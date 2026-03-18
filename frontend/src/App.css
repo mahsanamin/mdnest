@@ -1030,29 +1030,87 @@
   color: #1e1e2e;
 }
 
-.settings-help {
-  margin-top: 1rem;
-  padding: 0.8rem;
-  background: #181825;
-  border-radius: 6px;
-  border: 1px solid #313244;
-}
-
-.settings-help strong {
-  display: block;
-  font-size: 0.8rem;
-  color: #a6adc8;
-  margin-bottom: 0.4rem;
-}
-
-.settings-help pre {
-  font-size: 0.7rem;
+.settings-section-title {
+  font-size: 0.9rem;
   color: #cdd6f4;
+  margin: 1rem 0 0.4rem;
+  font-weight: 600;
+}
+
+.settings-section-title:first-child {
+  margin-top: 0;
+}
+
+.settings-steps {
+  margin: 0.5rem 0;
+}
+
+.settings-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin: 0.4rem 0;
+  font-size: 0.85rem;
+  color: #bac2de;
+}
+
+.step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.4em;
+  height: 1.4em;
+  background: #313244;
+  color: #89b4fa;
+  border-radius: 50%;
+  font-size: 0.7rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.settings-code {
+  background: #11111b;
+  border: 1px solid #313244;
+  border-radius: 6px;
+  padding: 0.6rem 0.8rem;
+  margin: 0.4rem 0 0.8rem;
+}
+
+.settings-code pre {
   margin: 0;
+  font-size: 0.72rem;
+  color: #cdd6f4;
   white-space: pre-wrap;
   word-break: break-all;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  line-height: 1.5;
+}
+
+.code-label {
+  font-size: 0.7rem;
+  color: #6c7086;
+  margin-bottom: 0.3rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.settings-tool-list {
+  margin: 0.4rem 0;
+}
+
+.settings-tool {
+  font-size: 0.8rem;
+  color: #bac2de;
+  padding: 0.2rem 0;
+}
+
+.settings-tool code {
+  background: #313244;
+  padding: 0.1em 0.35em;
+  border-radius: 3px;
+  font-size: 0.75rem;
+  color: #89b4fa;
   font-family: 'JetBrains Mono', monospace;
-  line-height: 1.4;
 }
 
 /* Context Menu */

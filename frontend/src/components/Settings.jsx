@@ -13,9 +13,13 @@ function Settings({ onClose }) {
         </div>
         <div className="settings-tabs">
           <button className={tab === 'tokens' ? 'active' : ''} onClick={() => setTab('tokens')}>API Tokens</button>
+          <button className={tab === 'mcp' ? 'active' : ''} onClick={() => setTab('mcp')}>MCP</button>
+          <button className={tab === 'api' ? 'active' : ''} onClick={() => setTab('api')}>API</button>
           <button className={tab === 'password' ? 'active' : ''} onClick={() => setTab('password')}>Credentials</button>
         </div>
         {tab === 'tokens' && <TokensTab />}
+        {tab === 'mcp' && <McpTab />}
+        {tab === 'api' && <ApiTab />}
         {tab === 'password' && <PasswordTab />}
       </div>
     </div>
@@ -75,12 +79,12 @@ function TokensTab() {
   return (
     <div className="settings-content">
       <p className="settings-description">
-        API tokens are used by MCP servers and external API clients. They don't expire -- revoke them when no longer needed.
+        Create tokens for MCP servers and API clients. Tokens don't expire -- revoke them when no longer needed.
       </p>
 
       {newToken && (
         <div className="token-created">
-          <div className="token-created-label">New token created -- copy it now, it won't be shown again:</div>
+          <div className="token-created-label">Token created -- copy it now, it won't be shown again:</div>
           <div className="token-created-value">
             <code>{newToken}</code>
             <button onClick={handleCopy}>{copied ? 'Copied' : 'Copy'}</button>
@@ -93,47 +97,152 @@ function TokensTab() {
         <input
           type="text"
           className="modal-input"
-          placeholder="Token name (e.g. Claude MCP, API script)"
+          placeholder="Token name (e.g. Claude MCP, backup script)"
           value={name}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') handleCreate(); }}
         />
-        <button className="modal-btn-primary" onClick={handleCreate}>Create Token</button>
+        <button className="modal-btn-primary" onClick={handleCreate}>Create</button>
       </div>
 
       {loading ? (
         <p style={{ color: '#6c7086', fontSize: '0.85rem' }}>Loading...</p>
       ) : tokens.length === 0 ? (
-        <p style={{ color: '#6c7086', fontSize: '0.85rem' }}>No API tokens yet.</p>
+        <p style={{ color: '#6c7086', fontSize: '0.85rem' }}>No tokens yet. Create one to connect MCP or API clients.</p>
       ) : (
         <div className="token-list">
           {tokens.map((t) => (
             <div key={t.id} className="token-item">
               <div className="token-info">
                 <span className="token-name">{t.name}</span>
-                <span className="token-date">{new Date(t.created_at).toLocaleDateString()}</span>
+                <span className="token-date">Created {new Date(t.created_at).toLocaleDateString()}</span>
               </div>
               <button className="token-revoke" onClick={() => handleRevoke(t.id, t.name)}>Revoke</button>
             </div>
           ))}
         </div>
       )}
+    </div>
+  );
+}
 
-      <div className="settings-help">
-        <strong>Usage with MCP:</strong>
+function McpTab() {
+  return (
+    <div className="settings-content">
+      <h4 className="settings-section-title">MCP Server</h4>
+      <p className="settings-description">
+        The MCP server lets AI assistants (Claude, Cursor, etc.) read, write, search, and organize your notes directly.
+      </p>
+
+      <div className="settings-steps">
+        <div className="settings-step">
+          <span className="step-num">1</span>
+          <span>Create an API token in the <strong>API Tokens</strong> tab</span>
+        </div>
+        <div className="settings-step">
+          <span className="step-num">2</span>
+          <span>Install dependencies:</span>
+        </div>
+      </div>
+      <div className="settings-code">
+        <pre>cd mcp-server && npm install</pre>
+      </div>
+
+      <div className="settings-steps">
+        <div className="settings-step">
+          <span className="step-num">3</span>
+          <span>Add to your MCP client config (e.g. Claude Desktop):</span>
+        </div>
+      </div>
+      <div className="settings-code">
         <pre>{`{
   "mcpServers": {
     "mdnest": {
       "command": "node",
-      "args": ["./mcp-server/index.js"],
+      "args": ["/path/to/mdnest/mcp-server/index.js"],
       "env": {
         "MDNEST_URL": "http://localhost:8286",
-        "MDNEST_TOKEN": "<paste token here>"
+        "MDNEST_TOKEN": "<your token>"
       }
     }
   }
 }`}</pre>
       </div>
+
+      <h4 className="settings-section-title">Available Tools</h4>
+      <div className="settings-tool-list">
+        <div className="settings-tool"><code>list_namespaces</code> -- list mounted namespaces</div>
+        <div className="settings-tool"><code>list_tree</code> -- get folder/file tree</div>
+        <div className="settings-tool"><code>read_note</code> -- read a note's content</div>
+        <div className="settings-tool"><code>write_note</code> -- update an existing note</div>
+        <div className="settings-tool"><code>create_note</code> -- create a new note</div>
+        <div className="settings-tool"><code>create_folder</code> -- create a folder</div>
+        <div className="settings-tool"><code>delete_item</code> -- delete a file or folder</div>
+        <div className="settings-tool"><code>move_item</code> -- move/rename a file or folder</div>
+        <div className="settings-tool"><code>search_notes</code> -- search note contents</div>
+      </div>
+    </div>
+  );
+}
+
+function ApiTab() {
+  return (
+    <div className="settings-content">
+      <h4 className="settings-section-title">REST API</h4>
+      <p className="settings-description">
+        All endpoints accept a Bearer token in the Authorization header. Create a token in the API Tokens tab.
+      </p>
+
+      <h4 className="settings-section-title">Authentication</h4>
+      <div className="settings-code">
+        <pre>{`# Use your API token
+curl -H "Authorization: Bearer mdnest_your_token_here" \\
+  http://localhost:8286/api/namespaces`}</pre>
+      </div>
+
+      <h4 className="settings-section-title">Examples</h4>
+
+      <div className="settings-code">
+        <div className="code-label">List namespaces</div>
+        <pre>{`curl -H "Authorization: Bearer $TOKEN" \\
+  http://localhost:8286/api/namespaces`}</pre>
+      </div>
+
+      <div className="settings-code">
+        <div className="code-label">Get file tree</div>
+        <pre>{`curl -H "Authorization: Bearer $TOKEN" \\
+  "http://localhost:8286/api/tree?ns=my_notes"`}</pre>
+      </div>
+
+      <div className="settings-code">
+        <div className="code-label">Read a note</div>
+        <pre>{`curl -H "Authorization: Bearer $TOKEN" \\
+  "http://localhost:8286/api/note?ns=my_notes&path=ideas/project.md"`}</pre>
+      </div>
+
+      <div className="settings-code">
+        <div className="code-label">Create a note</div>
+        <pre>{`curl -X POST -H "Authorization: Bearer $TOKEN" \\
+  -d "# New Note" \\
+  "http://localhost:8286/api/note?ns=my_notes&path=new-note.md"`}</pre>
+      </div>
+
+      <div className="settings-code">
+        <div className="code-label">Update a note</div>
+        <pre>{`curl -X PUT -H "Authorization: Bearer $TOKEN" \\
+  -d "# Updated content" \\
+  "http://localhost:8286/api/note?ns=my_notes&path=new-note.md"`}</pre>
+      </div>
+
+      <div className="settings-code">
+        <div className="code-label">Search</div>
+        <pre>{`curl -H "Authorization: Bearer $TOKEN" \\
+  "http://localhost:8286/api/search?ns=my_notes&q=kubernetes"`}</pre>
+      </div>
+
+      <p className="settings-description" style={{ marginTop: '1rem' }}>
+        See <a href="docs/api.md" target="_blank" style={{ color: '#89b4fa' }}>docs/api.md</a> for the full API reference.
+      </p>
     </div>
   );
 }
