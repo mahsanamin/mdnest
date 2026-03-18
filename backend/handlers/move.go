@@ -49,13 +49,13 @@ func (h *MoveHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Ensure destination parent exists
-	if err := os.MkdirAll(filepath.Dir(absDst), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(absDst), 0700); err != nil {
 		http.Error(w, `{"error":"failed to create destination directory"}`, http.StatusInternalServerError)
 		return
 	}
 
 	if err := os.Rename(absSrc, absDst); err != nil {
-		http.Error(w, `{"error":"failed to move: `+err.Error()+`"}`, http.StatusInternalServerError)
+		http.Error(w, `{"error":"failed to move item"}`, http.StatusInternalServerError)
 		return
 	}
 

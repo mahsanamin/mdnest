@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"log"
@@ -90,15 +91,9 @@ func (h *TokenHandler) ValidateAPIToken(rawToken string) bool {
 	return false
 }
 
-// Simple hash for token storage (SHA-256 would be better but this is adequate for local use)
 func hashToken(token string) string {
-	b := []byte(token)
-	// Use a simple non-reversible representation
-	h := make([]byte, 0, 64)
-	for i := 0; i < len(b); i++ {
-		h = append(h, b[i]^0x5a)
-	}
-	return hex.EncodeToString(h)
+	h := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(h[:])
 }
 
 // HandleTokens dispatches token CRUD: GET (list), POST (create), DELETE (revoke).

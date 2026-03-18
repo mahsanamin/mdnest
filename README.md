@@ -1,10 +1,10 @@
 # mdnest
 
-A self-hosted knowledge base for developers and technical people who want to own their notes.
+A private, self-hosted knowledge base for your personal notes.
 
-Write in markdown. Files live on your disk as plain `.md` -- no database, no proprietary format, no cloud dependency. Edit from any browser, keep everything private on your own machine. Optionally sync to a private GitHub repo on your own schedule.
+Everything runs on your machine. Notes are plain `.md` files on disk -- no database, no cloud, no third-party services. Only you have access. The app binds to `127.0.0.1` by default, meaning it's not reachable from the network unless you explicitly enable remote access via Tailscale or a reverse proxy.
 
-Built for the way technical people think: folders, files, code blocks, diagrams, tasks. Nothing more.
+Built for developers and technical people who want markdown, folders, code blocks, mermaid diagrams, and task lists -- without the bloat. Optionally sync to a private GitHub repo on your own schedule.
 
 **Comfortable range: 1,000-5,000 notes out of the box.** For larger repositories (5,000-20,000+), tune the [search settings](#search) -- no architectural changes needed, just configuration.
 

@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 )
 
+const maxNoteSize = 10 << 20 // 10MB
+
 type NoteHandler struct {
 	notesDir string
 }
@@ -70,16 +72,16 @@ func (h *NoteHandler) updateNote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
 		return
 	}
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxNoteSize))
 	if err != nil {
 		http.Error(w, `{"error":"failed to read body"}`, http.StatusBadRequest)
 		return
 	}
-	if err := os.MkdirAll(filepath.Dir(absPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(absPath), 0700); err != nil {
 		http.Error(w, `{"error":"failed to create directories"}`, http.StatusInternalServerError)
 		return
 	}
-	if err := os.WriteFile(absPath, body, 0644); err != nil {
+	if err := os.WriteFile(absPath, body, 0600); err != nil {
 		http.Error(w, `{"error":"failed to write file"}`, http.StatusInternalServerError)
 		return
 	}
@@ -102,16 +104,16 @@ func (h *NoteHandler) createNote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"file already exists"}`, http.StatusConflict)
 		return
 	}
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxNoteSize))
 	if err != nil {
 		http.Error(w, `{"error":"failed to read body"}`, http.StatusBadRequest)
 		return
 	}
-	if err := os.MkdirAll(filepath.Dir(absPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(absPath), 0700); err != nil {
 		http.Error(w, `{"error":"failed to create directories"}`, http.StatusInternalServerError)
 		return
 	}
-	if err := os.WriteFile(absPath, body, 0644); err != nil {
+	if err := os.WriteFile(absPath, body, 0600); err != nil {
 		http.Error(w, `{"error":"failed to write file"}`, http.StatusInternalServerError)
 		return
 	}

@@ -25,6 +25,10 @@ func main() {
 	frontendOrigin := env("FRONTEND_ORIGIN", "http://localhost:5173")
 	port := env("PORT", "8080")
 
+	if password == "changeme" || jwtSecret == "changeme" {
+		log.Println("WARNING: using default credentials — change MDNEST_PASSWORD and MDNEST_JWT_SECRET in your .env")
+	}
+
 	absNotesDir, err := filepath.Abs(notesDir)
 	if err != nil {
 		log.Fatalf("failed to resolve NOTES_DIR: %v", err)
