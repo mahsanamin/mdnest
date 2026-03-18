@@ -1,6 +1,7 @@
-import { useEffect, useRef, useMemo, useCallback } from 'react';
+import { useEffect, useRef, useMemo, useCallback, useState } from 'react';
 import { marked, Renderer } from 'marked';
 import mermaid from 'mermaid';
+import MermaidViewer from './MermaidViewer.jsx';
 
 mermaid.initialize({
   startOnLoad: false,
@@ -70,6 +71,7 @@ function renderMarkdown(source, ns, notePath) {
 
 function Preview({ content, currentPath, ns, onCheckboxToggle }) {
   const containerRef = useRef(null);
+  const [viewerSvg, setViewerSvg] = useState(null);
 
   const html = useMemo(
     () => renderMarkdown(content || '', ns, currentPath),
@@ -81,6 +83,7 @@ function Preview({ content, currentPath, ns, onCheckboxToggle }) {
     if (!el) return;
     el.innerHTML = html;
 
+    // Checkbox handling
     el.querySelectorAll('.task-checkbox').forEach((cb) => {
       cb.addEventListener('change', (e) => {
         const idx = parseInt(e.target.dataset.taskIndex, 10);
@@ -97,6 +100,7 @@ function Preview({ content, currentPath, ns, onCheckboxToggle }) {
       });
     });
 
+    // Mermaid rendering
     const mermaidEls = el.querySelectorAll('.mermaid-source');
     if (mermaidEls.length > 0) {
       let cancelled = false;
@@ -111,8 +115,12 @@ function Preview({ content, currentPath, ns, onCheckboxToggle }) {
             const { svg } = await mermaid.render(id, source);
             if (!cancelled && mEl.parentNode) {
               const wrapper = document.createElement('div');
-              wrapper.className = 'mermaid-container';
+              wrapper.className = 'mermaid-container mermaid-clickable';
+              wrapper.title = 'Click to expand';
               wrapper.innerHTML = svg;
+              wrapper.addEventListener('click', () => {
+                setViewerSvg(wrapper.innerHTML);
+              });
               mEl.replaceWith(wrapper);
             }
           } catch (err) {
@@ -182,6 +190,9 @@ function Preview({ content, currentPath, ns, onCheckboxToggle }) {
         </button>
       </div>
       <div className="preview-pane" ref={containerRef} />
+      {viewerSvg && (
+        <MermaidViewer svgContent={viewerSvg} onClose={() => setViewerSvg(null)} />
+      )}
     </div>
   );
 }
