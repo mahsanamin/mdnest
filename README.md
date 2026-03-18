@@ -105,26 +105,27 @@ All ports bind to `127.0.0.1` by default -- mdnest is not reachable from the net
 
 Tailscale creates a private mesh network between your devices. Install it on the host and on any device you want to access mdnest from.
 
+**Option A: Dedicated port (if you run multiple services on this host)**
+
 ```bash
-# On the host machine — serve mdnest on a dedicated port with HTTPS
 tailscale serve --bg --https 3236 http://127.0.0.1:3236
 ```
 
-Access from any device on your tailnet:
-```
-https://<your-hostname>.tailnet-name.ts.net:3236
-```
+Access: `https://<your-hostname>.tailnet-name.ts.net:3236`
 
-Using a specific port (`:3236`) keeps mdnest separate from other services on the same host.
+**Option B: Default HTTPS on port 443 (if this host is dedicated to mdnest)**
 
-To remove:
 ```bash
-tailscale serve off       # removes all serve rules
+tailscale serve --bg http://127.0.0.1:3236
 ```
 
-To check what's being served:
+Access: `https://<your-hostname>.tailnet-name.ts.net`
+
+**Manage:**
+
 ```bash
-tailscale serve status
+tailscale serve status    # see active rules
+tailscale serve off       # remove all rules
 ```
 
 ### Other options
