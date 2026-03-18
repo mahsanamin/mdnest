@@ -33,7 +33,7 @@ func (h *UploadHandler) HandleFolder(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid path"}`, http.StatusBadRequest)
 		return
 	}
-	if err := os.MkdirAll(absPath, 0700); err != nil {
+	if err := os.MkdirAll(absPath, 0755); err != nil {
 		http.Error(w, `{"error":"failed to create folder"}`, http.StatusInternalServerError)
 		return
 	}
@@ -71,7 +71,7 @@ func (h *UploadHandler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 
 	noteDir := filepath.Dir(notePath)
-	if err := os.MkdirAll(noteDir, 0700); err != nil {
+	if err := os.MkdirAll(noteDir, 0755); err != nil {
 		http.Error(w, `{"error":"failed to create directory"}`, http.StatusInternalServerError)
 		return
 	}

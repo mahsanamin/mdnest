@@ -77,11 +77,11 @@ func (h *NoteHandler) updateNote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"failed to read body"}`, http.StatusBadRequest)
 		return
 	}
-	if err := os.MkdirAll(filepath.Dir(absPath), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(absPath), 0755); err != nil {
 		http.Error(w, `{"error":"failed to create directories"}`, http.StatusInternalServerError)
 		return
 	}
-	if err := os.WriteFile(absPath, body, 0600); err != nil {
+	if err := os.WriteFile(absPath, body, 0644); err != nil {
 		http.Error(w, `{"error":"failed to write file"}`, http.StatusInternalServerError)
 		return
 	}
@@ -109,11 +109,11 @@ func (h *NoteHandler) createNote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"failed to read body"}`, http.StatusBadRequest)
 		return
 	}
-	if err := os.MkdirAll(filepath.Dir(absPath), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(absPath), 0755); err != nil {
 		http.Error(w, `{"error":"failed to create directories"}`, http.StatusInternalServerError)
 		return
 	}
-	if err := os.WriteFile(absPath, body, 0600); err != nil {
+	if err := os.WriteFile(absPath, body, 0644); err != nil {
 		http.Error(w, `{"error":"failed to write file"}`, http.StatusInternalServerError)
 		return
 	}
