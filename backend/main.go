@@ -33,13 +33,15 @@ func main() {
 		log.Fatalf("failed to create NOTES_DIR: %v", err)
 	}
 
-	authHandler := handlers.NewAuthHandler(user, password, jwtSecret)
+	secretsDir := env("SECRETS_DIR", filepath.Join(absNotesDir, ".secrets"))
+	authHandler := handlers.NewAuthHandler(user, password, jwtSecret, secretsDir)
 	nsHandler := handlers.NewNamespaceHandler(absNotesDir)
 	noteHandler := handlers.NewNoteHandler(absNotesDir)
 	treeHandler := handlers.NewTreeHandler(absNotesDir)
 	uploadHandler := handlers.NewUploadHandler(absNotesDir)
 	moveHandler := handlers.NewMoveHandler(absNotesDir)
 	searchHandler := handlers.NewSearchHandler(absNotesDir)
+	tokenHandler := handlers.NewTokenHandler(secretsDir)
 
 	// Wrap mutating handlers to invalidate search cache
 	invalidateSearch := func(next http.Handler) http.Handler {
@@ -51,12 +53,14 @@ func main() {
 		})
 	}
 
-	authMiddleware := middleware.NewAuthMiddleware(jwtSecret)
+	authMiddleware := middleware.NewAuthMiddleware(jwtSecret, tokenHandler)
 	corsMiddleware := middleware.NewCORSMiddleware(frontendOrigin)
 
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/api/auth/login", authHandler.Login)
+	mux.Handle("/api/auth/change-password", authMiddleware.Wrap(http.HandlerFunc(authHandler.ChangePassword)))
+	mux.Handle("/api/auth/tokens", authMiddleware.Wrap(http.HandlerFunc(tokenHandler.HandleTokens)))
 	mux.Handle("/api/namespaces", authMiddleware.Wrap(http.HandlerFunc(nsHandler.ListNamespaces)))
 	mux.Handle("/api/tree", authMiddleware.Wrap(http.HandlerFunc(treeHandler.GetTree)))
 	mux.Handle("/api/note", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(noteHandler.Handle))))

@@ -7,17 +7,26 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-// AuthMiddleware validates JWT tokens on protected routes.
+// TokenValidator validates API tokens (implemented by TokenHandler).
+type TokenValidator interface {
+	ValidateAPIToken(token string) bool
+}
+
+// AuthMiddleware validates JWT tokens or API tokens on protected routes.
 type AuthMiddleware struct {
-	secret []byte
+	secret         []byte
+	tokenValidator TokenValidator
 }
 
-// NewAuthMiddleware creates a new auth middleware with the given JWT secret.
-func NewAuthMiddleware(secret string) *AuthMiddleware {
-	return &AuthMiddleware{secret: []byte(secret)}
+// NewAuthMiddleware creates a new auth middleware.
+func NewAuthMiddleware(secret string, tv TokenValidator) *AuthMiddleware {
+	return &AuthMiddleware{secret: []byte(secret), tokenValidator: tv}
 }
 
-// Wrap wraps an http.Handler with JWT authentication.
+// Wrap wraps an http.Handler with authentication.
+// Accepts either:
+//   - Bearer <JWT> (from browser login)
+//   - Bearer mdnest_<token> (API token for MCP/API)
 func (a *AuthMiddleware) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
@@ -33,6 +42,18 @@ func (a *AuthMiddleware) Wrap(next http.Handler) http.Handler {
 		}
 
 		tokenString := parts[1]
+
+		// Check if it's an API token (starts with mdnest_)
+		if strings.HasPrefix(tokenString, "mdnest_") {
+			if a.tokenValidator != nil && a.tokenValidator.ValidateAPIToken(tokenString) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			http.Error(w, `{"error":"invalid API token"}`, http.StatusUnauthorized)
+			return
+		}
+
+		// Otherwise validate as JWT
 		token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
 			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, jwt.ErrSignatureInvalid

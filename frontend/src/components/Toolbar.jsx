@@ -1,5 +1,4 @@
-function Toolbar({ currentPath, onToggleSidebar, onNewNote, onNewFolder }) {
-  // Show which directory new items will be created in
+function Toolbar({ currentPath, onToggleSidebar, onNewNote, onNewFolder, onChangePassword }) {
   let dirHint = '';
   if (currentPath) {
     const parts = currentPath.split('/');
@@ -21,6 +20,9 @@ function Toolbar({ currentPath, onToggleSidebar, onNewNote, onNewFolder }) {
       <span className="toolbar-path">
         {currentPath || 'No file selected'}
       </span>
+      <button className="toolbar-settings" onClick={onChangePassword} title="Change credentials">
+        &#9881;
+      </button>
     </div>
   );
 }

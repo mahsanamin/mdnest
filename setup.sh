@@ -116,8 +116,10 @@ services:
     env_file:
       - .env
     volumes:
-${BACKEND_VOLUMES}    environment:
+${BACKEND_VOLUMES}      - mdnest-secrets:/data/secrets
+    environment:
       - NOTES_DIR=/data/notes
+      - SECRETS_DIR=/data/secrets
     restart: unless-stopped
 
   frontend:
@@ -145,6 +147,9 @@ ${GITSYNC_VOLUMES}      - ./git-sync/sync.sh:/sync.sh:ro
     entrypoint: /bin/sh
     command: ["/sync.sh"]
     restart: unless-stopped
+
+volumes:
+  mdnest-secrets:
 EOF
 
 echo "Generated docker-compose.yml"

@@ -39,6 +39,43 @@ export async function login(username, password) {
   return data;
 }
 
+export async function changePassword(currentPassword, newUsername, newPassword) {
+  const res = await request('/auth/change-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ currentPassword, newUsername, newPassword }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to change password');
+  }
+  return res.json();
+}
+
+export async function listTokens() {
+  const res = await request('/auth/tokens');
+  if (!res.ok) throw new Error('Failed to list tokens');
+  return res.json();
+}
+
+export async function createToken(name) {
+  const res = await request('/auth/tokens', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) throw new Error('Failed to create token');
+  return res.json();
+}
+
+export async function revokeToken(id) {
+  const res = await request(`/auth/tokens?id=${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) throw new Error('Failed to revoke token');
+  return res.json();
+}
+
 export async function getNamespaces() {
   const res = await request('/namespaces');
   if (!res.ok) throw new Error('Failed to load namespaces');

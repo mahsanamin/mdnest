@@ -8,7 +8,8 @@ import { z } from "zod";
 // Configuration
 // ---------------------------------------------------------------------------
 const BASE_URL = process.env.MDNEST_URL || "http://localhost:8286";
-const USERNAME = process.env.MDNEST_USER;
+const API_TOKEN = process.env.MDNEST_TOKEN;       // preferred: long-lived API token
+const USERNAME = process.env.MDNEST_USER;          // fallback: username/password login
 const PASSWORD = process.env.MDNEST_PASSWORD;
 
 let token = null;
@@ -17,8 +18,14 @@ let token = null;
 // Auth helpers
 // ---------------------------------------------------------------------------
 async function authenticate() {
+  // If an API token is provided, use it directly (no login needed)
+  if (API_TOKEN) {
+    token = API_TOKEN;
+    return;
+  }
+
   if (!USERNAME || !PASSWORD) {
-    console.error("MDNEST_USER and MDNEST_PASSWORD must be set");
+    console.error("Set MDNEST_TOKEN (recommended) or both MDNEST_USER and MDNEST_PASSWORD");
     process.exit(1);
   }
   const res = await fetch(`${BASE_URL}/api/auth/login`, {

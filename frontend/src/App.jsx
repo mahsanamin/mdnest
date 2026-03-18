@@ -5,6 +5,7 @@ import Toolbar from './components/Toolbar.jsx';
 import Editor from './components/Editor.jsx';
 import Preview from './components/Preview.jsx';
 import ContextMenu from './components/ContextMenu.jsx';
+import Settings from './components/Settings.jsx';
 import {
   getToken,
   getNote,
@@ -51,6 +52,7 @@ function App() {
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [mobileView, setMobileView] = useState('editor');
   const [ctxMenu, setCtxMenu] = useState({ visible: false, x: 0, y: 0, target: null });
+  const [showChangePassword, setShowChangePassword] = useState(false);
   const [initialized, setInitialized] = useState(false);
 
   const loadNamespaces = useCallback(async () => {
@@ -350,6 +352,7 @@ function App() {
           onToggleSidebar={() => setSidebarVisible((v) => !v)}
           onNewNote={() => doCreateNote(null)}
           onNewFolder={() => doCreateFolder(null)}
+          onChangePassword={() => setShowChangePassword(true)}
         />
         <div className="split-view">
           {currentPath ? (
@@ -372,6 +375,9 @@ function App() {
           )}
         </div>
       </div>
+      {showChangePassword && (
+        <Settings onClose={() => setShowChangePassword(false)} />
+      )}
       <ContextMenu visible={ctxMenu.visible} x={ctxMenu.x} y={ctxMenu.y} target={ctxMenu.target} onAction={handleContextAction} onClose={handleCloseContextMenu} />
     </div>
   );
