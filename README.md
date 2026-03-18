@@ -184,6 +184,7 @@ tailscale serve off       # remove all rules
 
 ## Documentation
 
+- [docs/security.md](docs/security.md) -- Security Model
 - [docs/api.md](docs/api.md) -- API Reference
 - [docs/setup.md](docs/setup.md) -- Setup and Configuration
 - [docs/user-guide.md](docs/user-guide.md) -- User Guide
