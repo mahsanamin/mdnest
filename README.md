@@ -1,6 +1,6 @@
 # mdnest
 
-Your private second brain. Self-hosted, always on, accessible from anywhere.
+Your notes. Your machine. Accessible from anywhere.
 
 Deploy on a spare machine, a home server, or a cheap VPS. Access your notes from your laptop, phone, tablet -- or let AI agents read and write to your knowledge base directly. Everything stays yours.
 
