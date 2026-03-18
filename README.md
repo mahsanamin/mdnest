@@ -1,18 +1,33 @@
 # mdnest
 
-A private, self-hosted knowledge base for your personal notes.
+Your private second brain. Self-hosted, always on, accessible from anywhere.
 
-Everything runs on your machine. Notes are plain `.md` files on disk -- no database, no cloud, no third-party services. Only you have access. The app binds to `127.0.0.1` by default, meaning it's not reachable from the network unless you explicitly enable remote access via Tailscale or a reverse proxy.
+Deploy on a spare machine, a home server, or a cheap VPS. Access your notes from your laptop, phone, tablet -- or let AI agents read and write to your knowledge base directly. Everything stays yours.
 
-Built for developers and technical people who want markdown, folders, code blocks, mermaid diagrams, and task lists -- without the bloat. Optionally sync to a private GitHub repo on your own schedule.
+### Why mdnest?
 
-**Comfortable range: 1,000-5,000 notes out of the box.** For larger repositories (5,000-20,000+), tune the [search settings](#search) -- no architectural changes needed, just configuration.
+- **Host once, access everywhere.** Set up on any always-on machine and reach it securely from all your devices via Tailscale -- phone, laptop, tablet, any browser.
+- **AI-native.** Built-in MCP server lets Claude, Cursor, and other AI agents read, write, search, and organize your notes. Your knowledge base becomes context for your AI workflows.
+- **API-first.** Full REST API with token auth. Build scripts, automations, or integrations on top of your notes.
+- **Plain files, no lock-in.** Notes are `.md` files in directories on disk. No database, no proprietary format. `cat`, `grep`, `git` -- your notes work with every tool you already use.
+- **Private by default.** Binds to localhost. No cloud, no third-party services, no telemetry. Add Tailscale for encrypted remote access only to your devices.
+- **Git backup on your terms.** Optionally auto-commit and push to a private GitHub repo. You control when and where.
+
+### Who is this for?
+
+Developers and technical people who:
+- Want a personal knowledge base that runs on their own hardware
+- Need their notes accessible from multiple devices and AI tools
+- Don't want to trust a SaaS with their private notes
+- Think in markdown, folders, code blocks, and diagrams
+
+**Comfortable range: 1,000-5,000 notes out of the box.** For larger repositories (5,000-20,000+), tune the [search settings](#search) -- just configuration, no architectural changes.
 
 ## Prerequisites
 
 - [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/)
 - Git
-- A directory (or directories) on your machine where you want to store notes
+- [Tailscale](https://tailscale.com/download) (free, for remote access)
 
 ## Quick Start
 
@@ -45,6 +60,39 @@ docker-compose up --build -d     # build and start
 ```
 
 Open [http://localhost:3236](http://localhost:3236)
+
+### Enable remote access
+
+Install Tailscale on the host and on your phone/laptop, then:
+
+```bash
+tailscale serve --bg --https 3236 http://127.0.0.1:3236
+```
+
+Access from any of your devices: `https://your-server.tailnet.ts.net:3236`
+
+Encrypted, private, no ports opened to the internet. See [Remote Access](#remote-access) for more options.
+
+### Connect AI agents
+
+Create an API token in Settings > API Tokens, then point your MCP client at mdnest:
+
+```json
+{
+  "mcpServers": {
+    "mdnest": {
+      "command": "node",
+      "args": ["/path/to/mdnest/mcp-server/index.js"],
+      "env": {
+        "MDNEST_URL": "http://localhost:8286",
+        "MDNEST_TOKEN": "<your API token>"
+      }
+    }
+  }
+}
+```
+
+Now Claude, Cursor, or any MCP-compatible agent can read, write, search, and organize your notes. See [MCP Server](#mcp-server) for setup details.
 
 ## Managing
 
@@ -97,8 +145,6 @@ Filename filtering is instant (client-side). Content search runs server-side wit
 
 For 10,000+ notes: set `SEARCH_WORKERS=16` and `SEARCH_CACHE_TTL=60`.
 
-See [docs/setup.md](docs/setup.md) for full details.
-
 ## Namespaces
 
 Each `MOUNT_<name>=<host_path>` entry in `mdnest.conf` mounts a host directory as a namespace. Namespaces are isolated -- separate trees, separate files. Add or remove by editing `mdnest.conf` and re-running `./setup.sh`.
@@ -123,7 +169,7 @@ See [docs/setup.md](docs/setup.md) for SSH key setup.
 
 ## MCP Server
 
-AI assistants (Claude, etc.) can read, write, and search your notes via the bundled MCP server.
+AI agents can read, write, search, and organize your notes via the bundled MCP server.
 
 ```bash
 cd mcp-server && npm install
@@ -146,15 +192,17 @@ Create an API token in Settings (gear icon) > API Tokens, then configure your MC
 }
 ```
 
+**Available tools:** `list_namespaces`, `list_tree`, `read_note`, `write_note`, `create_note`, `create_folder`, `delete_item`, `move_item`, `search_notes`
+
 ## Remote Access
 
-All ports bind to `127.0.0.1` by default -- mdnest is not reachable from the network. To access from other devices:
+All ports bind to `127.0.0.1` by default. To access from other devices:
 
 ### Tailscale (recommended)
 
-Tailscale creates a private mesh network between your devices. Install it on the host and on any device you want to access mdnest from.
+Tailscale creates an encrypted private network between your devices. No ports opened, no public IP needed.
 
-**Option A: Dedicated port (if you run multiple services on this host)**
+**Option A: Dedicated port (multiple services on the host)**
 
 ```bash
 tailscale serve --bg --https 3236 http://127.0.0.1:3236
@@ -162,7 +210,7 @@ tailscale serve --bg --https 3236 http://127.0.0.1:3236
 
 Access: `https://<your-hostname>.tailnet-name.ts.net:3236`
 
-**Option B: Default HTTPS on port 443 (if this host is dedicated to mdnest)**
+**Option B: Default HTTPS (host dedicated to mdnest)**
 
 ```bash
 tailscale serve --bg http://127.0.0.1:3236
