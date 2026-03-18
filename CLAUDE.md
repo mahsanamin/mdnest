@@ -7,6 +7,7 @@ Self-hosted markdown notes app. Plain files on disk, no database, Docker-based.
 - **Backend**: Go (net/http + golang-jwt), lives in `backend/`
 - **Frontend**: React + Vite, lives in `frontend/`
 - **Docker**: multi-stage builds, nginx proxy, optional git-sync sidecar
+- **MCP Server**: Node.js, lives in `mcp-server/` — wraps REST API for AI assistants
 - **Config**: `mdnest.conf` -> `setup.sh` generates `docker-compose.yml` and `.env`
 
 ## Project Structure
@@ -39,6 +40,10 @@ frontend/
       EditorToolbar.jsx      # Markdown formatting buttons
       Preview.jsx            # Rendered markdown (marked + mermaid)
       ContextMenu.jsx        # Right-click / long-press floating menu
+
+mcp-server/
+  index.js                   # MCP server entry — tools + resources wrapping REST API
+  package.json
 
 setup.sh                     # Reads mdnest.conf, generates docker-compose.yml + .env
 mdnest.conf.sample           # Template config with MOUNT_ entries
@@ -83,6 +88,15 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 - Nginx proxies /api/ to backend service
 - SPA fallback: try_files -> /index.html
 - git-sync: optional (--profile sync), alpine/git with cron-style loop
+
+### MCP Server (Node.js)
+- Uses @modelcontextprotocol/sdk with StdioServerTransport
+- Config via env vars: MDNEST_URL, MDNEST_USER, MDNEST_PASSWORD
+- Authenticates on startup, stores JWT, auto-refreshes on 401
+- Tools: list_namespaces, list_tree, read_note, write_note, create_note, create_folder, delete_item, move_item, search_notes
+- Resources: notes://{namespace}, notes://{namespace}/{path}
+- search_notes reads tree, fetches each .md, case-insensitive match, max 20 results
+- Uses native fetch (Node 18+), no extra HTTP deps
 
 ## What NOT to Do
 

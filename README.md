@@ -1,103 +1,93 @@
 # mdnest
 
-A self-hosted markdown notes app. Plain files on disk, edited in the browser, backed up with git.
+Self-hosted markdown notes app.
 
-**Philosophy:** Your notes are plain `.md` files in a folder. mdnest gives you a clean web UI to read and edit them. Git handles versioning and backup. No database, no vendor lock-in, no proprietary format. You own your data.
+Plain `.md` files on disk, no database. Runs in Docker with a Go backend and React frontend. Optional git-based backup and sync.
 
-## Quick start
+## Quick Start
 
 ```bash
 git clone https://github.com/mdnest/mdnest.git
 cd mdnest
-cp .env.example .env
-# Edit .env with your values
-docker compose up -d
-
-# To also enable git-sync (auto-commit + push to GitHub):
-docker compose --profile sync up -d
+./setup.sh           # creates mdnest.conf from sample
+# edit mdnest.conf   # set credentials, mount directories
+./setup.sh           # generates docker-compose.yml + .env
+docker-compose up --build -d
 ```
 
-Open [http://localhost](http://localhost) and log in with the credentials you set in `.env`.
+Open [http://localhost:3236](http://localhost:3236)
 
-## Set up your notes repository
+## Configuration
 
-mdnest expects `NOTES_DIR` to point at a git repository. If you're starting fresh:
+Everything is driven by `mdnest.conf`. Run `./setup.sh` after any change to regenerate `docker-compose.yml`.
+
+| Setting | Description | Default |
+|---|---|---|
+| `MDNEST_USER` | Login username | `admin` |
+| `MDNEST_PASSWORD` | Login password | `changeme` |
+| `MDNEST_JWT_SECRET` | JWT signing secret | `changeme` |
+| `BACKEND_PORT` | Backend API port | `8286` |
+| `FRONTEND_PORT` | Frontend UI port | `3236` |
+| `MOUNT_<name>` | Map a host directory as a namespace | -- |
+
+See [docs/setup.md](docs/setup.md) for full details.
+
+## Namespaces
+
+Each `MOUNT_<name>=<host_path>` entry in `mdnest.conf` mounts a host directory into the container as a namespace. Namespaces appear as top-level sections in the sidebar. Add or remove them by editing `mdnest.conf` and re-running `./setup.sh`.
+
+## Git Sync
+
+Optional auto-commit and push for all mounted namespaces. Each namespace directory should be its own git repo with a remote configured.
+
+Set up an SSH key that can push to your remotes, then start with the sync profile:
 
 ```bash
-mkdir notes && cd notes
-git init
-git remote add origin git@github.com:youruser/my-brain.git
-echo "# My Brain" > README.md
-git add -A && git commit -m "init"
-git push -u origin main
+docker-compose --profile sync up --build -d
 ```
 
-## GitHub SSH key for git-sync
+See [docs/setup.md](docs/setup.md) for SSH key setup and sync configuration.
 
-The `git-sync` sidecar mounts `~/.ssh` read-only so it can push to your remote. Make sure:
+## MCP Server
 
-1. You have an SSH key that can push to your notes repo (`ssh-keygen -t ed25519` if not).
-2. The key is in `~/.ssh/` on the host machine.
-3. Your remote repo is added to `~/.ssh/known_hosts` (`ssh-keyscan github.com >> ~/.ssh/known_hosts`).
-
-git-sync will auto-commit and push every 10 minutes.
-
-## Remote access and HTTPS
-
-All ports are bound to `127.0.0.1` by default, so mdnest is only accessible from the host machine. To access it remotely with HTTPS, pick one of:
-
-### Option 1: Tailscale Serve (simplest)
+AI assistants (Claude, etc.) can read, write, and search notes via the bundled MCP server.
 
 ```bash
-tailscale serve --bg 80
+cd mcp-server && npm install
 ```
 
-This gives you a `https://your-machine.tailnet-name.ts.net` URL accessible from your Tailscale network. No config changes needed.
+Configure in Claude Desktop or another MCP client:
 
-### Option 2: Nginx reverse proxy + Certbot
-
-Install nginx and certbot on the host, then proxy to `127.0.0.1:80`:
-
-```nginx
-server {
-    server_name notes.yourdomain.com;
-
-    location / {
-        proxy_pass http://127.0.0.1:80;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+```json
+{
+  "mcpServers": {
+    "mdnest": {
+      "command": "node",
+      "args": ["/path/to/mdnest/mcp-server/index.js"],
+      "env": {
+        "MDNEST_URL": "http://localhost:8286",
+        "MDNEST_USER": "ahsan",
+        "MDNEST_PASSWORD": "changeme"
+      }
     }
+  }
 }
 ```
 
-Then run `sudo certbot --nginx -d notes.yourdomain.com` for a free TLS certificate.
+See [docs/](docs/) for the full tool list.
 
-Update `FRONTEND_ORIGIN` in `.env` to `https://notes.yourdomain.com`.
+## Remote Access
 
-### Option 3: Cloudflare Tunnel
+- **Tailscale Serve** -- zero-config HTTPS on your tailnet. See [docs/setup.md](docs/setup.md).
+- **Nginx + Certbot** -- reverse proxy with free TLS. See [docs/setup.md](docs/setup.md).
+- **Cloudflare Tunnel** -- expose via Cloudflare without port forwarding. See [docs/setup.md](docs/setup.md).
 
-```bash
-cloudflared tunnel create mdnest
-cloudflared tunnel route dns mdnest notes.yourdomain.com
-cloudflared tunnel --url http://127.0.0.1:80 run mdnest
-```
+## Documentation
 
-Update `FRONTEND_ORIGIN` in `.env` to `https://notes.yourdomain.com`.
-
-## Environment variables
-
-| Variable | Description | Example |
-|---|---|---|
-| `MDNEST_USER` | Login username | `ahsan` |
-| `MDNEST_PASSWORD` | Login password | `changeme` |
-| `MDNEST_JWT_SECRET` | Secret for signing JWT tokens | `changeme` |
-| `NOTES_DIR` | Path to notes directory on host | `./notes` |
-| `FRONTEND_ORIGIN` | URL where the frontend is served (for CORS) | `http://localhost` |
-| `GIT_REMOTE` | SSH URL of the remote notes repo | `git@github.com:youruser/my-brain.git` |
-| `GIT_AUTHOR_NAME` | Name for git commits | `Your Name` |
-| `GIT_AUTHOR_EMAIL` | Email for git commits | `you@example.com` |
+- [docs/api.md](docs/api.md) -- API Reference
+- [docs/setup.md](docs/setup.md) -- Setup and Configuration
+- [docs/user-guide.md](docs/user-guide.md) -- User Guide
+- [docs/architecture.md](docs/architecture.md) -- Architecture
 
 ## License
 

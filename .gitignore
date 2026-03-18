@@ -5,3 +5,4 @@ notes/
 backend/mdnest
 frontend/node_modules/
 frontend/dist/
+mcp-server/node_modules/

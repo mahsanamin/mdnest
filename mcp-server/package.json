@@ -1,0 +1,17 @@
+{
+  "name": "mdnest-mcp-server",
+  "version": "0.1.0",
+  "description": "MCP server for mdnest note-taking app",
+  "main": "index.js",
+  "type": "module",
+  "bin": {
+    "mdnest-mcp": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "zod": "^3.23.0"
+  }
+}
