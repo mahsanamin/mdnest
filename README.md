@@ -99,13 +99,38 @@ Configure in Claude Desktop or another MCP client:
 
 ## Remote Access
 
-All ports are bound locally by default. To access remotely with HTTPS:
+All ports bind to `127.0.0.1` by default -- mdnest is not reachable from the network. To access from other devices:
 
-- **Tailscale Serve** -- zero-config HTTPS on your tailnet
-- **Nginx + Certbot** -- reverse proxy with free TLS
-- **Cloudflare Tunnel** -- no open ports, works behind NAT
+### Tailscale (recommended)
 
-See [docs/setup.md](docs/setup.md) for setup instructions.
+Tailscale creates a private mesh network between your devices. Install it on the host and on any device you want to access mdnest from.
+
+```bash
+# On the host machine — serve mdnest on a dedicated port with HTTPS
+tailscale serve --bg --https 3236 http://127.0.0.1:3236
+```
+
+Access from any device on your tailnet:
+```
+https://<your-hostname>.tailnet-name.ts.net:3236
+```
+
+Using a specific port (`:3236`) keeps mdnest separate from other services on the same host.
+
+To remove:
+```bash
+tailscale serve off       # removes all serve rules
+```
+
+To check what's being served:
+```bash
+tailscale serve status
+```
+
+### Other options
+
+- **Nginx + Certbot** -- traditional reverse proxy with free TLS. See [docs/setup.md](docs/setup.md).
+- **Cloudflare Tunnel** -- no open ports, works behind NAT. See [docs/setup.md](docs/setup.md).
 
 ## Documentation
 
