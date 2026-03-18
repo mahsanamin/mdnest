@@ -18,6 +18,13 @@ FRONTEND_PORT=3236
 GIT_AUTHOR_NAME=Your Name
 GIT_AUTHOR_EMAIL=you@example.com
 
+# Search tuning (optional — defaults work for most setups)
+# Increase these if you have a large repository (5,000+ notes).
+# SEARCH_MAX_RESULTS=30          # Max results per query
+# SEARCH_MAX_FILE_SIZE=1048576   # Skip files larger than this (bytes, default 1MB)
+# SEARCH_WORKERS=8               # Parallel file readers
+# SEARCH_CACHE_TTL=30            # File list cache lifetime (seconds)
+
 # Namespace mounts
 # Each line maps a namespace name to a host directory.
 # Format: MOUNT_<name>=<host_path>

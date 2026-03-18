@@ -2,7 +2,9 @@
 
 Self-hosted markdown notes app.
 
-Plain `.md` files on disk, no database. Runs in Docker with a Go backend and React frontend. Optional git-based backup and sync.
+A personal knowledge base built for simplicity. Plain `.md` files on disk, no database. Runs in Docker with a Go backend and React frontend. Optional git-based backup and sync.
+
+Designed for personal and small-team use. Comfortably handles **1,000-5,000 notes** out of the box. For larger repositories (5,000-20,000+ notes), tune the [search settings](#search) in `mdnest.conf`.
 
 ## Quick Start
 
@@ -29,6 +31,19 @@ Everything is driven by `mdnest.conf`. Run `./setup.sh` after any change to rege
 | `BACKEND_PORT` | Backend API port | `8286` |
 | `FRONTEND_PORT` | Frontend UI port | `3236` |
 | `MOUNT_<name>` | Map a host directory as a namespace | -- |
+
+### Search
+
+Search works in two phases: instant filename filtering (client-side) and content search (server-side, concurrent). The defaults handle most personal knowledge bases well. For larger repos, tune these in `mdnest.conf`:
+
+| Setting | Description | Default |
+|---|---|---|
+| `SEARCH_MAX_RESULTS` | Max results per query | `30` |
+| `SEARCH_MAX_FILE_SIZE` | Skip files larger than this (bytes) | `1048576` (1 MB) |
+| `SEARCH_WORKERS` | Parallel file readers | `8` |
+| `SEARCH_CACHE_TTL` | File list cache lifetime (seconds) | `30` |
+
+For a repo with 10,000+ notes, consider increasing `SEARCH_WORKERS` to 16 and `SEARCH_CACHE_TTL` to 60.
 
 See [docs/setup.md](docs/setup.md) for full details.
 

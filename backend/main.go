@@ -41,6 +41,16 @@ func main() {
 	moveHandler := handlers.NewMoveHandler(absNotesDir)
 	searchHandler := handlers.NewSearchHandler(absNotesDir)
 
+	// Wrap mutating handlers to invalidate search cache
+	invalidateSearch := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(w, r)
+			if ns := r.URL.Query().Get("ns"); ns != "" {
+				searchHandler.InvalidateCache(ns)
+			}
+		})
+	}
+
 	authMiddleware := middleware.NewAuthMiddleware(jwtSecret)
 	corsMiddleware := middleware.NewCORSMiddleware(frontendOrigin)
 
@@ -49,10 +59,10 @@ func main() {
 	mux.HandleFunc("/api/auth/login", authHandler.Login)
 	mux.Handle("/api/namespaces", authMiddleware.Wrap(http.HandlerFunc(nsHandler.ListNamespaces)))
 	mux.Handle("/api/tree", authMiddleware.Wrap(http.HandlerFunc(treeHandler.GetTree)))
-	mux.Handle("/api/note", authMiddleware.Wrap(http.HandlerFunc(noteHandler.Handle)))
-	mux.Handle("/api/folder", authMiddleware.Wrap(http.HandlerFunc(uploadHandler.HandleFolder)))
-	mux.Handle("/api/upload", authMiddleware.Wrap(http.HandlerFunc(uploadHandler.HandleUpload)))
-	mux.Handle("/api/move", authMiddleware.Wrap(http.HandlerFunc(moveHandler.HandleMove)))
+	mux.Handle("/api/note", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(noteHandler.Handle))))
+	mux.Handle("/api/folder", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(uploadHandler.HandleFolder))))
+	mux.Handle("/api/upload", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(uploadHandler.HandleUpload))))
+	mux.Handle("/api/move", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(moveHandler.HandleMove))))
 	mux.Handle("/api/search", authMiddleware.Wrap(http.HandlerFunc(searchHandler.HandleSearch)))
 	mux.Handle("/api/files/", authMiddleware.Wrap(http.HandlerFunc(uploadHandler.HandleServeFile)))
 
