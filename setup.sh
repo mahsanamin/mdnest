@@ -110,7 +110,7 @@ services:
   backend:
     build: ./backend
     ports:
-      - "${BACKEND_PORT}:8080"
+      - "127.0.0.1:${BACKEND_PORT}:8080"
     env_file:
       - .env
     volumes:
@@ -121,7 +121,7 @@ ${BACKEND_VOLUMES}    environment:
   frontend:
     build: ./frontend
     ports:
-      - "${FRONTEND_PORT}:80"
+      - "127.0.0.1:${FRONTEND_PORT}:80"
     depends_on:
       - backend
     restart: unless-stopped
