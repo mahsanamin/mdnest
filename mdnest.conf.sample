@@ -13,6 +13,9 @@ FRONTEND_ORIGIN=http://localhost:3236
 # Ports
 BACKEND_PORT=8286
 FRONTEND_PORT=3236
+# Bind address: 127.0.0.1 = localhost only (default), 0.0.0.0 = all interfaces
+# If you access via Tailscale IP directly, set to 0.0.0.0
+# BIND_ADDRESS=127.0.0.1
 
 # Git sync (optional — only used with --profile sync)
 # Sync is off by default. Your notes stay local unless you enable it.

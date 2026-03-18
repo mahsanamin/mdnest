@@ -45,6 +45,7 @@ while IFS= read -r line; do
     FRONTEND_ORIGIN) FRONTEND_ORIGIN="$value" ;;
     BACKEND_PORT) BACKEND_PORT="$value" ;;
     FRONTEND_PORT) FRONTEND_PORT="$value" ;;
+    BIND_ADDRESS) BIND_ADDRESS="$value" ;;
     GIT_AUTHOR_NAME) GIT_AUTHOR_NAME="$value" ;;
     GIT_AUTHOR_EMAIL) GIT_AUTHOR_EMAIL="$value" ;;
     GIT_SYNC_INTERVAL) GIT_SYNC_INTERVAL="$value" ;;
@@ -66,6 +67,7 @@ FRONTEND_PORT="${FRONTEND_PORT:-3236}"
 MDNEST_USER="${MDNEST_USER:-admin}"
 MDNEST_PASSWORD="${MDNEST_PASSWORD:-changeme}"
 MDNEST_JWT_SECRET="${MDNEST_JWT_SECRET:-changeme}"
+BIND_ADDRESS="${BIND_ADDRESS:-127.0.0.1}"
 FRONTEND_ORIGIN="${FRONTEND_ORIGIN:-http://localhost:$FRONTEND_PORT}"
 
 if [ ${#MOUNT_NAMES[@]} -eq 0 ]; then
@@ -110,7 +112,7 @@ services:
   backend:
     build: ./backend
     ports:
-      - "127.0.0.1:${BACKEND_PORT}:8080"
+      - "${BIND_ADDRESS}:${BACKEND_PORT}:8080"
     env_file:
       - .env
     volumes:
@@ -121,7 +123,7 @@ ${BACKEND_VOLUMES}    environment:
   frontend:
     build: ./frontend
     ports:
-      - "127.0.0.1:${FRONTEND_PORT}:80"
+      - "${BIND_ADDRESS}:${FRONTEND_PORT}:80"
     depends_on:
       - backend
     restart: unless-stopped
