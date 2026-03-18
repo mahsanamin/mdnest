@@ -2,8 +2,8 @@
 # Copy this file to mdnest.conf and edit to match your setup.
 # Run ./setup.sh to generate docker-compose.yml from this config.
 
-# Auth
-MDNEST_USER=ahsan
+# Auth — change these before first run
+MDNEST_USER=admin
 MDNEST_PASSWORD=changeme
 MDNEST_JWT_SECRET=changeme
 
@@ -14,7 +14,6 @@ FRONTEND_ORIGIN=http://localhost:3236
 BACKEND_PORT=8286
 FRONTEND_PORT=3236
 # Bind address: 127.0.0.1 = localhost only (default)
-# Use `tailscale serve --bg 3236` on the host for secure remote access.
 # Only set to 0.0.0.0 if you understand the security implications.
 # BIND_ADDRESS=127.0.0.1
 
@@ -35,5 +34,6 @@ GIT_AUTHOR_EMAIL=you@example.com
 # Each line maps a namespace name to a host directory.
 # Format: MOUNT_<name>=<host_path>
 # These directories will be mounted into the container and appear as namespaces.
-MOUNT_test_mdnest=/Volumes/Work/Wego/Repos/test_mdnest
-MOUNT_mdnestMotu=/Volumes/Work/Wego/Repos/mdnestMotu
+# Example:
+# MOUNT_personal=/home/you/notes/personal
+# MOUNT_work=/home/you/notes/work

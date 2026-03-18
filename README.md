@@ -8,18 +8,67 @@ Built for developers and technical people who want markdown, folders, code block
 
 **Comfortable range: 1,000-5,000 notes out of the box.** For larger repositories (5,000-20,000+), tune the [search settings](#search) -- no architectural changes needed, just configuration.
 
+## Prerequisites
+
+- [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/)
+- Git
+- A directory (or directories) on your machine where you want to store notes
+
 ## Quick Start
 
 ```bash
 git clone https://github.com/mahsanamin/mdnest.git
 cd mdnest
-./setup.sh           # creates mdnest.conf from sample
-# edit mdnest.conf   # set credentials, mount your directories
-./setup.sh           # generates docker-compose.yml + .env
-docker-compose up --build -d
+./setup.sh
+```
+
+This creates `mdnest.conf` from the sample. Open it and set:
+
+1. **Credentials** -- change `MDNEST_USER`, `MDNEST_PASSWORD`, and `MDNEST_JWT_SECRET`
+2. **Mounts** -- add at least one `MOUNT_<name>=<path>` pointing to a directory on your machine
+
+Example:
+```
+MDNEST_USER=ahsan
+MDNEST_PASSWORD=mysecurepassword
+MDNEST_JWT_SECRET=some-random-string
+
+MOUNT_personal=/home/ahsan/notes
+MOUNT_work=/home/ahsan/work-notes
+```
+
+Then generate and start:
+
+```bash
+./setup.sh                       # generates docker-compose.yml + .env
+docker-compose up --build -d     # build and start
 ```
 
 Open [http://localhost:3236](http://localhost:3236)
+
+## Managing
+
+```bash
+docker-compose up -d             # start
+docker-compose down              # stop
+docker-compose restart           # restart
+docker-compose up --build -d     # rebuild after code changes
+docker-compose logs -f           # view logs
+docker-compose logs -f backend   # view backend logs only
+```
+
+After editing `mdnest.conf`, always re-run:
+```bash
+./setup.sh && docker-compose up --build -d
+```
+
+## Updating
+
+```bash
+git pull
+./setup.sh
+docker-compose up --build -d
+```
 
 ## Configuration
 
@@ -32,6 +81,7 @@ Everything is driven by `mdnest.conf`. Run `./setup.sh` after any change.
 | `MDNEST_JWT_SECRET` | JWT signing secret | `changeme` |
 | `BACKEND_PORT` | Backend API port | `8286` |
 | `FRONTEND_PORT` | Frontend UI port | `3236` |
+| `BIND_ADDRESS` | Network bind address | `127.0.0.1` |
 | `MOUNT_<name>` | Map a host directory as a namespace | -- |
 
 ### Search
@@ -79,7 +129,7 @@ AI assistants (Claude, etc.) can read, write, and search your notes via the bund
 cd mcp-server && npm install
 ```
 
-Configure in Claude Desktop or another MCP client:
+Create an API token in Settings (gear icon) > API Tokens, then configure your MCP client:
 
 ```json
 {
@@ -89,8 +139,7 @@ Configure in Claude Desktop or another MCP client:
       "args": ["/path/to/mdnest/mcp-server/index.js"],
       "env": {
         "MDNEST_URL": "http://localhost:8286",
-        "MDNEST_USER": "ahsan",
-        "MDNEST_PASSWORD": "changeme"
+        "MDNEST_TOKEN": "<your API token>"
       }
     }
   }
