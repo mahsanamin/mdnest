@@ -229,6 +229,101 @@
   border-color: #89b4fa;
 }
 
+.sidebar-search {
+  display: flex;
+  align-items: center;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid #313244;
+  gap: 4px;
+}
+
+.search-input {
+  flex: 1;
+  padding: 0.3rem 0.5rem;
+  background: #1e1e2e;
+  color: #cdd6f4;
+  border: 1px solid #313244;
+  border-radius: 5px;
+  font-size: 0.8rem;
+  outline: none;
+}
+
+.search-input:focus {
+  border-color: #89b4fa;
+}
+
+.search-input::placeholder {
+  color: #585b70;
+}
+
+.search-clear {
+  padding: 1px 6px;
+  background: transparent;
+  color: #6c7086;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.search-clear:hover {
+  color: #cdd6f4;
+  background: #313244;
+}
+
+.search-results {
+  max-height: 200px;
+  overflow-y: auto;
+  border-bottom: 1px solid #313244;
+}
+
+.search-results-header {
+  padding: 0.3rem 0.6rem;
+  font-size: 0.7rem;
+  color: #6c7086;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.search-result-item {
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+  border-bottom: 1px solid #1e1e2e;
+}
+
+.search-result-item:hover {
+  background: #313244;
+}
+
+.search-result-item.active {
+  background: #313244;
+}
+
+.search-result-path {
+  font-size: 0.75rem;
+  color: #89b4fa;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-result-snippet {
+  font-size: 0.75rem;
+  color: #a6adc8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 1px;
+}
+
+.search-status {
+  padding: 0.3rem 0.6rem;
+  font-size: 0.75rem;
+  color: #6c7086;
+  font-style: italic;
+}
+
 .sidebar-tree {
   flex: 1;
   overflow-y: auto;
@@ -373,6 +468,36 @@
 }
 
 /* Preview */
+.preview-pane-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.preview-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 4px 8px;
+  background: #181825;
+  border-bottom: 1px solid #313244;
+}
+
+.preview-export-btn {
+  padding: 3px 10px;
+  background: #313244;
+  color: #a6adc8;
+  border: 1px solid #45475a;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.preview-export-btn:hover {
+  background: #45475a;
+  color: #cdd6f4;
+}
+
 .preview-pane {
   flex: 1;
   overflow-y: auto;

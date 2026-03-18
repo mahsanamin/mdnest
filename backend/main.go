@@ -39,6 +39,7 @@ func main() {
 	treeHandler := handlers.NewTreeHandler(absNotesDir)
 	uploadHandler := handlers.NewUploadHandler(absNotesDir)
 	moveHandler := handlers.NewMoveHandler(absNotesDir)
+	searchHandler := handlers.NewSearchHandler(absNotesDir)
 
 	authMiddleware := middleware.NewAuthMiddleware(jwtSecret)
 	corsMiddleware := middleware.NewCORSMiddleware(frontendOrigin)
@@ -52,6 +53,7 @@ func main() {
 	mux.Handle("/api/folder", authMiddleware.Wrap(http.HandlerFunc(uploadHandler.HandleFolder)))
 	mux.Handle("/api/upload", authMiddleware.Wrap(http.HandlerFunc(uploadHandler.HandleUpload)))
 	mux.Handle("/api/move", authMiddleware.Wrap(http.HandlerFunc(moveHandler.HandleMove)))
+	mux.Handle("/api/search", authMiddleware.Wrap(http.HandlerFunc(searchHandler.HandleSearch)))
 	mux.Handle("/api/files/", authMiddleware.Wrap(http.HandlerFunc(uploadHandler.HandleServeFile)))
 
 	handler := corsMiddleware.Wrap(mux)

@@ -1,5 +1,27 @@
-import { useRef, useCallback, useState } from 'react';
+import { useRef, useCallback, useState, useEffect } from 'react';
 import TreeNode from './TreeNode.jsx';
+import { searchNotes } from '../api.js';
+
+// Filter tree nodes by filename match (case-insensitive)
+function filterTree(nodes, query) {
+  if (!query || !nodes) return nodes;
+  const q = query.toLowerCase();
+  const filtered = [];
+  for (const node of nodes) {
+    if (node.type === 'folder') {
+      const childMatches = filterTree(node.children, query);
+      const nameMatch = node.name.toLowerCase().includes(q);
+      if (nameMatch || (childMatches && childMatches.length > 0)) {
+        filtered.push({ ...node, children: childMatches || [] });
+      }
+    } else {
+      if (node.name.toLowerCase().includes(q) || (node.path && node.path.toLowerCase().includes(q))) {
+        filtered.push(node);
+      }
+    }
+  }
+  return filtered;
+}
 
 function Sidebar({
   tree,
@@ -16,13 +38,54 @@ function Sidebar({
   const treeAreaRef = useRef(null);
   const longPressTimer = useRef(null);
   const touchMoved = useRef(false);
-  // null = default, true = expand all, false = collapse all
   const [expandAll, setExpandAll] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [contentResults, setContentResults] = useState(null);
+  const [searching, setSearching] = useState(false);
+  const searchTimer = useRef(null);
 
   const handleExpandAll = () => setExpandAll(true);
   const handleCollapseAll = () => setExpandAll(false);
-  // Reset after toggling so individual folders can be toggled again
   const resetExpandAll = () => setTimeout(() => setExpandAll(null), 50);
+
+  // Content search with debounce — triggers after 400ms of typing
+  useEffect(() => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+
+    const q = searchQuery.trim();
+    if (!q || q.length < 2 || !selectedNs) {
+      setContentResults(null);
+      setSearching(false);
+      return;
+    }
+
+    setSearching(true);
+    searchTimer.current = setTimeout(async () => {
+      try {
+        const results = await searchNotes(selectedNs, q);
+        setContentResults(results);
+      } catch (e) {
+        console.error('Search failed:', e);
+        setContentResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 400);
+
+    return () => {
+      if (searchTimer.current) clearTimeout(searchTimer.current);
+    };
+  }, [searchQuery, selectedNs]);
+
+  // Clear search when namespace changes
+  useEffect(() => {
+    setSearchQuery('');
+    setContentResults(null);
+  }, [selectedNs]);
+
+  const filteredTree = searchQuery.trim()
+    ? filterTree(tree, searchQuery.trim())
+    : tree;
 
   const handleEmptyContextMenu = useCallback((e) => {
     e.preventDefault();
@@ -49,6 +112,8 @@ function Sidebar({
     if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
   }, []);
 
+  const showContentResults = contentResults && contentResults.length > 0 && searchQuery.trim().length >= 2;
+
   return (
     <>
       {visible && <div className="sidebar-backdrop" onClick={onClose} />}
@@ -72,14 +137,47 @@ function Sidebar({
               className="tree-control-btn"
               onClick={() => { handleExpandAll(); resetExpandAll(); }}
               title="Expand all"
-            >⊞</button>
+            >&#8862;</button>
             <button
               className="tree-control-btn"
               onClick={() => { handleCollapseAll(); resetExpandAll(); }}
               title="Collapse all"
-            >⊟</button>
+            >&#8863;</button>
           </div>
         </div>
+        <div className="sidebar-search">
+          <input
+            type="text"
+            className="search-input"
+            placeholder="Search files..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+          {searchQuery && (
+            <button className="search-clear" onClick={() => setSearchQuery('')}>x</button>
+          )}
+        </div>
+
+        {showContentResults && (
+          <div className="search-results">
+            <div className="search-results-header">
+              Content matches ({contentResults.length})
+            </div>
+            {contentResults.map((r, i) => (
+              <div
+                key={`${r.path}-${r.line}-${i}`}
+                className={`search-result-item${currentPath === r.path ? ' active' : ''}`}
+                onClick={() => { onSelect(r.path); setSearchQuery(''); }}
+              >
+                <div className="search-result-path">{r.path}:{r.line}</div>
+                <div className="search-result-snippet">{r.snippet}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {searching && <div className="search-status">Searching...</div>}
+
         <div
           className="sidebar-tree"
           ref={treeAreaRef}
@@ -96,7 +194,7 @@ function Sidebar({
             } catch (err) { /* ignore */ }
           }}
         >
-          {Array.isArray(tree) && tree.map((node) => (
+          {Array.isArray(filteredTree) && filteredTree.map((node) => (
             <TreeNode
               key={node.path || node.name}
               node={node}
@@ -105,10 +203,13 @@ function Sidebar({
               depth={0}
               onContextMenu={onContextMenu}
               onDrop={onDrop}
-              expandAll={expandAll}
+              expandAll={searchQuery.trim() ? true : expandAll}
             />
           ))}
-          {(!tree || tree.length === 0) && (
+          {searchQuery.trim() && filteredTree.length === 0 && !showContentResults && !searching && (
+            <div className="sidebar-empty">No matches</div>
+          )}
+          {!searchQuery.trim() && (!tree || tree.length === 0) && (
             <div className="sidebar-empty">No files yet</div>
           )}
         </div>

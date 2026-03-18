@@ -102,6 +102,12 @@ export async function uploadImage(ns, notePath, file) {
   return res.json();
 }
 
+export async function searchNotes(ns, query) {
+  const res = await request(`/search?ns=${encodeURIComponent(ns)}&q=${encodeURIComponent(query)}`);
+  if (!res.ok) throw new Error('Failed to search');
+  return res.json();
+}
+
 export async function moveItem(ns, fromPath, toPath) {
   const res = await request(`/move?ns=${encodeURIComponent(ns)}&from=${encodeURIComponent(fromPath)}&to=${encodeURIComponent(toPath)}`, {
     method: 'POST',
