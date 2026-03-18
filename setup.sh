@@ -1,0 +1,143 @@
+#!/bin/bash
+set -e
+
+CONF="mdnest.conf"
+SAMPLE="mdnest.conf.sample"
+
+if [ ! -f "$CONF" ]; then
+  if [ -f "$SAMPLE" ]; then
+    cp "$SAMPLE" "$CONF"
+    echo "Created $CONF from $SAMPLE"
+    echo "Edit $CONF with your settings, then run ./setup.sh again."
+    exit 0
+  else
+    echo "Error: $SAMPLE not found."
+    exit 1
+  fi
+fi
+
+echo "Reading $CONF..."
+
+# Parse config
+MDNEST_USER=""
+MDNEST_PASSWORD=""
+MDNEST_JWT_SECRET=""
+FRONTEND_ORIGIN=""
+BACKEND_PORT=""
+FRONTEND_PORT=""
+GIT_AUTHOR_NAME=""
+GIT_AUTHOR_EMAIL=""
+declare -a MOUNT_NAMES=()
+declare -a MOUNT_PATHS=()
+
+while IFS= read -r line; do
+  # Skip comments and empty lines
+  [[ "$line" =~ ^[[:space:]]*# ]] && continue
+  [[ -z "${line// }" ]] && continue
+
+  key="${line%%=*}"
+  value="${line#*=}"
+
+  case "$key" in
+    MDNEST_USER) MDNEST_USER="$value" ;;
+    MDNEST_PASSWORD) MDNEST_PASSWORD="$value" ;;
+    MDNEST_JWT_SECRET) MDNEST_JWT_SECRET="$value" ;;
+    FRONTEND_ORIGIN) FRONTEND_ORIGIN="$value" ;;
+    BACKEND_PORT) BACKEND_PORT="$value" ;;
+    FRONTEND_PORT) FRONTEND_PORT="$value" ;;
+    GIT_AUTHOR_NAME) GIT_AUTHOR_NAME="$value" ;;
+    GIT_AUTHOR_EMAIL) GIT_AUTHOR_EMAIL="$value" ;;
+    MOUNT_*)
+      name="${key#MOUNT_}"
+      MOUNT_NAMES+=("$name")
+      MOUNT_PATHS+=("$value")
+      ;;
+  esac
+done < "$CONF"
+
+# Defaults
+BACKEND_PORT="${BACKEND_PORT:-8286}"
+FRONTEND_PORT="${FRONTEND_PORT:-3236}"
+MDNEST_USER="${MDNEST_USER:-admin}"
+MDNEST_PASSWORD="${MDNEST_PASSWORD:-changeme}"
+MDNEST_JWT_SECRET="${MDNEST_JWT_SECRET:-changeme}"
+FRONTEND_ORIGIN="${FRONTEND_ORIGIN:-http://localhost:$FRONTEND_PORT}"
+
+if [ ${#MOUNT_NAMES[@]} -eq 0 ]; then
+  echo "Error: No MOUNT_ entries found in $CONF."
+  echo "Add at least one line like: MOUNT_myrepo=/path/to/directory"
+  exit 1
+fi
+
+echo "Found ${#MOUNT_NAMES[@]} namespace(s):"
+for i in "${!MOUNT_NAMES[@]}"; do
+  echo "  ${MOUNT_NAMES[$i]} -> ${MOUNT_PATHS[$i]}"
+done
+
+# Generate .env
+cat > .env <<EOF
+MDNEST_USER=$MDNEST_USER
+MDNEST_PASSWORD=$MDNEST_PASSWORD
+MDNEST_JWT_SECRET=$MDNEST_JWT_SECRET
+FRONTEND_ORIGIN=$FRONTEND_ORIGIN
+GIT_AUTHOR_NAME=$GIT_AUTHOR_NAME
+GIT_AUTHOR_EMAIL=$GIT_AUTHOR_EMAIL
+EOF
+echo "Generated .env"
+
+# Build volume mount lines for backend
+BACKEND_VOLUMES=""
+GITSYNC_VOLUMES=""
+for i in "${!MOUNT_NAMES[@]}"; do
+  BACKEND_VOLUMES="$BACKEND_VOLUMES      - ${MOUNT_PATHS[$i]}:/data/notes/${MOUNT_NAMES[$i]}
+"
+  GITSYNC_VOLUMES="$GITSYNC_VOLUMES      - ${MOUNT_PATHS[$i]}:/data/notes/${MOUNT_NAMES[$i]}
+"
+done
+
+# Generate docker-compose.yml
+cat > docker-compose.yml <<EOF
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "${BACKEND_PORT}:8080"
+    env_file:
+      - .env
+    volumes:
+${BACKEND_VOLUMES}    environment:
+      - NOTES_DIR=/data/notes
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "${FRONTEND_PORT}:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  git-sync:
+    image: alpine/git:latest
+    profiles:
+      - sync
+    volumes:
+${GITSYNC_VOLUMES}      - ./git-sync/sync.sh:/sync.sh:ro
+      - \${HOME}/.ssh:/root/.ssh:ro
+    environment:
+      - GIT_AUTHOR_NAME=\${GIT_AUTHOR_NAME}
+      - GIT_AUTHOR_EMAIL=\${GIT_AUTHOR_EMAIL}
+      - GIT_COMMITTER_NAME=\${GIT_AUTHOR_NAME}
+      - GIT_COMMITTER_EMAIL=\${GIT_AUTHOR_EMAIL}
+    working_dir: /data/notes
+    entrypoint: /bin/sh
+    command: ["/sync.sh"]
+    restart: unless-stopped
+EOF
+
+echo "Generated docker-compose.yml"
+echo ""
+echo "Ready! Run:"
+echo "  docker-compose up --build -d"
+echo ""
+echo "Then open http://localhost:${FRONTEND_PORT}"

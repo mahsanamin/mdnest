@@ -1,0 +1,26 @@
+# mdnest configuration
+# Copy this file to mdnest.conf and edit to match your setup.
+# Run ./setup.sh to generate docker-compose.yml from this config.
+
+# Auth
+MDNEST_USER=ahsan
+MDNEST_PASSWORD=changeme
+MDNEST_JWT_SECRET=changeme
+
+# Frontend origin (for CORS)
+FRONTEND_ORIGIN=http://localhost:3236
+
+# Ports
+BACKEND_PORT=8286
+FRONTEND_PORT=3236
+
+# Git sync (used when running with --profile sync)
+GIT_AUTHOR_NAME=Your Name
+GIT_AUTHOR_EMAIL=you@example.com
+
+# Namespace mounts
+# Each line maps a namespace name to a host directory.
+# Format: MOUNT_<name>=<host_path>
+# These directories will be mounted into the container and appear as namespaces.
+MOUNT_test_mdnest=/Volumes/Work/Wego/Repos/test_mdnest
+MOUNT_mdnestMotu=/Volumes/Work/Wego/Repos/mdnestMotu
