@@ -47,6 +47,7 @@ while IFS= read -r line; do
     FRONTEND_PORT) FRONTEND_PORT="$value" ;;
     GIT_AUTHOR_NAME) GIT_AUTHOR_NAME="$value" ;;
     GIT_AUTHOR_EMAIL) GIT_AUTHOR_EMAIL="$value" ;;
+    GIT_SYNC_INTERVAL) GIT_SYNC_INTERVAL="$value" ;;
     SEARCH_MAX_RESULTS) SEARCH_MAX_RESULTS="$value" ;;
     SEARCH_MAX_FILE_SIZE) SEARCH_MAX_FILE_SIZE="$value" ;;
     SEARCH_WORKERS) SEARCH_WORKERS="$value" ;;
@@ -137,6 +138,7 @@ ${GITSYNC_VOLUMES}      - ./git-sync/sync.sh:/sync.sh:ro
       - GIT_AUTHOR_EMAIL=\${GIT_AUTHOR_EMAIL}
       - GIT_COMMITTER_NAME=\${GIT_AUTHOR_NAME}
       - GIT_COMMITTER_EMAIL=\${GIT_AUTHOR_EMAIL}
+      - GIT_SYNC_INTERVAL=${GIT_SYNC_INTERVAL:-600}
     working_dir: /data/notes
     entrypoint: /bin/sh
     command: ["/sync.sh"]

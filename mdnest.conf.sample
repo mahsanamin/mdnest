@@ -14,9 +14,11 @@ FRONTEND_ORIGIN=http://localhost:3236
 BACKEND_PORT=8286
 FRONTEND_PORT=3236
 
-# Git sync (used when running with --profile sync)
+# Git sync (optional — only used with --profile sync)
+# Sync is off by default. Your notes stay local unless you enable it.
 GIT_AUTHOR_NAME=Your Name
 GIT_AUTHOR_EMAIL=you@example.com
+# GIT_SYNC_INTERVAL=600          # Seconds between sync cycles (default 10 minutes)
 
 # Search tuning (optional — defaults work for most setups)
 # Increase these if you have a large repository (5,000+ notes).

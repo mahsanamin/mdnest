@@ -1,18 +1,20 @@
 # mdnest
 
-Self-hosted markdown notes app.
+A self-hosted knowledge base for developers and technical people who want to own their notes.
 
-A personal knowledge base built for simplicity. Plain `.md` files on disk, no database. Runs in Docker with a Go backend and React frontend. Optional git-based backup and sync.
+Write in markdown. Files live on your disk as plain `.md` -- no database, no proprietary format, no cloud dependency. Edit from any browser, keep everything private on your own machine. Optionally sync to a private GitHub repo on your own schedule.
 
-Designed for personal and small-team use. Comfortably handles **1,000-5,000 notes** out of the box. For larger repositories (5,000-20,000+ notes), tune the [search settings](#search) in `mdnest.conf`.
+Built for the way technical people think: folders, files, code blocks, diagrams, tasks. Nothing more.
+
+**Comfortable range: 1,000-5,000 notes out of the box.** For larger repositories (5,000-20,000+), tune the [search settings](#search) -- no architectural changes needed, just configuration.
 
 ## Quick Start
 
 ```bash
-git clone https://github.com/mdnest/mdnest.git
+git clone https://github.com/mahsanamin/mdnest.git
 cd mdnest
 ./setup.sh           # creates mdnest.conf from sample
-# edit mdnest.conf   # set credentials, mount directories
+# edit mdnest.conf   # set credentials, mount your directories
 ./setup.sh           # generates docker-compose.yml + .env
 docker-compose up --build -d
 ```
@@ -21,7 +23,7 @@ Open [http://localhost:3236](http://localhost:3236)
 
 ## Configuration
 
-Everything is driven by `mdnest.conf`. Run `./setup.sh` after any change to regenerate `docker-compose.yml`.
+Everything is driven by `mdnest.conf`. Run `./setup.sh` after any change.
 
 | Setting | Description | Default |
 |---|---|---|
@@ -34,7 +36,7 @@ Everything is driven by `mdnest.conf`. Run `./setup.sh` after any change to rege
 
 ### Search
 
-Search works in two phases: instant filename filtering (client-side) and content search (server-side, concurrent). The defaults handle most personal knowledge bases well. For larger repos, tune these in `mdnest.conf`:
+Filename filtering is instant (client-side). Content search runs server-side with concurrent file reads, a cached file index, and early termination.
 
 | Setting | Description | Default |
 |---|---|---|
@@ -43,29 +45,35 @@ Search works in two phases: instant filename filtering (client-side) and content
 | `SEARCH_WORKERS` | Parallel file readers | `8` |
 | `SEARCH_CACHE_TTL` | File list cache lifetime (seconds) | `30` |
 
-For a repo with 10,000+ notes, consider increasing `SEARCH_WORKERS` to 16 and `SEARCH_CACHE_TTL` to 60.
+For 10,000+ notes: set `SEARCH_WORKERS=16` and `SEARCH_CACHE_TTL=60`.
 
 See [docs/setup.md](docs/setup.md) for full details.
 
 ## Namespaces
 
-Each `MOUNT_<name>=<host_path>` entry in `mdnest.conf` mounts a host directory into the container as a namespace. Namespaces appear as top-level sections in the sidebar. Add or remove them by editing `mdnest.conf` and re-running `./setup.sh`.
+Each `MOUNT_<name>=<host_path>` entry in `mdnest.conf` mounts a host directory as a namespace. Namespaces are isolated -- separate trees, separate files. Add or remove by editing `mdnest.conf` and re-running `./setup.sh`.
 
-## Git Sync
+## Git Sync (Optional)
 
-Optional auto-commit and push for all mounted namespaces. Each namespace directory should be its own git repo with a remote configured.
+Your notes are private by default. Nothing leaves your machine unless you choose to enable sync.
 
-Set up an SSH key that can push to your remotes, then start with the sync profile:
+To back up to a private GitHub repo, initialize each namespace directory as a git repo with a remote, then start with the sync profile:
 
 ```bash
 docker-compose --profile sync up --build -d
 ```
 
-See [docs/setup.md](docs/setup.md) for SSH key setup and sync configuration.
+The sync interval is configurable (default: every 10 minutes):
+
+```
+GIT_SYNC_INTERVAL=900    # sync every 15 minutes
+```
+
+See [docs/setup.md](docs/setup.md) for SSH key setup.
 
 ## MCP Server
 
-AI assistants (Claude, etc.) can read, write, and search notes via the bundled MCP server.
+AI assistants (Claude, etc.) can read, write, and search your notes via the bundled MCP server.
 
 ```bash
 cd mcp-server && npm install
@@ -89,13 +97,15 @@ Configure in Claude Desktop or another MCP client:
 }
 ```
 
-See [docs/](docs/) for the full tool list.
-
 ## Remote Access
 
-- **Tailscale Serve** -- zero-config HTTPS on your tailnet. See [docs/setup.md](docs/setup.md).
-- **Nginx + Certbot** -- reverse proxy with free TLS. See [docs/setup.md](docs/setup.md).
-- **Cloudflare Tunnel** -- expose via Cloudflare without port forwarding. See [docs/setup.md](docs/setup.md).
+All ports are bound locally by default. To access remotely with HTTPS:
+
+- **Tailscale Serve** -- zero-config HTTPS on your tailnet
+- **Nginx + Certbot** -- reverse proxy with free TLS
+- **Cloudflare Tunnel** -- no open ports, works behind NAT
+
+See [docs/setup.md](docs/setup.md) for setup instructions.
 
 ## Documentation
 
