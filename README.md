@@ -31,6 +31,8 @@ Developers and technical people who:
 
 ## Quick Start
 
+### 1. Set up the server
+
 ```bash
 git clone https://github.com/mahsanamin/mdnest.git
 cd mdnest
@@ -52,16 +54,15 @@ MOUNT_personal=/home/ahsan/notes
 MOUNT_work=/home/ahsan/work-notes
 ```
 
-Then generate and start:
+Then build and start:
 
 ```bash
-./mdnest-server setup              # generates docker-compose.yml + .env
-./mdnest-server rebuild            # build and start
+./mdnest-server rebuild
 ```
 
 Open [http://localhost:3236](http://localhost:3236)
 
-### Enable remote access
+### 2. Enable remote access
 
 Install Tailscale on the host and on your phone/laptop, then:
 
@@ -73,9 +74,56 @@ Access from any of your devices: `https://your-server.tailnet.ts.net:3236`
 
 Encrypted, private, no ports opened to the internet. See [Remote Access](#remote-access) for more options.
 
-### Connect AI agents
+## Accessing Your Notes
 
-Create an API token in Settings > API Tokens, then point your MCP client at mdnest:
+Once the server is running, there are three ways to access your notes:
+
+### Web UI (browser)
+
+Open `http://localhost:3236` (or your Tailscale URL) in any browser. Works on desktop and mobile.
+
+### CLI (terminal)
+
+Install the `mdnest` CLI on any machine:
+
+```bash
+# Download the CLI
+curl -fsSL https://raw.githubusercontent.com/mahsanamin/mdnest/main/mdnest -o /usr/local/bin/mdnest
+chmod +x /usr/local/bin/mdnest
+```
+
+Then authenticate with a token from the web UI (Settings > API Tokens):
+
+```bash
+mdnest login https://your-server:3236 <your-api-token>
+```
+
+Now use it from anywhere:
+
+```bash
+mdnest note list                                    # list namespaces
+mdnest note list personal                           # list files in a namespace
+mdnest note read personal ideas.md                  # read a note
+mdnest note write personal ideas.md "New content"   # overwrite a note
+mdnest note append personal log.md "New entry"      # append to a note
+mdnest note prepend personal log.md "Top entry"     # prepend to a note
+mdnest note create personal new-note.md             # create a new note
+mdnest note delete personal old-note.md             # delete a note
+mdnest note search personal "search query"          # search notes
+echo "piped content" | mdnest note write personal draft.md -  # pipe from stdin
+```
+
+Run `mdnest note help` for the full list.
+
+### MCP Server (AI agents)
+
+AI agents can read, write, search, and organize your notes via the bundled MCP server.
+
+```bash
+cd mcp-server && npm install
+```
+
+Create an API token in Settings (gear icon) > API Tokens, then configure your MCP client:
 
 ```json
 {
@@ -92,9 +140,11 @@ Create an API token in Settings > API Tokens, then point your MCP client at mdne
 }
 ```
 
-Now Claude, Cursor, or any MCP-compatible agent can read, write, search, and organize your notes. See [MCP Server](#mcp-server) for setup details.
+**Available tools:** `list_namespaces`, `list_tree`, `read_note`, `write_note`, `append_note`, `prepend_note`, `create_note`, `create_folder`, `delete_item`, `move_item`, `search_notes`
 
-## Managing
+## Server Management
+
+All server commands use `mdnest-server` and must be run from the project directory:
 
 ```bash
 ./mdnest-server start              # start all services
@@ -179,33 +229,6 @@ GIT_SYNC_INTERVAL=900    # sync every 15 minutes
 ```
 
 The git remote is a **backup destination** — let mdnest be the only thing pushing to it. Don't commit to the same repo from other tools. See [docs/setup.md](docs/setup.md) for full setup details.
-
-## MCP Server
-
-AI agents can read, write, search, and organize your notes via the bundled MCP server.
-
-```bash
-cd mcp-server && npm install
-```
-
-Create an API token in Settings (gear icon) > API Tokens, then configure your MCP client:
-
-```json
-{
-  "mcpServers": {
-    "mdnest": {
-      "command": "node",
-      "args": ["/path/to/mdnest/mcp-server/index.js"],
-      "env": {
-        "MDNEST_URL": "http://localhost:8286",
-        "MDNEST_TOKEN": "<your API token>"
-      }
-    }
-  }
-}
-```
-
-**Available tools:** `list_namespaces`, `list_tree`, `read_note`, `write_note`, `create_note`, `create_folder`, `delete_item`, `move_item`, `search_notes`
 
 ## Remote Access
 
