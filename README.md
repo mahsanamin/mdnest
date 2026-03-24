@@ -153,11 +153,22 @@ Each `MOUNT_<name>=<host_path>` entry in `mdnest.conf` mounts a host directory a
 
 Your notes are private by default. Nothing leaves your machine unless you choose to enable sync.
 
-To back up to a private GitHub repo, initialize each namespace directory as a git repo with a remote, then start with the sync profile:
+To back up to a private GitHub repo:
 
-```bash
-docker-compose --profile sync up --build -d
-```
+1. Initialize each namespace directory as a git repo with a remote
+2. Add an SSH key (passphrase-protected keys won't work inside Docker):
+   ```bash
+   mkdir -p git-sync/keys
+   # Option A: single key for all repos
+   ssh-keygen -t ed25519 -f git-sync/keys/default -N "" -C "mdnest-sync"
+   # Option B: one key per namespace (required for GitHub deploy keys)
+   ssh-keygen -t ed25519 -f git-sync/keys/<namespace> -N "" -C "mdnest-sync"
+   ```
+3. Add the `.pub` key to your Git provider (GitHub: Settings > Deploy Keys, enable write access)
+4. Start with the sync profile:
+   ```bash
+   docker compose --profile sync up --build -d
+   ```
 
 The sync interval is configurable (default: every 10 minutes):
 
@@ -165,7 +176,7 @@ The sync interval is configurable (default: every 10 minutes):
 GIT_SYNC_INTERVAL=900    # sync every 15 minutes
 ```
 
-See [docs/setup.md](docs/setup.md) for SSH key setup.
+The git remote is a **backup destination** — let mdnest be the only thing pushing to it. Don't commit to the same repo from other tools. See [docs/setup.md](docs/setup.md) for full setup details.
 
 ## MCP Server
 

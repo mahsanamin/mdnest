@@ -106,6 +106,23 @@ for i in "${!MOUNT_NAMES[@]}"; do
 "
 done
 
+# Check for deploy keys
+if [ -d "git-sync/keys" ]; then
+  KEY_COUNT=$(find git-sync/keys -maxdepth 1 -type f ! -name "*.pub" 2>/dev/null | wc -l | tr -d ' ')
+  if [ "$KEY_COUNT" -gt 0 ]; then
+    echo "Found $KEY_COUNT deploy key(s) in git-sync/keys/"
+  else
+    echo "Warning: git-sync/keys/ exists but has no private keys."
+    echo "  Add a shared key:        ssh-keygen -t ed25519 -f git-sync/keys/default -N \"\""
+    echo "  Or one per namespace:    ssh-keygen -t ed25519 -f git-sync/keys/<namespace> -N \"\""
+  fi
+else
+  mkdir -p git-sync/keys
+  echo "Created git-sync/keys/ — add SSH keys for git-sync to push:"
+  echo "  Add a shared key:        ssh-keygen -t ed25519 -f git-sync/keys/default -N \"\""
+  echo "  Or one per namespace:    ssh-keygen -t ed25519 -f git-sync/keys/<namespace> -N \"\""
+fi
+
 # Generate docker-compose.yml
 cat > docker-compose.yml <<EOF
 services:
@@ -136,7 +153,7 @@ ${BACKEND_VOLUMES}      - mdnest-secrets:/data/secrets
       - sync
     volumes:
 ${GITSYNC_VOLUMES}      - ./git-sync/sync.sh:/sync.sh:ro
-      - \${HOME}/.ssh:/root/.ssh:ro
+      - ./git-sync/keys:/keys:ro
     environment:
       - GIT_AUTHOR_NAME=\${GIT_AUTHOR_NAME}
       - GIT_AUTHOR_EMAIL=\${GIT_AUTHOR_EMAIL}

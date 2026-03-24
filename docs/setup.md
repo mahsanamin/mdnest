@@ -148,17 +148,39 @@ git push -u origin main
 
 **2. Set up SSH keys:**
 
-The git-sync container mounts your host's `~/.ssh` directory read-only. Ensure:
+The git-sync container needs **unencrypted** SSH keys. Your regular SSH key likely has a passphrase and is decrypted by macOS Keychain or an SSH agent — neither is available inside the container.
 
-- You have an SSH key that can push to your notes repo:
-  ```bash
-  ssh-keygen -t ed25519 -C "mdnest"
-  ```
-- Add the public key to your Git hosting provider (GitHub, GitLab, etc.).
-- The remote host is in your `known_hosts`:
-  ```bash
-  ssh-keyscan github.com >> ~/.ssh/known_hosts
-  ```
+Keys live in `git-sync/keys/`. The sync script resolves keys in this order:
+
+1. **`git-sync/keys/<namespace>`** — a per-namespace key (matches your `MOUNT_<name>`)
+2. **`git-sync/keys/default`** — a shared key used for all namespaces that don't have their own
+3. **No key found** — commits locally but skips push/pull
+
+**Option A: Single key for all repos** (simplest if you have a machine user or personal key):
+
+```bash
+mkdir -p git-sync/keys
+# Copy or generate an unencrypted key
+ssh-keygen -t ed25519 -f git-sync/keys/default -N "" -C "mdnest-sync"
+```
+
+Add the public key to your GitHub account (Settings > SSH Keys) or as a collaborator key.
+
+**Option B: One key per namespace** (required if using GitHub deploy keys, since each must be unique):
+
+```bash
+mkdir -p git-sync/keys
+ssh-keygen -t ed25519 -f git-sync/keys/my_wego_brain -N "" -C "mdnest-sync"
+ssh-keygen -t ed25519 -f git-sync/keys/personal     -N "" -C "mdnest-sync"
+```
+
+Add each `.pub` key to the corresponding repo's deploy keys:
+- **GitHub**: repo Settings > Deploy Keys > Add deploy key (enable "Allow write access")
+- **GitLab**: repo Settings > Repository > Deploy Keys
+
+> **Why not mount `~/.ssh` directly?**
+> - Passphrase-protected keys silently fail (no agent to decrypt them).
+> - macOS SSH configs use `UseKeychain`, which Alpine's SSH doesn't recognize and treats as a fatal error.
 
 **3. Configure git identity in `mdnest.conf`:**
 
@@ -177,14 +199,17 @@ Without `--profile sync`, only the backend and frontend containers start. The gi
 
 ### How It Works
 
-The sync loop runs every 600 seconds (10 minutes):
+The sync loop runs every 600 seconds (10 minutes) per namespace:
 
-1. Stages all changes (`git add -A`)
-2. Commits if there are staged changes (message: `sync: <timestamp>`)
-3. Pulls with rebase from the remote
-4. Pushes to the remote
+1. **Commit** — stages all changes and commits. If the previous unpushed commit is also a sync commit, it squashes into it instead of creating a new one. This keeps history clean when push fails across multiple cycles.
+2. **Pull** — pulls from the remote with rebase for linear history.
+3. **Push** — pushes to the remote. If push fails, retries next cycle.
 
-If a pull or push fails, it logs an error and retries on the next cycle.
+### Important: Let mdnest Own the Repo
+
+The git remote should be treated as a **backup destination**, not a shared workspace. Do not push to it from other tools or machines. Since mdnest is the only process committing and pushing, conflicts cannot occur under normal use.
+
+If a conflict does happen (e.g., someone accidentally pushed to the repo directly), git-sync handles it automatically: it saves the local version as a `.sync-conflict-*` file, accepts the remote, and keeps the sync loop running. No data is lost, no manual intervention needed.
 
 ---
 
@@ -311,13 +336,14 @@ After changing `MDNEST_PASSWORD` in `mdnest.conf`:
 
 ### git-sync not pushing
 
-- Verify SSH keys are in `~/.ssh/` on the host and the public key is added to your git provider.
-- Check that the remote host is in `~/.ssh/known_hosts`.
-- Inspect git-sync logs:
+- **Check the logs first:**
   ```bash
   docker compose --profile sync logs git-sync
   ```
-- Ensure the notes directory has a git remote configured:
+- **"Permission denied (publickey)"** — your SSH key is likely passphrase-protected. The container has no SSH agent to decrypt it. Generate a dedicated deploy key (see [Git Sync](#git-sync) above).
+- **"Bad configuration option: usekeychain"** — your macOS `~/.ssh/config` is being mounted into the container. The generated setup uses `git-sync/ssh_config` instead. Re-run `./setup.sh` and restart.
+- **Verify the deploy key** is added to your git provider with write access.
+- **Ensure the notes directory** has a git remote configured:
   ```bash
   cd /path/to/your/notes
   git remote -v

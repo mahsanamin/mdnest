@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Login from './components/Login.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import Toolbar from './components/Toolbar.jsx';
@@ -54,6 +54,10 @@ function App() {
   const [ctxMenu, setCtxMenu] = useState({ visible: false, x: 0, y: 0, target: null });
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [initialized, setInitialized] = useState(false);
+  const contentRef = useRef(content);
+  const savedContentRef = useRef(savedContent);
+  contentRef.current = content;
+  savedContentRef.current = savedContent;
 
   const loadNamespaces = useCallback(async () => {
     try {
@@ -126,6 +130,25 @@ function App() {
       setHash(selectedNs, null);
     }
   }, [authenticated, selectedNs, initialized]);
+
+  // Auto-refresh: poll the current note every 30s to pick up external changes.
+  // Only updates if the user has no unsaved edits.
+  useEffect(() => {
+    if (!authenticated || !selectedNs || !currentPath) return;
+    const interval = setInterval(async () => {
+      try {
+        const remote = await getNote(selectedNs, currentPath);
+        if (contentRef.current === savedContentRef.current && remote !== savedContentRef.current) {
+          setContent(remote);
+          setSavedContent(remote);
+          refreshTree(selectedNs);
+        }
+      } catch (e) {
+        // Transient errors (network, 5xx) — skip silently, retry next cycle
+      }
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [authenticated, selectedNs, currentPath, refreshTree]);
 
   // Update URL hash whenever ns or path changes
   useEffect(() => {
