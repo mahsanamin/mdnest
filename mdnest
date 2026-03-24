@@ -41,7 +41,16 @@ api() {
 
 # ─── Server commands (only work from project directory) ──────────────────────
 
+is_server() {
+  [ -f "$SCRIPT_DIR/setup.sh" ] || [ -f "$SCRIPT_DIR/mdnest.conf.sample" ]
+}
+
 server_cmd() {
+  if ! is_server; then
+    echo "Server commands are only available from the mdnest project directory." >&2
+    echo "This script is running from: $SCRIPT_DIR" >&2
+    exit 1
+  fi
   cd "$SCRIPT_DIR"
 
   # Auto-detect git-sync
@@ -282,7 +291,16 @@ Client commands (work from any machine):
   whoami                    Show current server and token
   note    <subcommand>      Read, write, append, search notes (run 'mdnest note' for details)
 
-Server commands (run from the mdnest project directory):
+Examples:
+  mdnest login https://myserver:3236 tok_abc123
+  mdnest note list
+  mdnest note read my_notes ideas.md
+  mdnest note append my_notes log.md "Meeting notes here"
+HELP
+    if is_server; then
+      cat <<'HELP'
+
+Server commands (available because you're in the mdnest project directory):
   server setup              Generate docker-compose.yml and .env
   server start              Start all services
   server stop               Stop all services
@@ -292,15 +310,8 @@ Server commands (run from the mdnest project directory):
   server sync-logs          View git-sync logs
   server status             Show running containers
   server update             Pull latest code, rebuild, and start
-
-Examples:
-  mdnest login https://myserver:3236 tok_abc123
-  mdnest note list
-  mdnest note read my_notes ideas.md
-  mdnest note append my_notes log.md "Meeting notes here"
-  mdnest server start
-  mdnest server rebuild
 HELP
+    fi
     ;;
   *)
     echo "Unknown command: $CMD"
