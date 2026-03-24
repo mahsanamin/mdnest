@@ -8,7 +8,7 @@ if [ ! -f "$CONF" ]; then
   if [ -f "$SAMPLE" ]; then
     cp "$SAMPLE" "$CONF"
     echo "Created $CONF from $SAMPLE"
-    echo "Edit $CONF with your settings, then run ./mdnest rebuild."
+    echo "Edit $CONF with your settings, then run ./mdnest server rebuild."
     exit 0
   else
     echo "Error: $SAMPLE not found."
@@ -172,6 +172,6 @@ EOF
 echo "Generated docker-compose.yml"
 echo ""
 echo "Ready! Run:"
-echo "  ./mdnest start"
+echo "  ./mdnest server start"
 echo ""
 echo "Then open http://localhost:${FRONTEND_PORT}"

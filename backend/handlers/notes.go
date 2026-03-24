@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const maxNoteSize = 10 << 20 // 10MB
@@ -28,6 +29,8 @@ func (h *NoteHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		h.createNote(w, r)
 	case http.MethodDelete:
 		h.deleteNote(w, r)
+	case http.MethodPatch:
+		h.patchNote(w, r)
 	default:
 		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 	}
@@ -149,4 +152,70 @@ func (h *NoteHandler) deleteNote(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
+}
+
+func (h *NoteHandler) patchNote(w http.ResponseWriter, r *http.Request) {
+	nsDir := RequireNamespace(h.notesDir, w, r)
+	if nsDir == "" {
+		return
+	}
+	reqPath := r.URL.Query().Get("path")
+	absPath := SafePath(nsDir, reqPath)
+	if absPath == "" {
+		http.Error(w, `{"error":"invalid path"}`, http.StatusBadRequest)
+		return
+	}
+
+	position := r.URL.Query().Get("position")
+	if position == "" {
+		position = "bottom"
+	}
+	if position != "top" && position != "bottom" {
+		http.Error(w, `{"error":"position must be top or bottom"}`, http.StatusBadRequest)
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxNoteSize))
+	if err != nil {
+		http.Error(w, `{"error":"failed to read body"}`, http.StatusBadRequest)
+		return
+	}
+	text := string(body)
+
+	// Read existing content (empty if file doesn't exist yet)
+	existing := ""
+	data, err := os.ReadFile(absPath)
+	if err == nil {
+		existing = string(data)
+	} else if !os.IsNotExist(err) {
+		http.Error(w, `{"error":"failed to read file"}`, http.StatusInternalServerError)
+		return
+	}
+
+	// Combine based on position
+	var result string
+	if position == "top" {
+		if existing != "" {
+			result = text + "\n" + existing
+		} else {
+			result = text
+		}
+	} else {
+		if existing != "" {
+			result = strings.TrimRight(existing, "\n") + "\n" + text
+		} else {
+			result = text
+		}
+	}
+
+	if err := os.MkdirAll(filepath.Dir(absPath), 0755); err != nil {
+		http.Error(w, `{"error":"failed to create directories"}`, http.StatusInternalServerError)
+		return
+	}
+	if err := os.WriteFile(absPath, []byte(result), 0644); err != nil {
+		http.Error(w, `{"error":"failed to write file"}`, http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }

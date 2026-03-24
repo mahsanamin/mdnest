@@ -1,6 +1,6 @@
 # mdnest configuration
 # Copy this file to mdnest.conf and edit to match your setup.
-# Run ./mdnest rebuild to generate docker-compose.yml and start.
+# Run ./mdnest server rebuild to generate docker-compose.yml and start.
 
 # Auth — change these before first run
 MDNEST_USER=admin

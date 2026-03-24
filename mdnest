@@ -2,95 +2,309 @@
 set -e
 
 # Change to the directory where this script lives
-cd "$(dirname "$0")"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CONFIG_DIR="${HOME}/.config/mdnest"
+CONFIG_FILE="${CONFIG_DIR}/config"
 
-# Auto-detect if git-sync should be enabled:
-# keys exist in git-sync/keys/ → include --profile sync
-SYNC_PROFILE=""
-if [ -d "git-sync/keys" ]; then
-  KEY_COUNT=$(find git-sync/keys -maxdepth 1 -type f ! -name "*.pub" ! -name ".gitkeep" 2>/dev/null | wc -l | tr -d ' ')
-  if [ "$KEY_COUNT" -gt 0 ]; then
-    SYNC_PROFILE="--profile sync"
+# ─── Client config helpers ───────────────────────────────────────────────────
+
+load_config() {
+  if [ -f "$CONFIG_FILE" ]; then
+    MDNEST_URL=$(grep '^url=' "$CONFIG_FILE" 2>/dev/null | cut -d= -f2-)
+    MDNEST_TOKEN=$(grep '^token=' "$CONFIG_FILE" 2>/dev/null | cut -d= -f2-)
   fi
-fi
-
-compose() {
-  docker compose $SYNC_PROFILE "$@"
 }
+
+require_config() {
+  load_config
+  if [ -z "$MDNEST_URL" ] || [ -z "$MDNEST_TOKEN" ]; then
+    echo "Not logged in. Run: mdnest login <url> <token>"
+    exit 1
+  fi
+}
+
+api() {
+  local method="$1" path="$2" body="$3"
+  local args=(-s -w "\n%{http_code}" -H "Authorization: Bearer $MDNEST_TOKEN")
+  [ -n "$body" ] && args+=(-d "$body")
+  local response
+  response=$(curl "${args[@]}" -X "$method" "${MDNEST_URL}/api${path}")
+  local http_code="${response##*$'\n'}"
+  local body="${response%$'\n'*}"
+
+  if [ "$http_code" -ge 400 ] 2>/dev/null; then
+    echo "Error ($http_code): $body" >&2
+    return 1
+  fi
+  echo "$body"
+}
+
+# ─── Server commands (only work from project directory) ──────────────────────
+
+server_cmd() {
+  cd "$SCRIPT_DIR"
+
+  # Auto-detect git-sync
+  SYNC_PROFILE=""
+  if [ -d "git-sync/keys" ]; then
+    KEY_COUNT=$(find git-sync/keys -maxdepth 1 -type f ! -name "*.pub" ! -name ".gitkeep" 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$KEY_COUNT" -gt 0 ]; then
+      SYNC_PROFILE="--profile sync"
+    fi
+  fi
+
+  compose() {
+    docker compose $SYNC_PROFILE "$@"
+  }
+
+  local subcmd="${1:-help}"
+  shift 2>/dev/null || true
+
+  case "$subcmd" in
+    setup)
+      ./setup.sh
+      ;;
+    start)
+      compose up -d "$@"
+      [ -n "$SYNC_PROFILE" ] && echo "git-sync: enabled" || echo "git-sync: disabled (no keys in git-sync/keys/)"
+      echo "mdnest is running at http://localhost:$(grep FRONTEND_PORT mdnest.conf 2>/dev/null | head -1 | cut -d= -f2 | tr -d ' ' || echo 3236)"
+      ;;
+    stop)
+      compose down "$@"
+      ;;
+    restart)
+      compose down
+      compose up -d "$@"
+      [ -n "$SYNC_PROFILE" ] && echo "git-sync: enabled" || echo "git-sync: disabled (no keys in git-sync/keys/)"
+      echo "mdnest restarted"
+      ;;
+    rebuild)
+      ./setup.sh
+      compose up --build -d "$@"
+      [ -n "$SYNC_PROFILE" ] && echo "git-sync: enabled" || echo "git-sync: disabled (no keys in git-sync/keys/)"
+      echo "mdnest rebuilt and running"
+      ;;
+    logs)
+      compose logs "${@:--f --tail 50}"
+      ;;
+    sync-logs)
+      compose logs git-sync "${@:--f --tail 50}"
+      ;;
+    status)
+      compose ps
+      ;;
+    update)
+      git pull
+      ./setup.sh
+      compose up --build -d
+      echo "mdnest updated and running"
+      ;;
+    *)
+      echo "Unknown server command: $subcmd"
+      echo "Run './mdnest help' for usage"
+      exit 1
+      ;;
+  esac
+}
+
+# ─── Note commands (client — works from any machine) ─────────────────────────
+
+note_cmd() {
+  local subcmd="${1:-help}"
+  shift 2>/dev/null || true
+
+  # Help doesn't need auth
+  if [ "$subcmd" = "help" ] || [ "$subcmd" = "--help" ] || [ "$subcmd" = "-h" ]; then
+    subcmd="help_text"
+  else
+    require_config
+  fi
+
+  case "$subcmd" in
+    list)
+      # mdnest note list <namespace>
+      local ns="$1"
+      if [ -z "$ns" ]; then
+        # List namespaces
+        api GET "/namespaces"
+      else
+        api GET "/tree?ns=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$ns'))")"
+      fi
+      ;;
+    read)
+      # mdnest note read <namespace> <path>
+      local ns="$1" path="$2"
+      [ -z "$ns" ] || [ -z "$path" ] && { echo "Usage: mdnest note read <namespace> <path>" >&2; exit 1; }
+      api GET "/note?ns=$(urlencode "$ns")&path=$(urlencode "$path")"
+      ;;
+    write)
+      # mdnest note write <namespace> <path> <content | - for stdin>
+      local ns="$1" path="$2" content="$3"
+      [ -z "$ns" ] || [ -z "$path" ] && { echo "Usage: mdnest note write <namespace> <path> <content>" >&2; exit 1; }
+      [ "$content" = "-" ] && content=$(cat)
+      [ -z "$content" ] && content=$(cat)
+      api PUT "/note?ns=$(urlencode "$ns")&path=$(urlencode "$path")" "$content"
+      ;;
+    create)
+      # mdnest note create <namespace> <path> [content]
+      local ns="$1" path="$2" content="${3:-}"
+      [ -z "$ns" ] || [ -z "$path" ] && { echo "Usage: mdnest note create <namespace> <path> [content]" >&2; exit 1; }
+      api POST "/note?ns=$(urlencode "$ns")&path=$(urlencode "$path")" "$content"
+      ;;
+    append)
+      # mdnest note append <namespace> <path> <content | - for stdin>
+      local ns="$1" path="$2" content="$3"
+      [ -z "$ns" ] || [ -z "$path" ] && { echo "Usage: mdnest note append <namespace> <path> <content>" >&2; exit 1; }
+      [ "$content" = "-" ] && content=$(cat)
+      [ -z "$content" ] && content=$(cat)
+      api PATCH "/note?ns=$(urlencode "$ns")&path=$(urlencode "$path")&position=bottom" "$content"
+      ;;
+    prepend)
+      # mdnest note prepend <namespace> <path> <content | - for stdin>
+      local ns="$1" path="$2" content="$3"
+      [ -z "$ns" ] || [ -z "$path" ] && { echo "Usage: mdnest note prepend <namespace> <path> <content>" >&2; exit 1; }
+      [ "$content" = "-" ] && content=$(cat)
+      [ -z "$content" ] && content=$(cat)
+      api PATCH "/note?ns=$(urlencode "$ns")&path=$(urlencode "$path")&position=top" "$content"
+      ;;
+    delete)
+      # mdnest note delete <namespace> <path>
+      local ns="$1" path="$2"
+      [ -z "$ns" ] || [ -z "$path" ] && { echo "Usage: mdnest note delete <namespace> <path>" >&2; exit 1; }
+      api DELETE "/note?ns=$(urlencode "$ns")&path=$(urlencode "$path")"
+      ;;
+    move)
+      # mdnest note move <namespace> <from> <to>
+      local ns="$1" from="$2" to="$3"
+      [ -z "$ns" ] || [ -z "$from" ] || [ -z "$to" ] && { echo "Usage: mdnest note move <namespace> <from> <to>" >&2; exit 1; }
+      api POST "/move?ns=$(urlencode "$ns")&from=$(urlencode "$from")&to=$(urlencode "$to")"
+      ;;
+    search)
+      # mdnest note search <namespace> <query>
+      local ns="$1" query="$2"
+      [ -z "$ns" ] || [ -z "$query" ] && { echo "Usage: mdnest note search <namespace> <query>" >&2; exit 1; }
+      api GET "/search?ns=$(urlencode "$ns")&q=$(urlencode "$query")"
+      ;;
+    help_text)
+      cat <<'HELP'
+Usage: mdnest note <command> [args]
+
+Commands:
+  list    [namespace]                     List namespaces, or files in a namespace
+  read    <namespace> <path>              Read a note
+  write   <namespace> <path> <content>    Overwrite a note (use - for stdin)
+  create  <namespace> <path> [content]    Create a new note
+  append  <namespace> <path> <content>    Append text to a note (use - for stdin)
+  prepend <namespace> <path> <content>    Prepend text to a note (use - for stdin)
+  delete  <namespace> <path>              Delete a note or folder
+  move    <namespace> <from> <to>         Move/rename a note or folder
+  search  <namespace> <query>             Search notes
+
+Examples:
+  mdnest note list
+  mdnest note list my_notes
+  mdnest note read my_notes ideas.md
+  mdnest note append my_notes log.md "## $(date) - Meeting notes"
+  echo "new content" | mdnest note write my_notes draft.md -
+HELP
+      ;;
+    *)
+      echo "Unknown note command: $subcmd" >&2
+      echo "Run 'mdnest note help' for usage" >&2
+      exit 1
+      ;;
+  esac
+}
+
+# ─── URL encoding helper ────────────────────────────────────────────────────
+
+urlencode() {
+  python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))" "$1"
+}
+
+# ─── Main dispatch ───────────────────────────────────────────────────────────
 
 CMD="${1:-help}"
 shift 2>/dev/null || true
 
 case "$CMD" in
-  setup)
-    ./setup.sh
+  login)
+    # mdnest login <url> <token>
+    local_url="$1"
+    local_token="$2"
+    if [ -z "$local_url" ] || [ -z "$local_token" ]; then
+      echo "Usage: mdnest login <url> <token>"
+      echo "  url:   Your mdnest server URL (e.g. https://myserver:3236)"
+      echo "  token: API token from Settings > API Tokens in the web UI"
+      exit 1
+    fi
+    # Strip trailing slash
+    local_url="${local_url%/}"
+    mkdir -p "$CONFIG_DIR"
+    cat > "$CONFIG_FILE" <<EOF
+url=${local_url}
+token=${local_token}
+EOF
+    chmod 600 "$CONFIG_FILE"
+    # Test the connection
+    MDNEST_URL="$local_url" MDNEST_TOKEN="$local_token" api GET "/namespaces" > /dev/null 2>&1 \
+      && echo "Logged in to $local_url" \
+      || echo "Warning: could not reach $local_url — credentials saved, will retry on next command"
     ;;
-  start)
-    compose up -d "$@"
-    [ -n "$SYNC_PROFILE" ] && echo "git-sync: enabled" || echo "git-sync: disabled (no keys in git-sync/keys/)"
-    echo "mdnest is running at http://localhost:$(grep FRONTEND_PORT mdnest.conf 2>/dev/null | head -1 | cut -d= -f2 | tr -d ' ' || echo 3236)"
+  logout)
+    rm -f "$CONFIG_FILE"
+    echo "Logged out"
     ;;
-  stop)
-    compose down "$@"
+  whoami)
+    load_config
+    if [ -n "$MDNEST_URL" ]; then
+      echo "Server: $MDNEST_URL"
+      echo "Token:  ${MDNEST_TOKEN:0:8}..."
+    else
+      echo "Not logged in"
+    fi
     ;;
-  restart)
-    compose down
-    compose up -d "$@"
-    [ -n "$SYNC_PROFILE" ] && echo "git-sync: enabled" || echo "git-sync: disabled (no keys in git-sync/keys/)"
-    echo "mdnest restarted"
+  server)
+    server_cmd "$@"
     ;;
-  rebuild)
-    ./setup.sh
-    compose up --build -d "$@"
-    [ -n "$SYNC_PROFILE" ] && echo "git-sync: enabled" || echo "git-sync: disabled (no keys in git-sync/keys/)"
-    echo "mdnest rebuilt and running"
-    ;;
-  logs)
-    compose logs "${@:--f --tail 50}"
-    ;;
-  status)
-    compose ps
-    ;;
-  sync-logs)
-    compose logs git-sync "${@:--f --tail 50}"
-    ;;
-  update)
-    git pull
-    ./setup.sh
-    compose up --build -d
-    echo "mdnest updated and running"
+  note)
+    note_cmd "$@"
     ;;
   help|--help|-h)
     cat <<'HELP'
-mdnest — manage your mdnest instance
+mdnest — notes on your terms
 
-Usage: ./mdnest <command>
+Usage: mdnest <command>
 
-Commands:
-  setup       Run setup.sh to generate docker-compose.yml and .env
-  start       Start all services (includes git-sync if keys are configured)
-  stop        Stop all services
-  restart     Stop and start all services
-  rebuild     Re-run setup, rebuild images, and start
-  logs        View logs (all services)
-  sync-logs   View git-sync logs
-  status      Show running containers
-  update      Pull latest code, rebuild, and start
+Client commands (work from any machine):
+  login   <url> <token>     Authenticate with an mdnest server
+  logout                    Remove saved credentials
+  whoami                    Show current server and token
+  note    <subcommand>      Read, write, append, search notes (run 'mdnest note' for details)
 
-Git sync starts automatically when deploy keys are found in git-sync/keys/.
-No keys = no sync. Your notes stay local unless you set it up.
+Server commands (run from the mdnest project directory):
+  server setup              Generate docker-compose.yml and .env
+  server start              Start all services
+  server stop               Stop all services
+  server restart            Restart all services
+  server rebuild            Re-run setup, rebuild images, and start
+  server logs [service]     View logs
+  server sync-logs          View git-sync logs
+  server status             Show running containers
+  server update             Pull latest code, rebuild, and start
 
 Examples:
-  ./mdnest setup              # first-time setup
-  ./mdnest start              # start everything
-  ./mdnest rebuild            # after editing mdnest.conf
-  ./mdnest logs backend       # logs for one service
-  ./mdnest sync-logs          # check git sync status
+  mdnest login https://myserver:3236 tok_abc123
+  mdnest note list
+  mdnest note read my_notes ideas.md
+  mdnest note append my_notes log.md "Meeting notes here"
+  mdnest server start
+  mdnest server rebuild
 HELP
     ;;
   *)
     echo "Unknown command: $CMD"
-    echo "Run './mdnest help' for usage"
+    echo "Run 'mdnest help' for usage"
     exit 1
     ;;
 esac

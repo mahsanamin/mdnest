@@ -226,6 +226,58 @@ server.tool(
 );
 
 server.tool(
+  "append_note",
+  "Append text to the end of a note. Creates the note if it doesn't exist.",
+  {
+    namespace: z.string().describe("Namespace name"),
+    path: z.string().describe("Path to the note within the namespace"),
+    content: z.string().describe("Text to append"),
+  },
+  async ({ namespace, path, content }) => {
+    try {
+      const res = await api(
+        `/api/note?ns=${encodeURIComponent(namespace)}&path=${encodeURIComponent(path)}&position=bottom`,
+        { method: "PATCH", body: content }
+      );
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        return { content: [{ type: "text", text: `Error ${res.status}: ${text}` }], isError: true };
+      }
+      const data = await res.json();
+      return { content: [{ type: "text", text: JSON.stringify(data) }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  "prepend_note",
+  "Prepend text to the top of a note. Creates the note if it doesn't exist.",
+  {
+    namespace: z.string().describe("Namespace name"),
+    path: z.string().describe("Path to the note within the namespace"),
+    content: z.string().describe("Text to prepend"),
+  },
+  async ({ namespace, path, content }) => {
+    try {
+      const res = await api(
+        `/api/note?ns=${encodeURIComponent(namespace)}&path=${encodeURIComponent(path)}&position=top`,
+        { method: "PATCH", body: content }
+      );
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        return { content: [{ type: "text", text: `Error ${res.status}: ${text}` }], isError: true };
+      }
+      const data = await res.json();
+      return { content: [{ type: "text", text: JSON.stringify(data) }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+server.tool(
   "create_folder",
   "Create a new folder",
   {
