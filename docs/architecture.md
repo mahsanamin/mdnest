@@ -200,7 +200,7 @@ Both the backend and frontend use multi-stage Dockerfiles to keep production ima
 | `frontend` | Built from `./frontend` | Nginx serving static files on port 80 (mapped to host's `FRONTEND_PORT`) |
 | `git-sync` | `alpine/git:latest` | Optional sidecar, runs the commit/push loop for each namespace |
 
-The `git-sync` service is under the `sync` profile. The `./mdnest` CLI auto-detects deploy keys in `git-sync/keys/` and includes the profile automatically — no manual flags needed.
+The `git-sync` service is under the `sync` profile. `./mdnest-server` auto-detects deploy keys in `git-sync/keys/` and includes the profile automatically — no manual flags needed.
 
 ### Volume Mounts
 
