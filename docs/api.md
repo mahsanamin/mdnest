@@ -265,6 +265,54 @@ curl -X PUT "http://localhost:8286/api/note?ns=personal&path=todo.md" \
 
 ---
 
+### PATCH /api/note
+
+Append or prepend text to a note. Creates the file if it doesn't exist.
+
+**Query parameters:**
+
+| Param | Required | Description |
+|-------|----------|-------------|
+| `ns` | yes | Namespace name |
+| `path` | yes | Relative path to the note |
+| `position` | no | `top` (prepend) or `bottom` (append, default) |
+
+**Request body:** Plain text to append/prepend.
+
+**Response** (200 OK):
+
+```json
+{"status": "ok"}
+```
+
+**Examples:**
+
+```bash
+# Append text to a note
+curl -X PATCH "http://localhost:8286/api/note?ns=personal&path=log.md&position=bottom" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d "## $(date) - New entry"
+
+# Prepend text to the top of a note
+curl -X PATCH "http://localhost:8286/api/note?ns=personal&path=log.md&position=top" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d "# Important update"
+
+# Append to a file that doesn't exist yet (creates it)
+curl -X PATCH "http://localhost:8286/api/note?ns=personal&path=new-log.md" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d "First entry"
+```
+
+**Error responses:**
+
+| Status | Body | Cause |
+|--------|------|-------|
+| 400 | `{"error":"invalid path"}` | Path is empty or attempts directory traversal |
+| 400 | `{"error":"position must be top or bottom"}` | Invalid position value |
+
+---
+
 ### DELETE /api/note
 
 Delete a note or folder. If the path points to a directory, it and all its contents are removed recursively.
