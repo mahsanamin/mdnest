@@ -55,8 +55,8 @@ MOUNT_work=/home/ahsan/work-notes
 Then generate and start:
 
 ```bash
-./setup.sh                       # generates docker-compose.yml + .env
-docker-compose up --build -d     # build and start
+./mdnest setup                   # generates docker-compose.yml + .env
+./mdnest rebuild                 # build and start
 ```
 
 Open [http://localhost:3236](http://localhost:3236)
@@ -97,25 +97,25 @@ Now Claude, Cursor, or any MCP-compatible agent can read, write, search, and org
 ## Managing
 
 ```bash
-docker-compose up -d             # start
-docker-compose down              # stop
-docker-compose restart           # restart
-docker-compose up --build -d     # rebuild after code changes
-docker-compose logs -f           # view logs
-docker-compose logs -f backend   # view backend logs only
+./mdnest start                   # start all services
+./mdnest stop                    # stop all services
+./mdnest restart                 # restart all services
+./mdnest rebuild                 # rebuild after code or config changes
+./mdnest logs                    # view logs (all services)
+./mdnest logs backend            # view backend logs only
+./mdnest sync-logs               # view git-sync logs
+./mdnest status                  # show running containers
 ```
 
 After editing `mdnest.conf`, always re-run:
 ```bash
-./setup.sh && docker-compose up --build -d
+./mdnest rebuild
 ```
 
 ## Updating
 
 ```bash
-git pull
-./setup.sh
-docker-compose up --build -d
+./mdnest update
 ```
 
 ## Configuration
@@ -165,10 +165,12 @@ To back up to a private GitHub repo:
    ssh-keygen -t ed25519 -f git-sync/keys/<namespace> -N "" -C "mdnest-sync"
    ```
 3. Add the `.pub` key to your Git provider (GitHub: Settings > Deploy Keys, enable write access)
-4. Start with the sync profile:
+4. Rebuild:
    ```bash
-   docker compose --profile sync up --build -d
+   ./mdnest rebuild
    ```
+
+Git sync starts automatically when keys are found in `git-sync/keys/`. No keys = no sync.
 
 The sync interval is configurable (default: every 10 minutes):
 

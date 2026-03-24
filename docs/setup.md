@@ -27,11 +27,8 @@ cd mdnest
 #    - Add MOUNT_ entries for your note directories
 #    - Optionally configure git sync
 
-# 4. Run setup.sh again to generate docker-compose.yml and .env
-./setup.sh
-
-# 5. Start the containers
-docker compose up --build -d
+# 4. Generate config and start
+./mdnest rebuild
 ```
 
 Open `http://localhost:3236` in your browser and log in with the credentials you configured.
@@ -108,14 +105,13 @@ The backend scans `/data/notes/` at runtime and exposes each subdirectory as a n
 
 3. Re-run setup and restart:
    ```bash
-   ./setup.sh
-   docker compose up --build -d
+   ./mdnest rebuild
    ```
 
 ### Removing a Namespace
 
 1. Remove the corresponding `MOUNT_` line from `mdnest.conf`.
-2. Re-run `./setup.sh` and restart with `docker compose up --build -d`.
+2. Re-run `./mdnest rebuild`.
 
 The files on disk are not deleted -- only the mount into the container is removed.
 
@@ -189,13 +185,13 @@ GIT_AUTHOR_NAME=Your Name
 GIT_AUTHOR_EMAIL=you@example.com
 ```
 
-**4. Start with the sync profile:**
+**4. Rebuild and start:**
 
 ```bash
-docker compose --profile sync up --build -d
+./mdnest rebuild
 ```
 
-Without `--profile sync`, only the backend and frontend containers start. The git-sync container is excluded by default.
+Git sync starts automatically when keys are found in `git-sync/keys/`. No keys = no sync — your notes stay local.
 
 ### How It Works
 
@@ -288,15 +284,7 @@ To update mdnest to the latest version:
 
 ```bash
 cd mdnest
-git pull
-./setup.sh
-docker compose up --build -d
-```
-
-If you are using git-sync:
-
-```bash
-docker compose --profile sync up --build -d
+./mdnest update
 ```
 
 ---
@@ -320,28 +308,27 @@ Docker Desktop requires explicit file sharing permissions for host directories. 
 1. Open Docker Desktop settings.
 2. Go to **Resources > File Sharing**.
 3. Add the parent directory of your notes folders.
-4. Restart Docker Desktop and re-run `docker compose up --build -d`.
+4. Restart Docker Desktop and re-run `./mdnest rebuild`.
 
 ### Port conflicts
 
-If port `8286` or `3236` is already in use, change `BACKEND_PORT` or `FRONTEND_PORT` in `mdnest.conf` and re-run `./setup.sh`.
+If port `8286` or `3236` is already in use, change `BACKEND_PORT` or `FRONTEND_PORT` in `mdnest.conf` and re-run `./mdnest rebuild`.
 
 ### "invalid credentials" after changing password
 
 After changing `MDNEST_PASSWORD` in `mdnest.conf`:
 
-1. Re-run `./setup.sh` to regenerate `.env`.
-2. Restart the backend: `docker compose up --build -d`.
+1. Re-run `./mdnest rebuild`.
 3. Clear your browser's local storage for the mdnest site (the old JWT token is no longer valid).
 
 ### git-sync not pushing
 
 - **Check the logs first:**
   ```bash
-  docker compose --profile sync logs git-sync
+  ./mdnest sync-logs
   ```
 - **"Permission denied (publickey)"** — your SSH key is likely passphrase-protected. The container has no SSH agent to decrypt it. Generate a dedicated deploy key (see [Git Sync](#git-sync) above).
-- **"Bad configuration option: usekeychain"** — your macOS `~/.ssh/config` is being mounted into the container. The generated setup uses `git-sync/ssh_config` instead. Re-run `./setup.sh` and restart.
+- **"Bad configuration option: usekeychain"** — your macOS `~/.ssh/config` is being mounted into the container. Re-run `./mdnest rebuild`.
 - **Verify the deploy key** is added to your git provider with write access.
 - **Ensure the notes directory** has a git remote configured:
   ```bash

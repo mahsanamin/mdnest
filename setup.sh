@@ -172,6 +172,6 @@ EOF
 echo "Generated docker-compose.yml"
 echo ""
 echo "Ready! Run:"
-echo "  docker-compose up --build -d"
+echo "  ./mdnest start"
 echo ""
 echo "Then open http://localhost:${FRONTEND_PORT}"
