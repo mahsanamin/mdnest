@@ -1,4 +1,4 @@
-function Toolbar({ currentPath, onToggleSidebar, onNewNote, onNewFolder, onChangePassword }) {
+function Toolbar({ currentPath, onToggleSidebar, onNewNote, onNewFolder, onChangePassword, onRename, onDelete }) {
   let dirHint = '';
   if (currentPath) {
     const parts = currentPath.split('/');
@@ -20,6 +20,16 @@ function Toolbar({ currentPath, onToggleSidebar, onNewNote, onNewFolder, onChang
       <span className="toolbar-path">
         {currentPath || 'No file selected'}
       </span>
+      {currentPath && (
+        <div className="toolbar-file-actions">
+          <button className="toolbar-action" onClick={onRename} title="Rename file">
+            Rename
+          </button>
+          <button className="toolbar-action danger" onClick={onDelete} title="Delete file">
+            Delete
+          </button>
+        </div>
+      )}
       <button className="toolbar-settings" onClick={onChangePassword} title="Change credentials">
         &#9881;
       </button>

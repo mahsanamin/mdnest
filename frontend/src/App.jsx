@@ -326,6 +326,28 @@ function App() {
         } catch (e) { alert('Failed to delete folder: ' + e.message); }
         break;
       }
+      case 'rename': {
+        if (!target || !selectedNs) return;
+        const oldName = target.name || target.path.split('/').pop();
+        const newName = prompt('Rename to:', oldName);
+        if (!newName || newName === oldName) return;
+        const parts = target.path.split('/');
+        parts.pop();
+        const newPath = parts.length > 0 ? parts.join('/') + '/' + newName : newName;
+        try {
+          await moveItem(selectedNs, target.path, newPath);
+          if (currentPath === target.path) {
+            setCurrentPath(newPath);
+            setHash(selectedNs, newPath);
+          } else if (currentPath && currentPath.startsWith(target.path + '/')) {
+            const updated = newPath + currentPath.substring(target.path.length);
+            setCurrentPath(updated);
+            setHash(selectedNs, updated);
+          }
+          await refreshTree();
+        } catch (e) { alert('Failed to rename: ' + e.message); }
+        break;
+      }
     }
   }, [selectedNs, currentPath, refreshTree, doCreateNote, doCreateFolder]);
 
@@ -350,6 +372,18 @@ function App() {
       alert('Failed to move: ' + e.message);
     }
   }, [selectedNs, currentPath, refreshTree]);
+
+  const handleToolbarRename = useCallback(() => {
+    if (!currentPath || !selectedNs) return;
+    const name = currentPath.split('/').pop();
+    handleContextAction('rename', { path: currentPath, name });
+  }, [currentPath, selectedNs, handleContextAction]);
+
+  const handleToolbarDelete = useCallback(() => {
+    if (!currentPath || !selectedNs) return;
+    const name = currentPath.split('/').pop();
+    handleContextAction('delete-file', { path: currentPath, name });
+  }, [currentPath, selectedNs, handleContextAction]);
 
   if (!authenticated) {
     return <Login onLogin={() => setAuthenticated(true)} />;
@@ -376,6 +410,8 @@ function App() {
           onNewNote={() => doCreateNote(null)}
           onNewFolder={() => doCreateFolder(null)}
           onChangePassword={() => setShowChangePassword(true)}
+          onRename={handleToolbarRename}
+          onDelete={handleToolbarDelete}
         />
         <div className="split-view">
           {currentPath ? (

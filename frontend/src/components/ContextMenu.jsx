@@ -63,7 +63,12 @@ function ContextMenu({ visible, x, y, target, onAction, onClose }) {
     items.push({ label: 'New Folder', action: 'new-folder' });
   }
 
+  if (isFile) {
+    items.push({ label: 'Rename', action: 'rename' });
+  }
+
   if (isFolder) {
+    items.push({ label: 'Rename', action: 'rename' });
     items.push({ label: 'Delete Folder', action: 'delete-folder', danger: true });
   }
 

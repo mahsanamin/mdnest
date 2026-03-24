@@ -1,10 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 
+const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+
 function TreeNode({ node, onSelect, currentPath, depth, onContextMenu, onDrop, expandAll }) {
   const isFolder = node.type === 'folder' || node.type === 'directory';
   const isActive = currentPath === node.path;
   const longPressTimer = useRef(null);
   const touchMoved = useRef(false);
+  const longPressFired = useRef(false);
   const [dragOver, setDragOver] = useState(false);
 
   const containsActive = isFolder && currentPath && node.path &&
@@ -36,16 +39,23 @@ function TreeNode({ node, onSelect, currentPath, depth, onContextMenu, onDrop, e
 
   const handleTouchStart = useCallback((e) => {
     touchMoved.current = false;
+    longPressFired.current = false;
     longPressTimer.current = setTimeout(() => {
       if (!touchMoved.current && onContextMenu) {
+        longPressFired.current = true;
         const touch = e.touches[0];
         onContextMenu(touch.clientX, touch.clientY, node);
       }
     }, 500);
   }, [node, onContextMenu]);
 
-  const handleTouchEnd = useCallback(() => {
+  const handleTouchEnd = useCallback((e) => {
     if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; }
+    // Prevent the tap from firing click after a long press opened the context menu
+    if (longPressFired.current) {
+      e.preventDefault();
+      longPressFired.current = false;
+    }
   }, []);
 
   const handleTouchMove = useCallback(() => {
@@ -99,7 +109,7 @@ function TreeNode({ node, onSelect, currentPath, depth, onContextMenu, onDrop, e
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
         onTouchMove={handleTouchMove}
-        draggable
+        draggable={!isTouchDevice}
         onDragStart={handleDragStart}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}

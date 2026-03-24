@@ -754,8 +754,37 @@
   max-height: none;
 }
 
+.toolbar-file-actions {
+  display: flex;
+  gap: 4px;
+  margin-right: 8px;
+}
+
+.toolbar-action {
+  background: transparent !important;
+  border: 1px solid #45475a !important;
+  color: #a6adc8 !important;
+  font-size: 0.75rem !important;
+  padding: 0.15rem 0.5rem !important;
+  border-radius: 4px !important;
+  cursor: pointer;
+}
+
+.toolbar-action:hover {
+  background: #45475a !important;
+  color: #cdd6f4 !important;
+}
+
+.toolbar-action.danger {
+  color: #f38ba8 !important;
+  border-color: #f38ba855 !important;
+}
+
+.toolbar-action.danger:hover {
+  background: #f38ba822 !important;
+}
+
 .toolbar-settings {
-  margin-left: auto;
   background: transparent !important;
   border: none !important;
   color: #6c7086 !important;
@@ -1283,5 +1312,22 @@
 
   .fab {
     display: none;
+  }
+
+  /* Bigger touch targets for context menu on mobile */
+  .context-menu-item {
+    height: 44px;
+    font-size: 0.95rem;
+    padding: 0 16px;
+  }
+
+  /* Compact toolbar file actions on mobile */
+  .toolbar-file-actions {
+    margin-right: 4px;
+  }
+
+  .toolbar-action {
+    font-size: 0.7rem !important;
+    padding: 0.1rem 0.4rem !important;
   }
 }
