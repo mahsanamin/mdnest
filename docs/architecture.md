@@ -198,9 +198,9 @@ Both the backend and frontend use multi-stage Dockerfiles to keep production ima
 |---------|-------|---------|
 | `backend` | Built from `./backend` | Go API server on port 8080 (mapped to host's `BACKEND_PORT`) |
 | `frontend` | Built from `./frontend` | Nginx serving static files on port 80 (mapped to host's `FRONTEND_PORT`) |
-| `git-sync` | `alpine/git:latest` | Optional sidecar (requires `--profile sync`), runs the commit/push loop |
+| `git-sync` | `alpine/git:latest` | Optional sidecar, runs the commit/push loop for each namespace |
 
-The `git-sync` service is under the `sync` profile, so it only starts when explicitly requested with `docker compose --profile sync up`.
+The `git-sync` service is under the `sync` profile. The `./mdnest` CLI auto-detects deploy keys in `git-sync/keys/` and includes the profile automatically — no manual flags needed.
 
 ### Volume Mounts
 

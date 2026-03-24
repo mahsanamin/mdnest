@@ -19,8 +19,8 @@ This guide covers installing, configuring, and running mdnest.
 git clone https://github.com/mdnest/mdnest.git
 cd mdnest
 
-# 2. Run the setup script (creates mdnest.conf from the sample on first run)
-./setup.sh
+# 2. Run setup (creates mdnest.conf from the sample on first run)
+./mdnest setup
 
 # 3. Edit mdnest.conf with your settings
 #    - Set your username and password
@@ -247,7 +247,7 @@ Obtain a TLS certificate:
 sudo certbot --nginx -d notes.yourdomain.com
 ```
 
-Update `FRONTEND_ORIGIN` in `mdnest.conf` to `https://notes.yourdomain.com`, then re-run `./setup.sh` and restart.
+Update `FRONTEND_ORIGIN` in `mdnest.conf` to `https://notes.yourdomain.com`, then re-run `./mdnest rebuild`.
 
 ### Option 3: Cloudflare Tunnel
 
@@ -257,13 +257,13 @@ cloudflared tunnel route dns mdnest notes.yourdomain.com
 cloudflared tunnel --url http://127.0.0.1:3236 run mdnest
 ```
 
-Update `FRONTEND_ORIGIN` in `mdnest.conf` to `https://notes.yourdomain.com`, then re-run `./setup.sh` and restart.
+Update `FRONTEND_ORIGIN` in `mdnest.conf` to `https://notes.yourdomain.com`, then re-run `./mdnest rebuild`.
 
 ---
 
 ## Environment Variables
 
-These environment variables are set in the generated `.env` file and consumed by the Docker containers. You should not edit `.env` directly -- edit `mdnest.conf` and re-run `./setup.sh` instead.
+These environment variables are set in the generated `.env` file and consumed by the Docker containers. You should not edit `.env` directly -- edit `mdnest.conf` and run `./mdnest rebuild` instead.
 
 | Variable | Description |
 |----------|-------------|
@@ -295,7 +295,7 @@ cd mdnest
 
 - Verify the host directory exists and contains files.
 - Check that the `MOUNT_` path in `mdnest.conf` is an absolute path.
-- Re-run `./setup.sh` to regenerate `docker-compose.yml` with the correct mounts.
+- Re-run `./mdnest rebuild` to regenerate config and restart.
 - Inspect the running container's volumes:
   ```bash
   docker compose exec backend ls /data/notes/
@@ -328,7 +328,7 @@ After changing `MDNEST_PASSWORD` in `mdnest.conf`:
   ./mdnest sync-logs
   ```
 - **"Permission denied (publickey)"** — your SSH key is likely passphrase-protected. The container has no SSH agent to decrypt it. Generate a dedicated deploy key (see [Git Sync](#git-sync) above).
-- **"Bad configuration option: usekeychain"** — your macOS `~/.ssh/config` is being mounted into the container. Re-run `./mdnest rebuild`.
+- **"Bad configuration option: usekeychain"** — this happens with old configurations that mounted `~/.ssh` directly. The current setup uses `git-sync/keys/` instead. Re-run `./mdnest rebuild`.
 - **Verify the deploy key** is added to your git provider with write access.
 - **Ensure the notes directory** has a git remote configured:
   ```bash
@@ -341,8 +341,8 @@ After changing `MDNEST_PASSWORD` in `mdnest.conf`:
 Check the logs for the failing container:
 
 ```bash
-docker compose logs backend
-docker compose logs frontend
+./mdnest logs backend
+./mdnest logs frontend
 ```
 
 Common causes:

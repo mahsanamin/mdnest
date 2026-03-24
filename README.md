@@ -34,7 +34,7 @@ Developers and technical people who:
 ```bash
 git clone https://github.com/mahsanamin/mdnest.git
 cd mdnest
-./setup.sh
+./mdnest setup
 ```
 
 This creates `mdnest.conf` from the sample. Open it and set:
@@ -120,7 +120,7 @@ After editing `mdnest.conf`, always re-run:
 
 ## Configuration
 
-Everything is driven by `mdnest.conf`. Run `./setup.sh` after any change.
+Everything is driven by `mdnest.conf`. Run `./mdnest rebuild` after any change.
 
 | Setting | Description | Default |
 |---|---|---|
@@ -147,7 +147,7 @@ For 10,000+ notes: set `SEARCH_WORKERS=16` and `SEARCH_CACHE_TTL=60`.
 
 ## Namespaces
 
-Each `MOUNT_<name>=<host_path>` entry in `mdnest.conf` mounts a host directory as a namespace. Namespaces are isolated -- separate trees, separate files. Add or remove by editing `mdnest.conf` and re-running `./setup.sh`.
+Each `MOUNT_<name>=<host_path>` entry in `mdnest.conf` mounts a host directory as a namespace. Namespaces are isolated -- separate trees, separate files. Add or remove by editing `mdnest.conf` and running `./mdnest rebuild`.
 
 ## Git Sync (Optional)
 

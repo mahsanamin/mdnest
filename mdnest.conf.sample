@@ -1,6 +1,6 @@
 # mdnest configuration
 # Copy this file to mdnest.conf and edit to match your setup.
-# Run ./setup.sh to generate docker-compose.yml from this config.
+# Run ./mdnest rebuild to generate docker-compose.yml and start.
 
 # Auth — change these before first run
 MDNEST_USER=admin
@@ -17,8 +17,8 @@ FRONTEND_PORT=3236
 # Only set to 0.0.0.0 if you understand the security implications.
 # BIND_ADDRESS=127.0.0.1
 
-# Git sync (optional — only used with --profile sync)
-# Sync is off by default. Your notes stay local unless you enable it.
+# Git sync (optional — auto-enabled when keys are in git-sync/keys/)
+# Sync is off by default. Your notes stay local unless you set it up.
 GIT_AUTHOR_NAME=Your Name
 GIT_AUTHOR_EMAIL=you@example.com
 # GIT_SYNC_INTERVAL=600          # Seconds between sync cycles (default 10 minutes)

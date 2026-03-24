@@ -8,7 +8,7 @@ if [ ! -f "$CONF" ]; then
   if [ -f "$SAMPLE" ]; then
     cp "$SAMPLE" "$CONF"
     echo "Created $CONF from $SAMPLE"
-    echo "Edit $CONF with your settings, then run ./setup.sh again."
+    echo "Edit $CONF with your settings, then run ./mdnest rebuild."
     exit 0
   else
     echo "Error: $SAMPLE not found."

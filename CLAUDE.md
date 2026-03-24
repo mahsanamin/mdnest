@@ -87,7 +87,7 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 - Frontend: node:20-alpine build, nginx:alpine serve
 - Nginx proxies /api/ to backend service
 - SPA fallback: try_files -> /index.html
-- git-sync: optional (--profile sync), alpine/git with cron-style loop
+- git-sync: optional (auto-enabled when keys in git-sync/keys/), alpine/git with cron-style loop
 
 ### MCP Server (Node.js)
 - Uses @modelcontextprotocol/sdk with StdioServerTransport
