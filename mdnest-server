@@ -1,0 +1,96 @@
+#!/bin/bash
+set -e
+
+# Change to the directory where this script lives
+cd "$(dirname "$0")"
+
+# Auto-detect if git-sync should be enabled:
+# keys exist in git-sync/keys/ → include --profile sync
+SYNC_PROFILE=""
+if [ -d "git-sync/keys" ]; then
+  KEY_COUNT=$(find git-sync/keys -maxdepth 1 -type f ! -name "*.pub" ! -name ".gitkeep" 2>/dev/null | wc -l | tr -d ' ')
+  if [ "$KEY_COUNT" -gt 0 ]; then
+    SYNC_PROFILE="--profile sync"
+  fi
+fi
+
+compose() {
+  docker compose $SYNC_PROFILE "$@"
+}
+
+CMD="${1:-help}"
+shift 2>/dev/null || true
+
+case "$CMD" in
+  setup)
+    ./setup.sh
+    ;;
+  start)
+    compose up -d "$@"
+    [ -n "$SYNC_PROFILE" ] && echo "git-sync: enabled" || echo "git-sync: disabled (no keys in git-sync/keys/)"
+    echo "mdnest is running at http://localhost:$(grep FRONTEND_PORT mdnest.conf 2>/dev/null | head -1 | cut -d= -f2 | tr -d ' ' || echo 3236)"
+    ;;
+  stop)
+    compose down "$@"
+    ;;
+  restart)
+    compose down
+    compose up -d "$@"
+    [ -n "$SYNC_PROFILE" ] && echo "git-sync: enabled" || echo "git-sync: disabled (no keys in git-sync/keys/)"
+    echo "mdnest restarted"
+    ;;
+  rebuild)
+    ./setup.sh
+    compose up --build -d "$@"
+    [ -n "$SYNC_PROFILE" ] && echo "git-sync: enabled" || echo "git-sync: disabled (no keys in git-sync/keys/)"
+    echo "mdnest rebuilt and running"
+    ;;
+  logs)
+    compose logs "${@:--f --tail 50}"
+    ;;
+  sync-logs)
+    compose logs git-sync "${@:--f --tail 50}"
+    ;;
+  status)
+    compose ps
+    ;;
+  update)
+    git pull
+    ./setup.sh
+    compose up --build -d
+    echo "mdnest updated and running"
+    ;;
+  help|--help|-h)
+    cat <<'HELP'
+mdnest-server — manage your mdnest instance
+
+Usage: mdnest-server <command>
+
+Commands:
+  setup       Generate docker-compose.yml and .env from mdnest.conf
+  start       Start all services (includes git-sync if keys are configured)
+  stop        Stop all services
+  restart     Stop and start all services
+  rebuild     Re-run setup, rebuild images, and start
+  logs        View logs (all services)
+  sync-logs   View git-sync logs
+  status      Show running containers
+  update      Pull latest code, rebuild, and start
+
+Git sync starts automatically when deploy keys are found in git-sync/keys/.
+No keys = no sync. Your notes stay local unless you set it up.
+
+Examples:
+  mdnest-server setup          # first-time setup
+  mdnest-server start          # start everything
+  mdnest-server rebuild        # after editing mdnest.conf
+  mdnest-server logs backend   # logs for one service
+  mdnest-server sync-logs      # check git sync status
+HELP
+    ;;
+  *)
+    echo "Unknown command: $CMD"
+    echo "Run 'mdnest-server help' for usage"
+    exit 1
+    ;;
+esac

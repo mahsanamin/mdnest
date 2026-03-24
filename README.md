@@ -34,7 +34,7 @@ Developers and technical people who:
 ```bash
 git clone https://github.com/mahsanamin/mdnest.git
 cd mdnest
-./mdnest server setup
+./mdnest-server setup
 ```
 
 This creates `mdnest.conf` from the sample. Open it and set:
@@ -55,8 +55,8 @@ MOUNT_work=/home/ahsan/work-notes
 Then generate and start:
 
 ```bash
-./mdnest server setup              # generates docker-compose.yml + .env
-./mdnest server rebuild            # build and start
+./mdnest-server setup              # generates docker-compose.yml + .env
+./mdnest-server rebuild            # build and start
 ```
 
 Open [http://localhost:3236](http://localhost:3236)
@@ -97,30 +97,30 @@ Now Claude, Cursor, or any MCP-compatible agent can read, write, search, and org
 ## Managing
 
 ```bash
-./mdnest server start              # start all services
-./mdnest server stop               # stop all services
-./mdnest server restart            # restart all services
-./mdnest server rebuild            # rebuild after code or config changes
-./mdnest server logs               # view logs (all services)
-./mdnest server logs backend       # view backend logs only
-./mdnest server sync-logs          # view git-sync logs
-./mdnest server status             # show running containers
+./mdnest-server start              # start all services
+./mdnest-server stop               # stop all services
+./mdnest-server restart            # restart all services
+./mdnest-server rebuild            # rebuild after code or config changes
+./mdnest-server logs               # view logs (all services)
+./mdnest-server logs backend       # view backend logs only
+./mdnest-server sync-logs          # view git-sync logs
+./mdnest-server status             # show running containers
 ```
 
 After editing `mdnest.conf`, always re-run:
 ```bash
-./mdnest server rebuild
+./mdnest-server rebuild
 ```
 
 ## Updating
 
 ```bash
-./mdnest server update
+./mdnest-server update
 ```
 
 ## Configuration
 
-Everything is driven by `mdnest.conf`. Run `./mdnest server rebuild` after any change.
+Everything is driven by `mdnest.conf`. Run `./mdnest-server rebuild` after any change.
 
 | Setting | Description | Default |
 |---|---|---|
@@ -147,7 +147,7 @@ For 10,000+ notes: set `SEARCH_WORKERS=16` and `SEARCH_CACHE_TTL=60`.
 
 ## Namespaces
 
-Each `MOUNT_<name>=<host_path>` entry in `mdnest.conf` mounts a host directory as a namespace. Namespaces are isolated -- separate trees, separate files. Add or remove by editing `mdnest.conf` and running `./mdnest server rebuild`.
+Each `MOUNT_<name>=<host_path>` entry in `mdnest.conf` mounts a host directory as a namespace. Namespaces are isolated -- separate trees, separate files. Add or remove by editing `mdnest.conf` and running `./mdnest-server rebuild`.
 
 ## Git Sync (Optional)
 
@@ -167,7 +167,7 @@ To back up to a private GitHub repo:
 3. Add the `.pub` key to your Git provider (GitHub: Settings > Deploy Keys, enable write access)
 4. Rebuild:
    ```bash
-   ./mdnest server rebuild
+   ./mdnest-server rebuild
    ```
 
 Git sync starts automatically when keys are found in `git-sync/keys/`. No keys = no sync.
