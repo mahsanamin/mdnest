@@ -60,6 +60,16 @@ case "$CMD" in
     compose up --build -d
     echo "mdnest updated and running"
     ;;
+  install-cli)
+    DEST="/usr/local/bin/mdnest"
+    if [ -w "$(dirname "$DEST")" ]; then
+      ln -sf "$(pwd)/mdnest" "$DEST"
+    else
+      sudo ln -sf "$(pwd)/mdnest" "$DEST"
+    fi
+    echo "Installed: mdnest → $DEST"
+    echo "Run 'mdnest login <url> <token>' to get started"
+    ;;
   help|--help|-h)
     cat <<'HELP'
 mdnest-server — manage your mdnest instance
@@ -76,6 +86,7 @@ Commands:
   sync-logs   View git-sync logs
   status      Show running containers
   update      Pull latest code, rebuild, and start
+  install-cli Install the mdnest CLI system-wide (/usr/local/bin)
 
 Git sync starts automatically when deploy keys are found in git-sync/keys/.
 No keys = no sync. Your notes stay local unless you set it up.
