@@ -7,3 +7,4 @@ frontend/node_modules/
 frontend/dist/
 mcp-server/node_modules/
 git-sync/keys/
+.claude/settings.local.json
