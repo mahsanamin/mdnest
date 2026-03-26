@@ -24,12 +24,28 @@
   flex: 1;
   display: flex;
   min-width: 0;
+  overflow: hidden;
 }
 
 .preview-wrapper {
   flex: 1;
   display: flex;
   min-width: 0;
+  overflow: hidden;
+}
+
+.split-divider {
+  width: 5px;
+  cursor: col-resize;
+  background: #313244;
+  flex-shrink: 0;
+  position: relative;
+  transition: background 0.15s;
+}
+
+.split-divider:hover,
+.split-divider:active {
+  background: #89b4fa;
 }
 
 .empty-state {
@@ -754,6 +770,38 @@
   max-height: none;
 }
 
+.toolbar-view-toggle {
+  display: flex;
+  border: 1px solid #45475a;
+  border-radius: 6px;
+  overflow: hidden;
+  margin-right: 8px;
+}
+
+.toolbar-view-toggle button {
+  background: transparent !important;
+  border: none !important;
+  border-right: 1px solid #45475a !important;
+  color: #6c7086 !important;
+  font-size: 0.85rem !important;
+  padding: 0.2rem 0.5rem !important;
+  cursor: pointer;
+  border-radius: 0 !important;
+}
+
+.toolbar-view-toggle button:last-child {
+  border-right: none !important;
+}
+
+.toolbar-view-toggle button.active {
+  background: #45475a !important;
+  color: #cdd6f4 !important;
+}
+
+.toolbar-view-toggle button:hover:not(.active) {
+  background: #313244 !important;
+}
+
 .toolbar-file-actions {
   display: flex;
   gap: 4px;
@@ -1280,6 +1328,15 @@
     bottom: 0;
     background: rgba(0, 0, 0, 0.5);
     z-index: 7000;
+  }
+
+  /* Hide desktop view toggle and divider on mobile */
+  .toolbar-view-toggle {
+    display: none !important;
+  }
+
+  .split-divider {
+    display: none;
   }
 
   /* Stack editor and preview vertically — only show active one */

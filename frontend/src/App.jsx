@@ -51,6 +51,8 @@ function App() {
   const [saveTimer, setSaveTimer] = useState(null);
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [mobileView, setMobileView] = useState('editor');
+  const [viewMode, setViewMode] = useState('split');
+  const [splitRatio, setSplitRatio] = useState(50);
   const [ctxMenu, setCtxMenu] = useState({ visible: false, x: 0, y: 0, target: null });
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [initialized, setInitialized] = useState(false);
@@ -412,16 +414,52 @@ function App() {
           onChangePassword={() => setShowChangePassword(true)}
           onRename={handleToolbarRename}
           onDelete={handleToolbarDelete}
+          viewMode={viewMode}
+          onViewModeChange={setViewMode}
         />
         <div className="split-view">
           {currentPath ? (
             <>
-              <div className={`editor-wrapper${mobileView === 'editor' ? ' mobile-active' : ''}`}>
-                <Editor content={content} onChange={handleContentChange} currentPath={currentPath} ns={selectedNs} />
-              </div>
-              <div className={`preview-wrapper${mobileView === 'preview' ? ' mobile-active' : ''}`}>
-                <Preview content={content} currentPath={currentPath} ns={selectedNs} onCheckboxToggle={handleCheckboxToggle} />
-              </div>
+              {viewMode !== 'preview' && (
+                <div
+                  className={`editor-wrapper${mobileView === 'editor' ? ' mobile-active' : ''}`}
+                  style={viewMode === 'split' ? { flex: `0 0 ${splitRatio}%` } : undefined}
+                >
+                  <Editor content={content} onChange={handleContentChange} currentPath={currentPath} ns={selectedNs} />
+                </div>
+              )}
+              {viewMode === 'split' && (
+                <div
+                  className="split-divider"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    const container = e.target.parentElement;
+                    const onMove = (ev) => {
+                      const rect = container.getBoundingClientRect();
+                      const pct = ((ev.clientX - rect.left) / rect.width) * 100;
+                      setSplitRatio(Math.min(80, Math.max(20, pct)));
+                    };
+                    const onUp = () => {
+                      document.removeEventListener('mousemove', onMove);
+                      document.removeEventListener('mouseup', onUp);
+                      document.body.style.cursor = '';
+                      document.body.style.userSelect = '';
+                    };
+                    document.body.style.cursor = 'col-resize';
+                    document.body.style.userSelect = 'none';
+                    document.addEventListener('mousemove', onMove);
+                    document.addEventListener('mouseup', onUp);
+                  }}
+                />
+              )}
+              {viewMode !== 'editor' && (
+                <div
+                  className={`preview-wrapper${mobileView === 'preview' ? ' mobile-active' : ''}`}
+                  style={viewMode === 'split' ? { flex: `0 0 ${100 - splitRatio}%` } : undefined}
+                >
+                  <Preview content={content} currentPath={currentPath} ns={selectedNs} onCheckboxToggle={handleCheckboxToggle} />
+                </div>
+              )}
               <div className="mobile-view-toggle">
                 <button className={mobileView === 'editor' ? 'active' : ''} onClick={() => setMobileView('editor')}>Edit</button>
                 <button className={mobileView === 'preview' ? 'active' : ''} onClick={() => setMobileView('preview')}>Preview</button>
