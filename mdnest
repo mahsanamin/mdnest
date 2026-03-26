@@ -181,6 +181,16 @@ EOF
   note)
     note_cmd "$@"
     ;;
+  docs)
+    REAL_PATH="$(readlink -f "$0" 2>/dev/null || python3 -c "import os,sys; print(os.path.realpath(sys.argv[1]))" "$0")"
+    DOCS_DIR="$(dirname "$REAL_PATH")/docs"
+    if [ -f "$DOCS_DIR/cli.md" ]; then
+      cat "$DOCS_DIR/cli.md"
+    else
+      echo "Docs not found. Expected at: $DOCS_DIR/cli.md"
+      exit 1
+    fi
+    ;;
   help|--help|-h)
     cat <<'HELP'
 mdnest — notes on your terms
@@ -192,6 +202,7 @@ Commands:
   logout                    Remove saved credentials
   whoami                    Show current server and token
   note    <subcommand>      Read, write, append, search notes (run 'mdnest note help')
+  docs                      Print the full CLI reference
 
 Examples:
   mdnest login https://myserver:3236 tok_abc123
