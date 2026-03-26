@@ -19,7 +19,9 @@ backend/
     auth.go                  # POST /api/auth/login (JWT)
     namespaces.go            # GET /api/namespaces (lists mounted dirs)
     tree.go                  # GET /api/tree?ns= (recursive dir listing)
-    notes.go                 # GET/POST/PUT/DELETE /api/note?ns=&path=
+    notes.go                 # GET/POST/PUT/PATCH/DELETE /api/note?ns=&path=
+    search.go                # GET /api/search?ns=&q= (concurrent search with caching)
+    tokens.go                # GET/POST/DELETE /api/auth/tokens (API token management)
     upload.go                # POST /api/folder, /api/upload, GET /api/files/
     move.go                  # POST /api/move?ns=&from=&to=
     path.go                  # SafePath(), RequireNamespace() — shared utils

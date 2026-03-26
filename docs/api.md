@@ -59,6 +59,153 @@ curl -X POST http://localhost:8286/api/auth/login \
 
 ---
 
+### POST /api/auth/change-password
+
+Change the current user's password. Requires authentication.
+
+**Request body:**
+
+```json
+{
+  "current_password": "old-password",
+  "new_password": "new-password"
+}
+```
+
+**Response** (200 OK):
+
+```json
+{"status": "password changed"}
+```
+
+**Example:**
+
+```bash
+curl -X POST "http://localhost:8286/api/auth/change-password" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"current_password": "oldpass", "new_password": "newpass"}'
+```
+
+**Error responses:**
+
+| Status | Body | Cause |
+|--------|------|-------|
+| 400 | `{"error":"new password is required"}` | Empty new password |
+| 401 | `{"error":"current password is incorrect"}` | Wrong current password |
+
+---
+
+### API Tokens: /api/auth/tokens
+
+Manage long-lived API tokens for CLI and MCP access. Tokens are prefixed with `mdnest_` and stored as SHA-256 hashes.
+
+#### GET /api/auth/tokens
+
+List all API tokens (without the token values).
+
+**Response** (200 OK):
+
+```json
+[
+  {"id": "a1b2c3d4", "name": "my-laptop", "created_at": "2026-03-20T10:00:00Z"},
+  {"id": "e5f6g7h8", "name": "mcp-server", "created_at": "2026-03-21T15:30:00Z"}
+]
+```
+
+#### POST /api/auth/tokens
+
+Create a new API token. The token value is only returned once — save it immediately.
+
+**Request body:**
+
+```json
+{"name": "my-laptop"}
+```
+
+**Response** (201 Created):
+
+```json
+{
+  "id": "a1b2c3d4",
+  "name": "my-laptop",
+  "token": "mdnest_abc123...",
+  "created_at": "2026-03-20T10:00:00Z"
+}
+```
+
+#### DELETE /api/auth/tokens?id=\<token-id\>
+
+Revoke an API token.
+
+**Response** (200 OK):
+
+```json
+{"status": "revoked"}
+```
+
+**Examples:**
+
+```bash
+# List tokens
+curl "http://localhost:8286/api/auth/tokens" -H "Authorization: Bearer $TOKEN"
+
+# Create a token
+curl -X POST "http://localhost:8286/api/auth/tokens" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "my-laptop"}'
+
+# Revoke a token
+curl -X DELETE "http://localhost:8286/api/auth/tokens?id=a1b2c3d4" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+---
+
+## Search
+
+### GET /api/search
+
+Search notes by filename and content within a namespace. Returns filename matches first, then content matches with line numbers and snippets.
+
+**Query parameters:**
+
+| Param | Required | Description |
+|-------|----------|-------------|
+| `ns` | yes | Namespace name |
+| `q` | yes | Search query (case-insensitive) |
+
+**Response** (200 OK):
+
+```json
+[
+  {"path": "ideas/search-feature.md", "line": 0, "snippet": "filename match"},
+  {"path": "notes/meeting.md", "line": 15, "snippet": "We discussed the search feature and decided to..."}
+]
+```
+
+- `line: 0` = filename match; `line: N` = content match at line N
+- Snippets are truncated at 200 characters
+
+**Example:**
+
+```bash
+curl "http://localhost:8286/api/search?ns=personal&q=meeting" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+**Tuning** (via `mdnest.conf`):
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `SEARCH_MAX_RESULTS` | 30 | Max results per query |
+| `SEARCH_MAX_FILE_SIZE` | 1048576 | Skip files larger than this (bytes) |
+| `SEARCH_WORKERS` | 8 | Parallel file readers |
+| `SEARCH_CACHE_TTL` | 30 | File list cache lifetime (seconds) |
+
+---
+
 ## Namespaces
 
 ### GET /api/namespaces
