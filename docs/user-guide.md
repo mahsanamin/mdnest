@@ -58,10 +58,12 @@ Right-click (desktop) or long-press (mobile) on any folder in the tree to open a
 
 - Create a new note inside that folder
 - Create a new subfolder
+- Rename the folder
 - Delete the folder and its contents
 
 Right-click or long-press on a file to:
 
+- Rename the file
 - Delete the file
 
 ---
@@ -184,11 +186,18 @@ The context menu provides quick actions for files and folders in the sidebar.
 
 - New Note -- create a note inside this folder
 - New Folder -- create a subfolder
-- Delete -- remove the folder and all its contents
+- Rename -- rename the folder
+- Delete Folder -- remove the folder and all its contents
 
 **File context menu options:**
 
+- Rename -- rename the file
 - Delete -- remove the file
+
+**Toolbar actions** (appear when a file is open):
+
+- Rename -- rename the current file
+- Delete -- delete the current file (with confirmation)
 
 ---
 
