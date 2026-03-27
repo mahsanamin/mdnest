@@ -8,10 +8,30 @@ function MermaidViewer({ svgContent, onClose }) {
   const dragStart = useRef({ x: 0, y: 0 });
   const translateStart = useRef({ x: 0, y: 0 });
 
-  // Reset on open
+  // Auto-fit on open: calculate scale to fit the SVG in the viewport
   useEffect(() => {
-    setScale(1);
     setTranslate({ x: 0, y: 0 });
+    // Parse SVG dimensions from the content
+    const match = svgContent && svgContent.match(/viewBox="[^"]*?\s([\d.]+)\s([\d.]+)"/);
+    if (match && containerRef.current) {
+      const svgW = parseFloat(match[1]);
+      const svgH = parseFloat(match[2]);
+      // Use a slight delay to ensure container is rendered
+      requestAnimationFrame(() => {
+        const canvas = containerRef.current;
+        if (!canvas) return;
+        const canvasW = canvas.clientWidth - 40;
+        const canvasH = canvas.clientHeight - 40;
+        if (svgW > 0 && svgH > 0 && canvasW > 0 && canvasH > 0) {
+          const fitScale = Math.min(canvasW / svgW, canvasH / svgH, 2);
+          setScale(fitScale);
+        } else {
+          setScale(1);
+        }
+      });
+    } else {
+      setScale(1);
+    }
   }, [svgContent]);
 
   // Close on Escape
@@ -68,6 +88,25 @@ function MermaidViewer({ svgContent, onClose }) {
 
   const zoomIn = () => setScale((s) => Math.min(10, s + 0.25));
   const zoomOut = () => setScale((s) => Math.max(0.1, s - 0.25));
+  const fitView = useCallback(() => {
+    setTranslate({ x: 0, y: 0 });
+    const canvas = containerRef.current;
+    if (!canvas) { setScale(1); return; }
+    const svgEl = canvas.querySelector('svg');
+    if (!svgEl) { setScale(1); return; }
+    const vb = svgEl.getAttribute('viewBox');
+    if (!vb) { setScale(1); return; }
+    const parts = vb.split(/\s+/);
+    const svgW = parseFloat(parts[2]);
+    const svgH = parseFloat(parts[3]);
+    const canvasW = canvas.clientWidth - 40;
+    const canvasH = canvas.clientHeight - 40;
+    if (svgW > 0 && svgH > 0 && canvasW > 0 && canvasH > 0) {
+      setScale(Math.min(canvasW / svgW, canvasH / svgH, 2));
+    } else {
+      setScale(1);
+    }
+  }, []);
   const resetView = () => { setScale(1); setTranslate({ x: 0, y: 0 }); };
 
   const handlePrint = useCallback(() => {
@@ -117,7 +156,8 @@ function MermaidViewer({ svgContent, onClose }) {
           <button onClick={zoomIn} title="Zoom in">+</button>
           <span className="mermaid-viewer-zoom">{Math.round(scale * 100)}%</span>
           <button onClick={zoomOut} title="Zoom out">-</button>
-          <button onClick={resetView} title="Reset view">Reset</button>
+          <button onClick={fitView} title="Fit to screen">Fit</button>
+          <button onClick={resetView} title="Reset to 100%">100%</button>
           <div className="mermaid-viewer-spacer" />
           <button onClick={handlePrint} title="Print diagram">Print</button>
           <button onClick={onClose} title="Close">Close</button>

@@ -129,11 +129,13 @@ function Preview({ content, currentPath, ns, onCheckboxToggle }) {
             const id = `mmd-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
             const { svg } = await mermaid.render(id, source);
             if (!cancelled && mEl.parentNode) {
+              // Keep original SVG for the fullscreen viewer
+              const originalSvg = svg;
               const wrapper = document.createElement('div');
               wrapper.className = 'mermaid-container mermaid-clickable';
               wrapper.title = 'Click to expand';
               wrapper.innerHTML = svg;
-              // Remove hardcoded width/height so SVG fits container
+              // Remove hardcoded width/height so inline SVG fits container
               const svgEl = wrapper.querySelector('svg');
               if (svgEl) {
                 svgEl.removeAttribute('width');
@@ -141,7 +143,7 @@ function Preview({ content, currentPath, ns, onCheckboxToggle }) {
                 svgEl.style.height = 'auto';
               }
               wrapper.addEventListener('click', () => {
-                setViewerSvg(wrapper.innerHTML);
+                setViewerSvg(originalSvg);
               });
               mEl.replaceWith(wrapper);
             }
