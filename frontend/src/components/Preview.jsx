@@ -11,7 +11,22 @@ mermaid.initialize({
     background: '#1e1e2e',
     primaryColor: '#89b4fa',
     primaryTextColor: '#cdd6f4',
-    lineColor: '#585b70',
+    primaryBorderColor: '#74c7ec',
+    secondaryColor: '#a6e3a1',
+    secondaryTextColor: '#1e1e2e',
+    secondaryBorderColor: '#94e2d5',
+    tertiaryColor: '#f5c2e7',
+    tertiaryTextColor: '#1e1e2e',
+    tertiaryBorderColor: '#cba6f7',
+    lineColor: '#7f849c',
+    textColor: '#cdd6f4',
+    mainBkg: '#313244',
+    nodeBorder: '#74c7ec',
+    clusterBkg: '#1e1e2e',
+    clusterBorder: '#585b70',
+    titleColor: '#cdd6f4',
+    edgeLabelBackground: '#313244',
+    nodeTextColor: '#cdd6f4',
   },
 });
 
@@ -118,6 +133,13 @@ function Preview({ content, currentPath, ns, onCheckboxToggle }) {
               wrapper.className = 'mermaid-container mermaid-clickable';
               wrapper.title = 'Click to expand';
               wrapper.innerHTML = svg;
+              // Remove hardcoded width/height so SVG fits container
+              const svgEl = wrapper.querySelector('svg');
+              if (svgEl) {
+                svgEl.removeAttribute('width');
+                svgEl.style.maxWidth = '100%';
+                svgEl.style.height = 'auto';
+              }
               wrapper.addEventListener('click', () => {
                 setViewerSvg(wrapper.innerHTML);
               });
@@ -172,7 +194,13 @@ function Preview({ content, currentPath, ns, onCheckboxToggle }) {
   th { background: #f4f4f4; }
   .task-checkbox { margin-right: 0.4rem; }
   li.task-item { list-style: none; margin-left: -1.2rem; }
-  .mermaid-container svg { max-width: 100%; }
+  .mermaid-container svg { max-width: 100%; height: auto; }
+  .mermaid-container svg [fill="#313244"] { fill: #f8f9fa !important; }
+  .mermaid-container svg [fill="#1e1e2e"] { fill: #ffffff !important; }
+  .mermaid-container svg [stroke="#74c7ec"] { stroke: #2563eb !important; }
+  .mermaid-container svg [stroke="#7f849c"] { stroke: #6b7280 !important; }
+  .mermaid-container svg text { fill: #1a1a1a !important; }
+  .mermaid-container svg .nodeLabel { color: #1a1a1a !important; }
   @media print { body { padding: 0; } }
 </style>
 </head>
