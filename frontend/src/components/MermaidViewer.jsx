@@ -8,30 +8,25 @@ function MermaidViewer({ svgContent, onClose }) {
   const dragStart = useRef({ x: 0, y: 0 });
   const translateStart = useRef({ x: 0, y: 0 });
 
-  // Auto-fit on open: calculate scale to fit the SVG in the viewport
+  // Auto-fit on open: measure actual SVG render size and scale to fill viewport
   useEffect(() => {
     setTranslate({ x: 0, y: 0 });
-    // Parse SVG dimensions from the content
-    const match = svgContent && svgContent.match(/viewBox="[^"]*?\s([\d.]+)\s([\d.]+)"/);
-    if (match && containerRef.current) {
-      const svgW = parseFloat(match[1]);
-      const svgH = parseFloat(match[2]);
-      // Use a slight delay to ensure container is rendered
-      requestAnimationFrame(() => {
-        const canvas = containerRef.current;
-        if (!canvas) return;
-        const canvasW = canvas.clientWidth - 40;
-        const canvasH = canvas.clientHeight - 40;
-        if (svgW > 0 && svgH > 0 && canvasW > 0 && canvasH > 0) {
-          const fitScale = Math.min(canvasW / svgW, canvasH / svgH);
-          setScale(fitScale);
-        } else {
-          setScale(1);
-        }
-      });
-    } else {
-      setScale(1);
-    }
+    setScale(1);
+    if (!svgContent) return;
+    // Wait for DOM to render at scale=1, then measure and fit
+    const timer = setTimeout(() => {
+      const canvas = containerRef.current;
+      if (!canvas) return;
+      const svgEl = canvas.querySelector('svg');
+      if (!svgEl) return;
+      const svgRect = svgEl.getBoundingClientRect();
+      const canvasW = canvas.clientWidth - 40;
+      const canvasH = canvas.clientHeight - 40;
+      if (svgRect.width > 0 && svgRect.height > 0 && canvasW > 0 && canvasH > 0) {
+        setScale(Math.min(canvasW / svgRect.width, canvasH / svgRect.height));
+      }
+    }, 50);
+    return () => clearTimeout(timer);
   }, [svgContent]);
 
   // Close on Escape
@@ -94,18 +89,16 @@ function MermaidViewer({ svgContent, onClose }) {
     if (!canvas) { setScale(1); return; }
     const svgEl = canvas.querySelector('svg');
     if (!svgEl) { setScale(1); return; }
-    const vb = svgEl.getAttribute('viewBox');
-    if (!vb) { setScale(1); return; }
-    const parts = vb.split(/\s+/);
-    const svgW = parseFloat(parts[2]);
-    const svgH = parseFloat(parts[3]);
-    const canvasW = canvas.clientWidth - 40;
-    const canvasH = canvas.clientHeight - 40;
-    if (svgW > 0 && svgH > 0 && canvasW > 0 && canvasH > 0) {
-      setScale(Math.min(canvasW / svgW, canvasH / svgH));
-    } else {
-      setScale(1);
-    }
+    // Temporarily reset scale to measure natural SVG size
+    setScale(1);
+    requestAnimationFrame(() => {
+      const svgRect = svgEl.getBoundingClientRect();
+      const canvasW = canvas.clientWidth - 40;
+      const canvasH = canvas.clientHeight - 40;
+      if (svgRect.width > 0 && svgRect.height > 0 && canvasW > 0 && canvasH > 0) {
+        setScale(Math.min(canvasW / svgRect.width, canvasH / svgRect.height));
+      }
+    });
   }, []);
   const resetView = () => { setScale(1); setTranslate({ x: 0, y: 0 }); };
 
