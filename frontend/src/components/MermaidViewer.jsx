@@ -23,7 +23,7 @@ function MermaidViewer({ svgContent, onClose }) {
         const canvasW = canvas.clientWidth - 40;
         const canvasH = canvas.clientHeight - 40;
         if (svgW > 0 && svgH > 0 && canvasW > 0 && canvasH > 0) {
-          const fitScale = Math.min(canvasW / svgW, canvasH / svgH, 2);
+          const fitScale = Math.min(canvasW / svgW, canvasH / svgH);
           setScale(fitScale);
         } else {
           setScale(1);
@@ -102,7 +102,7 @@ function MermaidViewer({ svgContent, onClose }) {
     const canvasW = canvas.clientWidth - 40;
     const canvasH = canvas.clientHeight - 40;
     if (svgW > 0 && svgH > 0 && canvasW > 0 && canvasH > 0) {
-      setScale(Math.min(canvasW / svgW, canvasH / svgH, 2));
+      setScale(Math.min(canvasW / svgW, canvasH / svgH));
     } else {
       setScale(1);
     }
