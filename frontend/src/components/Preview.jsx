@@ -45,6 +45,11 @@ function renderMarkdown(source, ns, notePath) {
 
   const renderer = new Renderer();
 
+  renderer.link = function ({ href, title, text }) {
+    const titleAttr = title ? ` title="${title}"` : '';
+    return `<a href="${href}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`;
+  };
+
   const origListitem = renderer.listitem.bind(renderer);
   renderer.listitem = function (token) {
     const raw = token.raw || '';
