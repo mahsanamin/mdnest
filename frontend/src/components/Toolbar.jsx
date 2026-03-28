@@ -1,4 +1,12 @@
-function Toolbar({ currentPath, onToggleSidebar, onChangePassword, onRename, onDelete, viewMode, onViewModeChange }) {
+import { useState, useCallback } from 'react';
+
+function Toolbar({ currentPath, onToggleSidebar, onChangePassword, onRename, onDelete, viewMode, onViewModeChange, onRefresh }) {
+  const [refreshing, setRefreshing] = useState(false);
+  const handleRefresh = useCallback(() => {
+    if (refreshing || !onRefresh) return;
+    setRefreshing(true);
+    onRefresh().finally(() => setTimeout(() => setRefreshing(false), 2000));
+  }, [refreshing, onRefresh]);
   return (
     <div className="toolbar">
       <button className="toolbar-hamburger" onClick={onToggleSidebar} title="Toggle sidebar">
@@ -38,6 +46,14 @@ function Toolbar({ currentPath, onToggleSidebar, onChangePassword, onRename, onD
           </button>
         </div>
       )}
+      <button
+        className={`toolbar-refresh${refreshing ? ' spinning' : ''}`}
+        onClick={handleRefresh}
+        disabled={refreshing}
+        title="Refresh"
+      >
+        &#8635;
+      </button>
       <button className="toolbar-settings" onClick={onChangePassword} title="Settings">
         &#9881;
       </button>

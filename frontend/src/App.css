@@ -770,6 +770,30 @@
   max-height: none;
 }
 
+.toolbar-refresh {
+  background: transparent !important;
+  border: none !important;
+  color: #6c7086 !important;
+  font-size: 1.1rem !important;
+  padding: 0.15rem 0.4rem !important;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.toolbar-refresh:hover {
+  color: #cdd6f4 !important;
+}
+
+.toolbar-refresh.spinning {
+  animation: spin 0.6s linear;
+  color: #89b4fa !important;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 .toolbar-view-toggle {
   display: flex;
   border: 1px solid #45475a;

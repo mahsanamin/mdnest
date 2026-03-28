@@ -425,6 +425,20 @@ function App() {
     }
   }, [selectedNs, currentPath, refreshTree]);
 
+  const handleRefresh = useCallback(async () => {
+    if (!authenticated || !selectedNs) return;
+    await refreshTree(selectedNs);
+    if (currentPath) {
+      try {
+        const text = await getNote(selectedNs, currentPath);
+        setContent(text);
+        setSavedContent(text);
+      } catch (e) {
+        // Note may have been deleted
+      }
+    }
+  }, [authenticated, selectedNs, currentPath, refreshTree]);
+
   const handleToolbarRename = useCallback(() => {
     if (!currentPath || !selectedNs) return;
     const name = currentPath.split('/').pop();
@@ -473,6 +487,7 @@ function App() {
           onDelete={canWriteCurrent ? handleToolbarDelete : null}
           viewMode={viewMode}
           onViewModeChange={setViewMode}
+          onRefresh={handleRefresh}
         />
         <div className="split-view">
           {currentPath ? (
