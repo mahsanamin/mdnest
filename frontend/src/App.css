@@ -1775,3 +1775,52 @@
   font-size: 0.85rem;
   font-style: italic;
 }
+
+.admin-filter {
+  width: 100%;
+  padding: 8px 12px;
+  background: #313244;
+  color: #cdd6f4;
+  border: 1px solid #45475a;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  margin-bottom: 12px;
+  box-sizing: border-box;
+}
+
+.grant-user {
+  font-weight: 600;
+  color: #89b4fa;
+}
+
+/* ===== Toolbar inline file actions ===== */
+.toolbar-path-actions {
+  margin-left: 8px;
+}
+
+.toolbar-inline-action {
+  background: none;
+  border: none;
+  color: #6c7086;
+  cursor: pointer;
+  font-size: 0.75rem;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.toolbar-inline-action:hover {
+  color: #cdd6f4;
+  background: #313244;
+}
+
+.toolbar-inline-action.danger:hover {
+  color: #f38ba8;
+  background: #f38ba822;
+}
+
+/* ===== Context menu separator ===== */
+.context-menu-sep {
+  height: 1px;
+  background: #45475a;
+  margin: 4px 8px;
+}

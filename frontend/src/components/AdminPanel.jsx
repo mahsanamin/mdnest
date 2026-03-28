@@ -158,32 +158,39 @@ function InviteForm({ onDone }) {
 
 function GrantsTab({ namespaces }) {
   const [users, setUsers] = useState([]);
-  const [selectedUser, setSelectedUser] = useState(null);
   const [grants, setGrants] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [filter, setFilter] = useState('');
 
   // Form state
+  const [grantUser, setGrantUser] = useState('');
   const [grantNs, setGrantNs] = useState('');
   const [grantPath, setGrantPath] = useState('/');
   const [grantPerm, setGrantPerm] = useState('write');
 
-  useEffect(() => {
-    adminListUsers().then(setUsers).catch(console.error);
+  const loadGrants = useCallback(async () => {
+    try {
+      const data = await adminListGrants({});
+      setGrants(data);
+    } catch (e) { console.error(e); }
   }, []);
 
   useEffect(() => {
-    if (!selectedUser) { setGrants([]); return; }
-    setLoading(true);
-    adminListGrants({ user_id: selectedUser }).then(setGrants).catch(console.error).finally(() => setLoading(false));
-  }, [selectedUser]);
+    Promise.all([
+      adminListUsers().then(setUsers),
+      loadGrants(),
+    ]).finally(() => setLoading(false));
+  }, [loadGrants]);
 
   const handleCreate = async (e) => {
     e.preventDefault();
-    if (!selectedUser || !grantNs) return;
+    if (!grantUser || !grantNs) return;
     try {
-      await adminCreateGrant(selectedUser, grantNs, grantPath || '/', grantPerm);
-      const updated = await adminListGrants({ user_id: selectedUser });
-      setGrants(updated);
+      await adminCreateGrant(parseInt(grantUser), grantNs, grantPath || '/', grantPerm);
+      await loadGrants();
+      setShowAdd(false);
+      setGrantUser('');
       setGrantPath('/');
     } catch (err) {
       alert(err.message);
@@ -193,42 +200,46 @@ function GrantsTab({ namespaces }) {
   const handleDelete = async (grantId) => {
     try {
       await adminDeleteGrant(grantId);
-      const updated = await adminListGrants({ user_id: selectedUser });
-      setGrants(updated);
+      await loadGrants();
     } catch (err) {
       alert(err.message);
     }
   };
 
-  // Only show non-admin users (admins have full access)
   const collaborators = users.filter((u) => u.role === 'collaborator');
+
+  const filtered = filter
+    ? grants.filter((g) => (g.username || '').toLowerCase().includes(filter.toLowerCase()) || g.namespace.toLowerCase().includes(filter.toLowerCase()))
+    : grants;
+
+  if (loading) return <div className="admin-section">Loading...</div>;
 
   return (
     <div className="admin-section">
       <div className="admin-section-header">
-        <h3>Access Grants</h3>
+        <h3>Access Grants ({grants.length})</h3>
+        <button onClick={() => setShowAdd(!showAdd)}>
+          {showAdd ? 'Cancel' : '+ Add Grant'}
+        </button>
       </div>
 
-      <div className="admin-grant-selector">
-        <label>User: </label>
-        <select value={selectedUser || ''} onChange={(e) => setSelectedUser(e.target.value ? parseInt(e.target.value) : null)}>
-          <option value="">Select a user...</option>
-          {collaborators.map((u) => (
-            <option key={u.id} value={u.id}>{u.username} ({u.email})</option>
-          ))}
-        </select>
-        {collaborators.length === 0 && <span className="admin-hint">No collaborators yet. Invite a user first.</span>}
-      </div>
-
-      {selectedUser && (
-        <>
-          <form className="admin-grant-form" onSubmit={handleCreate}>
+      {showAdd && (
+        <form className="admin-invite-form" onSubmit={handleCreate}>
+          <div className="admin-form-row">
+            <select value={grantUser} onChange={(e) => setGrantUser(e.target.value)} required>
+              <option value="">User...</option>
+              {collaborators.map((u) => (
+                <option key={u.id} value={u.id}>{u.username}</option>
+              ))}
+            </select>
             <select value={grantNs} onChange={(e) => setGrantNs(e.target.value)} required>
               <option value="">Namespace...</option>
               {namespaces.map((ns) => (
                 <option key={ns} value={ns}>{ns}</option>
               ))}
             </select>
+          </div>
+          <div className="admin-form-row">
             <input
               type="text"
               placeholder="Path (/ = full namespace)"
@@ -237,40 +248,51 @@ function GrantsTab({ namespaces }) {
             />
             <select value={grantPerm} onChange={(e) => setGrantPerm(e.target.value)}>
               <option value="write">Write</option>
-              <option value="read">Read</option>
+              <option value="read">Read only</option>
             </select>
-            <button type="submit">Add Grant</button>
-          </form>
+          </div>
+          <button type="submit">Add Grant</button>
+          {collaborators.length === 0 && <div className="admin-hint">No collaborators yet. Invite a user first.</div>}
+        </form>
+      )}
 
-          {loading && <div>Loading...</div>}
+      {grants.length > 0 && (
+        <input
+          type="text"
+          className="admin-filter"
+          placeholder="Filter by user or namespace..."
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+        />
+      )}
 
-          {grants.length > 0 ? (
-            <table className="admin-table">
-              <thead>
-                <tr>
-                  <th>Namespace</th>
-                  <th>Path</th>
-                  <th>Permission</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {grants.map((g) => (
-                  <tr key={g.id}>
-                    <td>{g.namespace}</td>
-                    <td><code>{g.path}</code></td>
-                    <td><span className={`perm-badge ${g.permission}`}>{g.permission}</span></td>
-                    <td>
-                      <button className="admin-action-btn danger" onClick={() => handleDelete(g.id)}>Revoke</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            !loading && <div className="admin-hint">No grants for this user. Add one above.</div>
-          )}
-        </>
+      {filtered.length > 0 ? (
+        <table className="admin-table">
+          <thead>
+            <tr>
+              <th>User</th>
+              <th>Namespace</th>
+              <th>Path</th>
+              <th>Permission</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((g) => (
+              <tr key={g.id}>
+                <td><span className="grant-user">{g.username || `#${g.user_id}`}</span></td>
+                <td>{g.namespace}</td>
+                <td><code>{g.path}</code></td>
+                <td><span className={`perm-badge ${g.permission}`}>{g.permission}</span></td>
+                <td>
+                  <button className="admin-action-btn danger" onClick={() => handleDelete(g.id)}>Revoke</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        !loading && grants.length === 0 && <div className="admin-hint">No access grants yet. Add one to give collaborators access to namespaces.</div>
       )}
     </div>
   );

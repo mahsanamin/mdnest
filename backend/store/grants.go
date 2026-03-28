@@ -18,12 +18,19 @@ type Grant struct {
 	CreatedAt time.Time
 }
 
+// GrantWithUser is a grant with the associated username for display.
+type GrantWithUser struct {
+	Grant
+	Username string
+}
+
 // GrantStore defines access grant operations.
 type GrantStore interface {
 	CreateGrant(userID int, namespace, path, permission string, grantedBy *int) (*Grant, error)
 	DeleteGrant(id int) error
 	GetGrantsForUser(userID int) ([]Grant, error)
 	GetGrantsForNamespace(namespace string) ([]Grant, error)
+	ListAllGrants() ([]GrantWithUser, error)
 	CheckAccess(userID int, namespace, path, requiredPermission string) bool
 	GetAccessibleNamespaces(userID int) ([]string, error)
 }
@@ -86,6 +93,28 @@ func (s *PostgresGrantStore) GetGrantsForNamespace(namespace string) ([]Grant, e
 		`SELECT id, user_id, namespace, path, permission, granted_by, created_at
 		 FROM access_grants WHERE namespace = $1 ORDER BY user_id, path`, namespace,
 	)
+}
+
+func (s *PostgresGrantStore) ListAllGrants() ([]GrantWithUser, error) {
+	rows, err := s.db.Query(
+		`SELECT g.id, g.user_id, g.namespace, g.path, g.permission, g.granted_by, g.created_at, u.username
+		 FROM access_grants g JOIN users u ON g.user_id = u.id
+		 ORDER BY u.username, g.namespace, g.path`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list all grants: %w", err)
+	}
+	defer rows.Close()
+
+	var grants []GrantWithUser
+	for rows.Next() {
+		var g GrantWithUser
+		if err := rows.Scan(&g.ID, &g.UserID, &g.Namespace, &g.Path, &g.Permission, &g.GrantedBy, &g.CreatedAt, &g.Username); err != nil {
+			return nil, fmt.Errorf("failed to scan grant: %w", err)
+		}
+		grants = append(grants, g)
+	}
+	return grants, rows.Err()
 }
 
 func (s *PostgresGrantStore) queryGrants(query string, args ...interface{}) ([]Grant, error) {

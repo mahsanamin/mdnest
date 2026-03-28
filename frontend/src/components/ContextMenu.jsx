@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 
-function ContextMenu({ visible, x, y, target, onAction, onClose, canWrite }) {
+function ContextMenu({ visible, x, y, target, onAction, onClose, canWrite, isAdmin }) {
   const menuRef = useRef(null);
 
   useEffect(() => {
@@ -80,6 +80,11 @@ function ContextMenu({ visible, x, y, target, onAction, onClose, canWrite }) {
     items.push({ label: 'Delete', action: 'delete-file', danger: true });
   }
 
+  if ((isFolder || isEmptyArea) && isAdmin) {
+    if (items.length > 0) items.push({ separator: true });
+    items.push({ label: 'Manage Access', action: 'manage-access' });
+  }
+
   if (items.length === 0) return null;
 
   return (
@@ -88,7 +93,9 @@ function ContextMenu({ visible, x, y, target, onAction, onClose, canWrite }) {
       ref={menuRef}
       style={{ left: x, top: y }}
     >
-      {items.map((item) => (
+      {items.map((item, i) => item.separator ? (
+        <div key={`sep-${i}`} className="context-menu-sep" />
+      ) : (
         <div
           key={item.action}
           className={`context-menu-item${item.danger ? ' danger' : ''}`}

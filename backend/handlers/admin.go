@@ -241,6 +241,7 @@ type createGrantRequest struct {
 type grantResponse struct {
 	ID         int    `json:"id"`
 	UserID     int    `json:"user_id"`
+	Username   string `json:"username,omitempty"`
 	Namespace  string `json:"namespace"`
 	Path       string `json:"path"`
 	Permission string `json:"permission"`
@@ -252,6 +253,19 @@ func toGrantResponse(g *store.Grant) grantResponse {
 	return grantResponse{
 		ID:         g.ID,
 		UserID:     g.UserID,
+		Namespace:  g.Namespace,
+		Path:       g.Path,
+		Permission: g.Permission,
+		GrantedBy:  g.GrantedBy,
+		CreatedAt:  g.CreatedAt.Format(time.RFC3339),
+	}
+}
+
+func toGrantWithUserResponse(g *store.GrantWithUser) grantResponse {
+	return grantResponse{
+		ID:         g.ID,
+		UserID:     g.UserID,
+		Username:   g.Username,
 		Namespace:  g.Namespace,
 		Path:       g.Path,
 		Permission: g.Permission,
@@ -325,6 +339,22 @@ func (h *AdminHandler) listGrants(w http.ResponseWriter, r *http.Request) {
 	userIDStr := r.URL.Query().Get("user_id")
 	ns := r.URL.Query().Get("namespace")
 
+	// If no filter, return all grants with usernames
+	if userIDStr == "" && ns == "" {
+		allGrants, err := h.grantStore.ListAllGrants()
+		if err != nil {
+			http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+			return
+		}
+		resp := make([]grantResponse, 0, len(allGrants))
+		for i := range allGrants {
+			resp = append(resp, toGrantWithUserResponse(&allGrants[i]))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+		return
+	}
+
 	var grants []store.Grant
 	var err error
 
@@ -335,11 +365,8 @@ func (h *AdminHandler) listGrants(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		grants, err = h.grantStore.GetGrantsForUser(userID)
-	} else if ns != "" {
-		grants, err = h.grantStore.GetGrantsForNamespace(ns)
 	} else {
-		http.Error(w, `{"error":"user_id or namespace query param required"}`, http.StatusBadRequest)
-		return
+		grants, err = h.grantStore.GetGrantsForNamespace(ns)
 	}
 
 	if err != nil {

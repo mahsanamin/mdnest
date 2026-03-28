@@ -375,6 +375,10 @@ function App() {
         } catch (e) { alert('Failed to delete folder: ' + e.message); }
         break;
       }
+      case 'manage-access': {
+        if (isAdmin && isMulti) setShowAdminPanel(true);
+        break;
+      }
       case 'rename': {
         if (!target || !selectedNs) return;
         const oldName = target.name || target.path.split('/').pop();
@@ -542,6 +546,7 @@ function App() {
         onAction={handleContextAction}
         onClose={handleCloseContextMenu}
         canWrite={canWrite}
+        isAdmin={isAdmin && isMulti}
       />
     </div>
   );
