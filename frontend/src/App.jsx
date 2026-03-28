@@ -6,6 +6,7 @@ import Editor from './components/Editor.jsx';
 import Preview from './components/Preview.jsx';
 import ContextMenu from './components/ContextMenu.jsx';
 import Settings from './components/Settings.jsx';
+import AdminPanel from './components/AdminPanel.jsx';
 import {
   getToken,
   getNote,
@@ -16,6 +17,10 @@ import {
   createFolder,
   deleteNote,
   moveItem,
+  fetchConfig,
+  fetchMe,
+  logout,
+  PermissionError,
 } from './api.js';
 import './App.css';
 
@@ -55,11 +60,41 @@ function App() {
   const [splitRatio, setSplitRatio] = useState(50);
   const [ctxMenu, setCtxMenu] = useState({ visible: false, x: 0, y: 0, target: null });
   const [showChangePassword, setShowChangePassword] = useState(false);
+  const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [initialized, setInitialized] = useState(false);
   const contentRef = useRef(content);
   const savedContentRef = useRef(savedContent);
   contentRef.current = content;
   savedContentRef.current = savedContent;
+
+  // Multi-user state
+  const [appConfig, setAppConfig] = useState(null); // {authMode, version}
+  const [userInfo, setUserInfo] = useState(null); // {id, username, role, grants}
+  const isMulti = appConfig?.authMode === 'multi';
+  const isAdmin = !isMulti || userInfo?.role === 'admin';
+
+  // Determine write access for current namespace/path
+  const canWrite = useCallback((path) => {
+    if (!isMulti) return true;
+    if (!userInfo) return false;
+    if (userInfo.role === 'admin') return true;
+    if (!userInfo.grants || !selectedNs) return false;
+    const checkPath = path ? '/' + path : '/';
+    for (const g of userInfo.grants) {
+      if (g.namespace !== selectedNs) continue;
+      if (g.permission !== 'write') continue;
+      if (g.path === '/') return true;
+      if (checkPath === g.path || checkPath.startsWith(g.path + '/')) return true;
+    }
+    return false;
+  }, [isMulti, userInfo, selectedNs]);
+
+  const canWriteCurrent = canWrite(currentPath);
+
+  // Fetch app config on mount (before auth)
+  useEffect(() => {
+    fetchConfig().then(setAppConfig).catch(() => setAppConfig({ authMode: 'single', version: '1.0' }));
+  }, []);
 
   const loadNamespaces = useCallback(async () => {
     try {
@@ -83,10 +118,18 @@ function App() {
     }
   }, [selectedNs]);
 
-  // On auth, load namespaces and restore state from URL hash
+  // On auth, load namespaces (and user info in multi mode), restore from URL
   useEffect(() => {
     if (!authenticated) return;
-    loadNamespaces().then((nsList) => {
+
+    const init = async () => {
+      // Fetch user info in multi mode
+      if (isMulti) {
+        const me = await fetchMe().catch(() => null);
+        setUserInfo(me);
+      }
+
+      const nsList = await loadNamespaces();
       const { ns: hashNs, path: hashPath } = parseHash();
       let targetNs = null;
 
@@ -99,26 +142,25 @@ function App() {
       if (targetNs) {
         setSelectedNs(targetNs);
         if (hashPath && hashNs === targetNs) {
-          // Will be opened after tree loads
           setCurrentPath(hashPath);
         }
       }
       setInitialized(true);
-    });
-  }, [authenticated, loadNamespaces]);
+    };
+
+    init();
+  }, [authenticated, loadNamespaces, isMulti]);
 
   // When namespace changes, load tree and open note from URL if needed
   useEffect(() => {
     if (!authenticated || !selectedNs || !initialized) return;
 
     refreshTree(selectedNs).then(() => {
-      // If currentPath is set (from URL restore), open it
       if (currentPath) {
         getNote(selectedNs, currentPath).then((text) => {
           setContent(text);
           setSavedContent(text);
         }).catch(() => {
-          // File doesn't exist, clear
           setCurrentPath(null);
           setContent('');
           setSavedContent('');
@@ -127,14 +169,12 @@ function App() {
       }
     });
 
-    // Update URL when namespace changes (without path if we're switching)
     if (!currentPath) {
       setHash(selectedNs, null);
     }
   }, [authenticated, selectedNs, initialized]);
 
-  // Auto-refresh: poll the current note every 30s to pick up external changes.
-  // Only updates if the user has no unsaved edits.
+  // Auto-refresh: poll the current note every 30s
   useEffect(() => {
     if (!authenticated || !selectedNs || !currentPath) return;
     const interval = setInterval(async () => {
@@ -146,13 +186,13 @@ function App() {
           refreshTree(selectedNs);
         }
       } catch (e) {
-        // Transient errors (network, 5xx) — skip silently, retry next cycle
+        // Transient errors — skip silently
       }
     }, 30000);
     return () => clearInterval(interval);
   }, [authenticated, selectedNs, currentPath, refreshTree]);
 
-  // Update URL hash whenever ns or path changes
+  // Update URL hash
   useEffect(() => {
     if (selectedNs) {
       setHash(selectedNs, currentPath);
@@ -209,7 +249,11 @@ function App() {
       setSavedContent(text);
       setSidebarVisible(false);
     } catch (e) {
-      console.error('Failed to open note:', e);
+      if (e.name === 'PermissionError') {
+        alert('Access denied: you do not have permission to read this file.');
+      } else {
+        console.error('Failed to open note:', e);
+      }
     }
   }, [selectedNs]);
 
@@ -222,7 +266,11 @@ function App() {
           await saveNote(selectedNs, currentPath, newContent);
           setSavedContent(newContent);
         } catch (e) {
-          console.error('Auto-save failed:', e);
+          if (e.name === 'PermissionError') {
+            console.error('Save blocked: no write permission');
+          } else {
+            console.error('Auto-save failed:', e);
+          }
         }
       }
     }, 800);
@@ -262,7 +310,6 @@ function App() {
 
   const getTargetDir = useCallback((target) => {
     if (!target) {
-      // Toolbar buttons with no target → always create at root
       return '';
     }
     if (target.type === 'folder') {
@@ -360,7 +407,6 @@ function App() {
     if (fromPath === newPath) return;
     try {
       await moveItem(selectedNs, fromPath, newPath);
-      // Update currentPath if the moved item was open
       if (currentPath === fromPath) {
         setCurrentPath(newPath);
         setHash(selectedNs, newPath);
@@ -391,6 +437,10 @@ function App() {
     return <Login onLogin={() => setAuthenticated(true)} />;
   }
 
+  if (showAdminPanel && isAdmin && isMulti) {
+    return <AdminPanel onClose={() => setShowAdminPanel(false)} namespaces={namespaces} />;
+  }
+
   return (
     <div className="app">
       <Sidebar
@@ -401,19 +451,22 @@ function App() {
         selectedNs={selectedNs}
         onSelectNs={handleSelectNs}
         onContextMenu={handleContextMenu}
-        onDrop={handleTreeDrop}
+        onDrop={canWrite('') ? handleTreeDrop : null}
         visible={sidebarVisible}
         onClose={() => setSidebarVisible(false)}
+        userInfo={isMulti ? userInfo : null}
+        onLogout={logout}
+        onAdminPanel={isAdmin && isMulti ? () => setShowAdminPanel(true) : null}
       />
       <div className="main">
         <Toolbar
           currentPath={currentPath}
           onToggleSidebar={() => setSidebarVisible((v) => !v)}
-          onNewNote={() => doCreateNote(null)}
-          onNewFolder={() => doCreateFolder(null)}
+          onNewNote={canWrite('') ? () => doCreateNote(null) : null}
+          onNewFolder={canWrite('') ? () => doCreateFolder(null) : null}
           onChangePassword={() => setShowChangePassword(true)}
-          onRename={handleToolbarRename}
-          onDelete={handleToolbarDelete}
+          onRename={canWriteCurrent ? handleToolbarRename : null}
+          onDelete={canWriteCurrent ? handleToolbarDelete : null}
           viewMode={viewMode}
           onViewModeChange={setViewMode}
         />
@@ -425,7 +478,13 @@ function App() {
                   className={`editor-wrapper${mobileView === 'editor' ? ' mobile-active' : ''}`}
                   style={viewMode === 'split' ? { flex: `0 0 ${splitRatio}%` } : undefined}
                 >
-                  <Editor content={content} onChange={handleContentChange} currentPath={currentPath} ns={selectedNs} />
+                  <Editor
+                    content={content}
+                    onChange={canWriteCurrent ? handleContentChange : null}
+                    currentPath={currentPath}
+                    ns={selectedNs}
+                    readOnly={!canWriteCurrent}
+                  />
                 </div>
               )}
               {viewMode === 'split' && (
@@ -457,7 +516,7 @@ function App() {
                   className={`preview-wrapper${mobileView === 'preview' ? ' mobile-active' : ''}`}
                   style={viewMode === 'split' ? { flex: `0 0 ${100 - splitRatio}%` } : undefined}
                 >
-                  <Preview content={content} currentPath={currentPath} ns={selectedNs} onCheckboxToggle={handleCheckboxToggle} />
+                  <Preview content={content} currentPath={currentPath} ns={selectedNs} onCheckboxToggle={canWriteCurrent ? handleCheckboxToggle : null} />
                 </div>
               )}
               <div className="mobile-view-toggle">
@@ -475,7 +534,15 @@ function App() {
       {showChangePassword && (
         <Settings onClose={() => setShowChangePassword(false)} />
       )}
-      <ContextMenu visible={ctxMenu.visible} x={ctxMenu.x} y={ctxMenu.y} target={ctxMenu.target} onAction={handleContextAction} onClose={handleCloseContextMenu} />
+      <ContextMenu
+        visible={ctxMenu.visible}
+        x={ctxMenu.x}
+        y={ctxMenu.y}
+        target={ctxMenu.target}
+        onAction={handleContextAction}
+        onClose={handleCloseContextMenu}
+        canWrite={canWrite}
+      />
     </div>
   );
 }

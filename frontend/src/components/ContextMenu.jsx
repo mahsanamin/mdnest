@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 
-function ContextMenu({ visible, x, y, target, onAction, onClose }) {
+function ContextMenu({ visible, x, y, target, onAction, onClose, canWrite }) {
   const menuRef = useRef(null);
 
   useEffect(() => {
@@ -56,25 +56,31 @@ function ContextMenu({ visible, x, y, target, onAction, onClose }) {
   const isFile = target && !isFolder && target.path;
   const isEmptyArea = !target;
 
+  // Check write permission for the target path
+  const targetPath = target?.path || '';
+  const hasWrite = !canWrite || canWrite(targetPath);
+
   const items = [];
 
-  if (isFolder || isEmptyArea) {
+  if ((isFolder || isEmptyArea) && hasWrite) {
     items.push({ label: 'New Note', action: 'new-note' });
     items.push({ label: 'New Folder', action: 'new-folder' });
   }
 
-  if (isFile) {
+  if (isFile && hasWrite) {
     items.push({ label: 'Rename', action: 'rename' });
   }
 
-  if (isFolder) {
+  if (isFolder && hasWrite) {
     items.push({ label: 'Rename', action: 'rename' });
     items.push({ label: 'Delete Folder', action: 'delete-folder', danger: true });
   }
 
-  if (isFile) {
+  if (isFile && hasWrite) {
     items.push({ label: 'Delete', action: 'delete-file', danger: true });
   }
+
+  if (items.length === 0) return null;
 
   return (
     <div

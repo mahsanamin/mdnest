@@ -11,12 +11,16 @@ function Toolbar({ currentPath, onToggleSidebar, onNewNote, onNewFolder, onChang
       <button className="toolbar-hamburger" onClick={onToggleSidebar} title="Toggle sidebar">
         &#9776;
       </button>
-      <button onClick={onNewNote} title={dirHint ? `New note in ${dirHint}` : 'New note at root'}>
-        + Note
-      </button>
-      <button onClick={onNewFolder} title={dirHint ? `New folder in ${dirHint}` : 'New folder at root'}>
-        + Folder
-      </button>
+      {onNewNote && (
+        <button onClick={onNewNote} title={dirHint ? `New note in ${dirHint}` : 'New note at root'}>
+          + Note
+        </button>
+      )}
+      {onNewFolder && (
+        <button onClick={onNewFolder} title={dirHint ? `New folder in ${dirHint}` : 'New folder at root'}>
+          + Folder
+        </button>
+      )}
       <span className="toolbar-path">
         {currentPath || 'No file selected'}
       </span>
@@ -45,17 +49,23 @@ function Toolbar({ currentPath, onToggleSidebar, onNewNote, onNewFolder, onChang
               &#9673;
             </button>
           </div>
-          <div className="toolbar-file-actions">
-            <button className="toolbar-action" onClick={onRename} title="Rename file">
-              Rename
-            </button>
-            <button className="toolbar-action danger" onClick={onDelete} title="Delete file">
-              Delete
-            </button>
-          </div>
+          {(onRename || onDelete) && (
+            <div className="toolbar-file-actions">
+              {onRename && (
+                <button className="toolbar-action" onClick={onRename} title="Rename file">
+                  Rename
+                </button>
+              )}
+              {onDelete && (
+                <button className="toolbar-action danger" onClick={onDelete} title="Delete file">
+                  Delete
+                </button>
+              )}
+            </div>
+          )}
         </>
       )}
-      <button className="toolbar-settings" onClick={onChangePassword} title="Change credentials">
+      <button className="toolbar-settings" onClick={onChangePassword} title="Settings">
         &#9881;
       </button>
     </div>

@@ -2,7 +2,7 @@ import { useRef, useCallback } from 'react';
 import { uploadImage } from '../api.js';
 import EditorToolbar from './EditorToolbar.jsx';
 
-function Editor({ content, onChange, currentPath, ns }) {
+function Editor({ content, onChange, currentPath, ns, readOnly }) {
   const textareaRef = useRef(null);
 
   const getSelection = () => {
@@ -137,18 +137,20 @@ function Editor({ content, onChange, currentPath, ns }) {
 
   return (
     <div className="editor-pane">
-      <EditorToolbar onFormat={handleFormat} />
+      {!readOnly && <EditorToolbar onFormat={handleFormat} />}
+      {readOnly && <div className="editor-readonly-bar">Read-only</div>}
       <textarea
         ref={textareaRef}
         className="editor-textarea"
         value={content}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={handleKeyDown}
-        onPaste={handlePaste}
-        onDrop={handleDrop}
-        onDragOver={(e) => e.preventDefault()}
-        placeholder="Start writing..."
+        onChange={readOnly ? undefined : (e) => onChange(e.target.value)}
+        onKeyDown={readOnly ? undefined : handleKeyDown}
+        onPaste={readOnly ? undefined : handlePaste}
+        onDrop={readOnly ? undefined : handleDrop}
+        onDragOver={readOnly ? undefined : (e) => e.preventDefault()}
+        placeholder={readOnly ? '' : 'Start writing...'}
         spellCheck={false}
+        readOnly={readOnly}
       />
     </div>
   );

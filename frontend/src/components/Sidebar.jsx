@@ -34,6 +34,9 @@ function Sidebar({
   onDrop,
   visible,
   onClose,
+  userInfo,
+  onLogout,
+  onAdminPanel,
 }) {
   const treeAreaRef = useRef(null);
   const longPressTimer = useRef(null);
@@ -213,6 +216,28 @@ function Sidebar({
             <div className="sidebar-empty">No files yet</div>
           )}
         </div>
+        {(userInfo || onLogout) && (
+          <div className="sidebar-footer">
+            {userInfo && (
+              <div className="sidebar-user">
+                <span className="sidebar-username">{userInfo.username}</span>
+                <span className="sidebar-role">{userInfo.role}</span>
+              </div>
+            )}
+            <div className="sidebar-footer-actions">
+              {onAdminPanel && (
+                <button className="sidebar-footer-btn" onClick={onAdminPanel} title="Admin Panel">
+                  Admin
+                </button>
+              )}
+              {onLogout && (
+                <button className="sidebar-footer-btn" onClick={onLogout} title="Sign out">
+                  Logout
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </>
   );
