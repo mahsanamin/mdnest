@@ -53,6 +53,12 @@ On first run, `setup.sh` copies `mdnest.conf.sample` to `mdnest.conf` and exits,
 | `FRONTEND_PORT` | `3236` | Host port mapped to the frontend container (port 80 internally) |
 | `GIT_AUTHOR_NAME` | *(none)* | Name used for git commits when git-sync is enabled |
 | `GIT_AUTHOR_EMAIL` | *(none)* | Email used for git commits when git-sync is enabled |
+| `AUTH_MODE` | `single` | Auth mode: `single` (file-based, no DB) or `multi` (Postgres-backed users & permissions) |
+| `POSTGRES_HOST` | `postgres` | PostgreSQL host (only when `AUTH_MODE=multi`). Use `postgres` for the built-in container. |
+| `POSTGRES_PORT` | `5432` | PostgreSQL port (only when `AUTH_MODE=multi`) |
+| `POSTGRES_DB` | `mdnest` | PostgreSQL database name (only when `AUTH_MODE=multi`) |
+| `POSTGRES_USER` | `mdnest` | PostgreSQL user (only when `AUTH_MODE=multi`) |
+| `POSTGRES_PASSWORD` | *(none, required when multi)* | PostgreSQL password (only when `AUTH_MODE=multi`) |
 | `MOUNT_<name>` | *(none, at least one required)* | Maps a namespace to a host directory. See below. |
 
 ### Example Configuration
@@ -122,6 +128,80 @@ Namespace names (the part after `MOUNT_`) must be simple identifiers:
 - No slashes or backslashes
 - Must not start with a dot
 - Should contain only alphanumeric characters and underscores
+
+---
+
+## Multi-User Mode
+
+By default, mdnest runs in **single-user mode** -- one user, file-based auth, no database needed. This is the simplest setup and works for personal use.
+
+**Multi-user mode** adds PostgreSQL-backed user management with roles and namespace-level access control. When enabled, `setup.sh` automatically adds a Postgres container to `docker-compose.yml`.
+
+### Enabling Multi-User Mode (New Install)
+
+Add these lines to `mdnest.conf`:
+
+```ini
+AUTH_MODE=multi
+POSTGRES_PASSWORD=a-secure-password
+
+# Optional -- defaults are fine for the built-in Postgres container:
+# POSTGRES_HOST=postgres
+# POSTGRES_PORT=5432
+# POSTGRES_DB=mdnest
+# POSTGRES_USER=mdnest
+```
+
+Then build and start:
+
+```bash
+./mdnest-server rebuild
+```
+
+On first startup, the backend automatically:
+1. Connects to PostgreSQL
+2. Creates the `users` and `access_grants` tables
+3. Seeds the initial admin user from `MDNEST_USER` / `MDNEST_PASSWORD`
+
+### Upgrading from Single to Multi-User
+
+If you already have a running single-user mdnest and want to enable multi-user:
+
+1. **Edit `mdnest.conf`** -- add the `AUTH_MODE` and `POSTGRES_PASSWORD` lines shown above.
+
+2. **Regenerate config:**
+   ```bash
+   ./mdnest-server setup
+   ```
+   This regenerates `docker-compose.yml` with a Postgres service added.
+
+3. **Run migrations:**
+   ```bash
+   ./mdnest-server migrate
+   ```
+   This starts Postgres, connects the backend, and creates the database tables.
+
+4. **Rebuild and start:**
+   ```bash
+   ./mdnest-server rebuild
+   ```
+
+Your existing notes and configuration remain untouched. The database only stores user accounts and access permissions -- your notes are still plain files on disk.
+
+### Using an External PostgreSQL
+
+If you prefer to use an existing Postgres server instead of the built-in container, set `POSTGRES_HOST` to your server's address:
+
+```ini
+AUTH_MODE=multi
+POSTGRES_HOST=db.example.com
+POSTGRES_PORT=5432
+POSTGRES_DB=mdnest
+POSTGRES_USER=mdnest
+POSTGRES_PASSWORD=your-password
+```
+
+When `POSTGRES_HOST` is not `postgres` (the default), `setup.sh` does **not** add a Postgres container to `docker-compose.yml` -- it assumes you are managing the database yourself.
 
 ---
 
@@ -273,8 +353,14 @@ These environment variables are set in the generated `.env` file and consumed by
 | `FRONTEND_ORIGIN` | URL where the frontend is served (used for CORS headers) |
 | `GIT_AUTHOR_NAME` | Name for git-sync commits |
 | `GIT_AUTHOR_EMAIL` | Email for git-sync commits |
+| `AUTH_MODE` | Auth mode: `single` or `multi` |
 | `NOTES_DIR` | Path to the notes root inside the container (set to `/data/notes` in `docker-compose.yml`) |
 | `PORT` | Backend listen port inside the container (defaults to `8080`) |
+| `POSTGRES_HOST` | PostgreSQL host (multi mode only) |
+| `POSTGRES_PORT` | PostgreSQL port (multi mode only) |
+| `POSTGRES_DB` | PostgreSQL database (multi mode only) |
+| `POSTGRES_USER` | PostgreSQL user (multi mode only) |
+| `POSTGRES_PASSWORD` | PostgreSQL password (multi mode only) |
 
 ---
 
@@ -350,3 +436,12 @@ Common causes:
 - Missing or invalid environment variables in `.env`.
 - `NOTES_DIR` pointing to a path that does not exist inside the container.
 - Port already in use on the host.
+
+### Backend fails to start with "failed to connect to database"
+
+This happens when `AUTH_MODE=multi` but Postgres is not reachable:
+
+- Check that the `postgres` container is running: `./mdnest-server status`
+- Check Postgres logs: `docker compose logs postgres`
+- If using an external Postgres, verify `POSTGRES_HOST`, `POSTGRES_PORT`, and credentials in `mdnest.conf`
+- Run `./mdnest-server migrate` to verify the database connection before starting

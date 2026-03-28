@@ -8,6 +8,7 @@ import (
 
 	"github.com/mdnest/mdnest/backend/handlers"
 	"github.com/mdnest/mdnest/backend/middleware"
+	"github.com/mdnest/mdnest/backend/store"
 )
 
 func env(key, fallback string) string {
@@ -18,12 +19,16 @@ func env(key, fallback string) string {
 }
 
 func main() {
+	// Support -migrate flag for running migrations only (then exit)
+	migrateOnly := len(os.Args) > 1 && os.Args[1] == "-migrate"
+
 	user := env("MDNEST_USER", "admin")
 	password := env("MDNEST_PASSWORD", "changeme")
 	jwtSecret := env("MDNEST_JWT_SECRET", "changeme")
 	notesDir := env("NOTES_DIR", "./notes")
 	frontendOrigin := env("FRONTEND_ORIGIN", "http://localhost:5173")
 	port := env("PORT", "8080")
+	authMode := env("AUTH_MODE", "single")
 
 	if password == "changeme" || jwtSecret == "changeme" {
 		log.Println("WARNING: using default credentials — change MDNEST_PASSWORD and MDNEST_JWT_SECRET in your .env")
@@ -35,6 +40,32 @@ func main() {
 	}
 	if err := os.MkdirAll(absNotesDir, 0755); err != nil {
 		log.Fatalf("failed to create NOTES_DIR: %v", err)
+	}
+
+	// Database setup (multi mode only)
+	var db *store.DB
+	if authMode == "multi" {
+		log.Println("AUTH_MODE=multi — connecting to PostgreSQL...")
+		db, err = store.Connect()
+		if err != nil {
+			log.Fatalf("failed to connect to database: %v", err)
+		}
+		defer db.Close()
+
+		if err := db.Migrate(); err != nil {
+			log.Fatalf("database migration failed: %v", err)
+		}
+		log.Println("multi-user mode ready")
+
+		if migrateOnly {
+			log.Println("migrations complete — exiting (migrate-only mode)")
+			return
+		}
+	} else {
+		if migrateOnly {
+			log.Fatal("ERROR: -migrate flag requires AUTH_MODE=multi")
+		}
+		log.Println("AUTH_MODE=single — file-based auth (no database)")
 	}
 
 	secretsDir := env("SECRETS_DIR", filepath.Join(absNotesDir, ".secrets"))

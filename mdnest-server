@@ -60,6 +60,34 @@ case "$CMD" in
     compose up --build -d
     echo "mdnest updated and running"
     ;;
+  migrate)
+    # Run database migrations (multi mode only).
+    # Useful for existing users upgrading to multi mode.
+    if [ ! -f ".env" ]; then
+      echo "Error: .env not found. Run './mdnest-server setup' first."
+      exit 1
+    fi
+
+    AUTH_MODE=$(grep '^AUTH_MODE=' .env 2>/dev/null | cut -d= -f2)
+    if [ "$AUTH_MODE" != "multi" ]; then
+      echo "Error: AUTH_MODE is not 'multi' in your configuration."
+      echo ""
+      echo "To enable multi-user mode:"
+      echo "  1. Edit mdnest.conf and set:"
+      echo "       AUTH_MODE=multi"
+      echo "       POSTGRES_PASSWORD=your_secure_password"
+      echo "  2. Run: ./mdnest-server setup"
+      echo "  3. Run: ./mdnest-server migrate"
+      echo "  4. Run: ./mdnest-server rebuild"
+      exit 1
+    fi
+
+    echo "Starting postgres..."
+    compose up -d postgres
+    echo "Running database migrations..."
+    compose run --rm backend ./mdnest -migrate
+    echo "Migrations complete."
+    ;;
   install-cli)
     DEST="/usr/local/bin/mdnest"
     if [ -w "$(dirname "$DEST")" ]; then
@@ -86,10 +114,14 @@ Commands:
   sync-logs   View git-sync logs
   status      Show running containers
   update      Pull latest code, rebuild, and start
+  migrate     Run database migrations (multi-user mode only)
   install-cli Install the mdnest CLI system-wide (/usr/local/bin)
 
 Git sync starts automatically when deploy keys are found in git-sync/keys/.
 No keys = no sync. Your notes stay local unless you set it up.
+
+Multi-user mode requires AUTH_MODE=multi in mdnest.conf and a PostgreSQL database.
+When AUTH_MODE=multi, setup automatically adds a Postgres container.
 
 Examples:
   mdnest-server setup          # first-time setup
@@ -97,6 +129,12 @@ Examples:
   mdnest-server rebuild        # after editing mdnest.conf
   mdnest-server logs backend   # logs for one service
   mdnest-server sync-logs      # check git sync status
+
+Upgrading to multi-user mode:
+  1. Edit mdnest.conf:  AUTH_MODE=multi, POSTGRES_PASSWORD=<secure>
+  2. mdnest-server setup        # regenerates docker-compose with postgres
+  3. mdnest-server migrate      # creates database tables
+  4. mdnest-server rebuild      # rebuilds and starts everything
 HELP
     ;;
   *)

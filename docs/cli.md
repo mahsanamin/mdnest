@@ -1,6 +1,6 @@
 # mdnest CLI
 
-mdnest is a personal markdown notes system. Notes are plain `.md` files organized in namespaces. The `mdnest` CLI lets you read, write, search, and organize notes from the terminal.
+mdnest is a privately-hosted markdown notes system. Notes are plain `.md` files organized in namespaces. The `mdnest` CLI lets you read, write, search, and organize notes from the terminal.
 
 ## Setup
 

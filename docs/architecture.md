@@ -25,24 +25,28 @@ This document describes how mdnest is structured, how its components interact, a
                           +--------v----------+
                           |   Go Backend      |
                           |  (net/http + JWT) |
-                          +--------+----------+
-                                   |
-                              os.ReadFile
-                              os.WriteFile
-                              os.Rename
-                                   |
-                          +--------v----------+
-                          |   Filesystem      |
-                          | (mounted volumes) |
-                          +-------------------+
-                                   |
-                          +--------v----------+
-                          |   git-sync        |
-                          |  (optional cron)  |
-                          +-------------------+
+                          +------+-+----------+
+                                 | |
+                   +-------------+ +-------------+
+                   |                             |
+              os.ReadFile                   (multi mode
+              os.WriteFile                    only)
+              os.Rename                        |
+                   |                   +--------v----------+
+          +--------v----------+        |   PostgreSQL      |
+          |   Filesystem      |        | (users, grants,   |
+          | (mounted volumes) |        |  permissions)     |
+          +-------------------+        +-------------------+
+                   |
+          +--------v----------+
+          |   git-sync        |
+          |  (optional cron)  |
+          +-------------------+
 ```
 
 The frontend is a single-page React application served as static files by Nginx. Nginx also proxies all `/api/*` requests to the Go backend. The backend reads and writes markdown files directly on the filesystem. An optional git-sync sidecar periodically commits and pushes changes to a remote repository.
+
+In **multi-user mode** (`AUTH_MODE=multi`), the backend also connects to a PostgreSQL database for user management and access control. The database stores only user accounts and permissions -- notes remain as files on disk.
 
 ---
 
@@ -51,7 +55,7 @@ The frontend is a single-page React application served as static files by Nginx.
 ```
 mdnest/
   backend/
-    main.go                  # Entry point, route registration, env config
+    main.go                  # Entry point, route registration, AUTH_MODE branching
     Dockerfile               # Multi-stage build: Go compile then Alpine runtime
     handlers/
       auth.go                # POST /api/auth/login, POST /api/auth/change-password
@@ -66,6 +70,9 @@ mdnest/
     middleware/
       auth.go                # JWT validation middleware
       cors.go                # CORS header middleware
+    store/
+      db.go                  # PostgreSQL connection pool (multi mode only)
+      migrate.go             # Auto-migration with schema tracking
   frontend/
     Dockerfile               # Multi-stage build: npm build then Nginx serve
     nginx.conf               # Nginx config for SPA routing + API proxy
@@ -97,7 +104,7 @@ mdnest/
 
 ### Language and Framework
 
-The backend is written in Go using only the standard library's `net/http` package. There are no third-party web frameworks. The only external dependency is `github.com/golang-jwt/jwt/v5` for JWT token handling.
+The backend is written in Go using only the standard library's `net/http` package. There are no third-party web frameworks. External dependencies are minimal: `github.com/golang-jwt/jwt/v5` for JWT tokens, `github.com/lib/pq` for PostgreSQL (multi-user mode), and `golang.org/x/crypto` for bcrypt password hashing.
 
 ### Routing
 
@@ -118,18 +125,31 @@ All routes except `/api/auth/login` are wrapped with the auth middleware.
 
 ### Authentication
 
+mdnest supports two auth modes, configured via `AUTH_MODE`:
+
+**Single mode** (default, `AUTH_MODE=single`):
 - **Login:** Accepts username/password as JSON. Credentials are compared using `crypto/subtle.ConstantTimeCompare` to prevent timing attacks. On success, returns a JWT token signed with HS256.
+- Credentials are stored in a file (`auth.json`) or read from environment variables.
+
+**Multi mode** (`AUTH_MODE=multi`):
+- **Login:** Credentials are verified against the PostgreSQL `users` table (bcrypt-hashed passwords).
+- Users are managed by admins via the API. The first user is seeded from `MDNEST_USER` / `MDNEST_PASSWORD` on initial startup.
+- The database stores only user accounts and access grants -- notes remain as files.
+
+**Common to both modes:**
 - **Token expiry:** Tokens expire after 24 hours. The `exp` claim is checked by the JWT library during parsing.
 - **Middleware:** Every protected route is wrapped by `AuthMiddleware.Wrap`, which extracts the `Bearer` token from the `Authorization` header, parses and validates it, and rejects requests with a 401 if the token is missing, malformed, or expired.
 
-### File-Based Storage
+### File-Based Note Storage
 
-There is no database. The filesystem is the source of truth.
+Notes are always plain files on disk, regardless of auth mode. The filesystem is the source of truth for all note content.
 
 - Notes are plain `.md` files read and written with `os.ReadFile` and `os.WriteFile`.
 - The directory tree is built by walking the filesystem with `os.ReadDir`.
 - Moves use `os.Rename`.
 - Deletes use `os.Remove` (files) or `os.RemoveAll` (directories).
+
+In multi-user mode, PostgreSQL stores only user accounts and access grants -- never note content. See [Files as Source of Truth](#files-as-source-of-truth) below.
 
 ### Path Safety
 
@@ -197,13 +217,16 @@ Both the backend and frontend use multi-stage Dockerfiles to keep production ima
 
 ### Docker Compose Services
 
-| Service | Image | Purpose |
-|---------|-------|---------|
-| `backend` | Built from `./backend` | Go API server on port 8080 (mapped to host's `BACKEND_PORT`) |
-| `frontend` | Built from `./frontend` | Nginx serving static files on port 80 (mapped to host's `FRONTEND_PORT`) |
-| `git-sync` | `alpine/git:latest` | Optional sidecar, runs the commit/push loop for each namespace |
+| Service | Image | Purpose | When present |
+|---------|-------|---------|-------------|
+| `backend` | Built from `./backend` | Go API server on port 8080 (mapped to host's `BACKEND_PORT`) | Always |
+| `frontend` | Built from `./frontend` | Nginx serving static files on port 80 (mapped to host's `FRONTEND_PORT`) | Always |
+| `postgres` | `postgres:16-alpine` | User accounts and access permissions database | `AUTH_MODE=multi` only |
+| `git-sync` | `alpine/git:latest` | Optional sidecar, runs the commit/push loop for each namespace | Deploy keys present |
 
 The `git-sync` service is under the `sync` profile. `./mdnest-server` auto-detects deploy keys in `git-sync/keys/` and includes the profile automatically — no manual flags needed.
+
+The `postgres` service is added automatically by `setup.sh` when `AUTH_MODE=multi` and `POSTGRES_HOST=postgres` (the default). If you point to an external Postgres, the container is not added. The backend uses `depends_on` with a health check to wait for Postgres to be ready before starting.
 
 ### Volume Mounts
 
@@ -240,18 +263,30 @@ This model makes it straightforward to:
 
 ---
 
-## No Database
+## Files as Source of Truth
 
-mdnest deliberately avoids using a database. Files on disk are the single source of truth.
+Notes are always plain `.md` files on disk -- regardless of auth mode. There is no "notes database."
 
-Benefits:
+In **single-user mode**, there is no database at all. In **multi-user mode**, PostgreSQL stores only user accounts and access permissions, never note content. This means:
 
 - **Portability:** Notes are just files. Copy, `rsync`, or `git clone` them anywhere.
-- **No migrations:** No schema to manage, no database to back up separately.
 - **Transparency:** You can browse, edit, or `grep` your notes with any tool.
 - **Git-friendly:** Standard git workflows (branch, merge, diff) work naturally.
+- **Database is optional:** Single-user mode has zero database dependency.
 
-Trade-offs:
+### Database Schema (multi mode)
+
+When `AUTH_MODE=multi`, the backend auto-creates these tables on startup:
+
+| Table | Purpose |
+|-------|---------|
+| `schema_migrations` | Tracks which migrations have been applied |
+| `users` | User accounts (email, username, bcrypt password hash, role) |
+| `access_grants` | Namespace and directory-level permissions per user |
+
+Migrations run automatically and are idempotent -- safe to run on every startup.
+
+### Trade-offs
 
 - Search scales linearly with file count (concurrent reads + cached file index keep it fast for typical collections).
 - No metadata beyond what the filesystem provides (timestamps, filenames).
