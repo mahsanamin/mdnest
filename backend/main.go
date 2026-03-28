@@ -132,11 +132,16 @@ func main() {
 	mux.Handle("/api/search", authMiddleware.Wrap(http.HandlerFunc(searchHandler.HandleSearch)))
 	mux.Handle("/api/files/", authMiddleware.Wrap(http.HandlerFunc(uploadHandler.HandleServeFile)))
 
-	// Admin routes (multi mode only, require admin role)
+	// Multi-mode routes (require admin role for /admin/*, authenticated for /me)
 	if multiMode {
-		adminHandler := handlers.NewAdminHandler(userStore)
+		grantStore := store.NewPostgresGrantStore(db)
+		adminHandler := handlers.NewAdminHandler(userStore, grantStore)
+		meHandler := handlers.NewMeHandler(userStore, grantStore)
+
 		mux.Handle("/api/admin/invite", authMiddleware.Wrap(middleware.RequireAdmin(http.HandlerFunc(adminHandler.HandleInvite))))
 		mux.Handle("/api/admin/users", authMiddleware.Wrap(middleware.RequireAdmin(http.HandlerFunc(adminHandler.HandleUsers))))
+		mux.Handle("/api/admin/grants", authMiddleware.Wrap(middleware.RequireAdmin(http.HandlerFunc(adminHandler.HandleGrants))))
+		mux.Handle("/api/me", authMiddleware.Wrap(http.HandlerFunc(meHandler.HandleMe)))
 	}
 
 	handler := corsMiddleware.Wrap(mux)

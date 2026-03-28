@@ -290,6 +290,120 @@ curl -X DELETE "http://localhost:8286/api/admin/users?id=2" \
 
 ---
 
+### POST /api/admin/grants
+
+Create an access grant for a user on a namespace or directory.
+
+**Request body** (JSON):
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `user_id` | int | yes | User ID to grant access to |
+| `namespace` | string | yes | Namespace name |
+| `path` | string | no | Path within namespace (`/` = full namespace, default) |
+| `permission` | string | no | `read` or `write` (default: `write`) |
+
+**Response** (201 Created):
+
+```json
+{
+  "id": 1,
+  "user_id": 2,
+  "namespace": "work",
+  "path": "/",
+  "permission": "write",
+  "granted_by": 1,
+  "created_at": "2026-03-28T12:00:00Z"
+}
+```
+
+**Access rules:**
+- Grant on `/` covers the entire namespace
+- Grant on `/subdir` covers that directory and everything below it
+- `write` permission implies `read`
+- Admins have implicit full access (no grants needed)
+
+---
+
+### GET /api/admin/grants
+
+List grants filtered by user or namespace.
+
+**Query parameters** (one required):
+
+| Param | Description |
+|-------|-------------|
+| `user_id` | List all grants for a user |
+| `namespace` | List all grants for a namespace |
+
+**Response** (200 OK):
+
+```json
+[
+  {"id": 1, "user_id": 2, "namespace": "work", "path": "/", "permission": "write", "granted_by": 1, "created_at": "2026-03-28T12:00:00Z"}
+]
+```
+
+---
+
+### DELETE /api/admin/grants?id=\<grant-id\>
+
+Revoke an access grant.
+
+**Response** (200 OK):
+
+```json
+{"status": "deleted"}
+```
+
+**Examples:**
+
+```bash
+# Grant user 2 write access to the entire 'work' namespace
+curl -X POST "http://localhost:8286/api/admin/grants" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"user_id": 2, "namespace": "work", "path": "/", "permission": "write"}'
+
+# Grant user 2 read-only access to 'work/docs'
+curl -X POST "http://localhost:8286/api/admin/grants" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"user_id": 2, "namespace": "work", "path": "/docs", "permission": "read"}'
+
+# List grants for user 2
+curl "http://localhost:8286/api/admin/grants?user_id=2" \
+  -H "Authorization: Bearer $TOKEN"
+
+# Revoke a grant
+curl -X DELETE "http://localhost:8286/api/admin/grants?id=1" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+---
+
+### GET /api/me
+
+Returns the current user's profile and access grants. Requires authentication (any role).
+
+**Response** (200 OK):
+
+```json
+{
+  "id": 2,
+  "email": "bob@example.com",
+  "username": "bob",
+  "role": "collaborator",
+  "created_at": "2026-03-28T12:00:00Z",
+  "grants": [
+    {"id": 1, "namespace": "work", "path": "/", "permission": "write"},
+    {"id": 2, "namespace": "personal", "path": "/docs", "permission": "read"}
+  ]
+}
+```
+
+---
+
 ## Search
 
 ### GET /api/search
