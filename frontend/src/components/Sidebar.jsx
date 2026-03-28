@@ -1,4 +1,4 @@
-import { useRef, useCallback, useState, useEffect } from 'react';
+import { useRef, useCallback, useState, useEffect, useMemo } from 'react';
 import TreeNode from './TreeNode.jsx';
 import { searchNotes } from '../api.js';
 
@@ -217,29 +217,59 @@ function Sidebar({
           )}
         </div>
         {(userInfo || onLogout) && (
-          <div className="sidebar-footer">
-            {userInfo && (
-              <div className="sidebar-user">
-                <span className="sidebar-username">{userInfo.username}</span>
-                <span className="sidebar-role">{userInfo.role}</span>
-              </div>
-            )}
-            <div className="sidebar-footer-actions">
-              {onAdminPanel && (
-                <button className="sidebar-footer-btn" onClick={onAdminPanel} title="Admin Panel">
-                  Admin
-                </button>
-              )}
-              {onLogout && (
-                <button className="sidebar-footer-btn" onClick={onLogout} title="Sign out">
-                  Logout
-                </button>
-              )}
-            </div>
-          </div>
+          <UserFooter userInfo={userInfo} onLogout={onLogout} onAdminPanel={onAdminPanel} />
         )}
       </div>
     </>
+  );
+}
+
+function UserFooter({ userInfo, onLogout, onAdminPanel }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef(null);
+
+  const initials = useMemo(() => {
+    if (!userInfo?.username) return '?';
+    return userInfo.username.slice(0, 2).toUpperCase();
+  }, [userInfo]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handleClick = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [menuOpen]);
+
+  return (
+    <div className="sidebar-footer" ref={menuRef}>
+      <div className="sidebar-user-row" onClick={() => setMenuOpen(!menuOpen)}>
+        <div className="user-avatar">{initials}</div>
+        <div className="sidebar-user-info">
+          <span className="sidebar-username">{userInfo?.username || 'User'}</span>
+          <span className="sidebar-role">{userInfo?.role || ''}</span>
+        </div>
+      </div>
+      {menuOpen && (
+        <div className="user-menu">
+          {onAdminPanel && (
+            <div className="user-menu-item" onClick={() => { setMenuOpen(false); onAdminPanel(); }}>
+              <span className="user-menu-icon">&#9881;</span>
+              Manage Users & Access
+            </div>
+          )}
+          {onLogout && (
+            <div className="user-menu-item" onClick={() => { setMenuOpen(false); onLogout(); }}>
+              <span className="user-menu-icon">&#8618;</span>
+              Sign Out
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
