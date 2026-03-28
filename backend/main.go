@@ -69,7 +69,34 @@ func main() {
 	}
 
 	secretsDir := env("SECRETS_DIR", filepath.Join(absNotesDir, ".secrets"))
-	authHandler := handlers.NewAuthHandler(user, password, jwtSecret, secretsDir)
+	multiMode := authMode == "multi"
+
+	// Create auth handler based on mode
+	var authHandler *handlers.AuthHandler
+	var userStore store.UserStore
+
+	if multiMode {
+		userStore = store.NewPostgresUserStore(db)
+
+		// Seed admin user on first startup
+		count, err := userStore.CountUsers()
+		if err != nil {
+			log.Fatalf("failed to count users: %v", err)
+		}
+		if count == 0 {
+			email := user + "@mdnest.local"
+			_, err := userStore.CreateUser(email, user, password, "admin", nil)
+			if err != nil {
+				log.Fatalf("failed to seed admin user: %v", err)
+			}
+			log.Printf("seeded admin user: %s (%s)", user, email)
+		}
+
+		authHandler = handlers.NewMultiAuthHandler(jwtSecret, userStore)
+	} else {
+		authHandler = handlers.NewAuthHandler(user, password, jwtSecret, secretsDir)
+	}
+
 	nsHandler := handlers.NewNamespaceHandler(absNotesDir)
 	noteHandler := handlers.NewNoteHandler(absNotesDir)
 	treeHandler := handlers.NewTreeHandler(absNotesDir)
@@ -88,7 +115,7 @@ func main() {
 		})
 	}
 
-	authMiddleware := middleware.NewAuthMiddleware(jwtSecret, tokenHandler)
+	authMiddleware := middleware.NewAuthMiddleware(jwtSecret, multiMode, tokenHandler, tokenHandler)
 	corsMiddleware := middleware.NewCORSMiddleware(frontendOrigin)
 
 	mux := http.NewServeMux()

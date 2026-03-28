@@ -11,10 +11,12 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/mdnest/mdnest/backend/middleware"
+	"github.com/mdnest/mdnest/backend/store"
 	"golang.org/x/crypto/bcrypt"
 )
 
-// secretsFile stores hashed credentials on disk.
+// secretsFile stores hashed credentials on disk (single mode only).
 type secretsFile struct {
 	Username     string `json:"username"`
 	PasswordHash string `json:"password_hash"`
@@ -22,12 +24,18 @@ type secretsFile struct {
 
 // AuthHandler handles login and credential management.
 type AuthHandler struct {
+	// Single mode fields
 	defaultUser     string
 	defaultPassword string
 	secretsPath     string
-	secret          []byte
 	mu              sync.RWMutex
-	cached          *secretsFile // cached from disk
+	cached          *secretsFile
+
+	// Shared
+	secret []byte
+
+	// Multi mode fields (nil in single mode)
+	userStore store.UserStore
 }
 
 type loginRequest struct {
@@ -45,7 +53,7 @@ type changePasswordRequest struct {
 	NewPassword     string `json:"newPassword"`
 }
 
-// NewAuthHandler creates a new auth handler.
+// NewAuthHandler creates a new auth handler for single-user mode.
 // secretsDir is where auth.json is stored (e.g. /data/secrets).
 func NewAuthHandler(username, password, jwtSecret, secretsDir string) *AuthHandler {
 	h := &AuthHandler{
@@ -62,6 +70,19 @@ func NewAuthHandler(username, password, jwtSecret, secretsDir string) *AuthHandl
 	h.loadSecrets()
 
 	return h
+}
+
+// NewMultiAuthHandler creates a new auth handler for multi-user mode.
+func NewMultiAuthHandler(jwtSecret string, userStore store.UserStore) *AuthHandler {
+	return &AuthHandler{
+		secret:    []byte(jwtSecret),
+		userStore: userStore,
+	}
+}
+
+// IsMultiMode returns true if the handler is in multi-user mode.
+func (h *AuthHandler) IsMultiMode() bool {
+	return h.userStore != nil
 }
 
 func (h *AuthHandler) loadSecrets() {
@@ -93,8 +114,7 @@ func (h *AuthHandler) saveSecrets(sf *secretsFile) error {
 	return nil
 }
 
-// checkCredentials verifies username and password.
-// Returns true if valid.
+// checkCredentials verifies username and password in single mode.
 func (h *AuthHandler) checkCredentials(username, password string) bool {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -137,6 +157,14 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.IsMultiMode() {
+		h.loginMulti(w, req)
+	} else {
+		h.loginSingle(w, req)
+	}
+}
+
+func (h *AuthHandler) loginSingle(w http.ResponseWriter, req loginRequest) {
 	if !h.checkCredentials(req.Username, req.Password) {
 		http.Error(w, `{"error":"invalid credentials"}`, http.StatusUnauthorized)
 		return
@@ -146,6 +174,36 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		"sub": req.Username,
 		"iat": time.Now().Unix(),
 		"exp": time.Now().Add(24 * time.Hour).Unix(),
+	})
+
+	tokenString, err := token.SignedString(h.secret)
+	if err != nil {
+		http.Error(w, `{"error":"failed to generate token"}`, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(loginResponse{Token: tokenString})
+}
+
+func (h *AuthHandler) loginMulti(w http.ResponseWriter, req loginRequest) {
+	user, err := h.userStore.GetUserByUsername(req.Username)
+	if err != nil {
+		log.Printf("login error: %v", err)
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		return
+	}
+	if user == nil || !store.CheckPassword(user, req.Password) {
+		http.Error(w, `{"error":"invalid credentials"}`, http.StatusUnauthorized)
+		return
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub":     user.Username,
+		"user_id": user.ID,
+		"role":    user.Role,
+		"iat":     time.Now().Unix(),
+		"exp":     time.Now().Add(24 * time.Hour).Unix(),
 	})
 
 	tokenString, err := token.SignedString(h.secret)
@@ -176,6 +234,14 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.IsMultiMode() {
+		h.changePasswordMulti(w, r, req)
+	} else {
+		h.changePasswordSingle(w, req)
+	}
+}
+
+func (h *AuthHandler) changePasswordSingle(w http.ResponseWriter, req changePasswordRequest) {
 	// Verify current password
 	currentUser := h.currentUsername()
 	if !h.checkCredentials(currentUser, req.CurrentPassword) {
@@ -207,6 +273,36 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("credentials updated (user: %s)", newUsername)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func (h *AuthHandler) changePasswordMulti(w http.ResponseWriter, r *http.Request, req changePasswordRequest) {
+	uc := middleware.UserFromContext(r.Context())
+	if uc == nil {
+		http.Error(w, `{"error":"user context not found"}`, http.StatusInternalServerError)
+		return
+	}
+
+	// Verify current password against DB
+	user, err := h.userStore.GetUserByID(uc.ID)
+	if err != nil || user == nil {
+		http.Error(w, `{"error":"user not found"}`, http.StatusInternalServerError)
+		return
+	}
+	if !store.CheckPassword(user, req.CurrentPassword) {
+		http.Error(w, `{"error":"current password is incorrect"}`, http.StatusUnauthorized)
+		return
+	}
+
+	// Update password in DB
+	if err := h.userStore.UpdatePassword(uc.ID, req.NewPassword); err != nil {
+		http.Error(w, `{"error":"failed to update password"}`, http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("password updated for user: %s (id: %d)", uc.Username, uc.ID)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
