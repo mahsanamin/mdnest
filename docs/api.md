@@ -163,6 +163,133 @@ curl -X DELETE "http://localhost:8286/api/auth/tokens?id=a1b2c3d4" \
 
 ---
 
+## Admin (multi-user mode only)
+
+These endpoints are only available when `AUTH_MODE=multi`. All require admin role -- non-admin users receive a 403.
+
+### POST /api/admin/invite
+
+Create a new user.
+
+**Request body** (JSON):
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `email` | string | yes | User's email (must be unique) |
+| `username` | string | yes | Login username (must be unique) |
+| `password` | string | yes | Initial password |
+| `role` | string | no | `admin` or `collaborator` (default: `collaborator`) |
+
+**Response** (201 Created):
+
+```json
+{
+  "id": 2,
+  "email": "bob@example.com",
+  "username": "bob",
+  "role": "collaborator",
+  "invited_by": 1,
+  "created_at": "2026-03-28T12:00:00Z"
+}
+```
+
+**Example:**
+
+```bash
+curl -X POST "http://localhost:8286/api/admin/invite" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"email": "bob@example.com", "username": "bob", "password": "securepass", "role": "collaborator"}'
+```
+
+**Error responses:**
+
+| Status | Body | Cause |
+|--------|------|-------|
+| 400 | `{"error":"email, username, and password are required"}` | Missing fields |
+| 400 | `{"error":"role must be admin or collaborator"}` | Invalid role |
+| 403 | `{"error":"admin access required"}` | Non-admin user |
+| 409 | `{"error":"email already in use"}` | Duplicate email |
+| 409 | `{"error":"username already in use"}` | Duplicate username |
+
+---
+
+### GET /api/admin/users
+
+List all users.
+
+**Response** (200 OK):
+
+```json
+[
+  {"id": 1, "email": "admin@mdnest.local", "username": "admin", "role": "admin", "created_at": "2026-03-28T10:00:00Z"},
+  {"id": 2, "email": "bob@example.com", "username": "bob", "role": "collaborator", "invited_by": 1, "created_at": "2026-03-28T12:00:00Z"}
+]
+```
+
+---
+
+### PUT /api/admin/users?id=\<user-id\>
+
+Update a user's role.
+
+**Request body:**
+
+```json
+{"role": "admin"}
+```
+
+**Response** (200 OK):
+
+```json
+{"status": "ok"}
+```
+
+**Error responses:**
+
+| Status | Body | Cause |
+|--------|------|-------|
+| 400 | `{"error":"cannot remove the last admin"}` | Demoting the only admin |
+
+---
+
+### DELETE /api/admin/users?id=\<user-id\>
+
+Delete a user. Access grants are cascade-deleted.
+
+**Response** (200 OK):
+
+```json
+{"status": "deleted"}
+```
+
+**Error responses:**
+
+| Status | Body | Cause |
+|--------|------|-------|
+| 400 | `{"error":"cannot delete yourself"}` | Attempting self-deletion |
+| 400 | `{"error":"cannot remove the last admin"}` | Deleting the only admin |
+| 404 | `{"error":"user not found"}` | User ID does not exist |
+
+**Examples:**
+
+```bash
+# List users
+curl "http://localhost:8286/api/admin/users" -H "Authorization: Bearer $TOKEN"
+
+# Change role
+curl -X PUT "http://localhost:8286/api/admin/users?id=2" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"role": "admin"}'
+
+# Delete user
+curl -X DELETE "http://localhost:8286/api/admin/users?id=2" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+---
+
 ## Search
 
 ### GET /api/search

@@ -132,6 +132,13 @@ func main() {
 	mux.Handle("/api/search", authMiddleware.Wrap(http.HandlerFunc(searchHandler.HandleSearch)))
 	mux.Handle("/api/files/", authMiddleware.Wrap(http.HandlerFunc(uploadHandler.HandleServeFile)))
 
+	// Admin routes (multi mode only, require admin role)
+	if multiMode {
+		adminHandler := handlers.NewAdminHandler(userStore)
+		mux.Handle("/api/admin/invite", authMiddleware.Wrap(middleware.RequireAdmin(http.HandlerFunc(adminHandler.HandleInvite))))
+		mux.Handle("/api/admin/users", authMiddleware.Wrap(middleware.RequireAdmin(http.HandlerFunc(adminHandler.HandleUsers))))
+	}
+
 	handler := corsMiddleware.Wrap(mux)
 
 	log.Printf("mdnest backend listening on :%s (NOTES_DIR=%s)", port, absNotesDir)
