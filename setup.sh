@@ -194,8 +194,7 @@ if [ "$AUTH_MODE" = "multi" ]; then
       retries: 5
     restart: unless-stopped
 "
-    EXTRA_VOLUMES="  mdnest-pgdata:
-"
+    EXTRA_VOLUMES="  mdnest-pgdata:"
   fi
 fi
 
@@ -243,7 +242,8 @@ ${GITSYNC_VOLUMES}      - ./git-sync/sync.sh:/sync.sh:ro
 
 volumes:
   mdnest-secrets:
-${EXTRA_VOLUMES}EOF
+${EXTRA_VOLUMES}
+EOF
 
 echo "Generated docker-compose.yml"
 echo ""
