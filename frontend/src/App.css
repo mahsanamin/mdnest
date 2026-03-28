@@ -1389,6 +1389,32 @@
   }
 }
 
+/* ===== Sidebar action buttons ===== */
+.sidebar-actions {
+  display: flex;
+  gap: 6px;
+  padding: 6px 12px;
+  border-bottom: 1px solid #313244;
+  flex-shrink: 0;
+}
+
+.sidebar-action-btn {
+  flex: 1;
+  background: #313244;
+  color: #cdd6f4;
+  border: none;
+  padding: 5px 0;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 500;
+  transition: background 0.15s;
+}
+
+.sidebar-action-btn:hover {
+  background: #45475a;
+}
+
 /* ===== Multi-user: Sidebar footer ===== */
 .sidebar-footer {
   border-top: 1px solid #313244;

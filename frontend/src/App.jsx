@@ -461,13 +461,13 @@ function App() {
         userInfo={isMulti ? userInfo : null}
         onLogout={logout}
         onAdminPanel={isAdmin && isMulti ? () => setShowAdminPanel(true) : null}
+        onNewNote={canWrite('') ? () => doCreateNote(null) : null}
+        onNewFolder={canWrite('') ? () => doCreateFolder(null) : null}
       />
       <div className="main">
         <Toolbar
           currentPath={currentPath}
           onToggleSidebar={() => setSidebarVisible((v) => !v)}
-          onNewNote={canWrite('') ? () => doCreateNote(null) : null}
-          onNewFolder={canWrite('') ? () => doCreateFolder(null) : null}
           onChangePassword={() => setShowChangePassword(true)}
           onRename={canWriteCurrent ? handleToolbarRename : null}
           onDelete={canWriteCurrent ? handleToolbarDelete : null}

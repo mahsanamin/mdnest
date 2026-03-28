@@ -37,6 +37,8 @@ function Sidebar({
   userInfo,
   onLogout,
   onAdminPanel,
+  onNewNote,
+  onNewFolder,
 }) {
   const treeAreaRef = useRef(null);
   const longPressTimer = useRef(null);
@@ -160,6 +162,12 @@ function Sidebar({
             <button className="search-clear" onClick={() => setSearchQuery('')}>x</button>
           )}
         </div>
+        {(onNewNote || onNewFolder) && (
+          <div className="sidebar-actions">
+            {onNewNote && <button className="sidebar-action-btn" onClick={onNewNote}>+ Note</button>}
+            {onNewFolder && <button className="sidebar-action-btn" onClick={onNewFolder}>+ Folder</button>}
+          </div>
+        )}
 
         {showContentResults && (
           <div className="search-results">

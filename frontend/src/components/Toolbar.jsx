@@ -1,19 +1,9 @@
-function Toolbar({ currentPath, onToggleSidebar, onNewNote, onNewFolder, onChangePassword, onRename, onDelete, viewMode, onViewModeChange }) {
+function Toolbar({ currentPath, onToggleSidebar, onChangePassword, onRename, onDelete, viewMode, onViewModeChange }) {
   return (
     <div className="toolbar">
       <button className="toolbar-hamburger" onClick={onToggleSidebar} title="Toggle sidebar">
         &#9776;
       </button>
-      {onNewNote && (
-        <button onClick={onNewNote} title="New note">
-          + Note
-        </button>
-      )}
-      {onNewFolder && (
-        <button onClick={onNewFolder} title="New folder">
-          + Folder
-        </button>
-      )}
       <span className="toolbar-path">
         {currentPath || 'No file selected'}
         {currentPath && (onRename || onDelete) && (
