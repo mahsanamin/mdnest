@@ -85,12 +85,10 @@ Open `http://localhost:3236` (or your Tailscale URL) in any browser. Works on de
 
 ### CLI (terminal)
 
-Install the `mdnest` CLI on any machine:
+Install the `mdnest` CLI on any machine (macOS / Linux):
 
 ```bash
-# Download the CLI
-curl -fsSL https://raw.githubusercontent.com/mahsanamin/mdnest/main/mdnest -o /usr/local/bin/mdnest
-chmod +x /usr/local/bin/mdnest
+curl -fsSL https://raw.githubusercontent.com/mahsanamin/mdnest/v2.0/install-cli.sh | bash
 ```
 
 Then authenticate with a token from the web UI (Settings > API Tokens):

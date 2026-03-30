@@ -2,7 +2,25 @@
 
 mdnest is a privately-hosted markdown notes system. Notes are plain `.md` files organized in namespaces. The `mdnest` CLI lets you read, write, search, and organize notes from the terminal.
 
-## Setup
+## Install
+
+One command, works on macOS and Linux:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mahsanamin/mdnest/v2.0/install-cli.sh | bash
+```
+
+This installs the `mdnest` command to `/usr/local/bin`. No dependencies — just bash and curl.
+
+Or install manually from the project directory:
+
+```bash
+./mdnest-server install-cli
+```
+
+## Login
+
+Create an API token in the web UI (Settings > API Tokens), then:
 
 ```bash
 mdnest login <server-url> <api-token>
