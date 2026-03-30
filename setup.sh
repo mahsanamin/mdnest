@@ -56,6 +56,7 @@ while IFS= read -r line; do
     POSTGRES_USER) POSTGRES_USER="$value" ;;
     POSTGRES_PASSWORD) POSTGRES_PASSWORD="$value" ;;
     ENABLE_LIVE_COLLAB) ENABLE_LIVE_COLLAB="$value" ;;
+    SSH_KEY_PATH) SSH_KEY_PATH="$value" ;;
     SEARCH_MAX_RESULTS) SEARCH_MAX_RESULTS="$value" ;;
     SEARCH_MAX_FILE_SIZE) SEARCH_MAX_FILE_SIZE="$value" ;;
     SEARCH_WORKERS) SEARCH_WORKERS="$value" ;;
@@ -142,6 +143,19 @@ for i in "${!MOUNT_NAMES[@]}"; do
   GITSYNC_VOLUMES="$GITSYNC_VOLUMES      - ${MOUNT_PATHS[$i]}:/data/notes/${MOUNT_NAMES[$i]}
 "
 done
+
+# SSH key for git pull (sync button)
+SSH_KEY_VOLUME=""
+if [ -n "$SSH_KEY_PATH" ]; then
+  if [ -f "$SSH_KEY_PATH" ]; then
+    SSH_KEY_VOLUME="      - ${SSH_KEY_PATH}:/root/.ssh/deploy_key:ro
+"
+    BACKEND_VOLUMES="${BACKEND_VOLUMES}${SSH_KEY_VOLUME}"
+    echo "SSH key: $SSH_KEY_PATH (mounted for git pull)"
+  else
+    echo "Warning: SSH_KEY_PATH=$SSH_KEY_PATH does not exist, skipping"
+  fi
+fi
 
 # Check for deploy keys
 if [ -d "git-sync/keys" ]; then
