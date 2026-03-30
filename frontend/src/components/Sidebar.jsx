@@ -41,6 +41,8 @@ function Sidebar({
   onNewFolder,
   onRefreshTree,
   isAdmin,
+  width,
+  onResize,
 }) {
   const [syncing, setSyncing] = useState(false);
 
@@ -138,7 +140,7 @@ function Sidebar({
   return (
     <>
       {visible && <div className="sidebar-backdrop" onClick={onClose} />}
-      <div className={`sidebar${visible ? ' sidebar-open' : ''}`}>
+      <div className={`sidebar${visible ? ' sidebar-open' : ''}`} style={width ? { width: width, minWidth: width } : undefined}>
         <div className="sidebar-header">
           {namespaces.length > 1 ? (
             <select
@@ -250,6 +252,30 @@ function Sidebar({
         </div>
         {(userInfo || onLogout) && (
           <UserFooter userInfo={userInfo} onLogout={onLogout} onAdminPanel={onAdminPanel} />
+        )}
+        {onResize && (
+          <div
+            className="sidebar-resize-handle"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              const startX = e.clientX;
+              const startWidth = width || 260;
+              const onMove = (ev) => {
+                const newWidth = Math.min(600, Math.max(180, startWidth + ev.clientX - startX));
+                onResize(newWidth);
+              };
+              const onUp = () => {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+              };
+              document.body.style.cursor = 'col-resize';
+              document.body.style.userSelect = 'none';
+              document.addEventListener('mousemove', onMove);
+              document.addEventListener('mouseup', onUp);
+            }}
+          />
         )}
       </div>
     </>

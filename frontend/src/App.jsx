@@ -55,6 +55,7 @@ function App() {
   const [tree, setTree] = useState([]);
   const [currentPath, setCurrentPath] = useState(null);
   const [content, setContent] = useState('');
+  const [sidebarWidth, setSidebarWidth] = useState(260);
   const [savedContent, setSavedContent] = useState('');
   const [saveTimer, setSaveTimer] = useState(null);
   const [sidebarVisible, setSidebarVisible] = useState(false);
@@ -616,6 +617,8 @@ function App() {
         onNewFolder={canWrite('') ? () => doCreateFolder(null) : null}
         onRefreshTree={() => refreshTree(selectedNs)}
         isAdmin={isAdmin}
+        width={sidebarWidth}
+        onResize={setSidebarWidth}
       />
       <div className="main">
         <Toolbar

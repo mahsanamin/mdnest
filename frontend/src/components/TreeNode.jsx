@@ -114,7 +114,7 @@ function TreeNode({ node, onSelect, currentPath, depth, onContextMenu, onDrop, e
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
-        title={node.path}
+        title={name + (node.path ? '\n' + node.path : '')}
       >
         {isFolder && (
           <span className="tree-arrow">{expanded ? '▾' : '▸'}</span>
