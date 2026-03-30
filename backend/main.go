@@ -119,7 +119,7 @@ func main() {
 	if collabHub != nil {
 		noteHandler.SetCollabHub(collabHub)
 	}
-	treeHandler := handlers.NewTreeHandler(absNotesDir)
+	treeHandler := handlers.NewTreeHandler(absNotesDir, grantStore)
 	uploadHandler := handlers.NewUploadHandler(absNotesDir)
 	moveHandler := handlers.NewMoveHandler(absNotesDir)
 	searchHandler := handlers.NewSearchHandler(absNotesDir)
