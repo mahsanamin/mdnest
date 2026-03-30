@@ -88,14 +88,30 @@ mdnest note search <namespace> "query"
 ## Other commands
 
 ```bash
-mdnest login <url> <token>     # authenticate
-mdnest logout                  # remove credentials
-mdnest whoami                  # show server and token
+mdnest login <url> <token>     # authenticate with server
+mdnest logout                  # remove saved credentials
+mdnest whoami                  # show CLI version, server version, connection info
+mdnest version                 # show CLI version
+mdnest docs                    # print full CLI reference
 ```
 
-## Notes
+## Command format
 
-- Namespace = a top-level directory on the server (e.g. `personal`, `work`)
-- Paths are relative within the namespace (e.g. `ideas/project.md`)
+Every note command follows the same pattern:
+
+```
+mdnest note <action> <namespace> [path] [content]
+```
+
+- **namespace** = a top-level workspace on the server (e.g. `engineering`, `product`)
+- **path** = relative file path within the namespace (e.g. `Architecture/system-overview.md`)
 - Append/prepend create the file if it doesn't exist
 - Write with `-` reads content from stdin, useful for piping
+
+## Version compatibility
+
+The CLI checks the server version on login. If the major versions don't match, you'll see a warning. Update with:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mahsanamin/mdnest/v2.0/install-cli.sh | bash
+```
