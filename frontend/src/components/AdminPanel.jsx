@@ -6,6 +6,7 @@ import {
   adminUpdateRole,
   adminListGrants,
   adminCreateGrant,
+  adminUpdateGrant,
   adminDeleteGrant,
 } from '../api.js';
 
@@ -160,141 +161,152 @@ function GrantsTab({ namespaces }) {
   const [users, setUsers] = useState([]);
   const [grants, setGrants] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [showAdd, setShowAdd] = useState(false);
-  const [filter, setFilter] = useState('');
+  const [expandedUser, setExpandedUser] = useState(null);
 
-  // Form state
-  const [grantUser, setGrantUser] = useState('');
-  const [grantNs, setGrantNs] = useState('');
-  const [grantPath, setGrantPath] = useState('/');
-  const [grantPerm, setGrantPerm] = useState('write');
-
-  const loadGrants = useCallback(async () => {
+  const loadAll = useCallback(async () => {
     try {
-      const data = await adminListGrants({});
-      setGrants(data);
+      const [u, g] = await Promise.all([adminListUsers(), adminListGrants({})]);
+      setUsers(u);
+      setGrants(g);
     } catch (e) { console.error(e); }
   }, []);
 
-  useEffect(() => {
-    Promise.all([
-      adminListUsers().then(setUsers),
-      loadGrants(),
-    ]).finally(() => setLoading(false));
-  }, [loadGrants]);
-
-  const handleCreate = async (e) => {
-    e.preventDefault();
-    if (!grantUser || !grantNs) return;
-    try {
-      await adminCreateGrant(parseInt(grantUser), grantNs, grantPath || '/', grantPerm);
-      await loadGrants();
-      setShowAdd(false);
-      setGrantUser('');
-      setGrantPath('/');
-    } catch (err) {
-      alert(err.message);
-    }
-  };
-
-  const handleDelete = async (grantId) => {
-    try {
-      await adminDeleteGrant(grantId);
-      await loadGrants();
-    } catch (err) {
-      alert(err.message);
-    }
-  };
+  useEffect(() => { loadAll().finally(() => setLoading(false)); }, [loadAll]);
 
   const collaborators = users.filter((u) => u.role === 'collaborator');
 
-  const filtered = filter
-    ? grants.filter((g) => (g.username || '').toLowerCase().includes(filter.toLowerCase()) || g.namespace.toLowerCase().includes(filter.toLowerCase()))
-    : grants;
+  // Group grants by user_id
+  const grantsByUser = {};
+  for (const g of grants) {
+    if (!grantsByUser[g.user_id]) grantsByUser[g.user_id] = [];
+    grantsByUser[g.user_id].push(g);
+  }
+
+  const handleToggle = async (grant) => {
+    const newPerm = grant.permission === 'write' ? 'read' : 'write';
+    try {
+      await adminUpdateGrant(grant.id, newPerm);
+      await loadAll();
+    } catch (err) { alert(err.message); }
+  };
+
+  const handleRevoke = async (grant) => {
+    try {
+      await adminDeleteGrant(grant.id);
+      await loadAll();
+    } catch (err) { alert(err.message); }
+  };
 
   if (loading) return <div className="admin-section">Loading...</div>;
 
   return (
     <div className="admin-section">
       <div className="admin-section-header">
-        <h3>Access Grants ({grants.length})</h3>
-        <button onClick={() => setShowAdd(!showAdd)}>
-          {showAdd ? 'Cancel' : '+ Add Grant'}
-        </button>
+        <h3>Access Grants</h3>
       </div>
 
-      {showAdd && (
-        <form className="admin-invite-form" onSubmit={handleCreate}>
-          <div className="admin-form-row">
-            <select value={grantUser} onChange={(e) => setGrantUser(e.target.value)} required>
-              <option value="">User...</option>
-              {collaborators.map((u) => (
-                <option key={u.id} value={u.id}>{u.username}</option>
-              ))}
-            </select>
-            <select value={grantNs} onChange={(e) => setGrantNs(e.target.value)} required>
-              <option value="">Namespace...</option>
-              {namespaces.map((ns) => (
-                <option key={ns} value={ns}>{ns}</option>
-              ))}
-            </select>
-          </div>
-          <div className="admin-form-row">
-            <input
-              type="text"
-              placeholder="Path (/ = full namespace)"
-              value={grantPath}
-              onChange={(e) => setGrantPath(e.target.value)}
-            />
-            <select value={grantPerm} onChange={(e) => setGrantPerm(e.target.value)}>
-              <option value="write">Write</option>
-              <option value="read">Read only</option>
-            </select>
-          </div>
-          <button type="submit">Add Grant</button>
-          {collaborators.length === 0 && <div className="admin-hint">No collaborators yet. Invite a user first.</div>}
-        </form>
-      )}
-
-      {grants.length > 0 && (
-        <input
-          type="text"
-          className="admin-filter"
-          placeholder="Filter by user or namespace..."
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-        />
-      )}
-
-      {filtered.length > 0 ? (
-        <table className="admin-table">
-          <thead>
-            <tr>
-              <th>User</th>
-              <th>Namespace</th>
-              <th>Path</th>
-              <th>Permission</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((g) => (
-              <tr key={g.id}>
-                <td><span className="grant-user">{g.username || `#${g.user_id}`}</span></td>
-                <td>{g.namespace}</td>
-                <td><code>{g.path}</code></td>
-                <td><span className={`perm-badge ${g.permission}`}>{g.permission}</span></td>
-                <td>
-                  <button className="admin-action-btn danger" onClick={() => handleDelete(g.id)}>Revoke</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {collaborators.length === 0 ? (
+        <div className="admin-hint">No collaborators yet. Invite a user first from the Users tab.</div>
       ) : (
-        !loading && grants.length === 0 && <div className="admin-hint">No access grants yet. Add one to give collaborators access to namespaces.</div>
+        <div className="grants-user-list">
+          {collaborators.map((user) => {
+            const userGrants = grantsByUser[user.id] || [];
+            const isExpanded = expandedUser === user.id;
+            return (
+              <div key={user.id} className={`grants-user-card${isExpanded ? ' expanded' : ''}`}>
+                <div className="grants-user-header" onClick={() => setExpandedUser(isExpanded ? null : user.id)}>
+                  <div className="grants-user-info">
+                    <div className="grants-user-avatar">{user.username.slice(0, 1).toUpperCase()}</div>
+                    <div>
+                      <div className="grants-user-name">{user.username}</div>
+                      <div className="grants-user-email">{user.email}</div>
+                    </div>
+                  </div>
+                  <div className="grants-user-summary">
+                    {userGrants.length > 0 ? (
+                      <span className="grants-count">{userGrants.length} grant{userGrants.length !== 1 ? 's' : ''}</span>
+                    ) : (
+                      <span className="grants-none">No access</span>
+                    )}
+                    <span className="grants-chevron">{isExpanded ? '\u25B2' : '\u25BC'}</span>
+                  </div>
+                </div>
+
+                {isExpanded && (
+                  <div className="grants-user-body">
+                    {userGrants.length > 0 && (
+                      <div className="grants-list">
+                        {userGrants.map((g) => (
+                          <div key={g.id} className="grants-item">
+                            <div className="grants-item-path">
+                              <span className="grants-item-ns">{g.namespace}</span>
+                              <span className="grants-item-sep">/</span>
+                              <code>{g.path === '/' ? '(all)' : g.path}</code>
+                            </div>
+                            <div className="grants-item-actions">
+                              <button
+                                className={`share-perm-btn ${g.permission}`}
+                                onClick={() => handleToggle(g)}
+                                title={`Switch to ${g.permission === 'write' ? 'read' : 'write'}`}
+                              >
+                                {g.permission === 'write' ? 'Can edit' : 'Can view'}
+                              </button>
+                              <button className="share-revoke-btn" onClick={() => handleRevoke(g)} title="Remove">x</button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <UserAddGrant userId={user.id} namespaces={namespaces} existingGrants={userGrants} onDone={loadAll} />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
       )}
     </div>
+  );
+}
+
+function UserAddGrant({ userId, namespaces, existingGrants, onDone }) {
+  const [ns, setNs] = useState('');
+  const [path, setPath] = useState('/');
+  const [perm, setPerm] = useState('write');
+  const [error, setError] = useState('');
+
+  const handleAdd = async (e) => {
+    e.preventDefault();
+    if (!ns) return;
+    setError('');
+    try {
+      await adminCreateGrant(userId, ns, path || '/', perm);
+      setNs('');
+      setPath('/');
+      onDone();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  return (
+    <form className="grants-add-form" onSubmit={handleAdd}>
+      {error && <div className="share-error" style={{ padding: '4px 0' }}>{error}</div>}
+      <div className="grants-add-row">
+        <select value={ns} onChange={(e) => setNs(e.target.value)} required>
+          <option value="">Namespace...</option>
+          {namespaces.map((n) => (
+            <option key={n} value={n}>{n}</option>
+          ))}
+        </select>
+        <input type="text" placeholder="/ = all, or /docs" value={path} onChange={(e) => setPath(e.target.value)} />
+        <select value={perm} onChange={(e) => setPerm(e.target.value)}>
+          <option value="write">Can edit</option>
+          <option value="read">Can view</option>
+        </select>
+        <button type="submit" disabled={!ns}>+ Add</button>
+      </div>
+    </form>
   );
 }
 
