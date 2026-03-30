@@ -75,8 +75,23 @@ To also enable live collaboration:
 - **Auto-reconnect** — WebSocket reconnects automatically with exponential backoff on connection drop.
 - **No external services** — everything runs on your server via `nhooyr.io/websocket`. No Firebase, no Google, no third-party dependencies.
 
+#### UI Improvements
+- **Resizable sidebar** — drag the right edge to make the project pane wider or narrower (180px–600px).
+- **SVG file tree icons** — replaced emoji icons with crisp SVG icons. Folders with content show blue, empty folders show dashed grey outline with italic name.
+- **Directory-level share dialog** — right-click any folder → "Manage Access" opens a clean dialog to add/remove users with read/write toggles per directory.
+- **Directory picker for grants** — admin panel shows actual folder tree in dropdown instead of free-text path input.
+- **User-centric grants accordion** — admin panel Access Grants tab shows each collaborator as an expandable card with all their directory grants inline.
+- **Namespace sync button** — admin can click the sync icon in sidebar to trigger git pull and refresh the file tree.
+- **Copy Path** — right-click any file or folder to copy its full mdnest path (e.g. `growth/docs/readme.md`) to clipboard.
+- **User avatar menu** — sidebar footer shows user initials in a circle, click to open dropdown with "Manage Users & Access" and "Sign Out".
+- **Tree filtering by grants** — collaborators only see directories they have access to, not the full namespace tree.
+- **Mobile improvements** — Edit/Preview toggle moved to top, editor fills full screen width, sidebar resize handle hidden on mobile.
+
 ### Bug Fixes
 - Fixed links in preview opening in the same tab instead of a new tab (marked v15 renderer compatibility).
+- Fixed WebSocket proxy through nginx (missing upgrade headers).
+- Fixed concurrent editing overwriting — remote content only applied when local user is idle.
+- Fixed live content sync stopping after first remote update.
 
 ### Configuration Reference
 
@@ -114,7 +129,9 @@ New endpoints (multi-user mode only):
 | `DELETE /api/admin/users?id=` | Delete user (admin only) |
 | `POST /api/admin/grants` | Create access grant (admin only) |
 | `GET /api/admin/grants` | List grants (admin only) |
+| `PUT /api/admin/grants?id=` | Update grant permission (admin only) |
 | `DELETE /api/admin/grants?id=` | Revoke grant (admin only) |
+| `POST /api/admin/sync?ns=` | Git pull + cache refresh for a namespace (admin only) |
 | `GET /api/ws` | WebSocket for live collaboration |
 
 Changed endpoints:
@@ -124,3 +141,4 @@ Changed endpoints:
 | `GET /api/note` | Now returns `ETag` header |
 | `PUT /api/note` | Accepts `If-Match` header, returns 409 on conflict. Response includes `etag` field. |
 | `GET /api/namespaces` | In multi mode, filtered to user's granted namespaces |
+| `GET /api/tree` | In multi mode, filtered to user's granted directories |
