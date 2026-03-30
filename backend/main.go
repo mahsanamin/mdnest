@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	"github.com/mdnest/mdnest/backend/collab"
@@ -191,6 +192,9 @@ func main() {
 		wsHandler := handlers.NewWSHandler(collabHub, jwtSecret)
 		mux.HandleFunc("/api/ws", wsHandler.HandleWS)
 	}
+
+	// Trust all mounted directories for git operations
+	exec.Command("git", "config", "--global", "safe.directory", "*").Run()
 
 	handler := corsMiddleware.Wrap(mux)
 

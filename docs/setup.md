@@ -59,6 +59,7 @@ On first run, `setup.sh` copies `mdnest.conf.sample` to `mdnest.conf` and exits,
 | `POSTGRES_DB` | `mdnest` | PostgreSQL database name (only when `AUTH_MODE=multi`) |
 | `POSTGRES_USER` | `mdnest` | PostgreSQL user (only when `AUTH_MODE=multi`) |
 | `POSTGRES_PASSWORD` | *(none, required when multi)* | PostgreSQL password (only when `AUTH_MODE=multi`) |
+| `SSH_KEY_PATH` | *(none)* | Path to SSH private key on the host. Mounted into the backend for git pull via sync button. Must be passphrase-free. |
 | `MOUNT_<name>` | *(none, at least one required)* | Maps a namespace to a host directory. See below. |
 
 ### Example Configuration
@@ -286,6 +287,63 @@ The sync loop runs every 600 seconds (10 minutes) per namespace:
 The git remote should be treated as a **backup destination**, not a shared workspace. Do not push to it from other tools or machines. Since mdnest is the only process committing and pushing, conflicts cannot occur under normal use.
 
 If a conflict does happen (e.g., someone accidentally pushed to the repo directly), git-sync handles it automatically: it saves the local version as a `.sync-conflict-*` file, accepts the remote, and keeps the sync loop running. No data is lost, no manual intervention needed.
+
+---
+
+## Git Pull from the Web UI (Sync Button)
+
+If your namespaces are git repos managed outside mdnest (e.g., pushed from CI or other machines), the admin sync button in the sidebar lets you pull the latest changes without leaving the browser.
+
+For this to work, the backend container needs an SSH key to authenticate with the git remote.
+
+### Option A: Dedicated deploy key (recommended)
+
+Generate a passphrase-free key specifically for mdnest:
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/mdnest-deploy -N "" -C "mdnest-sync"
+```
+
+Add the public key to your git provider:
+- **GitHub**: repo Settings > Deploy Keys > Add deploy key (enable "Allow write access" if you also want git-sync push)
+- **GitLab**: repo Settings > Repository > Deploy Keys
+
+Then add to `mdnest.conf`:
+
+```
+SSH_KEY_PATH=/home/you/.ssh/mdnest-deploy
+```
+
+Rebuild:
+
+```bash
+./mdnest-server rebuild
+```
+
+The sync button (&#8635; in the sidebar) will now pull from the remote.
+
+### Option B: Use your existing SSH key
+
+If your default SSH key (`~/.ssh/id_ed25519` or `~/.ssh/id_rsa`) has **no passphrase**, you can use it directly:
+
+```
+SSH_KEY_PATH=/home/you/.ssh/id_ed25519
+```
+
+**Important:** If your key has a passphrase (common on macOS with Keychain), it will **not work** inside the Docker container — there's no SSH agent to decrypt it. Use Option A instead.
+
+### Option C: No SSH key (manual pull on host)
+
+If you don't set `SSH_KEY_PATH`, the sync button will still:
+- Invalidate the search cache
+- Refresh the file tree
+
+But it won't pull from the remote. You'll need to run `git pull` on the host machine manually or via a cron job:
+
+```bash
+# Add to crontab: pull every 5 minutes
+*/5 * * * * cd /path/to/your/notes && git pull --ff-only 2>/dev/null
+```
 
 ---
 

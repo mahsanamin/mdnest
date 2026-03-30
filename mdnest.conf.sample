@@ -44,6 +44,14 @@ GIT_AUTHOR_EMAIL=you@example.com
 # POSTGRES_USER=mdnest
 # POSTGRES_PASSWORD=changeme
 
+# SSH key for git pull (optional)
+# Path to an SSH private key on the host. Used by the sync button to pull
+# from git remotes. Must be unencrypted (no passphrase).
+# If your key has a passphrase, generate a dedicated deploy key:
+#   ssh-keygen -t ed25519 -f ~/.ssh/mdnest-deploy -N ""
+# Then add the .pub key to your GitHub repo's deploy keys.
+# SSH_KEY_PATH=/home/you/.ssh/mdnest-deploy
+
 # Live collaboration (optional, requires AUTH_MODE=multi)
 # Enables real-time cursor presence and conflict detection via WebSocket.
 # ENABLE_LIVE_COLLAB=false

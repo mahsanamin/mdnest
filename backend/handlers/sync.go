@@ -54,6 +54,18 @@ func (h *SyncHandler) HandleSync(w http.ResponseWriter, r *http.Request) {
 	if gitDir != "" {
 		cmd := exec.Command("git", "pull", "--ff-only")
 		cmd.Dir = gitDir
+
+		// Use mounted SSH key if available
+		sshKeyPath := "/root/.ssh/deploy_key"
+		if _, err := os.Stat(sshKeyPath); err == nil {
+			cmd.Env = append(os.Environ(),
+				"GIT_SSH_COMMAND=ssh -i "+sshKeyPath+" -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known_hosts",
+			)
+		}
+
+		// Trust mounted directories
+		cmd.Env = append(cmd.Env, "HOME=/root")
+
 		output, err := cmd.CombinedOutput()
 		gitOutput = strings.TrimSpace(string(output))
 		if err != nil {
