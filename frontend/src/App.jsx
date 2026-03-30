@@ -137,6 +137,7 @@ function App() {
           // Apply their content live if we have no local unsaved changes
           if (contentRef.current === savedContentRef.current) {
             setContent(msg.content);
+            setSavedContent(msg.content);
           }
           break;
         case 'file-changed':
