@@ -67,6 +67,8 @@ func (c *Conn) ReadLoop(ctx context.Context, hub *Hub, ns, path string) {
 			hub.BroadcastCursor(ns, path, c, msg)
 		case "selection":
 			hub.BroadcastSelection(ns, path, c, msg)
+		case "content":
+			hub.BroadcastContent(ns, path, c, msg.Content)
 		}
 	}
 }

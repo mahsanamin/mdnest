@@ -81,6 +81,7 @@ function App() {
   const [conflictBanner, setConflictBanner] = useState(null); // {username, etag}
   const etagRef = useRef(null);
   const collabRef = useRef(null);
+  const remoteUpdateRef = useRef(false); // flag to ignore self-triggered changes
 
   // Determine write access for current namespace/path
   const canWrite = useCallback((path) => {
@@ -123,12 +124,18 @@ function App() {
           setRemoteCursors((prev) => { const n = { ...prev }; delete n[msg.userId]; return n; });
           setPresenceUsers((prev) => prev.filter((u) => u.id !== msg.userId));
           break;
-        case 'file-changed':
-          // Another user saved — check if we have unsaved changes
+        case 'content':
+          // Another user is typing — apply their content live
+          // Only apply if we have no local unsaved changes (to avoid overwriting local typing)
           if (contentRef.current === savedContentRef.current) {
-            // No unsaved changes — auto-reload
-            etagRef.current = msg.etag;
-            // Trigger re-fetch handled by the auto-refresh or we do it inline
+            setContent(msg.content);
+          }
+          break;
+        case 'file-changed':
+          // Another user saved — update our saved baseline
+          etagRef.current = msg.etag;
+          if (contentRef.current === savedContentRef.current) {
+            // No local unsaved changes — silently accept
             setConflictBanner(null);
           } else {
             setConflictBanner({ username: msg.username, etag: msg.etag });
@@ -324,6 +331,10 @@ function App() {
   const handleContentChange = useCallback((newContent) => {
     setContent(newContent);
     setConflictBanner(null);
+
+    // Broadcast content to other users via WebSocket (live typing)
+    if (collabRef.current) collabRef.current.sendContent(newContent);
+
     if (saveTimer) clearTimeout(saveTimer);
     const timer = setTimeout(async () => {
       if (currentPath && selectedNs) {

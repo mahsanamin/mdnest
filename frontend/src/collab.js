@@ -103,6 +103,15 @@ class CollabClient {
     this._send({ type: 'selection', fromLine, fromCh, toLine, toCh });
   }
 
+  // Send live content (throttled to every 200ms)
+  sendContent(content) {
+    if (this._contentThrottle) return;
+    this._send({ type: 'content', content });
+    this._contentThrottle = setTimeout(() => {
+      this._contentThrottle = null;
+    }, 200);
+  }
+
   _send(msg) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(msg));

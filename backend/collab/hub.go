@@ -34,13 +34,14 @@ type UserInfo struct {
 
 // Message types sent/received over WebSocket.
 type IncomingMessage struct {
-	Type      string `json:"type"` // "cursor" or "selection"
+	Type      string `json:"type"` // "cursor", "selection", or "content"
 	Line      int    `json:"line,omitempty"`
 	Ch        int    `json:"ch,omitempty"`
 	FromLine  int    `json:"fromLine,omitempty"`
 	FromCh    int    `json:"fromCh,omitempty"`
 	ToLine    int    `json:"toLine,omitempty"`
 	ToCh      int    `json:"toCh,omitempty"`
+	Content   string `json:"content,omitempty"`
 }
 
 type OutgoingMessage struct {
@@ -57,6 +58,7 @@ type OutgoingMessage struct {
 	ToCh     int         `json:"toCh,omitempty"`
 	By       int         `json:"by,omitempty"`
 	ETag     string      `json:"etag,omitempty"`
+	Content  string      `json:"content,omitempty"`
 }
 
 // Color palette for user cursors (Catppuccin colors).
@@ -148,6 +150,17 @@ func (h *Hub) BroadcastSelection(ns, path string, from *Conn, msg IncomingMessag
 		FromCh:   msg.FromCh,
 		ToLine:   msg.ToLine,
 		ToCh:     msg.ToCh,
+	})
+}
+
+// BroadcastContent sends live content from one user to all others on the note.
+func (h *Hub) BroadcastContent(ns, path string, from *Conn, content string) {
+	key := noteKey(ns, path)
+	h.broadcastToOthers(key, from.User.ID, OutgoingMessage{
+		Type:     "content",
+		UserID:   from.User.ID,
+		Username: from.User.Username,
+		Content:  content,
 	})
 }
 
