@@ -2016,3 +2016,192 @@
   line-height: 1.3;
   pointer-events: none;
 }
+
+/* ===== Share dialog ===== */
+.share-dialog {
+  max-width: 480px;
+  width: 90vw;
+}
+
+.share-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 16px 20px;
+  border-bottom: 1px solid #313244;
+}
+
+.share-header h3 {
+  margin: 0 0 4px 0;
+  font-size: 1.1rem;
+}
+
+.share-path {
+  font-size: 0.8rem;
+  color: #6c7086;
+}
+
+.share-ns {
+  color: #89b4fa;
+  font-weight: 600;
+}
+
+.share-sep {
+  margin: 0 2px;
+}
+
+.share-error {
+  color: #f38ba8;
+  font-size: 0.85rem;
+  padding: 8px 20px;
+  background: #f38ba811;
+}
+
+.share-body {
+  padding: 16px 20px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.share-grants {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 16px;
+}
+
+.share-grant-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-radius: 6px;
+  transition: background 0.1s;
+}
+
+.share-grant-row:hover {
+  background: #181825;
+}
+
+.share-grant-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.share-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #1e1e2e;
+  font-size: 0.7rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.share-username {
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.share-grant-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.share-perm-btn {
+  background: none;
+  border: 1px solid #45475a;
+  border-radius: 4px;
+  padding: 3px 10px;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.share-perm-btn.write {
+  color: #a6e3a1;
+  border-color: #a6e3a144;
+}
+
+.share-perm-btn.read {
+  color: #f9e2af;
+  border-color: #f9e2af44;
+}
+
+.share-perm-btn:hover {
+  background: #313244;
+}
+
+.share-revoke-btn {
+  background: none;
+  border: none;
+  color: #6c7086;
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  line-height: 1;
+}
+
+.share-revoke-btn:hover {
+  color: #f38ba8;
+  background: #f38ba822;
+}
+
+.share-add-form {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.share-add-form select {
+  flex: 1;
+  padding: 6px 8px;
+  background: #313244;
+  color: #cdd6f4;
+  border: 1px solid #45475a;
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+.share-add-form button {
+  background: #89b4fa;
+  color: #1e1e2e;
+  border: none;
+  padding: 6px 14px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.share-add-form button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.share-empty {
+  color: #6c7086;
+  font-size: 0.85rem;
+  text-align: center;
+  padding: 16px 0;
+}
+
+.share-hint {
+  color: #585b70;
+  font-size: 0.75rem;
+  margin-top: 12px;
+  line-height: 1.4;
+}
+
+.share-loading {
+  text-align: center;
+  padding: 20px;
+  color: #6c7086;
+}

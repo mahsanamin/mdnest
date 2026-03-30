@@ -27,9 +27,11 @@ type GrantWithUser struct {
 // GrantStore defines access grant operations.
 type GrantStore interface {
 	CreateGrant(userID int, namespace, path, permission string, grantedBy *int) (*Grant, error)
+	UpdateGrantPermission(id int, permission string) error
 	DeleteGrant(id int) error
 	GetGrantsForUser(userID int) ([]Grant, error)
 	GetGrantsForNamespace(namespace string) ([]Grant, error)
+	GetGrantsForPath(namespace, path string) ([]GrantWithUser, error)
 	ListAllGrants() ([]GrantWithUser, error)
 	CheckAccess(userID int, namespace, path, requiredPermission string) bool
 	GetAccessibleNamespaces(userID int) ([]string, error)
@@ -67,6 +69,45 @@ func (s *PostgresGrantStore) CreateGrant(userID int, namespace, path, permission
 		return nil, fmt.Errorf("failed to create grant: %w", err)
 	}
 	return &g, nil
+}
+
+func (s *PostgresGrantStore) UpdateGrantPermission(id int, permission string) error {
+	if permission != "read" && permission != "write" {
+		return fmt.Errorf("permission must be read or write")
+	}
+	result, err := s.db.Exec(`UPDATE access_grants SET permission = $1 WHERE id = $2`, permission, id)
+	if err != nil {
+		return fmt.Errorf("failed to update grant: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("grant not found")
+	}
+	return nil
+}
+
+func (s *PostgresGrantStore) GetGrantsForPath(namespace, path string) ([]GrantWithUser, error) {
+	rows, err := s.db.Query(
+		`SELECT g.id, g.user_id, g.namespace, g.path, g.permission, g.granted_by, g.created_at, u.username
+		 FROM access_grants g JOIN users u ON g.user_id = u.id
+		 WHERE g.namespace = $1 AND g.path = $2
+		 ORDER BY u.username`,
+		namespace, path,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query grants for path: %w", err)
+	}
+	defer rows.Close()
+
+	var grants []GrantWithUser
+	for rows.Next() {
+		var g GrantWithUser
+		if err := rows.Scan(&g.ID, &g.UserID, &g.Namespace, &g.Path, &g.Permission, &g.GrantedBy, &g.CreatedAt, &g.Username); err != nil {
+			return nil, fmt.Errorf("failed to scan grant: %w", err)
+		}
+		grants = append(grants, g)
+	}
+	return grants, rows.Err()
 }
 
 func (s *PostgresGrantStore) DeleteGrant(id int) error {

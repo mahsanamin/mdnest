@@ -264,6 +264,19 @@ export async function adminCreateGrant(userId, namespace, path, permission) {
   return res.json();
 }
 
+export async function adminUpdateGrant(id, permission) {
+  const res = await request(`/admin/grants?id=${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ permission }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to update grant');
+  }
+  return res.json();
+}
+
 export async function adminDeleteGrant(id) {
   const res = await request(`/admin/grants?id=${id}`, { method: 'DELETE' });
   if (!res.ok) throw new Error('Failed to delete grant');

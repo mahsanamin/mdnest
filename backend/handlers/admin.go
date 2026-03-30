@@ -274,13 +274,15 @@ func toGrantWithUserResponse(g *store.GrantWithUser) grantResponse {
 	}
 }
 
-// HandleGrants dispatches POST/GET/DELETE /api/admin/grants.
+// HandleGrants dispatches POST/GET/PUT/DELETE /api/admin/grants.
 func (h *AdminHandler) HandleGrants(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodPost:
 		h.createGrant(w, r)
 	case http.MethodGet:
 		h.listGrants(w, r)
+	case http.MethodPut:
+		h.updateGrant(w, r)
 	case http.MethodDelete:
 		h.deleteGrant(w, r)
 	default:
@@ -335,9 +337,61 @@ func (h *AdminHandler) createGrant(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(toGrantResponse(grant))
 }
 
+func (h *AdminHandler) updateGrant(w http.ResponseWriter, r *http.Request) {
+	idStr := r.URL.Query().Get("id")
+	if idStr == "" {
+		http.Error(w, `{"error":"id is required"}`, http.StatusBadRequest)
+		return
+	}
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		http.Error(w, `{"error":"invalid id"}`, http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		Permission string `json:"permission"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
+		return
+	}
+	if req.Permission != "read" && req.Permission != "write" {
+		http.Error(w, `{"error":"permission must be read or write"}`, http.StatusBadRequest)
+		return
+	}
+
+	if err := h.grantStore.UpdateGrantPermission(id, req.Permission); err != nil {
+		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusNotFound)
+		return
+	}
+
+	log.Printf("grant updated: id=%d permission=%s", id, req.Permission)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
 func (h *AdminHandler) listGrants(w http.ResponseWriter, r *http.Request) {
 	userIDStr := r.URL.Query().Get("user_id")
 	ns := r.URL.Query().Get("namespace")
+	path := r.URL.Query().Get("path")
+
+	// Filter by namespace + path (for share dialog)
+	if ns != "" && path != "" {
+		grants, err := h.grantStore.GetGrantsForPath(ns, path)
+		if err != nil {
+			http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+			return
+		}
+		resp := make([]grantResponse, 0, len(grants))
+		for i := range grants {
+			resp = append(resp, toGrantWithUserResponse(&grants[i]))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+		return
+	}
 
 	// If no filter, return all grants with usernames
 	if userIDStr == "" && ns == "" {

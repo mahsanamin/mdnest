@@ -8,6 +8,7 @@ import ContextMenu from './components/ContextMenu.jsx';
 import Settings from './components/Settings.jsx';
 import AdminPanel from './components/AdminPanel.jsx';
 import PresenceBar from './components/PresenceBar.jsx';
+import ShareDialog from './components/ShareDialog.jsx';
 import CollabClient from './collab.js';
 import {
   getToken,
@@ -63,6 +64,7 @@ function App() {
   const [ctxMenu, setCtxMenu] = useState({ visible: false, x: 0, y: 0, target: null });
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
+  const [shareTarget, setShareTarget] = useState(null); // {namespace, path}
   const [initialized, setInitialized] = useState(false);
   const contentRef = useRef(content);
   const savedContentRef = useRef(savedContent);
@@ -480,7 +482,10 @@ function App() {
         break;
       }
       case 'manage-access': {
-        if (isAdmin && isMulti) setShowAdminPanel(true);
+        if (isAdmin && isMulti && selectedNs) {
+          const folderPath = target?.path ? '/' + target.path : '/';
+          setShareTarget({ namespace: selectedNs, path: folderPath });
+        }
         break;
       }
       case 'rename': {
@@ -685,6 +690,13 @@ function App() {
       </div>
       {showChangePassword && (
         <Settings onClose={() => setShowChangePassword(false)} />
+      )}
+      {shareTarget && (
+        <ShareDialog
+          namespace={shareTarget.namespace}
+          path={shareTarget.path}
+          onClose={() => setShareTarget(null)}
+        />
       )}
       <ContextMenu
         visible={ctxMenu.visible}
