@@ -142,3 +142,25 @@ Changed endpoints:
 | `PUT /api/note` | Accepts `If-Match` header, returns 409 on conflict. Response includes `etag` field. |
 | `GET /api/namespaces` | In multi mode, filtered to user's granted namespaces |
 | `GET /api/tree` | In multi mode, filtered to user's granted directories |
+
+---
+
+## v1.0 — Self-Hosted Private Knowledge Base
+
+The initial release. A single-user, file-based markdown notes app.
+
+### Features
+- **Markdown editor** with live preview, split view, and formatting toolbar
+- **Mermaid diagrams** rendered inline with interactive fullscreen viewer
+- **Task checkboxes** — click to toggle in preview, auto-saves to file
+- **Image upload** — paste or drag images into the editor
+- **Full-text search** with concurrent file reading and cached file index
+- **Namespace model** — mount multiple host directories as separate workspaces
+- **REST API** with JWT and API token authentication
+- **MCP server** for AI agent integration (Claude, Cursor)
+- **CLI tool** (`mdnest`) for terminal-based note access from any machine
+- **Git sync** — optional auto-commit and push to private repos
+- **Mobile responsive** — works on phone, tablet, desktop
+- **Docker deployment** — multi-stage builds, nginx proxy, alpine runtime
+- **Private by default** — binds to localhost, no cloud, no telemetry
+- **Tailscale ready** — one command for encrypted remote access
