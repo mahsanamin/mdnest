@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 
-function ContextMenu({ visible, x, y, target, onAction, onClose, canWrite, isAdmin }) {
+function ContextMenu({ visible, x, y, target, onAction, onClose, canWrite, isAdmin, selectedNs }) {
   const menuRef = useRef(null);
 
   useEffect(() => {
@@ -80,8 +80,14 @@ function ContextMenu({ visible, x, y, target, onAction, onClose, canWrite, isAdm
     items.push({ label: 'Delete', action: 'delete-file', danger: true });
   }
 
-  if ((isFolder || isEmptyArea) && isAdmin) {
+  // Copy path — available for both files and folders
+  if (isFile || isFolder) {
     if (items.length > 0) items.push({ separator: true });
+    items.push({ label: 'Copy Path', action: 'copy-path' });
+  }
+
+  if ((isFolder || isEmptyArea) && isAdmin) {
+    if (!isFile && !isFolder) items.push({ separator: true });
     items.push({ label: 'Manage Access', action: 'manage-access' });
   }
 

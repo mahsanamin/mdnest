@@ -481,6 +481,18 @@ function App() {
         } catch (e) { alert('Failed to delete folder: ' + e.message); }
         break;
       }
+      case 'copy-path': {
+        if (target && selectedNs) {
+          const fullPath = `${selectedNs}/${target.path}`;
+          navigator.clipboard.writeText(fullPath).then(() => {
+            // Brief visual feedback could be added here
+          }).catch(() => {
+            // Fallback for older browsers
+            prompt('Copy this path:', fullPath);
+          });
+        }
+        break;
+      }
       case 'manage-access': {
         if (isAdmin && isMulti && selectedNs) {
           const folderPath = target?.path ? '/' + target.path : '/';
@@ -707,6 +719,7 @@ function App() {
         onClose={handleCloseContextMenu}
         canWrite={canWrite}
         isAdmin={isAdmin && isMulti}
+        selectedNs={selectedNs}
       />
     </div>
   );
