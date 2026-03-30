@@ -127,14 +127,26 @@ export async function getTree(ns) {
 export async function getNote(ns, path) {
   const res = await request(`/note?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}`);
   if (!res.ok) throw new Error('Failed to get note');
-  return res.text();
+  const text = await res.text();
+  const etag = res.headers.get('ETag');
+  return { text, etag };
 }
 
-export async function saveNote(ns, path, content) {
+export async function saveNote(ns, path, content, ifMatch) {
+  const headers = {};
+  if (ifMatch) headers['If-Match'] = ifMatch;
   const res = await request(`/note?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}`, {
     method: 'PUT',
+    headers,
     body: content,
   });
+  if (res.status === 409) {
+    const data = await res.json().catch(() => ({}));
+    const err = new Error(data.error || 'File was modified');
+    err.status = 409;
+    err.etag = data.etag;
+    throw err;
+  }
   if (!res.ok) throw new Error('Failed to save note');
   return res.json();
 }

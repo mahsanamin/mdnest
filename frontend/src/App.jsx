@@ -7,6 +7,8 @@ import Preview from './components/Preview.jsx';
 import ContextMenu from './components/ContextMenu.jsx';
 import Settings from './components/Settings.jsx';
 import AdminPanel from './components/AdminPanel.jsx';
+import PresenceBar from './components/PresenceBar.jsx';
+import CollabClient from './collab.js';
 import {
   getToken,
   getNote,
@@ -68,10 +70,17 @@ function App() {
   savedContentRef.current = savedContent;
 
   // Multi-user state
-  const [appConfig, setAppConfig] = useState(null); // {authMode, version}
+  const [appConfig, setAppConfig] = useState(null); // {authMode, version, liveCollab}
   const [userInfo, setUserInfo] = useState(null); // {id, username, role, grants}
   const isMulti = appConfig?.authMode === 'multi';
   const isAdmin = !isMulti || userInfo?.role === 'admin';
+
+  // Live collaboration state
+  const [presenceUsers, setPresenceUsers] = useState([]);
+  const [remoteCursors, setRemoteCursors] = useState({});
+  const [conflictBanner, setConflictBanner] = useState(null); // {username, etag}
+  const etagRef = useRef(null);
+  const collabRef = useRef(null);
 
   // Determine write access for current namespace/path
   const canWrite = useCallback((path) => {
@@ -95,6 +104,56 @@ function App() {
   useEffect(() => {
     fetchConfig().then(setAppConfig).catch(() => setAppConfig({ authMode: 'single', version: '1.0' }));
   }, []);
+
+  // Initialize collab client
+  useEffect(() => {
+    if (!appConfig?.liveCollab) return;
+    const client = new CollabClient((msg) => {
+      switch (msg.type) {
+        case 'presence':
+          setPresenceUsers(msg.users || []);
+          break;
+        case 'cursor':
+          setRemoteCursors((prev) => ({ ...prev, [msg.userId]: { ...msg, type: 'cursor' } }));
+          break;
+        case 'selection':
+          setRemoteCursors((prev) => ({ ...prev, [msg.userId]: { ...msg, type: 'selection' } }));
+          break;
+        case 'leave':
+          setRemoteCursors((prev) => { const n = { ...prev }; delete n[msg.userId]; return n; });
+          setPresenceUsers((prev) => prev.filter((u) => u.id !== msg.userId));
+          break;
+        case 'file-changed':
+          // Another user saved — check if we have unsaved changes
+          if (contentRef.current === savedContentRef.current) {
+            // No unsaved changes — auto-reload
+            etagRef.current = msg.etag;
+            // Trigger re-fetch handled by the auto-refresh or we do it inline
+            setConflictBanner(null);
+          } else {
+            setConflictBanner({ username: msg.username, etag: msg.etag });
+          }
+          break;
+      }
+    });
+    collabRef.current = client;
+    return () => { client.disconnect(); collabRef.current = null; };
+  }, [appConfig?.liveCollab]);
+
+  // Connect/disconnect collab when note changes
+  useEffect(() => {
+    if (!collabRef.current || !selectedNs || !currentPath) {
+      if (collabRef.current) collabRef.current.disconnect();
+      setPresenceUsers([]);
+      setRemoteCursors({});
+      setConflictBanner(null);
+      return;
+    }
+    collabRef.current.connect(selectedNs, currentPath);
+    setPresenceUsers([]);
+    setRemoteCursors({});
+    setConflictBanner(null);
+  }, [selectedNs, currentPath]);
 
   const loadNamespaces = useCallback(async () => {
     try {
@@ -157,9 +216,10 @@ function App() {
 
     refreshTree(selectedNs).then(() => {
       if (currentPath) {
-        getNote(selectedNs, currentPath).then((text) => {
+        getNote(selectedNs, currentPath).then(({ text, etag }) => {
           setContent(text);
           setSavedContent(text);
+          etagRef.current = etag;
         }).catch(() => {
           setCurrentPath(null);
           setContent('');
@@ -179,10 +239,11 @@ function App() {
     if (!authenticated || !selectedNs || !currentPath) return;
     const interval = setInterval(async () => {
       try {
-        const remote = await getNote(selectedNs, currentPath);
+        const { text: remote, etag } = await getNote(selectedNs, currentPath);
         if (contentRef.current === savedContentRef.current && remote !== savedContentRef.current) {
           setContent(remote);
           setSavedContent(remote);
+          etagRef.current = etag;
           refreshTree(selectedNs);
         }
       } catch (e) {
@@ -222,10 +283,11 @@ function App() {
 
   const openNoteDirect = useCallback(async (ns, path) => {
     try {
-      const text = await getNote(ns, path);
+      const { text, etag } = await getNote(ns, path);
       setCurrentPath(path);
       setContent(text);
       setSavedContent(text);
+      etagRef.current = etag;
     } catch (e) {
       console.error('Failed to open note:', e);
     }
@@ -243,10 +305,12 @@ function App() {
   const openNote = useCallback(async (path) => {
     if (!selectedNs) return;
     try {
-      const text = await getNote(selectedNs, path);
+      const { text, etag } = await getNote(selectedNs, path);
       setCurrentPath(path);
       setContent(text);
       setSavedContent(text);
+      etagRef.current = etag;
+      setConflictBanner(null);
       setSidebarVisible(false);
     } catch (e) {
       if (e.name === 'PermissionError') {
@@ -259,14 +323,18 @@ function App() {
 
   const handleContentChange = useCallback((newContent) => {
     setContent(newContent);
+    setConflictBanner(null);
     if (saveTimer) clearTimeout(saveTimer);
     const timer = setTimeout(async () => {
       if (currentPath && selectedNs) {
         try {
-          await saveNote(selectedNs, currentPath, newContent);
+          const result = await saveNote(selectedNs, currentPath, newContent, etagRef.current);
           setSavedContent(newContent);
+          if (result.etag) etagRef.current = result.etag;
         } catch (e) {
-          if (e.name === 'PermissionError') {
+          if (e.status === 409) {
+            setConflictBanner({ username: 'another user', etag: e.etag });
+          } else if (e.name === 'PermissionError') {
             console.error('Save blocked: no write permission');
           } else {
             console.error('Auto-save failed:', e);
@@ -276,6 +344,15 @@ function App() {
     }, 800);
     setSaveTimer(timer);
   }, [currentPath, selectedNs, saveTimer]);
+
+  // Send cursor position to collab
+  const handleCursorChange = useCallback((line, ch) => {
+    if (collabRef.current) collabRef.current.sendCursor(line, ch);
+  }, []);
+
+  const handleSelectionChange = useCallback((fromLine, fromCh, toLine, toCh) => {
+    if (collabRef.current) collabRef.current.sendSelection(fromLine, fromCh, toLine, toCh);
+  }, []);
 
   const handleCheckboxToggle = useCallback(async (lineIndex) => {
     const lines = content.split('\n');
@@ -430,14 +507,30 @@ function App() {
     await refreshTree(selectedNs);
     if (currentPath) {
       try {
-        const text = await getNote(selectedNs, currentPath);
+        const { text, etag } = await getNote(selectedNs, currentPath);
         setContent(text);
         setSavedContent(text);
+        etagRef.current = etag;
+        setConflictBanner(null);
       } catch (e) {
         // Note may have been deleted
       }
     }
   }, [authenticated, selectedNs, currentPath, refreshTree]);
+
+  // Reload note content (used by conflict banner)
+  const handleReloadNote = useCallback(async () => {
+    if (!selectedNs || !currentPath) return;
+    try {
+      const { text, etag } = await getNote(selectedNs, currentPath);
+      setContent(text);
+      setSavedContent(text);
+      etagRef.current = etag;
+      setConflictBanner(null);
+    } catch (e) {
+      console.error('Failed to reload:', e);
+    }
+  }, [selectedNs, currentPath]);
 
   const handleToolbarRename = useCallback(() => {
     if (!currentPath || !selectedNs) return;
@@ -489,6 +582,16 @@ function App() {
           onViewModeChange={setViewMode}
           onRefresh={handleRefresh}
         />
+        {appConfig?.liveCollab && presenceUsers.length > 1 && (
+          <PresenceBar users={presenceUsers} currentUserId={userInfo?.id} />
+        )}
+        {conflictBanner && (
+          <div className="conflict-banner">
+            This file was modified by {conflictBanner.username}. Your changes may conflict.
+            <button onClick={handleReloadNote}>Reload</button>
+            <button onClick={() => setConflictBanner(null)}>Dismiss</button>
+          </div>
+        )}
         <div className="split-view">
           {currentPath ? (
             <>
@@ -503,6 +606,9 @@ function App() {
                     currentPath={currentPath}
                     ns={selectedNs}
                     readOnly={!canWriteCurrent}
+                    onCursorChange={appConfig?.liveCollab ? handleCursorChange : null}
+                    onSelectionChange={appConfig?.liveCollab ? handleSelectionChange : null}
+                    remoteCursors={appConfig?.liveCollab ? remoteCursors : null}
                   />
                 </div>
               )}

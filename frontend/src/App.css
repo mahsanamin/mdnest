@@ -1874,3 +1874,69 @@
   background: #45475a;
   margin: 4px 8px;
 }
+
+/* ===== Presence bar ===== */
+.presence-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  background: #181825;
+  border-bottom: 1px solid #313244;
+  font-size: 0.78rem;
+  color: #6c7086;
+  flex-shrink: 0;
+}
+
+.presence-dot {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: #1e1e2e;
+  flex-shrink: 0;
+}
+
+.presence-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ===== Conflict banner ===== */
+.conflict-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #f9e2af22;
+  border-bottom: 1px solid #f9e2af44;
+  color: #f9e2af;
+  font-size: 0.82rem;
+  flex-shrink: 0;
+}
+
+.conflict-banner button {
+  background: #313244;
+  color: #cdd6f4;
+  border: none;
+  padding: 3px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.conflict-banner button:first-of-type {
+  background: #f9e2af;
+  color: #1e1e2e;
+  font-weight: 600;
+}
+
+.conflict-banner button:hover {
+  opacity: 0.9;
+}

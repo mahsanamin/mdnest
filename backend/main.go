@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/mdnest/mdnest/backend/collab"
 	"github.com/mdnest/mdnest/backend/handlers"
 	"github.com/mdnest/mdnest/backend/middleware"
 	"github.com/mdnest/mdnest/backend/store"
@@ -105,8 +106,19 @@ func main() {
 		perms = middleware.NewPermissionChecker(grantStore)
 	}
 
+	// Live collaboration hub (optional, multi mode only)
+	enableCollab := multiMode && env("ENABLE_LIVE_COLLAB", "false") == "true"
+	var collabHub *collab.Hub
+	if enableCollab {
+		collabHub = collab.NewHub()
+		log.Println("live collaboration enabled (WebSocket)")
+	}
+
 	nsHandler := handlers.NewNamespaceHandler(absNotesDir, perms)
 	noteHandler := handlers.NewNoteHandler(absNotesDir)
+	if collabHub != nil {
+		noteHandler.SetCollabHub(collabHub)
+	}
 	treeHandler := handlers.NewTreeHandler(absNotesDir)
 	uploadHandler := handlers.NewUploadHandler(absNotesDir)
 	moveHandler := handlers.NewMoveHandler(absNotesDir)
@@ -128,7 +140,7 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	configHandler := handlers.NewConfigHandler(authMode)
+	configHandler := handlers.NewConfigHandler(authMode, enableCollab)
 	mux.HandleFunc("/api/config", configHandler.HandleConfig)
 	mux.HandleFunc("/api/auth/login", authHandler.Login)
 	mux.Handle("/api/auth/change-password", authMiddleware.Wrap(http.HandlerFunc(authHandler.ChangePassword)))
@@ -164,6 +176,12 @@ func main() {
 		mux.Handle("/api/admin/users", authMiddleware.Wrap(middleware.RequireAdmin(http.HandlerFunc(adminHandler.HandleUsers))))
 		mux.Handle("/api/admin/grants", authMiddleware.Wrap(middleware.RequireAdmin(http.HandlerFunc(adminHandler.HandleGrants))))
 		mux.Handle("/api/me", authMiddleware.Wrap(http.HandlerFunc(meHandler.HandleMe)))
+	}
+
+	// WebSocket route for live collaboration (no auth middleware — JWT verified in handler)
+	if enableCollab {
+		wsHandler := handlers.NewWSHandler(collabHub, jwtSecret)
+		mux.HandleFunc("/api/ws", wsHandler.HandleWS)
 	}
 
 	handler := corsMiddleware.Wrap(mux)

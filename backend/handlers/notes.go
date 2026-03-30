@@ -1,22 +1,38 @@
 package handlers
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/mdnest/mdnest/backend/collab"
+	"github.com/mdnest/mdnest/backend/middleware"
 )
 
 const maxNoteSize = 10 << 20 // 10MB
 
 type NoteHandler struct {
 	notesDir string
+	hub      *collab.Hub // nil when collab disabled
 }
 
 func NewNoteHandler(notesDir string) *NoteHandler {
 	return &NoteHandler{notesDir: notesDir}
+}
+
+// SetCollabHub sets the collaboration hub for broadcasting file changes.
+func (h *NoteHandler) SetCollabHub(hub *collab.Hub) {
+	h.hub = hub
+}
+
+func contentETag(data []byte) string {
+	hash := sha256.Sum256(data)
+	return `"` + hex.EncodeToString(hash[:16]) + `"`
 }
 
 func (h *NoteHandler) Handle(w http.ResponseWriter, r *http.Request) {
@@ -57,6 +73,7 @@ func (h *NoteHandler) getNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	w.Header().Set("ETag", contentETag(data))
 	w.Write(data)
 }
 
@@ -65,16 +82,41 @@ func (h *NoteHandler) updateNote(w http.ResponseWriter, r *http.Request) {
 	if nsDir == "" {
 		return
 	}
+	ns := r.URL.Query().Get("ns")
 	reqPath := r.URL.Query().Get("path")
 	absPath := SafePath(nsDir, reqPath)
 	if absPath == "" {
 		http.Error(w, `{"error":"invalid path"}`, http.StatusBadRequest)
 		return
 	}
-	if _, err := os.Stat(absPath); os.IsNotExist(err) {
-		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+
+	// Read current file for existence check and ETag verification
+	currentData, err := os.ReadFile(absPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+			return
+		}
+		http.Error(w, `{"error":"failed to read file"}`, http.StatusInternalServerError)
 		return
 	}
+
+	// If-Match: optimistic locking for conflict detection
+	ifMatch := r.Header.Get("If-Match")
+	if ifMatch != "" {
+		currentETag := contentETag(currentData)
+		if ifMatch != currentETag {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("ETag", currentETag)
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]string{
+				"error": "file was modified by another user",
+				"etag":  currentETag,
+			})
+			return
+		}
+	}
+
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxNoteSize))
 	if err != nil {
 		http.Error(w, `{"error":"failed to read body"}`, http.StatusBadRequest)
@@ -88,8 +130,24 @@ func (h *NoteHandler) updateNote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"failed to write file"}`, http.StatusInternalServerError)
 		return
 	}
+
+	newETag := contentETag(body)
+
+	// Broadcast file-changed to other users on this note
+	if h.hub != nil {
+		uc := middleware.UserFromContext(r.Context())
+		username := "unknown"
+		userID := 0
+		if uc != nil {
+			username = uc.Username
+			userID = uc.ID
+		}
+		h.hub.BroadcastFileChanged(ns, reqPath, userID, username, newETag)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	w.Header().Set("ETag", newETag)
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok", "etag": newETag})
 }
 
 func (h *NoteHandler) createNote(w http.ResponseWriter, r *http.Request) {

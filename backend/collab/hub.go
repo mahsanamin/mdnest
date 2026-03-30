@@ -1,0 +1,221 @@
+package collab
+
+import (
+	"encoding/json"
+	"log"
+	"sync"
+)
+
+// Hub manages WebSocket connections grouped by note (namespace + path).
+// All state is in-memory — no external services needed.
+type Hub struct {
+	mu    sync.RWMutex
+	notes map[string]map[int]*Conn // noteKey -> userID -> connection
+}
+
+// NewHub creates a new collaboration hub.
+func NewHub() *Hub {
+	return &Hub{
+		notes: make(map[string]map[int]*Conn),
+	}
+}
+
+// noteKey builds a unique key for a note.
+func noteKey(ns, path string) string {
+	return ns + ":" + path
+}
+
+// UserInfo identifies a connected user.
+type UserInfo struct {
+	ID       int    `json:"id"`
+	Username string `json:"username"`
+	Color    string `json:"color"`
+}
+
+// Message types sent/received over WebSocket.
+type IncomingMessage struct {
+	Type      string `json:"type"` // "cursor" or "selection"
+	Line      int    `json:"line,omitempty"`
+	Ch        int    `json:"ch,omitempty"`
+	FromLine  int    `json:"fromLine,omitempty"`
+	FromCh    int    `json:"fromCh,omitempty"`
+	ToLine    int    `json:"toLine,omitempty"`
+	ToCh      int    `json:"toCh,omitempty"`
+}
+
+type OutgoingMessage struct {
+	Type     string      `json:"type"`
+	UserID   int         `json:"userId,omitempty"`
+	Username string      `json:"username,omitempty"`
+	Color    string      `json:"color,omitempty"`
+	Users    []UserInfo  `json:"users,omitempty"`
+	Line     int         `json:"line,omitempty"`
+	Ch       int         `json:"ch,omitempty"`
+	FromLine int         `json:"fromLine,omitempty"`
+	FromCh   int         `json:"fromCh,omitempty"`
+	ToLine   int         `json:"toLine,omitempty"`
+	ToCh     int         `json:"toCh,omitempty"`
+	By       int         `json:"by,omitempty"`
+	ETag     string      `json:"etag,omitempty"`
+}
+
+// Color palette for user cursors (Catppuccin colors).
+var cursorColors = []string{
+	"#89b4fa", // blue
+	"#a6e3a1", // green
+	"#f9e2af", // yellow
+	"#f38ba8", // red
+	"#cba6f7", // mauve
+	"#fab387", // peach
+	"#94e2d5", // teal
+	"#f5c2e7", // pink
+	"#74c7ec", // sapphire
+	"#eba0ac", // maroon
+}
+
+func colorForUser(userID int) string {
+	return cursorColors[userID%len(cursorColors)]
+}
+
+// Join adds a connection to a note's presence.
+func (h *Hub) Join(ns, path string, conn *Conn) {
+	key := noteKey(ns, path)
+	h.mu.Lock()
+	if h.notes[key] == nil {
+		h.notes[key] = make(map[int]*Conn)
+	}
+	h.notes[key][conn.User.ID] = conn
+	h.mu.Unlock()
+
+	log.Printf("collab: %s joined %s (%d users)", conn.User.Username, key, h.countUsers(key))
+
+	// Broadcast updated presence to all users on this note
+	h.broadcastPresence(key)
+
+	// Send join event to others
+	h.broadcastToOthers(key, conn.User.ID, OutgoingMessage{
+		Type:     "join",
+		UserID:   conn.User.ID,
+		Username: conn.User.Username,
+		Color:    conn.User.Color,
+	})
+}
+
+// Leave removes a connection from a note's presence.
+func (h *Hub) Leave(ns, path string, userID int) {
+	key := noteKey(ns, path)
+	h.mu.Lock()
+	if conns, ok := h.notes[key]; ok {
+		delete(conns, userID)
+		if len(conns) == 0 {
+			delete(h.notes, key)
+		}
+	}
+	h.mu.Unlock()
+
+	log.Printf("collab: user %d left %s (%d users)", userID, key, h.countUsers(key))
+
+	// Broadcast updated presence and leave event
+	h.broadcastPresence(key)
+	h.broadcastToOthers(key, userID, OutgoingMessage{
+		Type:   "leave",
+		UserID: userID,
+	})
+}
+
+// BroadcastCursor sends a cursor update from one user to all others on the note.
+func (h *Hub) BroadcastCursor(ns, path string, from *Conn, msg IncomingMessage) {
+	key := noteKey(ns, path)
+	h.broadcastToOthers(key, from.User.ID, OutgoingMessage{
+		Type:     "cursor",
+		UserID:   from.User.ID,
+		Username: from.User.Username,
+		Color:    from.User.Color,
+		Line:     msg.Line,
+		Ch:       msg.Ch,
+	})
+}
+
+// BroadcastSelection sends a selection update from one user to all others.
+func (h *Hub) BroadcastSelection(ns, path string, from *Conn, msg IncomingMessage) {
+	key := noteKey(ns, path)
+	h.broadcastToOthers(key, from.User.ID, OutgoingMessage{
+		Type:     "selection",
+		UserID:   from.User.ID,
+		Username: from.User.Username,
+		Color:    from.User.Color,
+		FromLine: msg.FromLine,
+		FromCh:   msg.FromCh,
+		ToLine:   msg.ToLine,
+		ToCh:     msg.ToCh,
+	})
+}
+
+// BroadcastFileChanged notifies all users on a note that it was saved.
+func (h *Hub) BroadcastFileChanged(ns, path string, byUserID int, byUsername string, etag string) {
+	key := noteKey(ns, path)
+	h.broadcastToOthers(key, byUserID, OutgoingMessage{
+		Type:     "file-changed",
+		By:       byUserID,
+		Username: byUsername,
+		ETag:     etag,
+	})
+}
+
+func (h *Hub) broadcastPresence(key string) {
+	h.mu.RLock()
+	conns := h.notes[key]
+	if conns == nil {
+		h.mu.RUnlock()
+		return
+	}
+
+	users := make([]UserInfo, 0, len(conns))
+	for _, c := range conns {
+		users = append(users, c.User)
+	}
+
+	msg := OutgoingMessage{
+		Type:  "presence",
+		Users: users,
+	}
+	data, _ := json.Marshal(msg)
+
+	// Copy connections to avoid holding lock during send
+	targets := make([]*Conn, 0, len(conns))
+	for _, c := range conns {
+		targets = append(targets, c)
+	}
+	h.mu.RUnlock()
+
+	for _, c := range targets {
+		c.Send(data)
+	}
+}
+
+func (h *Hub) broadcastToOthers(key string, excludeUserID int, msg OutgoingMessage) {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return
+	}
+
+	h.mu.RLock()
+	conns := h.notes[key]
+	targets := make([]*Conn, 0, len(conns))
+	for uid, c := range conns {
+		if uid != excludeUserID {
+			targets = append(targets, c)
+		}
+	}
+	h.mu.RUnlock()
+
+	for _, c := range targets {
+		c.Send(data)
+	}
+}
+
+func (h *Hub) countUsers(key string) int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return len(h.notes[key])
+}

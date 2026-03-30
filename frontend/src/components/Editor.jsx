@@ -2,7 +2,7 @@ import { useRef, useCallback } from 'react';
 import { uploadImage } from '../api.js';
 import EditorToolbar from './EditorToolbar.jsx';
 
-function Editor({ content, onChange, currentPath, ns, readOnly }) {
+function Editor({ content, onChange, currentPath, ns, readOnly, onCursorChange, onSelectionChange, remoteCursors }) {
   const textareaRef = useRef(null);
 
   const getSelection = () => {
@@ -100,6 +100,25 @@ function Editor({ content, onChange, currentPath, ns, readOnly }) {
     }
   }, [ns, currentPath, insertAtCursor]);
 
+  const emitCursor = useCallback(() => {
+    if (!onCursorChange && !onSelectionChange) return;
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    const before = content.substring(0, start);
+    const line = before.split('\n').length - 1;
+    const ch = start - before.lastIndexOf('\n') - 1;
+    if (start === end) {
+      if (onCursorChange) onCursorChange(line, ch);
+    } else {
+      const beforeEnd = content.substring(0, end);
+      const endLine = beforeEnd.split('\n').length - 1;
+      const endCh = end - beforeEnd.lastIndexOf('\n') - 1;
+      if (onSelectionChange) onSelectionChange(line, ch, endLine, endCh);
+    }
+  }, [content, onCursorChange, onSelectionChange]);
+
   const handleKeyDown = (e) => {
     if (e.key === 'Tab') {
       e.preventDefault();
@@ -151,6 +170,9 @@ function Editor({ content, onChange, currentPath, ns, readOnly }) {
         placeholder={readOnly ? '' : 'Start writing...'}
         spellCheck={false}
         readOnly={readOnly}
+        onClick={emitCursor}
+        onKeyUp={emitCursor}
+        onSelect={emitCursor}
       />
     </div>
   );

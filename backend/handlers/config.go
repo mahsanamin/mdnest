@@ -7,12 +7,13 @@ import (
 
 // ConfigHandler returns public configuration (no auth required).
 type ConfigHandler struct {
-	authMode string
+	authMode  string
+	liveCollab bool
 }
 
 // NewConfigHandler creates a new config handler.
-func NewConfigHandler(authMode string) *ConfigHandler {
-	return &ConfigHandler{authMode: authMode}
+func NewConfigHandler(authMode string, liveCollab bool) *ConfigHandler {
+	return &ConfigHandler{authMode: authMode, liveCollab: liveCollab}
 }
 
 // HandleConfig handles GET /api/config (unauthenticated).
@@ -22,8 +23,9 @@ func (h *ConfigHandler) HandleConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
-		"authMode": h.authMode,
-		"version":  "2.0",
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"authMode":   h.authMode,
+		"liveCollab": h.liveCollab,
+		"version":    "2.0",
 	})
 }
