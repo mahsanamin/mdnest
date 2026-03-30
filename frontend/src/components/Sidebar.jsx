@@ -1,6 +1,6 @@
-import { useRef, useCallback, useState, useEffect } from 'react';
+import { useRef, useCallback, useState, useEffect, useMemo } from 'react';
 import TreeNode from './TreeNode.jsx';
-import { searchNotes } from '../api.js';
+import { searchNotes, adminSyncNamespace } from '../api.js';
 
 // Filter tree nodes by filename match (case-insensitive)
 function filterTree(nodes, query) {
@@ -34,7 +34,30 @@ function Sidebar({
   onDrop,
   visible,
   onClose,
+  userInfo,
+  onLogout,
+  onAdminPanel,
+  onNewNote,
+  onNewFolder,
+  onRefreshTree,
+  isAdmin,
+  width,
+  onResize,
 }) {
+  const [syncing, setSyncing] = useState(false);
+
+  const handleSync = useCallback(async () => {
+    if (syncing || !selectedNs) return;
+    setSyncing(true);
+    try {
+      await adminSyncNamespace(selectedNs);
+      if (onRefreshTree) await onRefreshTree();
+    } catch (e) {
+      console.error('Sync failed:', e);
+    } finally {
+      setSyncing(false);
+    }
+  }, [syncing, selectedNs, onRefreshTree]);
   const treeAreaRef = useRef(null);
   const longPressTimer = useRef(null);
   const touchMoved = useRef(false);
@@ -117,7 +140,7 @@ function Sidebar({
   return (
     <>
       {visible && <div className="sidebar-backdrop" onClick={onClose} />}
-      <div className={`sidebar${visible ? ' sidebar-open' : ''}`}>
+      <div className={`sidebar${visible ? ' sidebar-open' : ''}`} style={width ? { width: width, minWidth: width } : undefined}>
         <div className="sidebar-header">
           {namespaces.length > 1 ? (
             <select
@@ -133,6 +156,14 @@ function Sidebar({
             <span className="ns-label">{selectedNs || 'mdnest'}</span>
           )}
           <div className="sidebar-tree-controls">
+            {isAdmin && (
+              <button
+                className={`tree-control-btn${syncing ? ' spinning' : ''}`}
+                onClick={handleSync}
+                disabled={syncing}
+                title="Git pull & refresh"
+              >&#8635;</button>
+            )}
             <button
               className="tree-control-btn"
               onClick={() => { handleExpandAll(); resetExpandAll(); }}
@@ -157,6 +188,12 @@ function Sidebar({
             <button className="search-clear" onClick={() => setSearchQuery('')}>x</button>
           )}
         </div>
+        {(onNewNote || onNewFolder) && (
+          <div className="sidebar-actions">
+            {onNewNote && <button className="sidebar-action-btn" onClick={onNewNote}>+ Note</button>}
+            {onNewFolder && <button className="sidebar-action-btn" onClick={onNewFolder}>+ Folder</button>}
+          </div>
+        )}
 
         {showContentResults && (
           <div className="search-results">
@@ -213,8 +250,84 @@ function Sidebar({
             <div className="sidebar-empty">No files yet</div>
           )}
         </div>
+        {(userInfo || onLogout) && (
+          <UserFooter userInfo={userInfo} onLogout={onLogout} onAdminPanel={onAdminPanel} />
+        )}
+        {onResize && (
+          <div
+            className="sidebar-resize-handle"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              const startX = e.clientX;
+              const startWidth = width || 260;
+              const onMove = (ev) => {
+                const newWidth = Math.min(600, Math.max(180, startWidth + ev.clientX - startX));
+                onResize(newWidth);
+              };
+              const onUp = () => {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+              };
+              document.body.style.cursor = 'col-resize';
+              document.body.style.userSelect = 'none';
+              document.addEventListener('mousemove', onMove);
+              document.addEventListener('mouseup', onUp);
+            }}
+          />
+        )}
       </div>
     </>
+  );
+}
+
+function UserFooter({ userInfo, onLogout, onAdminPanel }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef(null);
+
+  const initials = useMemo(() => {
+    if (!userInfo?.username) return '?';
+    return userInfo.username.slice(0, 2).toUpperCase();
+  }, [userInfo]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handleClick = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [menuOpen]);
+
+  return (
+    <div className="sidebar-footer" ref={menuRef}>
+      <div className="sidebar-user-row" onClick={() => setMenuOpen(!menuOpen)}>
+        <div className="user-avatar">{initials}</div>
+        <div className="sidebar-user-info">
+          <span className="sidebar-username">{userInfo?.username || 'User'}</span>
+          <span className="sidebar-role">{userInfo?.role || ''}</span>
+        </div>
+      </div>
+      {menuOpen && (
+        <div className="user-menu">
+          {onAdminPanel && (
+            <div className="user-menu-item" onClick={() => { setMenuOpen(false); onAdminPanel(); }}>
+              <span className="user-menu-icon">&#9881;</span>
+              Manage Users & Access
+            </div>
+          )}
+          {onLogout && (
+            <div className="user-menu-item" onClick={() => { setMenuOpen(false); onLogout(); }}>
+              <span className="user-menu-icon">&#8618;</span>
+              Sign Out
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

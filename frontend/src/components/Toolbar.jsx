@@ -1,61 +1,60 @@
-function Toolbar({ currentPath, onToggleSidebar, onNewNote, onNewFolder, onChangePassword, onRename, onDelete, viewMode, onViewModeChange }) {
-  let dirHint = '';
-  if (currentPath) {
-    const parts = currentPath.split('/');
-    parts.pop();
-    dirHint = parts.length > 0 ? parts.join('/') + '/' : '';
-  }
+import { useState, useCallback } from 'react';
 
+function Toolbar({ currentPath, onToggleSidebar, onChangePassword, onRename, onDelete, viewMode, onViewModeChange, onRefresh }) {
+  const [refreshing, setRefreshing] = useState(false);
+  const handleRefresh = useCallback(() => {
+    if (refreshing || !onRefresh) return;
+    setRefreshing(true);
+    onRefresh().finally(() => setTimeout(() => setRefreshing(false), 2000));
+  }, [refreshing, onRefresh]);
   return (
     <div className="toolbar">
       <button className="toolbar-hamburger" onClick={onToggleSidebar} title="Toggle sidebar">
         &#9776;
       </button>
-      <button onClick={onNewNote} title={dirHint ? `New note in ${dirHint}` : 'New note at root'}>
-        + Note
-      </button>
-      <button onClick={onNewFolder} title={dirHint ? `New folder in ${dirHint}` : 'New folder at root'}>
-        + Folder
-      </button>
       <span className="toolbar-path">
         {currentPath || 'No file selected'}
+        {currentPath && (onRename || onDelete) && (
+          <span className="toolbar-path-actions">
+            {onRename && <button className="toolbar-inline-action" onClick={onRename} title="Rename">Rename</button>}
+            {onDelete && <button className="toolbar-inline-action danger" onClick={onDelete} title="Delete">Delete</button>}
+          </span>
+        )}
       </span>
       {currentPath && (
-        <>
-          <div className="toolbar-view-toggle">
-            <button
-              className={viewMode === 'editor' ? 'active' : ''}
-              onClick={() => onViewModeChange('editor')}
-              title="Editor only"
-            >
-              &#9998;
-            </button>
-            <button
-              className={viewMode === 'split' ? 'active' : ''}
-              onClick={() => onViewModeChange('split')}
-              title="Split view"
-            >
-              &#9109;
-            </button>
-            <button
-              className={viewMode === 'preview' ? 'active' : ''}
-              onClick={() => onViewModeChange('preview')}
-              title="Preview only"
-            >
-              &#9673;
-            </button>
-          </div>
-          <div className="toolbar-file-actions">
-            <button className="toolbar-action" onClick={onRename} title="Rename file">
-              Rename
-            </button>
-            <button className="toolbar-action danger" onClick={onDelete} title="Delete file">
-              Delete
-            </button>
-          </div>
-        </>
+        <div className="toolbar-view-toggle">
+          <button
+            className={viewMode === 'editor' ? 'active' : ''}
+            onClick={() => onViewModeChange('editor')}
+            title="Editor only"
+          >
+            &#9998;
+          </button>
+          <button
+            className={viewMode === 'split' ? 'active' : ''}
+            onClick={() => onViewModeChange('split')}
+            title="Split view"
+          >
+            &#9109;
+          </button>
+          <button
+            className={viewMode === 'preview' ? 'active' : ''}
+            onClick={() => onViewModeChange('preview')}
+            title="Preview only"
+          >
+            &#9673;
+          </button>
+        </div>
       )}
-      <button className="toolbar-settings" onClick={onChangePassword} title="Change credentials">
+      <button
+        className={`toolbar-refresh${refreshing ? ' spinning' : ''}`}
+        onClick={handleRefresh}
+        disabled={refreshing}
+        title="Refresh"
+      >
+        &#8635;
+      </button>
+      <button className="toolbar-settings" onClick={onChangePassword} title="Settings">
         &#9881;
       </button>
     </div>

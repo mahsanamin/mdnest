@@ -1,6 +1,7 @@
 #!/bin/bash
 set -e
 
+MDNEST_CLI_VERSION="2.0.0"
 CONFIG_DIR="${HOME}/.config/mdnest"
 CONFIG_FILE="${CONFIG_DIR}/config"
 
@@ -161,9 +162,21 @@ url=${url}
 token=${tok}
 EOF
     chmod 600 "$CONFIG_FILE"
-    MDNEST_URL="$url" MDNEST_TOKEN="$tok" api GET "/namespaces" > /dev/null 2>&1 \
-      && echo "Logged in to $url" \
-      || echo "Warning: could not reach $url — credentials saved, will retry on next command"
+    if MDNEST_URL="$url" MDNEST_TOKEN="$tok" api GET "/namespaces" > /dev/null 2>&1; then
+      echo "Logged in to $url"
+      # Check version compatibility
+      SERVER_VER=$(curl -s "${url}/api/config" 2>/dev/null | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
+      if [ -n "$SERVER_VER" ]; then
+        CLI_MAJOR="${MDNEST_CLI_VERSION%%.*}"
+        SRV_MAJOR="${SERVER_VER%%.*}"
+        if [ "$CLI_MAJOR" != "$SRV_MAJOR" ]; then
+          echo "Warning: CLI v${MDNEST_CLI_VERSION} may not be compatible with server v${SERVER_VER}"
+          echo "Update CLI: curl -fsSL https://raw.githubusercontent.com/mahsanamin/mdnest/v2.0/install-cli.sh | bash"
+        fi
+      fi
+    else
+      echo "Warning: could not reach $url — credentials saved, will retry on next command"
+    fi
     ;;
   logout)
     rm -f "$CONFIG_FILE"
@@ -172,11 +185,18 @@ EOF
   whoami)
     load_config
     if [ -n "$MDNEST_URL" ]; then
-      echo "Server: $MDNEST_URL"
-      echo "Token:  ${MDNEST_TOKEN:0:8}..."
+      echo "CLI:    v${MDNEST_CLI_VERSION}"
+      # Fetch server version
+      SERVER_INFO=$(curl -s "${MDNEST_URL}/api/config" 2>/dev/null || echo "{}")
+      SERVER_VER=$(echo "$SERVER_INFO" | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
+      [ -n "$SERVER_VER" ] && echo "Server: v${SERVER_VER} (${MDNEST_URL})" || echo "Server: $MDNEST_URL"
+      echo "Token:  ${MDNEST_TOKEN:0:12}..."
     else
-      echo "Not logged in"
+      echo "Not logged in. Run: mdnest login <url> <token>"
     fi
+    ;;
+  version|--version|-v)
+    echo "mdnest CLI v${MDNEST_CLI_VERSION}"
     ;;
   note)
     note_cmd "$@"
@@ -192,15 +212,16 @@ EOF
     fi
     ;;
   help|--help|-h)
-    cat <<'HELP'
-mdnest — notes on your terms
+    cat <<HELP
+mdnest CLI v${MDNEST_CLI_VERSION} — notes on your terms
 
 Usage: mdnest <command>
 
 Commands:
   login   <url> <token>     Authenticate with an mdnest server
   logout                    Remove saved credentials
-  whoami                    Show current server and token
+  whoami                    Show CLI version, server version, and connection info
+  version                   Show CLI version
   note    <subcommand>      Read, write, append, search notes (run 'mdnest note help')
   docs                      Print the full CLI reference
 

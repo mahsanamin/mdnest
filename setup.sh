@@ -49,6 +49,13 @@ while IFS= read -r line; do
     GIT_AUTHOR_NAME) GIT_AUTHOR_NAME="$value" ;;
     GIT_AUTHOR_EMAIL) GIT_AUTHOR_EMAIL="$value" ;;
     GIT_SYNC_INTERVAL) GIT_SYNC_INTERVAL="$value" ;;
+    AUTH_MODE) AUTH_MODE="$value" ;;
+    POSTGRES_HOST) POSTGRES_HOST="$value" ;;
+    POSTGRES_PORT) POSTGRES_PORT="$value" ;;
+    POSTGRES_DB) POSTGRES_DB="$value" ;;
+    POSTGRES_USER) POSTGRES_USER="$value" ;;
+    POSTGRES_PASSWORD) POSTGRES_PASSWORD="$value" ;;
+    ENABLE_LIVE_COLLAB) ENABLE_LIVE_COLLAB="$value" ;;
     SEARCH_MAX_RESULTS) SEARCH_MAX_RESULTS="$value" ;;
     SEARCH_MAX_FILE_SIZE) SEARCH_MAX_FILE_SIZE="$value" ;;
     SEARCH_WORKERS) SEARCH_WORKERS="$value" ;;
@@ -69,6 +76,23 @@ MDNEST_PASSWORD="${MDNEST_PASSWORD:-changeme}"
 MDNEST_JWT_SECRET="${MDNEST_JWT_SECRET:-changeme}"
 BIND_ADDRESS="${BIND_ADDRESS:-127.0.0.1}"
 FRONTEND_ORIGIN="${FRONTEND_ORIGIN:-http://localhost:$FRONTEND_PORT}"
+AUTH_MODE="${AUTH_MODE:-single}"
+
+# Validate multi mode config
+if [ "$AUTH_MODE" = "multi" ]; then
+  POSTGRES_HOST="${POSTGRES_HOST:-postgres}"
+  POSTGRES_PORT="${POSTGRES_PORT:-5432}"
+  POSTGRES_DB="${POSTGRES_DB:-mdnest}"
+  POSTGRES_USER="${POSTGRES_USER:-mdnest}"
+  if [ -z "$POSTGRES_PASSWORD" ]; then
+    echo "Error: AUTH_MODE=multi requires POSTGRES_PASSWORD to be set in $CONF."
+    exit 1
+  fi
+  echo "Auth mode: multi (PostgreSQL-backed users & permissions)"
+  echo "  Database: ${POSTGRES_USER}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}"
+else
+  echo "Auth mode: single (file-based, default)"
+fi
 
 if [ ${#MOUNT_NAMES[@]} -eq 0 ]; then
   echo "Error: No MOUNT_ entries found in $CONF."
@@ -93,7 +117,20 @@ SEARCH_MAX_RESULTS=${SEARCH_MAX_RESULTS:-30}
 SEARCH_MAX_FILE_SIZE=${SEARCH_MAX_FILE_SIZE:-1048576}
 SEARCH_WORKERS=${SEARCH_WORKERS:-8}
 SEARCH_CACHE_TTL=${SEARCH_CACHE_TTL:-30}
+AUTH_MODE=${AUTH_MODE}
+ENABLE_LIVE_COLLAB=${ENABLE_LIVE_COLLAB:-false}
 EOF
+
+if [ "$AUTH_MODE" = "multi" ]; then
+  cat >> .env <<EOF
+POSTGRES_HOST=${POSTGRES_HOST}
+POSTGRES_PORT=${POSTGRES_PORT}
+POSTGRES_DB=${POSTGRES_DB}
+POSTGRES_USER=${POSTGRES_USER}
+POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+EOF
+fi
+
 echo "Generated .env"
 
 # Build volume mount lines for backend
@@ -123,6 +160,46 @@ else
   echo "  Or one per namespace:    ssh-keygen -t ed25519 -f git-sync/keys/<namespace> -N \"\""
 fi
 
+# Build backend depends_on and extra environment for multi mode
+BACKEND_DEPENDS=""
+BACKEND_EXTRA_ENV=""
+POSTGRES_SERVICE=""
+EXTRA_VOLUMES=""
+
+if [ "$AUTH_MODE" = "multi" ]; then
+  BACKEND_EXTRA_ENV="      - POSTGRES_HOST=${POSTGRES_HOST}
+      - POSTGRES_PORT=${POSTGRES_PORT}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=\${POSTGRES_PASSWORD}
+"
+
+  # Only add postgres container if using default internal hostname
+  if [ "$POSTGRES_HOST" = "postgres" ]; then
+    BACKEND_DEPENDS="    depends_on:
+      postgres:
+        condition: service_healthy
+"
+    POSTGRES_SERVICE="
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=\${POSTGRES_PASSWORD}
+    volumes:
+      - mdnest-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: [\"CMD-SHELL\", \"pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}\"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+"
+    EXTRA_VOLUMES="  mdnest-pgdata:"
+  fi
+fi
+
 # Generate docker-compose.yml
 cat > docker-compose.yml <<EOF
 services:
@@ -132,12 +209,12 @@ services:
       - "${BIND_ADDRESS}:${BACKEND_PORT}:8080"
     env_file:
       - .env
-    volumes:
+${BACKEND_DEPENDS}    volumes:
 ${BACKEND_VOLUMES}      - mdnest-secrets:/data/secrets
     environment:
       - NOTES_DIR=/data/notes
       - SECRETS_DIR=/data/secrets
-    restart: unless-stopped
+${BACKEND_EXTRA_ENV}    restart: unless-stopped
 
   frontend:
     build: ./frontend
@@ -146,7 +223,7 @@ ${BACKEND_VOLUMES}      - mdnest-secrets:/data/secrets
     depends_on:
       - backend
     restart: unless-stopped
-
+${POSTGRES_SERVICE}
   git-sync:
     image: alpine/git:latest
     profiles:
@@ -167,6 +244,7 @@ ${GITSYNC_VOLUMES}      - ./git-sync/sync.sh:/sync.sh:ro
 
 volumes:
   mdnest-secrets:
+${EXTRA_VOLUMES}
 EOF
 
 echo "Generated docker-compose.yml"

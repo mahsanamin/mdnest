@@ -12,15 +12,28 @@ type TokenValidator interface {
 	ValidateAPIToken(token string) bool
 }
 
+// APITokenUserResolver resolves the user context for an API token.
+// Returns nil if the token has no associated user (single-user mode).
+type APITokenUserResolver interface {
+	ResolveAPITokenUser(token string) *UserContext
+}
+
 // AuthMiddleware validates JWT tokens or API tokens on protected routes.
 type AuthMiddleware struct {
 	secret         []byte
+	multiMode      bool
 	tokenValidator TokenValidator
+	tokenResolver  APITokenUserResolver
 }
 
 // NewAuthMiddleware creates a new auth middleware.
-func NewAuthMiddleware(secret string, tv TokenValidator) *AuthMiddleware {
-	return &AuthMiddleware{secret: []byte(secret), tokenValidator: tv}
+func NewAuthMiddleware(secret string, multiMode bool, tv TokenValidator, tr APITokenUserResolver) *AuthMiddleware {
+	return &AuthMiddleware{
+		secret:         []byte(secret),
+		multiMode:      multiMode,
+		tokenValidator: tv,
+		tokenResolver:  tr,
+	}
 }
 
 // Wrap wraps an http.Handler with authentication.
@@ -46,6 +59,12 @@ func (a *AuthMiddleware) Wrap(next http.Handler) http.Handler {
 		// Check if it's an API token (starts with mdnest_)
 		if strings.HasPrefix(tokenString, "mdnest_") {
 			if a.tokenValidator != nil && a.tokenValidator.ValidateAPIToken(tokenString) {
+				// In multi mode, resolve the user context for this API token
+				if a.multiMode && a.tokenResolver != nil {
+					if uc := a.tokenResolver.ResolveAPITokenUser(tokenString); uc != nil {
+						r = WithUser(r, uc)
+					}
+				}
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -63,6 +82,23 @@ func (a *AuthMiddleware) Wrap(next http.Handler) http.Handler {
 		if err != nil || !token.Valid {
 			http.Error(w, `{"error":"invalid or expired token"}`, http.StatusUnauthorized)
 			return
+		}
+
+		// In multi mode, extract user context from JWT claims
+		if a.multiMode {
+			if claims, ok := token.Claims.(jwt.MapClaims); ok {
+				uc := &UserContext{}
+				if v, ok := claims["user_id"].(float64); ok {
+					uc.ID = int(v)
+				}
+				if v, ok := claims["sub"].(string); ok {
+					uc.Username = v
+				}
+				if v, ok := claims["role"].(string); ok {
+					uc.Role = v
+				}
+				r = WithUser(r, uc)
+			}
 		}
 
 		next.ServeHTTP(w, r)

@@ -1,25 +1,26 @@
 # mdnest
 
-Your notes. Your machine. Accessible from anywhere.
+Powerful, privately-hosted Markdown notes -- use it the way you like.
 
-Deploy on a spare machine, a home server, or a cheap VPS. Access your notes from your laptop, phone, tablet -- or let AI agents read and write to your knowledge base directly. Everything stays yours.
+Deploy on a spare machine, a home server, or a cheap VPS. Use it as a personal knowledge base or a collaborative workspace for your team. Access your notes from your laptop, phone, tablet -- or let AI agents read and write directly. Everything stays on your hardware.
 
 ### Why mdnest?
 
 - **Host once, access everywhere.** Set up on any always-on machine and reach it securely from all your devices via Tailscale -- phone, laptop, tablet, any browser.
+- **Personal or team.** Run in single-user mode (default, no database) for a private knowledge base, or enable multi-user mode with roles, permissions, and namespace-level access control.
 - **AI-native.** Built-in MCP server lets Claude, Cursor, and other AI agents read, write, search, and organize your notes. Your knowledge base becomes context for your AI workflows.
 - **API-first.** Full REST API with token auth. Build scripts, automations, or integrations on top of your notes.
-- **Plain files, no lock-in.** Notes are `.md` files in directories on disk. No database, no proprietary format. `cat`, `grep`, `git` -- your notes work with every tool you already use.
+- **Plain files, no lock-in.** Notes are `.md` files in directories on disk. No proprietary format. `cat`, `grep`, `git` -- your notes work with every tool you already use.
 - **Private by default.** Binds to localhost. No cloud, no third-party services, no telemetry. Add Tailscale for encrypted remote access only to your devices.
 - **Git backup on your terms.** Optionally auto-commit and push to a private GitHub repo. You control when and where.
 
 ### Who is this for?
 
-Developers and technical people who:
-- Want a personal knowledge base that runs on their own hardware
-- Need their notes accessible from multiple devices and AI tools
-- Don't want to trust a SaaS with their private notes
-- Think in markdown, folders, code blocks, and diagrams
+- **Individual developers** who want a personal knowledge base on their own hardware
+- **Small teams** who need a privately-hosted shared notes platform with access control
+- People who need their notes accessible from multiple devices and AI tools
+- Anyone who doesn't want to trust a SaaS with their private notes
+- People who think in markdown, folders, code blocks, and diagrams
 
 **Comfortable range: 1,000-5,000 notes out of the box.** For larger repositories (5,000-20,000+), tune the [search settings](#search) -- just configuration, no architectural changes.
 
@@ -84,12 +85,10 @@ Open `http://localhost:3236` (or your Tailscale URL) in any browser. Works on de
 
 ### CLI (terminal)
 
-Install the `mdnest` CLI on any machine:
+Install the `mdnest` CLI on any machine (macOS / Linux):
 
 ```bash
-# Download the CLI
-curl -fsSL https://raw.githubusercontent.com/mahsanamin/mdnest/main/mdnest -o /usr/local/bin/mdnest
-chmod +x /usr/local/bin/mdnest
+curl -fsSL https://raw.githubusercontent.com/mahsanamin/mdnest/v2.0/install-cli.sh | bash
 ```
 
 Then authenticate with a token from the web UI (Settings > API Tokens):
@@ -155,6 +154,7 @@ All server commands use `mdnest-server` and must be run from the project directo
 ./mdnest-server logs backend       # view backend logs only
 ./mdnest-server sync-logs          # view git-sync logs
 ./mdnest-server status             # show running containers
+./mdnest-server migrate            # run database migrations (multi mode only)
 ```
 
 After editing `mdnest.conf`, always re-run:
@@ -174,13 +174,15 @@ Everything is driven by `mdnest.conf`. Run `./mdnest-server rebuild` after any c
 
 | Setting | Description | Default |
 |---|---|---|
-| `MDNEST_USER` | Login username | `admin` |
-| `MDNEST_PASSWORD` | Login password | `changeme` |
+| `MDNEST_USER` | Login username (single mode) / initial admin (multi mode) | `admin` |
+| `MDNEST_PASSWORD` | Login password (single mode) / initial admin password (multi mode) | `changeme` |
 | `MDNEST_JWT_SECRET` | JWT signing secret | `changeme` |
 | `BACKEND_PORT` | Backend API port | `8286` |
 | `FRONTEND_PORT` | Frontend UI port | `3236` |
 | `BIND_ADDRESS` | Network bind address | `127.0.0.1` |
 | `MOUNT_<name>` | Map a host directory as a namespace | -- |
+| `AUTH_MODE` | `single` (file-based, no DB) or `multi` (Postgres-backed users & permissions) | `single` |
+| `POSTGRES_PASSWORD` | PostgreSQL password (required when `AUTH_MODE=multi`) | -- |
 
 ### Search
 
@@ -194,6 +196,34 @@ Filename filtering is instant (client-side). Content search runs server-side wit
 | `SEARCH_CACHE_TTL` | File list cache lifetime (seconds) | `30` |
 
 For 10,000+ notes: set `SEARCH_WORKERS=16` and `SEARCH_CACHE_TTL=60`.
+
+## Multi-User Mode
+
+By default, mdnest runs in **single-user mode** -- one user, file-based auth, no database. This is ideal for personal use.
+
+To enable **multi-user mode** with roles and namespace-level access control, set `AUTH_MODE=multi` in `mdnest.conf`. This requires a PostgreSQL database, which `setup.sh` adds automatically to `docker-compose.yml`.
+
+```
+AUTH_MODE=multi
+POSTGRES_PASSWORD=a-secure-password
+```
+
+Then rebuild:
+
+```bash
+./mdnest-server rebuild
+```
+
+The first user (from `MDNEST_USER` / `MDNEST_PASSWORD`) is created as an admin on first startup.
+
+**Upgrading an existing single-user instance to multi-user:**
+
+1. Edit `mdnest.conf`: add `AUTH_MODE=multi` and `POSTGRES_PASSWORD=<secure>`
+2. `./mdnest-server setup` -- regenerates docker-compose.yml with a Postgres service
+3. `./mdnest-server migrate` -- starts Postgres and creates the database tables
+4. `./mdnest-server rebuild` -- rebuilds and starts everything
+
+See [docs/setup.md](docs/setup.md) for full details on multi-user configuration.
 
 ## Namespaces
 

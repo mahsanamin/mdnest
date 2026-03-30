@@ -6,6 +6,10 @@ import Editor from './components/Editor.jsx';
 import Preview from './components/Preview.jsx';
 import ContextMenu from './components/ContextMenu.jsx';
 import Settings from './components/Settings.jsx';
+import AdminPanel from './components/AdminPanel.jsx';
+import PresenceBar from './components/PresenceBar.jsx';
+import ShareDialog from './components/ShareDialog.jsx';
+import CollabClient from './collab.js';
 import {
   getToken,
   getNote,
@@ -16,6 +20,10 @@ import {
   createFolder,
   deleteNote,
   moveItem,
+  fetchConfig,
+  fetchMe,
+  logout,
+  PermissionError,
 } from './api.js';
 import './App.css';
 
@@ -47,6 +55,7 @@ function App() {
   const [tree, setTree] = useState([]);
   const [currentPath, setCurrentPath] = useState(null);
   const [content, setContent] = useState('');
+  const [sidebarWidth, setSidebarWidth] = useState(260);
   const [savedContent, setSavedContent] = useState('');
   const [saveTimer, setSaveTimer] = useState(null);
   const [sidebarVisible, setSidebarVisible] = useState(false);
@@ -55,11 +64,119 @@ function App() {
   const [splitRatio, setSplitRatio] = useState(50);
   const [ctxMenu, setCtxMenu] = useState({ visible: false, x: 0, y: 0, target: null });
   const [showChangePassword, setShowChangePassword] = useState(false);
+  const [showAdminPanel, setShowAdminPanel] = useState(false);
+  const [shareTarget, setShareTarget] = useState(null); // {namespace, path}
   const [initialized, setInitialized] = useState(false);
   const contentRef = useRef(content);
   const savedContentRef = useRef(savedContent);
   contentRef.current = content;
   savedContentRef.current = savedContent;
+
+  // Multi-user state
+  const [appConfig, setAppConfig] = useState(null); // {authMode, version, liveCollab}
+  const [userInfo, setUserInfo] = useState(null); // {id, username, role, grants}
+  const isMulti = appConfig?.authMode === 'multi';
+  const isAdmin = !isMulti || userInfo?.role === 'admin';
+
+  // Live collaboration state
+  const [presenceUsers, setPresenceUsers] = useState([]);
+  const [remoteCursors, setRemoteCursors] = useState({});
+  const [typingUsers, setTypingUsers] = useState({}); // {userId: username}
+  const [conflictBanner, setConflictBanner] = useState(null); // {username, etag}
+  const etagRef = useRef(null);
+  const collabRef = useRef(null);
+  const typingTimers = useRef({}); // {userId: timeoutId}
+  const localTypingUntil = useRef(0); // timestamp — local user is "typing" until this time
+
+  // Determine write access for current namespace/path
+  const canWrite = useCallback((path) => {
+    if (!isMulti) return true;
+    if (!userInfo) return false;
+    if (userInfo.role === 'admin') return true;
+    if (!userInfo.grants || !selectedNs) return false;
+    const checkPath = path ? '/' + path : '/';
+    for (const g of userInfo.grants) {
+      if (g.namespace !== selectedNs) continue;
+      if (g.permission !== 'write') continue;
+      if (g.path === '/') return true;
+      if (checkPath === g.path || checkPath.startsWith(g.path + '/')) return true;
+    }
+    return false;
+  }, [isMulti, userInfo, selectedNs]);
+
+  const canWriteCurrent = canWrite(currentPath);
+
+  // Fetch app config on mount (before auth)
+  useEffect(() => {
+    fetchConfig().then(setAppConfig).catch(() => setAppConfig({ authMode: 'single', version: '1.0' }));
+  }, []);
+
+  // Initialize collab client
+  useEffect(() => {
+    if (!appConfig?.liveCollab) return;
+    const client = new CollabClient((msg) => {
+      switch (msg.type) {
+        case 'presence':
+          setPresenceUsers(msg.users || []);
+          break;
+        case 'cursor':
+          setRemoteCursors((prev) => ({ ...prev, [msg.userId]: { ...msg, type: 'cursor' } }));
+          break;
+        case 'selection':
+          setRemoteCursors((prev) => ({ ...prev, [msg.userId]: { ...msg, type: 'selection' } }));
+          break;
+        case 'leave':
+          setRemoteCursors((prev) => { const n = { ...prev }; delete n[msg.userId]; return n; });
+          setTypingUsers((prev) => { const n = { ...prev }; delete n[msg.userId]; return n; });
+          setPresenceUsers((prev) => prev.filter((u) => u.id !== msg.userId));
+          break;
+        case 'content':
+          // Mark user as typing
+          setTypingUsers((prev) => ({ ...prev, [msg.userId]: msg.username }));
+          // Clear typing after 2s of silence
+          if (typingTimers.current[msg.userId]) clearTimeout(typingTimers.current[msg.userId]);
+          typingTimers.current[msg.userId] = setTimeout(() => {
+            setTypingUsers((prev) => { const n = { ...prev }; delete n[msg.userId]; return n; });
+          }, 2000);
+          // Apply remote content ONLY if local user is idle (no unsaved changes and not typing)
+          if (Date.now() < localTypingUntil.current || contentRef.current !== savedContentRef.current) {
+            // Local user has edits — don't overwrite. They'll sync via save + file-changed.
+            break;
+          }
+          setContent(msg.content);
+          setSavedContent(msg.content);
+          break;
+        case 'file-changed':
+          // Another user saved — update our saved baseline
+          etagRef.current = msg.etag;
+          if (contentRef.current === savedContentRef.current) {
+            // No local unsaved changes — silently accept
+            setConflictBanner(null);
+          } else {
+            setConflictBanner({ username: msg.username, etag: msg.etag });
+          }
+          break;
+      }
+    });
+    collabRef.current = client;
+    return () => { client.disconnect(); collabRef.current = null; };
+  }, [appConfig?.liveCollab]);
+
+  // Connect/disconnect collab when note changes
+  useEffect(() => {
+    if (!collabRef.current || !selectedNs || !currentPath) {
+      if (collabRef.current) collabRef.current.disconnect();
+      setPresenceUsers([]);
+      setRemoteCursors({});
+      setConflictBanner(null);
+      return;
+    }
+    collabRef.current.connect(selectedNs, currentPath);
+    setPresenceUsers([]);
+    setRemoteCursors({});
+    setTypingUsers({});
+    setConflictBanner(null);
+  }, [selectedNs, currentPath]);
 
   const loadNamespaces = useCallback(async () => {
     try {
@@ -83,10 +200,18 @@ function App() {
     }
   }, [selectedNs]);
 
-  // On auth, load namespaces and restore state from URL hash
+  // On auth, load namespaces (and user info in multi mode), restore from URL
   useEffect(() => {
     if (!authenticated) return;
-    loadNamespaces().then((nsList) => {
+
+    const init = async () => {
+      // Fetch user info in multi mode
+      if (isMulti) {
+        const me = await fetchMe().catch(() => null);
+        setUserInfo(me);
+      }
+
+      const nsList = await loadNamespaces();
       const { ns: hashNs, path: hashPath } = parseHash();
       let targetNs = null;
 
@@ -99,26 +224,26 @@ function App() {
       if (targetNs) {
         setSelectedNs(targetNs);
         if (hashPath && hashNs === targetNs) {
-          // Will be opened after tree loads
           setCurrentPath(hashPath);
         }
       }
       setInitialized(true);
-    });
-  }, [authenticated, loadNamespaces]);
+    };
+
+    init();
+  }, [authenticated, loadNamespaces, isMulti]);
 
   // When namespace changes, load tree and open note from URL if needed
   useEffect(() => {
     if (!authenticated || !selectedNs || !initialized) return;
 
     refreshTree(selectedNs).then(() => {
-      // If currentPath is set (from URL restore), open it
       if (currentPath) {
-        getNote(selectedNs, currentPath).then((text) => {
+        getNote(selectedNs, currentPath).then(({ text, etag }) => {
           setContent(text);
           setSavedContent(text);
+          etagRef.current = etag;
         }).catch(() => {
-          // File doesn't exist, clear
           setCurrentPath(null);
           setContent('');
           setSavedContent('');
@@ -127,32 +252,31 @@ function App() {
       }
     });
 
-    // Update URL when namespace changes (without path if we're switching)
     if (!currentPath) {
       setHash(selectedNs, null);
     }
   }, [authenticated, selectedNs, initialized]);
 
-  // Auto-refresh: poll the current note every 30s to pick up external changes.
-  // Only updates if the user has no unsaved edits.
+  // Auto-refresh: poll the current note every 30s
   useEffect(() => {
     if (!authenticated || !selectedNs || !currentPath) return;
     const interval = setInterval(async () => {
       try {
-        const remote = await getNote(selectedNs, currentPath);
+        const { text: remote, etag } = await getNote(selectedNs, currentPath);
         if (contentRef.current === savedContentRef.current && remote !== savedContentRef.current) {
           setContent(remote);
           setSavedContent(remote);
+          etagRef.current = etag;
           refreshTree(selectedNs);
         }
       } catch (e) {
-        // Transient errors (network, 5xx) — skip silently, retry next cycle
+        // Transient errors — skip silently
       }
     }, 30000);
     return () => clearInterval(interval);
   }, [authenticated, selectedNs, currentPath, refreshTree]);
 
-  // Update URL hash whenever ns or path changes
+  // Update URL hash
   useEffect(() => {
     if (selectedNs) {
       setHash(selectedNs, currentPath);
@@ -182,10 +306,11 @@ function App() {
 
   const openNoteDirect = useCallback(async (ns, path) => {
     try {
-      const text = await getNote(ns, path);
+      const { text, etag } = await getNote(ns, path);
       setCurrentPath(path);
       setContent(text);
       setSavedContent(text);
+      etagRef.current = etag;
     } catch (e) {
       console.error('Failed to open note:', e);
     }
@@ -203,31 +328,61 @@ function App() {
   const openNote = useCallback(async (path) => {
     if (!selectedNs) return;
     try {
-      const text = await getNote(selectedNs, path);
+      const { text, etag } = await getNote(selectedNs, path);
       setCurrentPath(path);
       setContent(text);
       setSavedContent(text);
+      etagRef.current = etag;
+      setConflictBanner(null);
       setSidebarVisible(false);
     } catch (e) {
-      console.error('Failed to open note:', e);
+      if (e.name === 'PermissionError') {
+        alert('Access denied: you do not have permission to read this file.');
+      } else {
+        console.error('Failed to open note:', e);
+      }
     }
   }, [selectedNs]);
 
   const handleContentChange = useCallback((newContent) => {
     setContent(newContent);
+    setConflictBanner(null);
+
+    // Mark local user as typing for 1.5s — blocks remote content from overwriting
+    localTypingUntil.current = Date.now() + 1500;
+
+    // Broadcast content to other users via WebSocket (live typing)
+    if (collabRef.current) collabRef.current.sendContent(newContent);
+
     if (saveTimer) clearTimeout(saveTimer);
     const timer = setTimeout(async () => {
       if (currentPath && selectedNs) {
         try {
-          await saveNote(selectedNs, currentPath, newContent);
+          const result = await saveNote(selectedNs, currentPath, newContent, etagRef.current);
           setSavedContent(newContent);
+          if (result.etag) etagRef.current = result.etag;
         } catch (e) {
-          console.error('Auto-save failed:', e);
+          if (e.status === 409) {
+            setConflictBanner({ username: 'another user', etag: e.etag });
+          } else if (e.name === 'PermissionError') {
+            console.error('Save blocked: no write permission');
+          } else {
+            console.error('Auto-save failed:', e);
+          }
         }
       }
     }, 800);
     setSaveTimer(timer);
   }, [currentPath, selectedNs, saveTimer]);
+
+  // Send cursor position to collab
+  const handleCursorChange = useCallback((line, ch) => {
+    if (collabRef.current) collabRef.current.sendCursor(line, ch);
+  }, []);
+
+  const handleSelectionChange = useCallback((fromLine, fromCh, toLine, toCh) => {
+    if (collabRef.current) collabRef.current.sendSelection(fromLine, fromCh, toLine, toCh);
+  }, []);
 
   const handleCheckboxToggle = useCallback(async (lineIndex) => {
     const lines = content.split('\n');
@@ -262,7 +417,6 @@ function App() {
 
   const getTargetDir = useCallback((target) => {
     if (!target) {
-      // Toolbar buttons with no target → always create at root
       return '';
     }
     if (target.type === 'folder') {
@@ -328,6 +482,28 @@ function App() {
         } catch (e) { alert('Failed to delete folder: ' + e.message); }
         break;
       }
+      case 'copy-path': {
+        if (target && selectedNs) {
+          const fullPath = `${selectedNs}/${target.path}`;
+          // Use execCommand fallback for non-HTTPS origins
+          const textarea = document.createElement('textarea');
+          textarea.value = fullPath;
+          textarea.style.position = 'fixed';
+          textarea.style.opacity = '0';
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand('copy');
+          document.body.removeChild(textarea);
+        }
+        break;
+      }
+      case 'manage-access': {
+        if (isAdmin && isMulti && selectedNs) {
+          const folderPath = target?.path ? '/' + target.path : '/';
+          setShareTarget({ namespace: selectedNs, path: folderPath });
+        }
+        break;
+      }
       case 'rename': {
         if (!target || !selectedNs) return;
         const oldName = target.name || target.path.split('/').pop();
@@ -360,7 +536,6 @@ function App() {
     if (fromPath === newPath) return;
     try {
       await moveItem(selectedNs, fromPath, newPath);
-      // Update currentPath if the moved item was open
       if (currentPath === fromPath) {
         setCurrentPath(newPath);
         setHash(selectedNs, newPath);
@@ -374,6 +549,36 @@ function App() {
       alert('Failed to move: ' + e.message);
     }
   }, [selectedNs, currentPath, refreshTree]);
+
+  const handleRefresh = useCallback(async () => {
+    if (!authenticated || !selectedNs) return;
+    await refreshTree(selectedNs);
+    if (currentPath) {
+      try {
+        const { text, etag } = await getNote(selectedNs, currentPath);
+        setContent(text);
+        setSavedContent(text);
+        etagRef.current = etag;
+        setConflictBanner(null);
+      } catch (e) {
+        // Note may have been deleted
+      }
+    }
+  }, [authenticated, selectedNs, currentPath, refreshTree]);
+
+  // Reload note content (used by conflict banner)
+  const handleReloadNote = useCallback(async () => {
+    if (!selectedNs || !currentPath) return;
+    try {
+      const { text, etag } = await getNote(selectedNs, currentPath);
+      setContent(text);
+      setSavedContent(text);
+      etagRef.current = etag;
+      setConflictBanner(null);
+    } catch (e) {
+      console.error('Failed to reload:', e);
+    }
+  }, [selectedNs, currentPath]);
 
   const handleToolbarRename = useCallback(() => {
     if (!currentPath || !selectedNs) return;
@@ -391,6 +596,10 @@ function App() {
     return <Login onLogin={() => setAuthenticated(true)} />;
   }
 
+  if (showAdminPanel && isAdmin && isMulti) {
+    return <AdminPanel onClose={() => setShowAdminPanel(false)} namespaces={namespaces} />;
+  }
+
   return (
     <div className="app">
       <Sidebar
@@ -401,31 +610,62 @@ function App() {
         selectedNs={selectedNs}
         onSelectNs={handleSelectNs}
         onContextMenu={handleContextMenu}
-        onDrop={handleTreeDrop}
+        onDrop={canWrite('') ? handleTreeDrop : null}
         visible={sidebarVisible}
         onClose={() => setSidebarVisible(false)}
+        userInfo={isMulti ? userInfo : null}
+        onLogout={logout}
+        onAdminPanel={isAdmin && isMulti ? () => setShowAdminPanel(true) : null}
+        onNewNote={canWrite('') ? () => doCreateNote(null) : null}
+        onNewFolder={canWrite('') ? () => doCreateFolder(null) : null}
+        onRefreshTree={() => refreshTree(selectedNs)}
+        isAdmin={isAdmin}
+        width={sidebarWidth}
+        onResize={setSidebarWidth}
       />
       <div className="main">
         <Toolbar
           currentPath={currentPath}
           onToggleSidebar={() => setSidebarVisible((v) => !v)}
-          onNewNote={() => doCreateNote(null)}
-          onNewFolder={() => doCreateFolder(null)}
           onChangePassword={() => setShowChangePassword(true)}
-          onRename={handleToolbarRename}
-          onDelete={handleToolbarDelete}
+          onRename={canWriteCurrent ? handleToolbarRename : null}
+          onDelete={canWriteCurrent ? handleToolbarDelete : null}
           viewMode={viewMode}
           onViewModeChange={setViewMode}
+          onRefresh={handleRefresh}
         />
+        {appConfig?.liveCollab && presenceUsers.length > 1 && (
+          <PresenceBar users={presenceUsers} currentUserId={userInfo?.id} typingUsers={typingUsers} />
+        )}
+        {conflictBanner && (
+          <div className="conflict-banner">
+            This file was modified by {conflictBanner.username}. Your changes may conflict.
+            <button onClick={handleReloadNote}>Reload</button>
+            <button onClick={() => setConflictBanner(null)}>Dismiss</button>
+          </div>
+        )}
         <div className="split-view">
           {currentPath ? (
             <>
+              <div className="mobile-view-toggle">
+                <button className={mobileView === 'editor' ? 'active' : ''} onClick={() => setMobileView('editor')}>Edit</button>
+                <button className={mobileView === 'preview' ? 'active' : ''} onClick={() => setMobileView('preview')}>Preview</button>
+              </div>
               {viewMode !== 'preview' && (
                 <div
                   className={`editor-wrapper${mobileView === 'editor' ? ' mobile-active' : ''}`}
                   style={viewMode === 'split' ? { flex: `0 0 ${splitRatio}%` } : undefined}
                 >
-                  <Editor content={content} onChange={handleContentChange} currentPath={currentPath} ns={selectedNs} />
+                  <Editor
+                    content={content}
+                    onChange={canWriteCurrent ? handleContentChange : null}
+                    currentPath={currentPath}
+                    ns={selectedNs}
+                    readOnly={!canWriteCurrent}
+                    onCursorChange={appConfig?.liveCollab ? handleCursorChange : null}
+                    onSelectionChange={appConfig?.liveCollab ? handleSelectionChange : null}
+                    remoteCursors={appConfig?.liveCollab ? remoteCursors : null}
+                  />
                 </div>
               )}
               {viewMode === 'split' && (
@@ -457,13 +697,9 @@ function App() {
                   className={`preview-wrapper${mobileView === 'preview' ? ' mobile-active' : ''}`}
                   style={viewMode === 'split' ? { flex: `0 0 ${100 - splitRatio}%` } : undefined}
                 >
-                  <Preview content={content} currentPath={currentPath} ns={selectedNs} onCheckboxToggle={handleCheckboxToggle} />
+                  <Preview content={content} currentPath={currentPath} ns={selectedNs} onCheckboxToggle={canWriteCurrent ? handleCheckboxToggle : null} />
                 </div>
               )}
-              <div className="mobile-view-toggle">
-                <button className={mobileView === 'editor' ? 'active' : ''} onClick={() => setMobileView('editor')}>Edit</button>
-                <button className={mobileView === 'preview' ? 'active' : ''} onClick={() => setMobileView('preview')}>Preview</button>
-              </div>
             </>
           ) : (
             <div className="empty-state">
@@ -475,7 +711,24 @@ function App() {
       {showChangePassword && (
         <Settings onClose={() => setShowChangePassword(false)} />
       )}
-      <ContextMenu visible={ctxMenu.visible} x={ctxMenu.x} y={ctxMenu.y} target={ctxMenu.target} onAction={handleContextAction} onClose={handleCloseContextMenu} />
+      {shareTarget && (
+        <ShareDialog
+          namespace={shareTarget.namespace}
+          path={shareTarget.path}
+          onClose={() => setShareTarget(null)}
+        />
+      )}
+      <ContextMenu
+        visible={ctxMenu.visible}
+        x={ctxMenu.x}
+        y={ctxMenu.y}
+        target={ctxMenu.target}
+        onAction={handleContextAction}
+        onClose={handleCloseContextMenu}
+        canWrite={canWrite}
+        isAdmin={isAdmin && isMulti}
+        selectedNs={selectedNs}
+      />
     </div>
   );
 }

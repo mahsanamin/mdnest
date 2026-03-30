@@ -163,6 +163,247 @@ curl -X DELETE "http://localhost:8286/api/auth/tokens?id=a1b2c3d4" \
 
 ---
 
+## Admin (multi-user mode only)
+
+These endpoints are only available when `AUTH_MODE=multi`. All require admin role -- non-admin users receive a 403.
+
+### POST /api/admin/invite
+
+Create a new user.
+
+**Request body** (JSON):
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `email` | string | yes | User's email (must be unique) |
+| `username` | string | yes | Login username (must be unique) |
+| `password` | string | yes | Initial password |
+| `role` | string | no | `admin` or `collaborator` (default: `collaborator`) |
+
+**Response** (201 Created):
+
+```json
+{
+  "id": 2,
+  "email": "bob@example.com",
+  "username": "bob",
+  "role": "collaborator",
+  "invited_by": 1,
+  "created_at": "2026-03-28T12:00:00Z"
+}
+```
+
+**Example:**
+
+```bash
+curl -X POST "http://localhost:8286/api/admin/invite" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"email": "bob@example.com", "username": "bob", "password": "securepass", "role": "collaborator"}'
+```
+
+**Error responses:**
+
+| Status | Body | Cause |
+|--------|------|-------|
+| 400 | `{"error":"email, username, and password are required"}` | Missing fields |
+| 400 | `{"error":"role must be admin or collaborator"}` | Invalid role |
+| 403 | `{"error":"admin access required"}` | Non-admin user |
+| 409 | `{"error":"email already in use"}` | Duplicate email |
+| 409 | `{"error":"username already in use"}` | Duplicate username |
+
+---
+
+### GET /api/admin/users
+
+List all users.
+
+**Response** (200 OK):
+
+```json
+[
+  {"id": 1, "email": "admin@mdnest.local", "username": "admin", "role": "admin", "created_at": "2026-03-28T10:00:00Z"},
+  {"id": 2, "email": "bob@example.com", "username": "bob", "role": "collaborator", "invited_by": 1, "created_at": "2026-03-28T12:00:00Z"}
+]
+```
+
+---
+
+### PUT /api/admin/users?id=\<user-id\>
+
+Update a user's role.
+
+**Request body:**
+
+```json
+{"role": "admin"}
+```
+
+**Response** (200 OK):
+
+```json
+{"status": "ok"}
+```
+
+**Error responses:**
+
+| Status | Body | Cause |
+|--------|------|-------|
+| 400 | `{"error":"cannot remove the last admin"}` | Demoting the only admin |
+
+---
+
+### DELETE /api/admin/users?id=\<user-id\>
+
+Delete a user. Access grants are cascade-deleted.
+
+**Response** (200 OK):
+
+```json
+{"status": "deleted"}
+```
+
+**Error responses:**
+
+| Status | Body | Cause |
+|--------|------|-------|
+| 400 | `{"error":"cannot delete yourself"}` | Attempting self-deletion |
+| 400 | `{"error":"cannot remove the last admin"}` | Deleting the only admin |
+| 404 | `{"error":"user not found"}` | User ID does not exist |
+
+**Examples:**
+
+```bash
+# List users
+curl "http://localhost:8286/api/admin/users" -H "Authorization: Bearer $TOKEN"
+
+# Change role
+curl -X PUT "http://localhost:8286/api/admin/users?id=2" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"role": "admin"}'
+
+# Delete user
+curl -X DELETE "http://localhost:8286/api/admin/users?id=2" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+---
+
+### POST /api/admin/grants
+
+Create an access grant for a user on a namespace or directory.
+
+**Request body** (JSON):
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `user_id` | int | yes | User ID to grant access to |
+| `namespace` | string | yes | Namespace name |
+| `path` | string | no | Path within namespace (`/` = full namespace, default) |
+| `permission` | string | no | `read` or `write` (default: `write`) |
+
+**Response** (201 Created):
+
+```json
+{
+  "id": 1,
+  "user_id": 2,
+  "namespace": "work",
+  "path": "/",
+  "permission": "write",
+  "granted_by": 1,
+  "created_at": "2026-03-28T12:00:00Z"
+}
+```
+
+**Access rules:**
+- Grant on `/` covers the entire namespace
+- Grant on `/subdir` covers that directory and everything below it
+- `write` permission implies `read`
+- Admins have implicit full access (no grants needed)
+
+---
+
+### GET /api/admin/grants
+
+List grants filtered by user or namespace.
+
+**Query parameters** (one required):
+
+| Param | Description |
+|-------|-------------|
+| `user_id` | List all grants for a user |
+| `namespace` | List all grants for a namespace |
+
+**Response** (200 OK):
+
+```json
+[
+  {"id": 1, "user_id": 2, "namespace": "work", "path": "/", "permission": "write", "granted_by": 1, "created_at": "2026-03-28T12:00:00Z"}
+]
+```
+
+---
+
+### DELETE /api/admin/grants?id=\<grant-id\>
+
+Revoke an access grant.
+
+**Response** (200 OK):
+
+```json
+{"status": "deleted"}
+```
+
+**Examples:**
+
+```bash
+# Grant user 2 write access to the entire 'work' namespace
+curl -X POST "http://localhost:8286/api/admin/grants" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"user_id": 2, "namespace": "work", "path": "/", "permission": "write"}'
+
+# Grant user 2 read-only access to 'work/docs'
+curl -X POST "http://localhost:8286/api/admin/grants" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"user_id": 2, "namespace": "work", "path": "/docs", "permission": "read"}'
+
+# List grants for user 2
+curl "http://localhost:8286/api/admin/grants?user_id=2" \
+  -H "Authorization: Bearer $TOKEN"
+
+# Revoke a grant
+curl -X DELETE "http://localhost:8286/api/admin/grants?id=1" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+---
+
+### GET /api/me
+
+Returns the current user's profile and access grants. Requires authentication (any role).
+
+**Response** (200 OK):
+
+```json
+{
+  "id": 2,
+  "email": "bob@example.com",
+  "username": "bob",
+  "role": "collaborator",
+  "created_at": "2026-03-28T12:00:00Z",
+  "grants": [
+    {"id": 1, "namespace": "work", "path": "/", "permission": "write"},
+    {"id": 2, "namespace": "personal", "path": "/docs", "permission": "read"}
+  ]
+}
+```
+
+---
+
 ## Search
 
 ### GET /api/search

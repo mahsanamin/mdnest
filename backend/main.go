@@ -6,8 +6,10 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/mdnest/mdnest/backend/collab"
 	"github.com/mdnest/mdnest/backend/handlers"
 	"github.com/mdnest/mdnest/backend/middleware"
+	"github.com/mdnest/mdnest/backend/store"
 )
 
 func env(key, fallback string) string {
@@ -18,12 +20,16 @@ func env(key, fallback string) string {
 }
 
 func main() {
+	// Support -migrate flag for running migrations only (then exit)
+	migrateOnly := len(os.Args) > 1 && os.Args[1] == "-migrate"
+
 	user := env("MDNEST_USER", "admin")
 	password := env("MDNEST_PASSWORD", "changeme")
 	jwtSecret := env("MDNEST_JWT_SECRET", "changeme")
 	notesDir := env("NOTES_DIR", "./notes")
 	frontendOrigin := env("FRONTEND_ORIGIN", "http://localhost:5173")
 	port := env("PORT", "8080")
+	authMode := env("AUTH_MODE", "single")
 
 	if password == "changeme" || jwtSecret == "changeme" {
 		log.Println("WARNING: using default credentials — change MDNEST_PASSWORD and MDNEST_JWT_SECRET in your .env")
@@ -37,11 +43,83 @@ func main() {
 		log.Fatalf("failed to create NOTES_DIR: %v", err)
 	}
 
+	// Database setup (multi mode only)
+	var db *store.DB
+	if authMode == "multi" {
+		log.Println("AUTH_MODE=multi — connecting to PostgreSQL...")
+		db, err = store.Connect()
+		if err != nil {
+			log.Fatalf("failed to connect to database: %v", err)
+		}
+		defer db.Close()
+
+		if err := db.Migrate(); err != nil {
+			log.Fatalf("database migration failed: %v", err)
+		}
+		log.Println("multi-user mode ready")
+
+		if migrateOnly {
+			log.Println("migrations complete — exiting (migrate-only mode)")
+			return
+		}
+	} else {
+		if migrateOnly {
+			log.Fatal("ERROR: -migrate flag requires AUTH_MODE=multi")
+		}
+		log.Println("AUTH_MODE=single — file-based auth (no database)")
+	}
+
 	secretsDir := env("SECRETS_DIR", filepath.Join(absNotesDir, ".secrets"))
-	authHandler := handlers.NewAuthHandler(user, password, jwtSecret, secretsDir)
-	nsHandler := handlers.NewNamespaceHandler(absNotesDir)
+	multiMode := authMode == "multi"
+
+	// Create auth handler based on mode
+	var authHandler *handlers.AuthHandler
+	var userStore store.UserStore
+
+	if multiMode {
+		userStore = store.NewPostgresUserStore(db)
+
+		// Seed admin user on first startup
+		count, err := userStore.CountUsers()
+		if err != nil {
+			log.Fatalf("failed to count users: %v", err)
+		}
+		if count == 0 {
+			email := user + "@mdnest.local"
+			_, err := userStore.CreateUser(email, user, password, "admin", nil)
+			if err != nil {
+				log.Fatalf("failed to seed admin user: %v", err)
+			}
+			log.Printf("seeded admin user: %s (%s)", user, email)
+		}
+
+		authHandler = handlers.NewMultiAuthHandler(jwtSecret, userStore)
+	} else {
+		authHandler = handlers.NewAuthHandler(user, password, jwtSecret, secretsDir)
+	}
+
+	// Permission checker (nil in single mode, wraps grant checks in multi mode)
+	var perms *middleware.PermissionChecker
+	var grantStore store.GrantStore
+	if multiMode {
+		grantStore = store.NewPostgresGrantStore(db)
+		perms = middleware.NewPermissionChecker(grantStore)
+	}
+
+	// Live collaboration hub (optional, multi mode only)
+	enableCollab := multiMode && env("ENABLE_LIVE_COLLAB", "false") == "true"
+	var collabHub *collab.Hub
+	if enableCollab {
+		collabHub = collab.NewHub()
+		log.Println("live collaboration enabled (WebSocket)")
+	}
+
+	nsHandler := handlers.NewNamespaceHandler(absNotesDir, perms)
 	noteHandler := handlers.NewNoteHandler(absNotesDir)
-	treeHandler := handlers.NewTreeHandler(absNotesDir)
+	if collabHub != nil {
+		noteHandler.SetCollabHub(collabHub)
+	}
+	treeHandler := handlers.NewTreeHandler(absNotesDir, grantStore)
 	uploadHandler := handlers.NewUploadHandler(absNotesDir)
 	moveHandler := handlers.NewMoveHandler(absNotesDir)
 	searchHandler := handlers.NewSearchHandler(absNotesDir)
@@ -57,22 +135,62 @@ func main() {
 		})
 	}
 
-	authMiddleware := middleware.NewAuthMiddleware(jwtSecret, tokenHandler)
+	authMiddleware := middleware.NewAuthMiddleware(jwtSecret, multiMode, tokenHandler, tokenHandler)
 	corsMiddleware := middleware.NewCORSMiddleware(frontendOrigin)
 
 	mux := http.NewServeMux()
 
+	configHandler := handlers.NewConfigHandler(authMode, enableCollab)
+	mux.HandleFunc("/api/config", configHandler.HandleConfig)
 	mux.HandleFunc("/api/auth/login", authHandler.Login)
 	mux.Handle("/api/auth/change-password", authMiddleware.Wrap(http.HandlerFunc(authHandler.ChangePassword)))
 	mux.Handle("/api/auth/tokens", authMiddleware.Wrap(http.HandlerFunc(tokenHandler.HandleTokens)))
-	mux.Handle("/api/namespaces", authMiddleware.Wrap(http.HandlerFunc(nsHandler.ListNamespaces)))
-	mux.Handle("/api/tree", authMiddleware.Wrap(http.HandlerFunc(treeHandler.GetTree)))
-	mux.Handle("/api/note", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(noteHandler.Handle))))
-	mux.Handle("/api/folder", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(uploadHandler.HandleFolder))))
-	mux.Handle("/api/upload", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(uploadHandler.HandleUpload))))
-	mux.Handle("/api/move", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(moveHandler.HandleMove))))
-	mux.Handle("/api/search", authMiddleware.Wrap(http.HandlerFunc(searchHandler.HandleSearch)))
-	mux.Handle("/api/files/", authMiddleware.Wrap(http.HandlerFunc(uploadHandler.HandleServeFile)))
+
+	// Apply permission checks in multi mode, passthrough in single mode
+	if perms != nil {
+		mux.Handle("/api/namespaces", authMiddleware.Wrap(http.HandlerFunc(nsHandler.ListNamespaces)))
+		mux.Handle("/api/tree", authMiddleware.Wrap(perms.RequireNsAccess(http.HandlerFunc(treeHandler.GetTree))))
+		mux.Handle("/api/note", authMiddleware.Wrap(perms.ReadWriteRouter(invalidateSearch(http.HandlerFunc(noteHandler.Handle)))))
+		mux.Handle("/api/folder", authMiddleware.Wrap(perms.RequireWrite(invalidateSearch(http.HandlerFunc(uploadHandler.HandleFolder)))))
+		mux.Handle("/api/upload", authMiddleware.Wrap(perms.RequireWrite(invalidateSearch(http.HandlerFunc(uploadHandler.HandleUpload)))))
+		mux.Handle("/api/move", authMiddleware.Wrap(perms.RequireMove(invalidateSearch(http.HandlerFunc(moveHandler.HandleMove)))))
+		mux.Handle("/api/search", authMiddleware.Wrap(perms.RequireNsAccess(http.HandlerFunc(searchHandler.HandleSearch))))
+		mux.Handle("/api/files/", authMiddleware.Wrap(http.HandlerFunc(uploadHandler.HandleServeFile))) // files endpoint extracts ns from URL, handled differently
+	} else {
+		mux.Handle("/api/namespaces", authMiddleware.Wrap(http.HandlerFunc(nsHandler.ListNamespaces)))
+		mux.Handle("/api/tree", authMiddleware.Wrap(http.HandlerFunc(treeHandler.GetTree)))
+		mux.Handle("/api/note", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(noteHandler.Handle))))
+		mux.Handle("/api/folder", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(uploadHandler.HandleFolder))))
+		mux.Handle("/api/upload", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(uploadHandler.HandleUpload))))
+		mux.Handle("/api/move", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(moveHandler.HandleMove))))
+		mux.Handle("/api/search", authMiddleware.Wrap(http.HandlerFunc(searchHandler.HandleSearch)))
+		mux.Handle("/api/files/", authMiddleware.Wrap(http.HandlerFunc(uploadHandler.HandleServeFile)))
+	}
+
+	// Multi-mode routes (require admin role for /admin/*, authenticated for /me)
+	if multiMode {
+		adminHandler := handlers.NewAdminHandler(userStore, grantStore)
+		meHandler := handlers.NewMeHandler(userStore, grantStore)
+
+		mux.Handle("/api/admin/invite", authMiddleware.Wrap(middleware.RequireAdmin(http.HandlerFunc(adminHandler.HandleInvite))))
+		mux.Handle("/api/admin/users", authMiddleware.Wrap(middleware.RequireAdmin(http.HandlerFunc(adminHandler.HandleUsers))))
+		mux.Handle("/api/admin/grants", authMiddleware.Wrap(middleware.RequireAdmin(http.HandlerFunc(adminHandler.HandleGrants))))
+		mux.Handle("/api/me", authMiddleware.Wrap(http.HandlerFunc(meHandler.HandleMe)))
+	}
+
+	// Git sync endpoint (admin-only in multi mode, always allowed in single)
+	syncHandler := handlers.NewSyncHandler(absNotesDir, searchHandler.InvalidateCache)
+	if multiMode {
+		mux.Handle("/api/admin/sync", authMiddleware.Wrap(middleware.RequireAdmin(http.HandlerFunc(syncHandler.HandleSync))))
+	} else {
+		mux.Handle("/api/admin/sync", authMiddleware.Wrap(http.HandlerFunc(syncHandler.HandleSync)))
+	}
+
+	// WebSocket route for live collaboration (no auth middleware — JWT verified in handler)
+	if enableCollab {
+		wsHandler := handlers.NewWSHandler(collabHub, jwtSecret)
+		mux.HandleFunc("/api/ws", wsHandler.HandleWS)
+	}
 
 	handler := corsMiddleware.Wrap(mux)
 

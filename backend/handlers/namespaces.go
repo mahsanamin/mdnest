@@ -6,16 +6,19 @@ import (
 	"os"
 	"sort"
 	"strings"
+
+	"github.com/mdnest/mdnest/backend/middleware"
 )
 
 // NamespaceHandler lists available namespaces (top-level dirs in NOTES_DIR).
 type NamespaceHandler struct {
 	notesDir string
+	perms    *middleware.PermissionChecker // nil in single mode
 }
 
 // NewNamespaceHandler creates a new namespace handler.
-func NewNamespaceHandler(notesDir string) *NamespaceHandler {
-	return &NamespaceHandler{notesDir: notesDir}
+func NewNamespaceHandler(notesDir string, perms *middleware.PermissionChecker) *NamespaceHandler {
+	return &NamespaceHandler{notesDir: notesDir, perms: perms}
 }
 
 // ListNamespaces handles GET /api/namespaces.
@@ -38,6 +41,14 @@ func (h *NamespaceHandler) ListNamespaces(w http.ResponseWriter, r *http.Request
 		}
 	}
 	sort.Strings(names)
+
+	// In multi mode, filter to namespaces the user has access to
+	if h.perms != nil {
+		names = h.perms.FilterNamespaces(r, names)
+		if names == nil {
+			names = []string{}
+		}
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(names)

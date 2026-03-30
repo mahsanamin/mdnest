@@ -1,6 +1,6 @@
 # mdnest User Guide
 
-mdnest is a self-hosted markdown notes app. Your notes are plain `.md` files on disk, and mdnest provides a clean web interface to browse, edit, and organize them.
+mdnest is a privately-hosted markdown notes app. Your notes are plain `.md` files on disk, and mdnest provides a clean web interface to browse, edit, and organize them. It works for personal use (single-user mode) or team collaboration (multi-user mode).
 
 ---
 
@@ -8,7 +8,7 @@ mdnest is a self-hosted markdown notes app. Your notes are plain `.md` files on 
 
 ### Logging In
 
-Open mdnest in your browser (e.g., `http://localhost:3236`). You will see a login screen. Enter the username and password that were configured during setup (the `MDNEST_USER` and `MDNEST_PASSWORD` values in your configuration).
+Open mdnest in your browser (e.g., `http://localhost:3236`). You will see a login screen. In single-user mode, enter the username and password from your configuration (`MDNEST_USER` and `MDNEST_PASSWORD`). In multi-user mode, use the credentials provided by your admin.
 
 After a successful login, the session lasts 24 hours before you need to log in again.
 

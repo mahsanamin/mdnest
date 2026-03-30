@@ -95,9 +95,7 @@ function TreeNode({ node, onSelect, currentPath, depth, onContextMenu, onDrop, e
 
   const name = node.name || node.path.split('/').filter(Boolean).pop() || node.path;
 
-  // File extension for icon
-  const ext = !isFolder ? (name.split('.').pop() || '').toLowerCase() : '';
-  const fileIcon = ext === 'md' ? '📝' : ext === 'json' ? '📋' : ext === 'txt' ? '📄' : '📄';
+  const hasChildren = isFolder && node.children && node.children.length > 0;
 
   return (
     <div className="tree-node">
@@ -114,18 +112,17 @@ function TreeNode({ node, onSelect, currentPath, depth, onContextMenu, onDrop, e
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
-        title={node.path}
+        title={name + (node.path ? '\n' + node.path : '')}
       >
-        {isFolder && (
-          <span className="tree-arrow">{expanded ? '▾' : '▸'}</span>
+        {isFolder ? (
+          hasChildren
+            ? <span className="tree-arrow">{expanded ? '\u25BE' : '\u25B8'}</span>
+            : <span className="tree-arrow-spacer" />
+        ) : (
+          <span className="tree-arrow-spacer" />
         )}
-        <span className="tree-icon">
-          {isFolder
-            ? (expanded ? '📂' : '📁')
-            : fileIcon
-          }
-        </span>
-        <span className="tree-label">{name}</span>
+        <span className={`tree-icon-svg ${isFolder ? (expanded ? 'folder-open' : (hasChildren ? 'folder-full' : 'folder-empty')) : 'file'}`} />
+        <span className={`tree-label${isFolder && !hasChildren ? ' empty-folder' : ''}`}>{name}</span>
       </div>
       {isFolder && expanded && node.children && (
         <div className="tree-children">

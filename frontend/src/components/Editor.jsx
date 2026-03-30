@@ -1,8 +1,8 @@
-import { useRef, useCallback } from 'react';
+import { useRef, useCallback, useState, useEffect } from 'react';
 import { uploadImage } from '../api.js';
 import EditorToolbar from './EditorToolbar.jsx';
 
-function Editor({ content, onChange, currentPath, ns }) {
+function Editor({ content, onChange, currentPath, ns, readOnly, onCursorChange, onSelectionChange, remoteCursors }) {
   const textareaRef = useRef(null);
 
   const getSelection = () => {
@@ -100,6 +100,25 @@ function Editor({ content, onChange, currentPath, ns }) {
     }
   }, [ns, currentPath, insertAtCursor]);
 
+  const emitCursor = useCallback(() => {
+    if (!onCursorChange && !onSelectionChange) return;
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    const before = content.substring(0, start);
+    const line = before.split('\n').length - 1;
+    const ch = start - before.lastIndexOf('\n') - 1;
+    if (start === end) {
+      if (onCursorChange) onCursorChange(line, ch);
+    } else {
+      const beforeEnd = content.substring(0, end);
+      const endLine = beforeEnd.split('\n').length - 1;
+      const endCh = end - beforeEnd.lastIndexOf('\n') - 1;
+      if (onSelectionChange) onSelectionChange(line, ch, endLine, endCh);
+    }
+  }, [content, onCursorChange, onSelectionChange]);
+
   const handleKeyDown = (e) => {
     if (e.key === 'Tab') {
       e.preventDefault();
@@ -135,21 +154,92 @@ function Editor({ content, onChange, currentPath, ns }) {
     }
   };
 
+  // Track scroll position for cursor overlay
+  const [scrollTop, setScrollTop] = useState(0);
+  const [lineHeight, setLineHeight] = useState(0);
+  const [textareaRect, setTextareaRect] = useState(null);
+
+  // Measure line height on mount and content change
+  useEffect(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const style = window.getComputedStyle(ta);
+    const lh = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.5;
+    setLineHeight(lh);
+  }, [content]);
+
+  const handleScroll = useCallback((e) => {
+    setScrollTop(e.target.scrollTop);
+  }, []);
+
+  // Update textarea rect on resize
+  useEffect(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const updateRect = () => setTextareaRect(ta.getBoundingClientRect());
+    updateRect();
+    const observer = new ResizeObserver(updateRect);
+    observer.observe(ta);
+    return () => observer.disconnect();
+  }, []);
+
+  // Compute cursor positions for remote cursors
+  const cursorOverlays = remoteCursors ? Object.entries(remoteCursors).map(([userId, cursor]) => {
+    if (!cursor || !lineHeight) return null;
+    const line = cursor.line || 0;
+    const ta = textareaRef.current;
+    if (!ta) return null;
+    const style = window.getComputedStyle(ta);
+    const paddingTop = parseFloat(style.paddingTop) || 0;
+    const top = paddingTop + (line * lineHeight) - scrollTop;
+    // Don't render if scrolled out of view
+    if (top < -lineHeight || top > ta.clientHeight) return null;
+    return {
+      userId: parseInt(userId),
+      username: cursor.username,
+      color: cursor.color,
+      top,
+    };
+  }).filter(Boolean) : [];
+
   return (
     <div className="editor-pane">
-      <EditorToolbar onFormat={handleFormat} />
-      <textarea
-        ref={textareaRef}
-        className="editor-textarea"
-        value={content}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={handleKeyDown}
-        onPaste={handlePaste}
-        onDrop={handleDrop}
-        onDragOver={(e) => e.preventDefault()}
-        placeholder="Start writing..."
-        spellCheck={false}
-      />
+      {!readOnly && <EditorToolbar onFormat={handleFormat} />}
+      {readOnly && <div className="editor-readonly-bar">Read-only</div>}
+      <div className="editor-container">
+        <textarea
+          ref={textareaRef}
+          className="editor-textarea"
+          value={content}
+          onChange={readOnly ? undefined : (e) => onChange(e.target.value)}
+          onKeyDown={readOnly ? undefined : handleKeyDown}
+          onPaste={readOnly ? undefined : handlePaste}
+          onDrop={readOnly ? undefined : handleDrop}
+          onDragOver={readOnly ? undefined : (e) => e.preventDefault()}
+          placeholder={readOnly ? '' : 'Start writing...'}
+          spellCheck={false}
+          readOnly={readOnly}
+          onClick={emitCursor}
+          onKeyUp={emitCursor}
+          onSelect={emitCursor}
+          onScroll={handleScroll}
+        />
+        {cursorOverlays.length > 0 && (
+          <div className="cursor-overlay">
+            {cursorOverlays.map((c) => (
+              <div
+                key={c.userId}
+                className="remote-cursor"
+                style={{ top: `${c.top}px`, borderColor: c.color }}
+              >
+                <span className="remote-cursor-label" style={{ backgroundColor: c.color }}>
+                  {c.username}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

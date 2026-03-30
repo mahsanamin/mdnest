@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/mdnest/mdnest/backend/middleware"
 )
 
 // APIToken represents a long-lived API token for MCP/API access.
@@ -20,6 +22,9 @@ type APIToken struct {
 	Token     string `json:"token,omitempty"` // only included on creation
 	TokenHash string `json:"token_hash"`      // stored, not exposed after creation
 	CreatedAt string `json:"created_at"`
+	UserID    int    `json:"user_id,omitempty"`   // owner (multi mode only, 0 = legacy/single)
+	Username  string `json:"username,omitempty"`  // denormalized for resolution
+	UserRole  string `json:"user_role,omitempty"` // denormalized for resolution
 }
 
 // tokenStore holds all API tokens.
@@ -83,12 +88,32 @@ func (h *TokenHandler) ValidateAPIToken(rawToken string) bool {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
+	hash := hashToken(rawToken)
 	for _, t := range h.store.Tokens {
-		if t.TokenHash == hashToken(rawToken) {
+		if t.TokenHash == hash {
 			return true
 		}
 	}
 	return false
+}
+
+// ResolveAPITokenUser returns the UserContext for an API token (multi mode).
+// Returns nil if the token has no associated user (single mode / legacy tokens).
+func (h *TokenHandler) ResolveAPITokenUser(rawToken string) *middleware.UserContext {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	hash := hashToken(rawToken)
+	for _, t := range h.store.Tokens {
+		if t.TokenHash == hash && t.UserID > 0 {
+			return &middleware.UserContext{
+				ID:       t.UserID,
+				Username: t.Username,
+				Role:     t.UserRole,
+			}
+		}
+	}
+	return nil
 }
 
 func hashToken(token string) string {
@@ -114,9 +139,15 @@ func (h *TokenHandler) listTokens(w http.ResponseWriter, r *http.Request) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
+	uc := middleware.UserFromContext(r.Context())
+
 	// Return tokens without the actual token value or hash
 	safe := make([]map[string]string, 0, len(h.store.Tokens))
 	for _, t := range h.store.Tokens {
+		// In multi mode, non-admins only see their own tokens
+		if uc != nil && uc.Role != "admin" && t.UserID != uc.ID {
+			continue
+		}
 		safe = append(safe, map[string]string{
 			"id":         t.ID,
 			"name":       t.Name,
@@ -152,6 +183,14 @@ func (h *TokenHandler) createToken(w http.ResponseWriter, r *http.Request) {
 		TokenHash: hashToken(token),
 		CreatedAt: time.Now().UTC().Format(time.RFC3339),
 	}
+
+	// In multi mode, associate token with the creating user
+	if uc := middleware.UserFromContext(r.Context()); uc != nil {
+		entry.UserID = uc.ID
+		entry.Username = uc.Username
+		entry.UserRole = uc.Role
+	}
+
 	h.store.Tokens = append(h.store.Tokens, entry)
 
 	if err := h.save(); err != nil {
