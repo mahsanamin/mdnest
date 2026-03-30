@@ -83,6 +83,7 @@ function App() {
   const etagRef = useRef(null);
   const collabRef = useRef(null);
   const typingTimers = useRef({}); // {userId: timeoutId}
+  const localTypingUntil = useRef(0); // timestamp — local user is "typing" until this time
 
   // Determine write access for current namespace/path
   const canWrite = useCallback((path) => {
@@ -134,11 +135,13 @@ function App() {
           typingTimers.current[msg.userId] = setTimeout(() => {
             setTypingUsers((prev) => { const n = { ...prev }; delete n[msg.userId]; return n; });
           }, 2000);
-          // Apply their content live if we have no local unsaved changes
-          if (contentRef.current === savedContentRef.current) {
-            setContent(msg.content);
-            setSavedContent(msg.content);
+          // Apply their content live only if the local user is NOT actively typing
+          if (Date.now() < localTypingUntil.current) {
+            // Local user is typing — skip to avoid overwriting their work
+            break;
           }
+          setContent(msg.content);
+          setSavedContent(msg.content);
           break;
         case 'file-changed':
           // Another user saved — update our saved baseline
@@ -341,6 +344,9 @@ function App() {
   const handleContentChange = useCallback((newContent) => {
     setContent(newContent);
     setConflictBanner(null);
+
+    // Mark local user as typing for 1.5s — blocks remote content from overwriting
+    localTypingUntil.current = Date.now() + 1500;
 
     // Broadcast content to other users via WebSocket (live typing)
     if (collabRef.current) collabRef.current.sendContent(newContent);
