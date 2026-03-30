@@ -485,12 +485,15 @@ function App() {
       case 'copy-path': {
         if (target && selectedNs) {
           const fullPath = `${selectedNs}/${target.path}`;
-          navigator.clipboard.writeText(fullPath).then(() => {
-            // Brief visual feedback could be added here
-          }).catch(() => {
-            // Fallback for older browsers
-            prompt('Copy this path:', fullPath);
-          });
+          // Use execCommand fallback for non-HTTPS origins
+          const textarea = document.createElement('textarea');
+          textarea.value = fullPath;
+          textarea.style.position = 'fixed';
+          textarea.style.opacity = '0';
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand('copy');
+          document.body.removeChild(textarea);
         }
         break;
       }
