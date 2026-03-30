@@ -1899,12 +1899,39 @@
   font-weight: 700;
   color: #1e1e2e;
   flex-shrink: 0;
+  transition: box-shadow 0.2s;
+}
+
+.presence-dot.typing {
+  box-shadow: 0 0 0 2px #1e1e2e, 0 0 0 4px currentColor;
+  animation: typing-pulse 1s ease-in-out infinite;
+}
+
+@keyframes typing-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
 }
 
 .presence-label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.typing-dots {
+  animation: typing-dots 1.2s steps(4, end) infinite;
+  display: inline-block;
+  width: 1.2em;
+  text-align: left;
+  overflow: hidden;
+  vertical-align: bottom;
+}
+
+@keyframes typing-dots {
+  0% { content: ''; width: 0; }
+  25% { width: 0.4em; }
+  50% { width: 0.8em; }
+  75% { width: 1.2em; }
 }
 
 /* ===== Conflict banner ===== */

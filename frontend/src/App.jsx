@@ -78,10 +78,11 @@ function App() {
   // Live collaboration state
   const [presenceUsers, setPresenceUsers] = useState([]);
   const [remoteCursors, setRemoteCursors] = useState({});
+  const [typingUsers, setTypingUsers] = useState({}); // {userId: username}
   const [conflictBanner, setConflictBanner] = useState(null); // {username, etag}
   const etagRef = useRef(null);
   const collabRef = useRef(null);
-  const remoteUpdateRef = useRef(false); // flag to ignore self-triggered changes
+  const typingTimers = useRef({}); // {userId: timeoutId}
 
   // Determine write access for current namespace/path
   const canWrite = useCallback((path) => {
@@ -122,11 +123,18 @@ function App() {
           break;
         case 'leave':
           setRemoteCursors((prev) => { const n = { ...prev }; delete n[msg.userId]; return n; });
+          setTypingUsers((prev) => { const n = { ...prev }; delete n[msg.userId]; return n; });
           setPresenceUsers((prev) => prev.filter((u) => u.id !== msg.userId));
           break;
         case 'content':
-          // Another user is typing — apply their content live
-          // Only apply if we have no local unsaved changes (to avoid overwriting local typing)
+          // Mark user as typing
+          setTypingUsers((prev) => ({ ...prev, [msg.userId]: msg.username }));
+          // Clear typing after 2s of silence
+          if (typingTimers.current[msg.userId]) clearTimeout(typingTimers.current[msg.userId]);
+          typingTimers.current[msg.userId] = setTimeout(() => {
+            setTypingUsers((prev) => { const n = { ...prev }; delete n[msg.userId]; return n; });
+          }, 2000);
+          // Apply their content live if we have no local unsaved changes
           if (contentRef.current === savedContentRef.current) {
             setContent(msg.content);
           }
@@ -159,6 +167,7 @@ function App() {
     collabRef.current.connect(selectedNs, currentPath);
     setPresenceUsers([]);
     setRemoteCursors({});
+    setTypingUsers({});
     setConflictBanner(null);
   }, [selectedNs, currentPath]);
 
@@ -594,7 +603,7 @@ function App() {
           onRefresh={handleRefresh}
         />
         {appConfig?.liveCollab && presenceUsers.length > 1 && (
-          <PresenceBar users={presenceUsers} currentUserId={userInfo?.id} />
+          <PresenceBar users={presenceUsers} currentUserId={userInfo?.id} typingUsers={typingUsers} />
         )}
         {conflictBanner && (
           <div className="conflict-banner">
