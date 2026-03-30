@@ -1433,20 +1433,32 @@
 
   .editor-wrapper {
     display: none;
+    flex: unset !important;
   }
 
   .editor-wrapper.mobile-active {
     display: flex;
-    flex: 1;
+    flex: 1 !important;
+    width: 100% !important;
   }
 
   .preview-wrapper {
     display: none;
+    flex: unset !important;
   }
 
   .preview-wrapper.mobile-active {
     display: flex;
-    flex: 1;
+    flex: 1 !important;
+    width: 100% !important;
+  }
+
+  .sidebar-resize-handle {
+    display: none;
+  }
+
+  .editor-container {
+    width: 100%;
   }
 
   /* Show mobile view toggle & FAB */
