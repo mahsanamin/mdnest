@@ -59,8 +59,8 @@ function App() {
   const [savedContent, setSavedContent] = useState('');
   const [saveTimer, setSaveTimer] = useState(null);
   const [sidebarVisible, setSidebarVisible] = useState(false);
-  const [mobileView, setMobileView] = useState('editor');
-  const [viewMode, setViewMode] = useState('split');
+  const [mobileView, setMobileView] = useState(() => localStorage.getItem('mdnest_mobile_view') || 'editor');
+  const [viewMode, setViewMode] = useState(() => localStorage.getItem('mdnest_view_mode') || 'split');
   const [splitRatio, setSplitRatio] = useState(50);
   const [ctxMenu, setCtxMenu] = useState({ visible: false, x: 0, y: 0, target: null });
   const [showChangePassword, setShowChangePassword] = useState(false);
@@ -631,7 +631,7 @@ function App() {
           onRename={canWriteCurrent ? handleToolbarRename : null}
           onDelete={canWriteCurrent ? handleToolbarDelete : null}
           viewMode={viewMode}
-          onViewModeChange={setViewMode}
+          onViewModeChange={(mode) => { setViewMode(mode); localStorage.setItem('mdnest_view_mode', mode); }}
           onRefresh={handleRefresh}
         />
         {appConfig?.liveCollab && presenceUsers.length > 1 && (
@@ -648,8 +648,8 @@ function App() {
           {currentPath ? (
             <>
               <div className="mobile-view-toggle">
-                <button className={mobileView === 'editor' ? 'active' : ''} onClick={() => setMobileView('editor')}>Edit</button>
-                <button className={mobileView === 'preview' ? 'active' : ''} onClick={() => setMobileView('preview')}>Preview</button>
+                <button className={mobileView === 'editor' ? 'active' : ''} onClick={() => { setMobileView('editor'); localStorage.setItem('mdnest_mobile_view', 'editor'); }}>Edit</button>
+                <button className={mobileView === 'preview' ? 'active' : ''} onClick={() => { setMobileView('preview'); localStorage.setItem('mdnest_mobile_view', 'preview'); }}>Preview</button>
               </div>
               {viewMode !== 'preview' && (
                 <div

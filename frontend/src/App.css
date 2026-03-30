@@ -1356,27 +1356,30 @@
 /* Mobile view toggle (editor/preview switch) */
 .mobile-view-toggle {
   display: none;
+  gap: 6px;
+  padding: 6px 10px;
   background: #181825;
   border-bottom: 1px solid #313244;
-  overflow: hidden;
   flex-shrink: 0;
 }
 
 .mobile-view-toggle button {
   flex: 1;
-  padding: 8px 0;
-  background: transparent;
+  padding: 7px 0;
+  background: #1e1e2e;
   color: #6c7086;
-  border: none;
-  font-size: 0.85rem;
+  border: 1px solid #313244;
+  border-radius: 6px;
+  font-size: 0.82rem;
   font-weight: 600;
   cursor: pointer;
+  transition: all 0.15s;
 }
 
 .mobile-view-toggle button.active {
-  background: #313244;
-  color: #cdd6f4;
-  border-bottom: 2px solid #89b4fa;
+  background: #89b4fa;
+  color: #1e1e2e;
+  border-color: #89b4fa;
 }
 
 /* Responsive: Mobile (<768px) */
