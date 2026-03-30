@@ -43,45 +43,46 @@ function renderMarkdown(source, ns, notePath) {
   const baseDir = getBaseDir(ns, notePath);
   let taskIndex = 0;
 
-  const renderer = {
-    link({ href, title, text }) {
-      const titleAttr = title ? ` title="${title}"` : '';
-      return `<a href="${href}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`;
-    },
+  const renderer = new Renderer();
 
-    image({ href, title, text }) {
-      let src = href || '';
-      if (src && !src.startsWith('http') && !src.startsWith('data:') && !src.startsWith('/')) {
-        src = baseDir + src;
-      }
-      const titleAttr = title ? ` title="${title}"` : '';
-      return `<img src="${src}" alt="${text || ''}"${titleAttr} />`;
-    },
+  renderer.link = function ({ href, title, text }) {
+    const titleAttr = title ? ` title="${title}"` : '';
+    return `<a href="${href}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`;
+  };
 
-    code({ text, lang }) {
-      const codeText = text || '';
-      const codeLang = (lang || '').trim().toLowerCase();
-      if (codeLang === 'mermaid') {
-        return `<div class="mermaid-source" data-mermaid="${encodeURIComponent(codeText)}"></div>`;
-      }
-      const escaped = codeText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      return `<pre><code class="language-${codeLang}">${escaped}</code></pre>`;
-    },
+  renderer.image = function ({ href, title, text }) {
+    let src = href || '';
+    if (src && !src.startsWith('http') && !src.startsWith('data:') && !src.startsWith('/')) {
+      src = baseDir + src;
+    }
+    const titleAttr = title ? ` title="${title}"` : '';
+    return `<img src="${src}" alt="${text || ''}"${titleAttr} />`;
+  };
 
-    listitem(token) {
-      const raw = token.raw || '';
-      const isChecked = raw.trimStart().startsWith('- [x]') || raw.trimStart().startsWith('* [x]');
-      const isUnchecked = raw.trimStart().startsWith('- [ ]') || raw.trimStart().startsWith('* [ ]');
-      if (isChecked || isUnchecked) {
-        const text = this.parser.parseInline(token.tokens);
-        const idx = taskIndex++;
-        const checked = isChecked ? 'checked' : '';
-        const checkbox = `<input type="checkbox" class="task-checkbox" data-task-index="${idx}" ${checked} />`;
-        const cleanText = text.replace(/^\[[ x]\]\s*/, '');
-        return `<li class="task-item">${checkbox}${cleanText}</li>\n`;
-      }
-      return false; // fall back to default
-    },
+  renderer.code = function ({ text, lang }) {
+    const codeText = text || '';
+    const codeLang = (lang || '').trim().toLowerCase();
+    if (codeLang === 'mermaid') {
+      return `<div class="mermaid-source" data-mermaid="${encodeURIComponent(codeText)}"></div>`;
+    }
+    const escaped = codeText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return `<pre><code class="language-${codeLang}">${escaped}</code></pre>`;
+  };
+
+  const origListitem = renderer.listitem.bind(renderer);
+  renderer.listitem = function (token) {
+    const raw = token.raw || '';
+    const isChecked = raw.trimStart().startsWith('- [x]') || raw.trimStart().startsWith('* [x]');
+    const isUnchecked = raw.trimStart().startsWith('- [ ]') || raw.trimStart().startsWith('* [ ]');
+    if (isChecked || isUnchecked) {
+      const text = this.parser.parseInline(token.tokens);
+      const idx = taskIndex++;
+      const checked = isChecked ? 'checked' : '';
+      const checkbox = `<input type="checkbox" class="task-checkbox" data-task-index="${idx}" ${checked} />`;
+      const cleanText = text.replace(/^\[[ x]\]\s*/, '');
+      return `<li class="task-item">${checkbox}${cleanText}</li>\n`;
+    }
+    return origListitem(token);
   };
 
   return marked(source, { renderer, breaks: true });
