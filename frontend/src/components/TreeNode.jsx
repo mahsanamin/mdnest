@@ -115,12 +115,14 @@ function TreeNode({ node, onSelect, currentPath, depth, onContextMenu, onDrop, e
         title={name + (node.path ? '\n' + node.path : '')}
       >
         {isFolder ? (
-          <span className="tree-arrow">{expanded ? '\u25BE' : '\u25B8'}</span>
+          hasChildren
+            ? <span className="tree-arrow">{expanded ? '\u25BE' : '\u25B8'}</span>
+            : <span className="tree-arrow-spacer" />
         ) : (
           <span className="tree-arrow-spacer" />
         )}
-        <span className={`tree-icon-svg ${isFolder ? (expanded ? 'folder-open' : (hasChildren ? 'folder-full' : 'folder')) : 'file'}`} />
-        <span className="tree-label">{name}</span>
+        <span className={`tree-icon-svg ${isFolder ? (expanded ? 'folder-open' : (hasChildren ? 'folder-full' : 'folder-empty')) : 'file'}`} />
+        <span className={`tree-label${isFolder && !hasChildren ? ' empty-folder' : ''}`}>{name}</span>
       </div>
       {isFolder && expanded && node.children && (
         <div className="tree-children">

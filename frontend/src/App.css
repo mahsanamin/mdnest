@@ -443,6 +443,16 @@
   background-position: center;
 }
 
+.tree-icon-svg.folder-empty {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23585b70' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round' stroke-dasharray='4 3'%3E%3Cpath d='M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z'/%3E%3C/svg%3E");
+  opacity: 0.7;
+}
+
+.tree-label.empty-folder {
+  color: #585b70;
+  font-style: italic;
+}
+
 .tree-icon-svg.folder {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236c7086' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z'/%3E%3C/svg%3E");
 }
