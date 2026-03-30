@@ -13,7 +13,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o mdnest .
 # Stage 2: Run
 FROM alpine:latest
 
-RUN apk add --no-cache ca-certificates
+RUN apk add --no-cache ca-certificates git openssh-client
 
 WORKDIR /app
 

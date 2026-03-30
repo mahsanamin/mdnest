@@ -283,4 +283,13 @@ export async function adminDeleteGrant(id) {
   return res.json();
 }
 
+export async function adminSyncNamespace(ns) {
+  const res = await request(`/admin/sync?ns=${encodeURIComponent(ns)}`, { method: 'POST' });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail || data.error || 'Sync failed');
+  }
+  return res.json();
+}
+
 export { getToken, clearToken, PermissionError };

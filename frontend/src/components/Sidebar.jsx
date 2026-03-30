@@ -1,6 +1,6 @@
 import { useRef, useCallback, useState, useEffect, useMemo } from 'react';
 import TreeNode from './TreeNode.jsx';
-import { searchNotes } from '../api.js';
+import { searchNotes, adminSyncNamespace } from '../api.js';
 
 // Filter tree nodes by filename match (case-insensitive)
 function filterTree(nodes, query) {
@@ -39,7 +39,23 @@ function Sidebar({
   onAdminPanel,
   onNewNote,
   onNewFolder,
+  onRefreshTree,
+  isAdmin,
 }) {
+  const [syncing, setSyncing] = useState(false);
+
+  const handleSync = useCallback(async () => {
+    if (syncing || !selectedNs) return;
+    setSyncing(true);
+    try {
+      await adminSyncNamespace(selectedNs);
+      if (onRefreshTree) await onRefreshTree();
+    } catch (e) {
+      console.error('Sync failed:', e);
+    } finally {
+      setSyncing(false);
+    }
+  }, [syncing, selectedNs, onRefreshTree]);
   const treeAreaRef = useRef(null);
   const longPressTimer = useRef(null);
   const touchMoved = useRef(false);
@@ -138,6 +154,14 @@ function Sidebar({
             <span className="ns-label">{selectedNs || 'mdnest'}</span>
           )}
           <div className="sidebar-tree-controls">
+            {isAdmin && (
+              <button
+                className={`tree-control-btn${syncing ? ' spinning' : ''}`}
+                onClick={handleSync}
+                disabled={syncing}
+                title="Git pull & refresh"
+              >&#8635;</button>
+            )}
             <button
               className="tree-control-btn"
               onClick={() => { handleExpandAll(); resetExpandAll(); }}

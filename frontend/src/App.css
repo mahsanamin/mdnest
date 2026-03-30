@@ -215,6 +215,15 @@
   line-height: 1;
 }
 
+.tree-control-btn.spinning {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 .tree-control-btn:hover {
   background: #313244;
   color: #cdd6f4;
