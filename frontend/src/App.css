@@ -2367,8 +2367,10 @@
   flex: 1;
 }
 
-.grants-add-row input {
-  width: 120px;
+.grants-add-row input,
+.grants-add-row .path-picker {
+  width: 160px;
+  flex-shrink: 0;
 }
 
 .grants-add-row button {

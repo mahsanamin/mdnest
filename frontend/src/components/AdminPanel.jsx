@@ -9,6 +9,7 @@ import {
   adminUpdateGrant,
   adminDeleteGrant,
 } from '../api.js';
+import PathPicker from './PathPicker.jsx';
 
 function AdminPanel({ onClose, namespaces }) {
   const [tab, setTab] = useState('users');
@@ -293,13 +294,13 @@ function UserAddGrant({ userId, namespaces, existingGrants, onDone }) {
     <form className="grants-add-form" onSubmit={handleAdd}>
       {error && <div className="share-error" style={{ padding: '4px 0' }}>{error}</div>}
       <div className="grants-add-row">
-        <select value={ns} onChange={(e) => setNs(e.target.value)} required>
+        <select value={ns} onChange={(e) => { setNs(e.target.value); setPath('/'); }} required>
           <option value="">Namespace...</option>
           {namespaces.map((n) => (
             <option key={n} value={n}>{n}</option>
           ))}
         </select>
-        <input type="text" placeholder="/ = all, or /docs" value={path} onChange={(e) => setPath(e.target.value)} />
+        <PathPicker namespace={ns} value={path} onChange={setPath} />
         <select value={perm} onChange={(e) => setPerm(e.target.value)}>
           <option value="write">Can edit</option>
           <option value="read">Can view</option>
