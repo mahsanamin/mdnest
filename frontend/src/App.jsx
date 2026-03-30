@@ -647,6 +647,10 @@ function App() {
         <div className="split-view">
           {currentPath ? (
             <>
+              <div className="mobile-view-toggle">
+                <button className={mobileView === 'editor' ? 'active' : ''} onClick={() => setMobileView('editor')}>Edit</button>
+                <button className={mobileView === 'preview' ? 'active' : ''} onClick={() => setMobileView('preview')}>Preview</button>
+              </div>
               {viewMode !== 'preview' && (
                 <div
                   className={`editor-wrapper${mobileView === 'editor' ? ' mobile-active' : ''}`}
@@ -696,10 +700,6 @@ function App() {
                   <Preview content={content} currentPath={currentPath} ns={selectedNs} onCheckboxToggle={canWriteCurrent ? handleCheckboxToggle : null} />
                 </div>
               )}
-              <div className="mobile-view-toggle">
-                <button className={mobileView === 'editor' ? 'active' : ''} onClick={() => setMobileView('editor')}>Edit</button>
-                <button className={mobileView === 'preview' ? 'active' : ''} onClick={() => setMobileView('preview')}>Preview</button>
-              </div>
             </>
           ) : (
             <div className="empty-state">
