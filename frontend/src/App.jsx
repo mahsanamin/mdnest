@@ -135,9 +135,9 @@ function App() {
           typingTimers.current[msg.userId] = setTimeout(() => {
             setTypingUsers((prev) => { const n = { ...prev }; delete n[msg.userId]; return n; });
           }, 2000);
-          // Apply their content live only if the local user is NOT actively typing
-          if (Date.now() < localTypingUntil.current) {
-            // Local user is typing — skip to avoid overwriting their work
+          // Apply remote content ONLY if local user is idle (no unsaved changes and not typing)
+          if (Date.now() < localTypingUntil.current || contentRef.current !== savedContentRef.current) {
+            // Local user has edits — don't overwrite. They'll sync via save + file-changed.
             break;
           }
           setContent(msg.content);
