@@ -593,7 +593,7 @@ function App() {
   }, [currentPath, selectedNs, handleContextAction]);
 
   if (!authenticated) {
-    return <Login onLogin={() => setAuthenticated(true)} />;
+    return <Login onLogin={() => window.location.reload()} />;
   }
 
   if (showAdminPanel && isAdmin && isMulti) {
