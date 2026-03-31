@@ -87,7 +87,12 @@ function TreeNode({ node, onSelect, currentPath, depth, onContextMenu, onDrop, e
     try {
       const data = JSON.parse(e.dataTransfer.getData('text/plain'));
       if (data.path && data.path !== node.path) {
-        if (node.path && data.path.startsWith(node.path + '/')) return;
+        // Block dropping a folder INTO its own descendant (circular move)
+        // e.g. dragging Dir_O onto Dir_O/Dir_B — node.path starts with data.path
+        if (node.path && node.path.startsWith(data.path + '/')) return;
+        // Block dropping into the SAME parent it's already in (no-op)
+        const fromParent = data.path.includes('/') ? data.path.substring(0, data.path.lastIndexOf('/')) : '';
+        if (node.path === fromParent) return;
         onDrop(data.path, node.path);
       }
     } catch (err) { /* ignore */ }
