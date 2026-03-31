@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-MDNEST_CLI_VERSION="2.0.0"
+MDNEST_CLI_VERSION="2.0.1"
 CONFIG_DIR="${HOME}/.config/mdnest"
 CONFIG_FILE="${CONFIG_DIR}/config"
 
