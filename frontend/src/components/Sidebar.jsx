@@ -1,6 +1,6 @@
 import { useRef, useCallback, useState, useEffect, useMemo } from 'react';
 import TreeNode from './TreeNode.jsx';
-import { searchNotes, adminSyncNamespace } from '../api.js';
+import { searchNotes, adminSyncNamespace, adminSyncStatus } from '../api.js';
 
 // Filter tree nodes by filename match (case-insensitive)
 function filterTree(nodes, query) {
@@ -21,6 +21,19 @@ function filterTree(nodes, query) {
     }
   }
   return filtered;
+}
+
+function formatSyncTime(dateStr) {
+  try {
+    const d = new Date(dateStr);
+    const now = new Date();
+    const diff = now - d;
+    if (diff < 60000) return 'just now';
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+    if (diff < 604800000) return `${Math.floor(diff / 86400000)}d ago`;
+    return d.toLocaleDateString();
+  } catch { return dateStr; }
 }
 
 function Sidebar({
@@ -45,12 +58,22 @@ function Sidebar({
   onResize,
 }) {
   const [syncing, setSyncing] = useState(false);
+  const [syncInfo, setSyncInfo] = useState(null); // {isGitRepo, hasRemote, lastCommit, ...}
+
+  // Fetch sync status when namespace changes
+  useEffect(() => {
+    if (!selectedNs || !isAdmin) { setSyncInfo(null); return; }
+    adminSyncStatus(selectedNs).then(setSyncInfo).catch(() => setSyncInfo(null));
+  }, [selectedNs, isAdmin]);
 
   const handleSync = useCallback(async () => {
     if (syncing || !selectedNs) return;
     setSyncing(true);
     try {
-      await adminSyncNamespace(selectedNs);
+      const result = await adminSyncNamespace(selectedNs);
+      if (result.lastCommit) {
+        setSyncInfo((prev) => prev ? { ...prev, lastCommit: result.lastCommit } : prev);
+      }
       if (onRefreshTree) await onRefreshTree();
     } catch (e) {
       console.error('Sync failed:', e);
@@ -156,13 +179,17 @@ function Sidebar({
             <span className="ns-label">{selectedNs || 'mdnest'}</span>
           )}
           <div className="sidebar-tree-controls">
-            {isAdmin && (
-              <button
-                className={`tree-control-btn${syncing ? ' spinning' : ''}`}
-                onClick={handleSync}
-                disabled={syncing}
-                title="Git pull & refresh"
-              >&#8635;</button>
+            {isAdmin && syncInfo && (
+              syncInfo.isGitRepo && syncInfo.hasRemote ? (
+                <button
+                  className={`tree-control-btn sync-btn${syncing ? ' spinning' : ''}`}
+                  onClick={handleSync}
+                  disabled={syncing}
+                  title={syncInfo.lastCommit ? `Last synced: ${formatSyncTime(syncInfo.lastCommit)}\n${syncInfo.remoteUrl || ''}` : 'Git pull & refresh'}
+                >&#8635;</button>
+              ) : (
+                <span className="sync-disabled" title="No git remote configured">&#8861;</span>
+              )
             )}
             <button
               className="tree-control-btn"
@@ -176,6 +203,24 @@ function Sidebar({
             >&#8863;</button>
           </div>
         </div>
+        {isAdmin && syncInfo && (
+          <div className={`sync-status-bar ${syncInfo.isGitRepo && syncInfo.hasRemote ? 'connected' : 'disconnected'}`}>
+            {syncInfo.isGitRepo && syncInfo.hasRemote ? (
+              <>
+                <span className="sync-status-dot connected" />
+                <span className="sync-status-text">
+                  {syncInfo.lastCommit ? `Synced ${formatSyncTime(syncInfo.lastCommit)}` : 'Connected'}
+                </span>
+                {!syncInfo.hasSSHKey && <span className="sync-status-warn" title="No SSH key — sync button may not pull from remote">no key</span>}
+              </>
+            ) : (
+              <>
+                <span className="sync-status-dot disconnected" />
+                <span className="sync-status-text">{syncInfo.isGitRepo ? 'No remote' : 'Not a git repo'}</span>
+              </>
+            )}
+          </div>
+        )}
         <div className="sidebar-search">
           <input
             type="text"

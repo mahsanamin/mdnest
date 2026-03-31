@@ -221,6 +221,47 @@
   flex-shrink: 0;
 }
 
+/* Sync status bar */
+.sync-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 12px;
+  font-size: 0.68rem;
+  color: #585b70;
+  border-bottom: 1px solid #313244;
+  flex-shrink: 0;
+}
+
+.sync-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.sync-status-dot.connected { background: #a6e3a1; }
+.sync-status-dot.disconnected { background: #585b70; }
+
+.sync-status-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sync-status-warn {
+  color: #f9e2af;
+  font-size: 0.62rem;
+  margin-left: auto;
+}
+
+.sync-disabled {
+  color: #585b70;
+  font-size: 0.85rem;
+  padding: 2px 5px;
+  cursor: default;
+}
+
 .tree-control-btn {
   padding: 2px 5px;
   background: transparent;
