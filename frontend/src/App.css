@@ -766,7 +766,14 @@
 }
 
 .mermaid-container svg {
-  max-width: 60%;
+  max-width: 50%;
+  height: auto !important;
+}
+
+@media (max-width: 768px) {
+  .mermaid-container svg {
+    max-width: 90%;
+  }
 }
 
 .mermaid-clickable {
