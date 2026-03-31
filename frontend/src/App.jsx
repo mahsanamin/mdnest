@@ -618,7 +618,7 @@ function App() {
         onAdminPanel={isAdmin && isMulti ? () => setShowAdminPanel(true) : null}
         onNewNote={canWrite('') ? () => doCreateNote(null) : null}
         onNewFolder={canWrite('') ? () => doCreateFolder(null) : null}
-        onRefreshTree={() => refreshTree(selectedNs)}
+        onRefreshTree={handleRefresh}
         isAdmin={isAdmin}
         width={sidebarWidth}
         onResize={setSidebarWidth}
