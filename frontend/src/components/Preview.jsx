@@ -149,7 +149,6 @@ function Preview({ content, currentPath, ns, onCheckboxToggle }) {
               const svgEl = wrapper.querySelector('svg');
               if (svgEl) {
                 svgEl.removeAttribute('width');
-                svgEl.style.maxWidth = '100%';
                 svgEl.style.height = 'auto';
               }
               wrapper.addEventListener('click', () => {
