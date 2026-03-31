@@ -1,5 +1,6 @@
 import { useRef, useCallback, useState, useEffect } from 'react';
 import { uploadImage } from '../api.js';
+import { htmlToMarkdown, hasRichContent } from '../html-to-md.js';
 import EditorToolbar from './EditorToolbar.jsx';
 
 function Editor({ content, onChange, currentPath, ns, readOnly, onCursorChange, onSelectionChange, remoteCursors }) {
@@ -133,9 +134,11 @@ function Editor({ content, onChange, currentPath, ns, readOnly, onCursorChange, 
   };
 
   const handlePaste = (e) => {
-    const items = e.clipboardData?.items;
-    if (!items) return;
-    for (const item of items) {
+    const clipboard = e.clipboardData;
+    if (!clipboard) return;
+
+    // Check for images first
+    for (const item of clipboard.items) {
       if (item.type.startsWith('image/')) {
         e.preventDefault();
         const file = item.getAsFile();
@@ -143,6 +146,15 @@ function Editor({ content, onChange, currentPath, ns, readOnly, onCursorChange, 
         return;
       }
     }
+
+    // Check for rich HTML content (from Google Docs, Confluence, etc.)
+    const html = clipboard.getData('text/html');
+    if (html && hasRichContent(html)) {
+      e.preventDefault();
+      const md = htmlToMarkdown(html);
+      insertAtCursor(md);
+    }
+    // Otherwise: default paste behavior (plain text)
   };
 
   const handleDrop = (e) => {
