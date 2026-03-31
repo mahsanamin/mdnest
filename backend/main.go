@@ -179,12 +179,14 @@ func main() {
 		mux.Handle("/api/me", authMiddleware.Wrap(http.HandlerFunc(meHandler.HandleMe)))
 	}
 
-	// Git sync endpoint (admin-only in multi mode, always allowed in single)
+	// Git sync endpoints (admin-only in multi mode, always allowed in single)
 	syncHandler := handlers.NewSyncHandler(absNotesDir, searchHandler.InvalidateCache)
 	if multiMode {
 		mux.Handle("/api/admin/sync", authMiddleware.Wrap(middleware.RequireAdmin(http.HandlerFunc(syncHandler.HandleSync))))
+		mux.Handle("/api/admin/sync-status", authMiddleware.Wrap(middleware.RequireAdmin(http.HandlerFunc(syncHandler.HandleSyncStatus))))
 	} else {
 		mux.Handle("/api/admin/sync", authMiddleware.Wrap(http.HandlerFunc(syncHandler.HandleSync)))
+		mux.Handle("/api/admin/sync-status", authMiddleware.Wrap(http.HandlerFunc(syncHandler.HandleSyncStatus)))
 	}
 
 	// WebSocket route for live collaboration (no auth middleware — JWT verified in handler)
