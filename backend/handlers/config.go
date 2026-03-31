@@ -26,6 +26,6 @@ func (h *ConfigHandler) HandleConfig(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"authMode":   h.authMode,
 		"liveCollab": h.liveCollab,
-		"version":    "2.0",
+		"version":    "2.0.1",
 	})
 }

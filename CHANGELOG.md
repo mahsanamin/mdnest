@@ -4,6 +4,19 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v2.0.1 — Patch Release
+
+### Fixes
+- **Drag-drop to ancestor directories** — moving items up the tree (e.g. subdir to parent) was blocked by an overly aggressive guard. Fixed.
+- **SSH key mount for git pull** — sync button now supports SSH authentication. Set `SSH_KEY_PATH` in `mdnest.conf` pointing to a passphrase-free deploy key.
+
+### New Features
+- **HTML-to-Markdown paste** — copy from Google Docs, Confluence, Notion etc. and paste into the editor. Rich content (headings, bold, lists, tables, code blocks) auto-converts to clean Markdown.
+- **View mode persistence** — your Edit/Preview/Split selection is remembered across page reloads (stored in localStorage).
+- **Mobile toggle restyle** — Edit/Preview buttons are now pill-shaped buttons instead of flat tabs.
+
+---
+
 ## v2.0 — Multi-User Collaboration
 
 > Powerful, privately-hosted Markdown notes — use it the way you like.
