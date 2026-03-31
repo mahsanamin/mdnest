@@ -125,6 +125,29 @@ function Preview({ content, currentPath, ns, onCheckboxToggle }) {
       if (!a.getAttribute('rel')) a.setAttribute('rel', 'noopener noreferrer');
     });
 
+    // Collapsible headings
+    el.querySelectorAll('h1, h2, h3, h4, h5, h6').forEach((heading) => {
+      const level = parseInt(heading.tagName[1]);
+      const toggle = document.createElement('span');
+      toggle.className = 'heading-toggle';
+      toggle.textContent = '\u25BE'; // ▾
+      heading.prepend(toggle);
+      heading.classList.add('collapsible-heading');
+      heading.addEventListener('click', (e) => {
+        if (e.target.tagName === 'A') return; // don't toggle when clicking links in headings
+        const collapsed = heading.classList.toggle('collapsed');
+        toggle.textContent = collapsed ? '\u25B8' : '\u25BE'; // ▸ or ▾
+        // Hide/show all siblings until next heading of same or higher level
+        let el = heading.nextElementSibling;
+        while (el) {
+          const tag = el.tagName;
+          if (/^H[1-6]$/.test(tag) && parseInt(tag[1]) <= level) break;
+          el.style.display = collapsed ? 'none' : '';
+          el = el.nextElementSibling;
+        }
+      });
+    });
+
     // Mermaid rendering
     const mermaidEls = el.querySelectorAll('.mermaid-source');
     if (mermaidEls.length > 0) {
@@ -221,9 +244,47 @@ function Preview({ content, currentPath, ns, onCheckboxToggle }) {
     setTimeout(() => { printWindow.print(); }, 500);
   }, [currentPath]);
 
+  const expandAllHeadings = useCallback(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    el.querySelectorAll('.collapsible-heading.collapsed').forEach((h) => {
+      h.classList.remove('collapsed');
+      h.querySelector('.heading-toggle').textContent = '\u25BE';
+      let sib = h.nextElementSibling;
+      const level = parseInt(h.tagName[1]);
+      while (sib) {
+        if (/^H[1-6]$/.test(sib.tagName) && parseInt(sib.tagName[1]) <= level) break;
+        sib.style.display = '';
+        sib = sib.nextElementSibling;
+      }
+    });
+  }, []);
+
+  const collapseAllHeadings = useCallback(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    el.querySelectorAll('.collapsible-heading:not(.collapsed)').forEach((h) => {
+      h.classList.add('collapsed');
+      h.querySelector('.heading-toggle').textContent = '\u25B8';
+      let sib = h.nextElementSibling;
+      const level = parseInt(h.tagName[1]);
+      while (sib) {
+        if (/^H[1-6]$/.test(sib.tagName) && parseInt(sib.tagName[1]) <= level) break;
+        sib.style.display = 'none';
+        sib = sib.nextElementSibling;
+      }
+    });
+  }, []);
+
   return (
     <div className="preview-pane-wrapper">
       <div className="preview-toolbar">
+        <button className="preview-fold-btn" onClick={expandAllHeadings} title="Expand all sections">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9"/><line x1="6" y1="4" x2="18" y2="4"/></svg>
+        </button>
+        <button className="preview-fold-btn" onClick={collapseAllHeadings} title="Collapse all sections">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 15 12 9 18 15"/><line x1="6" y1="20" x2="18" y2="20"/></svg>
+        </button>
         <button className="preview-export-btn" onClick={handleExportPdf} title="Export as PDF">
           Export PDF
         </button>

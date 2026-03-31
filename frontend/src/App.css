@@ -759,6 +759,49 @@
   margin-left: -1.2rem;
 }
 
+/* Collapsible headings */
+.collapsible-heading {
+  cursor: pointer;
+  user-select: text;
+  position: relative;
+}
+
+.collapsible-heading:hover {
+  opacity: 0.85;
+}
+
+.heading-toggle {
+  display: inline-block;
+  width: 1em;
+  color: #89b4fa;
+  font-size: 0.75em;
+  margin-right: 0.2em;
+  transition: transform 0.15s;
+}
+
+.collapsible-heading.collapsed .heading-toggle {
+  color: #6c7086;
+}
+
+/* Preview fold buttons */
+.preview-fold-btn {
+  background: transparent;
+  border: 1px solid #313244;
+  border-radius: 4px;
+  color: #6c7086;
+  padding: 3px 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  transition: all 0.15s;
+}
+
+.preview-fold-btn:hover {
+  color: #cdd6f4;
+  border-color: #45475a;
+  background: #313244;
+}
+
 /* Mermaid */
 .mermaid-container {
   margin: 0.5rem 0;
