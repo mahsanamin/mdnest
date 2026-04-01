@@ -484,8 +484,8 @@ function App() {
       }
       case 'copy-path': {
         if (target && selectedNs) {
-          const fullPath = `${selectedNs}/${target.path}`;
-          // Use execCommand fallback for non-HTTPS origins
+          const alias = appConfig?.serverAlias ? `@${appConfig.serverAlias}/` : '';
+          const fullPath = `${alias}${selectedNs}/${target.path}`;
           const textarea = document.createElement('textarea');
           textarea.value = fullPath;
           textarea.style.position = 'fixed';

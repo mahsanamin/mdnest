@@ -141,7 +141,8 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	configHandler := handlers.NewConfigHandler(authMode, enableCollab)
+	serverAlias := env("SERVER_ALIAS", "")
+	configHandler := handlers.NewConfigHandler(authMode, enableCollab, serverAlias)
 	mux.HandleFunc("/api/config", configHandler.HandleConfig)
 	mux.HandleFunc("/api/auth/login", authHandler.Login)
 	mux.Handle("/api/auth/change-password", authMiddleware.Wrap(http.HandlerFunc(authHandler.ChangePassword)))

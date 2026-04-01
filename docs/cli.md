@@ -1,117 +1,142 @@
 # mdnest CLI
 
-mdnest is a privately-hosted markdown notes system. Notes are plain `.md` files organized in namespaces. The `mdnest` CLI lets you read, write, search, and organize notes from the terminal.
+The `mdnest` CLI lets you read, write, search, and organize notes from any terminal. Supports multiple servers with `@alias` paths.
 
 ## Install
 
 One command, works on macOS and Linux:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mahsanamin/mdnest/v2.0/install-cli.sh | bash
+curl -fsSL https://raw.githubusercontent.com/mahsanamin/mdnest/main/install-cli.sh | bash
 ```
 
-This installs the `mdnest` command to `/usr/local/bin`. No dependencies — just bash and curl.
-
-Or install manually from the project directory:
-
-```bash
-./mdnest-server install-cli
-```
+No dependencies — just bash and curl.
 
 ## Login
 
-Create an API token in the web UI (Settings > API Tokens), then:
+### Single server
 
 ```bash
-mdnest login <server-url> <api-token>
+mdnest login https://myserver:3236 <api-token>
 ```
+
+### Multiple servers
+
+```bash
+mdnest login @work https://work-server:3236 <token>
+mdnest login @personal https://home-server:3236 <token>
+```
+
+Create API tokens in the web UI: Settings > API Tokens.
+
+## Path format
+
+Every command uses a unified path:
+
+```
+@server/namespace/path/to/file.md
+```
+
+- **@server** — server alias (optional if only one server configured)
+- **namespace** — workspace name on that server
+- **path** — file or folder path within the namespace
+
+The same format is used when you right-click → Copy Path in the web UI.
 
 ## Commands
 
 ### List namespaces or files
 
 ```bash
-mdnest note list                          # list all namespaces
-mdnest note list <namespace>              # list files in a namespace
+mdnest list                              # namespaces on default server
+mdnest list @work                        # namespaces on @work
+mdnest list @work/engineering             # files in namespace
 ```
 
 ### Read a note
 
 ```bash
-mdnest note read <namespace> <path>
+mdnest read @work/engineering/Architecture/system-overview.md
+mdnest read engineering/docs/api.md      # single server (no @)
 ```
 
 ### Write (overwrite) a note
 
 ```bash
-mdnest note write <namespace> <path> "content"
-mdnest note write <namespace> <path> -    # read from stdin
+mdnest write @work/engineering/log.md "New content"
+mdnest write @work/engineering/draft.md -    # read from stdin
+echo "piped" | mdnest write engineering/draft.md -
 ```
 
 ### Create a new note
 
 ```bash
-mdnest note create <namespace> <path> ["initial content"]
+mdnest create @work/engineering/new-doc.md "# Title"
+mdnest create engineering/new-doc.md
 ```
 
-### Append to a note
+### Append / Prepend
 
 ```bash
-mdnest note append <namespace> <path> "text to add at the end"
-mdnest note append <namespace> <path> -   # read from stdin
+mdnest append @work/engineering/log.md "## $(date) - Meeting notes"
+mdnest prepend @work/engineering/log.md "Important update"
+echo "from pipe" | mdnest append engineering/log.md -
 ```
 
-### Prepend to a note
+### Delete
 
 ```bash
-mdnest note prepend <namespace> <path> "text to add at the top"
+mdnest delete @work/engineering/old-doc.md
 ```
 
-### Delete a note or folder
+### Move / Rename
 
 ```bash
-mdnest note delete <namespace> <path>
-```
-
-### Move or rename
-
-```bash
-mdnest note move <namespace> <old-path> <new-path>
+mdnest move @work/engineering/old-name.md new-name.md
 ```
 
 ### Search
 
 ```bash
-mdnest note search <namespace> "query"
+mdnest search @work/engineering "database"
+mdnest search engineering "meeting"
 ```
 
-## Other commands
+## Server management
 
 ```bash
-mdnest login <url> <token>     # authenticate with server
-mdnest logout                  # remove saved credentials
-mdnest whoami                  # show CLI version, server version, connection info
-mdnest version                 # show CLI version
-mdnest docs                    # print full CLI reference
+mdnest servers                   # list all configured servers + versions
+mdnest whoami                    # CLI version + all servers
+mdnest logout @work              # remove one server
+mdnest logout                    # remove all
 ```
 
-## Command format
+## Legacy commands (backward compatible)
 
-Every note command follows the same pattern:
+The old `mdnest note <action> <namespace> <path>` format still works:
+
+```bash
+mdnest note list
+mdnest note read engineering Architecture/system-overview.md
+mdnest note append engineering log.md "text"
+```
+
+## Configuration
+
+Server configs are stored in `~/.config/mdnest/servers/`. Each server has its own file.
+
+To set the server alias that appears in Copy Path from the web UI, add to `mdnest.conf`:
 
 ```
-mdnest note <action> <namespace> [path] [content]
+SERVER_ALIAS=work
 ```
 
-- **namespace** = a top-level workspace on the server (e.g. `engineering`, `product`)
-- **path** = relative file path within the namespace (e.g. `Architecture/system-overview.md`)
-- Append/prepend create the file if it doesn't exist
-- Write with `-` reads content from stdin, useful for piping
+This makes Copy Path produce `@work/namespace/path` which the CLI can use directly.
 
 ## Version compatibility
 
-The CLI checks the server version on login. If the major versions don't match, you'll see a warning. Update with:
+The CLI checks the server version on login. If major versions don't match, you'll see a warning. Update with:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mahsanamin/mdnest/v2.0/install-cli.sh | bash
+curl -fsSL https://raw.githubusercontent.com/mahsanamin/mdnest/main/install-cli.sh | bash
 ```
