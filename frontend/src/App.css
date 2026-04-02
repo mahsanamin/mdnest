@@ -1898,6 +1898,49 @@
   background: #89b4fa44;
 }
 
+/* Table toolbar (Live editor) */
+.table-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 8px;
+  background: #181825;
+  border-bottom: 1px solid #313244;
+  flex-shrink: 0;
+}
+
+.table-toolbar button {
+  background: transparent;
+  border: 1px solid transparent;
+  color: #6c7086;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  transition: all 0.1s;
+}
+
+.table-toolbar button:hover {
+  background: #313244;
+  color: #cdd6f4;
+  border-color: #45475a;
+}
+
+.table-toolbar button.danger:hover {
+  color: #f38ba8;
+  background: #f38ba822;
+}
+
+.table-toolbar-sep {
+  width: 1px;
+  height: 16px;
+  background: #313244;
+  margin: 0 4px;
+}
+
 /* ===== Admin Panel ===== */
 .admin-panel {
   height: 100vh;
