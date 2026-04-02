@@ -1952,10 +1952,10 @@
 
 /* Mermaid live block */
 .mermaid-live-block {
-  background: #181825;
+  background: #11111b;
   border: 1px solid #313244;
-  border-radius: 8px;
-  margin: 0.5rem 0;
+  border-radius: 10px;
+  margin: 1rem 0;
   overflow: hidden;
 }
 
@@ -1991,15 +1991,22 @@
 }
 
 .mermaid-live-preview {
-  padding: 1rem;
+  padding: 2rem 3rem;
   display: flex;
   justify-content: center;
-  min-height: 120px;
+  align-items: center;
+  min-height: 200px;
+  background: #1e1e2e;
+}
+
+.mermaid-live-preview > div {
+  width: 100%;
+  display: flex;
+  justify-content: center;
 }
 
 .mermaid-live-preview svg {
   max-width: 100%;
-  width: 100%;
   height: auto;
 }
 
