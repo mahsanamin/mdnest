@@ -761,26 +761,37 @@
 
 /* Collapsible headings */
 .collapsible-heading {
-  cursor: pointer;
   user-select: text;
   position: relative;
 }
 
-.collapsible-heading:hover {
-  opacity: 0.85;
+.heading-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.2em;
+  height: 1.2em;
+  color: #89b4fa;
+  font-size: 0.7em;
+  margin-right: 0.3em;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: all 0.15s;
+  vertical-align: middle;
 }
 
-.heading-toggle {
-  display: inline-block;
-  width: 1em;
-  color: #89b4fa;
-  font-size: 0.75em;
-  margin-right: 0.2em;
-  transition: transform 0.15s;
+.heading-toggle:hover {
+  background: #313244;
+  color: #74c7ec;
 }
 
 .collapsible-heading.collapsed .heading-toggle {
   color: #6c7086;
+}
+
+.collapsible-heading.collapsed .heading-toggle:hover {
+  color: #89b4fa;
+  background: #313244;
 }
 
 /* Preview fold buttons */
