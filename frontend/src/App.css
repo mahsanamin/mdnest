@@ -2030,6 +2030,13 @@
   user-select: none;
 }
 
+.live-mermaid-blocks {
+  padding: 0 1rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
 .mermaid-live-hint {
   margin-left: auto;
   color: #585b70;
