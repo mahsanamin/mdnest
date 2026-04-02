@@ -203,17 +203,20 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly }) {
       });
     };
 
-    // Run once immediately
-    const timer = setTimeout(enhanceMermaidBlocks, 200);
+    // Run once after a short delay
+    const timer = setTimeout(enhanceMermaidBlocks, 300);
 
-    // Watch for DOM changes (Milkdown may render async)
+    // Watch for DOM changes (Milkdown may render async), debounced
+    let debounceTimer = null;
     const observer = new MutationObserver(() => {
-      enhanceMermaidBlocks();
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(enhanceMermaidBlocks, 500);
     });
     observer.observe(el, { childList: true, subtree: true });
 
     return () => {
       clearTimeout(timer);
+      if (debounceTimer) clearTimeout(debounceTimer);
       observer.disconnect();
       mermaidRootsRef.current.forEach((r) => {
         try { r.root.unmount(); } catch(e) {}

@@ -66,15 +66,11 @@ function App() {
   const [editorMode, setEditorMode] = useState('basic');
   const [editorModeReady, setEditorModeReady] = useState(false);
 
-  // Restore editor mode from localStorage AFTER initial render (avoids blocking page load)
+  // Restore editor mode from localStorage AFTER initial render
   useEffect(() => {
     const saved = localStorage.getItem('mdnest_editor_mode');
     if (saved === 'live') {
-      // Delay switching to live mode until page is interactive
-      requestIdleCallback ? requestIdleCallback(() => { setEditorMode('live'); setEditorModeReady(true); })
-        : setTimeout(() => { setEditorMode('live'); setEditorModeReady(true); }, 100);
-    } else {
-      setEditorModeReady(true);
+      setTimeout(() => { setEditorMode('live'); }, 500);
     }
   }, []);
   const [splitRatio, setSplitRatio] = useState(50);
@@ -608,7 +604,7 @@ function App() {
       editorEl.removeEventListener('scroll', syncEditorToPreview);
       previewPane.removeEventListener('scroll', syncPreviewToEditor);
     };
-  }, [viewMode, currentPath, editorMode, content]);
+  }, [viewMode, currentPath, editorMode]);
 
   const handleRefresh = useCallback(async () => {
     if (!authenticated || !selectedNs) return;
