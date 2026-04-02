@@ -3,6 +3,7 @@ import Login from './components/Login.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import Toolbar from './components/Toolbar.jsx';
 import Editor from './components/Editor.jsx';
+import LiveEditor from './components/LiveEditor.jsx';
 import Preview from './components/Preview.jsx';
 import ContextMenu from './components/ContextMenu.jsx';
 import Settings from './components/Settings.jsx';
@@ -61,6 +62,7 @@ function App() {
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [mobileView, setMobileView] = useState(() => localStorage.getItem('mdnest_mobile_view') || 'editor');
   const [viewMode, setViewMode] = useState(() => localStorage.getItem('mdnest_view_mode') || 'split');
+  const [editorMode, setEditorMode] = useState(() => localStorage.getItem('mdnest_editor_mode') || 'basic');
   const [splitRatio, setSplitRatio] = useState(50);
   const [ctxMenu, setCtxMenu] = useState({ visible: false, x: 0, y: 0, target: null });
   const [showChangePassword, setShowChangePassword] = useState(false);
@@ -632,6 +634,8 @@ function App() {
           onDelete={canWriteCurrent ? handleToolbarDelete : null}
           viewMode={viewMode}
           onViewModeChange={(mode) => { setViewMode(mode); localStorage.setItem('mdnest_view_mode', mode); }}
+          editorMode={editorMode}
+          onEditorModeChange={(mode) => { setEditorMode(mode); localStorage.setItem('mdnest_editor_mode', mode); }}
           onRefresh={handleRefresh}
         />
         {appConfig?.liveCollab && presenceUsers.length > 1 && (
@@ -656,16 +660,26 @@ function App() {
                   className={`editor-wrapper${mobileView === 'editor' ? ' mobile-active' : ''}`}
                   style={viewMode === 'split' ? { flex: `0 0 ${splitRatio}%` } : undefined}
                 >
-                  <Editor
-                    content={content}
-                    onChange={canWriteCurrent ? handleContentChange : null}
-                    currentPath={currentPath}
-                    ns={selectedNs}
-                    readOnly={!canWriteCurrent}
-                    onCursorChange={appConfig?.liveCollab ? handleCursorChange : null}
-                    onSelectionChange={appConfig?.liveCollab ? handleSelectionChange : null}
-                    remoteCursors={appConfig?.liveCollab ? remoteCursors : null}
-                  />
+                  {editorMode === 'live' ? (
+                    <LiveEditor
+                      content={content}
+                      onChange={canWriteCurrent ? handleContentChange : null}
+                      currentPath={currentPath}
+                      ns={selectedNs}
+                      readOnly={!canWriteCurrent}
+                    />
+                  ) : (
+                    <Editor
+                      content={content}
+                      onChange={canWriteCurrent ? handleContentChange : null}
+                      currentPath={currentPath}
+                      ns={selectedNs}
+                      readOnly={!canWriteCurrent}
+                      onCursorChange={appConfig?.liveCollab ? handleCursorChange : null}
+                      onSelectionChange={appConfig?.liveCollab ? handleSelectionChange : null}
+                      remoteCursors={appConfig?.liveCollab ? remoteCursors : null}
+                    />
+                  )}
                 </div>
               )}
               {viewMode === 'split' && (

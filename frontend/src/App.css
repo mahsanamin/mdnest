@@ -1728,6 +1728,176 @@
   cursor: default;
 }
 
+/* ===== Editor Mode Toggle ===== */
+.editor-mode-toggle {
+  display: flex;
+  gap: 0;
+  background: #181825;
+  border: 1px solid #313244;
+  border-radius: 6px;
+  overflow: hidden;
+  flex-shrink: 0;
+  margin-right: 6px;
+}
+
+.editor-mode-toggle button {
+  padding: 3px 10px;
+  background: transparent;
+  color: #6c7086;
+  border: none;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.editor-mode-toggle button.active {
+  background: #89b4fa;
+  color: #1e1e2e;
+}
+
+/* ===== Live Editor (Milkdown) ===== */
+.live-editor-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-right: 1px solid #313244;
+}
+
+.live-editor-wrapper {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0;
+}
+
+.live-editor-content {
+  outline: none;
+  padding: 1rem;
+  min-height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', sans-serif;
+  font-size: 0.9rem;
+  line-height: 1.7;
+  color: #cdd6f4;
+}
+
+.live-editor-content:focus {
+  outline: none;
+}
+
+/* Milkdown ProseMirror overrides for Catppuccin Mocha */
+.live-editor-content h1 { font-size: 1.8rem; font-weight: 700; margin: 1.2rem 0 0.6rem; border-bottom: 1px solid #313244; padding-bottom: 0.3rem; }
+.live-editor-content h2 { font-size: 1.4rem; font-weight: 700; margin: 1rem 0 0.5rem; }
+.live-editor-content h3 { font-size: 1.15rem; font-weight: 600; margin: 0.8rem 0 0.4rem; }
+.live-editor-content h4 { font-size: 1rem; font-weight: 600; margin: 0.6rem 0 0.3rem; }
+
+.live-editor-content p { margin: 0.4rem 0; }
+
+.live-editor-content strong { color: #cdd6f4; font-weight: 700; }
+.live-editor-content em { color: #cdd6f4; font-style: italic; }
+
+.live-editor-content a { color: #89b4fa; text-decoration: underline; }
+.live-editor-content a:hover { color: #74c7ec; }
+
+.live-editor-content code {
+  background: #313244;
+  color: #f38ba8;
+  padding: 0.15em 0.4em;
+  border-radius: 3px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.85em;
+}
+
+.live-editor-content pre {
+  background: #11111b;
+  border: 1px solid #313244;
+  border-radius: 6px;
+  padding: 0.8rem 1rem;
+  overflow-x: auto;
+  margin: 0.5rem 0;
+}
+
+.live-editor-content pre code {
+  background: none;
+  color: #cdd6f4;
+  padding: 0;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.live-editor-content blockquote {
+  border-left: 3px solid #89b4fa;
+  padding: 0.3rem 1rem;
+  margin: 0.5rem 0;
+  color: #a6adc8;
+  background: #181825;
+  border-radius: 0 4px 4px 0;
+}
+
+.live-editor-content hr {
+  border: none;
+  border-top: 1px solid #313244;
+  margin: 1rem 0;
+}
+
+.live-editor-content ul, .live-editor-content ol {
+  padding-left: 1.5rem;
+  margin: 0.3rem 0;
+}
+
+.live-editor-content li { margin: 0.15rem 0; }
+
+.live-editor-content li[data-checked="true"],
+.live-editor-content li[data-checked="false"] {
+  list-style: none;
+  margin-left: -1.2rem;
+}
+
+.live-editor-content li[data-checked] input[type="checkbox"] {
+  margin-right: 0.4rem;
+  cursor: pointer;
+}
+
+.live-editor-content img {
+  max-width: 100%;
+  border-radius: 4px;
+}
+
+/* Tables in live editor */
+.live-editor-content table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.5rem 0;
+}
+
+.live-editor-content th,
+.live-editor-content td {
+  border: 1px solid #45475a;
+  padding: 0.4rem 0.7rem;
+  text-align: left;
+  min-width: 80px;
+}
+
+.live-editor-content th {
+  background: #313244;
+  font-weight: 600;
+}
+
+.live-editor-content td {
+  background: #1e1e2e;
+}
+
+.live-editor-content td:focus,
+.live-editor-content th:focus {
+  outline: 2px solid #89b4fa;
+  outline-offset: -2px;
+}
+
+/* Selection */
+.live-editor-content ::selection {
+  background: #89b4fa44;
+}
+
 /* ===== Admin Panel ===== */
 .admin-panel {
   height: 100vh;
