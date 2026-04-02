@@ -1,17 +1,17 @@
-import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import { useRef, useEffect, useState, useCallback } from 'react';
+import { createRoot } from 'react-dom/client';
 import { Editor, rootCtx, defaultValueCtx, editorViewOptionsCtx } from '@milkdown/core';
 import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react';
-import { uploadImage } from '../api.js';
-import { htmlToMarkdown, hasRichContent } from '../html-to-md.js';
-import MermaidBlock from './MermaidBlock.jsx';
-import MermaidViewer from './MermaidViewer.jsx';
-import { commonmark } from '@milkdown/preset-commonmark';
+import { commonmark, codeBlockSchema } from '@milkdown/preset-commonmark';
 import { gfm } from '@milkdown/preset-gfm';
 import { listener, listenerCtx } from '@milkdown/plugin-listener';
 import { history } from '@milkdown/plugin-history';
 import { clipboard } from '@milkdown/plugin-clipboard';
-import { replaceAll } from '@milkdown/utils';
-import { callCommand } from '@milkdown/utils';
+import { replaceAll, callCommand, $view } from '@milkdown/utils';
+import { uploadImage } from '../api.js';
+import { htmlToMarkdown, hasRichContent } from '../html-to-md.js';
+import MermaidBlock from './MermaidBlock.jsx';
+import MermaidViewer from './MermaidViewer.jsx';
 import {
   insertTableCommand,
   addRowBeforeCommand,
@@ -20,6 +20,75 @@ import {
   addColAfterCommand,
   deleteSelectedCellsCommand,
 } from '@milkdown/preset-gfm';
+
+// ProseMirror node view for mermaid code blocks
+// Renders MermaidBlock React component in place of the <pre> element
+const mermaidNodeView = $view(codeBlockSchema.node, (ctx) => {
+  return (node, view, getPos) => {
+    const lang = node.attrs.language || '';
+    if (lang !== 'mermaid') {
+      // Not mermaid — return null to use default rendering
+      return {};
+    }
+
+    // Create container
+    const dom = document.createElement('div');
+    dom.className = 'mermaid-live-container';
+    dom.contentEditable = 'false';
+
+    const root = createRoot(dom);
+    let currentSource = node.textContent;
+
+    const render = (source) => {
+      root.render(
+        <MermaidBlock
+          source={source}
+          readOnly={!view.editable}
+          onChange={(newSource) => {
+            // Update the ProseMirror node's text content
+            const pos = getPos();
+            if (pos == null) return;
+            const tr = view.state.tr;
+            const nodeAt = view.state.doc.nodeAt(pos);
+            if (!nodeAt) return;
+            // Replace the code block's text content
+            tr.replaceWith(
+              pos + 1,
+              pos + 1 + nodeAt.content.size,
+              newSource ? view.state.schema.text(newSource) : view.state.schema.text('')
+            );
+            view.dispatch(tr);
+          }}
+          onFullscreen={(svg) => {
+            // Dispatch a custom event that LiveEditor can listen to
+            dom.dispatchEvent(new CustomEvent('mermaid-fullscreen', { detail: svg, bubbles: true }));
+          }}
+        />
+      );
+    };
+
+    render(currentSource);
+
+    return {
+      dom,
+      stopEvent: () => true, // Don't let ProseMirror handle events inside our component
+      ignoreMutation: () => true, // Don't let ProseMirror sync our DOM changes
+      update: (updatedNode) => {
+        if (updatedNode.type.name !== 'code_block') return false;
+        if ((updatedNode.attrs.language || '') !== 'mermaid') return false;
+        const newSource = updatedNode.textContent;
+        if (newSource !== currentSource) {
+          currentSource = newSource;
+          render(newSource);
+        }
+        return true;
+      },
+      destroy: () => {
+        root.unmount();
+      },
+    };
+  };
+});
 
 function MilkdownEditor({ content, onChange, readOnly, onEditorReady }) {
   const lastLocalContent = useRef(content);
@@ -52,7 +121,8 @@ function MilkdownEditor({ content, onChange, readOnly, onEditorReady }) {
       .use(gfm)
       .use(listener)
       .use(history)
-      .use(clipboard);
+      .use(clipboard)
+      .use(mermaidNodeView);
   }, [readOnly]);
 
   useEffect(() => {
@@ -81,13 +151,9 @@ function MilkdownEditor({ content, onChange, readOnly, onEditorReady }) {
 
 function TableToolbar({ editor }) {
   if (!editor) return null;
-
   const cmd = (command, payload) => {
-    try {
-      editor.action(callCommand(command.key, payload));
-    } catch (e) { /* command may not be available */ }
+    try { editor.action(callCommand(command.key, payload)); } catch (e) {}
   };
-
   return (
     <div className="table-toolbar">
       <button onClick={() => cmd(insertTableCommand, { row: 3, col: 3 })} title="Insert table">
@@ -117,8 +183,6 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly }) {
     const handlePaste = async (e) => {
       const clipboard = e.clipboardData;
       if (!clipboard) return;
-
-      // Check for images
       for (const item of clipboard.items) {
         if (item.type.startsWith('image/')) {
           e.preventDefault();
@@ -127,23 +191,16 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly }) {
             try {
               const data = await uploadImage(ns, currentPath, file);
               const filename = (data.url || file.name).split('/').pop();
-              // Insert image markdown — the editor will re-serialize
-              if (editor) {
-                const md = `![image](${filename})`;
-                document.execCommand('insertText', false, md);
-              }
+              if (editor) document.execCommand('insertText', false, `![image](${filename})`);
             } catch (err) { console.error('Upload failed:', err); }
           }
           return;
         }
       }
-
-      // Check for rich HTML
       const html = clipboard.getData('text/html');
       if (html && hasRichContent(html)) {
         e.preventDefault();
-        const md = htmlToMarkdown(html);
-        document.execCommand('insertText', false, md);
+        document.execCommand('insertText', false, htmlToMarkdown(html));
       }
     };
 
@@ -151,19 +208,14 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly }) {
     return () => el.removeEventListener('paste', handlePaste, true);
   }, [editor, ns, currentPath, readOnly]);
 
-  // Render mermaid blocks separately below the editor
-  // Instead of injecting into Milkdown's DOM (which gets wiped on re-render),
-  // extract mermaid sources from the content and render them as standalone blocks.
-  const mermaidBlocks = useMemo(() => {
-    if (!content) return [];
-    const blocks = [];
-    const regex = /```mermaid\s*\n([\s\S]*?)```/g;
-    let match;
-    while ((match = regex.exec(content)) !== null) {
-      blocks.push({ source: match[1].trim(), index: match.index });
-    }
-    return blocks;
-  }, [content]);
+  // Listen for mermaid fullscreen events from node views
+  useEffect(() => {
+    const el = wrapperRef.current;
+    if (!el) return;
+    const handler = (e) => setViewerSvg(e.detail);
+    el.addEventListener('mermaid-fullscreen', handler);
+    return () => el.removeEventListener('mermaid-fullscreen', handler);
+  }, []);
 
   return (
     <div className="live-editor-pane">
@@ -178,27 +230,6 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly }) {
             onEditorReady={setEditor}
           />
         </MilkdownProvider>
-        {mermaidBlocks.length > 0 && (
-          <div className="live-mermaid-blocks">
-            {mermaidBlocks.map((block, i) => (
-              <MermaidBlock
-                key={`${block.index}-${i}`}
-                source={block.source}
-                readOnly={readOnly}
-                onChange={(newSource) => {
-                  if (!onChange) return;
-                  // Replace the mermaid block in the content
-                  const newContent = content.replace(
-                    `\`\`\`mermaid\n${block.source}\n\`\`\``,
-                    `\`\`\`mermaid\n${newSource}\n\`\`\``
-                  );
-                  if (newContent !== content) onChange(newContent);
-                }}
-                onFullscreen={setViewerSvg}
-              />
-            ))}
-          </div>
-        )}
       </div>
       {viewerSvg && (
         <MermaidViewer svgContent={viewerSvg} onClose={() => setViewerSvg(null)} />
