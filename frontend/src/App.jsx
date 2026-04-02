@@ -67,6 +67,9 @@ function App() {
   const [ctxMenu, setCtxMenu] = useState({ visible: false, x: 0, y: 0, target: null });
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
+  const editorWrapperRef = useRef(null);
+  const previewWrapperRef = useRef(null);
+  const scrollSyncRef = useRef(false);
   const [shareTarget, setShareTarget] = useState(null); // {namespace, path}
   const [initialized, setInitialized] = useState(false);
   const contentRef = useRef(content);
@@ -552,6 +555,47 @@ function App() {
     }
   }, [selectedNs, currentPath, refreshTree]);
 
+  // Scroll sync: editor scroll → preview scroll (proportional)
+  useEffect(() => {
+    if (viewMode !== 'split') return;
+    const findScrollable = (wrapper) => {
+      if (!wrapper) return null;
+      // Find the actual scrollable element inside the wrapper
+      const textarea = wrapper.querySelector('.editor-textarea');
+      if (textarea) return textarea;
+      const liveContent = wrapper.querySelector('.live-editor-wrapper');
+      if (liveContent) return liveContent;
+      return wrapper;
+    };
+
+    const editorEl = findScrollable(editorWrapperRef.current);
+    const previewPane = previewWrapperRef.current?.querySelector('.preview-pane');
+    if (!editorEl || !previewPane) return;
+
+    const syncEditorToPreview = () => {
+      if (scrollSyncRef.current) return;
+      scrollSyncRef.current = true;
+      const pct = editorEl.scrollTop / (editorEl.scrollHeight - editorEl.clientHeight || 1);
+      previewPane.scrollTop = pct * (previewPane.scrollHeight - previewPane.clientHeight);
+      requestAnimationFrame(() => { scrollSyncRef.current = false; });
+    };
+
+    const syncPreviewToEditor = () => {
+      if (scrollSyncRef.current) return;
+      scrollSyncRef.current = true;
+      const pct = previewPane.scrollTop / (previewPane.scrollHeight - previewPane.clientHeight || 1);
+      editorEl.scrollTop = pct * (editorEl.scrollHeight - editorEl.clientHeight);
+      requestAnimationFrame(() => { scrollSyncRef.current = false; });
+    };
+
+    editorEl.addEventListener('scroll', syncEditorToPreview);
+    previewPane.addEventListener('scroll', syncPreviewToEditor);
+    return () => {
+      editorEl.removeEventListener('scroll', syncEditorToPreview);
+      previewPane.removeEventListener('scroll', syncPreviewToEditor);
+    };
+  }, [viewMode, currentPath, editorMode, content]);
+
   const handleRefresh = useCallback(async () => {
     if (!authenticated || !selectedNs) return;
     await refreshTree(selectedNs);
@@ -657,6 +701,7 @@ function App() {
               </div>
               {viewMode !== 'preview' && (
                 <div
+                  ref={editorWrapperRef}
                   className={`editor-wrapper${mobileView === 'editor' ? ' mobile-active' : ''}`}
                   style={viewMode === 'split' ? { flex: `0 0 ${splitRatio}%` } : undefined}
                 >
@@ -708,6 +753,7 @@ function App() {
               )}
               {viewMode !== 'editor' && (
                 <div
+                  ref={previewWrapperRef}
                   className={`preview-wrapper${mobileView === 'preview' ? ' mobile-active' : ''}`}
                   style={viewMode === 'split' ? { flex: `0 0 ${100 - splitRatio}%` } : undefined}
                 >
