@@ -4,6 +4,31 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v2.1.0 — Multi-Server CLI + Git Sync Fix
+
+### New Features
+- **Multi-server CLI** — manage multiple mdnest servers with `@alias` paths. `mdnest login @work <url> <token>`, then `mdnest read @work/engineering/docs.md`. Single-server users see zero change.
+- **Flat CLI commands** — `mdnest read`, `mdnest list`, `mdnest search` etc. (no more `mdnest note` prefix needed, though it still works).
+- **`mdnest servers`** — list all configured servers with versions and reachability.
+- **Copy Path includes server alias** — right-click Copy Path in the web UI gives `@work/namespace/path` when `SERVER_ALIAS` is set, directly pasteable into the CLI.
+- **Collapsible headings in preview** — click any heading to fold/unfold the section. Expand All / Collapse All buttons in preview toolbar.
+- **Git sync status indicator** — green dot + "Synced 5m ago" in sidebar header.
+- **Sync button commits + pushes** — pressing sync now does git add + commit + pull + push (was pull-only before).
+
+### Fixes
+- **Git-sync SSH key** — the git-sync sidecar now falls back to `SSH_KEY_PATH` when `git-sync/keys/` is empty. One SSH key config works for both the sync button and the auto-sync cycle.
+- **Mermaid inline sizing** — 50% on desktop, 90% on mobile. Removed inline style override.
+- **Sync button reloads current note** — not just the tree.
+- **Tree arrows bigger and blue** — more visible expand/collapse indicators.
+- **Hard refresh on login** — clean state, no stale data.
+- **Removed "no key" warning** — was confusing for users who don't need git pull.
+
+### Configuration
+- `SERVER_ALIAS` — optional, sets the `@alias` used in CLI paths and Copy Path.
+- `SSH_KEY_PATH` — now used by both the backend sync button AND the git-sync sidecar.
+
+---
+
 ## v2.0.1 — Patch Release
 
 ### Fixes
