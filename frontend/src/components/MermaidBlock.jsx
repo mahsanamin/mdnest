@@ -1,6 +1,61 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import mermaid from 'mermaid';
 
+function AutoSizeInput({ className, style, defaultValue, onConfirm, onCancel }) {
+  const [value, setValue] = useState(defaultValue || '');
+  const measureRef = useRef(null);
+  const inputRef = useRef(null);
+  const [size, setSize] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    if (measureRef.current) {
+      const w = Math.max(measureRef.current.scrollWidth + 32, 120);
+      const h = Math.max(measureRef.current.scrollHeight + 4, 32);
+      setSize({ width: w, height: h });
+    }
+  }, [value]);
+
+  useEffect(() => {
+    if (inputRef.current) inputRef.current.focus();
+  }, []);
+
+  return (
+    <>
+      <span
+        ref={measureRef}
+        className={className}
+        style={{
+          position: 'fixed',
+          visibility: 'hidden',
+          whiteSpace: 'pre-wrap',
+          maxWidth: '400px',
+          padding: '6px 12px',
+          fontSize: '0.9rem',
+        }}
+      >{value || ' '}</span>
+      <textarea
+        ref={inputRef}
+        className={className}
+        style={{
+          ...style,
+          width: Math.min(size.width, 400),
+          height: size.height,
+          resize: 'none',
+          overflow: 'hidden',
+        }}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onConfirm(value); }
+          if (e.key === 'Escape') onCancel();
+        }}
+        onBlur={() => onConfirm(value)}
+        rows={1}
+      />
+    </>
+  );
+}
+
 function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
   const [mode, setMode] = useState('preview');
   const [svgHtml, setSvgHtml] = useState('');
@@ -173,22 +228,16 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
             <div className="mermaid-live-loading">Rendering...</div>
           )}
           {editingLabel && (
-            <input
+            <AutoSizeInput
               className="mermaid-label-input"
               style={{
                 position: 'absolute',
                 left: editingLabel.left,
                 top: editingLabel.top,
-                width: editingLabel.width,
-                height: editingLabel.height,
               }}
               defaultValue={editingLabel.text}
-              autoFocus
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleLabelChange(e.target.value);
-                if (e.key === 'Escape') setEditingLabel(null);
-              }}
-              onBlur={(e) => handleLabelChange(e.target.value)}
+              onConfirm={(val) => handleLabelChange(val)}
+              onCancel={() => setEditingLabel(null)}
             />
           )}
         </div>
