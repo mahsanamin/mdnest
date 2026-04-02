@@ -154,56 +154,74 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly }) {
   }, [editor, ns, currentPath, readOnly]);
 
   // Enhance mermaid code blocks in the live editor DOM
+  // Uses MutationObserver to catch blocks as Milkdown renders them
   useEffect(() => {
     if (!wrapperRef.current) return;
     const el = wrapperRef.current;
 
-    // Clean up previous React roots
-    mermaidRootsRef.current.forEach((r) => { try { r.unmount(); } catch(e) {} });
-    mermaidRootsRef.current = [];
+    const enhanceMermaidBlocks = () => {
+      // Milkdown renders code blocks as <pre><code> or <pre data-language="mermaid">
+      // Check multiple possible selectors
+      const allPres = el.querySelectorAll('pre');
+      allPres.forEach((preEl) => {
+        if (preEl.dataset.mermaidEnhanced) return;
 
-    // Find code blocks with language-mermaid
-    const codeBlocks = el.querySelectorAll('pre code');
-    codeBlocks.forEach((codeEl) => {
-      const preEl = codeEl.parentElement;
-      if (!preEl) return;
+        // Detect mermaid: check code element's class, data-language, or pre's data-language
+        const codeEl = preEl.querySelector('code');
+        const lang = preEl.getAttribute('data-language')
+          || codeEl?.getAttribute('data-language')
+          || codeEl?.className || '';
+        const textContent = (codeEl || preEl).textContent || '';
 
-      // Check if it's a mermaid block (Milkdown adds data-language or class)
-      const lang = codeEl.getAttribute('data-language') || codeEl.className || '';
-      if (!lang.includes('mermaid')) return;
+        // Check if it looks like mermaid (language attribute or content starts with mermaid keywords)
+        const isMermaid = lang.toLowerCase().includes('mermaid')
+          || /^\s*(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|journey|gitGraph)\b/.test(textContent);
 
-      // Don't re-enhance if already done
-      if (preEl.dataset.mermaidEnhanced) return;
-      preEl.dataset.mermaidEnhanced = 'true';
+        if (!isMermaid) return;
 
-      const source = codeEl.textContent || '';
-      const container = document.createElement('div');
-      container.className = 'mermaid-live-container';
-      preEl.parentNode.insertBefore(container, preEl);
-      preEl.style.display = 'none';
+        preEl.dataset.mermaidEnhanced = 'true';
 
-      const root = createRoot(container);
-      root.render(
-        <MermaidBlock
-          source={source}
-          readOnly={readOnly}
-          onChange={(newSource) => {
-            // Update the code block content
-            codeEl.textContent = newSource;
-            // Trigger a re-render by dispatching input
-            preEl.style.display = 'none';
-          }}
-          onFullscreen={setViewerSvg}
-        />
-      );
-      mermaidRootsRef.current.push(root);
+        const source = textContent.trim();
+        const container = document.createElement('div');
+        container.className = 'mermaid-live-container';
+        preEl.parentNode.insertBefore(container, preEl);
+        preEl.style.display = 'none';
+
+        const root = createRoot(container);
+        root.render(
+          <MermaidBlock
+            source={source}
+            readOnly={readOnly}
+            onChange={(newSource) => {
+              // For now, onChange triggers a full content update via the editor
+              // The mermaid source edit in MermaidBlock handles its own re-render
+            }}
+            onFullscreen={setViewerSvg}
+          />
+        );
+        mermaidRootsRef.current.push({ root, container });
+      });
+    };
+
+    // Run once immediately
+    const timer = setTimeout(enhanceMermaidBlocks, 200);
+
+    // Watch for DOM changes (Milkdown may render async)
+    const observer = new MutationObserver(() => {
+      enhanceMermaidBlocks();
     });
+    observer.observe(el, { childList: true, subtree: true });
 
     return () => {
-      mermaidRootsRef.current.forEach((r) => { try { r.unmount(); } catch(e) {} });
+      clearTimeout(timer);
+      observer.disconnect();
+      mermaidRootsRef.current.forEach((r) => {
+        try { r.root.unmount(); } catch(e) {}
+        try { r.container.remove(); } catch(e) {}
+      });
       mermaidRootsRef.current = [];
     };
-  }, [content, readOnly]);
+  }, [readOnly, currentPath]);
 
   return (
     <div className="live-editor-pane">
