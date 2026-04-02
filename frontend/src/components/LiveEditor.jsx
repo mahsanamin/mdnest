@@ -7,7 +7,8 @@ import { gfm } from '@milkdown/preset-gfm';
 import { listener, listenerCtx } from '@milkdown/plugin-listener';
 import { history } from '@milkdown/plugin-history';
 import { clipboard } from '@milkdown/plugin-clipboard';
-import { replaceAll, callCommand, $view, insert } from '@milkdown/utils';
+import { replaceAll, callCommand, $view, insert, $prose } from '@milkdown/utils';
+import { Plugin, PluginKey } from '@milkdown/prose/state';
 import { uploadImage } from '../api.js';
 import { htmlToMarkdown, hasRichContent } from '../html-to-md.js';
 import MermaidBlock from './MermaidBlock.jsx';
@@ -20,6 +21,37 @@ import {
   addColAfterCommand,
   deleteSelectedCellsCommand,
 } from '@milkdown/preset-gfm';
+
+// Plugin: auto-convert empty block nodes (heading, blockquote) to paragraph on backspace
+const clearEmptyBlockPlugin = $prose((ctx) => {
+  return new Plugin({
+    key: new PluginKey('clear-empty-block'),
+    props: {
+      handleKeyDown(view, event) {
+        if (event.key !== 'Backspace' && event.key !== 'Delete') return false;
+        const { state } = view;
+        const { selection } = state;
+        if (!selection.empty) return false;
+
+        const { $from } = selection;
+        const node = $from.parent;
+
+        // Only act on empty block nodes that aren't paragraphs
+        if (node.content.size > 0) return false;
+        if (node.type.name === 'paragraph') return false;
+
+        // Check if this is a heading, blockquote, or similar
+        const paragraph = state.schema.nodes.paragraph;
+        if (!paragraph) return false;
+
+        const pos = $from.before($from.depth);
+        const tr = state.tr.setNodeMarkup(pos, paragraph);
+        view.dispatch(tr);
+        return true;
+      },
+    },
+  });
+});
 
 // ProseMirror node view for mermaid code blocks
 // Renders MermaidBlock React component in place of the <pre> element
@@ -122,7 +154,8 @@ function MilkdownEditor({ content, onChange, readOnly, onEditorReady }) {
       .use(listener)
       .use(history)
       .use(clipboard)
-      .use(mermaidNodeView);
+      .use(mermaidNodeView)
+      .use(clearEmptyBlockPlugin);
   }, [readOnly]);
 
   useEffect(() => {
