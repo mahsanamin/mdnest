@@ -2,8 +2,9 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import Login from './components/Login.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import Toolbar from './components/Toolbar.jsx';
+import { lazy, Suspense } from 'react';
 import Editor from './components/Editor.jsx';
-import LiveEditor from './components/LiveEditor.jsx';
+const LiveEditor = lazy(() => import('./components/LiveEditor.jsx'));
 import Preview from './components/Preview.jsx';
 import ContextMenu from './components/ContextMenu.jsx';
 import Settings from './components/Settings.jsx';
@@ -706,13 +707,15 @@ function App() {
                   style={viewMode === 'split' ? { flex: `0 0 ${splitRatio}%` } : undefined}
                 >
                   {editorMode === 'live' ? (
-                    <LiveEditor
-                      content={content}
-                      onChange={canWriteCurrent ? handleContentChange : null}
-                      currentPath={currentPath}
-                      ns={selectedNs}
-                      readOnly={!canWriteCurrent}
-                    />
+                    <Suspense fallback={<div className="editor-loading">Loading live editor...</div>}>
+                      <LiveEditor
+                        content={content}
+                        onChange={canWriteCurrent ? handleContentChange : null}
+                        currentPath={currentPath}
+                        ns={selectedNs}
+                        readOnly={!canWriteCurrent}
+                      />
+                    </Suspense>
                   ) : (
                     <Editor
                       content={content}
