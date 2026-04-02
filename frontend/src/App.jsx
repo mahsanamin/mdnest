@@ -66,10 +66,11 @@ function App() {
   const [editorMode, setEditorMode] = useState('basic');
   const [editorModeReady, setEditorModeReady] = useState(false);
 
-  // Restore editor mode from localStorage AFTER initial render
+  // Restore editor mode from localStorage AFTER initial render (only if in editor-only mode)
   useEffect(() => {
-    const saved = localStorage.getItem('mdnest_editor_mode');
-    if (saved === 'live') {
+    const savedView = localStorage.getItem('mdnest_view_mode') || 'split';
+    const savedEditor = localStorage.getItem('mdnest_editor_mode');
+    if (savedEditor === 'live' && savedView === 'editor') {
       setTimeout(() => { setEditorMode('live'); }, 500);
     }
   }, []);
@@ -690,10 +691,13 @@ function App() {
           onViewModeChange={(mode) => {
             setViewMode(mode);
             localStorage.setItem('mdnest_view_mode', mode);
-            // Reset to basic mode when leaving editor-only (Live only available in editor-only)
-            if (mode !== 'editor') {
+            // Restore saved editor mode when switching to editor-only
+            if (mode === 'editor') {
+              const saved = localStorage.getItem('mdnest_editor_mode') || 'basic';
+              setEditorMode(saved);
+            } else {
+              // Split/preview always uses basic
               setEditorMode('basic');
-              localStorage.setItem('mdnest_editor_mode', 'basic');
             }
           }}
           editorMode={editorMode}
