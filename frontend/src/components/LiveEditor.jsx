@@ -7,7 +7,7 @@ import { gfm } from '@milkdown/preset-gfm';
 import { listener, listenerCtx } from '@milkdown/plugin-listener';
 import { history } from '@milkdown/plugin-history';
 import { clipboard } from '@milkdown/plugin-clipboard';
-import { replaceAll, callCommand, $view } from '@milkdown/utils';
+import { replaceAll, callCommand, $view, insert } from '@milkdown/utils';
 import { uploadImage } from '../api.js';
 import { htmlToMarkdown, hasRichContent } from '../html-to-md.js';
 import MermaidBlock from './MermaidBlock.jsx';
@@ -181,9 +181,11 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly }) {
     if (!el || readOnly) return;
 
     const handlePaste = async (e) => {
-      const clipboard = e.clipboardData;
-      if (!clipboard) return;
-      for (const item of clipboard.items) {
+      const cb = e.clipboardData;
+      if (!cb) return;
+
+      // 1. Images
+      for (const item of cb.items) {
         if (item.type.startsWith('image/')) {
           e.preventDefault();
           const file = item.getAsFile();
@@ -191,17 +193,30 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly }) {
             try {
               const data = await uploadImage(ns, currentPath, file);
               const filename = (data.url || file.name).split('/').pop();
-              if (editor) document.execCommand('insertText', false, `![image](${filename})`);
+              if (editor) editor.action(insert(`![image](${filename})`));
             } catch (err) { console.error('Upload failed:', err); }
           }
           return;
         }
       }
-      const html = clipboard.getData('text/html');
+
+      // 2. Rich HTML → convert to markdown then insert as parsed nodes
+      const html = cb.getData('text/html');
       if (html && hasRichContent(html)) {
         e.preventDefault();
-        document.execCommand('insertText', false, htmlToMarkdown(html));
+        const md = htmlToMarkdown(html);
+        if (editor) editor.action(insert(md));
+        return;
       }
+
+      // 3. Plain text that contains markdown syntax → insert as parsed nodes
+      const text = cb.getData('text/plain');
+      if (text && editor && /^[\s]*[#\-*>|`\[]/.test(text)) {
+        e.preventDefault();
+        editor.action(insert(text));
+        return;
+      }
+      // Otherwise: default Milkdown paste
     };
 
     el.addEventListener('paste', handlePaste, true);
