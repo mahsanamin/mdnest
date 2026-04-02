@@ -2,6 +2,8 @@ import { useRef, useEffect, useState, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Editor, rootCtx, defaultValueCtx, editorViewOptionsCtx } from '@milkdown/core';
 import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react';
+import { uploadImage } from '../api.js';
+import { htmlToMarkdown, hasRichContent } from '../html-to-md.js';
 import MermaidBlock from './MermaidBlock.jsx';
 import MermaidViewer from './MermaidViewer.jsx';
 import { commonmark } from '@milkdown/preset-commonmark';
@@ -108,6 +110,48 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly }) {
   const [viewerSvg, setViewerSvg] = useState(null);
   const wrapperRef = useRef(null);
   const mermaidRootsRef = useRef([]);
+
+  // Handle image paste and rich HTML paste
+  useEffect(() => {
+    const el = wrapperRef.current;
+    if (!el || readOnly) return;
+
+    const handlePaste = async (e) => {
+      const clipboard = e.clipboardData;
+      if (!clipboard) return;
+
+      // Check for images
+      for (const item of clipboard.items) {
+        if (item.type.startsWith('image/')) {
+          e.preventDefault();
+          const file = item.getAsFile();
+          if (file && ns && currentPath) {
+            try {
+              const data = await uploadImage(ns, currentPath, file);
+              const filename = (data.url || file.name).split('/').pop();
+              // Insert image markdown — the editor will re-serialize
+              if (editor) {
+                const md = `![image](${filename})`;
+                document.execCommand('insertText', false, md);
+              }
+            } catch (err) { console.error('Upload failed:', err); }
+          }
+          return;
+        }
+      }
+
+      // Check for rich HTML
+      const html = clipboard.getData('text/html');
+      if (html && hasRichContent(html)) {
+        e.preventDefault();
+        const md = htmlToMarkdown(html);
+        document.execCommand('insertText', false, md);
+      }
+    };
+
+    el.addEventListener('paste', handlePaste, true);
+    return () => el.removeEventListener('paste', handlePaste, true);
+  }, [editor, ns, currentPath, readOnly]);
 
   // Enhance mermaid code blocks in the live editor DOM
   useEffect(() => {
