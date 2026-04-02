@@ -8,7 +8,7 @@ function Toolbar({ currentPath, onToggleSidebar, onChangePassword, onRename, onD
     onRefresh().finally(() => setTimeout(() => setRefreshing(false), 2000));
   }, [refreshing, onRefresh]);
 
-  const showEditorToggle = currentPath && viewMode !== 'preview' && onEditorModeChange;
+  const showEditorToggle = currentPath && viewMode === 'editor' && onEditorModeChange;
 
   return (
     <div className="toolbar">

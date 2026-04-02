@@ -687,7 +687,15 @@ function App() {
           onRename={canWriteCurrent ? handleToolbarRename : null}
           onDelete={canWriteCurrent ? handleToolbarDelete : null}
           viewMode={viewMode}
-          onViewModeChange={(mode) => { setViewMode(mode); localStorage.setItem('mdnest_view_mode', mode); }}
+          onViewModeChange={(mode) => {
+            setViewMode(mode);
+            localStorage.setItem('mdnest_view_mode', mode);
+            // Reset to basic mode when leaving editor-only (Live only available in editor-only)
+            if (mode !== 'editor') {
+              setEditorMode('basic');
+              localStorage.setItem('mdnest_editor_mode', 'basic');
+            }
+          }}
           editorMode={editorMode}
           onEditorModeChange={(mode) => { setEditorMode(mode); localStorage.setItem('mdnest_editor_mode', mode); }}
           onRefresh={handleRefresh}

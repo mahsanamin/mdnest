@@ -35,36 +35,49 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
     return () => { cancelled = true; };
   }, [source, mode]);
 
-  // Make node labels clickable after SVG renders
-  useEffect(() => {
-    if (!previewRef.current || readOnly || !svgHtml) return;
-    const svgEl = previewRef.current.querySelector('svg');
-    if (!svgEl) return;
+  // Make node labels clickable — use click delegation on the preview container
+  const handlePreviewClick = useCallback((e) => {
+    if (readOnly) return;
 
-    // Find all text elements that are node labels (inside .nodeLabel, .label, or direct text in nodes)
-    const textEls = svgEl.querySelectorAll('.nodeLabel, .label text, .node text, .edgeLabel text');
-    textEls.forEach((el) => {
-      el.style.cursor = 'pointer';
-      el.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const text = el.textContent?.trim();
-        if (!text) return;
+    // Walk up from the click target to find a text/label element
+    let el = e.target;
+    let text = null;
+    for (let i = 0; i < 5 && el && el !== previewRef.current; i++) {
+      // Check if this is a label element
+      const tagName = el.tagName?.toLowerCase();
+      const cls = el.className?.baseVal || el.className || '';
+      if (
+        tagName === 'text' ||
+        tagName === 'span' ||
+        tagName === 'p' ||
+        tagName === 'div' ||
+        cls.includes('nodeLabel') ||
+        cls.includes('edgeLabel') ||
+        cls.includes('label')
+      ) {
+        const t = el.textContent?.trim();
+        if (t && t.length > 0 && t.length < 200) {
+          text = t;
+          break;
+        }
+      }
+      el = el.parentElement;
+    }
 
-        // Get position relative to the preview container
-        const containerRect = previewRef.current.getBoundingClientRect();
-        const elRect = el.getBoundingClientRect();
+    if (!text || !previewRef.current) return;
 
-        setEditingLabel({
-          text,
-          originalText: text,
-          left: elRect.left - containerRect.left,
-          top: elRect.top - containerRect.top,
-          width: Math.max(elRect.width + 20, 80),
-          height: elRect.height + 8,
-        });
-      });
+    const containerRect = previewRef.current.getBoundingClientRect();
+    const elRect = el.getBoundingClientRect();
+
+    setEditingLabel({
+      text,
+      originalText: text,
+      left: elRect.left - containerRect.left,
+      top: elRect.top - containerRect.top,
+      width: Math.max(elRect.width + 30, 100),
+      height: Math.max(elRect.height + 10, 30),
     });
-  }, [svgHtml, readOnly]);
+  }, [readOnly]);
 
   // Replace label in mermaid source
   const handleLabelChange = useCallback((newText) => {
@@ -146,7 +159,7 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
         )}
       </div>
       {mode === 'preview' ? (
-        <div className="mermaid-live-preview" style={{ position: 'relative' }}>
+        <div className="mermaid-live-preview" style={{ position: 'relative' }} onClick={handlePreviewClick}>
           {error ? (
             <div className="mermaid-live-error">{error}</div>
           ) : svgHtml ? (
