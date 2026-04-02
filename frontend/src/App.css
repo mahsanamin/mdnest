@@ -2021,6 +2021,27 @@
   user-select: none;
 }
 
+.mermaid-live-hint {
+  margin-left: auto;
+  color: #585b70;
+  font-size: 0.65rem;
+  font-style: italic;
+}
+
+.mermaid-label-input {
+  background: #89b4fa;
+  color: #1e1e2e;
+  border: 2px solid #74c7ec;
+  border-radius: 4px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 2px 6px;
+  text-align: center;
+  outline: none;
+  z-index: 10;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
 /* ===== Admin Panel ===== */
 .admin-panel {
   height: 100vh;
