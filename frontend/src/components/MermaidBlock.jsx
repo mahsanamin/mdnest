@@ -20,8 +20,13 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
     (async () => {
       try {
         const id = `mmd-live-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-        const { svg } = await mermaid.render(id, source.trim());
+        let { svg } = await mermaid.render(id, source.trim());
         if (!cancelled) {
+          // Remove hardcoded width/height so SVG scales to container
+          svg = svg.replace(/(<svg[^>]*?)(\s+width="[^"]*")/, '$1');
+          svg = svg.replace(/(<svg[^>]*?)(\s+height="[^"]*")/, '$1');
+          // Ensure it has width:100% style
+          svg = svg.replace(/(<svg)/, '$1 style="width:100%;height:auto;"');
           setSvgHtml(svg);
           setError('');
         }
