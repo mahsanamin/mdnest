@@ -1941,6 +1941,86 @@
   margin: 0 4px;
 }
 
+/* Mermaid live block */
+.mermaid-live-block {
+  background: #181825;
+  border: 1px solid #313244;
+  border-radius: 8px;
+  margin: 0.5rem 0;
+  overflow: hidden;
+}
+
+.mermaid-live-toolbar {
+  display: flex;
+  gap: 2px;
+  padding: 4px 8px;
+  background: #11111b;
+  border-bottom: 1px solid #313244;
+}
+
+.mermaid-live-toolbar button {
+  background: transparent;
+  border: none;
+  color: #6c7086;
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mermaid-live-toolbar button.active {
+  background: #313244;
+  color: #89b4fa;
+}
+
+.mermaid-live-toolbar button:hover {
+  color: #cdd6f4;
+}
+
+.mermaid-live-preview {
+  padding: 1rem;
+  display: flex;
+  justify-content: center;
+}
+
+.mermaid-live-preview svg {
+  max-width: 60%;
+  height: auto;
+}
+
+.mermaid-live-error {
+  color: #f38ba8;
+  font-size: 0.82rem;
+  padding: 0.5rem;
+}
+
+.mermaid-live-loading {
+  color: #6c7086;
+  font-size: 0.82rem;
+  padding: 0.5rem;
+}
+
+.mermaid-live-source {
+  width: 100%;
+  border: none;
+  background: #11111b;
+  color: #cdd6f4;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.82rem;
+  padding: 0.8rem;
+  resize: vertical;
+  outline: none;
+  line-height: 1.5;
+}
+
+.mermaid-live-container {
+  user-select: none;
+}
+
 /* ===== Admin Panel ===== */
 .admin-panel {
   height: 100vh;

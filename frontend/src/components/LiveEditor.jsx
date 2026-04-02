@@ -1,6 +1,9 @@
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, useCallback } from 'react';
+import { createRoot } from 'react-dom/client';
 import { Editor, rootCtx, defaultValueCtx, editorViewOptionsCtx } from '@milkdown/core';
 import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react';
+import MermaidBlock from './MermaidBlock.jsx';
+import MermaidViewer from './MermaidViewer.jsx';
 import { commonmark } from '@milkdown/preset-commonmark';
 import { gfm } from '@milkdown/preset-gfm';
 import { listener, listenerCtx } from '@milkdown/plugin-listener';
@@ -102,12 +105,67 @@ function TableToolbar({ editor }) {
 
 function LiveEditor({ content, onChange, currentPath, ns, readOnly }) {
   const [editor, setEditor] = useState(null);
+  const [viewerSvg, setViewerSvg] = useState(null);
+  const wrapperRef = useRef(null);
+  const mermaidRootsRef = useRef([]);
+
+  // Enhance mermaid code blocks in the live editor DOM
+  useEffect(() => {
+    if (!wrapperRef.current) return;
+    const el = wrapperRef.current;
+
+    // Clean up previous React roots
+    mermaidRootsRef.current.forEach((r) => { try { r.unmount(); } catch(e) {} });
+    mermaidRootsRef.current = [];
+
+    // Find code blocks with language-mermaid
+    const codeBlocks = el.querySelectorAll('pre code');
+    codeBlocks.forEach((codeEl) => {
+      const preEl = codeEl.parentElement;
+      if (!preEl) return;
+
+      // Check if it's a mermaid block (Milkdown adds data-language or class)
+      const lang = codeEl.getAttribute('data-language') || codeEl.className || '';
+      if (!lang.includes('mermaid')) return;
+
+      // Don't re-enhance if already done
+      if (preEl.dataset.mermaidEnhanced) return;
+      preEl.dataset.mermaidEnhanced = 'true';
+
+      const source = codeEl.textContent || '';
+      const container = document.createElement('div');
+      container.className = 'mermaid-live-container';
+      preEl.parentNode.insertBefore(container, preEl);
+      preEl.style.display = 'none';
+
+      const root = createRoot(container);
+      root.render(
+        <MermaidBlock
+          source={source}
+          readOnly={readOnly}
+          onChange={(newSource) => {
+            // Update the code block content
+            codeEl.textContent = newSource;
+            // Trigger a re-render by dispatching input
+            preEl.style.display = 'none';
+          }}
+          onFullscreen={setViewerSvg}
+        />
+      );
+      mermaidRootsRef.current.push(root);
+    });
+
+    return () => {
+      mermaidRootsRef.current.forEach((r) => { try { r.unmount(); } catch(e) {} });
+      mermaidRootsRef.current = [];
+    };
+  }, [content, readOnly]);
 
   return (
     <div className="live-editor-pane">
       {readOnly && <div className="editor-readonly-bar">Read-only</div>}
       {!readOnly && <TableToolbar editor={editor} />}
-      <div className="live-editor-wrapper">
+      <div className="live-editor-wrapper" ref={wrapperRef}>
         <MilkdownProvider>
           <MilkdownEditor
             content={content}
@@ -117,6 +175,9 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly }) {
           />
         </MilkdownProvider>
       </div>
+      {viewerSvg && (
+        <MermaidViewer svgContent={viewerSvg} onClose={() => setViewerSvg(null)} />
+      )}
     </div>
   );
 }
