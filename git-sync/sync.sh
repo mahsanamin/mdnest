@@ -106,13 +106,16 @@ sync_repo() {
   # Commit local changes (squash if previous sync commit is unpushed)
   commit_changes "$name"
 
-  # Resolve SSH key: per-namespace key > default key > skip remote sync
+  # Resolve SSH key: per-namespace key > default key > SSH_KEY_PATH mount > skip
   if [ -f "$KEYS_DIR/$name" ]; then
     export GIT_SSH_COMMAND="ssh -i '$KEYS_DIR/$name' $SSH_OPTS"
   elif [ -f "$KEYS_DIR/default" ]; then
     export GIT_SSH_COMMAND="ssh -i '$KEYS_DIR/default' $SSH_OPTS"
+  elif [ -f "/ssh-key" ]; then
+    export GIT_SSH_COMMAND="ssh -i '/ssh-key' $SSH_OPTS"
   else
-    echo "git-sync [$name]: no SSH key found (tried keys/$name, keys/default) — committed locally, skipping push/pull"
+    echo "git-sync [$name]: no SSH key found — committed locally, skipping push/pull"
+    echo "git-sync [$name]: set SSH_KEY_PATH in mdnest.conf or add keys to git-sync/keys/"
     return
   fi
 

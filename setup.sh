@@ -146,14 +146,18 @@ for i in "${!MOUNT_NAMES[@]}"; do
 "
 done
 
-# SSH key for git pull (sync button)
+# SSH key for git pull/push (backend sync button + git-sync sidecar)
 SSH_KEY_VOLUME=""
+SSH_KEY_GITSYNC=""
 if [ -n "$SSH_KEY_PATH" ]; then
   if [ -f "$SSH_KEY_PATH" ]; then
     SSH_KEY_VOLUME="      - ${SSH_KEY_PATH}:/root/.ssh/deploy_key:ro
 "
+    SSH_KEY_GITSYNC="      - ${SSH_KEY_PATH}:/ssh-key:ro
+"
     BACKEND_VOLUMES="${BACKEND_VOLUMES}${SSH_KEY_VOLUME}"
-    echo "SSH key: $SSH_KEY_PATH (mounted for git pull)"
+    GITSYNC_VOLUMES="${GITSYNC_VOLUMES}${SSH_KEY_GITSYNC}"
+    echo "SSH key: $SSH_KEY_PATH (mounted for git pull/push)"
   else
     echo "Warning: SSH_KEY_PATH=$SSH_KEY_PATH does not exist, skipping"
   fi
