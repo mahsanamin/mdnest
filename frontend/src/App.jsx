@@ -63,7 +63,20 @@ function App() {
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [mobileView, setMobileView] = useState(() => localStorage.getItem('mdnest_mobile_view') || 'editor');
   const [viewMode, setViewMode] = useState(() => localStorage.getItem('mdnest_view_mode') || 'split');
-  const [editorMode, setEditorMode] = useState(() => localStorage.getItem('mdnest_editor_mode') || 'basic');
+  const [editorMode, setEditorMode] = useState('basic');
+  const [editorModeReady, setEditorModeReady] = useState(false);
+
+  // Restore editor mode from localStorage AFTER initial render (avoids blocking page load)
+  useEffect(() => {
+    const saved = localStorage.getItem('mdnest_editor_mode');
+    if (saved === 'live') {
+      // Delay switching to live mode until page is interactive
+      requestIdleCallback ? requestIdleCallback(() => { setEditorMode('live'); setEditorModeReady(true); })
+        : setTimeout(() => { setEditorMode('live'); setEditorModeReady(true); }, 100);
+    } else {
+      setEditorModeReady(true);
+    }
+  }, []);
   const [splitRatio, setSplitRatio] = useState(50);
   const [ctxMenu, setCtxMenu] = useState({ visible: false, x: 0, y: 0, target: null });
   const [showChangePassword, setShowChangePassword] = useState(false);
