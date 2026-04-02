@@ -7,13 +7,14 @@ import (
 
 // ConfigHandler returns public configuration (no auth required).
 type ConfigHandler struct {
-	authMode  string
-	liveCollab bool
+	authMode    string
+	liveCollab  bool
+	serverAlias string
 }
 
 // NewConfigHandler creates a new config handler.
-func NewConfigHandler(authMode string, liveCollab bool) *ConfigHandler {
-	return &ConfigHandler{authMode: authMode, liveCollab: liveCollab}
+func NewConfigHandler(authMode string, liveCollab bool, serverAlias string) *ConfigHandler {
+	return &ConfigHandler{authMode: authMode, liveCollab: liveCollab, serverAlias: serverAlias}
 }
 
 // HandleConfig handles GET /api/config (unauthenticated).
@@ -22,10 +23,14 @@ func (h *ConfigHandler) HandleConfig(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	resp := map[string]interface{}{
 		"authMode":   h.authMode,
 		"liveCollab": h.liveCollab,
-		"version":    "2.0.1",
-	})
+		"version":    "2.1.0",
+	}
+	if h.serverAlias != "" {
+		resp["serverAlias"] = h.serverAlias
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }

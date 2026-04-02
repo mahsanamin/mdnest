@@ -42,6 +42,7 @@ while IFS= read -r line; do
     MDNEST_USER) MDNEST_USER="$value" ;;
     MDNEST_PASSWORD) MDNEST_PASSWORD="$value" ;;
     MDNEST_JWT_SECRET) MDNEST_JWT_SECRET="$value" ;;
+    SERVER_ALIAS) SERVER_ALIAS="$value" ;;
     FRONTEND_ORIGIN) FRONTEND_ORIGIN="$value" ;;
     BACKEND_PORT) BACKEND_PORT="$value" ;;
     FRONTEND_PORT) FRONTEND_PORT="$value" ;;
@@ -120,6 +121,7 @@ SEARCH_WORKERS=${SEARCH_WORKERS:-8}
 SEARCH_CACHE_TTL=${SEARCH_CACHE_TTL:-30}
 AUTH_MODE=${AUTH_MODE}
 ENABLE_LIVE_COLLAB=${ENABLE_LIVE_COLLAB:-false}
+SERVER_ALIAS=${SERVER_ALIAS:-}
 EOF
 
 if [ "$AUTH_MODE" = "multi" ]; then
@@ -144,14 +146,18 @@ for i in "${!MOUNT_NAMES[@]}"; do
 "
 done
 
-# SSH key for git pull (sync button)
+# SSH key for git pull/push (backend sync button + git-sync sidecar)
 SSH_KEY_VOLUME=""
+SSH_KEY_GITSYNC=""
 if [ -n "$SSH_KEY_PATH" ]; then
   if [ -f "$SSH_KEY_PATH" ]; then
     SSH_KEY_VOLUME="      - ${SSH_KEY_PATH}:/root/.ssh/deploy_key:ro
 "
+    SSH_KEY_GITSYNC="      - ${SSH_KEY_PATH}:/ssh-key:ro
+"
     BACKEND_VOLUMES="${BACKEND_VOLUMES}${SSH_KEY_VOLUME}"
-    echo "SSH key: $SSH_KEY_PATH (mounted for git pull)"
+    GITSYNC_VOLUMES="${GITSYNC_VOLUMES}${SSH_KEY_GITSYNC}"
+    echo "SSH key: $SSH_KEY_PATH (mounted for git pull/push)"
   else
     echo "Warning: SSH_KEY_PATH=$SSH_KEY_PATH does not exist, skipping"
   fi

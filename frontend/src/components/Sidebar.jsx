@@ -211,7 +211,6 @@ function Sidebar({
                 <span className="sync-status-text">
                   {syncInfo.lastCommit ? `Synced ${formatSyncTime(syncInfo.lastCommit)}` : 'Connected'}
                 </span>
-                {!syncInfo.hasSSHKey && <span className="sync-status-warn" title="No SSH key — sync button may not pull from remote">no key</span>}
               </>
             ) : (
               <>

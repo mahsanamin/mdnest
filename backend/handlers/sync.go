@@ -118,28 +118,42 @@ func (h *SyncHandler) HandleSync(w http.ResponseWriter, r *http.Request) {
 
 	gitDir := findGitDir(nsDir)
 	if gitDir != "" {
-		cmd := exec.Command("git", "pull", "--ff-only")
-		cmd.Dir = gitDir
+		sshEnv := gitSSHEnv()
 
-		sshKeyPath := "/root/.ssh/deploy_key"
-		if _, err := os.Stat(sshKeyPath); err == nil {
-			cmd.Env = append(os.Environ(),
-				"GIT_SSH_COMMAND=ssh -i "+sshKeyPath+" -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known_hosts",
-			)
+		// 1. Commit any pending changes
+		gitRunIn(gitDir, nil, "add", "-A")
+		if _, err := gitRunIn(gitDir, nil, "diff", "--cached", "--quiet"); err != nil {
+			// There are staged changes — commit them
+			out, _ := gitRunIn(gitDir, nil, "commit", "-m", "mdnest sync")
+			if out != "" {
+				gitOutput += out + "\n"
+			}
+			log.Printf("git commit for %s: %s", ns, out)
 		}
 
-		cmd.Env = append(cmd.Env, "HOME=/root")
-
-		output, err := cmd.CombinedOutput()
-		gitOutput = strings.TrimSpace(string(output))
+		// 2. Pull
+		pullOut, err := gitRunIn(gitDir, sshEnv, "pull", "--ff-only")
 		if err != nil {
-			log.Printf("git pull failed for %s: %s", ns, gitOutput)
-			gitOutput = "pull failed: " + gitOutput
+			log.Printf("git pull failed for %s: %s", ns, pullOut)
+			gitOutput += "pull: " + pullOut + "\n"
 		} else {
-			log.Printf("git pull for %s: %s", ns, gitOutput)
+			log.Printf("git pull for %s: %s", ns, pullOut)
+			gitOutput += pullOut + "\n"
 		}
 
-		// Get last commit date after pull
+		// 3. Push
+		pushOut, err := gitRunIn(gitDir, sshEnv, "push")
+		if err != nil {
+			log.Printf("git push failed for %s: %s", ns, pushOut)
+			gitOutput += "push failed: " + pushOut
+		} else if pushOut != "" {
+			log.Printf("git push for %s: %s", ns, pushOut)
+			gitOutput += pushOut
+		}
+
+		gitOutput = strings.TrimSpace(gitOutput)
+
+		// Get last commit date
 		if out, err := gitCmd(gitDir, "log", "-1", "--format=%ci"); err == nil {
 			lastCommit = out
 		}
@@ -155,6 +169,28 @@ func (h *SyncHandler) HandleSync(w http.ResponseWriter, r *http.Request) {
 		"git":        gitOutput,
 		"lastCommit": lastCommit,
 	})
+}
+
+func gitSSHEnv() []string {
+	sshKeyPath := "/root/.ssh/deploy_key"
+	if _, err := os.Stat(sshKeyPath); err == nil {
+		return []string{
+			"GIT_SSH_COMMAND=ssh -i " + sshKeyPath + " -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known_hosts",
+			"HOME=/root",
+		}
+	}
+	return []string{"HOME=/root"}
+}
+
+func gitRunIn(dir string, extraEnv []string, args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "HOME=/root")
+	for _, e := range extraEnv {
+		cmd.Env = append(cmd.Env, e)
+	}
+	out, err := cmd.CombinedOutput()
+	return strings.TrimSpace(string(out)), err
 }
 
 func gitCmd(dir string, args ...string) (string, error) {

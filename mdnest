@@ -1,26 +1,108 @@
 #!/bin/bash
 set -e
 
-MDNEST_CLI_VERSION="2.0.1"
+MDNEST_CLI_VERSION="2.1.0"
 CONFIG_DIR="${HOME}/.config/mdnest"
-CONFIG_FILE="${CONFIG_DIR}/config"
+SERVERS_DIR="${CONFIG_DIR}/servers"
+DEFAULT_FILE="${CONFIG_DIR}/default"
 
-# ─── Config helpers ──────────────────────────────────────────────────────────
+# Legacy single-server config (backward compat)
+LEGACY_CONFIG="${CONFIG_DIR}/config"
 
-load_config() {
-  if [ -f "$CONFIG_FILE" ]; then
-    MDNEST_URL=$(grep '^url=' "$CONFIG_FILE" 2>/dev/null | cut -d= -f2-)
-    MDNEST_TOKEN=$(grep '^token=' "$CONFIG_FILE" 2>/dev/null | cut -d= -f2-)
-  fi
+# ─── Server config helpers ──────────────────────────────────────────────────
+
+get_server_file() {
+  echo "${SERVERS_DIR}/${1}"
 }
 
-require_config() {
-  load_config
+load_server() {
+  local alias="$1"
+  if [ -n "$alias" ] && [ -f "$(get_server_file "$alias")" ]; then
+    MDNEST_URL=$(grep '^url=' "$(get_server_file "$alias")" 2>/dev/null | cut -d= -f2-)
+    MDNEST_TOKEN=$(grep '^token=' "$(get_server_file "$alias")" 2>/dev/null | cut -d= -f2-)
+    CURRENT_ALIAS="$alias"
+    return 0
+  fi
+  return 1
+}
+
+load_default() {
+  # Try default alias
+  if [ -f "$DEFAULT_FILE" ]; then
+    local def
+    def=$(cat "$DEFAULT_FILE")
+    if load_server "$def"; then return 0; fi
+  fi
+  # Try first server
+  if [ -d "$SERVERS_DIR" ]; then
+    local first
+    first=$(ls "$SERVERS_DIR" 2>/dev/null | head -1)
+    if [ -n "$first" ] && load_server "$first"; then return 0; fi
+  fi
+  # Try legacy config
+  if [ -f "$LEGACY_CONFIG" ]; then
+    MDNEST_URL=$(grep '^url=' "$LEGACY_CONFIG" 2>/dev/null | cut -d= -f2-)
+    MDNEST_TOKEN=$(grep '^token=' "$LEGACY_CONFIG" 2>/dev/null | cut -d= -f2-)
+    CURRENT_ALIAS="default"
+    return 0
+  fi
+  return 1
+}
+
+require_server() {
   if [ -z "$MDNEST_URL" ] || [ -z "$MDNEST_TOKEN" ]; then
-    echo "Not logged in. Run: mdnest login <url> <token>"
+    echo "Not logged in. Run: mdnest login @alias <url> <token>" >&2
     exit 1
   fi
 }
+
+# ─── Path parser ────────────────────────────────────────────────────────────
+# Parses: @alias/namespace/path/to/file.md
+# Or:     namespace/path/to/file.md (uses default server)
+# Or:     @alias (just server)
+# Or:     @alias/namespace (server + namespace)
+
+parse_path() {
+  local input="$1"
+  PARSED_ALIAS=""
+  PARSED_NS=""
+  PARSED_PATH=""
+
+  # Extract @alias if present
+  if [[ "$input" == @* ]]; then
+    local rest="${input#@}"
+    PARSED_ALIAS="${rest%%/*}"
+    if [[ "$rest" == */* ]]; then
+      rest="${rest#*/}"
+    else
+      rest=""
+    fi
+    input="$rest"
+  fi
+
+  # Load the right server
+  if [ -n "$PARSED_ALIAS" ]; then
+    if ! load_server "$PARSED_ALIAS"; then
+      echo "Unknown server: @${PARSED_ALIAS}. Run 'mdnest servers' to see configured servers." >&2
+      exit 1
+    fi
+  elif [ -z "$MDNEST_URL" ]; then
+    if ! load_default; then
+      echo "Not logged in. Run: mdnest login @alias <url> <token>" >&2
+      exit 1
+    fi
+  fi
+
+  # Split remaining into namespace/path
+  if [ -n "$input" ]; then
+    PARSED_NS="${input%%/*}"
+    if [[ "$input" == */* ]]; then
+      PARSED_PATH="${input#*/}"
+    fi
+  fi
+}
+
+# ─── API helpers ────────────────────────────────────────────────────────────
 
 api() {
   local method="$1" path="$2" body="$3"
@@ -29,210 +111,306 @@ api() {
   local response
   response=$(curl "${args[@]}" -X "$method" "${MDNEST_URL}/api${path}")
   local http_code="${response##*$'\n'}"
-  local body="${response%$'\n'*}"
+  local resp_body="${response%$'\n'*}"
 
   if [ "$http_code" -ge 400 ] 2>/dev/null; then
-    echo "Error ($http_code): $body" >&2
+    echo "Error ($http_code): $resp_body" >&2
     return 1
   fi
-  echo "$body"
+  echo "$resp_body"
 }
 
 urlencode() {
   python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))" "$1"
 }
 
-# ─── Note commands ───────────────────────────────────────────────────────────
+# ─── Commands ───────────────────────────────────────────────────────────────
 
-note_cmd() {
-  local subcmd="${1:-help}"
-  shift 2>/dev/null || true
+cmd_login() {
+  local alias="" url="" tok=""
 
-  if [ "$subcmd" = "help" ] || [ "$subcmd" = "--help" ] || [ "$subcmd" = "-h" ]; then
-    subcmd="help_text"
+  # Parse: login @alias url token  OR  login url token (legacy)
+  if [[ "$1" == @* ]]; then
+    alias="${1#@}"
+    url="$2"
+    tok="$3"
   else
-    require_config
+    url="$1"
+    tok="$2"
+    alias="default"
   fi
 
-  case "$subcmd" in
-    list)
-      local ns="$1"
-      if [ -z "$ns" ]; then
-        api GET "/namespaces"
-      else
-        api GET "/tree?ns=$(urlencode "$ns")"
-      fi
-      ;;
-    read)
-      local ns="$1" path="$2"
-      [ -z "$ns" ] || [ -z "$path" ] && { echo "Usage: mdnest note read <namespace> <path>" >&2; exit 1; }
-      api GET "/note?ns=$(urlencode "$ns")&path=$(urlencode "$path")"
-      ;;
-    write)
-      local ns="$1" path="$2" content="$3"
-      [ -z "$ns" ] || [ -z "$path" ] && { echo "Usage: mdnest note write <namespace> <path> <content>" >&2; exit 1; }
-      [ "$content" = "-" ] && content=$(cat)
-      [ -z "$content" ] && content=$(cat)
-      api PUT "/note?ns=$(urlencode "$ns")&path=$(urlencode "$path")" "$content"
-      ;;
-    create)
-      local ns="$1" path="$2" content="${3:-}"
-      [ -z "$ns" ] || [ -z "$path" ] && { echo "Usage: mdnest note create <namespace> <path> [content]" >&2; exit 1; }
-      api POST "/note?ns=$(urlencode "$ns")&path=$(urlencode "$path")" "$content"
-      ;;
-    append)
-      local ns="$1" path="$2" content="$3"
-      [ -z "$ns" ] || [ -z "$path" ] && { echo "Usage: mdnest note append <namespace> <path> <content>" >&2; exit 1; }
-      [ "$content" = "-" ] && content=$(cat)
-      [ -z "$content" ] && content=$(cat)
-      api PATCH "/note?ns=$(urlencode "$ns")&path=$(urlencode "$path")&position=bottom" "$content"
-      ;;
-    prepend)
-      local ns="$1" path="$2" content="$3"
-      [ -z "$ns" ] || [ -z "$path" ] && { echo "Usage: mdnest note prepend <namespace> <path> <content>" >&2; exit 1; }
-      [ "$content" = "-" ] && content=$(cat)
-      [ -z "$content" ] && content=$(cat)
-      api PATCH "/note?ns=$(urlencode "$ns")&path=$(urlencode "$path")&position=top" "$content"
-      ;;
-    delete)
-      local ns="$1" path="$2"
-      [ -z "$ns" ] || [ -z "$path" ] && { echo "Usage: mdnest note delete <namespace> <path>" >&2; exit 1; }
-      api DELETE "/note?ns=$(urlencode "$ns")&path=$(urlencode "$path")"
-      ;;
-    move)
-      local ns="$1" from="$2" to="$3"
-      [ -z "$ns" ] || [ -z "$from" ] || [ -z "$to" ] && { echo "Usage: mdnest note move <namespace> <from> <to>" >&2; exit 1; }
-      api POST "/move?ns=$(urlencode "$ns")&from=$(urlencode "$from")&to=$(urlencode "$to")"
-      ;;
-    search)
-      local ns="$1" query="$2"
-      [ -z "$ns" ] || [ -z "$query" ] && { echo "Usage: mdnest note search <namespace> <query>" >&2; exit 1; }
-      api GET "/search?ns=$(urlencode "$ns")&q=$(urlencode "$query")"
-      ;;
-    help_text)
-      cat <<'HELP'
-Usage: mdnest note <command> [args]
-
-Commands:
-  list    [namespace]                     List namespaces, or files in a namespace
-  read    <namespace> <path>              Read a note
-  write   <namespace> <path> <content>    Overwrite a note (use - for stdin)
-  create  <namespace> <path> [content]    Create a new note
-  append  <namespace> <path> <content>    Append text to a note (use - for stdin)
-  prepend <namespace> <path> <content>    Prepend text to a note (use - for stdin)
-  delete  <namespace> <path>              Delete a note or folder
-  move    <namespace> <from> <to>         Move/rename a note or folder
-  search  <namespace> <query>             Search notes
+  if [ -z "$url" ] || [ -z "$tok" ]; then
+    cat <<'USAGE'
+Usage:
+  mdnest login @alias <url> <token>    Multi-server
+  mdnest login <url> <token>           Single server (alias = "default")
 
 Examples:
-  mdnest note list
-  mdnest note list my_notes
-  mdnest note read my_notes ideas.md
-  mdnest note append my_notes log.md "## $(date) - Meeting notes"
-  echo "new content" | mdnest note write my_notes draft.md -
-HELP
-      ;;
-    *)
-      echo "Unknown note command: $subcmd" >&2
-      echo "Run 'mdnest note help' for usage" >&2
-      exit 1
-      ;;
+  mdnest login @work https://work-server:3236 mdnest_abc123
+  mdnest login @personal https://home:3236 mdnest_def456
+  mdnest login https://myserver:3236 mdnest_abc123
+USAGE
+    exit 1
+  fi
+
+  url="${url%/}"
+  mkdir -p "$SERVERS_DIR"
+  cat > "$(get_server_file "$alias")" <<EOF
+url=${url}
+token=${tok}
+EOF
+  chmod 600 "$(get_server_file "$alias")"
+
+  # Set as default if it's the first server or alias is "default"
+  if [ "$alias" = "default" ] || [ ! -f "$DEFAULT_FILE" ]; then
+    echo "$alias" > "$DEFAULT_FILE"
+  fi
+
+  # Migrate legacy config if it exists and we're in single-server mode
+  if [ -f "$LEGACY_CONFIG" ] && [ "$alias" = "default" ]; then
+    rm -f "$LEGACY_CONFIG"
+  fi
+
+  if MDNEST_URL="$url" MDNEST_TOKEN="$tok" api GET "/namespaces" > /dev/null 2>&1; then
+    echo "Logged in to @${alias} (${url})"
+    SERVER_VER=$(curl -s "${url}/api/config" 2>/dev/null | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
+    if [ -n "$SERVER_VER" ]; then
+      CLI_MAJOR="${MDNEST_CLI_VERSION%%.*}"
+      SRV_MAJOR="${SERVER_VER%%.*}"
+      if [ "$CLI_MAJOR" != "$SRV_MAJOR" ]; then
+        echo "Warning: CLI v${MDNEST_CLI_VERSION} may not be compatible with server v${SERVER_VER}"
+      fi
+    fi
+  else
+    echo "Warning: could not reach $url — credentials saved, will retry on next command"
+  fi
+}
+
+cmd_logout() {
+  local alias="${1#@}"
+  if [ -z "$alias" ]; then
+    # Logout all
+    rm -rf "$SERVERS_DIR" "$DEFAULT_FILE" "$LEGACY_CONFIG"
+    echo "Logged out from all servers"
+  else
+    rm -f "$(get_server_file "$alias")"
+    echo "Logged out from @${alias}"
+    # If default was removed, pick another
+    if [ -f "$DEFAULT_FILE" ] && [ "$(cat "$DEFAULT_FILE")" = "$alias" ]; then
+      rm -f "$DEFAULT_FILE"
+      local next
+      next=$(ls "$SERVERS_DIR" 2>/dev/null | head -1)
+      if [ -n "$next" ]; then
+        echo "$next" > "$DEFAULT_FILE"
+        echo "Default switched to @${next}"
+      fi
+    fi
+  fi
+}
+
+cmd_servers() {
+  local def=""
+  [ -f "$DEFAULT_FILE" ] && def=$(cat "$DEFAULT_FILE")
+
+  if [ -d "$SERVERS_DIR" ] && [ -n "$(ls "$SERVERS_DIR" 2>/dev/null)" ]; then
+    for f in "$SERVERS_DIR"/*; do
+      local name=$(basename "$f")
+      local url=$(grep '^url=' "$f" 2>/dev/null | cut -d= -f2-)
+      local marker=""
+      [ "$name" = "$def" ] && marker=" (default)"
+      local ver=""
+      ver=$(curl -s --max-time 3 "${url}/api/config" 2>/dev/null | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
+      [ -n "$ver" ] && ver=" v${ver}" || ver=" (unreachable)"
+      echo "  @${name}  ${url}${ver}${marker}"
+    done
+  elif [ -f "$LEGACY_CONFIG" ]; then
+    local url=$(grep '^url=' "$LEGACY_CONFIG" 2>/dev/null | cut -d= -f2-)
+    echo "  @default  ${url} (legacy config)"
+  else
+    echo "No servers configured. Run: mdnest login @alias <url> <token>"
+  fi
+}
+
+cmd_whoami() {
+  echo "mdnest CLI v${MDNEST_CLI_VERSION}"
+  echo ""
+  cmd_servers
+}
+
+cmd_list() {
+  parse_path "$1"
+  require_server
+  if [ -z "$PARSED_NS" ]; then
+    api GET "/namespaces"
+  else
+    api GET "/tree?ns=$(urlencode "$PARSED_NS")"
+  fi
+}
+
+cmd_read() {
+  parse_path "$1"
+  require_server
+  [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] && { echo "Usage: mdnest read @server/namespace/path" >&2; exit 1; }
+  api GET "/note?ns=$(urlencode "$PARSED_NS")&path=$(urlencode "$PARSED_PATH")"
+}
+
+cmd_write() {
+  parse_path "$1"
+  require_server
+  [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] && { echo "Usage: mdnest write @server/namespace/path <content>" >&2; exit 1; }
+  local content="$2"
+  [ "$content" = "-" ] && content=$(cat)
+  [ -z "$content" ] && content=$(cat)
+  api PUT "/note?ns=$(urlencode "$PARSED_NS")&path=$(urlencode "$PARSED_PATH")" "$content"
+}
+
+cmd_create() {
+  parse_path "$1"
+  require_server
+  [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] && { echo "Usage: mdnest create @server/namespace/path [content]" >&2; exit 1; }
+  api POST "/note?ns=$(urlencode "$PARSED_NS")&path=$(urlencode "$PARSED_PATH")" "${2:-}"
+}
+
+cmd_append() {
+  parse_path "$1"
+  require_server
+  [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] && { echo "Usage: mdnest append @server/namespace/path <content>" >&2; exit 1; }
+  local content="$2"
+  [ "$content" = "-" ] && content=$(cat)
+  [ -z "$content" ] && content=$(cat)
+  api PATCH "/note?ns=$(urlencode "$PARSED_NS")&path=$(urlencode "$PARSED_PATH")&position=bottom" "$content"
+}
+
+cmd_prepend() {
+  parse_path "$1"
+  require_server
+  [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] && { echo "Usage: mdnest prepend @server/namespace/path <content>" >&2; exit 1; }
+  local content="$2"
+  [ "$content" = "-" ] && content=$(cat)
+  [ -z "$content" ] && content=$(cat)
+  api PATCH "/note?ns=$(urlencode "$PARSED_NS")&path=$(urlencode "$PARSED_PATH")&position=top" "$content"
+}
+
+cmd_delete() {
+  parse_path "$1"
+  require_server
+  [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] && { echo "Usage: mdnest delete @server/namespace/path" >&2; exit 1; }
+  api DELETE "/note?ns=$(urlencode "$PARSED_NS")&path=$(urlencode "$PARSED_PATH")"
+}
+
+cmd_move() {
+  parse_path "$1"
+  require_server
+  local to="$2"
+  [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] || [ -z "$to" ] && { echo "Usage: mdnest move @server/namespace/from to-path" >&2; exit 1; }
+  api POST "/move?ns=$(urlencode "$PARSED_NS")&from=$(urlencode "$PARSED_PATH")&to=$(urlencode "$to")"
+}
+
+cmd_search() {
+  parse_path "$1"
+  require_server
+  local query="$2"
+  [ -z "$PARSED_NS" ] || [ -z "$query" ] && { echo "Usage: mdnest search @server/namespace \"query\"" >&2; exit 1; }
+  api GET "/search?ns=$(urlencode "$PARSED_NS")&q=$(urlencode "$query")"
+}
+
+# ─── Legacy compat: mdnest note <subcmd> <ns> <path> ───────────────────────
+
+cmd_note_legacy() {
+  local subcmd="${1:-help}"
+  shift 2>/dev/null || true
+  load_default
+  require_server
+  case "$subcmd" in
+    list)     cmd_list "$1" ;;
+    read)     cmd_list "${1}/${2}" 2>/dev/null || api GET "/note?ns=$(urlencode "$1")&path=$(urlencode "$2")" ;;
+    write)    local ns="$1" p="$2" c="$3"; [ "$c" = "-" ] && c=$(cat); [ -z "$c" ] && c=$(cat); api PUT "/note?ns=$(urlencode "$ns")&path=$(urlencode "$p")" "$c" ;;
+    create)   api POST "/note?ns=$(urlencode "$1")&path=$(urlencode "$2")" "${3:-}" ;;
+    append)   local ns="$1" p="$2" c="$3"; [ "$c" = "-" ] && c=$(cat); [ -z "$c" ] && c=$(cat); api PATCH "/note?ns=$(urlencode "$ns")&path=$(urlencode "$p")&position=bottom" "$c" ;;
+    prepend)  local ns="$1" p="$2" c="$3"; [ "$c" = "-" ] && c=$(cat); [ -z "$c" ] && c=$(cat); api PATCH "/note?ns=$(urlencode "$ns")&path=$(urlencode "$p")&position=top" "$c" ;;
+    delete)   api DELETE "/note?ns=$(urlencode "$1")&path=$(urlencode "$2")" ;;
+    move)     api POST "/move?ns=$(urlencode "$1")&from=$(urlencode "$2")&to=$(urlencode "$3")" ;;
+    search)   api GET "/search?ns=$(urlencode "$1")&q=$(urlencode "$2")" ;;
+    help|--help|-h) cmd_help ;;
+    *)        echo "Unknown note command: $subcmd" >&2; exit 1 ;;
   esac
 }
 
-# ─── Main dispatch ───────────────────────────────────────────────────────────
+# ─── Main dispatch ──────────────────────────────────────────────────────────
+
+cmd_help() {
+  cat <<HELP
+mdnest CLI v${MDNEST_CLI_VERSION} — notes on your terms
+
+Usage: mdnest <command> [@server/namespace/path]
+
+Path format: @server/namespace/path/to/file.md
+  @server   = server alias (optional if only one server)
+  namespace = workspace name
+  path      = file path within namespace
+
+Commands:
+  login    @alias <url> <token>   Add a server
+  logout   [@alias]               Remove server (or all)
+  servers                         List configured servers
+  whoami                          Show CLI + server versions
+
+  list     [@server/namespace]    List namespaces or files
+  read     @server/ns/path        Read a note
+  write    @server/ns/path <text> Overwrite a note (use - for stdin)
+  create   @server/ns/path [text] Create a new note
+  append   @server/ns/path <text> Append to a note (use - for stdin)
+  prepend  @server/ns/path <text> Prepend to a note
+  delete   @server/ns/path        Delete a note or folder
+  move     @server/ns/from <to>   Move/rename within namespace
+  search   @server/ns "query"     Search notes
+
+  note     <subcommand> ...       Legacy format (still works)
+  version                         Show CLI version
+  docs                            Print full CLI reference
+
+Examples:
+  mdnest login @work https://work:3236 mdnest_abc123
+  mdnest login @home https://home:3236 mdnest_def456
+  mdnest list @work
+  mdnest list @work/engineering
+  mdnest read @work/engineering/Architecture/system-overview.md
+  mdnest search @home/notes "meeting"
+  echo "log entry" | mdnest append @work/engineering/log.md -
+  mdnest servers
+
+Single-server (backward compatible):
+  mdnest login https://myserver:3236 mdnest_abc123
+  mdnest read engineering/Architecture/system-overview.md
+HELP
+}
 
 CMD="${1:-help}"
 shift 2>/dev/null || true
 
 case "$CMD" in
-  login)
-    url="$1"
-    tok="$2"
-    if [ -z "$url" ] || [ -z "$tok" ]; then
-      echo "Usage: mdnest login <url> <token>"
-      echo "  url:   Your mdnest server URL (e.g. https://myserver:3236)"
-      echo "  token: API token from Settings > API Tokens in the web UI"
-      exit 1
-    fi
-    url="${url%/}"
-    mkdir -p "$CONFIG_DIR"
-    cat > "$CONFIG_FILE" <<EOF
-url=${url}
-token=${tok}
-EOF
-    chmod 600 "$CONFIG_FILE"
-    if MDNEST_URL="$url" MDNEST_TOKEN="$tok" api GET "/namespaces" > /dev/null 2>&1; then
-      echo "Logged in to $url"
-      # Check version compatibility
-      SERVER_VER=$(curl -s "${url}/api/config" 2>/dev/null | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
-      if [ -n "$SERVER_VER" ]; then
-        CLI_MAJOR="${MDNEST_CLI_VERSION%%.*}"
-        SRV_MAJOR="${SERVER_VER%%.*}"
-        if [ "$CLI_MAJOR" != "$SRV_MAJOR" ]; then
-          echo "Warning: CLI v${MDNEST_CLI_VERSION} may not be compatible with server v${SERVER_VER}"
-          echo "Update CLI: curl -fsSL https://raw.githubusercontent.com/mahsanamin/mdnest/v2.0/install-cli.sh | bash"
-        fi
-      fi
-    else
-      echo "Warning: could not reach $url — credentials saved, will retry on next command"
-    fi
-    ;;
-  logout)
-    rm -f "$CONFIG_FILE"
-    echo "Logged out"
-    ;;
-  whoami)
-    load_config
-    if [ -n "$MDNEST_URL" ]; then
-      echo "CLI:    v${MDNEST_CLI_VERSION}"
-      # Fetch server version
-      SERVER_INFO=$(curl -s "${MDNEST_URL}/api/config" 2>/dev/null || echo "{}")
-      SERVER_VER=$(echo "$SERVER_INFO" | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
-      [ -n "$SERVER_VER" ] && echo "Server: v${SERVER_VER} (${MDNEST_URL})" || echo "Server: $MDNEST_URL"
-      echo "Token:  ${MDNEST_TOKEN:0:12}..."
-    else
-      echo "Not logged in. Run: mdnest login <url> <token>"
-    fi
-    ;;
-  version|--version|-v)
-    echo "mdnest CLI v${MDNEST_CLI_VERSION}"
-    ;;
-  note)
-    note_cmd "$@"
-    ;;
+  login)    cmd_login "$@" ;;
+  logout)   cmd_logout "$@" ;;
+  servers)  cmd_servers ;;
+  whoami)   cmd_whoami ;;
+  list)     load_default; cmd_list "$@" ;;
+  read)     load_default; cmd_read "$@" ;;
+  write)    load_default; cmd_write "$@" ;;
+  create)   load_default; cmd_create "$@" ;;
+  append)   load_default; cmd_append "$@" ;;
+  prepend)  load_default; cmd_prepend "$@" ;;
+  delete)   load_default; cmd_delete "$@" ;;
+  move)     load_default; cmd_move "$@" ;;
+  search)   load_default; cmd_search "$@" ;;
+  note)     cmd_note_legacy "$@" ;;
+  version|--version|-v) echo "mdnest CLI v${MDNEST_CLI_VERSION}" ;;
   docs)
     REAL_PATH="$(readlink -f "$0" 2>/dev/null || python3 -c "import os,sys; print(os.path.realpath(sys.argv[1]))" "$0")"
     DOCS_DIR="$(dirname "$REAL_PATH")/docs"
-    if [ -f "$DOCS_DIR/cli.md" ]; then
-      cat "$DOCS_DIR/cli.md"
-    else
-      echo "Docs not found. Expected at: $DOCS_DIR/cli.md"
-      exit 1
-    fi
+    [ -f "$DOCS_DIR/cli.md" ] && cat "$DOCS_DIR/cli.md" || echo "Docs not found at $DOCS_DIR/cli.md"
     ;;
-  help|--help|-h)
-    cat <<HELP
-mdnest CLI v${MDNEST_CLI_VERSION} — notes on your terms
-
-Usage: mdnest <command>
-
-Commands:
-  login   <url> <token>     Authenticate with an mdnest server
-  logout                    Remove saved credentials
-  whoami                    Show CLI version, server version, and connection info
-  version                   Show CLI version
-  note    <subcommand>      Read, write, append, search notes (run 'mdnest note help')
-  docs                      Print the full CLI reference
-
-Examples:
-  mdnest login https://myserver:3236 tok_abc123
-  mdnest note list
-  mdnest note read my_notes ideas.md
-  mdnest note append my_notes log.md "Meeting notes here"
-  echo "piped content" | mdnest note write my_notes draft.md -
-HELP
-    ;;
+  help|--help|-h) cmd_help ;;
   *)
     echo "Unknown command: $CMD"
     echo "Run 'mdnest help' for usage"

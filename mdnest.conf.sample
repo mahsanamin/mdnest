@@ -7,6 +7,9 @@ MDNEST_USER=admin
 MDNEST_PASSWORD=changeme
 MDNEST_JWT_SECRET=changeme
 
+# Server alias (used in CLI paths, e.g. @work/namespace/path)
+# SERVER_ALIAS=work
+
 # Frontend origin (for CORS)
 FRONTEND_ORIGIN=http://localhost:3236
 
