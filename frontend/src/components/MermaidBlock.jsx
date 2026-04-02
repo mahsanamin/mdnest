@@ -79,8 +79,8 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
       originalText: text,
       left: elRect.left - containerRect.left,
       top: elRect.top - containerRect.top,
-      width: Math.max(elRect.width + 30, 100),
-      height: Math.max(elRect.height + 10, 30),
+      width: Math.max(text.length * 10 + 40, elRect.width + 60, 200),
+      height: Math.max(elRect.height + 16, 36),
     });
   }, [readOnly]);
 
