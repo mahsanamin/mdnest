@@ -321,22 +321,51 @@ function App() {
     return () => window.removeEventListener('hashchange', onHashChange);
   }, [selectedNs, currentPath]);
 
-  // Save current scroll position before switching documents
-  const saveScrollPosition = useCallback(() => {
+  // Find all scrollable elements in the editor/preview area
+  const getScrollables = useCallback(() => {
+    const els = [];
+    if (editorWrapperRef.current) {
+      const ta = editorWrapperRef.current.querySelector('.editor-textarea');
+      if (ta) els.push(ta);
+      const live = editorWrapperRef.current.querySelector('.live-editor-wrapper');
+      if (live) els.push(live);
+    }
+    if (previewWrapperRef.current) {
+      const pv = previewWrapperRef.current.querySelector('.preview-pane');
+      if (pv) els.push(pv);
+    }
+    return els;
+  }, []);
+
+  // Continuously track scroll position for the current document
+  useEffect(() => {
     if (!selectedNs || !currentPath) return;
     const key = `${selectedNs}/${currentPath}`;
-    // Find any visible scrollable element and save its percentage
-    const editor = editorWrapperRef.current?.querySelector('.editor-textarea')
-      || editorWrapperRef.current?.querySelector('.live-editor-wrapper');
-    const preview = previewWrapperRef.current?.querySelector('.preview-pane');
-    const el = editor || preview;
-    if (el && el.scrollHeight > el.clientHeight) {
-      const pct = el.scrollTop / (el.scrollHeight - el.clientHeight);
-      scrollPositions.current[key] = pct;
-    }
-  }, [selectedNs, currentPath]);
 
-  // Restore scroll position for a document (retries until content is rendered)
+    const onScroll = (e) => {
+      const el = e.target;
+      const maxScroll = el.scrollHeight - el.clientHeight;
+      if (maxScroll > 0) {
+        scrollPositions.current[key] = el.scrollTop / maxScroll;
+      }
+    };
+
+    // Attach scroll listeners after a short delay (let content render)
+    let timer = setTimeout(() => {
+      getScrollables().forEach((el) => {
+        el.addEventListener('scroll', onScroll, { passive: true });
+      });
+    }, 300);
+
+    return () => {
+      clearTimeout(timer);
+      getScrollables().forEach((el) => {
+        el.removeEventListener('scroll', onScroll);
+      });
+    };
+  }, [selectedNs, currentPath, viewMode, editorMode, getScrollables]);
+
+  // Restore scroll position when opening a document
   const restoreScrollPosition = useCallback((ns, path) => {
     const key = `${ns}/${path}`;
     const pct = scrollPositions.current[key];
@@ -344,33 +373,24 @@ function App() {
 
     let attempts = 0;
     const tryRestore = () => {
-      const targets = [
-        editorWrapperRef.current?.querySelector('.editor-textarea'),
-        editorWrapperRef.current?.querySelector('.live-editor-wrapper'),
-        previewWrapperRef.current?.querySelector('.preview-pane'),
-      ].filter(Boolean);
-
+      const els = getScrollables();
       let restored = false;
-      targets.forEach((el) => {
+      els.forEach((el) => {
         const maxScroll = el.scrollHeight - el.clientHeight;
-        if (maxScroll > 10) { // content has rendered
+        if (maxScroll > 10) {
           el.scrollTop = pct * maxScroll;
           restored = true;
         }
       });
-
-      // Retry if content hasn't rendered yet (up to 2 seconds)
-      if (!restored && attempts < 10) {
+      if (!restored && attempts < 15) {
         attempts++;
         setTimeout(tryRestore, 200);
       }
     };
-
-    setTimeout(tryRestore, 150);
-  }, []);
+    setTimeout(tryRestore, 200);
+  }, [getScrollables]);
 
   const openNoteDirect = useCallback(async (ns, path) => {
-    saveScrollPosition();
     try {
       const { text, etag } = await getNote(ns, path);
       setCurrentPath(path);
@@ -381,10 +401,9 @@ function App() {
     } catch (e) {
       console.error('Failed to open note:', e);
     }
-  }, [saveScrollPosition, restoreScrollPosition]);
+  }, [restoreScrollPosition]);
 
   const handleSelectNs = useCallback((ns) => {
-    saveScrollPosition();
     setSelectedNs(ns);
     setCurrentPath(null);
     setContent('');
@@ -395,7 +414,6 @@ function App() {
 
   const openNote = useCallback(async (path) => {
     if (!selectedNs) return;
-    saveScrollPosition();
     try {
       const { text, etag } = await getNote(selectedNs, path);
       setCurrentPath(path);
