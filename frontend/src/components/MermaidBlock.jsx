@@ -99,42 +99,60 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
   const handlePreviewClick = useCallback((e) => {
     if (readOnly) return;
 
-    // Walk up from the click target to find a text/label element
+    // Walk up from the click target to find any text-bearing element
     let el = e.target;
     let text = null;
-    for (let i = 0; i < 5 && el && el !== previewRef.current; i++) {
-      // Check if this is a label element
+    let textEl = null;
+
+    for (let i = 0; i < 8 && el && el !== previewRef.current; i++) {
       const tagName = el.tagName?.toLowerCase();
       const cls = el.className?.baseVal || el.className || '';
-      if (
+
+      // Match: SVG text/tspan, HTML span/p/div, or any mermaid label class
+      const isTextElement = (
         tagName === 'text' ||
+        tagName === 'tspan' ||
         tagName === 'span' ||
         tagName === 'p' ||
         tagName === 'div' ||
         cls.includes('nodeLabel') ||
         cls.includes('edgeLabel') ||
-        cls.includes('label')
-      ) {
+        cls.includes('label') ||
+        cls.includes('messageText') ||
+        cls.includes('actor') ||
+        cls.includes('loopText') ||
+        cls.includes('noteText') ||
+        cls.includes('labelText')
+      );
+
+      if (isTextElement) {
+        // For tspan, use parent <text> for positioning but tspan's text
         const t = el.textContent?.trim();
-        if (t && t.length > 0 && t.length < 200) {
+        if (t && t.length > 0 && t.length < 300) {
           text = t;
+          // Use the closest block-level element for positioning
+          textEl = (tagName === 'tspan' && el.parentElement?.tagName?.toLowerCase() === 'text')
+            ? el.parentElement : el;
           break;
         }
       }
       el = el.parentElement;
     }
 
-    if (!text || !previewRef.current) return;
+    if (!text || !textEl || !previewRef.current) return;
+
+    // Skip if it's a very long multi-line text (probably a Note block)
+    if (text.includes('\n') && text.length > 100) return;
 
     const containerRect = previewRef.current.getBoundingClientRect();
-    const elRect = el.getBoundingClientRect();
+    const elRect = textEl.getBoundingClientRect();
 
     setEditingLabel({
       text,
       originalText: text,
       left: elRect.left - containerRect.left,
       top: elRect.top - containerRect.top,
-      width: Math.max(text.length * 10 + 40, elRect.width + 60, 200),
+      width: Math.max(text.length * 8 + 50, elRect.width + 40, 200),
       height: Math.max(elRect.height + 16, 36),
     });
   }, [readOnly]);
