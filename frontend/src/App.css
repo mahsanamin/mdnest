@@ -795,14 +795,16 @@
 
 /* Heading copy button */
 .heading-copy {
-  float: right;
+  display: inline-block;
   opacity: 0;
   cursor: pointer;
-  font-size: 0.7em;
+  font-size: 0.6em;
   padding: 2px 4px;
+  margin-left: 6px;
   border-radius: 3px;
   transition: opacity 0.15s;
   color: #6c7086;
+  vertical-align: middle;
 }
 
 .collapsible-heading:hover .heading-copy {
