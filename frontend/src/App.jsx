@@ -336,22 +336,37 @@ function App() {
     }
   }, [selectedNs, currentPath]);
 
-  // Restore scroll position for a document
+  // Restore scroll position for a document (retries until content is rendered)
   const restoreScrollPosition = useCallback((ns, path) => {
     const key = `${ns}/${path}`;
     const pct = scrollPositions.current[key];
-    if (pct == null) return;
-    // Delay to let content render first
-    setTimeout(() => {
+    if (pct == null || pct === 0) return;
+
+    let attempts = 0;
+    const tryRestore = () => {
       const targets = [
         editorWrapperRef.current?.querySelector('.editor-textarea'),
         editorWrapperRef.current?.querySelector('.live-editor-wrapper'),
         previewWrapperRef.current?.querySelector('.preview-pane'),
       ].filter(Boolean);
+
+      let restored = false;
       targets.forEach((el) => {
-        el.scrollTop = pct * (el.scrollHeight - el.clientHeight);
+        const maxScroll = el.scrollHeight - el.clientHeight;
+        if (maxScroll > 10) { // content has rendered
+          el.scrollTop = pct * maxScroll;
+          restored = true;
+        }
       });
-    }, 100);
+
+      // Retry if content hasn't rendered yet (up to 2 seconds)
+      if (!restored && attempts < 10) {
+        attempts++;
+        setTimeout(tryRestore, 200);
+      }
+    };
+
+    setTimeout(tryRestore, 150);
   }, []);
 
   const openNoteDirect = useCallback(async (ns, path) => {
