@@ -791,6 +791,52 @@
 
 .collapsible-heading.collapsed .heading-toggle:hover {
   color: #89b4fa;
+}
+
+/* Heading copy button */
+.heading-copy {
+  float: right;
+  opacity: 0;
+  cursor: pointer;
+  font-size: 0.7em;
+  padding: 2px 4px;
+  border-radius: 3px;
+  transition: opacity 0.15s;
+  color: #6c7086;
+}
+
+.collapsible-heading:hover .heading-copy {
+  opacity: 1;
+}
+
+.heading-copy:hover {
+  color: #89b4fa;
+  background: #313244;
+}
+
+/* Code block copy button */
+.code-copy-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: #313244;
+  color: #6c7086;
+  border: 1px solid #45475a;
+  border-radius: 4px;
+  padding: 2px 10px;
+  font-size: 0.7rem;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+pre:hover .code-copy-btn {
+  opacity: 1;
+}
+
+.code-copy-btn:hover {
+  background: #45475a;
+  color: #cdd6f4;
   background: #313244;
 }
 

@@ -150,6 +150,56 @@ function Preview({ content, currentPath, ns, onCheckboxToggle }) {
         e.stopPropagation();
         doToggle();
       });
+
+      // Copy heading button (appears on hover)
+      const copyBtn = document.createElement('span');
+      copyBtn.className = 'heading-copy';
+      copyBtn.title = 'Copy heading';
+      copyBtn.innerHTML = '&#128203;'; // clipboard emoji as fallback
+      copyBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const text = heading.textContent.replace(/^[\u25B8\u25BE]\s*/, '').replace(/\u{1F4CB}$/u, '').trim();
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        copyBtn.innerHTML = '&#10003;';
+        setTimeout(() => { copyBtn.innerHTML = '&#128203;'; }, 1500);
+      });
+      heading.appendChild(copyBtn);
+    });
+
+    // Copy button on code blocks
+    el.querySelectorAll('pre').forEach((preEl) => {
+      if (preEl.querySelector('.code-copy-btn')) return;
+      if (preEl.closest('.mermaid-container')) return; // skip mermaid
+      const codeEl = preEl.querySelector('code');
+      if (!codeEl) return;
+
+      const btn = document.createElement('button');
+      btn.className = 'code-copy-btn';
+      btn.title = 'Copy code';
+      btn.textContent = 'Copy';
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const text = codeEl.textContent;
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+      });
+      preEl.style.position = 'relative';
+      preEl.appendChild(btn);
     });
 
     // Mermaid rendering
