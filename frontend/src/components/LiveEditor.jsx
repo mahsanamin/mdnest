@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Editor, rootCtx, defaultValueCtx, editorViewOptionsCtx } from '@milkdown/core';
+import { Editor, rootCtx, defaultValueCtx, editorViewOptionsCtx, editorViewCtx } from '@milkdown/core';
 import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react';
 import { commonmark, codeBlockSchema } from '@milkdown/preset-commonmark';
 import { gfm } from '@milkdown/preset-gfm';
@@ -9,6 +9,7 @@ import { history } from '@milkdown/plugin-history';
 import { clipboard } from '@milkdown/plugin-clipboard';
 import { replaceAll, callCommand, $view, insert, $prose } from '@milkdown/utils';
 import { Plugin, PluginKey } from '@milkdown/prose/state';
+import { deleteRow, deleteColumn, deleteTable } from '@milkdown/prose/tables';
 import { uploadImage } from '../api.js';
 import { htmlToMarkdown, hasRichContent } from '../html-to-md.js';
 import MermaidBlock from './MermaidBlock.jsx';
@@ -187,6 +188,15 @@ function TableToolbar({ editor }) {
   const cmd = (command, payload) => {
     try { editor.action(callCommand(command.key, payload)); } catch (e) {}
   };
+  // Direct ProseMirror command via editor view
+  const proseCmd = (pmCommand) => {
+    try {
+      editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        pmCommand(view.state, view.dispatch);
+      });
+    } catch (e) {}
+  };
   return (
     <div className="table-toolbar">
       <button onClick={() => cmd(insertTableCommand, { row: 3, col: 3 })} title="Insert table">
@@ -198,7 +208,9 @@ function TableToolbar({ editor }) {
       <button onClick={() => cmd(addColBeforeCommand)} title="Add column left">&#8592; Col</button>
       <button onClick={() => cmd(addColAfterCommand)} title="Add column right">&#8594; Col</button>
       <span className="table-toolbar-sep" />
-      <button className="danger" onClick={() => cmd(deleteSelectedCellsCommand)} title="Delete selected cells">Delete</button>
+      <button className="danger" onClick={() => proseCmd(deleteRow)} title="Delete current row">Del Row</button>
+      <button className="danger" onClick={() => proseCmd(deleteColumn)} title="Delete current column">Del Col</button>
+      <button className="danger" onClick={() => proseCmd(deleteTable)} title="Delete entire table">Del Table</button>
     </div>
   );
 }
