@@ -81,6 +81,7 @@ function App() {
   const editorWrapperRef = useRef(null);
   const previewWrapperRef = useRef(null);
   const scrollSyncRef = useRef(false);
+  const scrollPositions = useRef({}); // {ns/path: scrollPercent}
   const [shareTarget, setShareTarget] = useState(null); // {namespace, path}
   const [initialized, setInitialized] = useState(false);
   const contentRef = useRef(content);
@@ -320,19 +321,55 @@ function App() {
     return () => window.removeEventListener('hashchange', onHashChange);
   }, [selectedNs, currentPath]);
 
+  // Save current scroll position before switching documents
+  const saveScrollPosition = useCallback(() => {
+    if (!selectedNs || !currentPath) return;
+    const key = `${selectedNs}/${currentPath}`;
+    // Find any visible scrollable element and save its percentage
+    const editor = editorWrapperRef.current?.querySelector('.editor-textarea')
+      || editorWrapperRef.current?.querySelector('.live-editor-wrapper');
+    const preview = previewWrapperRef.current?.querySelector('.preview-pane');
+    const el = editor || preview;
+    if (el && el.scrollHeight > el.clientHeight) {
+      const pct = el.scrollTop / (el.scrollHeight - el.clientHeight);
+      scrollPositions.current[key] = pct;
+    }
+  }, [selectedNs, currentPath]);
+
+  // Restore scroll position for a document
+  const restoreScrollPosition = useCallback((ns, path) => {
+    const key = `${ns}/${path}`;
+    const pct = scrollPositions.current[key];
+    if (pct == null) return;
+    // Delay to let content render first
+    setTimeout(() => {
+      const targets = [
+        editorWrapperRef.current?.querySelector('.editor-textarea'),
+        editorWrapperRef.current?.querySelector('.live-editor-wrapper'),
+        previewWrapperRef.current?.querySelector('.preview-pane'),
+      ].filter(Boolean);
+      targets.forEach((el) => {
+        el.scrollTop = pct * (el.scrollHeight - el.clientHeight);
+      });
+    }, 100);
+  }, []);
+
   const openNoteDirect = useCallback(async (ns, path) => {
+    saveScrollPosition();
     try {
       const { text, etag } = await getNote(ns, path);
       setCurrentPath(path);
       setContent(text);
       setSavedContent(text);
       etagRef.current = etag;
+      restoreScrollPosition(ns, path);
     } catch (e) {
       console.error('Failed to open note:', e);
     }
-  }, []);
+  }, [saveScrollPosition, restoreScrollPosition]);
 
   const handleSelectNs = useCallback((ns) => {
+    saveScrollPosition();
     setSelectedNs(ns);
     setCurrentPath(null);
     setContent('');
@@ -343,6 +380,7 @@ function App() {
 
   const openNote = useCallback(async (path) => {
     if (!selectedNs) return;
+    saveScrollPosition();
     try {
       const { text, etag } = await getNote(selectedNs, path);
       setCurrentPath(path);
@@ -351,6 +389,7 @@ function App() {
       etagRef.current = etag;
       setConflictBanner(null);
       setSidebarVisible(false);
+      restoreScrollPosition(selectedNs, path);
     } catch (e) {
       if (e.name === 'PermissionError') {
         alert('Access denied: you do not have permission to read this file.');
