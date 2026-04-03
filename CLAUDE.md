@@ -5,7 +5,7 @@ Privately-hosted Markdown notes app. Plain files on disk, Docker-based. Supports
 ## Quick Orientation
 
 - **Backend**: Go (net/http + golang-jwt + lib/pq), lives in `backend/`
-- **Frontend**: React + Vite, lives in `frontend/`
+- **Frontend**: React + Vite + Milkdown (live editor), lives in `frontend/`
 - **Docker**: multi-stage builds, nginx proxy, optional git-sync sidecar
 - **MCP Server**: Node.js, lives in `mcp-server/` — wraps REST API for AI assistants
 - **Config**: `mdnest.conf` -> `setup.sh` generates `docker-compose.yml` and `.env`
@@ -41,8 +41,10 @@ frontend/
       Sidebar.jsx            # Namespace picker, tree area, expand/collapse
       TreeNode.jsx           # Recursive tree node (drag-drop, context menu, long-press)
       Toolbar.jsx            # Top bar: hamburger, +Note, +Folder, path display
-      Editor.jsx             # Textarea with tab/paste/drop support
-      EditorToolbar.jsx      # Markdown formatting buttons
+      Editor.jsx             # Basic mode: textarea with tab/paste/drop support
+      EditorToolbar.jsx      # Markdown formatting buttons (basic mode)
+      LiveEditor.jsx         # Live mode: Milkdown rich editor with inline rendering
+      MermaidBlock.jsx       # Inline mermaid with Source/Preview toggle + click-to-edit labels
       Preview.jsx            # Rendered markdown (marked + mermaid)
       ContextMenu.jsx        # Right-click / long-press floating menu
 
@@ -83,6 +85,11 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 - API calls: all go through api.js which handles JWT and 401 redirects
 - marked v15: use plain renderer object (NOT `new marked.Renderer()`), method signature is `({ text, lang })` for code blocks
 - Mermaid: rendered post-DOM-insert by querying `.mermaid-source` divs
+- Two editor modes: Basic (textarea, Editor.jsx) and Live (Milkdown, LiveEditor.jsx)
+- Live editor: lazy-loaded via React.lazy(), only downloads when user switches to Live mode
+- Milkdown: ProseMirror-based, markdown-native. Uses commonmark + GFM presets
+- Mermaid in Live mode: ProseMirror $view node view renders MermaidBlock.jsx in-place
+- Both editors share the same onChange/content props — App.jsx doesn't know which is active
 
 ### Namespace Model
 - Namespaces are NOT created at runtime — they are host directories mounted via Docker volumes
