@@ -169,8 +169,7 @@ function Preview({ content, currentPath, ns, onCheckboxToggle }) {
               // Keep original SVG for the fullscreen viewer
               const originalSvg = svg;
               const wrapper = document.createElement('div');
-              wrapper.className = 'mermaid-container mermaid-clickable';
-              wrapper.title = 'Click to expand';
+              wrapper.className = 'mermaid-container';
               wrapper.innerHTML = svg;
               // Remove hardcoded width/height so inline SVG fits container
               const svgEl = wrapper.querySelector('svg');
@@ -178,9 +177,17 @@ function Preview({ content, currentPath, ns, onCheckboxToggle }) {
                 svgEl.removeAttribute('width');
                 svgEl.style.height = 'auto';
               }
-              wrapper.addEventListener('click', () => {
+              // Add expand button instead of click-anywhere
+              const expandBtn = document.createElement('button');
+              expandBtn.className = 'mermaid-expand-btn';
+              expandBtn.title = 'Expand fullscreen';
+              expandBtn.innerHTML = '&#x26F6;';
+              expandBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
                 setViewerSvg(originalSvg);
               });
+              wrapper.style.position = 'relative';
+              wrapper.appendChild(expandBtn);
               mEl.replaceWith(wrapper);
             }
           } catch (err) {

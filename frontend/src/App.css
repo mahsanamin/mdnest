@@ -832,7 +832,6 @@
 }
 
 .mermaid-clickable {
-  cursor: pointer;
   border: 1px solid transparent;
   border-radius: 8px;
   padding: 4px;
@@ -844,20 +843,37 @@
   border-color: #89b4fa;
 }
 
-.mermaid-clickable::after {
-  content: 'Click to expand';
+.mermaid-clickable svg text,
+.mermaid-clickable svg tspan,
+.mermaid-clickable svg .nodeLabel,
+.mermaid-clickable svg foreignObject {
+  user-select: text !important;
+  cursor: text;
+}
+
+.mermaid-expand-btn {
   position: absolute;
   top: 6px;
   right: 8px;
-  font-size: 0.65rem;
-  color: #585b70;
+  background: #313244;
+  border: 1px solid #45475a;
+  color: #6c7086;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 0.9rem;
+  cursor: pointer;
   opacity: 0;
   transition: opacity 0.15s;
-  pointer-events: none;
+  z-index: 5;
 }
 
-.mermaid-clickable:hover::after {
+.mermaid-container:hover .mermaid-expand-btn {
   opacity: 1;
+}
+
+.mermaid-expand-btn:hover {
+  background: #45475a;
+  color: #cdd6f4;
 }
 
 /* Mermaid Viewer Modal */
@@ -2071,7 +2087,7 @@
 }
 
 .mermaid-live-container {
-  user-select: none;
+  user-select: auto;
 }
 
 .live-mermaid-blocks {
