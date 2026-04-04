@@ -61,7 +61,9 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
   const [svgHtml, setSvgHtml] = useState('');
   const [error, setError] = useState('');
   const [editSource, setEditSource] = useState(source);
-  const [editingLabel, setEditingLabel] = useState(null); // {text, rect, originalText}
+  const [editingLabel, setEditingLabel] = useState(null);
+  const [zoom, setZoom] = useState(100); // percentage
+  const [naturalWidth, setNaturalWidth] = useState(null);
   const previewRef = useRef(null);
   const currentSource = useRef(source);
   currentSource.current = source;
@@ -77,13 +79,19 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
         const id = `mmd-live-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
         let { svg } = await mermaid.render(id, source.trim());
         if (!cancelled) {
-          // Remove hardcoded width/height so SVG scales to container
+          // Extract natural width from the SVG before modifying
+          const widthMatch = svg.match(/width="([\d.]+)/);
+          const natW = widthMatch ? parseFloat(widthMatch[1]) : null;
+          setNaturalWidth(natW);
+
+          // Remove hardcoded width/height
           svg = svg.replace(/(<svg[^>]*?)(\s+width="[^"]*")/, '$1');
           svg = svg.replace(/(<svg[^>]*?)(\s+height="[^"]*")/, '$1');
-          // Ensure it has width:100% style
-          svg = svg.replace(/(<svg)/, '$1 style="width:100%;height:auto;"');
+          // Set height auto, width controlled by zoom state
+          svg = svg.replace(/(<svg)/, '$1 style="height:auto;"');
           setSvgHtml(svg);
           setError('');
+          setZoom(100); // reset zoom on new render
         }
       } catch (e) {
         if (!cancelled) {
@@ -216,6 +224,18 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
     setMode('preview');
   };
 
+  // Compute the SVG display width based on natural size and zoom
+  const svgStyle = {};
+  if (naturalWidth) {
+    // Use natural width at zoom%, capped at container width
+    svgStyle.width = `${Math.round(naturalWidth * zoom / 100)}px`;
+    svgStyle.maxWidth = '100%';
+    svgStyle.height = 'auto';
+  } else {
+    svgStyle.maxWidth = '100%';
+    svgStyle.height = 'auto';
+  }
+
   return (
     <div className="mermaid-live-block" contentEditable={false}>
       <div className="mermaid-live-toolbar">
@@ -227,6 +247,15 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
           className={mode === 'source' ? 'active' : ''}
           onClick={handleSwitchToSource}
         >Source</button>
+        {svgHtml && mode === 'preview' && (
+          <>
+            <span className="mermaid-toolbar-sep" />
+            <button onClick={() => setZoom((z) => Math.max(20, z - 20))} title="Zoom out">−</button>
+            <span className="mermaid-zoom-label">{zoom}%</span>
+            <button onClick={() => setZoom((z) => Math.min(300, z + 20))} title="Zoom in">+</button>
+            <button onClick={() => setZoom(100)} title="Reset zoom">Fit</button>
+          </>
+        )}
         {svgHtml && (
           <button onClick={() => onFullscreen && onFullscreen(svgHtml)} title="Fullscreen">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/></svg>
@@ -237,11 +266,11 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
         )}
       </div>
       {mode === 'preview' ? (
-        <div className="mermaid-live-preview" style={{ position: 'relative' }} onClick={handlePreviewClick}>
+        <div className="mermaid-live-preview" style={{ position: 'relative', overflow: 'auto' }} onClick={handlePreviewClick}>
           {error ? (
             <div className="mermaid-live-error">{error}</div>
           ) : svgHtml ? (
-            <div ref={previewRef} dangerouslySetInnerHTML={{ __html: svgHtml }} />
+            <div ref={previewRef} style={svgStyle} dangerouslySetInnerHTML={{ __html: svgHtml }} />
           ) : (
             <div className="mermaid-live-loading">Rendering...</div>
           )}

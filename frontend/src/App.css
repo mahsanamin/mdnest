@@ -2081,7 +2081,6 @@ pre:hover .code-copy-btn {
 }
 
 .mermaid-live-preview svg {
-  max-width: 100%;
   height: auto;
 }
 
@@ -2143,6 +2142,20 @@ pre:hover .code-copy-btn {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+}
+
+.mermaid-toolbar-sep {
+  width: 1px;
+  height: 14px;
+  background: #45475a;
+  margin: 0 4px;
+}
+
+.mermaid-zoom-label {
+  color: #6c7086;
+  font-size: 0.68rem;
+  min-width: 32px;
+  text-align: center;
 }
 
 .mermaid-live-hint {
