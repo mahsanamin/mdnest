@@ -2,7 +2,9 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import Login from './components/Login.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import Toolbar from './components/Toolbar.jsx';
+import { lazy, Suspense } from 'react';
 import Editor from './components/Editor.jsx';
+const LiveEditor = lazy(() => import('./components/LiveEditor.jsx'));
 import Preview from './components/Preview.jsx';
 import ContextMenu from './components/ContextMenu.jsx';
 import Settings from './components/Settings.jsx';
@@ -61,10 +63,25 @@ function App() {
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [mobileView, setMobileView] = useState(() => localStorage.getItem('mdnest_mobile_view') || 'editor');
   const [viewMode, setViewMode] = useState(() => localStorage.getItem('mdnest_view_mode') || 'split');
+  const [editorMode, setEditorMode] = useState('basic');
+  const [editorModeReady, setEditorModeReady] = useState(false);
+
+  // Restore editor mode from localStorage AFTER initial render (only if in editor-only mode)
+  useEffect(() => {
+    const savedView = localStorage.getItem('mdnest_view_mode') || 'split';
+    const savedEditor = localStorage.getItem('mdnest_editor_mode');
+    if (savedEditor === 'live' && savedView === 'editor') {
+      setTimeout(() => { setEditorMode('live'); }, 500);
+    }
+  }, []);
   const [splitRatio, setSplitRatio] = useState(50);
   const [ctxMenu, setCtxMenu] = useState({ visible: false, x: 0, y: 0, target: null });
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
+  const editorWrapperRef = useRef(null);
+  const previewWrapperRef = useRef(null);
+  const scrollSyncRef = useRef(false);
+  const scrollPositions = useRef({}); // {ns/path: scrollPercent}
   const [shareTarget, setShareTarget] = useState(null); // {namespace, path}
   const [initialized, setInitialized] = useState(false);
   const contentRef = useRef(content);
@@ -304,6 +321,75 @@ function App() {
     return () => window.removeEventListener('hashchange', onHashChange);
   }, [selectedNs, currentPath]);
 
+  // Find all scrollable elements in the editor/preview area
+  const getScrollables = useCallback(() => {
+    const els = [];
+    if (editorWrapperRef.current) {
+      const ta = editorWrapperRef.current.querySelector('.editor-textarea');
+      if (ta) els.push(ta);
+      const live = editorWrapperRef.current.querySelector('.live-editor-wrapper');
+      if (live) els.push(live);
+    }
+    if (previewWrapperRef.current) {
+      const pv = previewWrapperRef.current.querySelector('.preview-pane');
+      if (pv) els.push(pv);
+    }
+    return els;
+  }, []);
+
+  // Continuously track scroll position for the current document
+  useEffect(() => {
+    if (!selectedNs || !currentPath) return;
+    const key = `${selectedNs}/${currentPath}`;
+
+    const onScroll = (e) => {
+      const el = e.target;
+      const maxScroll = el.scrollHeight - el.clientHeight;
+      if (maxScroll > 0) {
+        scrollPositions.current[key] = el.scrollTop / maxScroll;
+      }
+    };
+
+    // Attach scroll listeners after a short delay (let content render)
+    let timer = setTimeout(() => {
+      getScrollables().forEach((el) => {
+        el.addEventListener('scroll', onScroll, { passive: true });
+      });
+    }, 300);
+
+    return () => {
+      clearTimeout(timer);
+      getScrollables().forEach((el) => {
+        el.removeEventListener('scroll', onScroll);
+      });
+    };
+  }, [selectedNs, currentPath, viewMode, editorMode, getScrollables]);
+
+  // Restore scroll position when opening a document
+  const restoreScrollPosition = useCallback((ns, path) => {
+    const key = `${ns}/${path}`;
+    const pct = scrollPositions.current[key];
+    if (pct == null || pct === 0) return;
+
+    let attempts = 0;
+    const tryRestore = () => {
+      const els = getScrollables();
+      let restored = false;
+      els.forEach((el) => {
+        const maxScroll = el.scrollHeight - el.clientHeight;
+        if (maxScroll > 10) {
+          el.scrollTop = pct * maxScroll;
+          restored = true;
+        }
+      });
+      if (!restored && attempts < 15) {
+        attempts++;
+        setTimeout(tryRestore, 200);
+      }
+    };
+    setTimeout(tryRestore, 200);
+  }, [getScrollables]);
+
   const openNoteDirect = useCallback(async (ns, path) => {
     try {
       const { text, etag } = await getNote(ns, path);
@@ -311,10 +397,11 @@ function App() {
       setContent(text);
       setSavedContent(text);
       etagRef.current = etag;
+      restoreScrollPosition(ns, path);
     } catch (e) {
       console.error('Failed to open note:', e);
     }
-  }, []);
+  }, [restoreScrollPosition]);
 
   const handleSelectNs = useCallback((ns) => {
     setSelectedNs(ns);
@@ -335,6 +422,7 @@ function App() {
       etagRef.current = etag;
       setConflictBanner(null);
       setSidebarVisible(false);
+      restoreScrollPosition(selectedNs, path);
     } catch (e) {
       if (e.name === 'PermissionError') {
         alert('Access denied: you do not have permission to read this file.');
@@ -550,6 +638,47 @@ function App() {
     }
   }, [selectedNs, currentPath, refreshTree]);
 
+  // Scroll sync: editor scroll → preview scroll (proportional)
+  useEffect(() => {
+    if (viewMode !== 'split') return;
+    const findScrollable = (wrapper) => {
+      if (!wrapper) return null;
+      // Find the actual scrollable element inside the wrapper
+      const textarea = wrapper.querySelector('.editor-textarea');
+      if (textarea) return textarea;
+      const liveContent = wrapper.querySelector('.live-editor-wrapper');
+      if (liveContent) return liveContent;
+      return wrapper;
+    };
+
+    const editorEl = findScrollable(editorWrapperRef.current);
+    const previewPane = previewWrapperRef.current?.querySelector('.preview-pane');
+    if (!editorEl || !previewPane) return;
+
+    const syncEditorToPreview = () => {
+      if (scrollSyncRef.current) return;
+      scrollSyncRef.current = true;
+      const pct = editorEl.scrollTop / (editorEl.scrollHeight - editorEl.clientHeight || 1);
+      previewPane.scrollTop = pct * (previewPane.scrollHeight - previewPane.clientHeight);
+      requestAnimationFrame(() => { scrollSyncRef.current = false; });
+    };
+
+    const syncPreviewToEditor = () => {
+      if (scrollSyncRef.current) return;
+      scrollSyncRef.current = true;
+      const pct = previewPane.scrollTop / (previewPane.scrollHeight - previewPane.clientHeight || 1);
+      editorEl.scrollTop = pct * (editorEl.scrollHeight - editorEl.clientHeight);
+      requestAnimationFrame(() => { scrollSyncRef.current = false; });
+    };
+
+    editorEl.addEventListener('scroll', syncEditorToPreview);
+    previewPane.addEventListener('scroll', syncPreviewToEditor);
+    return () => {
+      editorEl.removeEventListener('scroll', syncEditorToPreview);
+      previewPane.removeEventListener('scroll', syncPreviewToEditor);
+    };
+  }, [viewMode, currentPath, editorMode]);
+
   const handleRefresh = useCallback(async () => {
     if (!authenticated || !selectedNs) return;
     await refreshTree(selectedNs);
@@ -631,7 +760,20 @@ function App() {
           onRename={canWriteCurrent ? handleToolbarRename : null}
           onDelete={canWriteCurrent ? handleToolbarDelete : null}
           viewMode={viewMode}
-          onViewModeChange={(mode) => { setViewMode(mode); localStorage.setItem('mdnest_view_mode', mode); }}
+          onViewModeChange={(mode) => {
+            setViewMode(mode);
+            localStorage.setItem('mdnest_view_mode', mode);
+            // Restore saved editor mode when switching to editor-only
+            if (mode === 'editor') {
+              const saved = localStorage.getItem('mdnest_editor_mode') || 'basic';
+              setEditorMode(saved);
+            } else {
+              // Split/preview always uses basic
+              setEditorMode('basic');
+            }
+          }}
+          editorMode={editorMode}
+          onEditorModeChange={(mode) => { setEditorMode(mode); localStorage.setItem('mdnest_editor_mode', mode); }}
           onRefresh={handleRefresh}
         />
         {appConfig?.liveCollab && presenceUsers.length > 1 && (
@@ -653,19 +795,32 @@ function App() {
               </div>
               {viewMode !== 'preview' && (
                 <div
+                  ref={editorWrapperRef}
                   className={`editor-wrapper${mobileView === 'editor' ? ' mobile-active' : ''}`}
                   style={viewMode === 'split' ? { flex: `0 0 ${splitRatio}%` } : undefined}
                 >
-                  <Editor
-                    content={content}
-                    onChange={canWriteCurrent ? handleContentChange : null}
-                    currentPath={currentPath}
-                    ns={selectedNs}
-                    readOnly={!canWriteCurrent}
-                    onCursorChange={appConfig?.liveCollab ? handleCursorChange : null}
-                    onSelectionChange={appConfig?.liveCollab ? handleSelectionChange : null}
-                    remoteCursors={appConfig?.liveCollab ? remoteCursors : null}
-                  />
+                  {editorMode === 'live' ? (
+                    <Suspense fallback={<div className="editor-loading">Loading live editor...</div>}>
+                      <LiveEditor
+                        content={content}
+                        onChange={canWriteCurrent ? handleContentChange : null}
+                        currentPath={currentPath}
+                        ns={selectedNs}
+                        readOnly={!canWriteCurrent}
+                      />
+                    </Suspense>
+                  ) : (
+                    <Editor
+                      content={content}
+                      onChange={canWriteCurrent ? handleContentChange : null}
+                      currentPath={currentPath}
+                      ns={selectedNs}
+                      readOnly={!canWriteCurrent}
+                      onCursorChange={appConfig?.liveCollab ? handleCursorChange : null}
+                      onSelectionChange={appConfig?.liveCollab ? handleSelectionChange : null}
+                      remoteCursors={appConfig?.liveCollab ? remoteCursors : null}
+                    />
+                  )}
                 </div>
               )}
               {viewMode === 'split' && (
@@ -694,6 +849,7 @@ function App() {
               )}
               {viewMode !== 'editor' && (
                 <div
+                  ref={previewWrapperRef}
                   className={`preview-wrapper${mobileView === 'preview' ? ' mobile-active' : ''}`}
                   style={viewMode === 'split' ? { flex: `0 0 ${100 - splitRatio}%` } : undefined}
                 >

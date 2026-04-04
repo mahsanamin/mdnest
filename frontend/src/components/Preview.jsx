@@ -125,7 +125,7 @@ function Preview({ content, currentPath, ns, onCheckboxToggle }) {
       if (!a.getAttribute('rel')) a.setAttribute('rel', 'noopener noreferrer');
     });
 
-    // Collapsible headings
+    // Collapsible headings — only toggle icon triggers collapse
     el.querySelectorAll('h1, h2, h3, h4, h5, h6').forEach((heading) => {
       const level = parseInt(heading.tagName[1]);
       const toggle = document.createElement('span');
@@ -133,19 +133,73 @@ function Preview({ content, currentPath, ns, onCheckboxToggle }) {
       toggle.textContent = '\u25BE'; // ▾
       heading.prepend(toggle);
       heading.classList.add('collapsible-heading');
-      heading.addEventListener('click', (e) => {
-        if (e.target.tagName === 'A') return; // don't toggle when clicking links in headings
+
+      const doToggle = () => {
         const collapsed = heading.classList.toggle('collapsed');
-        toggle.textContent = collapsed ? '\u25B8' : '\u25BE'; // ▸ or ▾
-        // Hide/show all siblings until next heading of same or higher level
-        let el = heading.nextElementSibling;
-        while (el) {
-          const tag = el.tagName;
-          if (/^H[1-6]$/.test(tag) && parseInt(tag[1]) <= level) break;
-          el.style.display = collapsed ? 'none' : '';
-          el = el.nextElementSibling;
+        toggle.textContent = collapsed ? '\u25B8' : '\u25BE';
+        let sib = heading.nextElementSibling;
+        while (sib) {
+          if (/^H[1-6]$/.test(sib.tagName) && parseInt(sib.tagName[1]) <= level) break;
+          sib.style.display = collapsed ? 'none' : '';
+          sib = sib.nextElementSibling;
         }
+      };
+
+      // Only the toggle icon triggers collapse
+      toggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        doToggle();
       });
+
+      // Copy heading button (appears on hover)
+      const copyBtn = document.createElement('span');
+      copyBtn.className = 'heading-copy';
+      copyBtn.title = 'Copy heading';
+      copyBtn.innerHTML = '&#128203;'; // clipboard emoji as fallback
+      copyBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const text = heading.textContent.replace(/^[\u25B8\u25BE]\s*/, '').replace(/\u{1F4CB}$/u, '').trim();
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        copyBtn.innerHTML = '&#10003;';
+        setTimeout(() => { copyBtn.innerHTML = '&#128203;'; }, 1500);
+      });
+      heading.appendChild(copyBtn);
+    });
+
+    // Copy button on code blocks
+    el.querySelectorAll('pre').forEach((preEl) => {
+      if (preEl.querySelector('.code-copy-btn')) return;
+      if (preEl.closest('.mermaid-container')) return; // skip mermaid
+      const codeEl = preEl.querySelector('code');
+      if (!codeEl) return;
+
+      const btn = document.createElement('button');
+      btn.className = 'code-copy-btn';
+      btn.title = 'Copy code';
+      btn.textContent = 'Copy';
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const text = codeEl.textContent;
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+      });
+      preEl.style.position = 'relative';
+      preEl.appendChild(btn);
     });
 
     // Mermaid rendering
@@ -165,8 +219,7 @@ function Preview({ content, currentPath, ns, onCheckboxToggle }) {
               // Keep original SVG for the fullscreen viewer
               const originalSvg = svg;
               const wrapper = document.createElement('div');
-              wrapper.className = 'mermaid-container mermaid-clickable';
-              wrapper.title = 'Click to expand';
+              wrapper.className = 'mermaid-container';
               wrapper.innerHTML = svg;
               // Remove hardcoded width/height so inline SVG fits container
               const svgEl = wrapper.querySelector('svg');
@@ -174,9 +227,17 @@ function Preview({ content, currentPath, ns, onCheckboxToggle }) {
                 svgEl.removeAttribute('width');
                 svgEl.style.height = 'auto';
               }
-              wrapper.addEventListener('click', () => {
+              // Add expand button instead of click-anywhere
+              const expandBtn = document.createElement('button');
+              expandBtn.className = 'mermaid-expand-btn';
+              expandBtn.title = 'Expand fullscreen';
+              expandBtn.innerHTML = '&#x26F6;';
+              expandBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
                 setViewerSvg(originalSvg);
               });
+              wrapper.style.position = 'relative';
+              wrapper.appendChild(expandBtn);
               mEl.replaceWith(wrapper);
             }
           } catch (err) {
@@ -247,34 +308,37 @@ function Preview({ content, currentPath, ns, onCheckboxToggle }) {
   const expandAllHeadings = useCallback(() => {
     const el = containerRef.current;
     if (!el) return;
+    // Remove all collapsed states and show everything
     el.querySelectorAll('.collapsible-heading.collapsed').forEach((h) => {
       h.classList.remove('collapsed');
-      h.querySelector('.heading-toggle').textContent = '\u25BE';
-      let sib = h.nextElementSibling;
-      const level = parseInt(h.tagName[1]);
-      while (sib) {
-        if (/^H[1-6]$/.test(sib.tagName) && parseInt(sib.tagName[1]) <= level) break;
-        sib.style.display = '';
-        sib = sib.nextElementSibling;
-      }
+      const toggle = h.querySelector('.heading-toggle');
+      if (toggle) toggle.textContent = '\u25BE';
+    });
+    // Show all hidden elements
+    el.querySelectorAll('[style*="display: none"]').forEach((e) => {
+      e.style.display = '';
     });
   }, []);
 
   const collapseAllHeadings = useCallback(() => {
     const el = containerRef.current;
     if (!el) return;
-    el.querySelectorAll('.collapsible-heading:not(.collapsed)').forEach((h) => {
+    // Collapse all headings and hide non-heading content
+    el.querySelectorAll('.collapsible-heading').forEach((h) => {
       h.classList.add('collapsed');
-      h.querySelector('.heading-toggle').textContent = '\u25B8';
-      let sib = h.nextElementSibling;
-      const level = parseInt(h.tagName[1]);
-      while (sib) {
-        if (/^H[1-6]$/.test(sib.tagName) && parseInt(sib.tagName[1]) <= level) break;
-        sib.style.display = 'none';
-        sib = sib.nextElementSibling;
-      }
+      const toggle = h.querySelector('.heading-toggle');
+      if (toggle) toggle.textContent = '\u25B8';
     });
+    // Hide everything that's not a heading
+    const children = el.children;
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i];
+      if (!child.classList.contains('collapsible-heading')) {
+        child.style.display = 'none';
+      }
+    }
   }, []);
+
 
   return (
     <div className="preview-pane-wrapper">

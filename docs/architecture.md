@@ -171,23 +171,39 @@ The `RequireNamespace` function validates that the `ns` query parameter is a sim
 ### Technology Stack
 
 - **React** with JSX, bundled by **Vite**
-- **marked** for markdown-to-HTML rendering
-- **mermaid** for diagram rendering inside fenced code blocks
+- **Milkdown** (ProseMirror-based) for Live rich editing mode
+- **marked** for markdown-to-HTML rendering in preview and Basic mode
+- **mermaid** for diagram rendering
 - Plain CSS (no CSS framework)
 
 ### Key Components
 
 | Component | Responsibility |
 |-----------|---------------|
-| `App.jsx` | Top-level layout, state management, URL hash routing |
+| `App.jsx` | Top-level layout, state management, URL hash routing, editor mode switching |
 | `Login.jsx` | Login form, calls `/api/auth/login` |
-| `Sidebar.jsx` | Namespace dropdown, renders the folder tree |
-| `TreeNode.jsx` | Single node in the tree; handles expand/collapse, drag-and-drop, context menu triggers |
-| `Editor.jsx` | Textarea for editing markdown, handles paste/drop for image upload, Tab for indentation |
-| `EditorToolbar.jsx` | Buttons that insert markdown formatting into the editor |
-| `Preview.jsx` | Renders markdown to HTML using marked, initializes mermaid for diagram blocks, handles checkbox toggle |
-| `Toolbar.jsx` | New Note and New Folder buttons |
-| `ContextMenu.jsx` | Positioned menu for right-click/long-press actions |
+| `Sidebar.jsx` | Namespace dropdown, folder tree, sync button, user menu |
+| `TreeNode.jsx` | Single node in the tree; handles expand/collapse, drag-and-drop, context menu |
+| `Editor.jsx` | Basic mode: textarea for editing markdown, formatting toolbar, paste/drop |
+| `EditorToolbar.jsx` | Buttons that insert markdown formatting (Basic mode only) |
+| `LiveEditor.jsx` | Live mode: Milkdown rich editor with inline rendering, table controls, mermaid node views |
+| `MermaidBlock.jsx` | Inline mermaid diagram with Source/Preview toggle and click-to-edit labels |
+| `Preview.jsx` | Renders markdown to HTML using marked, mermaid diagrams, collapsible headings |
+| `Toolbar.jsx` | View mode toggle, Basic/Live toggle, file actions |
+| `ContextMenu.jsx` | Right-click/long-press menu with copy path, manage access |
+| `AdminPanel.jsx` | User management, access grants (admin only) |
+| `ShareDialog.jsx` | Directory-level sharing dialog |
+
+### Editor Architecture
+
+mdnest supports two editing modes:
+
+- **Basic mode** uses a plain `<textarea>` with the `marked` library for preview. The textarea receives raw markdown and fires `onChange` on every keystroke.
+- **Live mode** uses Milkdown (ProseMirror) which renders markdown inline. The editor serializes to markdown via a listener plugin and fires the same `onChange` callback.
+
+Both modes share identical props (`content`, `onChange`, `readOnly`, etc.). App.jsx doesn't know which editor is active — the content flow (auto-save, collaboration, ETag handling) is the same.
+
+Live mode is lazy-loaded via `React.lazy()`. The Milkdown chunk (~462KB) only downloads when the user first switches to Live mode.
 
 ### API Client
 

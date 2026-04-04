@@ -4,6 +4,43 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v3.0.0 — Live Rich Editor
+
+### New Features
+
+- **Live editor mode** — Obsidian-style rich editing powered by Milkdown (ProseMirror). Markdown renders inline as you type: bold shows bold, headings render as headings, lists format in place. Toggle between Basic (plain textarea) and Live mode from the toolbar.
+- **Interactive table editing** — click into table cells to edit. Toolbar buttons to insert tables, add/remove rows and columns. Tab between cells.
+- **Mermaid inline rendering** — mermaid code blocks render as diagrams in-place in Live mode with Source/Preview/Fullscreen buttons. Click any node or edge label to edit it directly on the diagram.
+- **Clickable checkboxes in edit mode** — task list checkboxes work in Live mode without switching to preview.
+- **Rich paste** — paste from Google Docs, Confluence, or any rich source into Live mode and it inserts as parsed markdown nodes (headings render as headings, not `# text`).
+- **Scroll sync** — editor and preview scroll proportionally in split view.
+- **Collapsible headings** — click the toggle icon on any heading in preview to collapse/expand that section. Expand All / Collapse All buttons in preview toolbar.
+
+### Improvements
+
+- **Lazy-loaded Live editor** — Milkdown only downloads when you switch to Live mode (462KB chunk). Main bundle stays at 311KB for fast initial load.
+- **Smart backspace** — empty headings/blockquotes convert to paragraphs on single backspace in Live mode.
+- **Text selection in mermaid** — can select and copy text from rendered mermaid diagrams in preview mode. Fullscreen expand moved to a hover button.
+- **Editor mode per view** — Live mode preference is separate for editor-only view. Split view always uses Basic mode.
+- **Heading collapse** — only the toggle icon (not heading text) triggers collapse. Expand All properly shows all nested content.
+- **Copy buttons** — headings show a clipboard icon on hover (copies heading text). Code blocks show a "Copy" button on hover (copies code content).
+- **Table delete controls** — separate Del Row, Del Col, Del Table buttons using direct ProseMirror commands (cursor in cell is enough, no need to select).
+- **Scroll position persistence** — each document remembers its scroll position. Switch between documents and your reading position is restored.
+- **Mermaid label editing for sequence diagrams** — participants, messages, and other sequence diagram labels are clickable alongside flowchart nodes.
+- **Auto-expanding label editor** — mermaid label input grows/shrinks with text content.
+
+### Dependencies
+
+- Added: `@milkdown/core`, `@milkdown/ctx`, `@milkdown/react`, `@milkdown/preset-commonmark`, `@milkdown/preset-gfm`, `@milkdown/plugin-listener`, `@milkdown/plugin-history`, `@milkdown/plugin-clipboard` (all v7.20)
+- Existing: `marked` (preview/basic mode), `mermaid` (diagrams) unchanged
+
+### New Files
+
+- `frontend/src/components/LiveEditor.jsx` — Milkdown editor wrapper with table toolbar, mermaid node view, paste handling
+- `frontend/src/components/MermaidBlock.jsx` — React component for inline mermaid with Source/Preview toggle and click-to-edit labels
+
+---
+
 ## v2.1.0 — Multi-Server CLI + Git Sync Fix
 
 ### New Features

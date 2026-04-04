@@ -1,17 +1,34 @@
 import { useState, useCallback } from 'react';
 
-function Toolbar({ currentPath, onToggleSidebar, onChangePassword, onRename, onDelete, viewMode, onViewModeChange, onRefresh }) {
+function Toolbar({ currentPath, onToggleSidebar, onChangePassword, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh }) {
   const [refreshing, setRefreshing] = useState(false);
   const handleRefresh = useCallback(() => {
     if (refreshing || !onRefresh) return;
     setRefreshing(true);
     onRefresh().finally(() => setTimeout(() => setRefreshing(false), 2000));
   }, [refreshing, onRefresh]);
+
+  const showEditorToggle = currentPath && viewMode === 'editor' && onEditorModeChange;
+
   return (
     <div className="toolbar">
       <button className="toolbar-hamburger" onClick={onToggleSidebar} title="Toggle sidebar">
         &#9776;
       </button>
+      {showEditorToggle && (
+        <div className="editor-mode-toggle">
+          <button
+            className={editorMode === 'basic' ? 'active' : ''}
+            onClick={() => onEditorModeChange('basic')}
+            title="Plain text editor"
+          >Basic</button>
+          <button
+            className={editorMode === 'live' ? 'active' : ''}
+            onClick={() => onEditorModeChange('live')}
+            title="Live rich editor"
+          >Live</button>
+        </div>
+      )}
       <span className="toolbar-path">
         {currentPath || 'No file selected'}
         {currentPath && (onRename || onDelete) && (

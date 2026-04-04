@@ -70,27 +70,25 @@ Right-click or long-press on a file to:
 
 ## Editing
 
-### The Markdown Editor
+### Editor Modes
 
-Clicking a file in the sidebar opens it in the editor pane. The editor is a plain-text area where you write standard markdown.
+mdnest has two editing modes, switchable from the toolbar when in editor-only view:
 
-Changes are saved automatically. There is no manual save button -- your edits are sent to the backend as you type.
+**Basic Mode** (default) -- a plain-text area where you write raw markdown. Simple, fast, no rendering overhead. Includes a formatting toolbar for bold, italic, headings, links, code, lists, and checkboxes. Press **Tab** to indent.
 
-### Formatting Toolbar
+**Live Mode** -- Obsidian-style rich editing powered by Milkdown. Markdown renders inline as you type:
 
-Above the editor, the formatting toolbar provides buttons for common markdown operations:
+- Type `**bold**` and it renders **bold** immediately
+- Type `## Heading` and it renders as a heading
+- Tables are click-to-edit -- click any cell, tab between cells
+- Checkboxes are clickable
+- Mermaid diagrams render in-place with Source/Preview/Fullscreen buttons
+- Click any mermaid node label to edit it directly on the diagram
+- Paste from Google Docs or Confluence -- auto-converts to markdown
 
-- **Bold** -- wraps selected text with `**`
-- **Italic** -- wraps selected text with `_`
-- **Heading** -- inserts a `#` prefix
-- **Link** -- inserts a `[text](url)` template
-- **Code** -- wraps selection with backticks (inline) or triple backticks (block)
-- **List** -- inserts a `- ` prefix for unordered lists
-- **Checkbox** -- inserts a `- [ ] ` prefix for task lists
+Live Mode is only available in editor-only view (the pen icon). Split view always uses Basic Mode with a separate preview pane.
 
-### Indentation
-
-Press **Tab** in the editor to indent the current line. This is useful for nesting list items.
+Changes are saved automatically in both modes. There is no manual save button -- your edits are sent to the backend as you type.
 
 ---
 
