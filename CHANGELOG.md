@@ -23,6 +23,11 @@ All notable changes to mdnest are documented here.
 - **Text selection in mermaid** — can select and copy text from rendered mermaid diagrams in preview mode. Fullscreen expand moved to a hover button.
 - **Editor mode per view** — Live mode preference is separate for editor-only view. Split view always uses Basic mode.
 - **Heading collapse** — only the toggle icon (not heading text) triggers collapse. Expand All properly shows all nested content.
+- **Copy buttons** — headings show a clipboard icon on hover (copies heading text). Code blocks show a "Copy" button on hover (copies code content).
+- **Table delete controls** — separate Del Row, Del Col, Del Table buttons using direct ProseMirror commands (cursor in cell is enough, no need to select).
+- **Scroll position persistence** — each document remembers its scroll position. Switch between documents and your reading position is restored.
+- **Mermaid label editing for sequence diagrams** — participants, messages, and other sequence diagram labels are clickable alongside flowchart nodes.
+- **Auto-expanding label editor** — mermaid label input grows/shrinks with text content.
 
 ### Dependencies
 
