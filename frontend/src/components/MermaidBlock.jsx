@@ -272,9 +272,28 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
           </>
         )}
         {svgHtml && (
-          <button onClick={() => onFullscreen && onFullscreen(originalSvg || svgHtml)} title="Fullscreen">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/></svg>
-          </button>
+          <>
+            <button onClick={() => onFullscreen && onFullscreen(originalSvg || svgHtml)} title="Fullscreen">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/></svg>
+            </button>
+            <button
+              className="mermaid-copy-btn"
+              onClick={(e) => {
+                const ta = document.createElement('textarea');
+                ta.value = source;
+                ta.style.position = 'fixed';
+                ta.style.opacity = '0';
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+                const btn = e.currentTarget;
+                btn.textContent = '\u2713';
+                setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+              }}
+              title="Copy mermaid code"
+            >Copy</button>
+          </>
         )}
         {mode === 'preview' && !readOnly && (
           <span className="mermaid-live-hint">Click any label to edit</span>
