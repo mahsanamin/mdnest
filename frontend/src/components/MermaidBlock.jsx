@@ -232,12 +232,23 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
     setMode('preview');
   };
 
-  // Zoom uses CSS transform for smooth scaling
+  // Smart sizing: small diagrams use natural width, large ones fill container
+  // Zoom applies via transform on top of the base size
+  const isSmall = naturalWidth && naturalWidth < 400;
   const svgContainerStyle = {
-    transform: `scale(${zoom / 100})`,
     transformOrigin: 'top center',
-    width: '100%',
   };
+  if (isSmall) {
+    // Small diagram: use natural width, centered, zoom scales from there
+    svgContainerStyle.width = `${naturalWidth}px`;
+    svgContainerStyle.maxWidth = '100%';
+    svgContainerStyle.margin = '0 auto';
+    if (zoom !== 100) svgContainerStyle.transform = `scale(${zoom / 100})`;
+  } else {
+    // Large diagram: fill container, zoom scales from there
+    svgContainerStyle.width = '100%';
+    if (zoom !== 100) svgContainerStyle.transform = `scale(${zoom / 100})`;
+  }
 
   return (
     <div className="mermaid-live-block" contentEditable={false}>
