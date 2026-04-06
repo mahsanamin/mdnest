@@ -4,6 +4,20 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v3.1.0 — Mermaid Zoom & Live Toolbar
+
+### New Features
+- **Mermaid zoom controls** — `−` / `+` / `Fit` buttons in the mermaid toolbar. Zoom 20%–300% via CSS transform. Small diagrams render at natural size, large diagrams fill container width.
+- **Rich text formatting toolbar** — Live mode now has a full toolbar: Bold, Italic, Strikethrough, Code, H1/H2/H3, Bullet/Numbered list, Blockquote, HR, Link, Code block, Table, +Row/+Col/-Row/-Col.
+- **Copy mermaid code** — Copy button in mermaid toolbar copies the source code to clipboard.
+
+### Fixes
+- **Smart mermaid sizing** — uses SVG viewBox dimensions (reliable) instead of width attribute (unreliable). Small diagrams centered at natural size, large diagrams fill container.
+- **Mermaid fullscreen** — was broken because modified SVG (stripped attributes) was passed to viewer. Now stores and passes original unmodified SVG.
+- **Scroll position on view switch** — switching between editor/split/preview modes now preserves scroll position.
+
+---
+
 ## v3.0.0 — Live Rich Editor
 
 ### New Features
