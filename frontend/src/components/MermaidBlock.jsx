@@ -80,11 +80,12 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
         const id = `mmd-live-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
         let { svg } = await mermaid.render(id, source.trim());
         if (!cancelled) {
-          // Extract natural dimensions for smart initial zoom
+          // Extract actual diagram size from viewBox (reliable) or width attr (fallback)
+          // viewBox format: "minX minY width height"
+          const vbMatch = svg.match(/viewBox="[^"]*?(-?[\d.]+)\s+(-?[\d.]+)\s+([\d.]+)\s+([\d.]+)"/);
           const wMatch = svg.match(/width="([\d.]+)/);
-          const hMatch = svg.match(/height="([\d.]+)/);
-          const natW = wMatch ? parseFloat(wMatch[1]) : 500;
-          const natH = hMatch ? parseFloat(hMatch[1]) : 300;
+          // viewBox width (3rd value) is the real diagram width
+          const natW = vbMatch ? parseFloat(vbMatch[3]) : (wMatch ? parseFloat(wMatch[1]) : 500);
           setNaturalWidth(natW);
 
           // Keep unmodified SVG for fullscreen viewer
