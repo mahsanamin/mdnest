@@ -771,9 +771,17 @@ function App() {
               // Split/preview always uses basic
               setEditorMode('basic');
             }
+            // Restore scroll position after view mode switch
+            if (selectedNs && currentPath) {
+              restoreScrollPosition(selectedNs, currentPath);
+            }
           }}
           editorMode={editorMode}
-          onEditorModeChange={(mode) => { setEditorMode(mode); localStorage.setItem('mdnest_editor_mode', mode); }}
+          onEditorModeChange={(mode) => {
+            setEditorMode(mode);
+            localStorage.setItem('mdnest_editor_mode', mode);
+            if (selectedNs && currentPath) restoreScrollPosition(selectedNs, currentPath);
+          }}
           onRefresh={handleRefresh}
         />
         {appConfig?.liveCollab && presenceUsers.length > 1 && (
