@@ -764,6 +764,7 @@ function App() {
         onNewFolder={canWrite('') ? () => doCreateFolder(null) : null}
         onRefreshTree={handleRefresh}
         isAdmin={isAdmin}
+        serverVersion={appConfig?.version}
         width={sidebarWidth}
         onResize={setSidebarWidth}
       />

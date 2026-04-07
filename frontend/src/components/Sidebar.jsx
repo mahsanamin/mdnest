@@ -56,6 +56,7 @@ function Sidebar({
   isAdmin,
   width,
   onResize,
+  serverVersion,
 }) {
   const [syncing, setSyncing] = useState(false);
   const [syncInfo, setSyncInfo] = useState(null); // {isGitRepo, hasRemote, lastCommit, ...}
@@ -297,6 +298,10 @@ function Sidebar({
         {(userInfo || onLogout) && (
           <UserFooter userInfo={userInfo} onLogout={onLogout} onAdminPanel={onAdminPanel} />
         )}
+        <div className="sidebar-server-info">
+          <span>{window.location.host}</span>
+          {serverVersion && <span>v{serverVersion}</span>}
+        </div>
         {onResize && (
           <div
             className="sidebar-resize-handle"
