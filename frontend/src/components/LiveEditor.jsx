@@ -15,12 +15,24 @@ import { htmlToMarkdown, hasRichContent } from '../html-to-md.js';
 import MermaidBlock from './MermaidBlock.jsx';
 import MermaidViewer from './MermaidViewer.jsx';
 import {
+  toggleStrongCommand,
+  toggleEmphasisCommand,
+  toggleInlineCodeCommand,
+  wrapInHeadingCommand,
+  wrapInBulletListCommand,
+  wrapInOrderedListCommand,
+  wrapInBlockquoteCommand,
+  insertHrCommand,
+  createCodeBlockCommand,
+  toggleLinkCommand,
+} from '@milkdown/preset-commonmark';
+import {
   insertTableCommand,
   addRowBeforeCommand,
   addRowAfterCommand,
   addColBeforeCommand,
   addColAfterCommand,
-  deleteSelectedCellsCommand,
+  toggleStrikethroughCommand,
 } from '@milkdown/preset-gfm';
 
 // Plugin: auto-convert empty block nodes (heading, blockquote) to paragraph on backspace
@@ -127,6 +139,10 @@ function MilkdownEditor({ content, onChange, readOnly, onEditorReady }) {
   const lastLocalContent = useRef(content);
   const editorRef = useRef(null);
   const isUpdatingRef = useRef(false);
+  // Keep onChange in a ref so the markdownUpdated listener (created once in useEditor)
+  // always calls the LATEST onChange, even after file switches recreate handleContentChange
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
   const { get } = useEditor((root) => {
     return Editor.make()
@@ -146,7 +162,7 @@ function MilkdownEditor({ content, onChange, readOnly, onEditorReady }) {
           if (isUpdatingRef.current) return;
           if (markdown !== prevMarkdown) {
             lastLocalContent.current = markdown;
-            if (onChange) onChange(markdown);
+            if (onChangeRef.current) onChangeRef.current(markdown);
           }
         });
       })
@@ -183,12 +199,11 @@ function MilkdownEditor({ content, onChange, readOnly, onEditorReady }) {
   return <Milkdown />;
 }
 
-function TableToolbar({ editor }) {
+function LiveToolbar({ editor }) {
   if (!editor) return null;
   const cmd = (command, payload) => {
     try { editor.action(callCommand(command.key, payload)); } catch (e) {}
   };
-  // Direct ProseMirror command via editor view
   const proseCmd = (pmCommand) => {
     try {
       editor.action((ctx) => {
@@ -198,19 +213,41 @@ function TableToolbar({ editor }) {
     } catch (e) {}
   };
   return (
-    <div className="table-toolbar">
-      <button onClick={() => cmd(insertTableCommand, { row: 3, col: 3 })} title="Insert table">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
-      </button>
-      <span className="table-toolbar-sep" />
-      <button onClick={() => cmd(addRowBeforeCommand)} title="Add row above">&#8593; Row</button>
-      <button onClick={() => cmd(addRowAfterCommand)} title="Add row below">&#8595; Row</button>
-      <button onClick={() => cmd(addColBeforeCommand)} title="Add column left">&#8592; Col</button>
-      <button onClick={() => cmd(addColAfterCommand)} title="Add column right">&#8594; Col</button>
-      <span className="table-toolbar-sep" />
-      <button className="danger" onClick={() => proseCmd(deleteRow)} title="Delete current row">Del Row</button>
-      <button className="danger" onClick={() => proseCmd(deleteColumn)} title="Delete current column">Del Col</button>
-      <button className="danger" onClick={() => proseCmd(deleteTable)} title="Delete entire table">Del Table</button>
+    <div className="live-toolbar">
+      <div className="live-toolbar-group">
+        <button onMouseDown={(e) => { e.preventDefault(); cmd(toggleStrongCommand); }} title="Bold"><b>B</b></button>
+        <button onMouseDown={(e) => { e.preventDefault(); cmd(toggleEmphasisCommand); }} title="Italic"><i>I</i></button>
+        <button onMouseDown={(e) => { e.preventDefault(); cmd(toggleStrikethroughCommand); }} title="Strikethrough"><s>S</s></button>
+        <button onMouseDown={(e) => { e.preventDefault(); cmd(toggleInlineCodeCommand); }} title="Inline code">`</button>
+      </div>
+      <span className="live-toolbar-sep" />
+      <div className="live-toolbar-group">
+        <button onMouseDown={(e) => { e.preventDefault(); cmd(wrapInHeadingCommand, 1); }} title="Heading 1">H1</button>
+        <button onMouseDown={(e) => { e.preventDefault(); cmd(wrapInHeadingCommand, 2); }} title="Heading 2">H2</button>
+        <button onMouseDown={(e) => { e.preventDefault(); cmd(wrapInHeadingCommand, 3); }} title="Heading 3">H3</button>
+      </div>
+      <span className="live-toolbar-sep" />
+      <div className="live-toolbar-group">
+        <button onMouseDown={(e) => { e.preventDefault(); cmd(wrapInBulletListCommand); }} title="Bullet list">&#8226;</button>
+        <button onMouseDown={(e) => { e.preventDefault(); cmd(wrapInOrderedListCommand); }} title="Numbered list">1.</button>
+        <button onMouseDown={(e) => { e.preventDefault(); cmd(wrapInBlockquoteCommand); }} title="Blockquote">&gt;</button>
+        <button onMouseDown={(e) => { e.preventDefault(); cmd(insertHrCommand); }} title="Horizontal rule">―</button>
+      </div>
+      <span className="live-toolbar-sep" />
+      <div className="live-toolbar-group">
+        <button onMouseDown={(e) => { e.preventDefault(); cmd(toggleLinkCommand); }} title="Link">&#128279;</button>
+        <button onMouseDown={(e) => { e.preventDefault(); cmd(createCodeBlockCommand); }} title="Code block">{ }</button>
+        <button onMouseDown={(e) => { e.preventDefault(); cmd(insertTableCommand, { row: 3, col: 3 }); }} title="Insert table">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+        </button>
+      </div>
+      <span className="live-toolbar-sep" />
+      <div className="live-toolbar-group live-toolbar-table">
+        <button onMouseDown={(e) => { e.preventDefault(); cmd(addRowAfterCommand); }} title="Add row">+Row</button>
+        <button onMouseDown={(e) => { e.preventDefault(); cmd(addColAfterCommand); }} title="Add column">+Col</button>
+        <button className="danger" onMouseDown={(e) => { e.preventDefault(); proseCmd(deleteRow); }} title="Delete row">-Row</button>
+        <button className="danger" onMouseDown={(e) => { e.preventDefault(); proseCmd(deleteColumn); }} title="Delete column">-Col</button>
+      </div>
     </div>
   );
 }
@@ -280,7 +317,7 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly }) {
   return (
     <div className="live-editor-pane">
       {readOnly && <div className="editor-readonly-bar">Read-only</div>}
-      {!readOnly && <TableToolbar editor={editor} />}
+      {!readOnly && <LiveToolbar editor={editor} />}
       <div className="live-editor-wrapper" ref={wrapperRef}>
         <MilkdownProvider>
           <MilkdownEditor

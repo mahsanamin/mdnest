@@ -175,6 +175,49 @@ func (h *Hub) BroadcastFileChanged(ns, path string, byUserID int, byUsername str
 	})
 }
 
+// BroadcastTreeChanged notifies all connected clients on a namespace that the file tree changed.
+// Used when files are created/deleted/moved via API or CLI.
+func (h *Hub) BroadcastTreeChanged(ns string) {
+	msg := OutgoingMessage{
+		Type: "tree-changed",
+	}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return
+	}
+
+	h.mu.RLock()
+	prefix := ns + ":"
+	for key, conns := range h.notes {
+		if len(key) >= len(prefix) && key[:len(prefix)] == prefix {
+			for _, c := range conns {
+				c.Send(data)
+			}
+		}
+	}
+	h.mu.RUnlock()
+}
+
+// BroadcastAccessChanged notifies ALL connected clients that permissions changed.
+// Used when users are invited, grants created/modified/deleted.
+func (h *Hub) BroadcastAccessChanged() {
+	msg := OutgoingMessage{
+		Type: "access-changed",
+	}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return
+	}
+
+	h.mu.RLock()
+	for _, conns := range h.notes {
+		for _, c := range conns {
+			c.Send(data)
+		}
+	}
+	h.mu.RUnlock()
+}
+
 func (h *Hub) broadcastPresence(key string) {
 	h.mu.RLock()
 	conns := h.notes[key]

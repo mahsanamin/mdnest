@@ -187,6 +187,16 @@
   flex-shrink: 0;
 }
 
+.sidebar-server-info {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 12px;
+  font-size: 0.6rem;
+  color: #45475a;
+  border-top: 1px solid #232334;
+  flex-shrink: 0;
+}
+
 .sidebar-resize-handle {
   position: absolute;
   top: 0;
@@ -842,6 +852,16 @@ pre:hover .code-copy-btn {
   background: #313244;
 }
 
+@media print {
+  .heading-copy,
+  .heading-toggle,
+  .code-copy-btn,
+  .mermaid-expand-btn,
+  .preview-toolbar {
+    display: none !important;
+  }
+}
+
 /* Preview fold buttons */
 .preview-fold-btn {
   background: transparent;
@@ -1341,6 +1361,13 @@ pre:hover .code-copy-btn {
   color: #cdd6f4;
 }
 
+.token-hint {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72rem;
+  color: #6c7086;
+  letter-spacing: 0.5px;
+}
+
 .token-date {
   font-size: 0.7rem;
   color: #585b70;
@@ -1374,6 +1401,31 @@ pre:hover .code-copy-btn {
 
 .settings-steps {
   margin: 0.5rem 0;
+}
+
+.settings-info-box {
+  background: #11111b;
+  border: 1px solid #313244;
+  border-radius: 6px;
+  padding: 8px 14px;
+  margin: 0.6rem 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-info-label {
+  color: #6c7086;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+}
+
+.settings-info-box code {
+  color: #89b4fa;
+  font-size: 0.85rem;
+  word-break: break-all;
 }
 
 .settings-step {
@@ -1983,7 +2035,8 @@ pre:hover .code-copy-btn {
 }
 
 /* Table toolbar (Live editor) */
-.table-toolbar {
+/* Live editor toolbar */
+.live-toolbar {
   display: flex;
   align-items: center;
   gap: 2px;
@@ -1991,26 +2044,51 @@ pre:hover .code-copy-btn {
   background: #181825;
   border-bottom: 1px solid #313244;
   flex-shrink: 0;
+  flex-wrap: wrap;
 }
 
-.table-toolbar button {
+.live-toolbar-group {
+  display: flex;
+  gap: 1px;
+}
+
+.live-toolbar button {
   background: transparent;
   border: 1px solid transparent;
-  color: #6c7086;
-  padding: 3px 8px;
+  color: #a6adc8;
+  padding: 3px 7px;
   border-radius: 4px;
-  font-size: 0.72rem;
+  font-size: 0.78rem;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  justify-content: center;
+  min-width: 26px;
+  height: 26px;
   transition: all 0.1s;
 }
 
-.table-toolbar button:hover {
+.live-toolbar button:hover {
   background: #313244;
   color: #cdd6f4;
   border-color: #45475a;
+}
+
+.live-toolbar button.danger:hover {
+  color: #f38ba8;
+  background: #f38ba822;
+}
+
+.live-toolbar-sep {
+  width: 1px;
+  height: 18px;
+  background: #313244;
+  margin: 0 4px;
+}
+
+.live-toolbar-table button {
+  font-size: 0.68rem;
+  color: #6c7086;
 }
 
 .table-toolbar button.danger:hover {
@@ -2081,7 +2159,6 @@ pre:hover .code-copy-btn {
 }
 
 .mermaid-live-preview svg {
-  max-width: 100%;
   height: auto;
 }
 
@@ -2143,6 +2220,20 @@ pre:hover .code-copy-btn {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+}
+
+.mermaid-toolbar-sep {
+  width: 1px;
+  height: 14px;
+  background: #45475a;
+  margin: 0 4px;
+}
+
+.mermaid-zoom-label {
+  color: #6c7086;
+  font-size: 0.68rem;
+  min-width: 32px;
+  text-align: center;
 }
 
 .mermaid-live-hint {
@@ -2538,6 +2629,40 @@ pre:hover .code-copy-btn {
   25% { width: 0.4em; }
   50% { width: 0.8em; }
   75% { width: 1.2em; }
+}
+
+/* ===== Update banner ===== */
+.update-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: #89b4fa22;
+  border-bottom: 1px solid #89b4fa44;
+  color: #89b4fa;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
+.update-banner strong {
+  color: #cdd6f4;
+}
+
+.update-banner button {
+  background: #89b4fa;
+  color: #1e1e2e;
+  border: none;
+  padding: 4px 14px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+  margin-left: auto;
+}
+
+.update-banner button:hover {
+  opacity: 0.9;
 }
 
 /* ===== Conflict banner ===== */

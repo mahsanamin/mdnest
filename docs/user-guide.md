@@ -82,9 +82,10 @@ mdnest has two editing modes, switchable from the toolbar when in editor-only vi
 - Type `## Heading` and it renders as a heading
 - Tables are click-to-edit -- click any cell, tab between cells
 - Checkboxes are clickable
-- Mermaid diagrams render in-place with Source/Preview/Fullscreen buttons
+- Mermaid diagrams render in-place with Source/Preview/Fullscreen/Copy/Zoom buttons
 - Click any mermaid node label to edit it directly on the diagram
 - Paste from Google Docs or Confluence -- auto-converts to markdown
+- Full formatting toolbar: Bold, Italic, Strikethrough, Code, Headings, Lists, Blockquote, Link, Code block, Table with row/column controls
 
 Live Mode is only available in editor-only view (the pen icon). Split view always uses Basic Mode with a separate preview pane.
 

@@ -59,7 +59,7 @@ function App() {
   const [content, setContent] = useState('');
   const [sidebarWidth, setSidebarWidth] = useState(260);
   const [savedContent, setSavedContent] = useState('');
-  const [saveTimer, setSaveTimer] = useState(null);
+  const saveTimerRef = useRef(null);
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [mobileView, setMobileView] = useState(() => localStorage.getItem('mdnest_mobile_view') || 'editor');
   const [viewMode, setViewMode] = useState(() => localStorage.getItem('mdnest_view_mode') || 'split');
@@ -100,10 +100,12 @@ function App() {
   const [remoteCursors, setRemoteCursors] = useState({});
   const [typingUsers, setTypingUsers] = useState({}); // {userId: username}
   const [conflictBanner, setConflictBanner] = useState(null); // {username, etag}
+  const [updateAvailable, setUpdateAvailable] = useState(null); // {current, latest}
   const etagRef = useRef(null);
   const collabRef = useRef(null);
   const typingTimers = useRef({}); // {userId: timeoutId}
   const localTypingUntil = useRef(0); // timestamp — local user is "typing" until this time
+  const pollPathRef = useRef(null); // tracks current file for stale poll detection
 
   // Determine write access for current namespace/path
   const canWrite = useCallback((path) => {
@@ -126,6 +128,24 @@ function App() {
   // Fetch app config on mount (before auth)
   useEffect(() => {
     fetchConfig().then(setAppConfig).catch(() => setAppConfig({ authMode: 'single', version: '1.0' }));
+  }, []);
+
+  // Version check: poll /api/config every 60s, compare server version vs build version
+  useEffect(() => {
+    const buildVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : null;
+    if (!buildVersion) return;
+    const check = async () => {
+      try {
+        const cfg = await fetchConfig();
+        if (cfg.version && cfg.version !== buildVersion) {
+          setUpdateAvailable({ current: buildVersion, latest: cfg.version });
+        }
+      } catch {}
+    };
+    const interval = setInterval(check, 60000);
+    // Also check once after 5s (catches updates during active sessions)
+    const initial = setTimeout(check, 5000);
+    return () => { clearInterval(interval); clearTimeout(initial); };
   }, []);
 
   // Initialize collab client
@@ -156,19 +176,38 @@ function App() {
             setTypingUsers((prev) => { const n = { ...prev }; delete n[msg.userId]; return n; });
           }, 2000);
           // Apply remote content ONLY if local user is idle (no unsaved changes and not typing)
-          if (Date.now() < localTypingUntil.current || contentRef.current !== savedContentRef.current) {
+          if (Date.now() < localTypingUntil.current || (contentRef.current || '').trim() !== (savedContentRef.current || '').trim()) {
             // Local user has edits — don't overwrite. They'll sync via save + file-changed.
             break;
           }
           setContent(msg.content);
           setSavedContent(msg.content);
           break;
+        case 'tree-changed':
+          // File tree changed (create/delete/move via any client) — refresh tree
+          if (selectedNs) refreshTree(selectedNs);
+          break;
+        case 'access-changed':
+          // Permissions changed (user invited, grant created/modified/deleted)
+          // Refresh namespace list and user info
+          loadNamespaces();
+          if (isMulti) fetchMe().then(setUserInfo).catch(() => {});
+          if (selectedNs) refreshTree(selectedNs);
+          break;
         case 'file-changed':
-          // Another user saved — update our saved baseline
+          // Another user saved — update etag and reload if no local edits
           etagRef.current = msg.etag;
-          if (contentRef.current === savedContentRef.current) {
-            // No local unsaved changes — silently accept
+          if ((contentRef.current || '').trim() === (savedContentRef.current || '').trim()) {
+            // No local unsaved changes — silently reload the file
             setConflictBanner(null);
+            // Fetch fresh content
+            if (selectedNs && currentPath) {
+              getNote(selectedNs, currentPath).then(({ text, etag }) => {
+                setContent(text);
+                setSavedContent(text);
+                etagRef.current = etag;
+              }).catch(() => {});
+            }
           } else {
             setConflictBanner({ username: msg.username, etag: msg.etag });
           }
@@ -274,24 +313,47 @@ function App() {
     }
   }, [authenticated, selectedNs, initialized]);
 
-  // Auto-refresh: poll the current note every 30s
+  // Auto-refresh: poll the current note every 10s to pick up external changes (CLI, git, etc.)
   useEffect(() => {
     if (!authenticated || !selectedNs || !currentPath) return;
+    // Track which file this poll is for — used to discard stale async responses
+    const myPollKey = `${selectedNs}/${currentPath}`;
+    pollPathRef.current = myPollKey;
+
     const interval = setInterval(async () => {
       try {
         const { text: remote, etag } = await getNote(selectedNs, currentPath);
-        if (contentRef.current === savedContentRef.current && remote !== savedContentRef.current) {
+
+        // STALE CHECK: if user switched files while getNote was in flight, discard
+        if (pollPathRef.current !== myPollKey) return;
+
+        if (remote === savedContentRef.current) return; // no change
+
+        if (contentRef.current === savedContentRef.current) {
+          // No local unsaved changes — silently update
           setContent(remote);
           setSavedContent(remote);
           etagRef.current = etag;
-          refreshTree(selectedNs);
+        } else {
+          // User has unsaved changes AND file changed externally — show conflict
+          etagRef.current = etag;
+          setConflictBanner({ username: 'an external source' });
         }
       } catch (e) {
         // Transient errors — skip silently
       }
-    }, 30000);
+    }, 10000);
     return () => clearInterval(interval);
-  }, [authenticated, selectedNs, currentPath, refreshTree]);
+  }, [authenticated, selectedNs, currentPath]);
+
+  // Auto-refresh tree every 15s to pick up new/deleted files from CLI, git, etc.
+  useEffect(() => {
+    if (!authenticated || !selectedNs) return;
+    const interval = setInterval(() => {
+      refreshTree(selectedNs);
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [authenticated, selectedNs, refreshTree]);
 
   // Update URL hash
   useEffect(() => {
@@ -391,6 +453,7 @@ function App() {
   }, [getScrollables]);
 
   const openNoteDirect = useCallback(async (ns, path) => {
+    if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
     try {
       const { text, etag } = await getNote(ns, path);
       setCurrentPath(path);
@@ -414,6 +477,8 @@ function App() {
 
   const openNote = useCallback(async (path) => {
     if (!selectedNs) return;
+    // Clear any pending save timer from the previous file
+    if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
     try {
       const { text, etag } = await getNote(selectedNs, path);
       setCurrentPath(path);
@@ -436,13 +501,13 @@ function App() {
     setContent(newContent);
     setConflictBanner(null);
 
-    // Mark local user as typing for 1.5s — blocks remote content from overwriting
+    // Mark local user as typing — blocks remote content from overwriting
     localTypingUntil.current = Date.now() + 1500;
 
     // Broadcast content to other users via WebSocket (live typing)
     if (collabRef.current) collabRef.current.sendContent(newContent);
 
-    if (saveTimer) clearTimeout(saveTimer);
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     const timer = setTimeout(async () => {
       if (currentPath && selectedNs) {
         try {
@@ -460,8 +525,8 @@ function App() {
         }
       }
     }, 800);
-    setSaveTimer(timer);
-  }, [currentPath, selectedNs, saveTimer]);
+    saveTimerRef.current = timer;
+  }, [currentPath, selectedNs]);
 
   // Send cursor position to collab
   const handleCursorChange = useCallback((line, ch) => {
@@ -586,7 +651,7 @@ function App() {
         break;
       }
       case 'manage-access': {
-        if (isAdmin && isMulti && selectedNs) {
+        if (selectedNs) {
           const folderPath = target?.path ? '/' + target.path : '/';
           setShareTarget({ namespace: selectedNs, path: folderPath });
         }
@@ -749,6 +814,7 @@ function App() {
         onNewFolder={canWrite('') ? () => doCreateFolder(null) : null}
         onRefreshTree={handleRefresh}
         isAdmin={isAdmin}
+        serverVersion={appConfig?.version}
         width={sidebarWidth}
         onResize={setSidebarWidth}
       />
@@ -771,13 +837,27 @@ function App() {
               // Split/preview always uses basic
               setEditorMode('basic');
             }
+            // Restore scroll position after view mode switch
+            if (selectedNs && currentPath) {
+              restoreScrollPosition(selectedNs, currentPath);
+            }
           }}
           editorMode={editorMode}
-          onEditorModeChange={(mode) => { setEditorMode(mode); localStorage.setItem('mdnest_editor_mode', mode); }}
+          onEditorModeChange={(mode) => {
+            setEditorMode(mode);
+            localStorage.setItem('mdnest_editor_mode', mode);
+            if (selectedNs && currentPath) restoreScrollPosition(selectedNs, currentPath);
+          }}
           onRefresh={handleRefresh}
         />
         {appConfig?.liveCollab && presenceUsers.length > 1 && (
           <PresenceBar users={presenceUsers} currentUserId={userInfo?.id} typingUsers={typingUsers} />
+        )}
+        {updateAvailable && (
+          <div className="update-banner">
+            New version available: <strong>v{updateAvailable.current}</strong> → <strong>v{updateAvailable.latest}</strong>
+            <button onClick={() => window.location.reload(true)}>Refresh Now</button>
+          </div>
         )}
         {conflictBanner && (
           <div className="conflict-banner">

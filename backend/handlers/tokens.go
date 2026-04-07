@@ -17,11 +17,12 @@ import (
 
 // APIToken represents a long-lived API token for MCP/API access.
 type APIToken struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Token     string `json:"token,omitempty"` // only included on creation
-	TokenHash string `json:"token_hash"`      // stored, not exposed after creation
-	CreatedAt string `json:"created_at"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Token       string `json:"token,omitempty"`  // only included on creation
+	TokenHash   string `json:"token_hash"`       // stored, not exposed after creation
+	TokenSuffix string `json:"token_suffix"`     // last 4 chars for identification
+	CreatedAt   string `json:"created_at"`
 	UserID    int    `json:"user_id,omitempty"`   // owner (multi mode only, 0 = legacy/single)
 	Username  string `json:"username,omitempty"`  // denormalized for resolution
 	UserRole  string `json:"user_role,omitempty"` // denormalized for resolution
@@ -149,9 +150,10 @@ func (h *TokenHandler) listTokens(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		safe = append(safe, map[string]string{
-			"id":         t.ID,
-			"name":       t.Name,
-			"created_at": t.CreatedAt,
+			"id":           t.ID,
+			"name":         t.Name,
+			"token_suffix": t.TokenSuffix,
+			"created_at":   t.CreatedAt,
 		})
 	}
 
@@ -177,11 +179,17 @@ func (h *TokenHandler) createToken(w http.ResponseWriter, r *http.Request) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
+	suffix := token
+	if len(suffix) > 4 {
+		suffix = suffix[len(suffix)-4:]
+	}
+
 	entry := APIToken{
-		ID:        generateID(),
-		Name:      req.Name,
-		TokenHash: hashToken(token),
-		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		ID:          generateID(),
+		Name:        req.Name,
+		TokenHash:   hashToken(token),
+		TokenSuffix: suffix,
+		CreatedAt:   time.Now().UTC().Format(time.RFC3339),
 	}
 
 	// In multi mode, associate token with the creating user

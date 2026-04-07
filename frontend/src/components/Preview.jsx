@@ -296,6 +296,7 @@ function Preview({ content, currentPath, ns, onCheckboxToggle }) {
   .mermaid-container svg [stroke="#7f849c"] { stroke: #6b7280 !important; }
   .mermaid-container svg text { fill: #1a1a1a !important; }
   .mermaid-container svg .nodeLabel { color: #1a1a1a !important; }
+  .heading-copy, .heading-toggle, .code-copy-btn, .mermaid-expand-btn { display: none !important; }
   @media print { body { padding: 0; } }
 </style>
 </head>
