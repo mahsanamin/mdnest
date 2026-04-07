@@ -198,6 +198,26 @@ func (h *Hub) BroadcastTreeChanged(ns string) {
 	h.mu.RUnlock()
 }
 
+// BroadcastAccessChanged notifies ALL connected clients that permissions changed.
+// Used when users are invited, grants created/modified/deleted.
+func (h *Hub) BroadcastAccessChanged() {
+	msg := OutgoingMessage{
+		Type: "access-changed",
+	}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return
+	}
+
+	h.mu.RLock()
+	for _, conns := range h.notes {
+		for _, c := range conns {
+			c.Send(data)
+		}
+	}
+	h.mu.RUnlock()
+}
+
 func (h *Hub) broadcastPresence(key string) {
 	h.mu.RLock()
 	conns := h.notes[key]

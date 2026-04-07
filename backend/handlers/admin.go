@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/mdnest/mdnest/backend/collab"
 	"github.com/mdnest/mdnest/backend/middleware"
 	"github.com/mdnest/mdnest/backend/store"
 )
@@ -16,11 +17,18 @@ import (
 type AdminHandler struct {
 	userStore  store.UserStore
 	grantStore store.GrantStore
+	hub        *collab.Hub // nil if collab disabled
 }
 
 // NewAdminHandler creates a new admin handler.
-func NewAdminHandler(userStore store.UserStore, grantStore store.GrantStore) *AdminHandler {
-	return &AdminHandler{userStore: userStore, grantStore: grantStore}
+func NewAdminHandler(userStore store.UserStore, grantStore store.GrantStore, hub *collab.Hub) *AdminHandler {
+	return &AdminHandler{userStore: userStore, grantStore: grantStore, hub: hub}
+}
+
+func (h *AdminHandler) notifyAccessChanged() {
+	if h.hub != nil {
+		h.hub.BroadcastAccessChanged()
+	}
 }
 
 type inviteRequest struct {
@@ -116,6 +124,7 @@ func (h *AdminHandler) HandleInvite(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("user invited: %s (%s) role=%s", user.Username, user.Email, user.Role)
+	h.notifyAccessChanged()
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -183,6 +192,7 @@ func (h *AdminHandler) deleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("user deleted: id=%d", id)
+	h.notifyAccessChanged()
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
@@ -331,6 +341,7 @@ func (h *AdminHandler) createGrant(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("grant created: user=%d ns=%s path=%s perm=%s", req.UserID, req.Namespace, req.Path, req.Permission)
+	h.notifyAccessChanged()
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -367,6 +378,7 @@ func (h *AdminHandler) updateGrant(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("grant updated: id=%d permission=%s", id, req.Permission)
+	h.notifyAccessChanged()
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
@@ -455,6 +467,7 @@ func (h *AdminHandler) deleteGrant(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("grant deleted: id=%d", id)
+	h.notifyAccessChanged()
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})

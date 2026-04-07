@@ -167,6 +167,13 @@ function App() {
           // File tree changed (create/delete/move via any client) — refresh tree
           if (selectedNs) refreshTree(selectedNs);
           break;
+        case 'access-changed':
+          // Permissions changed (user invited, grant created/modified/deleted)
+          // Refresh namespace list and user info
+          loadNamespaces();
+          if (isMulti) fetchMe().then(setUserInfo).catch(() => {});
+          if (selectedNs) refreshTree(selectedNs);
+          break;
         case 'file-changed':
           // Another user saved — update etag and reload if no local edits
           etagRef.current = msg.etag;

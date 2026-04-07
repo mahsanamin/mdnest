@@ -175,7 +175,7 @@ func main() {
 
 	// Multi-mode routes (require admin role for /admin/*, authenticated for /me)
 	if multiMode {
-		adminHandler := handlers.NewAdminHandler(userStore, grantStore)
+		adminHandler := handlers.NewAdminHandler(userStore, grantStore, collabHub)
 		meHandler := handlers.NewMeHandler(userStore, grantStore)
 
 		mux.Handle("/api/admin/invite", authMiddleware.Wrap(middleware.RequireAdmin(http.HandlerFunc(adminHandler.HandleInvite))))
