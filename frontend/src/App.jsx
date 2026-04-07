@@ -156,7 +156,7 @@ function App() {
             setTypingUsers((prev) => { const n = { ...prev }; delete n[msg.userId]; return n; });
           }, 2000);
           // Apply remote content ONLY if local user is idle (no unsaved changes and not typing)
-          if (Date.now() < localTypingUntil.current || contentRef.current !== savedContentRef.current) {
+          if (Date.now() < localTypingUntil.current || (contentRef.current || '').trim() !== (savedContentRef.current || '').trim()) {
             // Local user has edits — don't overwrite. They'll sync via save + file-changed.
             break;
           }
@@ -177,7 +177,7 @@ function App() {
         case 'file-changed':
           // Another user saved — update etag and reload if no local edits
           etagRef.current = msg.etag;
-          if (contentRef.current === savedContentRef.current) {
+          if ((contentRef.current || '').trim() === (savedContentRef.current || '').trim()) {
             // No local unsaved changes — silently reload the file
             setConflictBanner(null);
             // Fetch fresh content
@@ -293,22 +293,26 @@ function App() {
     }
   }, [authenticated, selectedNs, initialized]);
 
-  // Auto-refresh: poll the current note every 30s
   // Auto-refresh: poll the current note every 10s to pick up external changes (CLI, git, etc.)
   useEffect(() => {
     if (!authenticated || !selectedNs || !currentPath) return;
     const interval = setInterval(async () => {
       try {
         const { text: remote, etag } = await getNote(selectedNs, currentPath);
-        if (remote === savedContentRef.current) return; // no change
+        // Normalize comparison — editors may add/remove trailing whitespace
+        const remoteNorm = (remote || '').trim();
+        const savedNorm = (savedContentRef.current || '').trim();
+        const contentNorm = (contentRef.current || '').trim();
 
-        if (contentRef.current === savedContentRef.current) {
+        if (remoteNorm === savedNorm) return; // no real change
+
+        if (contentNorm === savedNorm) {
           // No local unsaved changes — silently update
           setContent(remote);
           setSavedContent(remote);
           etagRef.current = etag;
         } else {
-          // User has unsaved changes AND file changed externally — show conflict
+          // User has unsaved changes AND file genuinely changed externally
           etagRef.current = etag;
           setConflictBanner({ username: 'an external source' });
         }
