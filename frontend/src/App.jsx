@@ -294,27 +294,27 @@ function App() {
   }, [authenticated, selectedNs, initialized]);
 
   // Auto-refresh: poll the current note every 10s to pick up external changes (CLI, git, etc.)
+  // Uses ETag comparison only — content comparison is unreliable because editors re-serialize markdown.
   useEffect(() => {
     if (!authenticated || !selectedNs || !currentPath) return;
     const interval = setInterval(async () => {
       try {
         const { text: remote, etag } = await getNote(selectedNs, currentPath);
-        // Normalize comparison — editors may add/remove trailing whitespace
-        const remoteNorm = (remote || '').trim();
-        const savedNorm = (savedContentRef.current || '').trim();
-        const contentNorm = (contentRef.current || '').trim();
 
-        if (remoteNorm === savedNorm) return; // no real change
+        // No change if ETag matches what we last saw
+        if (etag === etagRef.current) return;
 
-        if (contentNorm === savedNorm) {
-          // No local unsaved changes — silently update
+        // ETag changed — file was modified externally
+        // Check if user has real unsaved edits (typed something since last save)
+        if (localTypingUntil.current > Date.now() - 5000) {
+          // User was recently typing — show conflict
+          setConflictBanner({ username: 'an external source' });
+          etagRef.current = etag;
+        } else {
+          // User is idle — silently update
           setContent(remote);
           setSavedContent(remote);
           etagRef.current = etag;
-        } else {
-          // User has unsaved changes AND file genuinely changed externally
-          etagRef.current = etag;
-          setConflictBanner({ username: 'an external source' });
         }
       } catch (e) {
         // Transient errors — skip silently
@@ -472,10 +472,19 @@ function App() {
   }, [selectedNs]);
 
   const handleContentChange = useCallback((newContent) => {
+    const prevContent = contentRef.current;
     setContent(newContent);
 
-    // Skip if content hasn't meaningfully changed (e.g. Milkdown re-serialization on load)
-    if ((newContent || '').trim() === (savedContentRef.current || '').trim()) {
+    // If the new content is identical to what we already have, skip entirely.
+    // This catches Milkdown re-serialization firing onChange without actual edits.
+    if (newContent === prevContent) return;
+
+    // If user hasn't typed recently (no keyboard/cursor activity), this is likely
+    // a programmatic change (Milkdown init, external content update). Skip auto-save.
+    // localTypingUntil is set by handleCursorChange/handleSelectionChange when user
+    // actually interacts with the editor.
+    if (Date.now() > localTypingUntil.current + 3000) {
+      // No recent interaction — don't save, don't broadcast
       return;
     }
 
