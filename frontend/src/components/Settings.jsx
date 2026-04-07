@@ -1,6 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import { changePassword, listTokens, createToken, revokeToken } from '../api.js';
 
+// Derive server URL from current browser location
+function getServerUrl() {
+  return window.location.origin;
+}
+
 function Settings({ onClose }) {
   const [tab, setTab] = useState('tokens');
 
@@ -13,11 +18,13 @@ function Settings({ onClose }) {
         </div>
         <div className="settings-tabs">
           <button className={tab === 'tokens' ? 'active' : ''} onClick={() => setTab('tokens')}>API Tokens</button>
+          <button className={tab === 'cli' ? 'active' : ''} onClick={() => setTab('cli')}>CLI</button>
           <button className={tab === 'mcp' ? 'active' : ''} onClick={() => setTab('mcp')}>MCP</button>
           <button className={tab === 'api' ? 'active' : ''} onClick={() => setTab('api')}>API</button>
           <button className={tab === 'password' ? 'active' : ''} onClick={() => setTab('password')}>Credentials</button>
         </div>
         {tab === 'tokens' && <TokensTab />}
+        {tab === 'cli' && <CliTab />}
         {tab === 'mcp' && <McpTab />}
         {tab === 'api' && <ApiTab />}
         {tab === 'password' && <PasswordTab />}
@@ -70,7 +77,14 @@ function TokensTab() {
 
   const handleCopy = () => {
     if (newToken) {
-      navigator.clipboard.writeText(newToken);
+      const ta = document.createElement('textarea');
+      ta.value = newToken;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
@@ -79,7 +93,7 @@ function TokensTab() {
   return (
     <div className="settings-content">
       <p className="settings-description">
-        Create tokens for MCP servers and API clients. Tokens don't expire -- revoke them when no longer needed.
+        Create tokens for CLI, MCP servers, and API clients. Tokens don't expire -- revoke them when no longer needed.
       </p>
 
       {newToken && (
@@ -97,7 +111,7 @@ function TokensTab() {
         <input
           type="text"
           className="modal-input"
-          placeholder="Token name (e.g. Claude MCP, backup script)"
+          placeholder="Token name (e.g. my-laptop, Claude MCP)"
           value={name}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') handleCreate(); }}
@@ -108,7 +122,7 @@ function TokensTab() {
       {loading ? (
         <p style={{ color: '#6c7086', fontSize: '0.85rem' }}>Loading...</p>
       ) : tokens.length === 0 ? (
-        <p style={{ color: '#6c7086', fontSize: '0.85rem' }}>No tokens yet. Create one to connect MCP or API clients.</p>
+        <p style={{ color: '#6c7086', fontSize: '0.85rem' }}>No tokens yet. Create one to connect CLI, MCP, or API clients.</p>
       ) : (
         <div className="token-list">
           {tokens.map((t) => (
@@ -126,13 +140,82 @@ function TokensTab() {
   );
 }
 
+function CliTab() {
+  const serverUrl = getServerUrl();
+  return (
+    <div className="settings-content">
+      <h4 className="settings-section-title">mdnest CLI</h4>
+      <p className="settings-description">
+        Access your notes from any terminal. Read, write, search, and organize notes without leaving the command line.
+      </p>
+
+      <div className="settings-info-box">
+        <div className="settings-info-label">Your server</div>
+        <code>{serverUrl}</code>
+      </div>
+
+      <div className="settings-steps">
+        <div className="settings-step">
+          <span className="step-num">1</span>
+          <span>Install the CLI (one command):</span>
+        </div>
+      </div>
+      <div className="settings-code">
+        <pre>curl -fsSL https://raw.githubusercontent.com/mahsanamin/mdnest/main/install-cli.sh | bash</pre>
+      </div>
+
+      <div className="settings-steps">
+        <div className="settings-step">
+          <span className="step-num">2</span>
+          <span>Create an API token in the <strong>API Tokens</strong> tab, then login:</span>
+        </div>
+      </div>
+      <div className="settings-code">
+        <pre>{`mdnest login ${serverUrl} <your-token>`}</pre>
+      </div>
+
+      <div className="settings-steps">
+        <div className="settings-step">
+          <span className="step-num">3</span>
+          <span>Start using it:</span>
+        </div>
+      </div>
+      <div className="settings-code">
+        <pre>{`mdnest list                              # list namespaces
+mdnest list <namespace>                  # list files
+mdnest read <namespace>/path/to/note.md  # read a note
+mdnest search <namespace> "query"        # search
+mdnest write <namespace>/path.md "text"  # write
+echo "text" | mdnest append <namespace>/log.md -  # pipe`}</pre>
+      </div>
+
+      <h4 className="settings-section-title">Multi-Server</h4>
+      <p className="settings-description">
+        Manage multiple mdnest servers with @alias paths:
+      </p>
+      <div className="settings-code">
+        <pre>{`mdnest login @work ${serverUrl} <token>
+mdnest login @personal https://home:3236 <token>
+mdnest read @work/<namespace>/path.md
+mdnest servers                           # list all servers`}</pre>
+      </div>
+    </div>
+  );
+}
+
 function McpTab() {
+  const serverUrl = getServerUrl();
   return (
     <div className="settings-content">
       <h4 className="settings-section-title">MCP Server</h4>
       <p className="settings-description">
         The MCP server lets AI assistants (Claude, Cursor, etc.) read, write, search, and organize your notes directly.
       </p>
+
+      <div className="settings-info-box">
+        <div className="settings-info-label">Your server</div>
+        <code>{serverUrl}</code>
+      </div>
 
       <div className="settings-steps">
         <div className="settings-step">
@@ -161,7 +244,7 @@ function McpTab() {
       "command": "node",
       "args": ["/path/to/mdnest/mcp-server/index.js"],
       "env": {
-        "MDNEST_URL": "http://localhost:8286",
+        "MDNEST_URL": "${serverUrl}",
         "MDNEST_TOKEN": "<your token>"
       }
     }
@@ -186,6 +269,7 @@ function McpTab() {
 }
 
 function ApiTab() {
+  const serverUrl = getServerUrl();
   return (
     <div className="settings-content">
       <h4 className="settings-section-title">REST API</h4>
@@ -193,11 +277,16 @@ function ApiTab() {
         All endpoints accept a Bearer token in the Authorization header. Create a token in the API Tokens tab.
       </p>
 
+      <div className="settings-info-box">
+        <div className="settings-info-label">API base URL</div>
+        <code>{serverUrl}/api</code>
+      </div>
+
       <h4 className="settings-section-title">Authentication</h4>
       <div className="settings-code">
         <pre>{`# Use your API token
 curl -H "Authorization: Bearer mdnest_your_token_here" \\
-  http://localhost:8286/api/namespaces`}</pre>
+  ${serverUrl}/api/namespaces`}</pre>
       </div>
 
       <h4 className="settings-section-title">Examples</h4>
@@ -205,44 +294,33 @@ curl -H "Authorization: Bearer mdnest_your_token_here" \\
       <div className="settings-code">
         <div className="code-label">List namespaces</div>
         <pre>{`curl -H "Authorization: Bearer $TOKEN" \\
-  http://localhost:8286/api/namespaces`}</pre>
+  ${serverUrl}/api/namespaces`}</pre>
       </div>
 
       <div className="settings-code">
         <div className="code-label">Get file tree</div>
         <pre>{`curl -H "Authorization: Bearer $TOKEN" \\
-  "http://localhost:8286/api/tree?ns=my_notes"`}</pre>
+  "${serverUrl}/api/tree?ns=my_notes"`}</pre>
       </div>
 
       <div className="settings-code">
         <div className="code-label">Read a note</div>
         <pre>{`curl -H "Authorization: Bearer $TOKEN" \\
-  "http://localhost:8286/api/note?ns=my_notes&path=ideas/project.md"`}</pre>
+  "${serverUrl}/api/note?ns=my_notes&path=ideas/project.md"`}</pre>
       </div>
 
       <div className="settings-code">
         <div className="code-label">Create a note</div>
         <pre>{`curl -X POST -H "Authorization: Bearer $TOKEN" \\
   -d "# New Note" \\
-  "http://localhost:8286/api/note?ns=my_notes&path=new-note.md"`}</pre>
-      </div>
-
-      <div className="settings-code">
-        <div className="code-label">Update a note</div>
-        <pre>{`curl -X PUT -H "Authorization: Bearer $TOKEN" \\
-  -d "# Updated content" \\
-  "http://localhost:8286/api/note?ns=my_notes&path=new-note.md"`}</pre>
+  "${serverUrl}/api/note?ns=my_notes&path=new-note.md"`}</pre>
       </div>
 
       <div className="settings-code">
         <div className="code-label">Search</div>
         <pre>{`curl -H "Authorization: Bearer $TOKEN" \\
-  "http://localhost:8286/api/search?ns=my_notes&q=kubernetes"`}</pre>
+  "${serverUrl}/api/search?ns=my_notes&q=kubernetes"`}</pre>
       </div>
-
-      <p className="settings-description" style={{ marginTop: '1rem' }}>
-        See <a href="docs/api.md" target="_blank" style={{ color: '#89b4fa' }}>docs/api.md</a> for the full API reference.
-      </p>
     </div>
   );
 }
