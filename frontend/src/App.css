@@ -1341,6 +1341,13 @@ pre:hover .code-copy-btn {
   color: #cdd6f4;
 }
 
+.token-hint {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72rem;
+  color: #6c7086;
+  letter-spacing: 0.5px;
+}
+
 .token-date {
   font-size: 0.7rem;
   color: #585b70;

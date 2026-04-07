@@ -99,9 +99,9 @@ function TokensTab() {
       {newToken && (
         <div className="token-created">
           <div className="token-created-label">Token created -- copy it now, it won't be shown again:</div>
-          <div className="token-created-value">
+          <div className="token-created-value" onClick={handleCopy} style={{ cursor: 'pointer' }} title="Click to copy">
             <code>{newToken}</code>
-            <button onClick={handleCopy}>{copied ? 'Copied' : 'Copy'}</button>
+            <button onClick={(e) => { e.stopPropagation(); handleCopy(); }}>{copied ? 'Copied!' : 'Copy'}</button>
           </div>
           <button className="modal-btn" onClick={() => setNewToken(null)} style={{ marginTop: '0.5rem' }}>Dismiss</button>
         </div>
@@ -129,6 +129,9 @@ function TokensTab() {
             <div key={t.id} className="token-item">
               <div className="token-info">
                 <span className="token-name">{t.name}</span>
+                <span className="token-hint">
+                  mdnest_•••••{t.token_suffix || '????'}
+                </span>
                 <span className="token-date">Created {new Date(t.created_at).toLocaleDateString()}</span>
               </div>
               <button className="token-revoke" onClick={() => handleRevoke(t.id, t.name)}>Revoke</button>
