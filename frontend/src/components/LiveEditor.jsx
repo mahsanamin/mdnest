@@ -138,7 +138,11 @@ const mermaidNodeView = $view(codeBlockSchema.node, (ctx) => {
 function MilkdownEditor({ content, onChange, readOnly, onEditorReady }) {
   const lastLocalContent = useRef(content);
   const editorRef = useRef(null);
-  const isUpdatingRef = useRef(false);
+  // Suppress onChange until user actually interacts. Starts true to block
+  // Milkdown's initial re-serialization. Set true again on replaceAll (file switch).
+  // Only cleared by keydown/mousedown — so MutationObserver re-serialization
+  // (which fires async, long after replaceAll) is always blocked.
+  const suppressSave = useRef(true);
   // Keep onChange in a ref so the markdownUpdated listener (created once in useEditor)
   // always calls the LATEST onChange, even after file switches recreate handleContentChange
   const onChangeRef = useRef(onChange);
@@ -159,9 +163,9 @@ function MilkdownEditor({ content, onChange, readOnly, onEditorReady }) {
 
         const listenerManager = ctx.get(listenerCtx);
         listenerManager.markdownUpdated((ctx, markdown, prevMarkdown) => {
-          if (isUpdatingRef.current) return;
+          lastLocalContent.current = markdown;
+          if (suppressSave.current) return;
           if (markdown !== prevMarkdown) {
-            lastLocalContent.current = markdown;
             if (onChangeRef.current) onChangeRef.current(markdown);
           }
         });
@@ -174,6 +178,21 @@ function MilkdownEditor({ content, onChange, readOnly, onEditorReady }) {
       .use(mermaidNodeView)
       .use(clearEmptyBlockPlugin);
   }, [readOnly]);
+
+  // Unsuppress on real user interaction — keydown/mousedown in the editor area.
+  // Uses capture phase and targets .live-editor-wrapper so toolbar clicks count too.
+  useEffect(() => {
+    const unsuppress = (e) => {
+      const wrapper = document.querySelector('.live-editor-wrapper');
+      if (wrapper && wrapper.contains(e.target)) suppressSave.current = false;
+    };
+    document.addEventListener('keydown', unsuppress, true);
+    document.addEventListener('mousedown', unsuppress, true);
+    return () => {
+      document.removeEventListener('keydown', unsuppress, true);
+      document.removeEventListener('mousedown', unsuppress, true);
+    };
+  }, []);
 
   useEffect(() => {
     if (get) {
@@ -188,12 +207,12 @@ function MilkdownEditor({ content, onChange, readOnly, onEditorReady }) {
   useEffect(() => {
     if (!editorRef.current) return;
     if (content === lastLocalContent.current) return;
-    isUpdatingRef.current = true;
+    suppressSave.current = true; // Block until next user interaction
     try {
       editorRef.current.action(replaceAll(content || ''));
       lastLocalContent.current = content;
     } catch (e) { /* editor not ready */ }
-    isUpdatingRef.current = false;
+    // DO NOT clear suppressSave here — MutationObserver fires async later
   }, [content]);
 
   return <Milkdown />;
