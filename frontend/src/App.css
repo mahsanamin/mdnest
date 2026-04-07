@@ -852,6 +852,16 @@ pre:hover .code-copy-btn {
   background: #313244;
 }
 
+@media print {
+  .heading-copy,
+  .heading-toggle,
+  .code-copy-btn,
+  .mermaid-expand-btn,
+  .preview-toolbar {
+    display: none !important;
+  }
+}
+
 /* Preview fold buttons */
 .preview-fold-btn {
   background: transparent;
