@@ -26,7 +26,7 @@ func (h *ConfigHandler) HandleConfig(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]interface{}{
 		"authMode":   h.authMode,
 		"liveCollab": h.liveCollab,
-		"version":    "3.1.0",
+		"version":    "3.1.1",
 	}
 	if h.serverAlias != "" {
 		resp["serverAlias"] = h.serverAlias

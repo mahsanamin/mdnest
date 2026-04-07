@@ -4,6 +4,18 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v3.1.1 — Critical Save Fix
+
+### Fixes
+- **Live Editor stale onChange (critical)** — switching files in Live mode caused 409 conflicts and lost changes. Milkdown's `markdownUpdated` listener captured `onChange` once at editor creation, so saves went to the wrong file path after switching. Fixed with `onChangeRef` that always points to the latest callback.
+- **MutationObserver phantom saves** — Milkdown's async MutationObserver fired `markdownUpdated` after `replaceAll`, triggering phantom saves that changed file ETags. Now suppressed until real user interaction (keydown/mousedown).
+- **Auto-refresh poll race condition** — in-flight `getNote` responses from the previous file could overwrite the new file's state after switching. Now discards stale responses.
+- **Save timer stale closure** — `saveTimer` was React state (stale in closures), changed to ref. Cleared on file switch.
+- **Version update banner** — active sessions show a blue banner when server is updated, with "Refresh Now" button.
+- **Browser cache on deploy** — nginx serves `index.html` with `no-cache` so hard refresh picks up new bundles.
+
+---
+
 ## v3.1.0 — Mermaid Zoom & Live Toolbar
 
 ### New Features
