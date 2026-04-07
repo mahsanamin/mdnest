@@ -139,6 +139,10 @@ function MilkdownEditor({ content, onChange, readOnly, onEditorReady }) {
   const lastLocalContent = useRef(content);
   const editorRef = useRef(null);
   const isUpdatingRef = useRef(false);
+  // Keep onChange in a ref so the markdownUpdated listener (created once in useEditor)
+  // always calls the LATEST onChange, even after file switches recreate handleContentChange
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
   const { get } = useEditor((root) => {
     return Editor.make()
@@ -158,7 +162,7 @@ function MilkdownEditor({ content, onChange, readOnly, onEditorReady }) {
           if (isUpdatingRef.current) return;
           if (markdown !== prevMarkdown) {
             lastLocalContent.current = markdown;
-            if (onChange) onChange(markdown);
+            if (onChangeRef.current) onChangeRef.current(markdown);
           }
         });
       })

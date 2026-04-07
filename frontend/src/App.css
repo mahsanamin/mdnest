@@ -2631,6 +2631,40 @@ pre:hover .code-copy-btn {
   75% { width: 1.2em; }
 }
 
+/* ===== Update banner ===== */
+.update-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: #89b4fa22;
+  border-bottom: 1px solid #89b4fa44;
+  color: #89b4fa;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
+.update-banner strong {
+  color: #cdd6f4;
+}
+
+.update-banner button {
+  background: #89b4fa;
+  color: #1e1e2e;
+  border: none;
+  padding: 4px 14px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+  margin-left: auto;
+}
+
+.update-banner button:hover {
+  opacity: 0.9;
+}
+
 /* ===== Conflict banner ===== */
 .conflict-banner {
   display: flex;

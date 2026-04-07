@@ -59,7 +59,7 @@ function App() {
   const [content, setContent] = useState('');
   const [sidebarWidth, setSidebarWidth] = useState(260);
   const [savedContent, setSavedContent] = useState('');
-  const [saveTimer, setSaveTimer] = useState(null);
+  const saveTimerRef = useRef(null);
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [mobileView, setMobileView] = useState(() => localStorage.getItem('mdnest_mobile_view') || 'editor');
   const [viewMode, setViewMode] = useState(() => localStorage.getItem('mdnest_view_mode') || 'split');
@@ -100,10 +100,12 @@ function App() {
   const [remoteCursors, setRemoteCursors] = useState({});
   const [typingUsers, setTypingUsers] = useState({}); // {userId: username}
   const [conflictBanner, setConflictBanner] = useState(null); // {username, etag}
+  const [updateAvailable, setUpdateAvailable] = useState(null); // {current, latest}
   const etagRef = useRef(null);
   const collabRef = useRef(null);
   const typingTimers = useRef({}); // {userId: timeoutId}
   const localTypingUntil = useRef(0); // timestamp — local user is "typing" until this time
+  const pollPathRef = useRef(null); // tracks current file for stale poll detection
 
   // Determine write access for current namespace/path
   const canWrite = useCallback((path) => {
@@ -126,6 +128,24 @@ function App() {
   // Fetch app config on mount (before auth)
   useEffect(() => {
     fetchConfig().then(setAppConfig).catch(() => setAppConfig({ authMode: 'single', version: '1.0' }));
+  }, []);
+
+  // Version check: poll /api/config every 60s, compare server version vs build version
+  useEffect(() => {
+    const buildVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : null;
+    if (!buildVersion) return;
+    const check = async () => {
+      try {
+        const cfg = await fetchConfig();
+        if (cfg.version && cfg.version !== buildVersion) {
+          setUpdateAvailable({ current: buildVersion, latest: cfg.version });
+        }
+      } catch {}
+    };
+    const interval = setInterval(check, 60000);
+    // Also check once after 5s (catches updates during active sessions)
+    const initial = setTimeout(check, 5000);
+    return () => { clearInterval(interval); clearTimeout(initial); };
   }, []);
 
   // Initialize collab client
@@ -294,27 +314,30 @@ function App() {
   }, [authenticated, selectedNs, initialized]);
 
   // Auto-refresh: poll the current note every 10s to pick up external changes (CLI, git, etc.)
-  // Uses ETag comparison only — content comparison is unreliable because editors re-serialize markdown.
   useEffect(() => {
     if (!authenticated || !selectedNs || !currentPath) return;
+    // Track which file this poll is for — used to discard stale async responses
+    const myPollKey = `${selectedNs}/${currentPath}`;
+    pollPathRef.current = myPollKey;
+
     const interval = setInterval(async () => {
       try {
         const { text: remote, etag } = await getNote(selectedNs, currentPath);
 
-        // No change if ETag matches what we last saw
-        if (etag === etagRef.current) return;
+        // STALE CHECK: if user switched files while getNote was in flight, discard
+        if (pollPathRef.current !== myPollKey) return;
 
-        // ETag changed — file was modified externally
-        // Check if user has real unsaved edits (typed something since last save)
-        if (localTypingUntil.current > Date.now() - 5000) {
-          // User was recently typing — show conflict
-          setConflictBanner({ username: 'an external source' });
-          etagRef.current = etag;
-        } else {
-          // User is idle — silently update
+        if (remote === savedContentRef.current) return; // no change
+
+        if (contentRef.current === savedContentRef.current) {
+          // No local unsaved changes — silently update
           setContent(remote);
           setSavedContent(remote);
           etagRef.current = etag;
+        } else {
+          // User has unsaved changes AND file changed externally — show conflict
+          etagRef.current = etag;
+          setConflictBanner({ username: 'an external source' });
         }
       } catch (e) {
         // Transient errors — skip silently
@@ -430,6 +453,7 @@ function App() {
   }, [getScrollables]);
 
   const openNoteDirect = useCallback(async (ns, path) => {
+    if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
     try {
       const { text, etag } = await getNote(ns, path);
       setCurrentPath(path);
@@ -453,6 +477,8 @@ function App() {
 
   const openNote = useCallback(async (path) => {
     if (!selectedNs) return;
+    // Clear any pending save timer from the previous file
+    if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
     try {
       const { text, etag } = await getNote(selectedNs, path);
       setCurrentPath(path);
@@ -472,31 +498,16 @@ function App() {
   }, [selectedNs]);
 
   const handleContentChange = useCallback((newContent) => {
-    const prevContent = contentRef.current;
     setContent(newContent);
-
-    // If the new content is identical to what we already have, skip entirely.
-    // This catches Milkdown re-serialization firing onChange without actual edits.
-    if (newContent === prevContent) return;
-
-    // If user hasn't typed recently (no keyboard/cursor activity), this is likely
-    // a programmatic change (Milkdown init, external content update). Skip auto-save.
-    // localTypingUntil is set by handleCursorChange/handleSelectionChange when user
-    // actually interacts with the editor.
-    if (Date.now() > localTypingUntil.current + 3000) {
-      // No recent interaction — don't save, don't broadcast
-      return;
-    }
-
     setConflictBanner(null);
 
-    // Mark local user as typing for 1.5s — blocks remote content from overwriting
+    // Mark local user as typing — blocks remote content from overwriting
     localTypingUntil.current = Date.now() + 1500;
 
     // Broadcast content to other users via WebSocket (live typing)
     if (collabRef.current) collabRef.current.sendContent(newContent);
 
-    if (saveTimer) clearTimeout(saveTimer);
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     const timer = setTimeout(async () => {
       if (currentPath && selectedNs) {
         try {
@@ -514,8 +525,8 @@ function App() {
         }
       }
     }, 800);
-    setSaveTimer(timer);
-  }, [currentPath, selectedNs, saveTimer]);
+    saveTimerRef.current = timer;
+  }, [currentPath, selectedNs]);
 
   // Send cursor position to collab
   const handleCursorChange = useCallback((line, ch) => {
@@ -841,6 +852,12 @@ function App() {
         />
         {appConfig?.liveCollab && presenceUsers.length > 1 && (
           <PresenceBar users={presenceUsers} currentUserId={userInfo?.id} typingUsers={typingUsers} />
+        )}
+        {updateAvailable && (
+          <div className="update-banner">
+            New version available: <strong>v{updateAvailable.current}</strong> → <strong>v{updateAvailable.latest}</strong>
+            <button onClick={() => window.location.reload(true)}>Refresh Now</button>
+          </div>
         )}
         {conflictBanner && (
           <div className="conflict-banner">
