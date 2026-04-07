@@ -126,12 +126,16 @@ func main() {
 	searchHandler := handlers.NewSearchHandler(absNotesDir)
 	tokenHandler := handlers.NewTokenHandler(secretsDir)
 
-	// Wrap mutating handlers to invalidate search cache
+	// Wrap mutating handlers to invalidate search cache + notify tree change
 	invalidateSearch := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			next.ServeHTTP(w, r)
 			if ns := r.URL.Query().Get("ns"); ns != "" {
 				searchHandler.InvalidateCache(ns)
+				// Broadcast tree-changed to all WebSocket clients on this namespace
+				if collabHub != nil {
+					collabHub.BroadcastTreeChanged(ns)
+				}
 			}
 		})
 	}
