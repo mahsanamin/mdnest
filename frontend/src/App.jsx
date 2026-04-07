@@ -614,7 +614,7 @@ function App() {
         break;
       }
       case 'manage-access': {
-        if (isAdmin && isMulti && selectedNs) {
+        if (selectedNs) {
           const folderPath = target?.path ? '/' + target.path : '/';
           setShareTarget({ namespace: selectedNs, path: folderPath });
         }
