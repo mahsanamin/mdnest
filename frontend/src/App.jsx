@@ -473,6 +473,12 @@ function App() {
 
   const handleContentChange = useCallback((newContent) => {
     setContent(newContent);
+
+    // Skip if content hasn't meaningfully changed (e.g. Milkdown re-serialization on load)
+    if ((newContent || '').trim() === (savedContentRef.current || '').trim()) {
+      return;
+    }
+
     setConflictBanner(null);
 
     // Mark local user as typing for 1.5s — blocks remote content from overwriting
