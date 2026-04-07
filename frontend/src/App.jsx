@@ -164,11 +164,19 @@ function App() {
           setSavedContent(msg.content);
           break;
         case 'file-changed':
-          // Another user saved — update our saved baseline
+          // Another user saved — update etag and reload if no local edits
           etagRef.current = msg.etag;
           if (contentRef.current === savedContentRef.current) {
-            // No local unsaved changes — silently accept
+            // No local unsaved changes — silently reload the file
             setConflictBanner(null);
+            // Fetch fresh content
+            if (selectedNs && currentPath) {
+              getNote(selectedNs, currentPath).then(({ text, etag }) => {
+                setContent(text);
+                setSavedContent(text);
+                etagRef.current = etag;
+              }).catch(() => {});
+            }
           } else {
             setConflictBanner({ username: msg.username, etag: msg.etag });
           }
@@ -275,23 +283,30 @@ function App() {
   }, [authenticated, selectedNs, initialized]);
 
   // Auto-refresh: poll the current note every 30s
+  // Auto-refresh: poll the current note every 10s to pick up external changes (CLI, git, etc.)
   useEffect(() => {
     if (!authenticated || !selectedNs || !currentPath) return;
     const interval = setInterval(async () => {
       try {
         const { text: remote, etag } = await getNote(selectedNs, currentPath);
-        if (contentRef.current === savedContentRef.current && remote !== savedContentRef.current) {
+        if (remote === savedContentRef.current) return; // no change
+
+        if (contentRef.current === savedContentRef.current) {
+          // No local unsaved changes — silently update
           setContent(remote);
           setSavedContent(remote);
           etagRef.current = etag;
-          refreshTree(selectedNs);
+        } else {
+          // User has unsaved changes AND file changed externally — show conflict
+          etagRef.current = etag;
+          setConflictBanner({ username: 'an external source' });
         }
       } catch (e) {
         // Transient errors — skip silently
       }
-    }, 30000);
+    }, 10000);
     return () => clearInterval(interval);
-  }, [authenticated, selectedNs, currentPath, refreshTree]);
+  }, [authenticated, selectedNs, currentPath]);
 
   // Update URL hash
   useEffect(() => {
