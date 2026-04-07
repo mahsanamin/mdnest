@@ -231,6 +231,14 @@ Opening a deep link takes you directly to that note (after login if your session
 
 ---
 
+## Version Updates
+
+When the server is updated to a new version, active browser sessions will see a blue banner at the top:
+
+> **New version available: v3.1.0 → v3.2.0** [Refresh Now]
+
+Click "Refresh Now" to reload and pick up the latest frontend. The check runs every 60 seconds.
+
 ## Keyboard Shortcuts
 
 | Key | Action |

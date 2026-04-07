@@ -88,6 +88,7 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 - Two editor modes: Basic (textarea, Editor.jsx) and Live (Milkdown, LiveEditor.jsx)
 - Live editor: lazy-loaded via React.lazy(), only downloads when user switches to Live mode
 - Milkdown: ProseMirror-based, markdown-native. Uses commonmark + GFM presets
+- Milkdown useEditor creates listeners ONCE — callbacks captured in closure are stale. Use refs (e.g. `onChangeRef`) for any prop that changes over time.
 - Mermaid in Live mode: ProseMirror $view node view renders MermaidBlock.jsx in-place
 - Both editors share the same onChange/content props — App.jsx doesn't know which is active
 
