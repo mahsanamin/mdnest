@@ -356,6 +356,18 @@ mdnest CLI v${MDNEST_CLI_VERSION}
 
   Privately-hosted markdown notes. Read, write, search from any terminal.
 
+QUICK REFERENCE (for AI agents / LLMs)
+  Path format:  @alias/namespace/path/to/file.md
+  New file:     mdnest create @alias/namespace/path.md "content"
+  Edit file:    mdnest write  @alias/namespace/path.md "content"  (file MUST exist)
+  Read file:    mdnest read   @alias/namespace/path.md
+  Append:       mdnest append @alias/namespace/path.md "text"
+  Search:       mdnest search @alias/namespace "query"
+  List:         mdnest list   @alias/namespace
+
+  IMPORTANT: "create" = new file. "write" = overwrite EXISTING file (returns 404 if not found).
+  Use "mdnest servers -v" to discover available @aliases and namespaces.
+
 USAGE
   mdnest <command> [@alias/namespace/path]
 
@@ -380,14 +392,14 @@ SERVER MANAGEMENT
   Login creates the alias. There is no rename — logout + login with new name.
 
 NOTE OPERATIONS
-  list     [@alias/namespace]     List namespaces, or files in a namespace
+  create   <path> [content]       Create a NEW file (fails if already exists)
+  write    <path> <content|->     Overwrite an EXISTING file (fails 404 if not found)
   read     <path>                 Read a note (outputs markdown to stdout)
-  write    <path> <content|->     Overwrite a note (- reads from stdin)
-  create   <path> [content]       Create a new note
-  append   <path> <content|->     Append text to end of note
-  prepend  <path> <content|->     Prepend text to start of note
+  append   <path> <content|->     Append text to end (creates file if not found)
+  prepend  <path> <content|->     Prepend text to start (creates file if not found)
   delete   <path>                 Delete a note or folder
   move     <path> <new-path>      Move/rename within the same namespace
+  list     [@alias/namespace]     List namespaces, or files in a namespace
   search   <ns-path> "query"      Search note contents
 
 OTHER
@@ -398,16 +410,19 @@ OTHER
 EXAMPLES
   # Setup
   mdnest login @work https://work.company.com:3236 mdnest_abc123
-  mdnest login @home https://home.local:3236 mdnest_def456
+  mdnest servers -v                                          # discover aliases + namespaces
 
-  # Browse
-  mdnest servers -v                                          # list all servers + namespaces
-  mdnest list @work/engineering                              # list files
+  # Create a new file (use "create", NOT "write")
+  mdnest create @work/engineering/notes/meeting.md "# Meeting Notes"
 
-  # Read & write
+  # Update an existing file (use "write")
+  mdnest write @work/engineering/notes/meeting.md "# Updated content"
+
+  # Read
   mdnest read @work/engineering/Architecture/system-overview.md
-  mdnest write @work/engineering/log.md "## Meeting notes"
-  echo "entry" | mdnest append @work/engineering/log.md -
+
+  # Append (creates the file if it doesn't exist)
+  echo "- action item" | mdnest append @work/engineering/log.md -
 
   # Search
   mdnest search @work/engineering "database schema"

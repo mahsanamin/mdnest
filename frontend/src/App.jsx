@@ -308,12 +308,12 @@ function App() {
     return () => clearInterval(interval);
   }, [authenticated, selectedNs, currentPath]);
 
-  // Auto-refresh tree every 30s to pick up new/deleted files from CLI, git, etc.
+  // Auto-refresh tree every 15s to pick up new/deleted files from CLI, git, etc.
   useEffect(() => {
     if (!authenticated || !selectedNs) return;
     const interval = setInterval(() => {
       refreshTree(selectedNs);
-    }, 30000);
+    }, 15000);
     return () => clearInterval(interval);
   }, [authenticated, selectedNs, refreshTree]);
 
