@@ -27,19 +27,16 @@ load_server() {
 }
 
 load_default() {
-  # Try default alias
   if [ -f "$DEFAULT_FILE" ]; then
     local def
     def=$(cat "$DEFAULT_FILE")
     if load_server "$def"; then return 0; fi
   fi
-  # Try first server
   if [ -d "$SERVERS_DIR" ]; then
     local first
     first=$(ls "$SERVERS_DIR" 2>/dev/null | head -1)
     if [ -n "$first" ] && load_server "$first"; then return 0; fi
   fi
-  # Try legacy config
   if [ -f "$LEGACY_CONFIG" ]; then
     MDNEST_URL=$(grep '^url=' "$LEGACY_CONFIG" 2>/dev/null | cut -d= -f2-)
     MDNEST_TOKEN=$(grep '^token=' "$LEGACY_CONFIG" 2>/dev/null | cut -d= -f2-)
@@ -68,7 +65,6 @@ parse_path() {
   PARSED_NS=""
   PARSED_PATH=""
 
-  # Extract @alias if present
   if [[ "$input" == @* ]]; then
     local rest="${input#@}"
     PARSED_ALIAS="${rest%%/*}"
@@ -80,7 +76,6 @@ parse_path() {
     input="$rest"
   fi
 
-  # Load the right server
   if [ -n "$PARSED_ALIAS" ]; then
     if ! load_server "$PARSED_ALIAS"; then
       echo "Unknown server: @${PARSED_ALIAS}. Run 'mdnest servers' to see configured servers." >&2
@@ -93,7 +88,6 @@ parse_path() {
     fi
   fi
 
-  # Split remaining into namespace/path
   if [ -n "$input" ]; then
     PARSED_NS="${input%%/*}"
     if [[ "$input" == */* ]]; then
@@ -129,7 +123,6 @@ urlencode() {
 cmd_login() {
   local alias="" url="" tok=""
 
-  # Parse: login @alias url token  OR  login url token (legacy)
   if [[ "$1" == @* ]]; then
     alias="${1#@}"
     url="$2"
@@ -143,8 +136,11 @@ cmd_login() {
   if [ -z "$url" ] || [ -z "$tok" ]; then
     cat <<'USAGE'
 Usage:
-  mdnest login @alias <url> <token>    Multi-server
+  mdnest login @alias <url> <token>    Multi-server (you choose the alias name)
   mdnest login <url> <token>           Single server (alias = "default")
+
+The @alias is any name you choose (e.g. @work, @home, @staging).
+Login creates or overwrites the alias. To rename: logout + login with new name.
 
 Examples:
   mdnest login @work https://work-server:3236 mdnest_abc123
@@ -162,12 +158,10 @@ token=${tok}
 EOF
   chmod 600 "$(get_server_file "$alias")"
 
-  # Set as default if it's the first server or alias is "default"
   if [ "$alias" = "default" ] || [ ! -f "$DEFAULT_FILE" ]; then
     echo "$alias" > "$DEFAULT_FILE"
   fi
 
-  # Migrate legacy config if it exists and we're in single-server mode
   if [ -f "$LEGACY_CONFIG" ] && [ "$alias" = "default" ]; then
     rm -f "$LEGACY_CONFIG"
   fi
@@ -190,13 +184,11 @@ EOF
 cmd_logout() {
   local alias="${1#@}"
   if [ -z "$alias" ]; then
-    # Logout all
     rm -rf "$SERVERS_DIR" "$DEFAULT_FILE" "$LEGACY_CONFIG"
     echo "Logged out from all servers"
   else
     rm -f "$(get_server_file "$alias")"
     echo "Logged out from @${alias}"
-    # If default was removed, pick another
     if [ -f "$DEFAULT_FILE" ] && [ "$(cat "$DEFAULT_FILE")" = "$alias" ]; then
       rm -f "$DEFAULT_FILE"
       local next
@@ -210,23 +202,42 @@ cmd_logout() {
 }
 
 cmd_servers() {
+  local verbose=false
+  [ "$1" = "-v" ] || [ "$1" = "--verbose" ] && verbose=true
+
   local def=""
   [ -f "$DEFAULT_FILE" ] && def=$(cat "$DEFAULT_FILE")
 
   if [ -d "$SERVERS_DIR" ] && [ -n "$(ls "$SERVERS_DIR" 2>/dev/null)" ]; then
+    printf "  %-12s  %-35s  %-12s  %s\n" "ALIAS" "URL" "VERSION" "DEFAULT"
+    printf "  %-12s  %-35s  %-12s  %s\n" "────────────" "───────────────────────────────────" "────────────" "───────"
     for f in "$SERVERS_DIR"/*; do
       local name=$(basename "$f")
       local url=$(grep '^url=' "$f" 2>/dev/null | cut -d= -f2-)
       local marker=""
-      [ "$name" = "$def" ] && marker=" (default)"
+      [ "$name" = "$def" ] && marker="*"
       local ver=""
       ver=$(curl -s --max-time 3 "${url}/api/config" 2>/dev/null | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
-      [ -n "$ver" ] && ver=" v${ver}" || ver=" (unreachable)"
-      echo "  @${name}  ${url}${ver}${marker}"
+      [ -n "$ver" ] || ver="unreachable"
+      printf "  %-12s  %-35s  %-12s  %s\n" "@${name}" "$url" "$ver" "$marker"
+
+      # Verbose: list namespaces for this server
+      if $verbose && [ "$ver" != "unreachable" ]; then
+        local tok=$(grep '^token=' "$f" 2>/dev/null | cut -d= -f2-)
+        local ns_json
+        ns_json=$(curl -s --max-time 3 -H "Authorization: Bearer $tok" "${url}/api/namespaces" 2>/dev/null)
+        if [ -n "$ns_json" ] && [ "$ns_json" != "[]" ]; then
+          local namespaces
+          namespaces=$(echo "$ns_json" | python3 -c "import sys,json; [print('    → @${name}/' + ns) for ns in json.load(sys.stdin)]" 2>/dev/null) || true
+          if [ -n "$namespaces" ]; then
+            echo "$namespaces"
+          fi
+        fi
+      fi
     done
   elif [ -f "$LEGACY_CONFIG" ]; then
     local url=$(grep '^url=' "$LEGACY_CONFIG" 2>/dev/null | cut -d= -f2-)
-    echo "  @default  ${url} (legacy config)"
+    printf "  %-12s  %-35s  %s\n" "@default" "$url" "(legacy config)"
   else
     echo "No servers configured. Run: mdnest login @alias <url> <token>"
   fi
@@ -235,7 +246,7 @@ cmd_servers() {
 cmd_whoami() {
   echo "mdnest CLI v${MDNEST_CLI_VERSION}"
   echo ""
-  cmd_servers
+  cmd_servers "$@"
 }
 
 cmd_list() {
@@ -251,14 +262,14 @@ cmd_list() {
 cmd_read() {
   parse_path "$1"
   require_server
-  [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] && { echo "Usage: mdnest read @server/namespace/path" >&2; exit 1; }
+  [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] && { echo "Usage: mdnest read @alias/namespace/path.md" >&2; exit 1; }
   api GET "/note?ns=$(urlencode "$PARSED_NS")&path=$(urlencode "$PARSED_PATH")"
 }
 
 cmd_write() {
   parse_path "$1"
   require_server
-  [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] && { echo "Usage: mdnest write @server/namespace/path <content>" >&2; exit 1; }
+  [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] && { echo "Usage: mdnest write @alias/namespace/path.md <content|->" >&2; exit 1; }
   local content="$2"
   [ "$content" = "-" ] && content=$(cat)
   [ -z "$content" ] && content=$(cat)
@@ -268,14 +279,14 @@ cmd_write() {
 cmd_create() {
   parse_path "$1"
   require_server
-  [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] && { echo "Usage: mdnest create @server/namespace/path [content]" >&2; exit 1; }
+  [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] && { echo "Usage: mdnest create @alias/namespace/path.md [content]" >&2; exit 1; }
   api POST "/note?ns=$(urlencode "$PARSED_NS")&path=$(urlencode "$PARSED_PATH")" "${2:-}"
 }
 
 cmd_append() {
   parse_path "$1"
   require_server
-  [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] && { echo "Usage: mdnest append @server/namespace/path <content>" >&2; exit 1; }
+  [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] && { echo "Usage: mdnest append @alias/namespace/path.md <content|->" >&2; exit 1; }
   local content="$2"
   [ "$content" = "-" ] && content=$(cat)
   [ -z "$content" ] && content=$(cat)
@@ -285,7 +296,7 @@ cmd_append() {
 cmd_prepend() {
   parse_path "$1"
   require_server
-  [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] && { echo "Usage: mdnest prepend @server/namespace/path <content>" >&2; exit 1; }
+  [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] && { echo "Usage: mdnest prepend @alias/namespace/path.md <content|->" >&2; exit 1; }
   local content="$2"
   [ "$content" = "-" ] && content=$(cat)
   [ -z "$content" ] && content=$(cat)
@@ -295,7 +306,7 @@ cmd_prepend() {
 cmd_delete() {
   parse_path "$1"
   require_server
-  [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] && { echo "Usage: mdnest delete @server/namespace/path" >&2; exit 1; }
+  [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] && { echo "Usage: mdnest delete @alias/namespace/path.md" >&2; exit 1; }
   api DELETE "/note?ns=$(urlencode "$PARSED_NS")&path=$(urlencode "$PARSED_PATH")"
 }
 
@@ -303,7 +314,7 @@ cmd_move() {
   parse_path "$1"
   require_server
   local to="$2"
-  [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] || [ -z "$to" ] && { echo "Usage: mdnest move @server/namespace/from to-path" >&2; exit 1; }
+  [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] || [ -z "$to" ] && { echo "Usage: mdnest move @alias/namespace/old-path new-path" >&2; exit 1; }
   api POST "/move?ns=$(urlencode "$PARSED_NS")&from=$(urlencode "$PARSED_PATH")&to=$(urlencode "$to")"
 }
 
@@ -311,7 +322,7 @@ cmd_search() {
   parse_path "$1"
   require_server
   local query="$2"
-  [ -z "$PARSED_NS" ] || [ -z "$query" ] && { echo "Usage: mdnest search @server/namespace \"query\"" >&2; exit 1; }
+  [ -z "$PARSED_NS" ] || [ -z "$query" ] && { echo "Usage: mdnest search @alias/namespace \"query\"" >&2; exit 1; }
   api GET "/search?ns=$(urlencode "$PARSED_NS")&q=$(urlencode "$query")"
 }
 
@@ -341,48 +352,69 @@ cmd_note_legacy() {
 
 cmd_help() {
   cat <<HELP
-mdnest CLI v${MDNEST_CLI_VERSION} — notes on your terms
+mdnest CLI v${MDNEST_CLI_VERSION}
 
-Usage: mdnest <command> [@server/namespace/path]
+  Privately-hosted markdown notes. Read, write, search from any terminal.
 
-Path format: @server/namespace/path/to/file.md
-  @server   = server alias (optional if only one server)
-  namespace = workspace name
-  path      = file path within namespace
+USAGE
+  mdnest <command> [@alias/namespace/path]
 
-Commands:
-  login    @alias <url> <token>   Add a server
-  logout   [@alias]               Remove server (or all)
-  servers                         List configured servers
-  whoami                          Show CLI + server versions
+PATH FORMAT
+  @alias/namespace/path/to/file.md
 
-  list     [@server/namespace]    List namespaces or files
-  read     @server/ns/path        Read a note
-  write    @server/ns/path <text> Overwrite a note (use - for stdin)
-  create   @server/ns/path [text] Create a new note
-  append   @server/ns/path <text> Append to a note (use - for stdin)
-  prepend  @server/ns/path <text> Prepend to a note
-  delete   @server/ns/path        Delete a note or folder
-  move     @server/ns/from <to>   Move/rename within namespace
-  search   @server/ns "query"     Search notes
+  @alias     Your chosen name for a server (set during login, e.g. @work, @home)
+  namespace  A workspace on that server (e.g. engineering, notes)
+  path       File path within the namespace
 
-  note     <subcommand> ...       Legacy format (still works)
+  Example: mdnest read @work/engineering/Architecture/system-overview.md
+
+  The @alias is optional if you only have one server configured.
+  Single-server: mdnest read engineering/Architecture/system-overview.md
+
+SERVER MANAGEMENT
+  login    @alias <url> <token>   Add or overwrite a server alias (you choose the name)
+  logout   [@alias]               Remove a server (omit alias to remove all)
+  servers  [-v]                   List servers (add -v to include namespaces)
+  whoami   [-v]                   Show CLI version + servers
+
+  Login creates the alias. There is no rename — logout + login with new name.
+
+NOTE OPERATIONS
+  list     [@alias/namespace]     List namespaces, or files in a namespace
+  read     <path>                 Read a note (outputs markdown to stdout)
+  write    <path> <content|->     Overwrite a note (- reads from stdin)
+  create   <path> [content]       Create a new note
+  append   <path> <content|->     Append text to end of note
+  prepend  <path> <content|->     Prepend text to start of note
+  delete   <path>                 Delete a note or folder
+  move     <path> <new-path>      Move/rename within the same namespace
+  search   <ns-path> "query"      Search note contents
+
+OTHER
   version                         Show CLI version
+  note <subcommand> ...           Legacy command format (still works)
   docs                            Print full CLI reference
 
-Examples:
-  mdnest login @work https://work:3236 mdnest_abc123
-  mdnest login @home https://home:3236 mdnest_def456
-  mdnest list @work
-  mdnest list @work/engineering
-  mdnest read @work/engineering/Architecture/system-overview.md
-  mdnest search @home/notes "meeting"
-  echo "log entry" | mdnest append @work/engineering/log.md -
-  mdnest servers
+EXAMPLES
+  # Setup
+  mdnest login @work https://work.company.com:3236 mdnest_abc123
+  mdnest login @home https://home.local:3236 mdnest_def456
 
-Single-server (backward compatible):
-  mdnest login https://myserver:3236 mdnest_abc123
-  mdnest read engineering/Architecture/system-overview.md
+  # Browse
+  mdnest servers -v                                          # list all servers + namespaces
+  mdnest list @work/engineering                              # list files
+
+  # Read & write
+  mdnest read @work/engineering/Architecture/system-overview.md
+  mdnest write @work/engineering/log.md "## Meeting notes"
+  echo "entry" | mdnest append @work/engineering/log.md -
+
+  # Search
+  mdnest search @work/engineering "database schema"
+
+  # Single-server shorthand (no @alias needed)
+  mdnest list
+  mdnest read engineering/docs/api.md
 HELP
 }
 
@@ -392,8 +424,8 @@ shift 2>/dev/null || true
 case "$CMD" in
   login)    cmd_login "$@" ;;
   logout)   cmd_logout "$@" ;;
-  servers)  cmd_servers ;;
-  whoami)   cmd_whoami ;;
+  servers)  cmd_servers "$@" ;;
+  whoami)   cmd_whoami "$@" ;;
   list)     load_default; cmd_list "$@" ;;
   read)     load_default; cmd_read "$@" ;;
   write)    load_default; cmd_write "$@" ;;
