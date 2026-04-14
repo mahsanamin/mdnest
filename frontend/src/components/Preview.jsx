@@ -5,30 +5,112 @@ import MermaidViewer from './MermaidViewer.jsx';
 
 mermaid.initialize({
   startOnLoad: false,
-  theme: 'dark',
+  theme: 'base',
   themeVariables: {
     darkMode: true,
     background: '#1e1e2e',
-    primaryColor: '#89b4fa',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+
+    // Primary nodes — dark blue fill, light text
+    primaryColor: '#313244',
     primaryTextColor: '#cdd6f4',
     primaryBorderColor: '#74c7ec',
-    secondaryColor: '#a6e3a1',
-    secondaryTextColor: '#1e1e2e',
+
+    // Secondary nodes — muted green fill, dark text for contrast
+    secondaryColor: '#2a4a3a',
+    secondaryTextColor: '#cdd6f4',
     secondaryBorderColor: '#94e2d5',
-    tertiaryColor: '#f5c2e7',
-    tertiaryTextColor: '#1e1e2e',
+
+    // Tertiary nodes — muted purple fill, dark text for contrast
+    tertiaryColor: '#3a2a4a',
+    tertiaryTextColor: '#cdd6f4',
     tertiaryBorderColor: '#cba6f7',
+
+    // Global defaults
     lineColor: '#7f849c',
     textColor: '#cdd6f4',
     mainBkg: '#313244',
     nodeBorder: '#74c7ec',
-    clusterBkg: '#1e1e2e',
+    nodeTextColor: '#cdd6f4',
+
+    // Clusters (subgraphs)
+    clusterBkg: '#181825',
     clusterBorder: '#585b70',
+
+    // Labels & misc
     titleColor: '#cdd6f4',
     edgeLabelBackground: '#313244',
-    nodeTextColor: '#cdd6f4',
+    noteBkgColor: '#313244',
+    noteTextColor: '#cdd6f4',
+    noteBorderColor: '#585b70',
+
+    // Sequence diagrams
+    actorTextColor: '#cdd6f4',
+    actorBkg: '#313244',
+    actorBorder: '#74c7ec',
+    signalColor: '#cdd6f4',
+    loopTextColor: '#cdd6f4',
+    labelBoxBkgColor: '#313244',
+    labelBoxBorderColor: '#585b70',
+    labelTextColor: '#cdd6f4',
   },
 });
+
+// Post-process mermaid SVG: force text colors for readability.
+// Mermaid calculates text color based on node fill — often wrong in dark mode
+// (e.g. light text on pastel fill). This walks all text elements and forces
+// a readable color based on the parent node's actual fill brightness.
+function fixMermaidTextColors(svgEl) {
+  const lightText = '#cdd6f4';
+  const darkText = '#1e1e2e';
+
+  // Get perceived brightness of a color (0=black, 255=white)
+  function getBrightness(color) {
+    if (!color || color === 'none' || color === 'transparent') return 0;
+    const ctx = document.createElement('canvas').getContext('2d');
+    ctx.fillStyle = color;
+    const hex = ctx.fillStyle; // normalizes to #rrggbb
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return (r * 299 + g * 587 + b * 114) / 1000;
+  }
+
+  // Find the fill color of the closest parent shape (rect, circle, polygon, path)
+  function getParentFill(el) {
+    let node = el.closest('.node, .cluster, .actor, .note, .label');
+    if (!node) node = el.parentElement;
+    while (node && node !== svgEl) {
+      const shape = node.querySelector('rect, circle, polygon, path.label-container');
+      if (shape) {
+        const fill = shape.getAttribute('fill') || shape.style.fill;
+        if (fill && fill !== 'none') return fill;
+      }
+      // Also check the node itself
+      const directFill = node.getAttribute('fill') || node.style?.fill || node.style?.background;
+      if (directFill && directFill !== 'none') return directFill;
+      node = node.parentElement;
+    }
+    return null;
+  }
+
+  // Fix SVG <text> and <tspan> elements
+  svgEl.querySelectorAll('text, tspan').forEach((textEl) => {
+    const parentFill = getParentFill(textEl);
+    const brightness = parentFill ? getBrightness(parentFill) : 0;
+    const textColor = brightness > 140 ? darkText : lightText;
+    textEl.setAttribute('fill', textColor);
+    textEl.style.fill = textColor;
+  });
+
+  // Fix HTML elements inside <foreignObject> (nodeLabel, edgeLabel)
+  svgEl.querySelectorAll('foreignObject span, foreignObject div, foreignObject p').forEach((htmlEl) => {
+    const parentFill = getParentFill(htmlEl.closest('foreignObject') || htmlEl);
+    const brightness = parentFill ? getBrightness(parentFill) : 0;
+    const textColor = brightness > 140 ? darkText : lightText;
+    htmlEl.style.color = textColor;
+  });
+}
 
 function getBaseDir(ns, notePath) {
   const nsPrefix = ns ? encodeURIComponent(ns) + '/' : '';
@@ -226,6 +308,9 @@ function Preview({ content, currentPath, ns, onCheckboxToggle }) {
               if (svgEl) {
                 svgEl.removeAttribute('width');
                 svgEl.style.height = 'auto';
+                // Force readable text on all elements — mermaid sets inline styles
+                // based on node fill colors, often producing invisible text on dark mode
+                fixMermaidTextColors(svgEl);
               }
               // Add expand button instead of click-anywhere
               const expandBtn = document.createElement('button');

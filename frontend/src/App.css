@@ -861,14 +861,7 @@ pre:hover .code-copy-btn {
     display: none !important;
   }
 
-  /* Print: force dark text on mermaid since print bg is white */
-  .mermaid-clickable svg text,
-  .mermaid-clickable svg tspan,
-  .mermaid-clickable svg .nodeLabel,
-  .mermaid-clickable svg .label {
-    color: #1e1e2e !important;
-    fill: #1e1e2e !important;
-  }
+  /* Print: mermaid nodes have dark fills, text is already light — keep as-is */
 }
 
 /* Preview fold buttons */
@@ -920,16 +913,10 @@ pre:hover .code-copy-btn {
   border-color: #89b4fa;
 }
 
-/* Force readable text on all mermaid diagrams — user-defined node fills
-   (e.g. fill:#006400 dark green) override the theme text color, making
-   text invisible on dark backgrounds. Force light text everywhere. */
 .mermaid-clickable svg text,
 .mermaid-clickable svg tspan,
 .mermaid-clickable svg .nodeLabel,
-.mermaid-clickable svg .label,
 .mermaid-clickable svg foreignObject {
-  color: #cdd6f4 !important;
-  fill: #cdd6f4 !important;
   user-select: text !important;
   cursor: text;
 }
@@ -1004,6 +991,8 @@ pre:hover .code-copy-btn {
 .mermaid-viewer-toolbar button:hover {
   background: #45475a;
 }
+
+/* Fullscreen mermaid viewer — theme handles text colors */
 
 .mermaid-viewer-zoom {
   font-size: 0.8rem;
@@ -2196,14 +2185,7 @@ pre:hover .code-copy-btn {
   height: auto;
 }
 
-/* Force readable text in Live editor mermaid too */
-.mermaid-live-preview svg text,
-.mermaid-live-preview svg tspan,
-.mermaid-live-preview svg .nodeLabel,
-.mermaid-live-preview svg .label {
-  color: #cdd6f4 !important;
-  fill: #cdd6f4 !important;
-}
+/* Live editor mermaid — text selection */
 
 .mermaid-live-preview .nodeLabel,
 .mermaid-live-preview .label text,
