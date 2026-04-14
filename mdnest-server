@@ -47,9 +47,11 @@ case "$CMD" in
       compose up --build --force-recreate -d "$@"
     else
       compose up --build -d "$@"
-      # Restart git-sync separately — it uses volume mounts (not built images)
+      # Force-recreate git-sync only — it uses volume mounts (not built images)
       # so `up --build` won't detect changes to sync.sh or keys
-      [ -n "$SYNC_PROFILE" ] && compose restart git-sync 2>/dev/null
+      if [ -n "$SYNC_PROFILE" ]; then
+        compose up --force-recreate --no-deps -d git-sync
+      fi
     fi
     [ -n "$SYNC_PROFILE" ] && echo "git-sync: enabled" || echo "git-sync: disabled (no keys in git-sync/keys/)"
     echo "mdnest rebuilt and running"
