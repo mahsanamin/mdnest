@@ -143,12 +143,10 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
         let node = el.closest('.node, .cluster, .actor, .note, .label');
         if (!node) node = el.parentElement;
         while (node && node !== svgEl) {
-          // Check rect, circle, polygon, path — any shape with a fill
           for (const shape of node.querySelectorAll('rect, circle, polygon, path')) {
             const fill = shape.getAttribute('fill') || shape.style?.fill;
             if (fill && fill !== 'none' && fill !== 'transparent') return fill;
           }
-          // Check inline style on the group/node itself
           const bg = node.getAttribute('fill') || node.style?.fill || node.style?.backgroundColor;
           if (bg && bg !== 'none' && bg !== 'transparent') return bg;
           node = node.parentElement;
@@ -156,17 +154,14 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
         return null;
       }
 
-      // Force text color on ALL text elements — SVG text/tspan use 'fill'
       svgEl.querySelectorAll('text, tspan').forEach((t) => {
         const parentFill = getParentFill(t);
         const brightness = getBrightness(parentFill);
-        // If brightness > 140 = light bg = use dark text; otherwise light text
         const color = brightness > 140 ? darkText : lightText;
         t.setAttribute('fill', color);
         t.style.fill = color;
       });
 
-      // HTML elements inside foreignObject use 'color'
       svgEl.querySelectorAll('foreignObject span, foreignObject div, foreignObject p').forEach((t) => {
         const parentFill = getParentFill(t.closest('foreignObject') || t);
         const brightness = getBrightness(parentFill);
