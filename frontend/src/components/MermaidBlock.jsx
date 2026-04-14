@@ -112,12 +112,12 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
     return () => { cancelled = true; };
   }, [source, mode]);
 
-  // Fix text colors after SVG renders — mermaid calculates contrast poorly
-  // for user-defined fill colors, producing invisible text on dark mode.
-  // Uses requestAnimationFrame to ensure dangerouslySetInnerHTML has committed.
+  // Fix text colors after SVG renders — mermaid's dark theme produces
+  // low-contrast text on dark node fills. Use the same fixMermaidTextColors
+  // approach as Preview.jsx but via getComputedStyle for reliable fill detection.
   useEffect(() => {
     if (!svgHtml) return;
-    const fixColors = () => {
+    requestAnimationFrame(() => {
       const container = previewRef.current;
       if (!container) return;
       const svgEl = container.querySelector('svg');
@@ -139,37 +139,46 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
         } catch { return -1; }
       }
 
-      function getParentFill(el) {
-        let node = el.closest('.node, .cluster, .actor, .note, .label');
+      // Use getComputedStyle to get the ACTUAL rendered fill, including CSS-applied fills
+      function getNodeFill(el) {
+        let node = el.closest ? el.closest('.node, .cluster, .actor, .note') : null;
         if (!node) node = el.parentElement;
         while (node && node !== svgEl) {
-          for (const shape of node.querySelectorAll('rect, circle, polygon, path')) {
-            const fill = shape.getAttribute('fill') || shape.style?.fill;
-            if (fill && fill !== 'none' && fill !== 'transparent') return fill;
+          const shapes = node.querySelectorAll('rect, circle, polygon, path');
+          for (const shape of shapes) {
+            // Try computed style first (catches CSS-applied fills)
+            try {
+              const computed = window.getComputedStyle(shape);
+              const fill = computed.fill;
+              if (fill && fill !== 'none') return fill;
+            } catch {}
+            // Fallback to attribute
+            const attr = shape.getAttribute('fill');
+            if (attr && attr !== 'none' && attr !== 'transparent') return attr;
           }
-          const bg = node.getAttribute('fill') || node.style?.fill || node.style?.backgroundColor;
-          if (bg && bg !== 'none' && bg !== 'transparent') return bg;
           node = node.parentElement;
         }
         return null;
       }
 
+      // SVG text/tspan
       svgEl.querySelectorAll('text, tspan').forEach((t) => {
-        const parentFill = getParentFill(t);
-        const brightness = getBrightness(parentFill);
-        const color = brightness > 140 ? darkText : lightText;
+        const fill = getNodeFill(t);
+        const b = getBrightness(fill);
+        // If can't determine fill, default to light text (dark bg assumed)
+        const color = b > 140 ? darkText : lightText;
         t.setAttribute('fill', color);
         t.style.fill = color;
       });
 
+      // HTML inside foreignObject
       svgEl.querySelectorAll('foreignObject span, foreignObject div, foreignObject p').forEach((t) => {
-        const parentFill = getParentFill(t.closest('foreignObject') || t);
-        const brightness = getBrightness(parentFill);
-        const color = brightness > 140 ? darkText : lightText;
+        const fill = getNodeFill(t.closest('foreignObject') || t);
+        const b = getBrightness(fill);
+        const color = b > 140 ? darkText : lightText;
         t.style.setProperty('color', color, 'important');
       });
-    };
-    requestAnimationFrame(fixColors);
+    });
   }, [svgHtml]);
 
   // Make node labels clickable — use click delegation on the preview container
