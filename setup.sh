@@ -104,7 +104,12 @@ fi
 
 echo "Found ${#MOUNT_NAMES[@]} namespace(s):"
 for i in "${!MOUNT_NAMES[@]}"; do
-  echo "  ${MOUNT_NAMES[$i]} -> ${MOUNT_PATHS[$i]}"
+  if [ ! -d "${MOUNT_PATHS[$i]}" ]; then
+    echo "  ${MOUNT_NAMES[$i]} -> ${MOUNT_PATHS[$i]} (creating directory)"
+    mkdir -p "${MOUNT_PATHS[$i]}"
+  else
+    echo "  ${MOUNT_NAMES[$i]} -> ${MOUNT_PATHS[$i]}"
+  fi
 done
 
 # Generate .env
