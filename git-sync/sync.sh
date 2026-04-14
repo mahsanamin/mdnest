@@ -98,8 +98,11 @@ fix_remote_url() {
   REMOTE_URL=$(git remote get-url origin 2>/dev/null)
   [ -z "$REMOTE_URL" ] && return
 
-  # Extract host from git@host:user/repo.git format
-  REMOTE_HOST=$(echo "$REMOTE_URL" | sed -n 's/^[^@]*@\([^:]*\):.*/\1/p')
+  # Skip HTTPS URLs — no SSH alias issue
+  case "$REMOTE_URL" in http://*|https://*) return ;; esac
+
+  # Extract host from either "git@host:path" or "host:path" format
+  REMOTE_HOST=$(echo "$REMOTE_URL" | sed 's/^.*@//' | sed 's/:.*//')
   [ -z "$REMOTE_HOST" ] && return
 
   # Known git hosts — no fix needed
@@ -107,7 +110,7 @@ fix_remote_url() {
     github.com|gitlab.com|bitbucket.org) return ;;
   esac
 
-  # Unknown host (likely an SSH alias) — rewrite to github.com
+  # Unknown host (likely an SSH alias) — rewrite to git@github.com:user/repo.git
   REPO_PATH=$(echo "$REMOTE_URL" | sed 's/^[^:]*://')
   NEW_URL="git@github.com:${REPO_PATH}"
   git remote set-url origin "$NEW_URL"
