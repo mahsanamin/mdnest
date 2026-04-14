@@ -78,8 +78,12 @@ func (h *SyncHandler) HandleSyncStatus(w http.ResponseWriter, r *http.Request) {
 			resp.LastCommit = out
 		}
 
-		// Check SSH key
-		if _, err := os.Stat("/root/.ssh/deploy_key"); err == nil {
+		// Check SSH key — same resolution chain as gitSSHEnv
+		if _, err := os.Stat("/keys/" + ns); err == nil {
+			resp.HasSSHKey = true
+		} else if _, err := os.Stat("/keys/default"); err == nil {
+			resp.HasSSHKey = true
+		} else if _, err := os.Stat("/root/.ssh/deploy_key"); err == nil {
 			resp.HasSSHKey = true
 		}
 	}
@@ -118,7 +122,7 @@ func (h *SyncHandler) HandleSync(w http.ResponseWriter, r *http.Request) {
 
 	gitDir := findGitDir(nsDir)
 	if gitDir != "" {
-		sshEnv := gitSSHEnv()
+		sshEnv := gitSSHEnv(ns)
 
 		// Fix SSH host aliases (users configure git with ~/.ssh/config aliases
 		// on the host, but the container doesn't have that config)
@@ -210,11 +214,35 @@ func fixRemoteURL(gitDir, ns string) {
 	}
 }
 
-func gitSSHEnv() []string {
-	sshKeyPath := "/root/.ssh/deploy_key"
-	if _, err := os.Stat(sshKeyPath); err == nil {
+// gitSSHEnv resolves the SSH key for a namespace using the same chain as git-sync:
+// per-namespace key (/keys/<ns>) > shared key (/keys/default) > legacy single key (/root/.ssh/deploy_key)
+func gitSSHEnv(ns string) []string {
+	sshOpts := "-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known_hosts -o LogLevel=QUIET"
+	keyPath := ""
+
+	// 1. Per-namespace key (matches git-sync/keys/<namespace>)
+	if ns != "" {
+		candidate := "/keys/" + ns
+		if _, err := os.Stat(candidate); err == nil {
+			keyPath = candidate
+		}
+	}
+	// 2. Shared default key
+	if keyPath == "" {
+		if _, err := os.Stat("/keys/default"); err == nil {
+			keyPath = "/keys/default"
+		}
+	}
+	// 3. Legacy single key (from SSH_KEY_PATH mount)
+	if keyPath == "" {
+		if _, err := os.Stat("/root/.ssh/deploy_key"); err == nil {
+			keyPath = "/root/.ssh/deploy_key"
+		}
+	}
+
+	if keyPath != "" {
 		return []string{
-			"GIT_SSH_COMMAND=ssh -i " + sshKeyPath + " -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known_hosts",
+			"GIT_SSH_COMMAND=ssh -i " + keyPath + " " + sshOpts,
 			"HOME=/root",
 		}
 	}
