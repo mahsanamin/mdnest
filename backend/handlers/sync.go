@@ -120,6 +120,10 @@ func (h *SyncHandler) HandleSync(w http.ResponseWriter, r *http.Request) {
 	if gitDir != "" {
 		sshEnv := gitSSHEnv()
 
+		// Fix SSH host aliases (users configure git with ~/.ssh/config aliases
+		// on the host, but the container doesn't have that config)
+		fixRemoteURL(gitDir, ns)
+
 		// 1. Commit any pending changes
 		gitRunIn(gitDir, nil, "add", "-A")
 		if _, err := gitRunIn(gitDir, nil, "diff", "--cached", "--quiet"); err != nil {
@@ -169,6 +173,41 @@ func (h *SyncHandler) HandleSync(w http.ResponseWriter, r *http.Request) {
 		"git":        gitOutput,
 		"lastCommit": lastCommit,
 	})
+}
+
+// fixRemoteURL detects SSH host aliases in the remote URL and rewrites them
+// to git@github.com:user/repo.git. Users configure git on the host with
+// ~/.ssh/config aliases, but the Docker container doesn't have that config.
+func fixRemoteURL(gitDir, ns string) {
+	url, err := gitCmd(gitDir, "remote", "get-url", "origin")
+	if err != nil || url == "" {
+		return
+	}
+	// Skip HTTPS URLs
+	if strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://") {
+		return
+	}
+	// Extract host — handle both "git@host:path" and "host:path"
+	hostPart := url
+	if idx := strings.Index(hostPart, "@"); idx >= 0 {
+		hostPart = hostPart[idx+1:]
+	}
+	colonIdx := strings.Index(hostPart, ":")
+	if colonIdx < 0 {
+		return
+	}
+	host := hostPart[:colonIdx]
+	// Known hosts — no fix needed
+	switch host {
+	case "github.com", "gitlab.com", "bitbucket.org":
+		return
+	}
+	// Rewrite to github.com
+	repoPath := hostPart[colonIdx+1:]
+	newURL := "git@github.com:" + repoPath
+	if _, err := gitRunIn(gitDir, nil, "remote", "set-url", "origin", newURL); err == nil {
+		log.Printf("sync [%s]: rewrote remote URL from '%s' to '%s' (SSH alias '%s' doesn't work in Docker)", ns, url, newURL, host)
+	}
 }
 
 func gitSSHEnv() []string {
