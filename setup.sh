@@ -170,9 +170,12 @@ fi
 
 # Check for deploy keys
 if [ -d "git-sync/keys" ]; then
-  KEY_COUNT=$(find git-sync/keys -maxdepth 1 -type f ! -name "*.pub" 2>/dev/null | wc -l | tr -d ' ')
+  KEY_COUNT=$(find git-sync/keys -maxdepth 1 -type f ! -name "*.pub" ! -name ".gitkeep" 2>/dev/null | wc -l | tr -d ' ')
   if [ "$KEY_COUNT" -gt 0 ]; then
     echo "Found $KEY_COUNT deploy key(s) in git-sync/keys/"
+    # Mount keys into backend too (so sync button can use per-namespace keys)
+    BACKEND_VOLUMES="${BACKEND_VOLUMES}      - ./git-sync/keys:/keys:ro
+"
   else
     echo "Warning: git-sync/keys/ exists but has no private keys."
     echo "  Add a shared key:        ssh-keygen -t ed25519 -f git-sync/keys/default -N \"\""
