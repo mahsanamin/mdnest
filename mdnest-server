@@ -98,6 +98,123 @@ case "$CMD" in
     echo "Installed: mdnest → $DEST"
     echo "Run 'mdnest login <url> <token>' to get started"
     ;;
+  git-check)
+    echo "=== mdnest git-sync diagnostics ==="
+    echo ""
+
+    # Check keys
+    if [ -d "git-sync/keys" ]; then
+      KEY_FILES=$(find git-sync/keys -maxdepth 1 -type f ! -name "*.pub" ! -name ".gitkeep" 2>/dev/null)
+      if [ -z "$KEY_FILES" ]; then
+        echo "KEYS: none found in git-sync/keys/"
+        echo "  → Git sync is disabled. Add deploy keys to enable."
+        exit 0
+      fi
+      echo "KEYS:"
+      for key in $KEY_FILES; do
+        name=$(basename "$key")
+        pub="${key}.pub"
+        echo "  $name"
+        if [ -f "$pub" ]; then
+          echo "    Public key: $(cat "$pub")"
+        else
+          echo "    WARNING: no .pub file — run: ssh-keygen -y -f git-sync/keys/$name > git-sync/keys/${name}.pub"
+        fi
+      done
+    else
+      echo "KEYS: git-sync/keys/ directory not found"
+      echo "  → Run: mkdir -p git-sync/keys && ssh-keygen -t ed25519 -f git-sync/keys/default -N ''"
+      exit 0
+    fi
+
+    echo ""
+
+    # Check each namespace repo
+    # Find MOUNT_ entries from mdnest.conf
+    if [ ! -f "mdnest.conf" ]; then
+      echo "ERROR: mdnest.conf not found"
+      exit 1
+    fi
+
+    echo "NAMESPACES:"
+    grep '^MOUNT_' mdnest.conf | while IFS='=' read -r key path; do
+      name="${key#MOUNT_}"
+      path=$(echo "$path" | tr -d ' ')
+      echo ""
+      echo "  $name → $path"
+
+      if [ ! -d "$path" ]; then
+        echo "    WARNING: directory does not exist"
+        continue
+      fi
+
+      if [ ! -d "$path/.git" ]; then
+        echo "    No git repo (sync skipped — this is fine for local-only namespaces)"
+        continue
+      fi
+
+      cd "$path"
+      REMOTE_URL=$(git remote get-url origin 2>/dev/null || echo "")
+      BRANCH=$(git branch --show-current 2>/dev/null || echo "unknown")
+
+      if [ -z "$REMOTE_URL" ]; then
+        echo "    Git repo but no remote — commits stay local"
+        continue
+      fi
+
+      echo "    Remote: $REMOTE_URL"
+      echo "    Branch: $BRANCH"
+
+      # Check for SSH host alias
+      REMOTE_HOST=$(echo "$REMOTE_URL" | sed -n 's/^[^@]*@\([^:]*\):.*/\1/p')
+      if [ -n "$REMOTE_HOST" ]; then
+        case "$REMOTE_HOST" in
+          github.com|gitlab.com|bitbucket.org)
+            echo "    Host: $REMOTE_HOST (OK)"
+            ;;
+          *)
+            echo "    WARNING: SSH host alias '$REMOTE_HOST' won't work inside Docker!"
+            REPO_PATH=$(echo "$REMOTE_URL" | sed 's/^[^:]*://')
+            echo "    Fix: git remote set-url origin git@github.com:${REPO_PATH}"
+            echo "    (git-sync will auto-fix this on next cycle)"
+            ;;
+        esac
+      fi
+
+      # Check key mapping
+      if [ -f "git-sync/keys/$name" ]; then
+        echo "    Key: git-sync/keys/$name (per-namespace)"
+      elif [ -f "git-sync/keys/default" ]; then
+        echo "    Key: git-sync/keys/default (shared)"
+      else
+        echo "    WARNING: no matching key — push/pull will fail"
+        echo "    Fix: cp your-deploy-key git-sync/keys/$name"
+      fi
+      cd - >/dev/null
+    done
+
+    echo ""
+    echo "=== Testing SSH connectivity ==="
+    if command -v ssh >/dev/null 2>&1; then
+      for key in $KEY_FILES; do
+        name=$(basename "$key")
+        echo -n "  $name → github.com: "
+        RESULT=$(ssh -T git@github.com -i "$key" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 2>&1 || true)
+        if echo "$RESULT" | grep -q "successfully authenticated"; then
+          USER=$(echo "$RESULT" | grep -o 'Hi [^!]*' | sed 's/Hi //')
+          echo "OK (authenticated as $USER)"
+        else
+          echo "FAILED"
+          echo "    $RESULT"
+          echo "    → Add the public key as a deploy key (with write access) on your GitHub repo"
+        fi
+      done
+    else
+      echo "  ssh not available on host — test from inside container:"
+      echo "  docker compose exec git-sync sh -c 'ssh -T git@github.com -i /keys/<keyname>'"
+    fi
+    echo ""
+    ;;
   help|--help|-h)
     cat <<'HELP'
 mdnest-server — manage your mdnest instance
@@ -112,6 +229,7 @@ Commands:
   rebuild     Re-run setup, rebuild images, and start
   logs        View logs (all services)
   sync-logs   View git-sync logs
+  git-check   Diagnose git-sync: keys, remotes, SSH connectivity
   status      Show running containers
   update      Pull latest code, rebuild, and start
   migrate     Run database migrations (multi-user mode only)

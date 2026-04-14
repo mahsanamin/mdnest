@@ -90,6 +90,31 @@ pull_remote() {
   return 0
 }
 
+# Fix SSH host aliases in remote URLs. Users often configure git on the host
+# with aliases like "gh-myrepo" in ~/.ssh/config, but the container doesn't
+# have that config. Detect and rewrite to git@github.com:user/repo.git.
+fix_remote_url() {
+  name="$1"
+  REMOTE_URL=$(git remote get-url origin 2>/dev/null)
+  [ -z "$REMOTE_URL" ] && return
+
+  # Extract host from git@host:user/repo.git format
+  REMOTE_HOST=$(echo "$REMOTE_URL" | sed -n 's/^[^@]*@\([^:]*\):.*/\1/p')
+  [ -z "$REMOTE_HOST" ] && return
+
+  # Known git hosts — no fix needed
+  case "$REMOTE_HOST" in
+    github.com|gitlab.com|bitbucket.org) return ;;
+  esac
+
+  # Unknown host (likely an SSH alias) — rewrite to github.com
+  REPO_PATH=$(echo "$REMOTE_URL" | sed 's/^[^:]*://')
+  NEW_URL="git@github.com:${REPO_PATH}"
+  git remote set-url origin "$NEW_URL"
+  echo "git-sync [$name]: rewrote remote URL from '$REMOTE_URL' to '$NEW_URL'"
+  echo "git-sync [$name]: (SSH host alias '$REMOTE_HOST' doesn't work inside Docker)"
+}
+
 sync_repo() {
   dir="$1"
   name="$(basename "$dir")"
@@ -118,6 +143,9 @@ sync_repo() {
     echo "git-sync [$name]: set SSH_KEY_PATH in mdnest.conf or add keys to git-sync/keys/"
     return
   fi
+
+  # Fix SSH host aliases before pull/push
+  fix_remote_url "$name"
 
   if pull_remote "$name"; then
     git push || echo "git-sync [$name]: push failed, will retry next cycle"
