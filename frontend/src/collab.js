@@ -4,9 +4,11 @@ import { getToken } from './api.js';
 // Connects to /api/ws when a note is opened, disconnects on close.
 
 class CollabClient {
-  constructor(onMessage) {
+  // status: 'connected' | 'connecting' | 'disconnected'
+  constructor(onMessage, onStatusChange) {
     this.ws = null;
     this.onMessage = onMessage;
+    this.onStatusChange = onStatusChange;
     this.ns = null;
     this.path = null;
     this.reconnectTimer = null;
@@ -14,6 +16,14 @@ class CollabClient {
     this.maxReconnectDelay = 30000;
     this.closed = false;
     this._cursorThrottle = null;
+    this._status = 'disconnected';
+  }
+
+  _setStatus(status) {
+    if (status !== this._status) {
+      this._status = status;
+      if (this.onStatusChange) this.onStatusChange(status);
+    }
   }
 
   connect(ns, path) {
@@ -35,15 +45,19 @@ class CollabClient {
     const host = window.location.host;
     const url = `${proto}//${host}/api/ws?ns=${encodeURIComponent(this.ns)}&path=${encodeURIComponent(this.path)}&token=${encodeURIComponent(token)}`;
 
+    this._setStatus('connecting');
+
     try {
       this.ws = new WebSocket(url);
     } catch (e) {
+      this._setStatus('disconnected');
       this._scheduleReconnect();
       return;
     }
 
     this.ws.onopen = () => {
-      this.reconnectDelay = 1000; // Reset on successful connect
+      this.reconnectDelay = 1000;
+      this._setStatus('connected');
     };
 
     this.ws.onmessage = (e) => {
@@ -58,7 +72,10 @@ class CollabClient {
     this.ws.onclose = () => {
       this.ws = null;
       if (!this.closed) {
+        this._setStatus('connecting'); // will reconnect
         this._scheduleReconnect();
+      } else {
+        this._setStatus('disconnected');
       }
     };
 
@@ -87,6 +104,7 @@ class CollabClient {
     }
     this.ns = null;
     this.path = null;
+    this._setStatus('disconnected');
   }
 
   // Send cursor position (throttled to every 100ms)

@@ -101,6 +101,7 @@ function App() {
   const [typingUsers, setTypingUsers] = useState({}); // {userId: username}
   const [conflictBanner, setConflictBanner] = useState(null); // {username, etag}
   const [updateAvailable, setUpdateAvailable] = useState(null); // {current, latest}
+  const [wsStatus, setWsStatus] = useState('disconnected'); // 'connected' | 'connecting' | 'disconnected'
   const etagRef = useRef(null);
   const collabRef = useRef(null);
   const typingTimers = useRef({}); // {userId: timeoutId}
@@ -213,9 +214,9 @@ function App() {
           }
           break;
       }
-    });
+    }, setWsStatus);
     collabRef.current = client;
-    return () => { client.disconnect(); collabRef.current = null; };
+    return () => { client.disconnect(); collabRef.current = null; setWsStatus('disconnected'); };
   }, [appConfig?.liveCollab]);
 
   // Connect/disconnect collab when note changes
@@ -849,6 +850,7 @@ function App() {
             if (selectedNs && currentPath) restoreScrollPosition(selectedNs, currentPath);
           }}
           onRefresh={handleRefresh}
+          wsStatus={appConfig?.liveCollab ? wsStatus : null}
         />
         {appConfig?.liveCollab && presenceUsers.length > 1 && (
           <PresenceBar users={presenceUsers} currentUserId={userInfo?.id} typingUsers={typingUsers} />

@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 
-function Toolbar({ currentPath, onToggleSidebar, onChangePassword, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh }) {
+function Toolbar({ currentPath, onToggleSidebar, onChangePassword, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh, wsStatus }) {
   const [refreshing, setRefreshing] = useState(false);
   const handleRefresh = useCallback(() => {
     if (refreshing || !onRefresh) return;
@@ -62,6 +62,12 @@ function Toolbar({ currentPath, onToggleSidebar, onChangePassword, onRename, onD
             &#9673;
           </button>
         </div>
+      )}
+      {wsStatus && (
+        <span
+          className={`ws-status-dot ${wsStatus}`}
+          title={wsStatus === 'connected' ? 'Live connection active' : wsStatus === 'connecting' ? 'Reconnecting...' : 'Disconnected'}
+        />
       )}
       <button
         className={`toolbar-refresh${refreshing ? ' spinning' : ''}`}
