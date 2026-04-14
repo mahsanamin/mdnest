@@ -863,11 +863,19 @@ pre:hover .code-copy-btn {
 
   /* Print: force dark text on mermaid since print bg is white */
   .mermaid-clickable svg text,
-  .mermaid-clickable svg tspan,
-  .mermaid-clickable svg .nodeLabel,
-  .mermaid-clickable svg .label {
-    color: #1e1e2e !important;
+  .mermaid-clickable svg tspan {
     fill: #1e1e2e !important;
+  }
+
+  .mermaid-clickable svg foreignObject,
+  .mermaid-clickable svg foreignObject div,
+  .mermaid-clickable svg foreignObject span,
+  .mermaid-clickable svg foreignObject p,
+  .mermaid-clickable svg .nodeLabel,
+  .mermaid-clickable svg .edgeLabel,
+  .mermaid-clickable svg .label div,
+  .mermaid-clickable svg .label span {
+    color: #1e1e2e !important;
   }
 }
 
@@ -920,16 +928,26 @@ pre:hover .code-copy-btn {
   border-color: #89b4fa;
 }
 
-/* Force readable text on all mermaid diagrams — user-defined node fills
-   (e.g. fill:#006400 dark green) override the theme text color, making
-   text invisible on dark backgrounds. Force light text everywhere. */
+/* Force readable text on all mermaid diagrams.
+   Mermaid renders labels as HTML inside <foreignObject><div><span class="nodeLabel">.
+   User-defined fills (fill:#006400) set inline styles that override theme text color.
+   Must target both SVG text elements AND HTML elements inside foreignObject. */
 .mermaid-clickable svg text,
-.mermaid-clickable svg tspan,
-.mermaid-clickable svg .nodeLabel,
-.mermaid-clickable svg .label,
-.mermaid-clickable svg foreignObject {
-  color: #cdd6f4 !important;
+.mermaid-clickable svg tspan {
   fill: #cdd6f4 !important;
+  user-select: text !important;
+  cursor: text;
+}
+
+.mermaid-clickable svg foreignObject,
+.mermaid-clickable svg foreignObject div,
+.mermaid-clickable svg foreignObject span,
+.mermaid-clickable svg foreignObject p,
+.mermaid-clickable svg .nodeLabel,
+.mermaid-clickable svg .edgeLabel,
+.mermaid-clickable svg .label div,
+.mermaid-clickable svg .label span {
+  color: #cdd6f4 !important;
   user-select: text !important;
   cursor: text;
 }
@@ -1003,6 +1021,23 @@ pre:hover .code-copy-btn {
 
 .mermaid-viewer-toolbar button:hover {
   background: #45475a;
+}
+
+/* Force readable text in fullscreen mermaid viewer */
+.mermaid-viewer svg text,
+.mermaid-viewer svg tspan {
+  fill: #cdd6f4 !important;
+}
+
+.mermaid-viewer svg foreignObject,
+.mermaid-viewer svg foreignObject div,
+.mermaid-viewer svg foreignObject span,
+.mermaid-viewer svg foreignObject p,
+.mermaid-viewer svg .nodeLabel,
+.mermaid-viewer svg .edgeLabel,
+.mermaid-viewer svg .label div,
+.mermaid-viewer svg .label span {
+  color: #cdd6f4 !important;
 }
 
 .mermaid-viewer-zoom {
@@ -2198,11 +2233,19 @@ pre:hover .code-copy-btn {
 
 /* Force readable text in Live editor mermaid too */
 .mermaid-live-preview svg text,
-.mermaid-live-preview svg tspan,
-.mermaid-live-preview svg .nodeLabel,
-.mermaid-live-preview svg .label {
-  color: #cdd6f4 !important;
+.mermaid-live-preview svg tspan {
   fill: #cdd6f4 !important;
+}
+
+.mermaid-live-preview svg foreignObject,
+.mermaid-live-preview svg foreignObject div,
+.mermaid-live-preview svg foreignObject span,
+.mermaid-live-preview svg foreignObject p,
+.mermaid-live-preview svg .nodeLabel,
+.mermaid-live-preview svg .edgeLabel,
+.mermaid-live-preview svg .label div,
+.mermaid-live-preview svg .label span {
+  color: #cdd6f4 !important;
 }
 
 .mermaid-live-preview .nodeLabel,
