@@ -861,22 +861,7 @@ pre:hover .code-copy-btn {
     display: none !important;
   }
 
-  /* Print: force dark text on mermaid since print bg is white */
-  .mermaid-clickable svg text,
-  .mermaid-clickable svg tspan {
-    fill: #1e1e2e !important;
-  }
-
-  .mermaid-clickable svg foreignObject,
-  .mermaid-clickable svg foreignObject div,
-  .mermaid-clickable svg foreignObject span,
-  .mermaid-clickable svg foreignObject p,
-  .mermaid-clickable svg .nodeLabel,
-  .mermaid-clickable svg .edgeLabel,
-  .mermaid-clickable svg .label div,
-  .mermaid-clickable svg .label span {
-    color: #1e1e2e !important;
-  }
+  /* Print: mermaid nodes have dark fills, text is already light — keep as-is */
 }
 
 /* Preview fold buttons */
@@ -928,26 +913,10 @@ pre:hover .code-copy-btn {
   border-color: #89b4fa;
 }
 
-/* Force readable text on all mermaid diagrams.
-   Mermaid renders labels as HTML inside <foreignObject><div><span class="nodeLabel">.
-   User-defined fills (fill:#006400) set inline styles that override theme text color.
-   Must target both SVG text elements AND HTML elements inside foreignObject. */
 .mermaid-clickable svg text,
-.mermaid-clickable svg tspan {
-  fill: #cdd6f4 !important;
-  user-select: text !important;
-  cursor: text;
-}
-
-.mermaid-clickable svg foreignObject,
-.mermaid-clickable svg foreignObject div,
-.mermaid-clickable svg foreignObject span,
-.mermaid-clickable svg foreignObject p,
+.mermaid-clickable svg tspan,
 .mermaid-clickable svg .nodeLabel,
-.mermaid-clickable svg .edgeLabel,
-.mermaid-clickable svg .label div,
-.mermaid-clickable svg .label span {
-  color: #cdd6f4 !important;
+.mermaid-clickable svg foreignObject {
   user-select: text !important;
   cursor: text;
 }
@@ -1023,22 +992,7 @@ pre:hover .code-copy-btn {
   background: #45475a;
 }
 
-/* Force readable text in fullscreen mermaid viewer */
-.mermaid-viewer svg text,
-.mermaid-viewer svg tspan {
-  fill: #cdd6f4 !important;
-}
-
-.mermaid-viewer svg foreignObject,
-.mermaid-viewer svg foreignObject div,
-.mermaid-viewer svg foreignObject span,
-.mermaid-viewer svg foreignObject p,
-.mermaid-viewer svg .nodeLabel,
-.mermaid-viewer svg .edgeLabel,
-.mermaid-viewer svg .label div,
-.mermaid-viewer svg .label span {
-  color: #cdd6f4 !important;
-}
+/* Fullscreen mermaid viewer — theme handles text colors */
 
 .mermaid-viewer-zoom {
   font-size: 0.8rem;
@@ -2231,22 +2185,7 @@ pre:hover .code-copy-btn {
   height: auto;
 }
 
-/* Force readable text in Live editor mermaid too */
-.mermaid-live-preview svg text,
-.mermaid-live-preview svg tspan {
-  fill: #cdd6f4 !important;
-}
-
-.mermaid-live-preview svg foreignObject,
-.mermaid-live-preview svg foreignObject div,
-.mermaid-live-preview svg foreignObject span,
-.mermaid-live-preview svg foreignObject p,
-.mermaid-live-preview svg .nodeLabel,
-.mermaid-live-preview svg .edgeLabel,
-.mermaid-live-preview svg .label div,
-.mermaid-live-preview svg .label span {
-  color: #cdd6f4 !important;
-}
+/* Live editor mermaid — text selection */
 
 .mermaid-live-preview .nodeLabel,
 .mermaid-live-preview .label text,
