@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-MDNEST_CLI_VERSION="3.1.2"
+MDNEST_CLI_VERSION="3.1.3"
 CONFIG_DIR="${HOME}/.config/mdnest"
 SERVERS_DIR="${CONFIG_DIR}/servers"
 DEFAULT_FILE="${CONFIG_DIR}/default"

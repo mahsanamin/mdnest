@@ -41,7 +41,7 @@ case "$CMD" in
     ;;
   rebuild)
     ./setup.sh
-    compose up --build -d "$@"
+    compose up --build --force-recreate -d "$@"
     [ -n "$SYNC_PROFILE" ] && echo "git-sync: enabled" || echo "git-sync: disabled (no keys in git-sync/keys/)"
     echo "mdnest rebuilt and running"
     ;;
