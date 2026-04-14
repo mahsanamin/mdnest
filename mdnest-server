@@ -41,15 +41,21 @@ case "$CMD" in
     ;;
   rebuild)
     ./setup.sh
-    compose up --build --force-recreate -d "$@"
+    if [ "$1" = "--full" ]; then
+      shift
+      echo "Full rebuild: recreating all containers..."
+      compose up --build --force-recreate -d "$@"
+    else
+      compose up --build -d "$@"
+      # Restart git-sync separately — it uses volume mounts (not built images)
+      # so `up --build` won't detect changes to sync.sh or keys
+      [ -n "$SYNC_PROFILE" ] && compose restart git-sync 2>/dev/null
+    fi
     [ -n "$SYNC_PROFILE" ] && echo "git-sync: enabled" || echo "git-sync: disabled (no keys in git-sync/keys/)"
     echo "mdnest rebuilt and running"
     ;;
   logs)
     compose logs "${@:--f --tail 50}"
-    ;;
-  sync-logs)
-    compose logs git-sync "${@:--f --tail 50}"
     ;;
   status)
     compose ps
@@ -226,9 +232,9 @@ Commands:
   start       Start all services (includes git-sync if keys are configured)
   stop        Stop all services
   restart     Stop and start all services
-  rebuild     Re-run setup, rebuild images, and start
-  logs        View logs (all services)
-  sync-logs   View git-sync logs
+  rebuild     Re-run setup, rebuild changed images, and start
+  rebuild --full  Force recreate ALL containers (use after major updates)
+  logs        View logs (all services, or specify: backend, frontend, git-sync, postgres)
   git-check   Diagnose git-sync: keys, remotes, SSH connectivity
   status      Show running containers
   update      Pull latest code, rebuild, and start
@@ -242,11 +248,14 @@ Multi-user mode requires AUTH_MODE=multi in mdnest.conf and a PostgreSQL databas
 When AUTH_MODE=multi, setup automatically adds a Postgres container.
 
 Examples:
-  mdnest-server setup          # first-time setup
-  mdnest-server start          # start everything
-  mdnest-server rebuild        # after editing mdnest.conf
-  mdnest-server logs backend   # logs for one service
-  mdnest-server sync-logs      # check git sync status
+  mdnest-server setup           # first-time setup
+  mdnest-server start           # start everything
+  mdnest-server rebuild         # after editing mdnest.conf (smart, fast)
+  mdnest-server rebuild --full  # force recreate all containers
+  mdnest-server git-check       # diagnose git-sync keys & remotes
+  mdnest-server logs             # all service logs
+  mdnest-server logs backend     # backend only
+  mdnest-server logs git-sync    # git sync only
 
 Upgrading to multi-user mode:
   1. Edit mdnest.conf:  AUTH_MODE=multi, POSTGRES_PASSWORD=<secure>
