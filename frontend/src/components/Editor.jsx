@@ -148,8 +148,13 @@ function Editor({ content, onChange, currentPath, ns, readOnly, onCursorChange, 
     }
 
     // Check for rich HTML content (from Google Docs, Confluence, etc.)
+    // But NOT if the plain text already looks like markdown — the user is
+    // pasting raw .md content and the HTML version would mangle it
+    // (e.g. wrapping everything in triple backticks from <pre><code>).
     const html = clipboard.getData('text/html');
-    if (html && hasRichContent(html)) {
+    const plain = clipboard.getData('text/plain');
+    const looksLikeMarkdown = plain && /^[\s]*[#\-*>|`\[!]/.test(plain);
+    if (html && hasRichContent(html) && !looksLikeMarkdown) {
       e.preventDefault();
       const md = htmlToMarkdown(html);
       insertAtCursor(md);
