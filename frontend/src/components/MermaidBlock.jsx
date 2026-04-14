@@ -112,6 +112,56 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
     return () => { cancelled = true; };
   }, [source, mode]);
 
+  // Fix text colors after SVG renders — mermaid calculates contrast poorly
+  // for user-defined fill colors, producing invisible text on dark mode
+  useEffect(() => {
+    const container = previewRef.current;
+    if (!container || !svgHtml) return;
+    const svgEl = container.querySelector('svg');
+    if (!svgEl) return;
+
+    const lightText = '#cdd6f4';
+    const darkText = '#1e1e2e';
+
+    function getBrightness(color) {
+      if (!color || color === 'none' || color === 'transparent') return 0;
+      const ctx = document.createElement('canvas').getContext('2d');
+      ctx.fillStyle = color;
+      const hex = ctx.fillStyle;
+      const r = parseInt(hex.slice(1, 3), 16);
+      const g = parseInt(hex.slice(3, 5), 16);
+      const b = parseInt(hex.slice(5, 7), 16);
+      return (r * 299 + g * 587 + b * 114) / 1000;
+    }
+
+    function getParentFill(el) {
+      let node = el.closest('.node, .cluster, .actor, .note, .label');
+      if (!node) node = el.parentElement;
+      while (node && node !== svgEl) {
+        const shape = node.querySelector('rect, circle, polygon, path.label-container');
+        if (shape) {
+          const fill = shape.getAttribute('fill') || shape.style.fill;
+          if (fill && fill !== 'none') return fill;
+        }
+        node = node.parentElement;
+      }
+      return null;
+    }
+
+    svgEl.querySelectorAll('text, tspan').forEach((t) => {
+      const fill = getParentFill(t);
+      const color = fill && getBrightness(fill) > 140 ? darkText : lightText;
+      t.setAttribute('fill', color);
+      t.style.fill = color;
+    });
+
+    svgEl.querySelectorAll('foreignObject span, foreignObject div, foreignObject p').forEach((t) => {
+      const fill = getParentFill(t.closest('foreignObject') || t);
+      const color = fill && getBrightness(fill) > 140 ? darkText : lightText;
+      t.style.color = color;
+    });
+  }, [svgHtml]);
+
   // Make node labels clickable — use click delegation on the preview container
   const handlePreviewClick = useCallback((e) => {
     if (readOnly) return;

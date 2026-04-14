@@ -56,6 +56,62 @@ mermaid.initialize({
   },
 });
 
+// Post-process mermaid SVG: force text colors for readability.
+// Mermaid calculates text color based on node fill — often wrong in dark mode
+// (e.g. light text on pastel fill). This walks all text elements and forces
+// a readable color based on the parent node's actual fill brightness.
+function fixMermaidTextColors(svgEl) {
+  const lightText = '#cdd6f4';
+  const darkText = '#1e1e2e';
+
+  // Get perceived brightness of a color (0=black, 255=white)
+  function getBrightness(color) {
+    if (!color || color === 'none' || color === 'transparent') return 0;
+    const ctx = document.createElement('canvas').getContext('2d');
+    ctx.fillStyle = color;
+    const hex = ctx.fillStyle; // normalizes to #rrggbb
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return (r * 299 + g * 587 + b * 114) / 1000;
+  }
+
+  // Find the fill color of the closest parent shape (rect, circle, polygon, path)
+  function getParentFill(el) {
+    let node = el.closest('.node, .cluster, .actor, .note, .label');
+    if (!node) node = el.parentElement;
+    while (node && node !== svgEl) {
+      const shape = node.querySelector('rect, circle, polygon, path.label-container');
+      if (shape) {
+        const fill = shape.getAttribute('fill') || shape.style.fill;
+        if (fill && fill !== 'none') return fill;
+      }
+      // Also check the node itself
+      const directFill = node.getAttribute('fill') || node.style?.fill || node.style?.background;
+      if (directFill && directFill !== 'none') return directFill;
+      node = node.parentElement;
+    }
+    return null;
+  }
+
+  // Fix SVG <text> and <tspan> elements
+  svgEl.querySelectorAll('text, tspan').forEach((textEl) => {
+    const parentFill = getParentFill(textEl);
+    const brightness = parentFill ? getBrightness(parentFill) : 0;
+    const textColor = brightness > 140 ? darkText : lightText;
+    textEl.setAttribute('fill', textColor);
+    textEl.style.fill = textColor;
+  });
+
+  // Fix HTML elements inside <foreignObject> (nodeLabel, edgeLabel)
+  svgEl.querySelectorAll('foreignObject span, foreignObject div, foreignObject p').forEach((htmlEl) => {
+    const parentFill = getParentFill(htmlEl.closest('foreignObject') || htmlEl);
+    const brightness = parentFill ? getBrightness(parentFill) : 0;
+    const textColor = brightness > 140 ? darkText : lightText;
+    htmlEl.style.color = textColor;
+  });
+}
+
 function getBaseDir(ns, notePath) {
   const nsPrefix = ns ? encodeURIComponent(ns) + '/' : '';
   if (!notePath) return `/api/files/${nsPrefix}`;
@@ -252,6 +308,9 @@ function Preview({ content, currentPath, ns, onCheckboxToggle }) {
               if (svgEl) {
                 svgEl.removeAttribute('width');
                 svgEl.style.height = 'auto';
+                // Force readable text on all elements — mermaid sets inline styles
+                // based on node fill colors, often producing invisible text on dark mode
+                fixMermaidTextColors(svgEl);
               }
               // Add expand button instead of click-anywhere
               const expandBtn = document.createElement('button');
