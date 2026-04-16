@@ -60,6 +60,7 @@ On first run, `setup.sh` copies `mdnest.conf.sample` to `mdnest.conf` and exits,
 | `POSTGRES_USER` | `mdnest` | PostgreSQL user (only when `AUTH_MODE=multi`) |
 | `POSTGRES_PASSWORD` | *(none, required when multi)* | PostgreSQL password (only when `AUTH_MODE=multi`) |
 | `SSH_KEY_PATH` | *(none)* | Path to SSH private key on the host. Mounted into the backend for git pull via sync button. Must be passphrase-free. |
+| `CADDY_DOMAIN` | *(none)* | Domain name for automatic HTTPS via Caddy. When set, adds a Caddy container and makes backend/frontend ports internal-only. Requires a DNS A record pointing to the server. |
 | `MOUNT_<name>` | *(none, at least one required)* | Maps a namespace to a host directory. See below. |
 
 ### Example Configuration
@@ -351,7 +352,34 @@ But it won't pull from the remote. You'll need to run `git pull` on the host mac
 
 By default, mdnest binds to `127.0.0.1` and is only accessible from the host machine. To access it from other devices, choose one of the following approaches.
 
-### Option 1: Tailscale Serve (Simplest)
+### Option 1: Caddy (Built-in, Simplest)
+
+mdnest includes built-in HTTPS support via [Caddy](https://caddyserver.com/). Caddy runs as a Docker container alongside the app and automatically provisions TLS certificates from Let's Encrypt.
+
+**1. Point a DNS A record** at your server's public IP:
+
+```
+notes.yourdomain.com → 203.0.113.10
+```
+
+**2. Add to `mdnest.conf`:**
+
+```ini
+CADDY_DOMAIN=notes.yourdomain.com
+FRONTEND_ORIGIN=https://notes.yourdomain.com
+```
+
+**3. Rebuild and start:**
+
+```bash
+./mdnest-server rebuild
+```
+
+Caddy listens on ports 80 and 443. HTTP requests are automatically redirected to HTTPS. The backend and frontend ports are no longer exposed to the host -- all traffic flows through Caddy.
+
+> **Note:** Ports 80 and 443 must be open in your firewall / security group. Port 80 is required for Let's Encrypt HTTP-01 challenge validation.
+
+### Option 2: Tailscale Serve
 
 If you use [Tailscale](https://tailscale.com/), expose the frontend port:
 
@@ -361,7 +389,7 @@ tailscale serve --bg 3236
 
 This gives you a `https://your-machine.tailnet-name.ts.net` URL accessible from any device on your Tailscale network. No additional configuration is needed.
 
-### Option 2: Nginx Reverse Proxy + Certbot
+### Option 3: Nginx Reverse Proxy + Certbot
 
 Install nginx and certbot on the host, then create a proxy configuration:
 
@@ -387,7 +415,7 @@ sudo certbot --nginx -d notes.yourdomain.com
 
 Update `FRONTEND_ORIGIN` in `mdnest.conf` to `https://notes.yourdomain.com`, then re-run `./mdnest-server rebuild`.
 
-### Option 3: Cloudflare Tunnel
+### Option 4: Cloudflare Tunnel
 
 ```bash
 cloudflared tunnel create mdnest
