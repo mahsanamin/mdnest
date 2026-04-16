@@ -263,7 +263,7 @@ func (h *TOTPHandler) HandleSetupTOTPWithTemp(w http.ResponseWriter, r *http.Req
 			"user_id": user.ID,
 			"role":    user.Role,
 			"iat":     time.Now().Unix(),
-			"exp":     time.Now().Add(24 * time.Hour).Unix(),
+			"exp":     time.Now().Add(30 * 24 * time.Hour).Unix(),
 		})
 		tokenString, err := token.SignedString(h.secret)
 		if err != nil {
@@ -372,7 +372,7 @@ func (h *TOTPHandler) HandleVerifyLoginTOTP(w http.ResponseWriter, r *http.Reque
 		"user_id": user.ID,
 		"role":    user.Role,
 		"iat":     time.Now().Unix(),
-		"exp":     time.Now().Add(24 * time.Hour).Unix(),
+		"exp":     time.Now().Add(30 * 24 * time.Hour).Unix(),
 	})
 
 	tokenString, err := token.SignedString(h.secret)

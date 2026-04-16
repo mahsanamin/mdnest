@@ -177,7 +177,7 @@ func (h *AuthHandler) loginSingle(w http.ResponseWriter, req loginRequest) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"sub": req.Username,
 		"iat": time.Now().Unix(),
-		"exp": time.Now().Add(24 * time.Hour).Unix(),
+		"exp": time.Now().Add(30 * 24 * time.Hour).Unix(),
 	})
 
 	tokenString, err := token.SignedString(h.secret)
@@ -262,7 +262,7 @@ func (h *AuthHandler) issueFullToken(w http.ResponseWriter, user *store.User) {
 		"user_id": user.ID,
 		"role":    user.Role,
 		"iat":     time.Now().Unix(),
-		"exp":     time.Now().Add(24 * time.Hour).Unix(),
+		"exp":     time.Now().Add(30 * 24 * time.Hour).Unix(),
 	})
 
 	tokenString, err := token.SignedString(h.secret)

@@ -1,5 +1,14 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { login, verifyTOTP, setupTOTPWithTemp, forcedPasswordChange } from '../api.js';
+
+// Auto-focus hook — works reliably across step transitions
+function useAutoFocus(deps) {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (ref.current) ref.current.focus();
+  }, deps);
+  return ref;
+}
 
 function Login({ onLogin }) {
   const [step, setStep] = useState('login'); // login, change_password, totp, totp_setup
@@ -22,6 +31,11 @@ function Login({ onLogin }) {
   // Forced password change state
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+
+  // Auto-focus refs for each step
+  const totpInputRef = useAutoFocus([step === 'totp']);
+  const setupInputRef = useAutoFocus([step === 'totp_setup', codesShown]);
+  const passwordInputRef = useAutoFocus([step === 'change_password']);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -152,11 +166,11 @@ function Login({ onLogin }) {
           <p className="login-subtitle">You must change your password before continuing.</p>
           {error && <div className="login-error">{error}</div>}
           <input
+            ref={passwordInputRef}
             type="password"
             placeholder="New password"
             value={newPassword}
             onChange={(e) => setNewPassword(e.target.value)}
-            autoFocus
           />
           <input
             type="password"
@@ -181,11 +195,11 @@ function Login({ onLogin }) {
           <p className="login-subtitle">Enter the 6-digit code from your authenticator app.</p>
           {error && <div className="login-error">{error}</div>}
           <input
+            ref={totpInputRef}
             type="text"
             placeholder="123456"
             value={totpCode}
             onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-            autoFocus
             autoComplete="one-time-code"
             inputMode="numeric"
             style={{ textAlign: 'center', fontSize: '1.5rem', letterSpacing: '0.3em' }}
@@ -240,11 +254,11 @@ function Login({ onLogin }) {
 
               <form onSubmit={handleTOTPSetupVerify}>
                 <input
+                  ref={setupInputRef}
                   type="text"
                   placeholder="123456"
                   value={setupCode}
                   onChange={(e) => setSetupCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                  autoFocus
                   autoComplete="one-time-code"
                   inputMode="numeric"
                   style={{ textAlign: 'center', fontSize: '1.5rem', letterSpacing: '0.3em' }}
