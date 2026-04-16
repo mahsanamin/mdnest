@@ -407,38 +407,51 @@ function App() {
     return els;
   }, []);
 
-  // Continuously track scroll position for the current document
+  // Save scroll position — debounced, persisted to localStorage via file prefs
+  const saveScrollDebounce = useRef(null);
+  const saveScrollPos = useCallback(() => {
+    if (!selectedNs || !currentPath) return;
+    if (saveScrollDebounce.current) clearTimeout(saveScrollDebounce.current);
+    saveScrollDebounce.current = setTimeout(() => {
+      const els = getScrollables();
+      for (const el of els) {
+        const maxScroll = el.scrollHeight - el.clientHeight;
+        if (maxScroll > 10) {
+          const pct = el.scrollTop / maxScroll;
+          scrollPositions.current[`${selectedNs}/${currentPath}`] = pct;
+          setFilePrefs(selectedNs, currentPath, { scrollPct: pct });
+          break; // save from the first scrollable element
+        }
+      }
+    }, 200);
+  }, [selectedNs, currentPath, getScrollables, setFilePrefs]);
+
+  // Attach scroll listeners — re-attach when view/editor mode changes
   useEffect(() => {
     if (!selectedNs || !currentPath) return;
-    const key = `${selectedNs}/${currentPath}`;
-
-    const onScroll = (e) => {
-      const el = e.target;
-      const maxScroll = el.scrollHeight - el.clientHeight;
-      if (maxScroll > 0) {
-        scrollPositions.current[key] = el.scrollTop / maxScroll;
-      }
-    };
-
-    // Attach scroll listeners after a short delay (let content render)
+    const handler = () => saveScrollPos();
     let timer = setTimeout(() => {
       getScrollables().forEach((el) => {
-        el.addEventListener('scroll', onScroll, { passive: true });
+        el.addEventListener('scroll', handler, { passive: true });
       });
     }, 300);
-
     return () => {
       clearTimeout(timer);
       getScrollables().forEach((el) => {
-        el.removeEventListener('scroll', onScroll);
+        el.removeEventListener('scroll', handler);
       });
     };
-  }, [selectedNs, currentPath, viewMode, editorMode, getScrollables]);
+  }, [selectedNs, currentPath, viewMode, editorMode, getScrollables, saveScrollPos]);
 
   // Restore scroll position when opening a document
   const restoreScrollPosition = useCallback((ns, path) => {
+    // Try in-memory first (fastest), then localStorage
     const key = `${ns}/${path}`;
-    const pct = scrollPositions.current[key];
+    let pct = scrollPositions.current[key];
+    if (pct == null) {
+      const prefs = getFilePrefs(ns, path);
+      pct = prefs?.scrollPct;
+    }
     if (pct == null || pct === 0) return;
 
     let attempts = 0;
@@ -458,7 +471,7 @@ function App() {
       }
     };
     setTimeout(tryRestore, 200);
-  }, [getScrollables]);
+  }, [getScrollables, getFilePrefs]);
 
   const openNoteDirect = useCallback(async (ns, path) => {
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
