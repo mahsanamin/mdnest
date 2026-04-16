@@ -2148,6 +2148,25 @@ pre:hover .code-copy-btn {
   outline-offset: -2px;
 }
 
+/* ProseMirror table cell selection (shift+click, drag across cells) */
+.live-editor-content .selectedCell {
+  background: #89b4fa33 !important;
+  position: relative;
+}
+
+.live-editor-content .selectedCell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: #89b4fa22;
+  pointer-events: none;
+}
+
+/* Allow text selection across table cells */
+.live-editor-content table {
+  user-select: text;
+}
+
 /* Selection */
 .live-editor-content ::selection {
   background: #89b4fa44;
