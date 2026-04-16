@@ -126,6 +126,8 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 - Update `CHANGELOG.md` with the new version section
 - Merge to `main`, tag as `v3.X.Y`, push with `--tags`
 - Run `/mdnest-ship` skill after code changes to update docs, website, and test instance
+- Pre-push hook (`.githooks/pre-push`) verifies builds, security, lock files, version consistency
+- New developers run `./mdnest-server dev-setup` to activate hooks
 
 ## Debugging Practice
 

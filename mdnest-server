@@ -96,6 +96,17 @@ case "$CMD" in
     compose run --rm backend ./mdnest -migrate
     echo "Migrations complete."
     ;;
+  dev-setup)
+    echo "Setting up development environment..."
+    git config core.hooksPath .githooks
+    echo "Git hooks configured (.githooks/pre-push)"
+    echo ""
+    echo "Pre-push hook verifies:"
+    echo "  - Frontend & backend compile"
+    echo "  - No high-severity vulnerabilities (npm audit + govulncheck)"
+    echo "  - Lock files in sync with package.json"
+    echo "  - Version strings consistent across backend, frontend, CLI"
+    ;;
   install-cli)
     DEST="/usr/local/bin/mdnest"
     if [ -w "$(dirname "$DEST")" ]; then
@@ -110,105 +121,295 @@ case "$CMD" in
     echo "=== Add namespace to mdnest ==="
     echo ""
 
-    # 1. Get namespace name
-    if [ -n "$1" ]; then
-      NS_NAME="$1"; shift
-    else
-      read -p "Namespace name (e.g. work, personal, docs): " NS_NAME
-    fi
-    if [ -z "$NS_NAME" ]; then
-      echo "Error: namespace name is required"
-      exit 1
-    fi
-    # Sanitize — alphanumeric, hyphens, underscores only
-    if ! echo "$NS_NAME" | grep -qE '^[a-zA-Z0-9_-]+$'; then
-      echo "Error: namespace name must be alphanumeric (hyphens and underscores OK)"
-      exit 1
-    fi
-
-    # Check if already exists
-    if grep -q "^MOUNT_${NS_NAME}=" mdnest.conf 2>/dev/null; then
-      echo "Error: MOUNT_${NS_NAME} already exists in mdnest.conf"
-      exit 1
-    fi
-
-    # 2. Get host path
-    if [ -n "$1" ]; then
-      NS_PATH="$1"; shift
-    else
-      DEFAULT_PATH="$HOME/notes/${NS_NAME}"
-      read -p "Host directory path [$DEFAULT_PATH]: " NS_PATH
-      NS_PATH="${NS_PATH:-$DEFAULT_PATH}"
-    fi
-
-    # Create directory
-    if [ ! -d "$NS_PATH" ]; then
-      mkdir -p "$NS_PATH"
-      echo "Created directory: $NS_PATH"
-    fi
-
-    # 3. Add to mdnest.conf
-    echo "MOUNT_${NS_NAME}=${NS_PATH}" >> mdnest.conf
-    echo "Added MOUNT_${NS_NAME}=${NS_PATH} to mdnest.conf"
-
-    # 4. Ask about git sync
+    # 1. Source: GitHub or local?
+    echo "Where are your notes?"
+    echo "  1) GitHub repo (clone it)"
+    echo "  2) Local directory (existing files or empty)"
     echo ""
-    read -p "Set up git sync for this namespace? (y/N): " SETUP_GIT
-    if [ "$SETUP_GIT" = "y" ] || [ "$SETUP_GIT" = "Y" ]; then
+    read -p "Choose [1/2]: " NS_SOURCE
 
-      # Initialize git repo if needed
-      if [ ! -d "$NS_PATH/.git" ]; then
-        cd "$NS_PATH"
-        git init
-        git config user.name "${GIT_AUTHOR_NAME:-mdnest}"
-        git config user.email "${GIT_AUTHOR_EMAIL:-mdnest@localhost}"
-        git add -A 2>/dev/null
-        git commit -m "Initial commit" --allow-empty 2>/dev/null
-        cd - >/dev/null
-        echo "Initialized git repo in $NS_PATH"
+    # 2. Namespace name (re-prompt on invalid input)
+    echo ""
+    while true; do
+      read -p "Namespace name (e.g. work, personal, docs): " NS_NAME
+      if [ -z "$NS_NAME" ]; then
+        echo "  Name is required. Try again."
+        continue
       fi
+      if ! echo "$NS_NAME" | grep -qE '^[a-zA-Z0-9_-]+$'; then
+        echo "  Must be alphanumeric (hyphens and underscores OK). Try again."
+        continue
+      fi
+      if grep -q "^MOUNT_${NS_NAME}=" mdnest.conf 2>/dev/null; then
+        echo "  MOUNT_${NS_NAME} already exists. Choose a different name."
+        continue
+      fi
+      break
+    done
+
+    # 3. Generate deploy key (needed for both GitHub sources and local+sync)
+    KEY_PATH="git-sync/keys/${NS_NAME}"
+    mkdir -p git-sync/keys
+
+    if [ "$NS_SOURCE" = "1" ]; then
+      ##############################################
+      # Option 1: Clone from GitHub
+      ##############################################
+      echo ""
+      read -p "GitHub SSH URL (e.g. git@github.com:user/repo.git): " REMOTE_URL
+      while [ -z "$REMOTE_URL" ]; do
+        read -p "GitHub URL is required. Try again: " REMOTE_URL
+      done
+
+      DEFAULT_PATH="$HOME/notes/${NS_NAME}"
+      read -p "Directory to clone into [$DEFAULT_PATH]: " NS_PATH
+      NS_PATH="${NS_PATH:-$DEFAULT_PATH}"
+
+      # If path exists and is not empty, use a subdirectory with the namespace name
+      if [ -d "$NS_PATH" ] && [ "$(ls -A "$NS_PATH" 2>/dev/null)" ]; then
+        NS_PATH="${NS_PATH%/}/${NS_NAME}"
+        echo "Directory not empty — will clone into $NS_PATH"
+      fi
+      mkdir -p "$(dirname "$NS_PATH")"
 
       # Generate deploy key
-      KEY_PATH="git-sync/keys/${NS_NAME}"
       if [ -f "$KEY_PATH" ]; then
+        echo ""
         echo "Deploy key already exists: $KEY_PATH"
       else
-        mkdir -p git-sync/keys
         ssh-keygen -t ed25519 -f "$KEY_PATH" -N "" -C "mdnest-${NS_NAME}"
         echo ""
-        echo "Deploy key generated: $KEY_PATH"
+        echo "Deploy key generated."
       fi
+
+      KEY_ABS_PATH="$(cd "$(dirname "$KEY_PATH")" && pwd)/$(basename "$KEY_PATH")"
+      GIT_SSH="ssh -i $KEY_ABS_PATH -o StrictHostKeyChecking=accept-new"
 
       echo ""
       echo "============================================================"
-      echo "  PUBLIC KEY — add this as a Deploy Key on your GitHub repo"
-      echo "  (Settings → Deploy Keys → Add → check 'Allow write access')"
+      echo "  Add this as a Deploy Key on your GitHub repo"
+      echo "  (Repo → Settings → Deploy Keys → Add deploy key)"
+      echo "  Check 'Allow write access'"
       echo "============================================================"
       echo ""
       cat "${KEY_PATH}.pub"
       echo ""
       echo "============================================================"
       echo ""
+      read -p "Press Enter after adding the key to GitHub... "
 
-      # Ask for remote URL
-      read -p "GitHub SSH remote URL (e.g. git@github.com:user/repo.git): " REMOTE_URL
-      if [ -n "$REMOTE_URL" ]; then
-        cd "$NS_PATH"
-        git remote remove origin 2>/dev/null
-        git remote add origin "$REMOTE_URL"
-        cd - >/dev/null
-        echo "Set remote: $REMOTE_URL"
+      # Verify SSH
+      echo -n "Verifying SSH... "
+      SSH_RESULT=$(ssh -T git@github.com -i "$KEY_ABS_PATH" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 2>&1 || true)
+      if echo "$SSH_RESULT" | grep -q "successfully authenticated"; then
+        GITHUB_USER=$(echo "$SSH_RESULT" | grep -o 'Hi [^!]*' | sed 's/Hi //')
+        echo "OK ($GITHUB_USER)"
+      else
+        echo "FAILED — $SSH_RESULT"
+        echo "Check that the deploy key is added with write access."
+        echo "You can continue and fix later with: ./mdnest-server git-check"
       fi
 
+      # Clone
+      echo -n "Cloning $REMOTE_URL... "
+      CLONE_RESULT=$(GIT_SSH_COMMAND="$GIT_SSH" git clone "$REMOTE_URL" "$NS_PATH" 2>&1) || true
+      if [ -d "$NS_PATH/.git" ]; then
+        cd "$NS_PATH"
+        git config user.name "${GIT_AUTHOR_NAME:-mdnest}"
+        git config user.email "${GIT_AUTHOR_EMAIL:-mdnest@localhost}"
+        cd - >/dev/null
+        FILE_COUNT=$(find "$NS_PATH" -name '*.md' | wc -l | tr -d ' ')
+        echo "OK ($FILE_COUNT markdown files)"
+      else
+        # Empty remote — init fresh
+        mkdir -p "$NS_PATH"
+        cd "$NS_PATH"
+        git init
+        git config user.name "${GIT_AUTHOR_NAME:-mdnest}"
+        git config user.email "${GIT_AUTHOR_EMAIL:-mdnest@localhost}"
+        git remote add origin "$REMOTE_URL"
+        git commit -m "Initial commit" --allow-empty
+        echo -n "empty repo. Pushing initial commit... "
+        PUSH_RESULT=$(GIT_SSH_COMMAND="$GIT_SSH" git push --set-upstream origin "$(git branch --show-current)" 2>&1) || true
+        if echo "$PUSH_RESULT" | grep -qi "error\|fatal"; then
+          echo "FAILED (will retry on next git-sync cycle)"
+        else
+          echo "OK"
+        fi
+        cd - >/dev/null
+      fi
+
+    else
+      ##############################################
+      # Option 2: Local directory
+      ##############################################
       echo ""
-      echo "Git sync setup complete for '${NS_NAME}'"
+      DEFAULT_PATH="$HOME/notes/${NS_NAME}"
+      read -p "Directory path [$DEFAULT_PATH]: " NS_PATH
+      NS_PATH="${NS_PATH:-$DEFAULT_PATH}"
+
+      if [ ! -d "$NS_PATH" ]; then
+        mkdir -p "$NS_PATH"
+        echo "Created: $NS_PATH"
+      fi
+
+      # Check if already a git repo
+      if [ -d "$NS_PATH/.git" ]; then
+        EXISTING_REMOTE=$(cd "$NS_PATH" && git remote get-url origin 2>/dev/null) || true
+        FILE_COUNT=$(find "$NS_PATH" -name '*.md' | wc -l | tr -d ' ')
+        BRANCH=$(cd "$NS_PATH" && git branch --show-current)
+        echo ""
+        echo "Detected existing git repo:"
+        echo "  Remote: ${EXISTING_REMOTE:-none}"
+        echo "  Branch: $BRANCH"
+        echo "  Files:  $FILE_COUNT markdown files"
+      fi
+
+      # Ask about git sync
+      echo ""
+      read -p "Enable git sync to GitHub? (y/N): " SETUP_GIT
+      if [ "$SETUP_GIT" = "y" ] || [ "$SETUP_GIT" = "Y" ]; then
+
+        # Generate deploy key
+        if [ -f "$KEY_PATH" ]; then
+          echo "Deploy key already exists: $KEY_PATH"
+        else
+          ssh-keygen -t ed25519 -f "$KEY_PATH" -N "" -C "mdnest-${NS_NAME}"
+          echo "Deploy key generated."
+        fi
+
+        KEY_ABS_PATH="$(cd "$(dirname "$KEY_PATH")" && pwd)/$(basename "$KEY_PATH")"
+        GIT_SSH="ssh -i $KEY_ABS_PATH -o StrictHostKeyChecking=accept-new"
+
+        # Get remote URL
+        echo ""
+        EXISTING_REMOTE=""
+        [ -d "$NS_PATH/.git" ] && EXISTING_REMOTE=$(cd "$NS_PATH" && git remote get-url origin 2>/dev/null) || true
+        if [ -n "$EXISTING_REMOTE" ]; then
+          read -p "GitHub SSH URL [$EXISTING_REMOTE]: " REMOTE_URL
+          REMOTE_URL="${REMOTE_URL:-$EXISTING_REMOTE}"
+        else
+          read -p "GitHub SSH URL (e.g. git@github.com:user/repo.git): " REMOTE_URL
+        fi
+
+        echo ""
+        echo "============================================================"
+        echo "  Add this as a Deploy Key on your GitHub repo"
+        echo "  (Repo → Settings → Deploy Keys → Add deploy key)"
+        echo "  Check 'Allow write access'"
+        echo "============================================================"
+        echo ""
+        cat "${KEY_PATH}.pub"
+        echo ""
+        echo "============================================================"
+        echo ""
+        read -p "Press Enter after adding the key to GitHub... "
+
+        # Verify SSH
+        echo -n "Verifying SSH... "
+        SSH_RESULT=$(ssh -T git@github.com -i "$KEY_ABS_PATH" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 2>&1 || true)
+        if echo "$SSH_RESULT" | grep -q "successfully authenticated"; then
+          GITHUB_USER=$(echo "$SSH_RESULT" | grep -o 'Hi [^!]*' | sed 's/Hi //')
+          echo "OK ($GITHUB_USER)"
+        else
+          echo "FAILED — check deploy key and try: ./mdnest-server git-check"
+        fi
+
+        # Init git if needed
+        if [ ! -d "$NS_PATH/.git" ]; then
+          cd "$NS_PATH"
+          git init
+          git config user.name "${GIT_AUTHOR_NAME:-mdnest}"
+          git config user.email "${GIT_AUTHOR_EMAIL:-mdnest@localhost}"
+          git add -A 2>/dev/null
+          git commit -m "Initial commit" --allow-empty 2>/dev/null
+          cd - >/dev/null
+          echo "Initialized git repo"
+        fi
+
+        # Set remote
+        if [ -n "$REMOTE_URL" ]; then
+          cd "$NS_PATH"
+          git remote remove origin 2>/dev/null
+          git remote add origin "$REMOTE_URL"
+          echo "Set remote: $REMOTE_URL"
+          echo -n "Pushing... "
+          PUSH_RESULT=$(GIT_SSH_COMMAND="$GIT_SSH" git push --set-upstream origin "$(git branch --show-current)" 2>&1) || true
+          if echo "$PUSH_RESULT" | grep -qi "error\|fatal"; then
+            echo "FAILED (will retry on next git-sync cycle)"
+          else
+            echo "OK"
+          fi
+          cd - >/dev/null
+        fi
+      fi
+    fi
+
+    # Add to mdnest.conf
+    echo ""
+    echo "MOUNT_${NS_NAME}=${NS_PATH}" >> mdnest.conf
+    echo "Added to mdnest.conf: MOUNT_${NS_NAME}=${NS_PATH}"
+    echo ""
+    echo "=== Done! Run ./mdnest-server rebuild ==="
+    ;;
+  remove-namespace)
+    echo "=== Remove namespace from mdnest ==="
+    echo ""
+
+    # List current namespaces
+    MOUNTS=$(grep '^MOUNT_' mdnest.conf 2>/dev/null)
+    if [ -z "$MOUNTS" ]; then
+      echo "No namespaces configured."
+      exit 0
+    fi
+
+    echo "Current namespaces:"
+    echo "$MOUNTS" | while IFS='=' read -r key path; do
+      name="${key#MOUNT_}"
+      echo "  $name → $path"
+    done
+    echo ""
+
+    read -p "Namespace to remove: " NS_NAME
+    if [ -z "$NS_NAME" ]; then
+      echo "Cancelled."
+      exit 0
+    fi
+
+    # Check it exists
+    MOUNT_LINE=$(grep "^MOUNT_${NS_NAME}=" mdnest.conf 2>/dev/null)
+    if [ -z "$MOUNT_LINE" ]; then
+      echo "Error: MOUNT_${NS_NAME} not found in mdnest.conf"
+      exit 1
+    fi
+
+    NS_PATH="${MOUNT_LINE#MOUNT_${NS_NAME}=}"
+    echo ""
+    echo "This will:"
+    echo "  - Remove MOUNT_${NS_NAME} from mdnest.conf"
+    echo "  - Remove deploy key git-sync/keys/${NS_NAME} (if exists)"
+    echo "  - NOT delete files at $NS_PATH"
+    echo ""
+    read -p "Continue? (y/N): " CONFIRM
+    if [ "$CONFIRM" != "y" ] && [ "$CONFIRM" != "Y" ]; then
+      echo "Cancelled."
+      exit 0
+    fi
+
+    # Remove from mdnest.conf
+    sed -i.bak "/^MOUNT_${NS_NAME}=/d" mdnest.conf
+    rm -f mdnest.conf.bak
+    echo "Removed MOUNT_${NS_NAME} from mdnest.conf"
+
+    # Remove deploy key
+    if [ -f "git-sync/keys/${NS_NAME}" ]; then
+      rm -f "git-sync/keys/${NS_NAME}" "git-sync/keys/${NS_NAME}.pub"
+      echo "Removed deploy key: git-sync/keys/${NS_NAME}"
     fi
 
     echo ""
-    echo "=== Next steps ==="
-    echo "  1. If git sync: add the public key to your GitHub repo as a Deploy Key (with write access)"
-    echo "  2. Run: ./mdnest-server rebuild"
-    echo "  3. The namespace will appear in the sidebar"
+    echo "Files at $NS_PATH are untouched."
+    echo "Run ./mdnest-server rebuild to apply."
     ;;
   git-check)
     echo "=== mdnest git-sync diagnostics ==="
@@ -338,7 +539,8 @@ Commands:
   start       Start all services (includes git-sync if keys are configured)
   stop        Stop all services
   restart     Stop and start all services
-  add-namespace  Add a namespace: create dir, deploy key, git remote, update config
+  add-namespace     Add a namespace: clone from GitHub or use local directory
+  remove-namespace  Remove a namespace from config (files are NOT deleted)
   rebuild     Re-run setup, rebuild changed images, and start
   rebuild --full  Force recreate ALL containers (use after major updates)
   logs        View logs (all services, or specify: backend, frontend, git-sync, postgres)
@@ -347,6 +549,7 @@ Commands:
   update      Pull latest code, rebuild, and start
   migrate     Run database migrations (multi-user mode only)
   install-cli Install the mdnest CLI system-wide (/usr/local/bin)
+  dev-setup   Configure git hooks (pre-push: build, audit, version check)
 
 Git sync starts automatically when deploy keys are found in git-sync/keys/.
 No keys = no sync. Your notes stay local unless you set it up.

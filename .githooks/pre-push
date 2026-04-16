@@ -1,0 +1,109 @@
+#!/bin/bash
+# Pre-push hook: verify builds, lock files, and security before pushing.
+# Install: git config core.hooksPath .githooks
+set -e
+
+echo "=== Pre-push checks ==="
+
+FAILED=0
+
+# 1. Frontend: verify build compiles
+echo -n "Frontend build... "
+if (cd frontend && npx vite build --mode production) > /dev/null 2>&1; then
+  echo "OK"
+else
+  echo "FAILED"
+  FAILED=1
+fi
+
+# 2. Backend: verify Go compiles
+echo -n "Backend build... "
+if (cd backend && go build -o /dev/null .) > /dev/null 2>&1; then
+  echo "OK"
+else
+  echo "FAILED"
+  FAILED=1
+fi
+
+# 3. Frontend: npm audit
+echo -n "Frontend security (npm audit)... "
+if (cd frontend && npm audit --audit-level=high) > /dev/null 2>&1; then
+  echo "OK"
+else
+  echo "VULNERABILITIES FOUND"
+  echo "  Run: cd frontend && npm audit"
+  FAILED=1
+fi
+
+# 4. MCP Server: npm audit
+echo -n "MCP Server security (npm audit)... "
+if (cd mcp-server && npm audit --audit-level=high) > /dev/null 2>&1; then
+  echo "OK"
+else
+  echo "VULNERABILITIES FOUND"
+  echo "  Run: cd mcp-server && npm audit"
+  FAILED=1
+fi
+
+# 5. Backend: govulncheck (if installed)
+# Only fails on dependency vulnerabilities — stdlib issues require Go updates
+# and are tracked separately.
+GOVULNCHECK="$(go env GOPATH 2>/dev/null)/bin/govulncheck"
+if [ -x "$GOVULNCHECK" ]; then
+  echo -n "Backend security (govulncheck)... "
+  VULN_OUT=$(cd backend && "$GOVULNCHECK" ./... 2>&1) || true
+  if echo "$VULN_OUT" | grep -q "affected by 0 vulnerabilities"; then
+    echo "OK"
+  elif echo "$VULN_OUT" | grep -q "Standard library"; then
+    # Only stdlib — warn but don't block
+    echo "WARN (stdlib only — update Go to fix)"
+  else
+    echo "VULNERABILITIES FOUND"
+    echo "  Run: cd backend && govulncheck ./..."
+    FAILED=1
+  fi
+else
+  echo "Backend security: skipped (govulncheck not installed)"
+fi
+
+# 6. Lock file integrity: package-lock.json must be in sync with package.json
+echo -n "Frontend lock file... "
+if (cd frontend && npm ls) > /dev/null 2>&1; then
+  echo "OK"
+else
+  echo "OUT OF SYNC"
+  echo "  Run: cd frontend && npm install"
+  FAILED=1
+fi
+
+echo -n "MCP Server lock file... "
+if (cd mcp-server && npm ls) > /dev/null 2>&1; then
+  echo "OK"
+else
+  echo "OUT OF SYNC"
+  echo "  Run: cd mcp-server && npm install"
+  FAILED=1
+fi
+
+# 7. Version consistency: all three version strings must match
+BE_VER=$(grep -o '"version":.*"[0-9.]*"' backend/handlers/config.go | grep -o '[0-9.]*')
+FE_VER=$(grep -o '"version": "[0-9.]*"' frontend/package.json | grep -o '[0-9.]*')
+CLI_VER=$(grep -o 'MDNEST_CLI_VERSION="[0-9.]*"' mdnest | grep -o '[0-9.]*')
+
+echo -n "Version consistency... "
+if [ "$BE_VER" = "$FE_VER" ] && [ "$FE_VER" = "$CLI_VER" ]; then
+  echo "OK ($BE_VER)"
+else
+  echo "MISMATCH"
+  echo "  backend: $BE_VER, frontend: $FE_VER, CLI: $CLI_VER"
+  FAILED=1
+fi
+
+echo ""
+if [ "$FAILED" -eq 1 ]; then
+  echo "=== Pre-push checks FAILED — push blocked ==="
+  echo "Fix the issues above and try again."
+  exit 1
+fi
+
+echo "=== All checks passed ==="
