@@ -508,18 +508,6 @@ function App() {
       etagRef.current = etag;
       setConflictBanner(null);
       setSidebarVisible(false);
-      // Restore per-file view/editor mode preferences
-      const prefs = getFilePrefs(selectedNs, path);
-      if (prefs) {
-        if (prefs.viewMode) {
-          setViewMode(prefs.viewMode);
-          if (prefs.viewMode === 'editor') {
-            setEditorMode(prefs.editorMode || 'live');
-          } else {
-            setEditorMode('basic');
-          }
-        }
-      }
       restoreScrollPosition(selectedNs, path);
     } catch (e) {
       if (e.name === 'PermissionError') {
@@ -862,15 +850,12 @@ function App() {
           onViewModeChange={(mode) => {
             setViewMode(mode);
             localStorage.setItem('mdnest_view_mode', mode);
+            // Restore editor mode from user preference when switching to editor-only
             if (mode === 'editor') {
-              const prefs = getFilePrefs(selectedNs, currentPath);
-              const savedEditor = prefs?.editorMode || 'live';
-              setEditorMode(savedEditor);
-            } else {
-              setEditorMode('basic');
+              const saved = localStorage.getItem('mdnest_editor_mode') || 'live';
+              setEditorMode(saved);
             }
             if (selectedNs && currentPath) {
-              setFilePrefs(selectedNs, currentPath, { viewMode: mode });
               restoreScrollPosition(selectedNs, currentPath);
             }
           }}
@@ -879,7 +864,6 @@ function App() {
             setEditorMode(mode);
             localStorage.setItem('mdnest_editor_mode', mode);
             if (selectedNs && currentPath) {
-              setFilePrefs(selectedNs, currentPath, { editorMode: mode });
               restoreScrollPosition(selectedNs, currentPath);
             }
           }}
