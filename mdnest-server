@@ -217,14 +217,15 @@ case "$CMD" in
         cd "$NS_PATH"
         git config user.name "${GIT_AUTHOR_NAME:-mdnest}"
         git config user.email "${GIT_AUTHOR_EMAIL:-mdnest@localhost}"
+        CLONED_BRANCH=$(git branch --show-current)
         cd - >/dev/null
         FILE_COUNT=$(find "$NS_PATH" -name '*.md' | wc -l | tr -d ' ')
-        echo "OK ($FILE_COUNT markdown files)"
+        echo "OK ($FILE_COUNT markdown files, branch: $CLONED_BRANCH)"
       else
         # Empty remote — init fresh
         mkdir -p "$NS_PATH"
         cd "$NS_PATH"
-        git init
+        git init -b main
         git config user.name "${GIT_AUTHOR_NAME:-mdnest}"
         git config user.email "${GIT_AUTHOR_EMAIL:-mdnest@localhost}"
         git remote add origin "$REMOTE_URL"
@@ -318,7 +319,7 @@ case "$CMD" in
         # Init git if needed
         if [ ! -d "$NS_PATH/.git" ]; then
           cd "$NS_PATH"
-          git init
+          git init -b main
           git config user.name "${GIT_AUTHOR_NAME:-mdnest}"
           git config user.email "${GIT_AUTHOR_EMAIL:-mdnest@localhost}"
           git add -A 2>/dev/null
