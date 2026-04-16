@@ -112,9 +112,10 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
     return () => { cancelled = true; };
   }, [source, mode]);
 
-  // Fix text colors after SVG renders — shared function from mermaid-config.js
-  // Run multiple times: immediately, after RAF, and after a delay to catch
-  // late-applying mermaid <style> blocks that override our colors.
+  // Fix text colors after SVG renders.
+  // Instead of modifying mermaid's <style> (too aggressive — breaks backgrounds),
+  // inject our own <style> at the END of the SVG that overrides text colors only.
+  // Also run fixMermaidTextColors for inline style attributes.
   useEffect(() => {
     if (!svgHtml) return;
     const fix = () => {
@@ -123,21 +124,29 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
       const svgEl = container.querySelector('svg');
       if (!svgEl) return;
 
-      // Strip mermaid's inline <style> color rules that conflict with our fixes
-      svgEl.querySelectorAll('style').forEach((styleEl) => {
-        // Remove fill/color rules for text elements from mermaid's embedded CSS
-        styleEl.textContent = styleEl.textContent
-          .replace(/\.actor\s*\{[^}]*fill:[^}]*\}/g, (m) => m.replace(/fill:[^;]+;?/g, ''))
-          .replace(/\.messageText\s*\{[^}]*fill:[^}]*\}/g, (m) => m.replace(/fill:[^;]+;?/g, ''))
-          .replace(/text\s*\{[^}]*fill:[^}]*\}/g, (m) => m.replace(/fill:[^;]+;?/g, ''));
-      });
+      // Inject override CSS once (check for existing)
+      if (!svgEl.querySelector('#mdnest-text-override')) {
+        const style = document.createElementNS('http://www.w3.org/2000/svg', 'style');
+        style.id = 'mdnest-text-override';
+        style.textContent = `
+          text.actor, .actor text { fill: #cdd6f4 !important; }
+          .messageText { fill: #cdd6f4 !important; }
+          .loopText, .loopText > tspan { fill: #cdd6f4 !important; }
+          .noteText > tspan { fill: #cdd6f4 !important; }
+          .labelText > tspan { fill: #cdd6f4 !important; }
+          .nodeLabel { color: #cdd6f4 !important; }
+          .edgeLabel { color: #cdd6f4 !important; }
+          .label text { fill: #cdd6f4 !important; }
+        `;
+        svgEl.appendChild(style);
+      }
 
+      // Also fix inline style attributes on individual elements
       fixMermaidTextColors(svgEl);
     };
     requestAnimationFrame(fix);
-    const t1 = setTimeout(fix, 100);
-    const t2 = setTimeout(fix, 300);
-    return () => { clearTimeout(t1); clearTimeout(t2); };
+    const t1 = setTimeout(fix, 150);
+    return () => { clearTimeout(t1); };
   }, [svgHtml]);
 
   // Make any mermaid text clickable — diagram-type agnostic.
