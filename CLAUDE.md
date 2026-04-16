@@ -22,6 +22,7 @@ backend/
     notes.go                 # GET/POST/PUT/PATCH/DELETE /api/note?ns=&path=
     search.go                # GET /api/search?ns=&q= (concurrent search with caching)
     tokens.go                # GET/POST/DELETE /api/auth/tokens (API token management)
+    totp.go                  # 2FA: TOTP setup, verify, disable, admin reset
     upload.go                # POST /api/folder, /api/upload, GET /api/files/
     move.go                  # POST /api/move?ns=&from=&to=
     path.go                  # SafePath(), RequireNamespace() — shared utils

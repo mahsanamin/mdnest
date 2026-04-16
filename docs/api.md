@@ -96,6 +96,46 @@ curl -X POST "http://localhost:8286/api/auth/change-password" \
 
 ---
 
+### Two-Factor Authentication (2FA)
+
+#### POST /api/auth/totp/setup
+Generate TOTP secret and QR code. Requires authentication.
+
+**Response:** `{ secret, qrCode, url, recoveryCodes }`
+
+#### POST /api/auth/totp/verify-setup
+Verify the first TOTP code and enable 2FA. Requires authentication.
+
+**Body:** `{ "code": "123456" }`
+
+#### POST /api/auth/totp/disable
+Disable 2FA. Requires password confirmation.
+
+**Body:** `{ "password": "current_password" }`
+
+#### POST /api/auth/verify-totp
+Verify TOTP code during login (uses temp token, no auth required).
+
+**Body:** `{ "tempToken": "...", "code": "123456" }`
+**Response:** `{ "token": "jwt..." }`
+
+#### POST /api/auth/totp/setup-with-temp
+Forced 2FA setup during login. Without `code`: returns QR + secret. With `code`: verifies and returns JWT.
+
+**Body:** `{ "tempToken": "...", "code": "" }` or `{ "tempToken": "...", "code": "123456" }`
+
+#### POST /api/auth/change-password-forced
+Change password during first login (uses temp token, no auth required).
+
+**Body:** `{ "tempToken": "...", "newPassword": "new_pass" }`
+
+#### POST /api/admin/reset-2fa
+Admin: reset a user's 2FA. Requires admin role.
+
+**Body:** `{ "userId": 5 }`
+
+---
+
 ### API Tokens: /api/auth/tokens
 
 Manage long-lived API tokens for CLI and MCP access. Tokens are prefixed with `mdnest_` and stored as SHA-256 hashes.

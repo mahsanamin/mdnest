@@ -9,7 +9,7 @@ Deploy on a spare machine, a home server, or a cheap VPS. Use it as a personal k
 - **Live rich editor.** Obsidian-style editing where markdown renders inline as you type. Bold shows bold, headings render as headings, tables are click-to-edit. Switch between Live and Basic (plain textarea) modes.
 - **Interactive diagrams.** Mermaid diagrams render in-place with click-to-edit labels. Edit node text directly on the diagram without touching code.
 - **Host once, access everywhere.** Set up on any always-on machine and reach it securely from all your devices via Tailscale -- phone, laptop, tablet, any browser.
-- **Personal or team.** Run in single-user mode (default, no database) for a private knowledge base, or enable multi-user mode with roles, permissions, and namespace-level access control.
+- **Personal or team.** Run in single-user mode (default, no database) for a private knowledge base, or enable multi-user mode with roles, permissions, namespace-level access control, and two-factor authentication.
 - **AI-native.** Built-in MCP server lets Claude, Cursor, and other AI agents read, write, search, and organize your notes. Your knowledge base becomes context for your AI workflows.
 - **API-first.** Full REST API + CLI with multi-server support. Build scripts, automations, or integrations on top of your notes.
 - **Plain files, no lock-in.** Notes are `.md` files in directories on disk. No proprietary format. `cat`, `grep`, `git` -- your notes work with every tool you already use.
