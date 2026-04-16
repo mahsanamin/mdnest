@@ -73,6 +73,12 @@ func main() {
 	secretsDir := env("SECRETS_DIR", filepath.Join(absNotesDir, ".secrets"))
 	multiMode := authMode == "multi"
 
+	// 2FA requirement (optional, multi mode only)
+	require2FA := multiMode && env("REQUIRE_2FA", "false") == "true"
+	if require2FA {
+		log.Println("2FA is REQUIRED for all users")
+	}
+
 	// Create auth handler based on mode
 	var authHandler *handlers.AuthHandler
 	var userStore store.UserStore
@@ -94,7 +100,7 @@ func main() {
 			log.Printf("seeded admin user: %s (%s)", user, email)
 		}
 
-		authHandler = handlers.NewMultiAuthHandler(jwtSecret, userStore)
+		authHandler = handlers.NewMultiAuthHandler(jwtSecret, userStore, require2FA)
 	} else {
 		authHandler = handlers.NewAuthHandler(user, password, jwtSecret, secretsDir)
 	}
@@ -146,11 +152,24 @@ func main() {
 	mux := http.NewServeMux()
 
 	serverAlias := env("SERVER_ALIAS", "")
-	configHandler := handlers.NewConfigHandler(authMode, enableCollab, serverAlias)
+	configHandler := handlers.NewConfigHandler(authMode, enableCollab, serverAlias, require2FA)
 	mux.HandleFunc("/api/config", configHandler.HandleConfig)
 	mux.HandleFunc("/api/auth/login", authHandler.Login)
 	mux.Handle("/api/auth/change-password", authMiddleware.Wrap(http.HandlerFunc(authHandler.ChangePassword)))
+	mux.HandleFunc("/api/auth/change-password-forced", authHandler.HandleForcedPasswordChange)
 	mux.Handle("/api/auth/tokens", authMiddleware.Wrap(http.HandlerFunc(tokenHandler.HandleTokens)))
+
+	// TOTP / 2FA routes (multi mode only)
+	var totpHandler *handlers.TOTPHandler
+	if multiMode {
+		totpIssuer := env("TOTP_ISSUER", "mdnest")
+		totpHandler = handlers.NewTOTPHandler(jwtSecret, userStore, totpIssuer)
+		mux.Handle("/api/auth/totp/setup", authMiddleware.Wrap(http.HandlerFunc(totpHandler.HandleSetupTOTP)))
+		mux.Handle("/api/auth/totp/verify-setup", authMiddleware.Wrap(http.HandlerFunc(totpHandler.HandleVerifySetup)))
+		mux.Handle("/api/auth/totp/disable", authMiddleware.Wrap(http.HandlerFunc(totpHandler.HandleDisableTOTP)))
+		mux.HandleFunc("/api/auth/verify-totp", totpHandler.HandleVerifyLoginTOTP) // no auth — uses temp token
+		mux.HandleFunc("/api/auth/totp/setup-with-temp", totpHandler.HandleSetupTOTPWithTemp) // no auth — uses temp token for forced setup
+	}
 
 	// Apply permission checks in multi mode, passthrough in single mode
 	if perms != nil {
@@ -182,6 +201,11 @@ func main() {
 		mux.Handle("/api/admin/users", authMiddleware.Wrap(middleware.RequireAdmin(http.HandlerFunc(adminHandler.HandleUsers))))
 		mux.Handle("/api/admin/grants", authMiddleware.Wrap(middleware.RequireAdmin(http.HandlerFunc(adminHandler.HandleGrants))))
 		mux.Handle("/api/me", authMiddleware.Wrap(http.HandlerFunc(meHandler.HandleMe)))
+
+		// Admin: reset 2FA
+		if totpHandler != nil {
+			mux.Handle("/api/admin/reset-2fa", authMiddleware.Wrap(middleware.RequireAdmin(http.HandlerFunc(totpHandler.HandleAdminResetTOTP))))
+		}
 	}
 
 	// Git sync endpoints (admin-only in multi mode, always allowed in single)

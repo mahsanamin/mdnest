@@ -209,6 +209,112 @@ func (h *TOTPHandler) HandleDisableTOTP(w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
+// --- Forced TOTP Setup (during login, with temp token) ---
+
+// HandleSetupTOTPWithTemp generates TOTP for a user during forced setup (no full auth).
+// POST /api/auth/totp/setup-with-temp { tempToken }
+func (h *TOTPHandler) HandleSetupTOTPWithTemp(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		TempToken string `json:"tempToken"`
+		Code      string `json:"code"` // empty for setup, filled for verify
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		return
+	}
+
+	claims, err := parseTempToken(req.TempToken, h.secret)
+	if err != nil {
+		http.Error(w, `{"error":"invalid or expired token"}`, http.StatusUnauthorized)
+		return
+	}
+
+	userID := int(claims["user_id"].(float64))
+	user, err := h.userStore.GetUserByID(userID)
+	if err != nil || user == nil {
+		http.Error(w, `{"error":"user not found"}`, http.StatusNotFound)
+		return
+	}
+
+	// If code is provided, verify and enable 2FA
+	if req.Code != "" {
+		if user.TOTPSecret == nil || *user.TOTPSecret == "" {
+			http.Error(w, `{"error":"TOTP not set up yet"}`, http.StatusBadRequest)
+			return
+		}
+		if !totp.Validate(req.Code, *user.TOTPSecret) {
+			http.Error(w, `{"error":"invalid code"}`, http.StatusUnauthorized)
+			return
+		}
+		if err := h.userStore.EnableTOTP(user.ID); err != nil {
+			http.Error(w, `{"error":"failed to enable 2FA"}`, http.StatusInternalServerError)
+			return
+		}
+		log.Printf("2FA enabled for user: %s (id: %d) via forced setup", user.Username, user.ID)
+
+		// Issue full JWT
+		token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+			"sub":     user.Username,
+			"user_id": user.ID,
+			"role":    user.Role,
+			"iat":     time.Now().Unix(),
+			"exp":     time.Now().Add(24 * time.Hour).Unix(),
+		})
+		tokenString, err := token.SignedString(h.secret)
+		if err != nil {
+			http.Error(w, `{"error":"failed to generate token"}`, http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"token": tokenString})
+		return
+	}
+
+	// No code — generate TOTP secret and QR
+	key, err := totp.Generate(totp.GenerateOpts{
+		Issuer:      h.issuer,
+		AccountName: user.Email,
+	})
+	if err != nil {
+		http.Error(w, `{"error":"failed to generate TOTP"}`, http.StatusInternalServerError)
+		return
+	}
+
+	img, err := key.Image(256, 256)
+	if err != nil {
+		http.Error(w, `{"error":"failed to generate QR code"}`, http.StatusInternalServerError)
+		return
+	}
+	var pngBuf bytes.Buffer
+	if err := png.Encode(&pngBuf, img); err != nil {
+		http.Error(w, `{"error":"failed to encode QR"}`, http.StatusInternalServerError)
+		return
+	}
+	qrBase64 := "data:image/png;base64," + base64.StdEncoding.EncodeToString(pngBuf.Bytes())
+
+	recoveryCodes := generateRecoveryCodes(10)
+	hashedCodes := hashRecoveryCodes(recoveryCodes)
+	codesJSON, _ := json.Marshal(hashedCodes)
+
+	if err := h.userStore.SetTOTP(user.ID, key.Secret(), string(codesJSON)); err != nil {
+		http.Error(w, `{"error":"failed to save TOTP"}`, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"secret":        key.Secret(),
+		"qrCode":        qrBase64,
+		"url":           key.URL(),
+		"recoveryCodes": recoveryCodes,
+	})
+}
+
 // --- Login TOTP Verification ---
 
 // HandleVerifyLoginTOTP verifies TOTP during the login flow.

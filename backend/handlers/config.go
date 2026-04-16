@@ -10,11 +10,12 @@ type ConfigHandler struct {
 	authMode    string
 	liveCollab  bool
 	serverAlias string
+	require2FA  bool
 }
 
 // NewConfigHandler creates a new config handler.
-func NewConfigHandler(authMode string, liveCollab bool, serverAlias string) *ConfigHandler {
-	return &ConfigHandler{authMode: authMode, liveCollab: liveCollab, serverAlias: serverAlias}
+func NewConfigHandler(authMode string, liveCollab bool, serverAlias string, require2FA bool) *ConfigHandler {
+	return &ConfigHandler{authMode: authMode, liveCollab: liveCollab, serverAlias: serverAlias, require2FA: require2FA}
 }
 
 // HandleConfig handles GET /api/config (unauthenticated).
@@ -26,6 +27,7 @@ func (h *ConfigHandler) HandleConfig(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]interface{}{
 		"authMode":   h.authMode,
 		"liveCollab": h.liveCollab,
+		"require2FA": h.require2FA,
 		"version":    "3.2.0",
 	}
 	if h.serverAlias != "" {

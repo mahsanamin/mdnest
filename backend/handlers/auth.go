@@ -35,7 +35,8 @@ type AuthHandler struct {
 	secret []byte
 
 	// Multi mode fields (nil in single mode)
-	userStore store.UserStore
+	userStore  store.UserStore
+	require2FA bool
 }
 
 type loginRequest struct {
@@ -75,10 +76,11 @@ func NewAuthHandler(username, password, jwtSecret, secretsDir string) *AuthHandl
 }
 
 // NewMultiAuthHandler creates a new auth handler for multi-user mode.
-func NewMultiAuthHandler(jwtSecret string, userStore store.UserStore) *AuthHandler {
+func NewMultiAuthHandler(jwtSecret string, userStore store.UserStore, require2FA bool) *AuthHandler {
 	return &AuthHandler{
-		secret:    []byte(jwtSecret),
-		userStore: userStore,
+		secret:     []byte(jwtSecret),
+		userStore:  userStore,
+		require2FA: require2FA,
 	}
 }
 
@@ -220,7 +222,7 @@ func (h *AuthHandler) loginMulti(w http.ResponseWriter, req loginRequest) {
 		return
 	}
 
-	// Check if 2FA is enabled
+	// Check if 2FA is enabled — verify code
 	if user.TOTPEnabled {
 		tempToken, err := CreateTempToken(user, h.secret, "totp")
 		if err != nil {
@@ -230,6 +232,21 @@ func (h *AuthHandler) loginMulti(w http.ResponseWriter, req loginRequest) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(loginResponse{
 			Status:    "totp_required",
+			TempToken: tempToken,
+		})
+		return
+	}
+
+	// Check if 2FA is required by admin but user hasn't set it up yet
+	if h.require2FA && !user.TOTPEnabled {
+		tempToken, err := CreateTempToken(user, h.secret, "totp_setup")
+		if err != nil {
+			http.Error(w, `{"error":"failed to generate token"}`, http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(loginResponse{
+			Status:    "totp_setup_required",
 			TempToken: tempToken,
 		})
 		return
