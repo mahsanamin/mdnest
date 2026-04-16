@@ -167,18 +167,6 @@ case "$CMD" in
     read -p "Set up git sync for this namespace? (y/N): " SETUP_GIT
     if [ "$SETUP_GIT" = "y" ] || [ "$SETUP_GIT" = "Y" ]; then
 
-      # Initialize git repo if needed
-      if [ ! -d "$NS_PATH/.git" ]; then
-        cd "$NS_PATH"
-        git init
-        git config user.name "${GIT_AUTHOR_NAME:-mdnest}"
-        git config user.email "${GIT_AUTHOR_EMAIL:-mdnest@localhost}"
-        git add -A 2>/dev/null
-        git commit -m "Initial commit" --allow-empty 2>/dev/null
-        cd - >/dev/null
-        echo "Initialized git repo in $NS_PATH"
-      fi
-
       # Generate deploy key
       KEY_PATH="git-sync/keys/${NS_NAME}"
       if [ -f "$KEY_PATH" ]; then
@@ -186,20 +174,15 @@ case "$CMD" in
       else
         mkdir -p git-sync/keys
         ssh-keygen -t ed25519 -f "$KEY_PATH" -N "" -C "mdnest-${NS_NAME}"
-        echo ""
         echo "Deploy key generated: $KEY_PATH"
       fi
 
-      # Ask for remote URL first
+      KEY_ABS_PATH="$(cd "$(dirname "$KEY_PATH")" && pwd)/$(basename "$KEY_PATH")"
+      GIT_SSH="ssh -i $KEY_ABS_PATH -o StrictHostKeyChecking=accept-new"
+
+      # Ask for remote URL
       echo ""
       read -p "GitHub SSH remote URL (e.g. git@github.com:user/repo.git): " REMOTE_URL
-      if [ -n "$REMOTE_URL" ]; then
-        cd "$NS_PATH"
-        git remote remove origin 2>/dev/null
-        git remote add origin "$REMOTE_URL"
-        cd - >/dev/null
-        echo "Set remote: $REMOTE_URL"
-      fi
 
       echo ""
       echo "============================================================"
@@ -214,32 +197,88 @@ case "$CMD" in
       read -p "Press Enter after adding the key to GitHub... "
 
       # Verify SSH connection
-      echo -n "Verifying SSH connection to GitHub... "
-      SSH_RESULT=$(ssh -T git@github.com -i "$KEY_PATH" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 2>&1 || true)
+      echo -n "Verifying SSH connection... "
+      SSH_RESULT=$(ssh -T git@github.com -i "$KEY_ABS_PATH" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 2>&1 || true)
       if echo "$SSH_RESULT" | grep -q "successfully authenticated"; then
         GITHUB_USER=$(echo "$SSH_RESULT" | grep -o 'Hi [^!]*' | sed 's/Hi //')
         echo "OK (authenticated as $GITHUB_USER)"
-
-        # Try initial push
-        echo -n "Pushing to remote... "
-        PUSH_RESULT=$(cd "$NS_PATH" && GIT_SSH_COMMAND="ssh -i $(pwd)/../git-sync/keys/${NS_NAME} -o StrictHostKeyChecking=accept-new" git push --set-upstream origin "$(git branch --show-current)" 2>&1) || true
-        if echo "$PUSH_RESULT" | grep -qi "error\|fatal"; then
-          echo "FAILED (will retry on next git-sync cycle)"
-          echo "  $PUSH_RESULT"
-        else
-          echo "OK"
-        fi
-        cd - >/dev/null 2>/dev/null
       else
         echo "FAILED"
         echo "  $SSH_RESULT"
         echo ""
-        echo "  Check that:"
-        echo "  1. The deploy key is added to the correct GitHub repo"
-        echo "  2. 'Allow write access' is checked"
-        echo "  3. The repo URL is correct: $REMOTE_URL"
-        echo ""
+        echo "  Check that the deploy key is added with write access."
         echo "  You can retry later with: ./mdnest-server git-check"
+        echo ""
+        echo "  Continuing setup without verification..."
+      fi
+
+      # Determine strategy: clone (empty dir + remote has content) or init + push
+      DIR_EMPTY=true
+      if [ "$(ls -A "$NS_PATH" 2>/dev/null)" ]; then
+        DIR_EMPTY=false
+      fi
+
+      if [ "$DIR_EMPTY" = true ] && [ -n "$REMOTE_URL" ]; then
+        # Empty directory — try to clone from remote
+        echo ""
+        echo -n "Cloning from $REMOTE_URL... "
+        CLONE_RESULT=$(GIT_SSH_COMMAND="$GIT_SSH" git clone "$REMOTE_URL" "$NS_PATH.tmp" 2>&1) || true
+        if [ -d "$NS_PATH.tmp/.git" ]; then
+          # Clone succeeded — move contents into the namespace directory
+          rm -rf "$NS_PATH"
+          mv "$NS_PATH.tmp" "$NS_PATH"
+          cd "$NS_PATH"
+          git config user.name "${GIT_AUTHOR_NAME:-mdnest}"
+          git config user.email "${GIT_AUTHOR_EMAIL:-mdnest@localhost}"
+          cd - >/dev/null
+          FILE_COUNT=$(find "$NS_PATH" -name '*.md' | wc -l | tr -d ' ')
+          echo "OK ($FILE_COUNT markdown files)"
+        else
+          # Clone failed (empty remote or error) — init fresh
+          rm -rf "$NS_PATH.tmp"
+          echo "empty repo or failed — initializing fresh"
+          cd "$NS_PATH"
+          git init
+          git config user.name "${GIT_AUTHOR_NAME:-mdnest}"
+          git config user.email "${GIT_AUTHOR_EMAIL:-mdnest@localhost}"
+          git remote add origin "$REMOTE_URL"
+          git commit -m "Initial commit" --allow-empty
+          echo -n "Pushing initial commit... "
+          PUSH_RESULT=$(GIT_SSH_COMMAND="$GIT_SSH" git push --set-upstream origin "$(git branch --show-current)" 2>&1) || true
+          if echo "$PUSH_RESULT" | grep -qi "error\|fatal"; then
+            echo "FAILED (will retry on next git-sync cycle)"
+          else
+            echo "OK"
+          fi
+          cd - >/dev/null
+        fi
+      else
+        # Directory has content — init repo and push
+        if [ ! -d "$NS_PATH/.git" ]; then
+          cd "$NS_PATH"
+          git init
+          git config user.name "${GIT_AUTHOR_NAME:-mdnest}"
+          git config user.email "${GIT_AUTHOR_EMAIL:-mdnest@localhost}"
+          git add -A 2>/dev/null
+          git commit -m "Initial commit" --allow-empty 2>/dev/null
+          cd - >/dev/null
+          echo "Initialized git repo in $NS_PATH"
+        fi
+
+        if [ -n "$REMOTE_URL" ]; then
+          cd "$NS_PATH"
+          git remote remove origin 2>/dev/null
+          git remote add origin "$REMOTE_URL"
+          echo "Set remote: $REMOTE_URL"
+          echo -n "Pushing to remote... "
+          PUSH_RESULT=$(GIT_SSH_COMMAND="$GIT_SSH" git push --set-upstream origin "$(git branch --show-current)" 2>&1) || true
+          if echo "$PUSH_RESULT" | grep -qi "error\|fatal"; then
+            echo "FAILED (will retry on next git-sync cycle)"
+          else
+            echo "OK"
+          fi
+          cd - >/dev/null
+        fi
       fi
 
       echo ""
