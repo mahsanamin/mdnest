@@ -180,9 +180,18 @@ case "$CMD" in
       KEY_ABS_PATH="$(cd "$(dirname "$KEY_PATH")" && pwd)/$(basename "$KEY_PATH")"
       GIT_SSH="ssh -i $KEY_ABS_PATH -o StrictHostKeyChecking=accept-new"
 
-      # Ask for remote URL
+      # Ask for remote URL — show existing if present
       echo ""
-      read -p "GitHub SSH remote URL (e.g. git@github.com:user/repo.git): " REMOTE_URL
+      EXISTING_REMOTE=""
+      if [ -d "$NS_PATH/.git" ]; then
+        EXISTING_REMOTE=$(cd "$NS_PATH" && git remote get-url origin 2>/dev/null) || true
+      fi
+      if [ -n "$EXISTING_REMOTE" ]; then
+        read -p "GitHub SSH remote URL [$EXISTING_REMOTE]: " REMOTE_URL
+        REMOTE_URL="${REMOTE_URL:-$EXISTING_REMOTE}"
+      else
+        read -p "GitHub SSH remote URL (e.g. git@github.com:user/repo.git): " REMOTE_URL
+      fi
 
       echo ""
       echo "============================================================"
@@ -212,19 +221,50 @@ case "$CMD" in
         echo "  Continuing setup without verification..."
       fi
 
-      # Determine strategy: clone (empty dir + remote has content) or init + push
+      # Determine scenario and act accordingly
+      HAS_GIT=false
+      HAS_REMOTE=false
       DIR_EMPTY=true
-      if [ "$(ls -A "$NS_PATH" 2>/dev/null)" ]; then
-        DIR_EMPTY=false
+
+      [ -d "$NS_PATH/.git" ] && HAS_GIT=true
+      [ "$(ls -A "$NS_PATH" 2>/dev/null)" ] && DIR_EMPTY=false
+      if [ "$HAS_GIT" = true ]; then
+        EXISTING_REMOTE=$(cd "$NS_PATH" && git remote get-url origin 2>/dev/null) || true
+        [ -n "$EXISTING_REMOTE" ] && HAS_REMOTE=true
       fi
 
-      if [ "$DIR_EMPTY" = true ] && [ -n "$REMOTE_URL" ]; then
-        # Empty directory — try to clone from remote
-        echo ""
+      echo ""
+
+      # Scenario A: Existing git repo with remote — just wire up the deploy key
+      if [ "$HAS_GIT" = true ] && [ "$HAS_REMOTE" = true ]; then
+        EXISTING_REMOTE=$(cd "$NS_PATH" && git remote get-url origin)
+        FILE_COUNT=$(find "$NS_PATH" -name '*.md' | wc -l | tr -d ' ')
+        BRANCH=$(cd "$NS_PATH" && git branch --show-current)
+        echo "Detected existing git repo:"
+        echo "  Remote: $EXISTING_REMOTE"
+        echo "  Branch: $BRANCH"
+        echo "  Files:  $FILE_COUNT markdown files"
+        # Update remote if user provided a different one
+        if [ -n "$REMOTE_URL" ] && [ "$REMOTE_URL" != "$EXISTING_REMOTE" ]; then
+          cd "$NS_PATH"
+          git remote set-url origin "$REMOTE_URL"
+          cd - >/dev/null
+          echo "  Updated remote → $REMOTE_URL"
+        fi
+        # Pull latest
+        echo -n "Pulling latest... "
+        PULL_RESULT=$(cd "$NS_PATH" && GIT_SSH_COMMAND="$GIT_SSH" git pull --ff-only 2>&1) || true
+        if echo "$PULL_RESULT" | grep -qi "error\|fatal\|conflict"; then
+          echo "skipped (will sync on next cycle)"
+        else
+          echo "OK"
+        fi
+
+      # Scenario B: Empty directory + remote URL — clone
+      elif [ "$DIR_EMPTY" = true ] && [ -n "$REMOTE_URL" ]; then
         echo -n "Cloning from $REMOTE_URL... "
         CLONE_RESULT=$(GIT_SSH_COMMAND="$GIT_SSH" git clone "$REMOTE_URL" "$NS_PATH.tmp" 2>&1) || true
         if [ -d "$NS_PATH.tmp/.git" ]; then
-          # Clone succeeded — move contents into the namespace directory
           rm -rf "$NS_PATH"
           mv "$NS_PATH.tmp" "$NS_PATH"
           cd "$NS_PATH"
@@ -234,9 +274,8 @@ case "$CMD" in
           FILE_COUNT=$(find "$NS_PATH" -name '*.md' | wc -l | tr -d ' ')
           echo "OK ($FILE_COUNT markdown files)"
         else
-          # Clone failed (empty remote or error) — init fresh
           rm -rf "$NS_PATH.tmp"
-          echo "empty repo or failed — initializing fresh"
+          echo "empty repo — initializing fresh"
           cd "$NS_PATH"
           git init
           git config user.name "${GIT_AUTHOR_NAME:-mdnest}"
@@ -252,17 +291,19 @@ case "$CMD" in
           fi
           cd - >/dev/null
         fi
+
+      # Scenario C: Directory with files but no git — init + push
       else
-        # Directory has content — init repo and push
         if [ ! -d "$NS_PATH/.git" ]; then
           cd "$NS_PATH"
           git init
           git config user.name "${GIT_AUTHOR_NAME:-mdnest}"
           git config user.email "${GIT_AUTHOR_EMAIL:-mdnest@localhost}"
           git add -A 2>/dev/null
+          FILE_COUNT=$(git diff --cached --stat | tail -1 | grep -o '[0-9]* file' | grep -o '[0-9]*' || echo "0")
           git commit -m "Initial commit" --allow-empty 2>/dev/null
           cd - >/dev/null
-          echo "Initialized git repo in $NS_PATH"
+          echo "Initialized git repo ($FILE_COUNT files committed)"
         fi
 
         if [ -n "$REMOTE_URL" ]; then
