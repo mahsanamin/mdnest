@@ -562,8 +562,10 @@ Examples:
   mdnest-server start           # start everything
   mdnest-server rebuild         # after editing mdnest.conf (smart, fast)
   mdnest-server rebuild --full  # force recreate all containers
-  mdnest-server add-namespace    # interactive: add namespace + git sync
-  mdnest-server git-check       # diagnose git-sync keys & remotes
+  mdnest-server add-namespace     # interactive: add namespace + git sync
+  mdnest-server remove-namespace  # remove a namespace (files kept)
+  mdnest-server git-check        # diagnose git-sync keys & remotes
+  mdnest-server dev-setup        # enable pre-push security hooks
   mdnest-server logs             # all service logs
   mdnest-server logs backend     # backend only
   mdnest-server logs git-sync    # git sync only
