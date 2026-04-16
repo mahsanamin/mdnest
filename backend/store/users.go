@@ -69,7 +69,7 @@ func (s *PostgresUserStore) CreateUser(email, username, password, role string, i
 		 RETURNING `+userColumns,
 		email, username, string(hash), role, invitedBy,
 	).Scan(&user.ID, &user.Email, &user.Username, &user.PasswordHash, &user.Role, &user.InvitedBy, &user.CreatedAt,
-		&user.MustChangePassword, &user.TOTPSecret, &user.TOTPEnabled, &user.RecoveryCodes)
+		&user.MustChangePassword, &user.TOTPSecret, &user.TOTPEnabled, &user.RecoveryCodes, &user.Blocked)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create user: %w", err)
 	}
@@ -92,7 +92,7 @@ func (s *PostgresUserStore) scanUser(query string, args ...interface{}) (*User, 
 	var u User
 	err := s.db.QueryRow(query, args...).Scan(
 		&u.ID, &u.Email, &u.Username, &u.PasswordHash, &u.Role, &u.InvitedBy, &u.CreatedAt,
-		&u.MustChangePassword, &u.TOTPSecret, &u.TOTPEnabled, &u.RecoveryCodes,
+		&u.MustChangePassword, &u.TOTPSecret, &u.TOTPEnabled, &u.RecoveryCodes, &u.Blocked,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
