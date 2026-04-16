@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import mermaid from 'mermaid';
+import mermaid from '../mermaid-config.js';
 
 function AutoSizeInput({ className, style, defaultValue, onConfirm, onCancel }) {
   const [value, setValue] = useState(defaultValue || '');
@@ -185,7 +185,9 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
   const handlePreviewClick = useCallback((e) => {
     if (readOnly) return;
 
-    // Walk up from the click target to find any text-bearing element
+    // Walk up from the click target to find the label text.
+    // Prefer the innermost meaningful text element to avoid grabbing
+    // entire multi-line node content from a parent div.
     let el = e.target;
     let text = null;
     let textEl = null;
@@ -194,16 +196,10 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
       const tagName = el.tagName?.toLowerCase();
       const cls = el.className?.baseVal || el.className || '';
 
-      // Match: SVG text/tspan, HTML span/p/div, or any mermaid label class
-      const isTextElement = (
-        tagName === 'text' ||
-        tagName === 'tspan' ||
-        tagName === 'span' ||
-        tagName === 'p' ||
-        tagName === 'div' ||
+      // Specific label classes (high confidence)
+      const isLabelClass = (
         cls.includes('nodeLabel') ||
         cls.includes('edgeLabel') ||
-        cls.includes('label') ||
         cls.includes('messageText') ||
         cls.includes('actor') ||
         cls.includes('loopText') ||
@@ -211,12 +207,16 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
         cls.includes('labelText')
       );
 
-      if (isTextElement) {
-        // For tspan, use parent <text> for positioning but tspan's text
+      // SVG text elements
+      const isSvgText = tagName === 'text' || tagName === 'tspan';
+
+      // HTML text inside foreignObject — only span/p (not div, which wraps everything)
+      const isHtmlText = (tagName === 'span' || tagName === 'p') && el.closest('foreignObject');
+
+      if (isLabelClass || isSvgText || isHtmlText) {
         const t = el.textContent?.trim();
         if (t && t.length > 0 && t.length < 300) {
           text = t;
-          // Use the closest block-level element for positioning
           textEl = (tagName === 'tspan' && el.parentElement?.tagName?.toLowerCase() === 'text')
             ? el.parentElement : el;
           break;
