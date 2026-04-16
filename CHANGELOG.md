@@ -4,6 +4,27 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v3.1.7 — Mermaid Improvements & UX Polish
+
+### New Features
+- **Per-file preferences** — each file remembers its view mode (editor/split/preview), editor mode (basic/live), and scroll position in localStorage. Survives page refresh.
+- **Default to Live editor** — new files open in Live editing mode instead of basic textarea.
+- **Sync status visible to all users** — "Synced 5m ago" green dot shown to collaborators, not just admins. Sync trigger button stays admin-only.
+- **`add-namespace` command** — `./mdnest-server add-namespace` walks through creating a namespace: directory, git init, deploy key generation, remote URL setup.
+
+### Fixes
+- **Mermaid color revert on label edit** — mermaid.initialize was only in Preview.jsx; Live mode used default pastel theme. Moved to shared `mermaid-config.js`.
+- **Mermaid text contrast** — smart post-processing detects parent node fill brightness and forces dark or light text for readability.
+- **Mermaid label click for multi-line labels** — labels with `<br/>` line breaks now correctly detected and replaced in source.
+- **Mermaid code consolidated** — theme config, initialization, and text color fix all in one shared file.
+- **Refresh icon moved** — now appears right after the file path instead of at the end of the toolbar.
+- **Raw editor paste fix** — pasting markdown text no longer wraps it in triple backticks.
+- **Git-sync fresh repos** — first push uses `--set-upstream` for newly created namespaces.
+- **Git-sync SSH alias auto-fix** — detects `host:path` format (without `git@`) and rewrites to `git@github.com:path`.
+- **Rebuild force-recreates git-sync** — volume-mounted services always restart on rebuild.
+
+---
+
 ## v3.1.1 — Critical Save Fix
 
 ### Fixes

@@ -36,6 +36,7 @@ frontend/
   src/
     App.jsx                  # Root: auth, namespace/tree state, context menu, URL routing
     api.js                   # All API calls (fetch wrapper with JWT + 401 handling)
+    mermaid-config.js         # Shared mermaid init, theme, and fixMermaidTextColors()
     components/
       Login.jsx              # Auth form
       Sidebar.jsx            # Namespace picker, tree area, expand/collapse

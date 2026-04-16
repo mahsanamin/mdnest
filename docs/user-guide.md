@@ -239,6 +239,16 @@ When the server is updated to a new version, active browser sessions will see a 
 
 Click "Refresh Now" to reload and pick up the latest frontend. The check runs every 60 seconds.
 
+## Per-File Preferences
+
+mdnest remembers your preferences for each file individually:
+
+- **View mode** — editor, split, or preview. Switch once and it sticks for that file.
+- **Editor mode** — basic (textarea) or live (rich editor). New files default to Live mode.
+- **Scroll position** — where you left off. Switch between files and come back to the same spot.
+
+Preferences are stored in your browser's local storage and survive page refreshes.
+
 ## Keyboard Shortcuts
 
 | Key | Action |

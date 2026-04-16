@@ -106,7 +106,12 @@ The backend scans `/data/notes/` at runtime and exposes each subdirectory as a n
    mkdir -p /home/ahsan/notes/projects
    ```
 
-2. Add a `MOUNT_` line to `mdnest.conf`:
+2. Use the interactive command (handles everything: config, directory, git, deploy key):
+   ```bash
+   ./mdnest-server add-namespace
+   ```
+
+   Or manually add a `MOUNT_` line to `mdnest.conf`:
    ```
    MOUNT_projects=/home/ahsan/notes/projects
    ```
