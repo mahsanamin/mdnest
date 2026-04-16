@@ -128,21 +128,24 @@ case "$CMD" in
     echo ""
     read -p "Choose [1/2]: " NS_SOURCE
 
-    # 2. Namespace name
+    # 2. Namespace name (re-prompt on invalid input)
     echo ""
-    read -p "Namespace name (e.g. work, personal, docs): " NS_NAME
-    if [ -z "$NS_NAME" ]; then
-      echo "Error: namespace name is required"
-      exit 1
-    fi
-    if ! echo "$NS_NAME" | grep -qE '^[a-zA-Z0-9_-]+$'; then
-      echo "Error: namespace name must be alphanumeric (hyphens and underscores OK)"
-      exit 1
-    fi
-    if grep -q "^MOUNT_${NS_NAME}=" mdnest.conf 2>/dev/null; then
-      echo "Error: MOUNT_${NS_NAME} already exists in mdnest.conf"
-      exit 1
-    fi
+    while true; do
+      read -p "Namespace name (e.g. work, personal, docs): " NS_NAME
+      if [ -z "$NS_NAME" ]; then
+        echo "  Name is required. Try again."
+        continue
+      fi
+      if ! echo "$NS_NAME" | grep -qE '^[a-zA-Z0-9_-]+$'; then
+        echo "  Must be alphanumeric (hyphens and underscores OK). Try again."
+        continue
+      fi
+      if grep -q "^MOUNT_${NS_NAME}=" mdnest.conf 2>/dev/null; then
+        echo "  MOUNT_${NS_NAME} already exists. Choose a different name."
+        continue
+      fi
+      break
+    done
 
     # 3. Generate deploy key (needed for both GitHub sources and local+sync)
     KEY_PATH="git-sync/keys/${NS_NAME}"
@@ -154,14 +157,20 @@ case "$CMD" in
       ##############################################
       echo ""
       read -p "GitHub SSH URL (e.g. git@github.com:user/repo.git): " REMOTE_URL
-      if [ -z "$REMOTE_URL" ]; then
-        echo "Error: GitHub URL is required"
-        exit 1
-      fi
+      while [ -z "$REMOTE_URL" ]; do
+        read -p "GitHub URL is required. Try again: " REMOTE_URL
+      done
 
       DEFAULT_PATH="$HOME/notes/${NS_NAME}"
-      read -p "Local directory to clone into [$DEFAULT_PATH]: " NS_PATH
+      read -p "Directory to clone into [$DEFAULT_PATH]: " NS_PATH
       NS_PATH="${NS_PATH:-$DEFAULT_PATH}"
+
+      # If path exists and is not empty, use a subdirectory with the namespace name
+      if [ -d "$NS_PATH" ] && [ "$(ls -A "$NS_PATH" 2>/dev/null)" ]; then
+        NS_PATH="${NS_PATH%/}/${NS_NAME}"
+        echo "Directory not empty — will clone into $NS_PATH"
+      fi
+      mkdir -p "$(dirname "$NS_PATH")"
 
       # Generate deploy key
       if [ -f "$KEY_PATH" ]; then
@@ -203,11 +212,6 @@ case "$CMD" in
 
       # Clone
       echo -n "Cloning $REMOTE_URL... "
-      if [ -d "$NS_PATH" ] && [ "$(ls -A "$NS_PATH" 2>/dev/null)" ]; then
-        echo "ERROR — directory $NS_PATH is not empty"
-        exit 1
-      fi
-      rm -rf "$NS_PATH" 2>/dev/null
       CLONE_RESULT=$(GIT_SSH_COMMAND="$GIT_SSH" git clone "$REMOTE_URL" "$NS_PATH" 2>&1) || true
       if [ -d "$NS_PATH/.git" ]; then
         cd "$NS_PATH"
