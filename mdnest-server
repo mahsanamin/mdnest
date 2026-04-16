@@ -441,6 +441,66 @@ case "$CMD" in
     echo "Files at $NS_PATH are untouched."
     echo "Run ./mdnest-server rebuild to apply."
     ;;
+  export-2fa)
+    # Export a user's TOTP secret for sharing across servers
+    AUTH_MODE=$(grep '^AUTH_MODE=' .env 2>/dev/null | cut -d= -f2)
+    if [ "$AUTH_MODE" != "multi" ]; then
+      echo "Error: 2FA export requires AUTH_MODE=multi"
+      exit 1
+    fi
+
+    if [ -n "$1" ]; then
+      EXPORT_USER="$1"
+    else
+      read -p "Username to export 2FA for: " EXPORT_USER
+    fi
+
+    RESULT=$(docker compose exec -T postgres psql -U mdnest -d mdnest -t -c \
+      "SELECT totp_secret, totp_enabled FROM users WHERE username='${EXPORT_USER}';" 2>/dev/null | tr -d ' ')
+
+    SECRET=$(echo "$RESULT" | cut -d'|' -f1)
+    ENABLED=$(echo "$RESULT" | cut -d'|' -f2)
+
+    if [ -z "$SECRET" ] || [ "$SECRET" = "" ]; then
+      echo "Error: user '$EXPORT_USER' not found or 2FA not set up"
+      exit 1
+    fi
+
+    echo ""
+    echo "=== 2FA Export for: $EXPORT_USER ==="
+    echo "TOTP Secret: $SECRET"
+    echo "Enabled:     $ENABLED"
+    echo ""
+    echo "To import on another server:"
+    echo "  ./mdnest-server import-2fa $EXPORT_USER $SECRET"
+    ;;
+  import-2fa)
+    # Import a TOTP secret from another server
+    AUTH_MODE=$(grep '^AUTH_MODE=' .env 2>/dev/null | cut -d= -f2)
+    if [ "$AUTH_MODE" != "multi" ]; then
+      echo "Error: 2FA import requires AUTH_MODE=multi"
+      exit 1
+    fi
+
+    if [ -n "$1" ] && [ -n "$2" ]; then
+      IMPORT_USER="$1"
+      IMPORT_SECRET="$2"
+    else
+      read -p "Username: " IMPORT_USER
+      read -p "TOTP Secret: " IMPORT_SECRET
+    fi
+
+    if [ -z "$IMPORT_USER" ] || [ -z "$IMPORT_SECRET" ]; then
+      echo "Error: username and secret are required"
+      echo "Usage: ./mdnest-server import-2fa <username> <secret>"
+      exit 1
+    fi
+
+    docker compose exec -T postgres psql -U mdnest -d mdnest -c \
+      "UPDATE users SET totp_secret='${IMPORT_SECRET}', totp_enabled=true WHERE username='${IMPORT_USER}';" 2>/dev/null
+
+    echo "2FA imported for '$IMPORT_USER' — same authenticator code now works on this server."
+    ;;
   git-check)
     echo "=== mdnest git-sync diagnostics ==="
     echo ""
@@ -571,6 +631,8 @@ Commands:
   restart     Stop and start all services
   add-namespace     Add a namespace: clone from GitHub or use local directory
   remove-namespace  Remove a namespace from config (files are NOT deleted)
+  export-2fa      Export a user's TOTP secret (for sharing across servers)
+  import-2fa      Import a TOTP secret from another server
   rebuild     Re-run setup, rebuild changed images, and start
   rebuild --full  Force recreate ALL containers (use after major updates)
   logs        View logs (all services, or specify: backend, frontend, git-sync, postgres)

@@ -458,6 +458,52 @@ These environment variables are set in the generated `.env` file and consumed by
 
 ---
 
+## Two-Factor Authentication (2FA)
+
+### Enabling 2FA
+
+Add to `mdnest.conf`:
+
+```
+REQUIRE_2FA=true
+TOTP_ISSUER=Wego mdnest    # Name shown in authenticator app (optional)
+```
+
+Run `./mdnest-server rebuild`. All users will be required to set up 2FA on their next login.
+
+### Sharing 2FA Across Multiple Servers
+
+If you run multiple mdnest instances (e.g. `growth.mdnest.wego.engineering`, `docs.mdnest.wego.engineering`), users can use the **same authenticator entry** for all servers.
+
+Set up 2FA on the first server, then export and import the secret:
+
+```bash
+# On server A (where 2FA is already set up)
+./mdnest-server export-2fa ahsan
+
+# Output:
+#   TOTP Secret: JBSWY3DPEHPK3PXP
+#   To import on another server:
+#     ./mdnest-server import-2fa ahsan JBSWY3DPEHPK3PXP
+
+# On server B, C, D...
+./mdnest-server import-2fa ahsan JBSWY3DPEHPK3PXP
+```
+
+The same 6-digit code from the authenticator app now works on all servers. Use the same `TOTP_ISSUER` on all servers so the authenticator app groups them.
+
+### Admin: Reset a User's 2FA
+
+From the admin panel in the web UI, or via API:
+
+```bash
+curl -X POST https://your-server/api/admin/reset-2fa \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"userId": 5}'
+```
+
+The user will need to set up 2FA again on next login (if `REQUIRE_2FA=true`).
+
 ## Updating
 
 To update mdnest to the latest version:
