@@ -113,89 +113,94 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
   }, [source, mode]);
 
   // Fix text colors after SVG renders — shared function from mermaid-config.js
+  // Run multiple times: immediately, after RAF, and after a delay to catch
+  // late-applying mermaid <style> blocks that override our colors.
   useEffect(() => {
     if (!svgHtml) return;
-    requestAnimationFrame(() => {
+    const fix = () => {
       const container = previewRef.current;
       if (!container) return;
       const svgEl = container.querySelector('svg');
-      if (svgEl) fixMermaidTextColors(svgEl);
-    });
+      if (!svgEl) return;
+
+      // Strip mermaid's inline <style> color rules that conflict with our fixes
+      svgEl.querySelectorAll('style').forEach((styleEl) => {
+        // Remove fill/color rules for text elements from mermaid's embedded CSS
+        styleEl.textContent = styleEl.textContent
+          .replace(/\.actor\s*\{[^}]*fill:[^}]*\}/g, (m) => m.replace(/fill:[^;]+;?/g, ''))
+          .replace(/\.messageText\s*\{[^}]*fill:[^}]*\}/g, (m) => m.replace(/fill:[^;]+;?/g, ''))
+          .replace(/text\s*\{[^}]*fill:[^}]*\}/g, (m) => m.replace(/fill:[^;]+;?/g, ''));
+      });
+
+      fixMermaidTextColors(svgEl);
+    };
+    requestAnimationFrame(fix);
+    const t1 = setTimeout(fix, 100);
+    const t2 = setTimeout(fix, 300);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
   }, [svgHtml]);
 
-  // Make node labels clickable — use click delegation on the preview container
+  // Make any mermaid text clickable — diagram-type agnostic.
+  // Strategy: find the nearest <g> group, then find any text inside it.
   const handlePreviewClick = useCallback((e) => {
     if (readOnly) return;
 
-    // Walk up from the click target to find the label text.
-    // Prefer the innermost meaningful text element to avoid grabbing
-    // entire multi-line node content from a parent div.
     let el = e.target;
     let text = null;
     let textEl = null;
 
-    for (let i = 0; i < 8 && el && el !== previewRef.current; i++) {
+    // Walk up from click target to find a <g> group containing text
+    for (let i = 0; i < 10 && el && el !== previewRef.current; i++) {
       const tagName = el.tagName?.toLowerCase();
-      const cls = el.className?.baseVal || el.className || '';
 
-      // Specific label classes (high confidence)
-      const isLabelClass = (
-        cls.includes('nodeLabel') ||
-        cls.includes('edgeLabel') ||
-        cls.includes('messageText') ||
-        cls.includes('actor') ||
-        cls.includes('loopText') ||
-        cls.includes('noteText') ||
-        cls.includes('labelText')
-      );
+      // If we hit a <text> or <tspan> directly — use it
+      if (tagName === 'text' || tagName === 'tspan') {
+        const root = tagName === 'tspan' ? el.parentElement : el;
+        const tspans = root.querySelectorAll('tspan');
+        text = tspans.length > 1
+          ? Array.from(tspans).map(ts => ts.textContent.trim()).filter(Boolean).join(' ')
+          : root.textContent?.trim();
+        textEl = root;
+        break;
+      }
 
-      // SVG text elements
-      const isSvgText = tagName === 'text' || tagName === 'tspan';
+      // If we hit a <span> or <p> inside foreignObject — use it
+      if ((tagName === 'span' || tagName === 'p') && el.closest('foreignObject')) {
+        text = el.innerHTML ? el.innerHTML.replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]+>/g, '').trim() : el.textContent?.trim();
+        textEl = el;
+        break;
+      }
 
-      // HTML text inside foreignObject — only span/p (not div, which wraps everything)
-      const isHtmlText = (tagName === 'span' || tagName === 'p') && el.closest('foreignObject');
+      // If we hit a <g> group or shape (rect/circle/etc) — look for text inside
+      if (tagName === 'g' || ['rect', 'circle', 'path', 'polygon', 'ellipse', 'line'].includes(tagName)) {
+        const group = tagName === 'g' ? el : el.parentElement;
+        if (!group) { el = el.parentElement; continue; }
 
-      if (isLabelClass || isSvgText || isHtmlText) {
-        let t;
-        let posEl = el;
+        // Find text in this group: try foreignObject first (HTML labels), then SVG text
+        const foText = group.querySelector('foreignObject span, foreignObject p');
+        const svgText = group.querySelector('text');
+        const found = foText || svgText;
 
-        // If we clicked on a shape (rect/circle/path) with a label class,
-        // find the sibling or child <text> element for the actual label
-        if (['rect', 'circle', 'path', 'polygon', 'line'].includes(tagName)) {
-          const parent = el.parentElement;
-          if (parent) {
-            const siblingText = parent.querySelector('text') || parent.querySelector('.nodeLabel') || parent.querySelector('foreignObject span');
-            if (siblingText) {
-              el = siblingText;
-              posEl = siblingText;
-            }
+        if (found) {
+          const foundTag = found.tagName?.toLowerCase();
+          if (foundTag === 'text') {
+            const tspans = found.querySelectorAll('tspan');
+            text = tspans.length > 1
+              ? Array.from(tspans).map(ts => ts.textContent.trim()).filter(Boolean).join(' ')
+              : found.textContent?.trim();
+          } else {
+            text = found.innerHTML ? found.innerHTML.replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]+>/g, '').trim() : found.textContent?.trim();
           }
-        }
-
-        const elTag = el.tagName?.toLowerCase();
-        if (elTag === 'text' || elTag === 'tspan') {
-          const tspans = el.querySelectorAll('tspan');
-          t = tspans.length > 1
-            ? Array.from(tspans).map(ts => ts.textContent.trim()).filter(Boolean).join(' ')
-            : el.textContent?.trim();
-        } else {
-          t = el.innerHTML ? el.innerHTML.replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]+>/g, '').trim() : el.textContent?.trim();
-        }
-
-        if (t && t.length > 0 && t.length < 300) {
-          text = t;
-          textEl = (elTag === 'tspan' && el.parentElement?.tagName?.toLowerCase() === 'text')
-            ? el.parentElement : posEl;
+          textEl = found;
           break;
         }
       }
+
       el = el.parentElement;
     }
 
     if (!text || !textEl || !previewRef.current) return;
-
-    // Skip if it's a very long multi-line text (probably a Note block)
-    if (text.includes('\n') && text.length > 100) return;
+    if (text.length > 300) return;
 
     const containerRect = previewRef.current.getBoundingClientRect();
     const elRect = textEl.getBoundingClientRect();

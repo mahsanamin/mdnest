@@ -2303,8 +2303,8 @@ pre:hover .code-copy-btn {
 .mermaid-live-preview .messageText:hover,
 .mermaid-live-preview .actor text:hover,
 .mermaid-live-preview text.actor:hover {
-  fill: #89b4fa !important;
   text-decoration: underline;
+  opacity: 0.8;
 }
 
 .mermaid-live-error {
