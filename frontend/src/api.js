@@ -54,9 +54,58 @@ export async function login(username, password) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, password }),
   });
-  if (!res.ok) throw new Error('Login failed');
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Login failed');
+  }
   const data = await res.json();
-  setToken(data.token);
+  // Multi-step login: may return status instead of token
+  if (data.token) setToken(data.token);
+  return data;
+}
+
+export async function verifyTOTP(tempToken, code) {
+  const res = await fetch(`${BASE}/auth/verify-totp`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tempToken, code }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Verification failed');
+  }
+  const data = await res.json();
+  if (data.token) setToken(data.token);
+  return data;
+}
+
+export async function setupTOTPWithTemp(tempToken, code) {
+  const res = await fetch(`${BASE}/auth/totp/setup-with-temp`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tempToken, code: code || '' }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Setup failed');
+  }
+  const data = await res.json();
+  if (data.token) setToken(data.token);
+  return data;
+}
+
+export async function forcedPasswordChange(tempToken, newPassword) {
+  const res = await fetch(`${BASE}/auth/change-password-forced`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tempToken, newPassword }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Password change failed');
+  }
+  const data = await res.json();
+  if (data.token) setToken(data.token);
   return data;
 }
 
