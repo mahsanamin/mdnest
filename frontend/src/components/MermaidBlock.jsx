@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import mermaid from '../mermaid-config.js';
+import mermaid, { fixMermaidTextColors } from '../mermaid-config.js';
 
 function AutoSizeInput({ className, style, defaultValue, onConfirm, onCancel }) {
   const [value, setValue] = useState(defaultValue || '');
@@ -112,72 +112,14 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
     return () => { cancelled = true; };
   }, [source, mode]);
 
-  // Fix text colors after SVG renders — mermaid's dark theme produces
-  // low-contrast text on dark node fills. Use the same fixMermaidTextColors
-  // approach as Preview.jsx but via getComputedStyle for reliable fill detection.
+  // Fix text colors after SVG renders — shared function from mermaid-config.js
   useEffect(() => {
     if (!svgHtml) return;
     requestAnimationFrame(() => {
       const container = previewRef.current;
       if (!container) return;
       const svgEl = container.querySelector('svg');
-      if (!svgEl) return;
-
-      const lightText = '#cdd6f4';
-      const darkText = '#1e1e2e';
-
-      function getBrightness(color) {
-        if (!color || color === 'none' || color === 'transparent') return -1;
-        try {
-          const ctx = document.createElement('canvas').getContext('2d');
-          ctx.fillStyle = color;
-          const hex = ctx.fillStyle;
-          const r = parseInt(hex.slice(1, 3), 16);
-          const g = parseInt(hex.slice(3, 5), 16);
-          const b = parseInt(hex.slice(5, 7), 16);
-          return (r * 299 + g * 587 + b * 114) / 1000;
-        } catch { return -1; }
-      }
-
-      // Use getComputedStyle to get the ACTUAL rendered fill, including CSS-applied fills
-      function getNodeFill(el) {
-        let node = el.closest ? el.closest('.node, .cluster, .actor, .note') : null;
-        if (!node) node = el.parentElement;
-        while (node && node !== svgEl) {
-          const shapes = node.querySelectorAll('rect, circle, polygon, path');
-          for (const shape of shapes) {
-            // Try computed style first (catches CSS-applied fills)
-            try {
-              const computed = window.getComputedStyle(shape);
-              const fill = computed.fill;
-              if (fill && fill !== 'none') return fill;
-            } catch {}
-            // Fallback to attribute
-            const attr = shape.getAttribute('fill');
-            if (attr && attr !== 'none' && attr !== 'transparent') return attr;
-          }
-          node = node.parentElement;
-        }
-        return null;
-      }
-
-      // SVG text/tspan
-      svgEl.querySelectorAll('text, tspan').forEach((t) => {
-        const fill = getNodeFill(t);
-        const b = getBrightness(fill);
-        // If can't determine fill, default to light text (dark bg assumed)
-        const color = b > 140 ? darkText : lightText;
-        t.setAttribute('fill', color);
-        t.style.fill = color;
-      });
-
-      // HTML inside foreignObject
-      svgEl.querySelectorAll('foreignObject span, foreignObject div, foreignObject p').forEach((t) => {
-        const fill = getNodeFill(t.closest('foreignObject') || t);
-        const b = getBrightness(fill);
-        const color = b > 140 ? darkText : lightText;
-        t.style.setProperty('color', color, 'important');
-      });
+      if (svgEl) fixMermaidTextColors(svgEl);
     });
   }, [svgHtml]);
 
