@@ -1,6 +1,7 @@
 .env
 mdnest.conf
 docker-compose.yml
+Caddyfile
 notes/
 backend/mdnest
 frontend/node_modules/

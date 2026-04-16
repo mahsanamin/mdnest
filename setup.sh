@@ -57,6 +57,7 @@ while IFS= read -r line; do
     POSTGRES_USER) POSTGRES_USER="$value" ;;
     POSTGRES_PASSWORD) POSTGRES_PASSWORD="$value" ;;
     ENABLE_LIVE_COLLAB) ENABLE_LIVE_COLLAB="$value" ;;
+    CADDY_DOMAIN) CADDY_DOMAIN="$value" ;;
     SSH_KEY_PATH) SSH_KEY_PATH="$value" ;;
     SEARCH_MAX_RESULTS) SEARCH_MAX_RESULTS="$value" ;;
     SEARCH_MAX_FILE_SIZE) SEARCH_MAX_FILE_SIZE="$value" ;;
@@ -228,13 +229,55 @@ if [ "$AUTH_MODE" = "multi" ]; then
   fi
 fi
 
+# Caddy HTTPS proxy
+CADDY_SERVICE=""
+CADDY_VOLUMES=""
+if [ -n "$CADDY_DOMAIN" ]; then
+  echo "Caddy HTTPS: enabled for $CADDY_DOMAIN"
+
+  # Generate Caddyfile
+  cat > Caddyfile <<CADDYEOF
+${CADDY_DOMAIN} {
+    reverse_proxy frontend:80
+}
+CADDYEOF
+  echo "Generated Caddyfile"
+
+  # Backend/frontend use expose (internal only) when Caddy is in front
+  BACKEND_PORT_LINE="    expose:
+      - \"8080\""
+  FRONTEND_PORT_LINE="    expose:
+      - \"80\""
+
+  CADDY_SERVICE="
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - \"80:80\"
+      - \"443:443\"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - frontend
+    restart: unless-stopped
+"
+  CADDY_VOLUMES="  caddy-data:
+  caddy-config:"
+else
+  BACKEND_PORT_LINE="    ports:
+      - \"${BIND_ADDRESS}:${BACKEND_PORT}:8080\""
+  FRONTEND_PORT_LINE="    ports:
+      - \"${BIND_ADDRESS}:${FRONTEND_PORT}:80\""
+fi
+
 # Generate docker-compose.yml
 cat > docker-compose.yml <<EOF
 services:
   backend:
     build: ./backend
-    ports:
-      - "${BIND_ADDRESS}:${BACKEND_PORT}:8080"
+${BACKEND_PORT_LINE}
     env_file:
       - .env
 ${BACKEND_DEPENDS}    volumes:
@@ -246,12 +289,11 @@ ${BACKEND_EXTRA_ENV}    restart: unless-stopped
 
   frontend:
     build: ./frontend
-    ports:
-      - "${BIND_ADDRESS}:${FRONTEND_PORT}:80"
+${FRONTEND_PORT_LINE}
     depends_on:
       - backend
     restart: unless-stopped
-${POSTGRES_SERVICE}
+${POSTGRES_SERVICE}${CADDY_SERVICE}
   git-sync:
     image: alpine/git:latest
     profiles:
@@ -273,6 +315,7 @@ ${GITSYNC_VOLUMES}      - ./git-sync/sync.sh:/sync.sh:ro
 volumes:
   mdnest-secrets:
 ${EXTRA_VOLUMES}
+${CADDY_VOLUMES}
 EOF
 
 echo "Generated docker-compose.yml"
@@ -280,4 +323,8 @@ echo ""
 echo "Ready! Run:"
 echo "  ./mdnest-server start"
 echo ""
-echo "Then open http://localhost:${FRONTEND_PORT}"
+if [ -n "$CADDY_DOMAIN" ]; then
+  echo "Then open https://${CADDY_DOMAIN}"
+else
+  echo "Then open http://localhost:${FRONTEND_PORT}"
+fi
