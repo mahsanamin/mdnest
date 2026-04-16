@@ -20,6 +20,8 @@ All notable changes to mdnest are documented here.
 - **Mermaid text colors** — injected SVG `<style>` override ensures light text on all diagram types. No more black text on load or color toggling on click.
 - **Mermaid label click** — diagram-type agnostic click handler. Works on all mermaid types (sequence, flowchart, class, etc.) by finding nearest `<g>` group text instead of checking specific CSS classes.
 - **Mermaid label replace** — handles `<br/>` line breaks at any word boundary via brute-force matching.
+- **WebSocket stale closure** — collab message handler used stale namespace/path from closure, causing one user's saves to disrupt another user's view. Now uses refs for current values.
+- **Editor mode reset** — switching files no longer resets Live mode to Basic. Editor/view mode are global user preferences, not per-file.
 
 ### Config
 - `REQUIRE_2FA=true|false` — require all users to set up 2FA (default: false)
