@@ -156,22 +156,36 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
       const isHtmlText = (tagName === 'span' || tagName === 'p') && el.closest('foreignObject');
 
       if (isLabelClass || isSvgText || isHtmlText) {
-        // Get text preserving line breaks — textContent strips them.
-        // For SVG: multiple <tspan> = multiple lines. For HTML: <br> = line break.
         let t;
-        if (isSvgText) {
+        let posEl = el;
+
+        // If we clicked on a shape (rect/circle/path) with a label class,
+        // find the sibling or child <text> element for the actual label
+        if (['rect', 'circle', 'path', 'polygon', 'line'].includes(tagName)) {
+          const parent = el.parentElement;
+          if (parent) {
+            const siblingText = parent.querySelector('text') || parent.querySelector('.nodeLabel') || parent.querySelector('foreignObject span');
+            if (siblingText) {
+              el = siblingText;
+              posEl = siblingText;
+            }
+          }
+        }
+
+        const elTag = el.tagName?.toLowerCase();
+        if (elTag === 'text' || elTag === 'tspan') {
           const tspans = el.querySelectorAll('tspan');
           t = tspans.length > 1
             ? Array.from(tspans).map(ts => ts.textContent.trim()).filter(Boolean).join(' ')
             : el.textContent?.trim();
         } else {
-          // HTML: replace <br> with space, then get text
           t = el.innerHTML ? el.innerHTML.replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]+>/g, '').trim() : el.textContent?.trim();
         }
+
         if (t && t.length > 0 && t.length < 300) {
           text = t;
-          textEl = (tagName === 'tspan' && el.parentElement?.tagName?.toLowerCase() === 'text')
-            ? el.parentElement : el;
+          textEl = (elTag === 'tspan' && el.parentElement?.tagName?.toLowerCase() === 'text')
+            ? el.parentElement : posEl;
           break;
         }
       }
