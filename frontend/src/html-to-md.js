@@ -162,12 +162,10 @@ function convertList(node, ordered, depth = 0) {
 
 function convertTable(tableNode) {
   const rows = [];
-  let hasHeader = false;
   for (const tr of tableNode.querySelectorAll('tr')) {
     const cells = [];
     for (const cell of tr.querySelectorAll('th, td')) {
       cells.push(convertNode(cell).trim().replace(/\n/g, ' ').replace(/\|/g, '\\|'));
-      if (cell.tagName.toLowerCase() === 'th') hasHeader = true;
     }
     rows.push(cells);
   }
@@ -181,21 +179,10 @@ function convertTable(tableNode) {
   });
 
   const lines = [];
-
-  if (hasHeader) {
-    // First row is the header
-    lines.push('| ' + padded[0].join(' | ') + ' |');
-    lines.push('| ' + padded[0].map(() => '---').join(' | ') + ' |');
-    for (let i = 1; i < padded.length; i++) {
-      lines.push('| ' + padded[i].join(' | ') + ' |');
-    }
-  } else {
-    // No header — all rows are data. Add empty header for valid markdown.
-    lines.push('| ' + padded[0].map(() => ' ').join(' | ') + ' |');
-    lines.push('| ' + padded[0].map(() => '---').join(' | ') + ' |');
-    for (let i = 0; i < padded.length; i++) {
-      lines.push('| ' + padded[i].join(' | ') + ' |');
-    }
+  lines.push('| ' + padded[0].join(' | ') + ' |');
+  lines.push('| ' + padded[0].map(() => '---').join(' | ') + ' |');
+  for (let i = 1; i < padded.length; i++) {
+    lines.push('| ' + padded[i].join(' | ') + ' |');
   }
 
   return lines.join('\n');
