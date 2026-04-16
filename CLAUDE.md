@@ -126,6 +126,15 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 - Merge to `main`, tag as `v3.X.Y`, push with `--tags`
 - Run `/mdnest-ship` skill after code changes to update docs, website, and test instance
 
+## Debugging Practice
+
+- When a fix doesn't work after 2 attempts, **stop guessing and look at the actual data**
+- Read `mdnest.conf` and `.env` for ports, credentials, and config — never hardcode or guess
+- Use the running server's API to fetch real content: `curl -s http://<BIND_ADDRESS>:<BACKEND_PORT>/api/note?ns=...`
+- Use `python3 -c "print(repr(chunk))"` to see exact bytes (escapes, `<br/>` vs `\n`, whitespace)
+- Check the live Docker containers: `docker ps | grep mdnest` — know which port serves what
+- When the dev machine runs the same server the user tests against, use it directly instead of asking the user for logs
+
 ## What NOT to Do
 
 - Do not add a database dependency in single mode — files are the source of truth for notes; Postgres is only for user/permission management in multi mode
