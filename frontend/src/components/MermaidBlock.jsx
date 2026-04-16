@@ -156,7 +156,18 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
       const isHtmlText = (tagName === 'span' || tagName === 'p') && el.closest('foreignObject');
 
       if (isLabelClass || isSvgText || isHtmlText) {
-        const t = el.textContent?.trim();
+        // Get text preserving line breaks — textContent strips them.
+        // For SVG: multiple <tspan> = multiple lines. For HTML: <br> = line break.
+        let t;
+        if (isSvgText) {
+          const tspans = el.querySelectorAll('tspan');
+          t = tspans.length > 1
+            ? Array.from(tspans).map(ts => ts.textContent.trim()).filter(Boolean).join(' ')
+            : el.textContent?.trim();
+        } else {
+          // HTML: replace <br> with space, then get text
+          t = el.innerHTML ? el.innerHTML.replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]+>/g, '').trim() : el.textContent?.trim();
+        }
         if (t && t.length > 0 && t.length < 300) {
           text = t;
           textEl = (tagName === 'tspan' && el.parentElement?.tagName?.toLowerCase() === 'text')
@@ -194,36 +205,65 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
       return;
     }
 
-    // Replace the label in the source
-    // Mermaid labels appear in patterns like: A[Label], A(Label), A{Label}, A((Label)), A>Label], A[/Label/]
-    // Also edge labels: -->|Label|, -- Label -->
     let newSource = currentSource.current;
 
-    // Try bracket patterns: [old], (old), {old}, ((old)), [/old/], [\old\]
+    // The clicked text comes from textContent which strips newlines.
+    // In the source, the label might contain \n or <br>. Build a flexible
+    // pattern that matches the old text with optional \n or <br> between words.
     const escaped = oldText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const patterns = [
-      new RegExp(`(\\[)${escaped}(\\])`, 'g'),           // [Label]
-      new RegExp(`(\\()${escaped}(\\))`, 'g'),           // (Label)
-      new RegExp(`(\\{)${escaped}(\\})`, 'g'),           // {Label}
-      new RegExp(`(\\(\\()${escaped}(\\)\\))`, 'g'),     // ((Label))
-      new RegExp(`(\\[/)${escaped}(/\\])`, 'g'),         // [/Label/]
-      new RegExp(`(\\|)${escaped}(\\|)`, 'g'),           // |Label|
-      new RegExp(`(-- )${escaped}( -->)`, 'g'),          // -- Label -->
-      new RegExp(`(-- )${escaped}( ---)`, 'g'),          // -- Label ---
+    // Allow \n, <br>, or whitespace between any characters where the original has none
+    // (textContent concatenates lines without separators)
+    const flexEscaped = escaped.replace(/(\S)(\S)/g, (m, a, b) => {
+      // Only insert optional \n between characters that could be a line break join
+      return a + '(?:\\\\n|<br>)?' + b;
+    });
+
+    // Also create a version that matches the text with literal \n in source
+    const withNewlines = escaped.replace(/ /g, '(?:\\\\n| |<br>)');
+
+    // Bracket patterns: [old], (old), {old}, ((old)), [/old/], |old|, -- old -->
+    const tryPatterns = [escaped, flexEscaped, withNewlines];
+    const wrappers = [
+      ['\\[', '\\]'],         // [Label]
+      ['\\(', '\\)'],         // (Label)
+      ['\\{', '\\}'],         // {Label}
+      ['\\(\\(', '\\)\\)'],   // ((Label))
+      ['\\[/', '/\\]'],       // [/Label/]
+      ['\\|', '\\|'],         // |Label|
+      ['-- ', ' -->'],        // -- Label -->
+      ['-- ', ' ---'],        // -- Label ---
+      ['"', '"'],             // "Label" (quoted labels)
     ];
 
     let replaced = false;
-    for (const pattern of patterns) {
-      if (pattern.test(newSource)) {
-        newSource = newSource.replace(pattern, `$1${newText}$2`);
-        replaced = true;
-        break;
+    for (const textPattern of tryPatterns) {
+      if (replaced) break;
+      for (const [open, close] of wrappers) {
+        const re = new RegExp(`(${open})${textPattern}(${close})`);
+        if (re.test(newSource)) {
+          newSource = newSource.replace(re, `$1${newText}$2`);
+          replaced = true;
+          break;
+        }
       }
     }
 
     // Fallback: simple string replace (first occurrence)
     if (!replaced && newSource.includes(oldText)) {
       newSource = newSource.replace(oldText, newText);
+    }
+
+    // Second fallback: try replacing with \n variations in the source
+    if (!replaced && !newSource.includes(oldText)) {
+      const lines = oldText.split(/(?=[A-Z])/); // split on capital letters as potential line breaks
+      for (let i = 1; i < lines.length; i++) {
+        const candidate = lines.slice(0, i).join('') + '\\n' + lines.slice(i).join('');
+        if (newSource.includes(candidate)) {
+          newSource = newSource.replace(candidate, newText);
+          replaced = true;
+          break;
+        }
+      }
     }
 
     setEditingLabel(null);
