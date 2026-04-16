@@ -123,10 +123,13 @@ The backend scans `/data/notes/` at runtime and exposes each subdirectory as a n
 
 ### Removing a Namespace
 
-1. Remove the corresponding `MOUNT_` line from `mdnest.conf`.
-2. Re-run `./mdnest-server rebuild`.
+```bash
+./mdnest-server remove-namespace
+```
 
-The files on disk are not deleted -- only the mount into the container is removed.
+Lists all namespaces, asks which to remove, cleans up config and deploy key. Files on disk are NOT deleted.
+
+Or manually: remove the `MOUNT_` line from `mdnest.conf` and run `./mdnest-server rebuild`.
 
 ### Naming Rules
 

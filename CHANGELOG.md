@@ -4,6 +4,15 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v3.1.8 — Developer Experience & Security
+
+### New Features
+- **Pre-push git hook** — verifies frontend/backend compile, npm audit, govulncheck, lock file integrity, and version consistency before every push. Install with `./mdnest-server dev-setup`.
+- **`remove-namespace` command** — lists namespaces, removes config entry and deploy key. Files on disk are NOT deleted.
+- **Improved `add-namespace`** — two clear paths (GitHub clone or local directory), SSH verification, auto-clone, never exits on bad input (re-prompts instead), auto-creates subdirectories for non-empty paths.
+
+---
+
 ## v3.1.7 — Mermaid Improvements & UX Polish
 
 ### New Features
