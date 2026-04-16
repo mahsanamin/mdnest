@@ -35,7 +35,8 @@ type AuthHandler struct {
 	secret []byte
 
 	// Multi mode fields (nil in single mode)
-	userStore store.UserStore
+	userStore  store.UserStore
+	require2FA bool
 }
 
 type loginRequest struct {
@@ -44,7 +45,9 @@ type loginRequest struct {
 }
 
 type loginResponse struct {
-	Token string `json:"token"`
+	Token    string `json:"token,omitempty"`
+	Status   string `json:"status,omitempty"`   // "ok", "change_password_required", "totp_required"
+	TempToken string `json:"tempToken,omitempty"` // short-lived token for multi-step login
 }
 
 type changePasswordRequest struct {
@@ -73,10 +76,11 @@ func NewAuthHandler(username, password, jwtSecret, secretsDir string) *AuthHandl
 }
 
 // NewMultiAuthHandler creates a new auth handler for multi-user mode.
-func NewMultiAuthHandler(jwtSecret string, userStore store.UserStore) *AuthHandler {
+func NewMultiAuthHandler(jwtSecret string, userStore store.UserStore, require2FA bool) *AuthHandler {
 	return &AuthHandler{
-		secret:    []byte(jwtSecret),
-		userStore: userStore,
+		secret:     []byte(jwtSecret),
+		userStore:  userStore,
+		require2FA: require2FA,
 	}
 }
 
@@ -173,7 +177,7 @@ func (h *AuthHandler) loginSingle(w http.ResponseWriter, req loginRequest) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"sub": req.Username,
 		"iat": time.Now().Unix(),
-		"exp": time.Now().Add(24 * time.Hour).Unix(),
+		"exp": time.Now().Add(30 * 24 * time.Hour).Unix(),
 	})
 
 	tokenString, err := token.SignedString(h.secret)
@@ -198,12 +202,67 @@ func (h *AuthHandler) loginMulti(w http.ResponseWriter, req loginRequest) {
 		return
 	}
 
+	if user.Blocked {
+		http.Error(w, `{"error":"your account has been blocked. Contact your administrator."}`, http.StatusForbidden)
+		return
+	}
+
+	// Check if password change is required
+	if user.MustChangePassword {
+		tempToken, err := CreateTempToken(user, h.secret, "change_password")
+		if err != nil {
+			http.Error(w, `{"error":"failed to generate token"}`, http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(loginResponse{
+			Status:    "change_password_required",
+			TempToken: tempToken,
+		})
+		return
+	}
+
+	// Check if 2FA is enabled — verify code
+	if user.TOTPEnabled {
+		tempToken, err := CreateTempToken(user, h.secret, "totp")
+		if err != nil {
+			http.Error(w, `{"error":"failed to generate token"}`, http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(loginResponse{
+			Status:    "totp_required",
+			TempToken: tempToken,
+		})
+		return
+	}
+
+	// Check if 2FA is required by admin but user hasn't set it up yet
+	if h.require2FA && !user.TOTPEnabled {
+		tempToken, err := CreateTempToken(user, h.secret, "totp_setup")
+		if err != nil {
+			http.Error(w, `{"error":"failed to generate token"}`, http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(loginResponse{
+			Status:    "totp_setup_required",
+			TempToken: tempToken,
+		})
+		return
+	}
+
+	// No extra steps — issue full JWT
+	h.issueFullToken(w, user)
+}
+
+func (h *AuthHandler) issueFullToken(w http.ResponseWriter, user *store.User) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"sub":     user.Username,
 		"user_id": user.ID,
 		"role":    user.Role,
 		"iat":     time.Now().Unix(),
-		"exp":     time.Now().Add(24 * time.Hour).Unix(),
+		"exp":     time.Now().Add(30 * 24 * time.Hour).Unix(),
 	})
 
 	tokenString, err := token.SignedString(h.secret)
@@ -214,6 +273,68 @@ func (h *AuthHandler) loginMulti(w http.ResponseWriter, req loginRequest) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(loginResponse{Token: tokenString})
+}
+
+// HandleForcedPasswordChange handles password change during first login.
+// POST /api/auth/change-password-forced { tempToken, newPassword }
+func (h *AuthHandler) HandleForcedPasswordChange(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		TempToken   string `json:"tempToken"`
+		NewPassword string `json:"newPassword"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		return
+	}
+
+	if req.NewPassword == "" {
+		http.Error(w, `{"error":"new password is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	claims, err := parseTempToken(req.TempToken, h.secret)
+	if err != nil {
+		http.Error(w, `{"error":"invalid or expired token"}`, http.StatusUnauthorized)
+		return
+	}
+
+	userID := int(claims["user_id"].(float64))
+	user, err := h.userStore.GetUserByID(userID)
+	if err != nil || user == nil {
+		http.Error(w, `{"error":"user not found"}`, http.StatusNotFound)
+		return
+	}
+
+	// Update password (also clears must_change_password)
+	if err := h.userStore.UpdatePassword(userID, req.NewPassword); err != nil {
+		http.Error(w, `{"error":"failed to update password"}`, http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("forced password change for user: %s (id: %d)", user.Username, user.ID)
+
+	// If 2FA is enabled, require TOTP next
+	if user.TOTPEnabled {
+		tempToken, err := CreateTempToken(user, h.secret, "totp")
+		if err != nil {
+			http.Error(w, `{"error":"failed to generate token"}`, http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(loginResponse{
+			Status:    "totp_required",
+			TempToken: tempToken,
+		})
+		return
+	}
+
+	// No 2FA — issue full JWT
+	h.issueFullToken(w, user)
 }
 
 // ChangePassword handles POST /api/auth/change-password (authenticated).

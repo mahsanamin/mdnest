@@ -122,6 +122,102 @@
   margin-bottom: 0.5rem;
 }
 
+.login-subtitle {
+  color: #a6adc8;
+  font-size: 0.85rem;
+  margin-bottom: 1rem;
+  text-align: center;
+  line-height: 1.4;
+}
+
+.login-hint {
+  color: #6c7086;
+  font-size: 0.75rem;
+  text-align: center;
+  margin-top: 0.5rem;
+}
+
+/* TOTP Setup */
+.totp-setup-box {
+  max-width: 420px;
+}
+
+.totp-setup-steps {
+  margin-bottom: 1rem;
+}
+
+.totp-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 0.7rem;
+  font-size: 0.85rem;
+  color: #cdd6f4;
+}
+
+.totp-step-num {
+  background: #89b4fa;
+  color: #1e1e2e;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.totp-qr-container {
+  display: flex;
+  justify-content: center;
+  margin: 1rem 0;
+}
+
+.totp-qr {
+  border-radius: 8px;
+  border: 2px solid #313244;
+}
+
+.totp-manual {
+  text-align: center;
+  font-size: 0.8rem;
+  color: #6c7086;
+  margin-bottom: 1rem;
+}
+
+.totp-secret {
+  display: block;
+  margin-top: 4px;
+  background: #313244;
+  color: #89b4fa;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  letter-spacing: 0.1em;
+  word-break: break-all;
+  user-select: all;
+}
+
+.recovery-codes {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+  margin: 1rem 0;
+}
+
+.recovery-code {
+  background: #313244;
+  color: #cdd6f4;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  text-align: center;
+  letter-spacing: 0.05em;
+  user-select: all;
+}
+
 /* Toolbar */
 .toolbar {
   display: flex;

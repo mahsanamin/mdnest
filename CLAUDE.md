@@ -22,6 +22,7 @@ backend/
     notes.go                 # GET/POST/PUT/PATCH/DELETE /api/note?ns=&path=
     search.go                # GET /api/search?ns=&q= (concurrent search with caching)
     tokens.go                # GET/POST/DELETE /api/auth/tokens (API token management)
+    totp.go                  # 2FA: TOTP setup, verify, disable, admin reset
     upload.go                # POST /api/folder, /api/upload, GET /api/files/
     move.go                  # POST /api/move?ns=&from=&to=
     path.go                  # SafePath(), RequireNamespace() — shared utils
@@ -131,6 +132,9 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 
 ## Debugging Practice
 
+- **Read the error message literally** — "expected 12 not 11" means count your Scan args, don't blame Docker cache
+- **Never assume the problem is external** (cache, stale code, old binary) without evidence — check YOUR code first
+- When adding a column to a SQL query, grep ALL Scan() calls for that table and update every one
 - When a fix doesn't work after 2 attempts, **stop guessing and look at the actual data**
 - Read `mdnest.conf` and `.env` for ports, credentials, and config — never hardcode or guess
 - Use the running server's API to fetch real content: `curl -s http://<BIND_ADDRESS>:<BACKEND_PORT>/api/note?ns=...`

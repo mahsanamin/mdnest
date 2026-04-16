@@ -4,6 +4,24 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v3.2.0 — Two-Factor Authentication & Account Security
+
+### New Features
+- **Two-Factor Authentication (TOTP)** — authenticator app support (Google Authenticator, Authy, 1Password). QR code setup, recovery codes, admin reset.
+- **Mandatory 2FA** — `REQUIRE_2FA=true` in config forces all users to set up 2FA. Guided setup flow during login with QR code + step-by-step instructions.
+- **Shared 2FA across servers** — `export-2fa` / `import-2fa` commands let admins share TOTP secrets across multiple mdnest instances. One authenticator entry for all servers.
+- **Forced password change** — new users must change their password on first login (`must_change_password` flag).
+- **Block/unblock users** — admin can block users, preventing login with a clear error message.
+- **Multi-step login flow** — password → forced password change → 2FA setup/verify → JWT. Each step shows a clean UI.
+- **30-day sessions** — JWT expiry extended from 24 hours to 30 days (safe with 2FA).
+- **Auto-migrate on rebuild** — `./mdnest-server rebuild` automatically runs database migrations for multi-user mode.
+
+### Config
+- `REQUIRE_2FA=true|false` — require all users to set up 2FA (default: false)
+- `TOTP_ISSUER=name` — issuer name shown in authenticator app (default: mdnest)
+
+---
+
 ## v3.1.8 — Developer Experience & Security
 
 ### New Features
