@@ -50,6 +50,11 @@ var migrations = []struct {
 			ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret TEXT;
 			ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEFAULT false;
 			ALTER TABLE users ADD COLUMN IF NOT EXISTS recovery_codes TEXT;
+		`,
+	},
+	{
+		name: "004_add_blocked",
+		sql: `
 			ALTER TABLE users ADD COLUMN IF NOT EXISTS blocked BOOLEAN NOT NULL DEFAULT false;
 		`,
 	},
