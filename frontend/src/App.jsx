@@ -93,8 +93,12 @@ function App() {
   const [initialized, setInitialized] = useState(false);
   const contentRef = useRef(content);
   const savedContentRef = useRef(savedContent);
+  const selectedNsRef = useRef(selectedNs);
+  const currentPathRef = useRef(currentPath);
   contentRef.current = content;
   savedContentRef.current = savedContent;
+  selectedNsRef.current = selectedNs;
+  currentPathRef.current = currentPath;
 
   // Multi-user state
   const [appConfig, setAppConfig] = useState(null); // {authMode, version, liveCollab}
@@ -193,27 +197,31 @@ function App() {
           break;
         case 'tree-changed':
           // File tree changed (create/delete/move via any client) — refresh tree
-          if (selectedNs) refreshTree(selectedNs);
+          // Use refs to get CURRENT namespace (not stale closure value)
+          if (selectedNsRef.current) refreshTree(selectedNsRef.current);
           break;
         case 'access-changed':
           // Permissions changed (user invited, grant created/modified/deleted)
-          // Refresh namespace list and user info
           loadNamespaces();
-          if (isMulti) fetchMe().then(setUserInfo).catch(() => {});
-          if (selectedNs) refreshTree(selectedNs);
+          fetchMe().then(setUserInfo).catch(() => {});
+          if (selectedNsRef.current) refreshTree(selectedNsRef.current);
           break;
         case 'file-changed':
           // Another user saved — update etag and reload if no local edits
           etagRef.current = msg.etag;
           if ((contentRef.current || '').trim() === (savedContentRef.current || '').trim()) {
-            // No local unsaved changes — silently reload the file
             setConflictBanner(null);
-            // Fetch fresh content
-            if (selectedNs && currentPath) {
-              getNote(selectedNs, currentPath).then(({ text, etag }) => {
-                setContent(text);
-                setSavedContent(text);
-                etagRef.current = etag;
+            // Use refs for current namespace/path
+            const ns = selectedNsRef.current;
+            const path = currentPathRef.current;
+            if (ns && path) {
+              getNote(ns, path).then(({ text, etag }) => {
+                // Verify user hasn't switched files while getNote was in flight
+                if (selectedNsRef.current === ns && currentPathRef.current === path) {
+                  setContent(text);
+                  setSavedContent(text);
+                  etagRef.current = etag;
+                }
               }).catch(() => {});
             }
           } else {
