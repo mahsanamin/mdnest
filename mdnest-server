@@ -52,10 +52,12 @@ case "$CMD" in
 
     if [ "$1" = "--full" ]; then
       shift
-      echo "Full rebuild: recreating all containers..."
-      compose up --build --force-recreate -d "$@"
+      echo "Full rebuild: force recreate all containers..."
+      compose build --no-cache frontend backend
+      compose up --force-recreate -d "$@"
     else
-      compose up --build -d "$@"
+      compose build frontend backend
+      compose up -d "$@"
       # Force-recreate git-sync only — it uses volume mounts (not built images)
       # so `up --build` won't detect changes to sync.sh or keys
       if [ -n "$SYNC_PROFILE" ]; then
