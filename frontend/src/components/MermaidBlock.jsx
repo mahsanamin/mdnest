@@ -206,19 +206,46 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
     }
 
     let src = currentSource.current;
+    let replaced = false;
 
-    // Normalize: the clicked text has spaces where the source might have \n or <br>.
-    // Build a version of oldText where each space can match space, \n, or <br>.
-    const normalize = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-      .replace(/ /g, '(?:\\\\n|<br>| )+');
-
-    // Try exact match first (simple labels)
+    // 1. Exact match
     if (src.includes(oldText)) {
       src = src.replace(oldText, newText);
-    } else {
-      // Try with \n/space flexibility
-      const re = new RegExp(normalize(oldText));
-      src = src.replace(re, newText);
+      replaced = true;
+    }
+
+    // 2. Try replacing spaces with common mermaid line break variants
+    if (!replaced) {
+      const separators = ['\\n', '<br>', '<br/>', '<br />'];
+      for (const sep of separators) {
+        // Try each space → separator combination
+        const candidate = oldText.replace(/ /g, sep);
+        if (src.includes(candidate)) {
+          src = src.replace(candidate, newText);
+          replaced = true;
+          break;
+        }
+      }
+    }
+
+    // 3. Try matching where SOME spaces are \n (not all)
+    if (!replaced) {
+      const words = oldText.split(' ');
+      if (words.length > 1) {
+        // Try each split point: "A B C" → "A\nB C", "A B\nC", "A\nB\nC"
+        for (let mask = 1; mask < (1 << (words.length - 1)); mask++) {
+          let candidate = words[0];
+          for (let i = 1; i < words.length; i++) {
+            candidate += ((mask >> (i - 1)) & 1) ? '\\n' : ' ';
+            candidate += words[i];
+          }
+          if (src.includes(candidate)) {
+            src = src.replace(candidate, newText);
+            replaced = true;
+            break;
+          }
+        }
+      }
     }
 
     setEditingLabel(null);
