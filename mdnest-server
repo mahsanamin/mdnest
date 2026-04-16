@@ -352,6 +352,65 @@ case "$CMD" in
     echo ""
     echo "=== Done! Run ./mdnest-server rebuild ==="
     ;;
+  remove-namespace)
+    echo "=== Remove namespace from mdnest ==="
+    echo ""
+
+    # List current namespaces
+    MOUNTS=$(grep '^MOUNT_' mdnest.conf 2>/dev/null)
+    if [ -z "$MOUNTS" ]; then
+      echo "No namespaces configured."
+      exit 0
+    fi
+
+    echo "Current namespaces:"
+    echo "$MOUNTS" | while IFS='=' read -r key path; do
+      name="${key#MOUNT_}"
+      echo "  $name → $path"
+    done
+    echo ""
+
+    read -p "Namespace to remove: " NS_NAME
+    if [ -z "$NS_NAME" ]; then
+      echo "Cancelled."
+      exit 0
+    fi
+
+    # Check it exists
+    MOUNT_LINE=$(grep "^MOUNT_${NS_NAME}=" mdnest.conf 2>/dev/null)
+    if [ -z "$MOUNT_LINE" ]; then
+      echo "Error: MOUNT_${NS_NAME} not found in mdnest.conf"
+      exit 1
+    fi
+
+    NS_PATH="${MOUNT_LINE#MOUNT_${NS_NAME}=}"
+    echo ""
+    echo "This will:"
+    echo "  - Remove MOUNT_${NS_NAME} from mdnest.conf"
+    echo "  - Remove deploy key git-sync/keys/${NS_NAME} (if exists)"
+    echo "  - NOT delete files at $NS_PATH"
+    echo ""
+    read -p "Continue? (y/N): " CONFIRM
+    if [ "$CONFIRM" != "y" ] && [ "$CONFIRM" != "Y" ]; then
+      echo "Cancelled."
+      exit 0
+    fi
+
+    # Remove from mdnest.conf
+    sed -i.bak "/^MOUNT_${NS_NAME}=/d" mdnest.conf
+    rm -f mdnest.conf.bak
+    echo "Removed MOUNT_${NS_NAME} from mdnest.conf"
+
+    # Remove deploy key
+    if [ -f "git-sync/keys/${NS_NAME}" ]; then
+      rm -f "git-sync/keys/${NS_NAME}" "git-sync/keys/${NS_NAME}.pub"
+      echo "Removed deploy key: git-sync/keys/${NS_NAME}"
+    fi
+
+    echo ""
+    echo "Files at $NS_PATH are untouched."
+    echo "Run ./mdnest-server rebuild to apply."
+    ;;
   git-check)
     echo "=== mdnest git-sync diagnostics ==="
     echo ""
@@ -480,7 +539,8 @@ Commands:
   start       Start all services (includes git-sync if keys are configured)
   stop        Stop all services
   restart     Stop and start all services
-  add-namespace  Add a namespace: create dir, deploy key, git remote, update config
+  add-namespace     Add a namespace: clone from GitHub or use local directory
+  remove-namespace  Remove a namespace from config (files are NOT deleted)
   rebuild     Re-run setup, rebuild changed images, and start
   rebuild --full  Force recreate ALL containers (use after major updates)
   logs        View logs (all services, or specify: backend, frontend, git-sync, postgres)
