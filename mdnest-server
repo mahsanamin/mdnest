@@ -96,6 +96,17 @@ case "$CMD" in
     compose run --rm backend ./mdnest -migrate
     echo "Migrations complete."
     ;;
+  dev-setup)
+    echo "Setting up development environment..."
+    git config core.hooksPath .githooks
+    echo "Git hooks configured (.githooks/pre-push)"
+    echo ""
+    echo "Pre-push hook verifies:"
+    echo "  - Frontend & backend compile"
+    echo "  - No high-severity vulnerabilities (npm audit + govulncheck)"
+    echo "  - Lock files in sync with package.json"
+    echo "  - Version strings consistent across backend, frontend, CLI"
+    ;;
   install-cli)
     DEST="/usr/local/bin/mdnest"
     if [ -w "$(dirname "$DEST")" ]; then
@@ -347,6 +358,7 @@ Commands:
   update      Pull latest code, rebuild, and start
   migrate     Run database migrations (multi-user mode only)
   install-cli Install the mdnest CLI system-wide (/usr/local/bin)
+  dev-setup   Configure git hooks (pre-push: build, audit, version check)
 
 Git sync starts automatically when deploy keys are found in git-sync/keys/.
 No keys = no sync. Your notes stay local unless you set it up.
