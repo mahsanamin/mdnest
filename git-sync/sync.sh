@@ -71,6 +71,13 @@ pull_remote() {
     return 1
   fi
 
+  # Fresh repo — no upstream branch yet, skip pull (first push will create it)
+  UPSTREAM=$(git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null)
+  if [ -z "$UPSTREAM" ]; then
+    echo "git-sync [$name]: no upstream branch yet, will push to create it"
+    return 0
+  fi
+
   # Try rebase first (clean linear history)
   if git pull --rebase 2>/dev/null; then
     return 0
@@ -151,7 +158,7 @@ sync_repo() {
   fix_remote_url "$name"
 
   if pull_remote "$name"; then
-    git push || echo "git-sync [$name]: push failed, will retry next cycle"
+    git push 2>/dev/null || git push --set-upstream origin "$(git branch --show-current)" || echo "git-sync [$name]: push failed, will retry next cycle"
   fi
 }
 
