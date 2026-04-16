@@ -41,6 +41,15 @@ case "$CMD" in
     ;;
   rebuild)
     ./setup.sh
+
+    # Auto-migrate if multi mode (safe — idempotent, adds columns IF NOT EXISTS)
+    AUTH_MODE=$(grep '^AUTH_MODE=' .env 2>/dev/null | cut -d= -f2)
+    if [ "$AUTH_MODE" = "multi" ]; then
+      echo "Running database migrations..."
+      compose up -d postgres
+      compose run --rm backend ./mdnest -migrate 2>&1 | grep -v "^$"
+    fi
+
     if [ "$1" = "--full" ]; then
       shift
       echo "Full rebuild: recreating all containers..."
@@ -65,6 +74,12 @@ case "$CMD" in
   update)
     git pull
     ./setup.sh
+    AUTH_MODE=$(grep '^AUTH_MODE=' .env 2>/dev/null | cut -d= -f2)
+    if [ "$AUTH_MODE" = "multi" ]; then
+      echo "Running database migrations..."
+      compose up -d postgres
+      compose run --rm backend ./mdnest -migrate 2>&1 | grep -v "^$"
+    fi
     compose up --build -d
     echo "mdnest updated and running"
     ;;
