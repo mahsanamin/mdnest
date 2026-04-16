@@ -22,6 +22,8 @@ All notable changes to mdnest are documented here.
 - **Mermaid label replace** — handles `<br/>` line breaks at any word boundary via brute-force matching.
 - **WebSocket stale closure** — collab message handler used stale namespace/path from closure, causing one user's saves to disrupt another user's view. Now uses refs for current values.
 - **Editor mode reset** — switching files no longer resets Live mode to Basic. Editor/view mode are global user preferences, not per-file.
+- **Table cell selection** — multi-cell selection now visually highlights in Live editor (blue overlay).
+- **Table row paste** — copying table rows and pasting inside an existing table inserts rows after the current row instead of creating a new table.
 
 ### Config
 - `REQUIRE_2FA=true|false` — require all users to set up 2FA (default: false)
