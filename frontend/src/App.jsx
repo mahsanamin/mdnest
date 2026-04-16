@@ -62,18 +62,25 @@ function App() {
   const saveTimerRef = useRef(null);
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [mobileView, setMobileView] = useState(() => localStorage.getItem('mdnest_mobile_view') || 'editor');
-  const [viewMode, setViewMode] = useState(() => localStorage.getItem('mdnest_view_mode') || 'split');
-  const [editorMode, setEditorMode] = useState('basic');
+  const [viewMode, setViewMode] = useState(() => localStorage.getItem('mdnest_view_mode') || 'editor');
+  const [editorMode, setEditorMode] = useState('live');
   const [editorModeReady, setEditorModeReady] = useState(false);
 
-  // Restore editor mode from localStorage AFTER initial render (only if in editor-only mode)
-  useEffect(() => {
-    const savedView = localStorage.getItem('mdnest_view_mode') || 'split';
-    const savedEditor = localStorage.getItem('mdnest_editor_mode');
-    if (savedEditor === 'live' && savedView === 'editor') {
-      setTimeout(() => { setEditorMode('live'); }, 500);
-    }
+  // Helper: get/set per-file preferences from localStorage
+  const getFilePrefs = useCallback((ns, path) => {
+    if (!ns || !path) return null;
+    try {
+      const key = `mdnest_file_prefs:${ns}/${path}`;
+      return JSON.parse(localStorage.getItem(key));
+    } catch { return null; }
   }, []);
+
+  const setFilePrefs = useCallback((ns, path, prefs) => {
+    if (!ns || !path) return;
+    const key = `mdnest_file_prefs:${ns}/${path}`;
+    const existing = getFilePrefs(ns, path) || {};
+    localStorage.setItem(key, JSON.stringify({ ...existing, ...prefs }));
+  }, [getFilePrefs]);
   const [splitRatio, setSplitRatio] = useState(50);
   const [ctxMenu, setCtxMenu] = useState({ visible: false, x: 0, y: 0, target: null });
   const [showChangePassword, setShowChangePassword] = useState(false);
@@ -488,6 +495,18 @@ function App() {
       etagRef.current = etag;
       setConflictBanner(null);
       setSidebarVisible(false);
+      // Restore per-file view/editor mode preferences
+      const prefs = getFilePrefs(selectedNs, path);
+      if (prefs) {
+        if (prefs.viewMode) {
+          setViewMode(prefs.viewMode);
+          if (prefs.viewMode === 'editor') {
+            setEditorMode(prefs.editorMode || 'live');
+          } else {
+            setEditorMode('basic');
+          }
+        }
+      }
       restoreScrollPosition(selectedNs, path);
     } catch (e) {
       if (e.name === 'PermissionError') {
@@ -830,16 +849,15 @@ function App() {
           onViewModeChange={(mode) => {
             setViewMode(mode);
             localStorage.setItem('mdnest_view_mode', mode);
-            // Restore saved editor mode when switching to editor-only
             if (mode === 'editor') {
-              const saved = localStorage.getItem('mdnest_editor_mode') || 'basic';
-              setEditorMode(saved);
+              const prefs = getFilePrefs(selectedNs, currentPath);
+              const savedEditor = prefs?.editorMode || 'live';
+              setEditorMode(savedEditor);
             } else {
-              // Split/preview always uses basic
               setEditorMode('basic');
             }
-            // Restore scroll position after view mode switch
             if (selectedNs && currentPath) {
+              setFilePrefs(selectedNs, currentPath, { viewMode: mode });
               restoreScrollPosition(selectedNs, currentPath);
             }
           }}
@@ -847,7 +865,10 @@ function App() {
           onEditorModeChange={(mode) => {
             setEditorMode(mode);
             localStorage.setItem('mdnest_editor_mode', mode);
-            if (selectedNs && currentPath) restoreScrollPosition(selectedNs, currentPath);
+            if (selectedNs && currentPath) {
+              setFilePrefs(selectedNs, currentPath, { editorMode: mode });
+              restoreScrollPosition(selectedNs, currentPath);
+            }
           }}
           onRefresh={handleRefresh}
           wsStatus={appConfig?.liveCollab ? wsStatus : null}
