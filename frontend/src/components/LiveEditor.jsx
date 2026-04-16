@@ -301,8 +301,97 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly }) {
         }
       }
 
-      // 2. Rich HTML → convert to markdown then insert as parsed nodes
+      // 2. Table row paste — if clipboard has <tr> and cursor is in a table,
+      // insert rows into the existing table instead of creating a new one.
       const html = cb.getData('text/html');
+      if (html && /<tr[\s>]/i.test(html) && editor) {
+        try {
+          const handled = editor.action((ctx) => {
+            const view = ctx.get(editorViewCtx);
+            const { state } = view;
+            const { $from } = state.selection;
+
+            // Check if cursor is inside a table cell
+            let tableNode = null;
+            let tablePos = null;
+            let currentRowIndex = 0;
+            for (let d = $from.depth; d > 0; d--) {
+              const node = $from.node(d);
+              if (node.type.name === 'table') {
+                tableNode = node;
+                tablePos = $from.before(d);
+                // Find current row index
+                const cellNode = $from.node(d + 1); // table_row
+                for (let i = 0; i < node.childCount; i++) {
+                  if (node.child(i) === cellNode) { currentRowIndex = i; break; }
+                }
+                break;
+              }
+            }
+
+            if (!tableNode) return false; // Not in a table — let default handler run
+
+            // Parse the pasted HTML to extract cell contents
+            const doc = new DOMParser().parseFromString(html, 'text/html');
+            const trs = doc.querySelectorAll('tr');
+            if (trs.length === 0) return false;
+
+            // Build rows from pasted HTML
+            const pastedRows = [];
+            for (const tr of trs) {
+              const cells = [];
+              for (const cell of tr.querySelectorAll('th, td')) {
+                cells.push(cell.textContent.trim());
+              }
+              if (cells.length > 0) pastedRows.push(cells);
+            }
+            if (pastedRows.length === 0) return false;
+
+            // Get table column count
+            const colCount = tableNode.child(0).childCount;
+
+            // Build ProseMirror table rows
+            const schema = state.schema;
+            const cellType = schema.nodes.table_cell;
+            const rowType = schema.nodes.table_row;
+            if (!cellType || !rowType) return false;
+
+            const newRows = pastedRows.map((cells) => {
+              const pmCells = [];
+              for (let c = 0; c < colCount; c++) {
+                const text = cells[c] || '';
+                const content = text ? schema.text(text) : null;
+                const para = schema.nodes.paragraph.create(null, content ? [content] : []);
+                pmCells.push(cellType.create(null, [para]));
+              }
+              return rowType.create(null, pmCells);
+            });
+
+            // Insert after current row
+            let insertPos = tablePos + 1; // start of table content
+            for (let i = 0; i <= currentRowIndex; i++) {
+              insertPos += tableNode.child(i).nodeSize;
+            }
+
+            const tr = state.tr;
+            for (let i = newRows.length - 1; i >= 0; i--) {
+              tr.insert(insertPos, newRows[i]);
+            }
+            view.dispatch(tr);
+            return true;
+          });
+
+          if (handled) {
+            e.preventDefault();
+            return;
+          }
+        } catch (err) {
+          // Fall through to default paste
+          console.error('Table row paste failed:', err);
+        }
+      }
+
+      // 3. Rich HTML → convert to markdown then insert as parsed nodes
       if (html && hasRichContent(html)) {
         e.preventDefault();
         const md = htmlToMarkdown(html);
