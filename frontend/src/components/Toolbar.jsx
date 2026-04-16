@@ -31,6 +31,14 @@ function Toolbar({ currentPath, onToggleSidebar, onChangePassword, onRename, onD
       )}
       <span className="toolbar-path">
         {currentPath || 'No file selected'}
+        {currentPath && (
+          <button
+            className={`toolbar-inline-refresh${refreshing ? ' spinning' : ''}`}
+            onClick={handleRefresh}
+            disabled={refreshing}
+            title="Refresh"
+          >&#8635;</button>
+        )}
         {currentPath && (onRename || onDelete) && (
           <span className="toolbar-path-actions">
             {onRename && <button className="toolbar-inline-action" onClick={onRename} title="Rename">Rename</button>}
@@ -69,14 +77,6 @@ function Toolbar({ currentPath, onToggleSidebar, onChangePassword, onRename, onD
           title={wsStatus === 'connected' ? 'Live connection active' : wsStatus === 'connecting' ? 'Reconnecting...' : 'Disconnected'}
         />
       )}
-      <button
-        className={`toolbar-refresh${refreshing ? ' spinning' : ''}`}
-        onClick={handleRefresh}
-        disabled={refreshing}
-        title="Refresh"
-      >
-        &#8635;
-      </button>
       <button className="toolbar-settings" onClick={onChangePassword} title="Settings">
         &#9881;
       </button>

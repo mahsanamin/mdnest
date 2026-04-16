@@ -63,9 +63,9 @@ function Sidebar({
 
   // Fetch sync status when namespace changes
   useEffect(() => {
-    if (!selectedNs || !isAdmin) { setSyncInfo(null); return; }
+    if (!selectedNs) { setSyncInfo(null); return; }
     adminSyncStatus(selectedNs).then(setSyncInfo).catch(() => setSyncInfo(null));
-  }, [selectedNs, isAdmin]);
+  }, [selectedNs]);
 
   const handleSync = useCallback(async () => {
     if (syncing || !selectedNs) return;
@@ -180,7 +180,7 @@ function Sidebar({
             <span className="ns-label">{selectedNs || 'mdnest'}</span>
           )}
           <div className="sidebar-tree-controls">
-            {isAdmin && syncInfo && (
+            {syncInfo && isAdmin && (
               syncInfo.isGitRepo && syncInfo.hasRemote ? (
                 <button
                   className={`tree-control-btn sync-btn${syncing ? ' spinning' : ''}`}
@@ -204,7 +204,7 @@ function Sidebar({
             ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 15 12 9 18 15"/><line x1="6" y1="20" x2="18" y2="20"/></svg></button>
           </div>
         </div>
-        {isAdmin && syncInfo && (
+        {syncInfo && (
           <div className={`sync-status-bar ${syncInfo.isGitRepo && syncInfo.hasRemote ? 'connected' : 'disconnected'}`}>
             {syncInfo.isGitRepo && syncInfo.hasRemote ? (
               <>

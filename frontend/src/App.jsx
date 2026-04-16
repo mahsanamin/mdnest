@@ -62,18 +62,25 @@ function App() {
   const saveTimerRef = useRef(null);
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [mobileView, setMobileView] = useState(() => localStorage.getItem('mdnest_mobile_view') || 'editor');
-  const [viewMode, setViewMode] = useState(() => localStorage.getItem('mdnest_view_mode') || 'split');
-  const [editorMode, setEditorMode] = useState('basic');
+  const [viewMode, setViewMode] = useState(() => localStorage.getItem('mdnest_view_mode') || 'editor');
+  const [editorMode, setEditorMode] = useState('live');
   const [editorModeReady, setEditorModeReady] = useState(false);
 
-  // Restore editor mode from localStorage AFTER initial render (only if in editor-only mode)
-  useEffect(() => {
-    const savedView = localStorage.getItem('mdnest_view_mode') || 'split';
-    const savedEditor = localStorage.getItem('mdnest_editor_mode');
-    if (savedEditor === 'live' && savedView === 'editor') {
-      setTimeout(() => { setEditorMode('live'); }, 500);
-    }
+  // Helper: get/set per-file preferences from localStorage
+  const getFilePrefs = useCallback((ns, path) => {
+    if (!ns || !path) return null;
+    try {
+      const key = `mdnest_file_prefs:${ns}/${path}`;
+      return JSON.parse(localStorage.getItem(key));
+    } catch { return null; }
   }, []);
+
+  const setFilePrefs = useCallback((ns, path, prefs) => {
+    if (!ns || !path) return;
+    const key = `mdnest_file_prefs:${ns}/${path}`;
+    const existing = getFilePrefs(ns, path) || {};
+    localStorage.setItem(key, JSON.stringify({ ...existing, ...prefs }));
+  }, [getFilePrefs]);
   const [splitRatio, setSplitRatio] = useState(50);
   const [ctxMenu, setCtxMenu] = useState({ visible: false, x: 0, y: 0, target: null });
   const [showChangePassword, setShowChangePassword] = useState(false);
@@ -400,38 +407,51 @@ function App() {
     return els;
   }, []);
 
-  // Continuously track scroll position for the current document
+  // Save scroll position — debounced, persisted to localStorage via file prefs
+  const saveScrollDebounce = useRef(null);
+  const saveScrollPos = useCallback(() => {
+    if (!selectedNs || !currentPath) return;
+    if (saveScrollDebounce.current) clearTimeout(saveScrollDebounce.current);
+    saveScrollDebounce.current = setTimeout(() => {
+      const els = getScrollables();
+      for (const el of els) {
+        const maxScroll = el.scrollHeight - el.clientHeight;
+        if (maxScroll > 10) {
+          const pct = el.scrollTop / maxScroll;
+          scrollPositions.current[`${selectedNs}/${currentPath}`] = pct;
+          setFilePrefs(selectedNs, currentPath, { scrollPct: pct });
+          break; // save from the first scrollable element
+        }
+      }
+    }, 200);
+  }, [selectedNs, currentPath, getScrollables, setFilePrefs]);
+
+  // Attach scroll listeners — re-attach when view/editor mode changes
   useEffect(() => {
     if (!selectedNs || !currentPath) return;
-    const key = `${selectedNs}/${currentPath}`;
-
-    const onScroll = (e) => {
-      const el = e.target;
-      const maxScroll = el.scrollHeight - el.clientHeight;
-      if (maxScroll > 0) {
-        scrollPositions.current[key] = el.scrollTop / maxScroll;
-      }
-    };
-
-    // Attach scroll listeners after a short delay (let content render)
+    const handler = () => saveScrollPos();
     let timer = setTimeout(() => {
       getScrollables().forEach((el) => {
-        el.addEventListener('scroll', onScroll, { passive: true });
+        el.addEventListener('scroll', handler, { passive: true });
       });
     }, 300);
-
     return () => {
       clearTimeout(timer);
       getScrollables().forEach((el) => {
-        el.removeEventListener('scroll', onScroll);
+        el.removeEventListener('scroll', handler);
       });
     };
-  }, [selectedNs, currentPath, viewMode, editorMode, getScrollables]);
+  }, [selectedNs, currentPath, viewMode, editorMode, getScrollables, saveScrollPos]);
 
   // Restore scroll position when opening a document
   const restoreScrollPosition = useCallback((ns, path) => {
+    // Try in-memory first (fastest), then localStorage
     const key = `${ns}/${path}`;
-    const pct = scrollPositions.current[key];
+    let pct = scrollPositions.current[key];
+    if (pct == null) {
+      const prefs = getFilePrefs(ns, path);
+      pct = prefs?.scrollPct;
+    }
     if (pct == null || pct === 0) return;
 
     let attempts = 0;
@@ -451,7 +471,7 @@ function App() {
       }
     };
     setTimeout(tryRestore, 200);
-  }, [getScrollables]);
+  }, [getScrollables, getFilePrefs]);
 
   const openNoteDirect = useCallback(async (ns, path) => {
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
@@ -488,6 +508,18 @@ function App() {
       etagRef.current = etag;
       setConflictBanner(null);
       setSidebarVisible(false);
+      // Restore per-file view/editor mode preferences
+      const prefs = getFilePrefs(selectedNs, path);
+      if (prefs) {
+        if (prefs.viewMode) {
+          setViewMode(prefs.viewMode);
+          if (prefs.viewMode === 'editor') {
+            setEditorMode(prefs.editorMode || 'live');
+          } else {
+            setEditorMode('basic');
+          }
+        }
+      }
       restoreScrollPosition(selectedNs, path);
     } catch (e) {
       if (e.name === 'PermissionError') {
@@ -830,16 +862,15 @@ function App() {
           onViewModeChange={(mode) => {
             setViewMode(mode);
             localStorage.setItem('mdnest_view_mode', mode);
-            // Restore saved editor mode when switching to editor-only
             if (mode === 'editor') {
-              const saved = localStorage.getItem('mdnest_editor_mode') || 'basic';
-              setEditorMode(saved);
+              const prefs = getFilePrefs(selectedNs, currentPath);
+              const savedEditor = prefs?.editorMode || 'live';
+              setEditorMode(savedEditor);
             } else {
-              // Split/preview always uses basic
               setEditorMode('basic');
             }
-            // Restore scroll position after view mode switch
             if (selectedNs && currentPath) {
+              setFilePrefs(selectedNs, currentPath, { viewMode: mode });
               restoreScrollPosition(selectedNs, currentPath);
             }
           }}
@@ -847,7 +878,10 @@ function App() {
           onEditorModeChange={(mode) => {
             setEditorMode(mode);
             localStorage.setItem('mdnest_editor_mode', mode);
-            if (selectedNs && currentPath) restoreScrollPosition(selectedNs, currentPath);
+            if (selectedNs && currentPath) {
+              setFilePrefs(selectedNs, currentPath, { editorMode: mode });
+              restoreScrollPosition(selectedNs, currentPath);
+            }
           }}
           onRefresh={handleRefresh}
           wsStatus={appConfig?.liveCollab ? wsStatus : null}

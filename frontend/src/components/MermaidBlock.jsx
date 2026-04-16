@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import mermaid from 'mermaid';
+import mermaid, { fixMermaidTextColors } from '../mermaid-config.js';
 
 function AutoSizeInput({ className, style, defaultValue, onConfirm, onCancel }) {
   const [value, setValue] = useState(defaultValue || '');
@@ -112,72 +112,14 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
     return () => { cancelled = true; };
   }, [source, mode]);
 
-  // Fix text colors after SVG renders — mermaid's dark theme produces
-  // low-contrast text on dark node fills. Use the same fixMermaidTextColors
-  // approach as Preview.jsx but via getComputedStyle for reliable fill detection.
+  // Fix text colors after SVG renders — shared function from mermaid-config.js
   useEffect(() => {
     if (!svgHtml) return;
     requestAnimationFrame(() => {
       const container = previewRef.current;
       if (!container) return;
       const svgEl = container.querySelector('svg');
-      if (!svgEl) return;
-
-      const lightText = '#cdd6f4';
-      const darkText = '#1e1e2e';
-
-      function getBrightness(color) {
-        if (!color || color === 'none' || color === 'transparent') return -1;
-        try {
-          const ctx = document.createElement('canvas').getContext('2d');
-          ctx.fillStyle = color;
-          const hex = ctx.fillStyle;
-          const r = parseInt(hex.slice(1, 3), 16);
-          const g = parseInt(hex.slice(3, 5), 16);
-          const b = parseInt(hex.slice(5, 7), 16);
-          return (r * 299 + g * 587 + b * 114) / 1000;
-        } catch { return -1; }
-      }
-
-      // Use getComputedStyle to get the ACTUAL rendered fill, including CSS-applied fills
-      function getNodeFill(el) {
-        let node = el.closest ? el.closest('.node, .cluster, .actor, .note') : null;
-        if (!node) node = el.parentElement;
-        while (node && node !== svgEl) {
-          const shapes = node.querySelectorAll('rect, circle, polygon, path');
-          for (const shape of shapes) {
-            // Try computed style first (catches CSS-applied fills)
-            try {
-              const computed = window.getComputedStyle(shape);
-              const fill = computed.fill;
-              if (fill && fill !== 'none') return fill;
-            } catch {}
-            // Fallback to attribute
-            const attr = shape.getAttribute('fill');
-            if (attr && attr !== 'none' && attr !== 'transparent') return attr;
-          }
-          node = node.parentElement;
-        }
-        return null;
-      }
-
-      // SVG text/tspan
-      svgEl.querySelectorAll('text, tspan').forEach((t) => {
-        const fill = getNodeFill(t);
-        const b = getBrightness(fill);
-        // If can't determine fill, default to light text (dark bg assumed)
-        const color = b > 140 ? darkText : lightText;
-        t.setAttribute('fill', color);
-        t.style.fill = color;
-      });
-
-      // HTML inside foreignObject
-      svgEl.querySelectorAll('foreignObject span, foreignObject div, foreignObject p').forEach((t) => {
-        const fill = getNodeFill(t.closest('foreignObject') || t);
-        const b = getBrightness(fill);
-        const color = b > 140 ? darkText : lightText;
-        t.style.setProperty('color', color, 'important');
-      });
+      if (svgEl) fixMermaidTextColors(svgEl);
     });
   }, [svgHtml]);
 
@@ -185,7 +127,9 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
   const handlePreviewClick = useCallback((e) => {
     if (readOnly) return;
 
-    // Walk up from the click target to find any text-bearing element
+    // Walk up from the click target to find the label text.
+    // Prefer the innermost meaningful text element to avoid grabbing
+    // entire multi-line node content from a parent div.
     let el = e.target;
     let text = null;
     let textEl = null;
@@ -194,16 +138,10 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
       const tagName = el.tagName?.toLowerCase();
       const cls = el.className?.baseVal || el.className || '';
 
-      // Match: SVG text/tspan, HTML span/p/div, or any mermaid label class
-      const isTextElement = (
-        tagName === 'text' ||
-        tagName === 'tspan' ||
-        tagName === 'span' ||
-        tagName === 'p' ||
-        tagName === 'div' ||
+      // Specific label classes (high confidence)
+      const isLabelClass = (
         cls.includes('nodeLabel') ||
         cls.includes('edgeLabel') ||
-        cls.includes('label') ||
         cls.includes('messageText') ||
         cls.includes('actor') ||
         cls.includes('loopText') ||
@@ -211,12 +149,27 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
         cls.includes('labelText')
       );
 
-      if (isTextElement) {
-        // For tspan, use parent <text> for positioning but tspan's text
-        const t = el.textContent?.trim();
+      // SVG text elements
+      const isSvgText = tagName === 'text' || tagName === 'tspan';
+
+      // HTML text inside foreignObject — only span/p (not div, which wraps everything)
+      const isHtmlText = (tagName === 'span' || tagName === 'p') && el.closest('foreignObject');
+
+      if (isLabelClass || isSvgText || isHtmlText) {
+        // Get text preserving line breaks — textContent strips them.
+        // For SVG: multiple <tspan> = multiple lines. For HTML: <br> = line break.
+        let t;
+        if (isSvgText) {
+          const tspans = el.querySelectorAll('tspan');
+          t = tspans.length > 1
+            ? Array.from(tspans).map(ts => ts.textContent.trim()).filter(Boolean).join(' ')
+            : el.textContent?.trim();
+        } else {
+          // HTML: replace <br> with space, then get text
+          t = el.innerHTML ? el.innerHTML.replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]+>/g, '').trim() : el.textContent?.trim();
+        }
         if (t && t.length > 0 && t.length < 300) {
           text = t;
-          // Use the closest block-level element for positioning
           textEl = (tagName === 'tspan' && el.parentElement?.tagName?.toLowerCase() === 'text')
             ? el.parentElement : el;
           break;
@@ -252,41 +205,55 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
       return;
     }
 
-    // Replace the label in the source
-    // Mermaid labels appear in patterns like: A[Label], A(Label), A{Label}, A((Label)), A>Label], A[/Label/]
-    // Also edge labels: -->|Label|, -- Label -->
-    let newSource = currentSource.current;
-
-    // Try bracket patterns: [old], (old), {old}, ((old)), [/old/], [\old\]
-    const escaped = oldText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const patterns = [
-      new RegExp(`(\\[)${escaped}(\\])`, 'g'),           // [Label]
-      new RegExp(`(\\()${escaped}(\\))`, 'g'),           // (Label)
-      new RegExp(`(\\{)${escaped}(\\})`, 'g'),           // {Label}
-      new RegExp(`(\\(\\()${escaped}(\\)\\))`, 'g'),     // ((Label))
-      new RegExp(`(\\[/)${escaped}(/\\])`, 'g'),         // [/Label/]
-      new RegExp(`(\\|)${escaped}(\\|)`, 'g'),           // |Label|
-      new RegExp(`(-- )${escaped}( -->)`, 'g'),          // -- Label -->
-      new RegExp(`(-- )${escaped}( ---)`, 'g'),          // -- Label ---
-    ];
-
+    let src = currentSource.current;
     let replaced = false;
-    for (const pattern of patterns) {
-      if (pattern.test(newSource)) {
-        newSource = newSource.replace(pattern, `$1${newText}$2`);
-        replaced = true;
-        break;
+
+    // 1. Exact match
+    if (src.includes(oldText)) {
+      src = src.replace(oldText, newText);
+      replaced = true;
+    }
+
+    // 2. Try replacing ALL spaces with a single separator type (for fully-wrapped labels)
+    if (!replaced) {
+      const separators = ['\\n', '<br>', '<br/>', '<br />'];
+      for (const sep of separators) {
+        const candidate = oldText.replace(/ /g, sep);
+        if (src.includes(candidate)) {
+          src = src.replace(candidate, newText);
+          replaced = true;
+          break;
+        }
       }
     }
 
-    // Fallback: simple string replace (first occurrence)
-    if (!replaced && newSource.includes(oldText)) {
-      newSource = newSource.replace(oldText, newText);
+    // 3. Try matching where SOME spaces are line breaks (not all)
+    // Each space could be a space, \n, <br>, or <br/>
+    if (!replaced) {
+      const words = oldText.split(' ');
+      if (words.length > 1) {
+        const breakVariants = ['\\n', '<br>', '<br/>', '<br />'];
+        for (let mask = 1; mask < (1 << (words.length - 1)); mask++) {
+          for (const brk of breakVariants) {
+            let candidate = words[0];
+            for (let i = 1; i < words.length; i++) {
+              candidate += ((mask >> (i - 1)) & 1) ? brk : ' ';
+              candidate += words[i];
+            }
+            if (src.includes(candidate)) {
+              src = src.replace(candidate, newText);
+              replaced = true;
+              break;
+            }
+          }
+          if (replaced) break;
+        }
+      }
     }
 
     setEditingLabel(null);
-    if (newSource !== currentSource.current) {
-      onChange(newSource);
+    if (src !== currentSource.current) {
+      onChange(src);
     }
   }, [editingLabel, onChange]);
 
