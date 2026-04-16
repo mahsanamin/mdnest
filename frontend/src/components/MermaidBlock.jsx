@@ -214,11 +214,10 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
       replaced = true;
     }
 
-    // 2. Try replacing spaces with common mermaid line break variants
+    // 2. Try replacing ALL spaces with a single separator type (for fully-wrapped labels)
     if (!replaced) {
       const separators = ['\\n', '<br>', '<br/>', '<br />'];
       for (const sep of separators) {
-        // Try each space → separator combination
         const candidate = oldText.replace(/ /g, sep);
         if (src.includes(candidate)) {
           src = src.replace(candidate, newText);
@@ -228,22 +227,26 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
       }
     }
 
-    // 3. Try matching where SOME spaces are \n (not all)
+    // 3. Try matching where SOME spaces are line breaks (not all)
+    // Each space could be a space, \n, <br>, or <br/>
     if (!replaced) {
       const words = oldText.split(' ');
       if (words.length > 1) {
-        // Try each split point: "A B C" → "A\nB C", "A B\nC", "A\nB\nC"
+        const breakVariants = ['\\n', '<br>', '<br/>', '<br />'];
         for (let mask = 1; mask < (1 << (words.length - 1)); mask++) {
-          let candidate = words[0];
-          for (let i = 1; i < words.length; i++) {
-            candidate += ((mask >> (i - 1)) & 1) ? '\\n' : ' ';
-            candidate += words[i];
+          for (const brk of breakVariants) {
+            let candidate = words[0];
+            for (let i = 1; i < words.length; i++) {
+              candidate += ((mask >> (i - 1)) & 1) ? brk : ' ';
+              candidate += words[i];
+            }
+            if (src.includes(candidate)) {
+              src = src.replace(candidate, newText);
+              replaced = true;
+              break;
+            }
           }
-          if (src.includes(candidate)) {
-            src = src.replace(candidate, newText);
-            replaced = true;
-            break;
-          }
+          if (replaced) break;
         }
       }
     }
