@@ -190,18 +190,8 @@ case "$CMD" in
         echo "Deploy key generated: $KEY_PATH"
       fi
 
+      # Ask for remote URL first
       echo ""
-      echo "============================================================"
-      echo "  PUBLIC KEY — add this as a Deploy Key on your GitHub repo"
-      echo "  (Settings → Deploy Keys → Add → check 'Allow write access')"
-      echo "============================================================"
-      echo ""
-      cat "${KEY_PATH}.pub"
-      echo ""
-      echo "============================================================"
-      echo ""
-
-      # Ask for remote URL
       read -p "GitHub SSH remote URL (e.g. git@github.com:user/repo.git): " REMOTE_URL
       if [ -n "$REMOTE_URL" ]; then
         cd "$NS_PATH"
@@ -212,14 +202,54 @@ case "$CMD" in
       fi
 
       echo ""
+      echo "============================================================"
+      echo "  PUBLIC KEY — add this as a Deploy Key on your GitHub repo"
+      echo "  (Settings → Deploy Keys → Add → check 'Allow write access')"
+      echo "============================================================"
+      echo ""
+      cat "${KEY_PATH}.pub"
+      echo ""
+      echo "============================================================"
+      echo ""
+      read -p "Press Enter after adding the key to GitHub... "
+
+      # Verify SSH connection
+      echo -n "Verifying SSH connection to GitHub... "
+      SSH_RESULT=$(ssh -T git@github.com -i "$KEY_PATH" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 2>&1 || true)
+      if echo "$SSH_RESULT" | grep -q "successfully authenticated"; then
+        GITHUB_USER=$(echo "$SSH_RESULT" | grep -o 'Hi [^!]*' | sed 's/Hi //')
+        echo "OK (authenticated as $GITHUB_USER)"
+
+        # Try initial push
+        echo -n "Pushing to remote... "
+        PUSH_RESULT=$(cd "$NS_PATH" && GIT_SSH_COMMAND="ssh -i $(pwd)/../git-sync/keys/${NS_NAME} -o StrictHostKeyChecking=accept-new" git push --set-upstream origin "$(git branch --show-current)" 2>&1) || true
+        if echo "$PUSH_RESULT" | grep -qi "error\|fatal"; then
+          echo "FAILED (will retry on next git-sync cycle)"
+          echo "  $PUSH_RESULT"
+        else
+          echo "OK"
+        fi
+        cd - >/dev/null 2>/dev/null
+      else
+        echo "FAILED"
+        echo "  $SSH_RESULT"
+        echo ""
+        echo "  Check that:"
+        echo "  1. The deploy key is added to the correct GitHub repo"
+        echo "  2. 'Allow write access' is checked"
+        echo "  3. The repo URL is correct: $REMOTE_URL"
+        echo ""
+        echo "  You can retry later with: ./mdnest-server git-check"
+      fi
+
+      echo ""
       echo "Git sync setup complete for '${NS_NAME}'"
     fi
 
     echo ""
     echo "=== Next steps ==="
-    echo "  1. If git sync: add the public key to your GitHub repo as a Deploy Key (with write access)"
-    echo "  2. Run: ./mdnest-server rebuild"
-    echo "  3. The namespace will appear in the sidebar"
+    echo "  1. Run: ./mdnest-server rebuild"
+    echo "  2. The namespace will appear in the sidebar"
     ;;
   git-check)
     echo "=== mdnest git-sync diagnostics ==="
