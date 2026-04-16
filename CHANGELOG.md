@@ -16,6 +16,11 @@ All notable changes to mdnest are documented here.
 - **30-day sessions** — JWT expiry extended from 24 hours to 30 days (safe with 2FA).
 - **Auto-migrate on rebuild** — `./mdnest-server rebuild` automatically runs database migrations for multi-user mode.
 
+### Fixes
+- **Mermaid text colors** — injected SVG `<style>` override ensures light text on all diagram types. No more black text on load or color toggling on click.
+- **Mermaid label click** — diagram-type agnostic click handler. Works on all mermaid types (sequence, flowchart, class, etc.) by finding nearest `<g>` group text instead of checking specific CSS classes.
+- **Mermaid label replace** — handles `<br/>` line breaks at any word boundary via brute-force matching.
+
 ### Config
 - `REQUIRE_2FA=true|false` — require all users to set up 2FA (default: false)
 - `TOTP_ISSUER=name` — issuer name shown in authenticator app (default: mdnest)
