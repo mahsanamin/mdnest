@@ -116,6 +116,16 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 - search_notes reads tree, fetches each .md, case-insensitive match, max 20 results
 - Uses native fetch (Node 18+), no extra HTTP deps
 
+## Release Process
+
+- Every release branch (`release/v3.X.Y`) MUST bump version as the first commit. Three files:
+  - `backend/handlers/config.go` — `"version": "3.X.Y"`
+  - `frontend/package.json` — `"version": "3.X.Y"`
+  - `mdnest` CLI script — `MDNEST_CLI_VERSION="3.X.Y"`
+- Update `CHANGELOG.md` with the new version section
+- Merge to `main`, tag as `v3.X.Y`, push with `--tags`
+- Run `/mdnest-ship` skill after code changes to update docs, website, and test instance
+
 ## What NOT to Do
 
 - Do not add a database dependency in single mode — files are the source of truth for notes; Postgres is only for user/permission management in multi mode

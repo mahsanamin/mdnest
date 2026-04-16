@@ -1,9 +1,9 @@
 #!/bin/bash
 # mdnest CLI installer — run with:
-#   curl -fsSL https://raw.githubusercontent.com/mahsanamin/mdnest/v2.0/install-cli.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/mahsanamin/mdnest/main/install-cli.sh | bash
 set -e
 
-REPO="https://raw.githubusercontent.com/mahsanamin/mdnest/v2.0"
+REPO="https://raw.githubusercontent.com/mahsanamin/mdnest/main"
 DEST="/usr/local/bin/mdnest"
 
 echo "Installing mdnest CLI..."
