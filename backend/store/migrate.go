@@ -43,6 +43,16 @@ var migrations = []struct {
 			CREATE INDEX IF NOT EXISTS idx_access_grants_namespace ON access_grants(namespace);
 		`,
 	},
+	{
+		name: "003_add_2fa_and_password_fields",
+		sql: `
+			ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT false;
+			ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret TEXT;
+			ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEFAULT false;
+			ALTER TABLE users ADD COLUMN IF NOT EXISTS recovery_codes TEXT;
+			ALTER TABLE users ADD COLUMN IF NOT EXISTS blocked BOOLEAN NOT NULL DEFAULT false;
+		`,
+	},
 }
 
 // Migrate runs all pending migrations. Safe to call on every startup.
