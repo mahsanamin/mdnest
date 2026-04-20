@@ -4,6 +4,26 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v3.2.1 — Performance & Stability
+
+### Fixes
+- **Server overload (critical)** — GET requests on `/api/note` triggered `BroadcastTreeChanged` to all WebSocket clients, causing an infinite loop. Now only broadcasts on mutating requests (PUT/POST/DELETE).
+- **WebSocket ghost reconnections** — switching files left stale `onclose` handlers that reconnected to the old file, stacking connections. Fixed with connection ID tracking.
+- **Tree filtering** — non-markdown files (Postman JSON, binaries) excluded from tree. Supports `.md`, `.txt`, `.json`, `.sql`, `.csv`, `.yaml`. Files >5MB skipped. Empty directories still shown.
+- **Removed 15-second tree polling** — WebSocket `tree-changed` events handle tree updates. Eliminated 80+ redundant requests/min with 20 users.
+- **Note poll reduced** — 10s → 60s. WebSocket `file-changed` is real-time, poll is just a fallback.
+- **Tree-changed debounce** — 1-second debounce prevents rapid-fire tree refreshes from bulk operations.
+- **PathPicker cache** — admin panel directory picker caches tree API for 30s, preventing N duplicate calls.
+- **ETag conditional (304)** — note GET returns 304 Not Modified when content unchanged, saving bandwidth.
+- **Backend always rebuilt --no-cache** — prevents stale Docker cache from deploying old binaries.
+- **False update banner** — no longer shows "v3.2.1 → v1.0" when backend is slow/unreachable.
+- **iPad viewport** — `100dvh` accounts for mobile browser bar. View mode toggle visible on tablets.
+- **Copy path URI** — uses `mdnest://@alias/namespace/path` format for LLM readability.
+- **WebSocket status text** — shows "Live", "Reconnecting", or "Offline" next to the status dot.
+- **CLI login warning** — warns before overwriting default server with a different URL, suggests aliases.
+
+---
+
 ## v3.2.0 — Two-Factor Authentication & Account Security
 
 ### New Features
