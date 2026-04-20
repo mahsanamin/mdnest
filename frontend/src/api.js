@@ -42,7 +42,7 @@ async function request(path, options = {}) {
 
 export async function fetchConfig() {
   const res = await fetch(`${BASE}/config`);
-  if (!res.ok) return { authMode: 'single', version: '1.0' };
+  if (!res.ok) return { authMode: 'single' };
   return res.json();
 }
 
