@@ -34,6 +34,11 @@ func NewConn(ws *websocket.Conn, userID int, username string) *Conn {
 	}
 }
 
+// Close forcefully closes the WebSocket connection.
+func (c *Conn) Close() {
+	c.ws.Close(websocket.StatusGoingAway, "replaced by new connection")
+}
+
 // Send queues a message to be sent. Non-blocking — drops if buffer full.
 func (c *Conn) Send(data []byte) {
 	select {

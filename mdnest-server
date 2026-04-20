@@ -56,7 +56,9 @@ case "$CMD" in
       compose build --no-cache frontend backend
       compose up --force-recreate -d "$@"
     else
-      compose build frontend backend
+      # Always --no-cache for backend (Go compiles in seconds, cache causes stale binaries)
+      compose build --no-cache backend
+      compose build frontend
       compose up -d "$@"
       # Force-recreate git-sync only — it uses volume mounts (not built images)
       # so `up --build` won't detect changes to sync.sh or keys

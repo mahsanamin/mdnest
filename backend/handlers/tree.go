@@ -148,6 +148,20 @@ func isPathCovered(nodePath string, grantPaths []string) bool {
 	return false
 }
 
+// File extensions shown in the tree — markdown + a few common text formats.
+var textExtensions = map[string]bool{
+	".md": true, ".markdown": true,
+	".txt": true,
+	".json": true,
+	".sql": true,
+	".csv": true,
+	".yaml": true, ".yml": true,
+}
+
+func isTextFileExt(ext string) bool {
+	return textExtensions[ext]
+}
+
 func buildTree(dirPath, relativePath string) (*TreeNode, error) {
 	entries, err := os.ReadDir(dirPath)
 	if err != nil {
@@ -188,6 +202,15 @@ func buildTree(dirPath, relativePath string) (*TreeNode, error) {
 			}
 			node.Children = append(node.Children, child)
 		} else {
+			// Show text-based files only — skip binaries, images, huge files
+			ext := strings.ToLower(filepath.Ext(name))
+			if !isTextFileExt(ext) {
+				continue
+			}
+			// Skip files > 5MB to prevent huge files from killing the server
+			if info, err := entry.Info(); err == nil && info.Size() > 5*1024*1024 {
+				continue
+			}
 			node.Children = append(node.Children, &TreeNode{
 				Name: name,
 				Type: "file",

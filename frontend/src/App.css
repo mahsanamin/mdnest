@@ -1,7 +1,8 @@
-/* Layout */
+/* Layout — use dvh for mobile browsers where 100vh includes area behind browser bar */
 .app {
   display: flex;
   height: 100vh;
+  height: 100dvh;
   width: 100vw;
   overflow: hidden;
 }
@@ -63,6 +64,7 @@
   align-items: center;
   justify-content: center;
   height: 100vh;
+  height: 100dvh;
   width: 100vw;
   background: #1e1e2e;
 }
@@ -1121,14 +1123,29 @@ pre:hover .code-copy-btn {
 }
 
 /* WebSocket status indicator */
+.ws-status {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 4px;
+}
+
 .ws-status-dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   flex-shrink: 0;
-  margin-right: 2px;
   transition: background 0.3s;
 }
+
+.ws-status-text {
+  font-size: 0.7rem;
+  color: #6c7086;
+}
+
+.ws-status.connected .ws-status-text { color: #a6e3a1; }
+.ws-status.connecting .ws-status-text { color: #f9e2af; }
+.ws-status.disconnected .ws-status-text { color: #f38ba8; }
 
 .ws-status-dot.connected { background: #a6e3a1; }
 .ws-status-dot.connecting { background: #f9e2af; animation: pulse-dot 1.2s ease-in-out infinite; }
@@ -1754,9 +1771,10 @@ pre:hover .code-copy-btn {
     z-index: 7000;
   }
 
-  /* Hide desktop view toggle and divider on mobile */
-  .toolbar-view-toggle {
-    display: none !important;
+  /* Compact view toggle on mobile — keep visible but smaller */
+  .toolbar-view-toggle button {
+    font-size: 0.75rem;
+    padding: 2px 6px;
   }
 
   .split-divider {
@@ -2402,6 +2420,7 @@ pre:hover .code-copy-btn {
 /* ===== Admin Panel ===== */
 .admin-panel {
   height: 100vh;
+  height: 100dvh;
   width: 100vw;
   display: flex;
   flex-direction: column;

@@ -118,6 +118,7 @@ function App() {
   const typingTimers = useRef({}); // {userId: timeoutId}
   const localTypingUntil = useRef(0); // timestamp — local user is "typing" until this time
   const pollPathRef = useRef(null); // tracks current file for stale poll detection
+  const treeRefreshTimer = useRef(null); // debounce for tree-changed events
 
   // Determine write access for current namespace/path
   const canWrite = useCallback((path) => {
@@ -139,7 +140,7 @@ function App() {
 
   // Fetch app config on mount (before auth)
   useEffect(() => {
-    fetchConfig().then(setAppConfig).catch(() => setAppConfig({ authMode: 'single', version: '1.0' }));
+    fetchConfig().then(setAppConfig).catch(() => setAppConfig({ authMode: 'single' }));
   }, []);
 
   // Version check: poll /api/config every 60s, compare server version vs build version
@@ -196,15 +197,21 @@ function App() {
           setSavedContent(msg.content);
           break;
         case 'tree-changed':
-          // File tree changed (create/delete/move via any client) — refresh tree
-          // Use refs to get CURRENT namespace (not stale closure value)
-          if (selectedNsRef.current) refreshTree(selectedNsRef.current);
+          // Debounce tree refresh — multiple rapid tree-changed events
+          // (e.g. bulk file operations) should only trigger one refresh
+          if (treeRefreshTimer.current) clearTimeout(treeRefreshTimer.current);
+          treeRefreshTimer.current = setTimeout(() => {
+            if (selectedNsRef.current) refreshTree(selectedNsRef.current);
+          }, 1000);
           break;
         case 'access-changed':
-          // Permissions changed (user invited, grant created/modified/deleted)
-          loadNamespaces();
-          fetchMe().then(setUserInfo).catch(() => {});
-          if (selectedNsRef.current) refreshTree(selectedNsRef.current);
+          // Debounce — multiple grant changes in quick succession
+          if (treeRefreshTimer.current) clearTimeout(treeRefreshTimer.current);
+          treeRefreshTimer.current = setTimeout(() => {
+            loadNamespaces();
+            fetchMe().then(setUserInfo).catch(() => {});
+            if (selectedNsRef.current) refreshTree(selectedNsRef.current);
+          }, 1000);
           break;
         case 'file-changed':
           // Another user saved — update etag and reload if no local edits
@@ -329,10 +336,10 @@ function App() {
     }
   }, [authenticated, selectedNs, initialized]);
 
-  // Auto-refresh: poll the current note every 10s to pick up external changes (CLI, git, etc.)
+  // Auto-refresh: poll the current note every 60s as fallback for external changes
+  // (CLI, git-sync). WebSocket file-changed handles real-time updates.
   useEffect(() => {
     if (!authenticated || !selectedNs || !currentPath) return;
-    // Track which file this poll is for — used to discard stale async responses
     const myPollKey = `${selectedNs}/${currentPath}`;
     pollPathRef.current = myPollKey;
 
@@ -358,18 +365,13 @@ function App() {
       } catch (e) {
         // Transient errors — skip silently
       }
-    }, 10000);
+    }, 60000);
     return () => clearInterval(interval);
   }, [authenticated, selectedNs, currentPath]);
 
   // Auto-refresh tree every 15s to pick up new/deleted files from CLI, git, etc.
-  useEffect(() => {
-    if (!authenticated || !selectedNs) return;
-    const interval = setInterval(() => {
-      refreshTree(selectedNs);
-    }, 15000);
-    return () => clearInterval(interval);
-  }, [authenticated, selectedNs, refreshTree]);
+  // Tree refresh is handled by WebSocket tree-changed events.
+  // No polling needed — saves server load with many users.
 
   // Update URL hash
   useEffect(() => {
@@ -667,7 +669,7 @@ function App() {
       case 'copy-path': {
         if (target && selectedNs) {
           const alias = appConfig?.serverAlias ? `@${appConfig.serverAlias}/` : '';
-          const fullPath = `${alias}${selectedNs}/${target.path}`;
+          const fullPath = `mdnest://${alias}${selectedNs}/${target.path}`;
           const textarea = document.createElement('textarea');
           textarea.value = fullPath;
           textarea.style.position = 'fixed';
