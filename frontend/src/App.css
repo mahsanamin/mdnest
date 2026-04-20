@@ -1146,10 +1146,60 @@ pre:hover .code-copy-btn {
 .ws-status.connected .ws-status-text { color: #a6e3a1; }
 .ws-status.connecting .ws-status-text { color: #f9e2af; }
 .ws-status.disconnected .ws-status-text { color: #f38ba8; }
+.ws-status.superseded .ws-status-text { color: #fab387; }
 
 .ws-status-dot.connected { background: #a6e3a1; }
 .ws-status-dot.connecting { background: #f9e2af; animation: pulse-dot 1.2s ease-in-out infinite; }
 .ws-status-dot.disconnected { background: #f38ba8; }
+.ws-status-dot.superseded { background: #fab387; }
+
+/* Session superseded full-screen overlay */
+.session-superseded {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  height: 100dvh;
+  width: 100vw;
+  background: #1e1e2e;
+}
+
+.session-superseded-box {
+  text-align: center;
+  padding: 2.5rem;
+  background: #181825;
+  border: 1px solid #313244;
+  border-radius: 12px;
+  max-width: 400px;
+}
+
+.session-superseded-box h2 {
+  color: #fab387;
+  font-size: 1.3rem;
+  margin-bottom: 0.8rem;
+}
+
+.session-superseded-box p {
+  color: #a6adc8;
+  font-size: 0.9rem;
+  margin-bottom: 1.5rem;
+  line-height: 1.5;
+}
+
+.session-superseded-box button {
+  background: #89b4fa;
+  color: #1e1e2e;
+  border: none;
+  padding: 0.6rem 1.5rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.session-superseded-box button:hover {
+  opacity: 0.9;
+}
 
 @keyframes pulse-dot {
   0%, 100% { opacity: 1; }
@@ -1771,10 +1821,9 @@ pre:hover .code-copy-btn {
     z-index: 7000;
   }
 
-  /* Compact view toggle on mobile — keep visible but smaller */
-  .toolbar-view-toggle button {
-    font-size: 0.75rem;
-    padding: 2px 6px;
+  /* Hide desktop view toggle on mobile — mobile-view-toggle handles this */
+  .toolbar-view-toggle {
+    display: none !important;
   }
 
   .split-divider {
@@ -1787,25 +1836,32 @@ pre:hover .code-copy-btn {
   }
 
   .editor-wrapper {
-    display: none;
+    display: none !important;
     flex: unset !important;
   }
 
   .editor-wrapper.mobile-active {
-    display: flex;
-    flex: 1 !important;
+    display: flex !important;
+    flex: 1 1 auto !important;
+    flex-basis: auto !important;
+    flex-grow: 1 !important;
+    flex-shrink: 1 !important;
     width: 100% !important;
+    max-width: 100% !important;
+    height: 100% !important;
+    min-height: 0 !important;
   }
 
   .preview-wrapper {
-    display: none;
+    display: none !important;
     flex: unset !important;
   }
 
   .preview-wrapper.mobile-active {
-    display: flex;
+    display: flex !important;
     flex: 1 !important;
     width: 100% !important;
+    height: 100% !important;
   }
 
   .sidebar-resize-handle {
@@ -1814,6 +1870,12 @@ pre:hover .code-copy-btn {
 
   .editor-container {
     width: 100%;
+    height: 100%;
+  }
+
+  .live-editor-pane,
+  .live-editor-wrapper {
+    height: 100%;
   }
 
   /* Show mobile view toggle & FAB */

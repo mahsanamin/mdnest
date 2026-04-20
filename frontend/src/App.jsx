@@ -61,7 +61,21 @@ function App() {
   const [savedContent, setSavedContent] = useState('');
   const saveTimerRef = useRef(null);
   const [sidebarVisible, setSidebarVisible] = useState(false);
-  const [mobileView, setMobileView] = useState(() => localStorage.getItem('mdnest_mobile_view') || 'editor');
+  const [mobileView, setMobileView] = useState(() => {
+    const saved = localStorage.getItem('mdnest_mobile_view');
+    if (saved) return saved;
+    const vm = localStorage.getItem('mdnest_view_mode');
+    if (vm === 'preview') return 'preview';
+    return 'editor';
+  });
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+
+  // Track screen width changes for responsive rendering
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth <= 768);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
   const [viewMode, setViewMode] = useState(() => localStorage.getItem('mdnest_view_mode') || 'editor');
   const [editorMode, setEditorMode] = useState('live');
   const [editorModeReady, setEditorModeReady] = useState(false);
@@ -903,11 +917,11 @@ function App() {
                 <button className={mobileView === 'editor' ? 'active' : ''} onClick={() => { setMobileView('editor'); localStorage.setItem('mdnest_mobile_view', 'editor'); }}>Edit</button>
                 <button className={mobileView === 'preview' ? 'active' : ''} onClick={() => { setMobileView('preview'); localStorage.setItem('mdnest_mobile_view', 'preview'); }}>Preview</button>
               </div>
-              {viewMode !== 'preview' && (
+              {(isMobile ? mobileView === 'editor' : viewMode !== 'preview') && (
                 <div
                   ref={editorWrapperRef}
                   className={`editor-wrapper${mobileView === 'editor' ? ' mobile-active' : ''}`}
-                  style={viewMode === 'split' ? { flex: `0 0 ${splitRatio}%` } : undefined}
+                  style={!isMobile && viewMode === 'split' ? { flex: `0 0 ${splitRatio}%` } : undefined}
                 >
                   {editorMode === 'live' ? (
                     <Suspense fallback={<div className="editor-loading">Loading live editor...</div>}>
@@ -957,11 +971,11 @@ function App() {
                   }}
                 />
               )}
-              {viewMode !== 'editor' && (
+              {(isMobile ? mobileView === 'preview' : viewMode !== 'editor') && (
                 <div
                   ref={previewWrapperRef}
                   className={`preview-wrapper${mobileView === 'preview' ? ' mobile-active' : ''}`}
-                  style={viewMode === 'split' ? { flex: `0 0 ${100 - splitRatio}%` } : undefined}
+                  style={!isMobile && viewMode === 'split' ? { flex: `0 0 ${100 - splitRatio}%` } : undefined}
                 >
                   <Preview content={content} currentPath={currentPath} ns={selectedNs} onCheckboxToggle={canWriteCurrent ? handleCheckboxToggle : null} />
                 </div>

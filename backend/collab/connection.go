@@ -34,7 +34,7 @@ func NewConn(ws *websocket.Conn, userID int, username string) *Conn {
 	}
 }
 
-// Close forcefully closes the WebSocket connection.
+// Close forcefully closes the WebSocket connection (normal closure).
 func (c *Conn) Close() {
 	c.ws.Close(websocket.StatusGoingAway, "replaced by new connection")
 }

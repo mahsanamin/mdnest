@@ -72,10 +72,11 @@ class CollabClient {
     };
 
     const myConnId = this._connId;
-    this.ws.onclose = () => {
+    this.ws.onclose = (event) => {
       // Ignore if this is a stale connection (we already connected to a new file)
       if (this._connId !== myConnId) return;
       this.ws = null;
+
       if (!this.closed) {
         this._setStatus('connecting');
         this._scheduleReconnect();

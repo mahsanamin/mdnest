@@ -7,7 +7,6 @@ import (
 )
 
 // Hub manages WebSocket connections grouped by note (namespace + path).
-// All state is in-memory — no external services needed.
 type Hub struct {
 	mu    sync.RWMutex
 	notes map[string]map[int]*Conn // noteKey -> userID -> connection
@@ -80,7 +79,7 @@ func colorForUser(userID int) string {
 }
 
 // Join adds a connection to a note's presence.
-// Supports multiple tabs — uses a composite key of userID + connID.
+// Join adds a connection to a note's presence.
 func (h *Hub) Join(ns, path string, conn *Conn) {
 	key := noteKey(ns, path)
 	h.mu.Lock()
@@ -92,10 +91,8 @@ func (h *Hub) Join(ns, path string, conn *Conn) {
 
 	log.Printf("collab: %s joined %s (%d users)", conn.User.Username, key, h.countUsers(key))
 
-	// Broadcast updated presence to all users on this note
 	h.broadcastPresence(key)
 
-	// Send join event to others
 	h.broadcastToOthers(key, conn.User.ID, OutgoingMessage{
 		Type:     "join",
 		UserID:   conn.User.ID,
