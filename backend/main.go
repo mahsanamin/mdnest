@@ -133,12 +133,17 @@ func main() {
 	tokenHandler := handlers.NewTokenHandler(secretsDir)
 
 	// Wrap mutating handlers to invalidate search cache + notify tree change
+	// Only invalidate search cache and broadcast tree-changed on mutating requests.
+	// GET requests must NOT trigger broadcasts — that causes an infinite loop
+	// (broadcast → client refreshes tree → GET → broadcast → ...).
 	invalidateSearch := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			next.ServeHTTP(w, r)
+			if r.Method == http.MethodGet || r.Method == http.MethodHead {
+				return // Read-only — no cache invalidation or broadcast
+			}
 			if ns := r.URL.Query().Get("ns"); ns != "" {
 				searchHandler.InvalidateCache(ns)
-				// Broadcast tree-changed to all WebSocket clients on this namespace
 				if collabHub != nil {
 					collabHub.BroadcastTreeChanged(ns)
 				}

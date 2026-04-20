@@ -63,7 +63,8 @@ func (h *NoteHandler) getNote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid path"}`, http.StatusBadRequest)
 		return
 	}
-	data, err := os.ReadFile(absPath)
+	// Check file size before reading — reject huge non-markdown files
+	stat, err := os.Stat(absPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
@@ -72,8 +73,27 @@ func (h *NoteHandler) getNote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"failed to read file"}`, http.StatusInternalServerError)
 		return
 	}
+	if stat.Size() > maxNoteSize {
+		http.Error(w, `{"error":"file too large"}`, http.StatusRequestEntityTooLarge)
+		return
+	}
+
+	data, err := os.ReadFile(absPath)
+	if err != nil {
+		http.Error(w, `{"error":"failed to read file"}`, http.StatusInternalServerError)
+		return
+	}
+
+	etag := contentETag(data)
+
+	// Support conditional requests — return 304 if content hasn't changed
+	if ifNoneMatch := r.Header.Get("If-None-Match"); ifNoneMatch == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
 	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
-	w.Header().Set("ETag", contentETag(data))
+	w.Header().Set("ETag", etag)
 	w.Write(data)
 }
 

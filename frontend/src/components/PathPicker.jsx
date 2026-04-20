@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { getTree } from '../api.js';
 
 // Extracts all folder paths from a tree recursively
@@ -15,6 +15,23 @@ function extractFolders(nodes, prefix) {
   return folders;
 }
 
+// In-memory cache for tree results — shared across all PathPicker instances.
+// Prevents N simultaneous getTree calls when N users are expanded.
+const treeCache = {};
+const treeCacheTime = {};
+const CACHE_TTL = 30000; // 30 seconds
+
+async function getCachedTree(namespace) {
+  const now = Date.now();
+  if (treeCache[namespace] && treeCacheTime[namespace] && (now - treeCacheTime[namespace]) < CACHE_TTL) {
+    return treeCache[namespace];
+  }
+  const tree = await getTree(namespace);
+  treeCache[namespace] = tree;
+  treeCacheTime[namespace] = now;
+  return tree;
+}
+
 // Dropdown that shows "/" (entire namespace) plus all directories from the tree
 function PathPicker({ namespace, value, onChange }) {
   const [folders, setFolders] = useState([]);
@@ -22,14 +39,18 @@ function PathPicker({ namespace, value, onChange }) {
 
   useEffect(() => {
     if (!namespace) { setFolders([]); return; }
+    let cancelled = false;
     setLoading(true);
-    getTree(namespace)
+    getCachedTree(namespace)
       .then((tree) => {
-        const paths = extractFolders(tree.children || [], '');
-        setFolders(paths);
+        if (!cancelled) {
+          const paths = extractFolders(tree.children || [], '');
+          setFolders(paths);
+        }
       })
-      .catch(() => setFolders([]))
-      .finally(() => setLoading(false));
+      .catch(() => { if (!cancelled) setFolders([]); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [namespace]);
 
   return (
