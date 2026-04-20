@@ -1842,9 +1842,14 @@ pre:hover .code-copy-btn {
 
   .editor-wrapper.mobile-active {
     display: flex !important;
-    flex: 1 !important;
+    flex: 1 1 auto !important;
+    flex-basis: auto !important;
+    flex-grow: 1 !important;
+    flex-shrink: 1 !important;
     width: 100% !important;
+    max-width: 100% !important;
     height: 100% !important;
+    min-height: 0 !important;
   }
 
   .preview-wrapper {
