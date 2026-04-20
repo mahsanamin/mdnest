@@ -167,6 +167,9 @@ function App() {
     if (!appConfig?.liveCollab) return;
     const client = new CollabClient((msg) => {
       switch (msg.type) {
+        case 'session_superseded':
+          setSessionSuperseded(true);
+          break;
         case 'presence':
           setPresenceUsers(msg.users || []);
           break;

@@ -41,10 +41,18 @@ func (c *Conn) Close() {
 	c.ws.Close(websocket.StatusGoingAway, "replaced by new connection")
 }
 
-// CloseSuperseded closes the connection with a custom code (4000)
-// that tells the frontend to NOT reconnect and show a "session moved" message.
+// CloseSuperseded sends a "session_superseded" message then closes.
+// Uses a JSON message instead of a custom close code because proxies
+// (Caddy, nginx) can strip or remap WebSocket close codes.
 func (c *Conn) CloseSuperseded() {
-	c.ws.Close(websocket.StatusCode(4000), "session_superseded")
+	// Send supersede message — the frontend handles this in onMessage
+	msg := []byte(`{"type":"session_superseded"}`)
+	c.Send(msg)
+	// Give the message time to flush before closing
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		c.ws.Close(websocket.StatusGoingAway, "session_superseded")
+	}()
 }
 
 // Send queues a message to be sent. Non-blocking — drops if buffer full.
