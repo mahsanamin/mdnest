@@ -61,7 +61,14 @@ function App() {
   const [savedContent, setSavedContent] = useState('');
   const saveTimerRef = useRef(null);
   const [sidebarVisible, setSidebarVisible] = useState(false);
-  const [mobileView, setMobileView] = useState(() => localStorage.getItem('mdnest_mobile_view') || 'editor');
+  const [mobileView, setMobileView] = useState(() => {
+    const saved = localStorage.getItem('mdnest_mobile_view');
+    if (saved) return saved;
+    // Sync with viewMode on first load for mobile
+    const vm = localStorage.getItem('mdnest_view_mode');
+    if (vm === 'preview') return 'preview';
+    return 'editor';
+  });
   const [viewMode, setViewMode] = useState(() => localStorage.getItem('mdnest_view_mode') || 'editor');
   const [editorMode, setEditorMode] = useState('live');
   const [editorModeReady, setEditorModeReady] = useState(false);
