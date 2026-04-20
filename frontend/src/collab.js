@@ -17,6 +17,7 @@ class CollabClient {
     this.closed = false;
     this._cursorThrottle = null;
     this._status = 'disconnected';
+    this._connId = 0; // incremented on each connect, used to discard stale onclose
   }
 
   _setStatus(status) {
@@ -32,6 +33,7 @@ class CollabClient {
     this.path = path;
     this.closed = false;
     this.reconnectDelay = 1000;
+    this._connId++; // invalidate any pending reconnect from the old connection
     this._connect();
   }
 
@@ -69,10 +71,13 @@ class CollabClient {
       }
     };
 
+    const myConnId = this._connId;
     this.ws.onclose = () => {
+      // Ignore if this is a stale connection (we already connected to a new file)
+      if (this._connId !== myConnId) return;
       this.ws = null;
       if (!this.closed) {
-        this._setStatus('connecting'); // will reconnect
+        this._setStatus('connecting');
         this._scheduleReconnect();
       } else {
         this._setStatus('disconnected');

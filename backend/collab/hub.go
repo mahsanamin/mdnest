@@ -80,6 +80,7 @@ func colorForUser(userID int) string {
 }
 
 // Join adds a connection to a note's presence.
+// Supports multiple tabs — uses a composite key of userID + connID.
 func (h *Hub) Join(ns, path string, conn *Conn) {
 	key := noteKey(ns, path)
 	h.mu.Lock()
