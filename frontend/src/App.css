@@ -1146,10 +1146,60 @@ pre:hover .code-copy-btn {
 .ws-status.connected .ws-status-text { color: #a6e3a1; }
 .ws-status.connecting .ws-status-text { color: #f9e2af; }
 .ws-status.disconnected .ws-status-text { color: #f38ba8; }
+.ws-status.superseded .ws-status-text { color: #fab387; }
 
 .ws-status-dot.connected { background: #a6e3a1; }
 .ws-status-dot.connecting { background: #f9e2af; animation: pulse-dot 1.2s ease-in-out infinite; }
 .ws-status-dot.disconnected { background: #f38ba8; }
+.ws-status-dot.superseded { background: #fab387; }
+
+/* Session superseded full-screen overlay */
+.session-superseded {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  height: 100dvh;
+  width: 100vw;
+  background: #1e1e2e;
+}
+
+.session-superseded-box {
+  text-align: center;
+  padding: 2.5rem;
+  background: #181825;
+  border: 1px solid #313244;
+  border-radius: 12px;
+  max-width: 400px;
+}
+
+.session-superseded-box h2 {
+  color: #fab387;
+  font-size: 1.3rem;
+  margin-bottom: 0.8rem;
+}
+
+.session-superseded-box p {
+  color: #a6adc8;
+  font-size: 0.9rem;
+  margin-bottom: 1.5rem;
+  line-height: 1.5;
+}
+
+.session-superseded-box button {
+  background: #89b4fa;
+  color: #1e1e2e;
+  border: none;
+  padding: 0.6rem 1.5rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.session-superseded-box button:hover {
+  opacity: 0.9;
+}
 
 @keyframes pulse-dot {
   0%, 100% { opacity: 1; }

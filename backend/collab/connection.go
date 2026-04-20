@@ -34,9 +34,15 @@ func NewConn(ws *websocket.Conn, userID int, username string) *Conn {
 	}
 }
 
-// Close forcefully closes the WebSocket connection.
+// Close forcefully closes the WebSocket connection (normal closure).
 func (c *Conn) Close() {
 	c.ws.Close(websocket.StatusGoingAway, "replaced by new connection")
+}
+
+// CloseSuperseded closes the connection with a custom code (4000)
+// that tells the frontend to NOT reconnect and show a "session moved" message.
+func (c *Conn) CloseSuperseded() {
+	c.ws.Close(websocket.StatusCode(4000), "session_superseded")
 }
 
 // Send queues a message to be sent. Non-blocking — drops if buffer full.

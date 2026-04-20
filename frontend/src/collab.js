@@ -4,11 +4,12 @@ import { getToken } from './api.js';
 // Connects to /api/ws when a note is opened, disconnects on close.
 
 class CollabClient {
-  // status: 'connected' | 'connecting' | 'disconnected'
-  constructor(onMessage, onStatusChange) {
+  // status: 'connected' | 'connecting' | 'disconnected' | 'superseded'
+  constructor(onMessage, onStatusChange, onSessionSuperseded) {
     this.ws = null;
     this.onMessage = onMessage;
     this.onStatusChange = onStatusChange;
+    this.onSessionSuperseded = onSessionSuperseded;
     this.ns = null;
     this.path = null;
     this.reconnectTimer = null;
@@ -72,10 +73,19 @@ class CollabClient {
     };
 
     const myConnId = this._connId;
-    this.ws.onclose = () => {
+    this.ws.onclose = (event) => {
       // Ignore if this is a stale connection (we already connected to a new file)
       if (this._connId !== myConnId) return;
       this.ws = null;
+
+      // Session superseded by another tab/window — don't reconnect
+      if (event.code === 4000) {
+        this.closed = true;
+        this._setStatus('superseded');
+        if (this.onSessionSuperseded) this.onSessionSuperseded();
+        return;
+      }
+
       if (!this.closed) {
         this._setStatus('connecting');
         this._scheduleReconnect();

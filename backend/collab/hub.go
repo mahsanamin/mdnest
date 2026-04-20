@@ -4,19 +4,30 @@ import (
 	"encoding/json"
 	"log"
 	"sync"
+	"time"
 )
 
 // Hub manages WebSocket connections grouped by note (namespace + path).
-// All state is in-memory — no external services needed.
+// Enforces single active session per user — new connections supersede old ones.
 type Hub struct {
-	mu    sync.RWMutex
-	notes map[string]map[int]*Conn // noteKey -> userID -> connection
+	mu       sync.RWMutex
+	notes    map[string]map[int]*Conn // noteKey -> userID -> connection
+	sessions map[int]*sessionInfo     // userID -> active session (global, across all notes)
+}
+
+// sessionInfo tracks a user's active WebSocket session.
+type sessionInfo struct {
+	conn        *Conn
+	ns          string
+	path        string
+	connectedAt time.Time
 }
 
 // NewHub creates a new collaboration hub.
 func NewHub() *Hub {
 	return &Hub{
-		notes: make(map[string]map[int]*Conn),
+		notes:    make(map[string]map[int]*Conn),
+		sessions: make(map[int]*sessionInfo),
 	}
 }
 
@@ -80,25 +91,59 @@ func colorForUser(userID int) string {
 }
 
 // Join adds a connection to a note's presence.
-// Supports multiple tabs — uses a composite key of userID + connID.
+// Enforces single session per user — if the user already has an active session,
+// the old connection is closed. A 2-second debounce avoids treating page refreshes
+// as new sessions.
 func (h *Hub) Join(ns, path string, conn *Conn) {
 	key := noteKey(ns, path)
+	userID := conn.User.ID
+
 	h.mu.Lock()
+
+	// Check for existing session
+	if existing, ok := h.sessions[userID]; ok && existing.conn != conn {
+		oldKey := noteKey(existing.ns, existing.path)
+
+		if time.Since(existing.connectedAt) > 2*time.Second {
+			// Not a quick reconnect — supersede the old session
+			log.Printf("collab: session superseded for %s (was on %s, now on %s)", conn.User.Username, oldKey, key)
+			existing.conn.CloseSuperseded()
+		} else {
+			// Quick reconnect (page refresh, network blip) — close silently
+			log.Printf("collab: quick reconnect for %s (closing old session)", conn.User.Username)
+			existing.conn.Close()
+		}
+
+		// Remove old connection from its note
+		if conns, ok := h.notes[oldKey]; ok {
+			delete(conns, userID)
+			if len(conns) == 0 {
+				delete(h.notes, oldKey)
+			}
+		}
+	}
+
+	// Register new session
+	h.sessions[userID] = &sessionInfo{
+		conn:        conn,
+		ns:          ns,
+		path:        path,
+		connectedAt: time.Now(),
+	}
+
 	if h.notes[key] == nil {
 		h.notes[key] = make(map[int]*Conn)
 	}
-	h.notes[key][conn.User.ID] = conn
+	h.notes[key][userID] = conn
 	h.mu.Unlock()
 
 	log.Printf("collab: %s joined %s (%d users)", conn.User.Username, key, h.countUsers(key))
 
-	// Broadcast updated presence to all users on this note
 	h.broadcastPresence(key)
 
-	// Send join event to others
-	h.broadcastToOthers(key, conn.User.ID, OutgoingMessage{
+	h.broadcastToOthers(key, userID, OutgoingMessage{
 		Type:     "join",
-		UserID:   conn.User.ID,
+		UserID:   userID,
 		Username: conn.User.Username,
 		Color:    conn.User.Color,
 	})
@@ -109,9 +154,15 @@ func (h *Hub) Leave(ns, path string, userID int) {
 	key := noteKey(ns, path)
 	h.mu.Lock()
 	if conns, ok := h.notes[key]; ok {
+		leavingConn := conns[userID]
 		delete(conns, userID)
 		if len(conns) == 0 {
 			delete(h.notes, key)
+		}
+		// Only remove from sessions if this IS the active session
+		// (a newer session may have already replaced it)
+		if sess, ok := h.sessions[userID]; ok && sess.conn == leavingConn {
+			delete(h.sessions, userID)
 		}
 	}
 	h.mu.Unlock()
