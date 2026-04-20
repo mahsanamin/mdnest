@@ -140,7 +140,7 @@ function App() {
 
   // Fetch app config on mount (before auth)
   useEffect(() => {
-    fetchConfig().then(setAppConfig).catch(() => setAppConfig({ authMode: 'single', version: '1.0' }));
+    fetchConfig().then(setAppConfig).catch(() => setAppConfig({ authMode: 'single' }));
   }, []);
 
   // Version check: poll /api/config every 60s, compare server version vs build version
