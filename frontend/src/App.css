@@ -1821,10 +1821,9 @@ pre:hover .code-copy-btn {
     z-index: 7000;
   }
 
-  /* Compact view toggle on mobile — keep visible but smaller */
-  .toolbar-view-toggle button {
-    font-size: 0.75rem;
-    padding: 2px 6px;
+  /* Hide desktop view toggle on mobile — mobile-view-toggle handles this */
+  .toolbar-view-toggle {
+    display: none !important;
   }
 
   .split-divider {
