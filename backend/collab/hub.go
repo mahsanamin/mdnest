@@ -104,13 +104,14 @@ func (h *Hub) Join(ns, path string, conn *Conn) {
 
 	if existing, ok := h.sessions[userID]; ok && existing.conn != conn {
 		oldKey := noteKey(existing.ns, existing.path)
-		oldConn = existing.conn
 
 		if conn.SessionID != "" && conn.SessionID == existing.conn.SessionID {
+			// Same tab switching files — don't close, frontend handles its own cleanup
 			log.Printf("collab: %s switched notes (same tab %s)", conn.User.Username, conn.SessionID)
-			supersede = false
 		} else {
+			// Different tab/window — supersede the old session
 			log.Printf("collab: session superseded for %s (was on %s, now on %s)", conn.User.Username, oldKey, key)
+			oldConn = existing.conn
 			supersede = true
 		}
 
