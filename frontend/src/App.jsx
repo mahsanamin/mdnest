@@ -669,7 +669,7 @@ function App() {
       case 'copy-path': {
         if (target && selectedNs) {
           const alias = appConfig?.serverAlias ? `@${appConfig.serverAlias}/` : '';
-          const fullPath = `${alias}${selectedNs}/${target.path}`;
+          const fullPath = `mdnest://${alias}${selectedNs}/${target.path}`;
           const textarea = document.createElement('textarea');
           textarea.value = fullPath;
           textarea.style.position = 'fixed';
