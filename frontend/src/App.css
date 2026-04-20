@@ -1,7 +1,8 @@
-/* Layout */
+/* Layout — use dvh for mobile browsers where 100vh includes area behind browser bar */
 .app {
   display: flex;
   height: 100vh;
+  height: 100dvh;
   width: 100vw;
   overflow: hidden;
 }
@@ -63,6 +64,7 @@
   align-items: center;
   justify-content: center;
   height: 100vh;
+  height: 100dvh;
   width: 100vw;
   background: #1e1e2e;
 }
@@ -1754,9 +1756,10 @@ pre:hover .code-copy-btn {
     z-index: 7000;
   }
 
-  /* Hide desktop view toggle and divider on mobile */
-  .toolbar-view-toggle {
-    display: none !important;
+  /* Compact view toggle on mobile — keep visible but smaller */
+  .toolbar-view-toggle button {
+    font-size: 0.75rem;
+    padding: 2px 6px;
   }
 
   .split-divider {
@@ -2402,6 +2405,7 @@ pre:hover .code-copy-btn {
 /* ===== Admin Panel ===== */
 .admin-panel {
   height: 100vh;
+  height: 100dvh;
   width: 100vw;
   display: flex;
   flex-direction: column;
