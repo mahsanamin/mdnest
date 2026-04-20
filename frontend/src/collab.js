@@ -4,11 +4,12 @@ import { getToken } from './api.js';
 // Connects to /api/ws when a note is opened, disconnects on close.
 
 class CollabClient {
-  // status: 'connected' | 'connecting' | 'disconnected'
-  constructor(onMessage, onStatusChange) {
+  // status: 'connected' | 'connecting' | 'disconnected' | 'superseded'
+  constructor(onMessage, onStatusChange, onSessionSuperseded) {
     this.ws = null;
     this.onMessage = onMessage;
     this.onStatusChange = onStatusChange;
+    this.onSessionSuperseded = onSessionSuperseded;
     this.ns = null;
     this.path = null;
     this.reconnectTimer = null;
@@ -18,6 +19,7 @@ class CollabClient {
     this._cursorThrottle = null;
     this._status = 'disconnected';
     this._connId = 0; // incremented on each connect, used to discard stale onclose
+    this._sessionId = Math.random().toString(36).slice(2, 10); // unique per CollabClient instance (per tab)
   }
 
   _setStatus(status) {
@@ -45,7 +47,7 @@ class CollabClient {
 
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
-    const url = `${proto}//${host}/api/ws?ns=${encodeURIComponent(this.ns)}&path=${encodeURIComponent(this.path)}&token=${encodeURIComponent(token)}`;
+    const url = `${proto}//${host}/api/ws?ns=${encodeURIComponent(this.ns)}&path=${encodeURIComponent(this.path)}&token=${encodeURIComponent(token)}&sid=${this._sessionId}`;
 
     this._setStatus('connecting');
 
@@ -72,10 +74,19 @@ class CollabClient {
     };
 
     const myConnId = this._connId;
-    this.ws.onclose = () => {
+    this.ws.onclose = (event) => {
       // Ignore if this is a stale connection (we already connected to a new file)
       if (this._connId !== myConnId) return;
       this.ws = null;
+
+      // Session superseded by another tab/window — don't reconnect
+      if (event.code === 4000) {
+        this.closed = true;
+        this._setStatus('superseded');
+        if (this.onSessionSuperseded) this.onSessionSuperseded();
+        return;
+      }
+
       if (!this.closed) {
         this._setStatus('connecting');
         this._scheduleReconnect();

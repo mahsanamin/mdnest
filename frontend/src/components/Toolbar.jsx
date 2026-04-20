@@ -75,7 +75,7 @@ function Toolbar({ currentPath, onToggleSidebar, onChangePassword, onRename, onD
         <span className={`ws-status ${wsStatus}`}>
           <span className={`ws-status-dot ${wsStatus}`} />
           <span className="ws-status-text">
-            {wsStatus === 'connected' ? 'Live' : wsStatus === 'connecting' ? 'Reconnecting' : 'Offline'}
+            {wsStatus === 'connected' ? 'Live' : wsStatus === 'connecting' ? 'Reconnecting' : wsStatus === 'superseded' ? 'Session moved' : 'Offline'}
           </span>
         </span>
       )}

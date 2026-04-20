@@ -107,6 +107,7 @@ function App() {
   const isAdmin = !isMulti || userInfo?.role === 'admin';
 
   // Live collaboration state
+  const [sessionSuperseded, setSessionSuperseded] = useState(false);
   const [presenceUsers, setPresenceUsers] = useState([]);
   const [remoteCursors, setRemoteCursors] = useState({});
   const [typingUsers, setTypingUsers] = useState({}); // {userId: username}
@@ -236,7 +237,7 @@ function App() {
           }
           break;
       }
-    }, setWsStatus);
+    }, setWsStatus, () => setSessionSuperseded(true));
     collabRef.current = client;
     return () => { client.disconnect(); collabRef.current = null; setWsStatus('disconnected'); };
   }, [appConfig?.liveCollab]);
@@ -819,6 +820,18 @@ function App() {
 
   if (!authenticated) {
     return <Login onLogin={() => window.location.reload()} />;
+  }
+
+  if (sessionSuperseded) {
+    return (
+      <div className="session-superseded">
+        <div className="session-superseded-box">
+          <h2>Session moved</h2>
+          <p>This session was opened in another window or tab.</p>
+          <button onClick={() => window.location.reload()}>Continue here</button>
+        </div>
+      </div>
+    );
   }
 
   if (showAdminPanel && isAdmin && isMulti) {
