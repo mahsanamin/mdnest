@@ -4,6 +4,16 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v3.2.2 — Responsive Mobile & Stability
+
+### Fixes
+- **Mobile responsive rendering** — uses React `isMobile` state instead of CSS-only for editor/preview switching. At 768px breakpoint, only one wrapper renders (editor OR preview), preventing blank screens and split-view glitches.
+- **Mobile mobileView sync** — syncs with desktop viewMode on first load so preview mode works on mobile.
+- **False update banner (v1.0)** — removed second fallback in api.js that returned version '1.0' when config failed.
+- **WebSocket status hidden when no file** — "Offline" no longer shows when no file is selected.
+
+---
+
 ## v3.2.1 — Performance & Stability
 
 ### Fixes
