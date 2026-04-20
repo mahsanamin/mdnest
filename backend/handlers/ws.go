@@ -68,8 +68,7 @@ func (h *WSHandler) HandleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessionID := r.URL.Query().Get("sid")
-	conn := collab.NewConn(ws, userID, username, sessionID)
+	conn := collab.NewConn(ws, userID, username)
 	h.hub.Join(ns, path, conn)
 
 	ctx := r.Context()

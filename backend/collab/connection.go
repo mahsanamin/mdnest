@@ -16,43 +16,27 @@ const (
 
 // Conn wraps a WebSocket connection with user identity.
 type Conn struct {
-	User      UserInfo
-	SessionID string // unique per browser tab (frontend CollabClient instance)
-	ws        *websocket.Conn
-	send      chan []byte
+	User UserInfo
+	ws   *websocket.Conn
+	send chan []byte
 }
 
 // NewConn creates a new connection wrapper.
-func NewConn(ws *websocket.Conn, userID int, username string, sessionID string) *Conn {
+func NewConn(ws *websocket.Conn, userID int, username string) *Conn {
 	return &Conn{
 		User: UserInfo{
 			ID:       userID,
 			Username: username,
 			Color:    colorForUser(userID),
 		},
-		SessionID: sessionID,
-		ws:        ws,
-		send:      make(chan []byte, 64),
+		ws:   ws,
+		send: make(chan []byte, 64),
 	}
 }
 
 // Close forcefully closes the WebSocket connection (normal closure).
 func (c *Conn) Close() {
 	c.ws.Close(websocket.StatusGoingAway, "replaced by new connection")
-}
-
-// CloseSuperseded sends a "session_superseded" message then closes.
-// Uses a JSON message instead of a custom close code because proxies
-// (Caddy, nginx) can strip or remap WebSocket close codes.
-func (c *Conn) CloseSuperseded() {
-	// Send supersede message — the frontend handles this in onMessage
-	msg := []byte(`{"type":"session_superseded"}`)
-	c.Send(msg)
-	// Give the message time to flush before closing
-	go func() {
-		time.Sleep(500 * time.Millisecond)
-		c.ws.Close(websocket.StatusGoingAway, "session_superseded")
-	}()
 }
 
 // Send queues a message to be sent. Non-blocking — drops if buffer full.
