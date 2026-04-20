@@ -152,6 +152,25 @@ USAGE
 
   url="${url%/}"
   mkdir -p "$SERVERS_DIR"
+
+  # Warn if overwriting a different server without alias
+  if [ "$alias" = "default" ] && [ -f "$(get_server_file "default")" ]; then
+    local existing_url
+    existing_url=$(grep '^url=' "$(get_server_file "default")" 2>/dev/null | cut -d= -f2-)
+    if [ -n "$existing_url" ] && [ "$existing_url" != "$url" ]; then
+      echo "Warning: replacing existing default server ($existing_url)"
+      echo "  To keep both servers, use aliases:"
+      echo "    mdnest login @name1 $existing_url <token>"
+      echo "    mdnest login @name2 $url <token>"
+      echo ""
+      read -p "Continue and replace default? (y/N): " confirm
+      if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
+        echo "Cancelled. Use: mdnest login @alias $url $tok"
+        exit 0
+      fi
+    fi
+  fi
+
   cat > "$(get_server_file "$alias")" <<EOF
 url=${url}
 token=${tok}
