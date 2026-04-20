@@ -98,18 +98,20 @@ func (h *Hub) Join(ns, path string, conn *Conn) {
 
 	h.mu.Lock()
 
-	// Check for existing session
+	// Check for existing session — collect old conn to close AFTER releasing lock
+	var oldConn *Conn
+	var supersede bool
+
 	if existing, ok := h.sessions[userID]; ok && existing.conn != conn {
 		oldKey := noteKey(existing.ns, existing.path)
+		oldConn = existing.conn
 
 		if conn.SessionID != "" && conn.SessionID == existing.conn.SessionID {
-			// Same tab switching files — close old silently, no supersede message
 			log.Printf("collab: %s switched notes (same tab %s)", conn.User.Username, conn.SessionID)
-			existing.conn.Close()
+			supersede = false
 		} else {
-			// Different tab/window — supersede the old session
 			log.Printf("collab: session superseded for %s (was on %s, now on %s)", conn.User.Username, oldKey, key)
-			existing.conn.CloseSuperseded()
+			supersede = true
 		}
 
 		// Remove old connection from its note
@@ -133,6 +135,15 @@ func (h *Hub) Join(ns, path string, conn *Conn) {
 	}
 	h.notes[key][userID] = conn
 	h.mu.Unlock()
+
+	// Close old connection OUTSIDE the lock to avoid deadlock
+	if oldConn != nil {
+		if supersede {
+			oldConn.CloseSuperseded()
+		} else {
+			oldConn.Close()
+		}
+	}
 
 	log.Printf("collab: %s joined %s (%d users)", conn.User.Username, key, h.countUsers(key))
 
