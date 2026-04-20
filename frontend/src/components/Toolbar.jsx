@@ -72,10 +72,12 @@ function Toolbar({ currentPath, onToggleSidebar, onChangePassword, onRename, onD
         </div>
       )}
       {wsStatus && (
-        <span
-          className={`ws-status-dot ${wsStatus}`}
-          title={wsStatus === 'connected' ? 'Live connection active' : wsStatus === 'connecting' ? 'Reconnecting...' : 'Disconnected'}
-        />
+        <span className={`ws-status ${wsStatus}`}>
+          <span className={`ws-status-dot ${wsStatus}`} />
+          <span className="ws-status-text">
+            {wsStatus === 'connected' ? 'Live' : wsStatus === 'connecting' ? 'Reconnecting' : 'Offline'}
+          </span>
+        </span>
       )}
       <button className="toolbar-settings" onClick={onChangePassword} title="Settings">
         &#9881;

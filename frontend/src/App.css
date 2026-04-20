@@ -1123,14 +1123,29 @@ pre:hover .code-copy-btn {
 }
 
 /* WebSocket status indicator */
+.ws-status {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 4px;
+}
+
 .ws-status-dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   flex-shrink: 0;
-  margin-right: 2px;
   transition: background 0.3s;
 }
+
+.ws-status-text {
+  font-size: 0.7rem;
+  color: #6c7086;
+}
+
+.ws-status.connected .ws-status-text { color: #a6e3a1; }
+.ws-status.connecting .ws-status-text { color: #f9e2af; }
+.ws-status.disconnected .ws-status-text { color: #f38ba8; }
 
 .ws-status-dot.connected { background: #a6e3a1; }
 .ws-status-dot.connecting { background: #f9e2af; animation: pulse-dot 1.2s ease-in-out infinite; }
