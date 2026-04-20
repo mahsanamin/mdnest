@@ -71,7 +71,7 @@ function Toolbar({ currentPath, onToggleSidebar, onChangePassword, onRename, onD
           </button>
         </div>
       )}
-      {wsStatus && (
+      {wsStatus && currentPath && (
         <span className={`ws-status ${wsStatus}`}>
           <span className={`ws-status-dot ${wsStatus}`} />
           <span className="ws-status-text">
