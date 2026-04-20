@@ -919,7 +919,7 @@ function App() {
                 <button className={mobileView === 'editor' ? 'active' : ''} onClick={() => { setMobileView('editor'); localStorage.setItem('mdnest_mobile_view', 'editor'); }}>Edit</button>
                 <button className={mobileView === 'preview' ? 'active' : ''} onClick={() => { setMobileView('preview'); localStorage.setItem('mdnest_mobile_view', 'preview'); }}>Preview</button>
               </div>
-              {viewMode !== 'preview' && (
+              {(viewMode !== 'preview' || mobileView === 'editor') && (
                 <div
                   ref={editorWrapperRef}
                   className={`editor-wrapper${mobileView === 'editor' ? ' mobile-active' : ''}`}
@@ -973,7 +973,7 @@ function App() {
                   }}
                 />
               )}
-              {viewMode !== 'editor' && (
+              {(viewMode !== 'editor' || mobileView === 'preview') && (
                 <div
                   ref={previewWrapperRef}
                   className={`preview-wrapper${mobileView === 'preview' ? ' mobile-active' : ''}`}
