@@ -186,10 +186,7 @@ func buildTree(dirPath, relativePath string) (*TreeNode, error) {
 			if err != nil {
 				continue
 			}
-			// Only include directories that have content (skip empty dirs)
-			if len(child.Children) > 0 {
-				node.Children = append(node.Children, child)
-			}
+			node.Children = append(node.Children, child)
 		} else {
 			// Only show markdown files in the tree
 			ext := strings.ToLower(filepath.Ext(name))
