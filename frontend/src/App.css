@@ -1836,25 +1836,27 @@ pre:hover .code-copy-btn {
   }
 
   .editor-wrapper {
-    display: none;
+    display: none !important;
     flex: unset !important;
   }
 
   .editor-wrapper.mobile-active {
-    display: flex;
+    display: flex !important;
     flex: 1 !important;
     width: 100% !important;
+    height: 100% !important;
   }
 
   .preview-wrapper {
-    display: none;
+    display: none !important;
     flex: unset !important;
   }
 
   .preview-wrapper.mobile-active {
-    display: flex;
+    display: flex !important;
     flex: 1 !important;
     width: 100% !important;
+    height: 100% !important;
   }
 
   .sidebar-resize-handle {
@@ -1863,6 +1865,12 @@ pre:hover .code-copy-btn {
 
   .editor-container {
     width: 100%;
+    height: 100%;
+  }
+
+  .live-editor-pane,
+  .live-editor-wrapper {
+    height: 100%;
   }
 
   /* Show mobile view toggle & FAB */
