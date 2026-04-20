@@ -75,6 +75,7 @@ class CollabClient {
 
     const myConnId = this._connId;
     this.ws.onclose = (event) => {
+      console.log('[WS-CLOSE] code:', event.code, 'reason:', event.reason, 'connId:', myConnId, 'current:', this._connId);
       // Ignore if this is a stale connection (we already connected to a new file)
       if (this._connId !== myConnId) return;
       this.ws = null;
