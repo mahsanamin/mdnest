@@ -101,11 +101,13 @@ function CommentSidebar({ comments, ns, currentPath, onRefresh, onClose, userInf
             <div className="comment-actions">
               {c.anchorText && (
                 <button onClick={() => {
-                  // Clear any existing selection first
-                  window.getSelection().removeAllRanges();
-                  // Use browser's native find — highlights text exactly like Cmd+F
-                  // Doesn't modify DOM, doesn't appear in print
-                  window.find(c.anchorText, false, false, true);
+                  const mark = document.querySelector(`mark.comment-mark[data-comment-id="${c.id}"]`);
+                  if (mark) {
+                    mark.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    // Flash highlight
+                    mark.classList.add('comment-mark-flash');
+                    setTimeout(() => mark.classList.remove('comment-mark-flash'), 2000);
+                  }
                 }}>Go to</button>
               )}
               <button onClick={() => handleResolve(c.id, true)}>Resolve</button>

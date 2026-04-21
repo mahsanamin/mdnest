@@ -461,8 +461,57 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly, onComment, c
     return () => el.removeEventListener('mermaid-fullscreen', handler);
   }, []);
 
-  // Comments prop received but highlighting is done via browser's native
-  // window.find() when user clicks "Go to" in the sidebar. No DOM modification needed.
+  // Highlight commented text with <mark> elements in the editor DOM.
+  // Runs after content renders. Hidden from print via CSS.
+  useEffect(() => {
+    const wrapper = wrapperRef.current;
+    if (!wrapper) return;
+
+    const timer = setTimeout(() => {
+      // Clear old marks
+      wrapper.querySelectorAll('mark.comment-mark').forEach(m => {
+        const parent = m.parentNode;
+        while (m.firstChild) parent.insertBefore(m.firstChild, m);
+        parent.removeChild(m);
+        parent.normalize();
+      });
+
+      const active = (comments || []).filter(c => !c.resolved && c.anchorText?.trim());
+      if (!active.length) return;
+
+      const editorEl = wrapper.querySelector('.live-editor-content');
+      if (!editorEl) return;
+
+      for (const c of active) {
+        const anchor = c.anchorText.trim();
+        if (anchor.length < 2) continue;
+
+        // Walk text nodes
+        const walker = document.createTreeWalker(editorEl, NodeFilter.SHOW_TEXT);
+        let node;
+        while ((node = walker.nextNode())) {
+          const idx = node.textContent.indexOf(anchor);
+          if (idx < 0) continue;
+
+          try {
+            // Only wrap if the text node has enough content
+            if (idx + anchor.length > node.textContent.length) continue;
+            const range = document.createRange();
+            range.setStart(node, idx);
+            range.setEnd(node, idx + anchor.length);
+            const mark = document.createElement('mark');
+            mark.className = 'comment-mark';
+            mark.dataset.commentId = c.id;
+            mark.title = `${c.author}: ${c.body.slice(0, 80)}`;
+            range.surroundContents(mark);
+          } catch { /* skip if range crosses element boundaries */ }
+          break; // Only highlight first occurrence
+        }
+      }
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [comments, content]);
 
   return (
     <div className="live-editor-pane">
