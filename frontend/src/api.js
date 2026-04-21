@@ -178,7 +178,8 @@ export async function getNote(ns, path) {
   if (!res.ok) throw new Error('Failed to get note');
   const text = await res.text();
   const etag = res.headers.get('ETag');
-  return { text, etag };
+  const noteId = res.headers.get('X-Note-ID');
+  return { text, etag, noteId };
 }
 
 export async function saveNote(ns, path, content, ifMatch) {
@@ -344,6 +345,45 @@ export async function adminSyncNamespace(ns) {
     const data = await res.json().catch(() => ({}));
     throw new Error(data.detail || data.error || 'Sync failed');
   }
+  return res.json();
+}
+
+// --- Comments ---
+
+export async function listComments(ns, path) {
+  const res = await request(`/comments?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}`);
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function createComment(ns, path, { rangeStart, rangeEnd, anchorText, body }) {
+  const res = await request(`/comments?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rangeStart, rangeEnd, anchorText, body }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to create comment');
+  }
+  return res.json();
+}
+
+export async function resolveComment(ns, path, commentId, resolved) {
+  const res = await request(`/comments?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}&id=${encodeURIComponent(commentId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ resolved }),
+  });
+  if (!res.ok) throw new Error('Failed to update comment');
+  return res.json();
+}
+
+export async function deleteComment(ns, path, commentId) {
+  const res = await request(`/comments?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}&id=${encodeURIComponent(commentId)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) throw new Error('Failed to delete comment');
   return res.json();
 }
 

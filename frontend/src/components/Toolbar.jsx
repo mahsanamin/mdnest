@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 
-function Toolbar({ currentPath, onToggleSidebar, onChangePassword, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh, wsStatus }) {
+function Toolbar({ currentPath, onToggleSidebar, onChangePassword, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh, wsStatus, commentCount, onToggleComments }) {
   const [refreshing, setRefreshing] = useState(false);
   const handleRefresh = useCallback(() => {
     if (refreshing || !onRefresh) return;
@@ -78,6 +78,14 @@ function Toolbar({ currentPath, onToggleSidebar, onChangePassword, onRename, onD
             {wsStatus === 'connected' ? 'Live' : wsStatus === 'connecting' ? 'Reconnecting' : wsStatus === 'superseded' ? 'Session moved' : 'Offline'}
           </span>
         </span>
+      )}
+      {currentPath && onToggleComments && (
+        <button className="toolbar-comments" onClick={onToggleComments} title="Comments">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
+          </svg>
+          {commentCount > 0 && <span className="comment-badge">{commentCount}</span>}
+        </button>
       )}
       <button className="toolbar-settings" onClick={onChangePassword} title="Settings">
         &#9881;

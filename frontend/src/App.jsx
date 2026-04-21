@@ -10,11 +10,13 @@ import ContextMenu from './components/ContextMenu.jsx';
 import Settings from './components/Settings.jsx';
 import AdminPanel from './components/AdminPanel.jsx';
 import PresenceBar from './components/PresenceBar.jsx';
+import CommentSidebar from './components/CommentSidebar.jsx';
 import ShareDialog from './components/ShareDialog.jsx';
 import CollabClient from './collab.js';
 import {
   getToken,
   getNote,
+  listComments,
   saveNote,
   getTree,
   getNamespaces,
@@ -99,6 +101,8 @@ function App() {
   const [ctxMenu, setCtxMenu] = useState({ visible: false, x: 0, y: 0, target: null });
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
+  const [comments, setComments] = useState([]);
+  const [showComments, setShowComments] = useState(false);
   const editorWrapperRef = useRef(null);
   const previewWrapperRef = useRef(null);
   const scrollSyncRef = useRef(false);
@@ -533,6 +537,8 @@ function App() {
       setConflictBanner(null);
       setSidebarVisible(false);
       restoreScrollPosition(selectedNs, path);
+      // Load comments for this note
+      listComments(selectedNs, path).then(setComments).catch(() => setComments([]));
     } catch (e) {
       if (e.name === 'PermissionError') {
         alert('Access denied: you do not have permission to read this file.');
@@ -541,6 +547,12 @@ function App() {
       }
     }
   }, [selectedNs]);
+
+  const refreshComments = useCallback(() => {
+    if (selectedNs && currentPath) {
+      listComments(selectedNs, currentPath).then(setComments).catch(() => setComments([]));
+    }
+  }, [selectedNs, currentPath]);
 
   const handleContentChange = useCallback((newContent) => {
     setContent(newContent);
@@ -892,6 +904,8 @@ function App() {
             }
           }}
           onRefresh={handleRefresh}
+          commentCount={comments.filter(c => !c.resolved).length}
+          onToggleComments={() => setShowComments(v => !v)}
           wsStatus={appConfig?.liveCollab ? wsStatus : null}
         />
         {appConfig?.liveCollab && presenceUsers.length > 1 && (
@@ -1009,6 +1023,16 @@ function App() {
         isAdmin={isAdmin && isMulti}
         selectedNs={selectedNs}
       />
+      {showComments && currentPath && (
+        <CommentSidebar
+          comments={comments}
+          ns={selectedNs}
+          currentPath={currentPath}
+          onRefresh={refreshComments}
+          onClose={() => setShowComments(false)}
+          userInfo={userInfo}
+        />
+      )}
     </div>
   );
 }
