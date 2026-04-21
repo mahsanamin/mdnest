@@ -15,7 +15,7 @@ All notable changes to mdnest are documented here.
 - **Cross-mark anchor matching** — highlights work even when the commented selection spans inline marks (bold, italic, inline code, links). The search concatenates every text node with position mapping, rather than walking nodes one at a time.
 - **UUID-anchored storage** — each note carries an invisible `<!-- mdnest:UUID -->` marker at the bottom, stripped on GET and re-injected on PUT. Comments are stored at `<namespace>/.mdnest/comments/<uuid>.jsonl`, so moving or renaming a file keeps its comments attached.
 - **Direct-link loading** — comments now load correctly when opening a note via URL hash or browser back/forward, not just when clicked in the tree.
-- **Multi-user only for v1** — comments require `AUTH_MODE=multi` so each message has a real author identity.
+- **Requires multi-user + live collab** — comments need both `AUTH_MODE=multi` (for real author identity) and `ENABLE_LIVE_COLLAB=true` (for the WebSocket hub). Without either, the UI is hidden and the `/api/comments` route is unregistered.
 
 ### Fixes
 - **Floating Comment popup at wrong positions** — suppressed when the triggering mouseup/keyup comes from outside the editor (e.g. clicking Go To in the sidebar no longer resurrects the popup).

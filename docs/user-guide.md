@@ -134,7 +134,7 @@ This renders as an interactive diagram in the preview pane. Mermaid supports man
 
 ## Inline Comments
 
-> **Available in multi-user mode only.** Each comment is tied to a real user account.
+> **Requires multi-user mode with live collaboration enabled** (`AUTH_MODE=multi` and `ENABLE_LIVE_COLLAB=true`). Each comment is tied to a real user account and relies on the WebSocket hub. In single-user mode or when live collab is off the comment UI is hidden.
 
 Leave feedback on any part of a note without touching its content.
 

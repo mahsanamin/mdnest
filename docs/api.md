@@ -902,7 +902,7 @@ curl -X POST "http://localhost:8286/api/move?ns=personal&from=drafts&to=archive/
 
 ## Comments
 
-> **Multi-user mode only.** All comment endpoints require a valid JWT.
+> **Requires multi-user mode with live collab enabled** (`AUTH_MODE=multi` and `ENABLE_LIVE_COLLAB=true`). The `/api/comments` route is only registered under that combination; in any other mode the endpoints return 404. All endpoints require a valid JWT.
 
 Comments are anchored to notes by an invisible UUID marker (`<!-- mdnest:<uuid> -->`) appended at the end of each note's content. The marker is stripped from the response body on GET and re-injected on PUT, so clients never see it. Comment data lives at `<namespace>/.mdnest/comments/<uuid>.jsonl` — append-only JSONL with soft deletes. Moving or renaming a file preserves its UUID and therefore its comments.
 

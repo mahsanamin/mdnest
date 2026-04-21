@@ -310,9 +310,11 @@ Migrations run automatically and are idempotent -- safe to run on every startup.
 
 ---
 
-## Comment Storage (multi-user mode)
+## Comment Storage (multi-user + live collab)
 
 Inline comments are anchored to notes by an invisible UUID, not by path. This means a file can be renamed, moved across folders, or namespaces without losing its comment history.
+
+The feature is gated on `enableCollab` in `backend/main.go` (which itself requires `AUTH_MODE=multi` and `ENABLE_LIVE_COLLAB=true`). Under any other configuration, `handlers.NewCommentsHandler` is never constructed and the `/api/comments` route is never registered — callers get a clean 404.
 
 **UUID marker.** Each note carries an HTML-comment marker at the bottom: `<!-- mdnest:<uuid> -->`. Markdown renderers ignore HTML comments, so it's invisible in preview, print, and export. `backend/handlers/noteid.go` handles the lifecycle:
 
