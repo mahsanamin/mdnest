@@ -946,6 +946,7 @@ function App() {
                         currentPath={currentPath}
                         ns={selectedNs}
                         readOnly={!canWriteCurrent}
+                        comments={comments}
                         onComment={(sel) => {
                           setPendingCommentSelection(sel);
                           setShowComments(true);

@@ -271,7 +271,7 @@ function LiveToolbar({ editor }) {
   );
 }
 
-function LiveEditor({ content, onChange, currentPath, ns, readOnly, onComment }) {
+function LiveEditor({ content, onChange, currentPath, ns, readOnly, onComment, comments }) {
   const [editor, setEditor] = useState(null);
   const [viewerSvg, setViewerSvg] = useState(null);
   const wrapperRef = useRef(null);
@@ -460,6 +460,66 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly, onComment })
     el.addEventListener('mermaid-fullscreen', handler);
     return () => el.removeEventListener('mermaid-fullscreen', handler);
   }, []);
+
+  // Highlight commented text ranges in the editor
+  useEffect(() => {
+    if (!editor || !comments?.length) return;
+    const wrapper = wrapperRef.current;
+    if (!wrapper) return;
+
+    // Clear existing highlights
+    wrapper.querySelectorAll('.comment-highlight').forEach(el => {
+      const parent = el.parentNode;
+      parent.replaceChild(document.createTextNode(el.textContent), el);
+      parent.normalize();
+    });
+
+    // Apply highlights for active comments with anchor text
+    const activeComments = comments.filter(c => !c.resolved && c.anchorText);
+    if (activeComments.length === 0) return;
+
+    // Debounce to avoid running during edits
+    const timer = setTimeout(() => {
+      try {
+        editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx);
+          const doc = view.state.doc;
+          const docText = doc.textContent;
+
+          for (const comment of activeComments) {
+            const anchor = comment.anchorText;
+            const idx = docText.indexOf(anchor);
+            if (idx < 0) continue;
+
+            // Find the DOM range for this text position
+            const from = idx;
+            const to = idx + anchor.length;
+
+            try {
+              const startCoords = view.coordsAtPos(from);
+              const endCoords = view.coordsAtPos(to);
+              if (!startCoords || !endCoords) continue;
+
+              // Create a highlight overlay
+              const wrapperRect = wrapper.getBoundingClientRect();
+              const highlight = document.createElement('div');
+              highlight.className = 'comment-highlight-overlay';
+              highlight.title = `${comment.author}: ${comment.body.slice(0, 50)}`;
+              highlight.style.position = 'absolute';
+              highlight.style.top = `${startCoords.top - wrapperRect.top + wrapper.scrollTop}px`;
+              highlight.style.left = `${startCoords.left - wrapperRect.left}px`;
+              highlight.style.width = `${endCoords.right - startCoords.left}px`;
+              highlight.style.height = `${startCoords.bottom - startCoords.top}px`;
+              highlight.style.pointerEvents = 'none';
+              wrapper.appendChild(highlight);
+            } catch {}
+          }
+        });
+      } catch {}
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [editor, comments, content]);
 
   return (
     <div className="live-editor-pane">

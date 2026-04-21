@@ -1501,6 +1501,14 @@ pre:hover .code-copy-btn {
 }
 
 /* Floating comment button on text selection */
+/* Comment highlight overlay on text */
+.comment-highlight-overlay {
+  background: #89b4fa22;
+  border-bottom: 2px solid #89b4fa66;
+  border-radius: 2px;
+  z-index: 1;
+}
+
 .comment-selection-btn {
   position: absolute;
   z-index: 100;
