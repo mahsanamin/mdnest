@@ -103,6 +103,7 @@ function App() {
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [comments, setComments] = useState([]);
   const [showComments, setShowComments] = useState(false);
+  const [pendingCommentSelection, setPendingCommentSelection] = useState(null);
   const editorWrapperRef = useRef(null);
   const previewWrapperRef = useRef(null);
   const scrollSyncRef = useRef(false);
@@ -945,6 +946,10 @@ function App() {
                         currentPath={currentPath}
                         ns={selectedNs}
                         readOnly={!canWriteCurrent}
+                        onComment={(sel) => {
+                          setPendingCommentSelection(sel);
+                          setShowComments(true);
+                        }}
                       />
                     </Suspense>
                   ) : (
@@ -1029,8 +1034,10 @@ function App() {
           ns={selectedNs}
           currentPath={currentPath}
           onRefresh={refreshComments}
-          onClose={() => setShowComments(false)}
+          onClose={() => { setShowComments(false); setPendingCommentSelection(null); }}
           userInfo={userInfo}
+          pendingSelection={pendingCommentSelection}
+          onSelectionConsumed={() => setPendingCommentSelection(null)}
         />
       )}
     </div>

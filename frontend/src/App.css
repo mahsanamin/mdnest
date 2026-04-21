@@ -1500,6 +1500,38 @@ pre:hover .code-copy-btn {
   color: #f38ba8;
 }
 
+/* Floating comment button on text selection */
+.comment-selection-btn {
+  position: absolute;
+  z-index: 100;
+  background: #89b4fa;
+  color: #1e1e2e;
+  border: none;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  white-space: nowrap;
+}
+
+.comment-selection-btn:hover {
+  opacity: 0.9;
+}
+
+.comment-anchor-preview {
+  font-size: 0.78rem;
+  color: #a6adc8;
+  font-style: italic;
+  padding: 6px 8px;
+  background: #1e1e2e;
+  border-radius: 4px;
+  border-left: 2px solid #89b4fa;
+  max-height: 60px;
+  overflow: hidden;
+}
+
 .comment-section-label {
   padding: 8px 16px 4px;
   font-size: 0.72rem;

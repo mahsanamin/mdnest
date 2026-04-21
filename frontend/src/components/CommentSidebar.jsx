@@ -1,21 +1,30 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { createComment, resolveComment, deleteComment } from '../api.js';
 
-function CommentSidebar({ comments, ns, currentPath, onRefresh, onClose, userInfo }) {
+function CommentSidebar({ comments, ns, currentPath, onRefresh, onClose, userInfo, pendingSelection, onSelectionConsumed }) {
   const [newComment, setNewComment] = useState('');
   const [adding, setAdding] = useState(false);
+  const textareaRef = useRef(null);
+
+  // Auto-focus textarea when sidebar opens with a pending selection
+  useEffect(() => {
+    if (pendingSelection && textareaRef.current) {
+      textareaRef.current.focus();
+    }
+  }, [pendingSelection]);
 
   const handleAdd = useCallback(async () => {
     if (!newComment.trim() || !ns || !currentPath) return;
     setAdding(true);
     try {
       await createComment(ns, currentPath, {
-        rangeStart: 0,
-        rangeEnd: 0,
-        anchorText: '',
+        rangeStart: pendingSelection?.rangeStart || 0,
+        rangeEnd: pendingSelection?.rangeEnd || 0,
+        anchorText: pendingSelection?.anchorText || '',
         body: newComment.trim(),
       });
       setNewComment('');
+      if (onSelectionConsumed) onSelectionConsumed();
       if (onRefresh) onRefresh();
     } catch (e) {
       console.error('Failed to add comment:', e);
@@ -53,10 +62,17 @@ function CommentSidebar({ comments, ns, currentPath, onRefresh, onClose, userInf
       </div>
 
       <div className="comment-sidebar-add">
+        {pendingSelection?.anchorText && (
+          <div className="comment-anchor-preview">
+            &ldquo;{pendingSelection.anchorText.slice(0, 100)}{pendingSelection.anchorText.length > 100 ? '...' : ''}&rdquo;
+          </div>
+        )}
         <textarea
-          placeholder="Add a comment..."
+          ref={textareaRef}
+          placeholder={pendingSelection ? "Comment on this selection..." : "Add a general comment..."}
           value={newComment}
           onChange={(e) => setNewComment(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAdd(); } }}
           rows={2}
         />
         <button

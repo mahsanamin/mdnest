@@ -271,10 +271,49 @@ function LiveToolbar({ editor }) {
   );
 }
 
-function LiveEditor({ content, onChange, currentPath, ns, readOnly }) {
+function LiveEditor({ content, onChange, currentPath, ns, readOnly, onComment }) {
   const [editor, setEditor] = useState(null);
   const [viewerSvg, setViewerSvg] = useState(null);
   const wrapperRef = useRef(null);
+  const [selectionPopup, setSelectionPopup] = useState(null); // {top, left, text, start, end}
+
+  // Track text selection for comment button
+  useEffect(() => {
+    if (!editor || !onComment) return;
+    const checkSelection = () => {
+      try {
+        editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx);
+          const { from, to } = view.state.selection;
+          if (to - from < 3) { setSelectionPopup(null); return; }
+
+          const selectedText = view.state.doc.textBetween(from, to, ' ');
+          if (!selectedText.trim()) { setSelectionPopup(null); return; }
+
+          // Get screen coordinates of the selection end
+          const coords = view.coordsAtPos(to);
+          const wrapper = wrapperRef.current;
+          if (!wrapper) { setSelectionPopup(null); return; }
+          const rect = wrapper.getBoundingClientRect();
+
+          setSelectionPopup({
+            top: coords.top - rect.top + wrapper.scrollTop + 20,
+            left: Math.min(coords.left - rect.left, rect.width - 120),
+            text: selectedText,
+            start: from,
+            end: to,
+          });
+        });
+      } catch {}
+    };
+
+    document.addEventListener('mouseup', checkSelection);
+    document.addEventListener('keyup', checkSelection);
+    return () => {
+      document.removeEventListener('mouseup', checkSelection);
+      document.removeEventListener('keyup', checkSelection);
+    };
+  }, [editor, onComment]);
 
   // Handle image paste and rich HTML paste
   useEffect(() => {
@@ -435,6 +474,24 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly }) {
             onEditorReady={setEditor}
           />
         </MilkdownProvider>
+        {selectionPopup && onComment && (
+          <button
+            className="comment-selection-btn"
+            style={{ top: selectionPopup.top, left: selectionPopup.left }}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onComment({
+                rangeStart: selectionPopup.start,
+                rangeEnd: selectionPopup.end,
+                anchorText: selectionPopup.text,
+              });
+              setSelectionPopup(null);
+            }}
+          >
+            💬 Comment
+          </button>
+        )}
       </div>
       {viewerSvg && (
         <MermaidViewer svgContent={viewerSvg} onClose={() => setViewerSvg(null)} />
