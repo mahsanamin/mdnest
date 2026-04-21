@@ -19,7 +19,7 @@ All notable changes to mdnest are documented here.
 
 ### Fixes
 - **Floating Comment popup at wrong positions** — suppressed when the triggering mouseup/keyup comes from outside the editor (e.g. clicking Go To in the sidebar no longer resurrects the popup).
-- **Single-user mode logout on comment** — the comment UI was showing in single mode but the handler required a user context, returning 401 and triggering the global 401 → logout handler. Comments are now hidden in single mode and the `/api/comments` route is unregistered there.
+- **Single-user / collab-off mode crash on comment** — the comment UI was showing in single-user mode and in multi-user installs that disable live collaboration (`ENABLE_LIVE_COLLAB=false`), even though the feature requires real user identity and the WebSocket hub. Comments are now gated on `liveCollab` on both the frontend (no icon, no popup, no sidebar, no API calls) and the backend (`/api/comments` route is only registered when live collab is on).
 
 ---
 

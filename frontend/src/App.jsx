@@ -126,6 +126,10 @@ function App() {
   const [userInfo, setUserInfo] = useState(null); // {id, username, role, grants}
   const isMulti = appConfig?.authMode === 'multi';
   const isAdmin = !isMulti || userInfo?.role === 'admin';
+  // Comments need real user identity AND the WebSocket hub (so other clients
+  // see new/resolved comments without a manual refresh), so gate on liveCollab
+  // — which itself is only true when multi mode is on.
+  const commentsEnabled = !!appConfig?.liveCollab;
 
   // Live collaboration state
   const [presenceUsers, setPresenceUsers] = useState([]);
@@ -349,7 +353,7 @@ function App() {
           setSavedContent('');
           setHash(selectedNs, null);
         });
-        if (isMulti) {
+        if (commentsEnabled) {
           listComments(selectedNs, currentPath).then(setComments).catch(() => setComments([]));
         }
       }
@@ -516,13 +520,13 @@ function App() {
       setSavedContent(text);
       etagRef.current = etag;
       restoreScrollPosition(ns, path);
-      if (isMulti) {
+      if (commentsEnabled) {
         listComments(ns, path).then(setComments).catch(() => setComments([]));
       }
     } catch (e) {
       console.error('Failed to open note:', e);
     }
-  }, [restoreScrollPosition, isMulti]);
+  }, [restoreScrollPosition, commentsEnabled]);
 
   const handleSelectNs = useCallback((ns) => {
     setSelectedNs(ns);
@@ -546,8 +550,8 @@ function App() {
       setConflictBanner(null);
       setSidebarVisible(false);
       restoreScrollPosition(selectedNs, path);
-      // Load comments for this note (multi-user mode only)
-      if (isMulti) {
+      // Load comments for this note (only when comments feature is enabled)
+      if (commentsEnabled) {
         listComments(selectedNs, path).then(setComments).catch(() => setComments([]));
       }
     } catch (e) {
@@ -915,8 +919,8 @@ function App() {
             }
           }}
           onRefresh={handleRefresh}
-          commentCount={isMulti ? comments.filter(c => !c.parentId && !c.resolved).length : 0}
-          onToggleComments={!isMulti ? null : () => {
+          commentCount={commentsEnabled ? comments.filter(c => !c.parentId && !c.resolved).length : 0}
+          onToggleComments={!commentsEnabled ? null : () => {
             const next = !showComments;
             setShowComments(next);
             // When opening comments, snap the user to Live editor — that's
@@ -976,13 +980,13 @@ function App() {
                         currentPath={currentPath}
                         ns={selectedNs}
                         readOnly={!canWriteCurrent}
-                        comments={isMulti ? comments : []}
-                        onComment={!isMulti ? null : (sel) => {
+                        comments={commentsEnabled ? comments : []}
+                        onComment={!commentsEnabled ? null : (sel) => {
                           setPendingCommentSelection(sel);
                           setShowComments(true);
                         }}
                         onGoToReady={(fn) => { goToCommentRef.current = fn; }}
-                        onHighlightClick={!isMulti ? null : (commentId) => {
+                        onHighlightClick={!commentsEnabled ? null : (commentId) => {
                           setShowComments(true);
                           setHighlightedCommentId(commentId);
                           if (viewMode === 'preview') {
@@ -1068,7 +1072,7 @@ function App() {
         isAdmin={isAdmin && isMulti}
         selectedNs={selectedNs}
       />
-      {isMulti && showComments && currentPath && (
+      {commentsEnabled && showComments && currentPath && (
         <CommentSidebar
           comments={comments}
           ns={selectedNs}
