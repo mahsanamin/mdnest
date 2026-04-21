@@ -89,13 +89,24 @@ function buildCommentDecorations(doc, anchors) {
     const text = anchor?.text;
     if (!text || text.length < 2) continue;
     const matches = findAnchorMatches(doc, text);
-    for (const { from, to } of matches) {
-      const key = `${from}-${to}`;
-      if (!rangeMap.has(key)) {
-        rangeMap.set(key, { from, to, ids: [anchor.id] });
-      } else {
-        rangeMap.get(key).ids.push(anchor.id);
-      }
+    if (matches.length === 0) continue;
+
+    // Highlight only the occurrence whose position is closest to where the
+    // comment was originally placed. Without this, a comment on "good"
+    // would light up every "good" in the document.
+    const hintPos = Number(anchor.rangeStart ?? 0);
+    let best = matches[0];
+    let bestDist = Math.abs(best.from - hintPos);
+    for (const m of matches) {
+      const d = Math.abs(m.from - hintPos);
+      if (d < bestDist) { best = m; bestDist = d; }
+    }
+
+    const key = `${best.from}-${best.to}`;
+    if (!rangeMap.has(key)) {
+      rangeMap.set(key, { from: best.from, to: best.to, ids: [anchor.id] });
+    } else {
+      rangeMap.get(key).ids.push(anchor.id);
     }
   }
   const decorations = [];
@@ -593,9 +604,11 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly, onComment, c
     if (!editor) return;
     // Highlight only top-level threads (no parentId). Replies inherit their
     // parent's anchor, so adding them would just create duplicate decorations.
+    // rangeStart flows through so the decoration picker can disambiguate
+    // multiple occurrences of the same anchor text.
     const anchors = (comments || [])
       .filter((c) => !c.parentId && !c.resolved && c.anchorText)
-      .map((c) => ({ text: c.anchorText, id: c.id }));
+      .map((c) => ({ text: c.anchorText, id: c.id, rangeStart: c.rangeStart }));
     try {
       editor.action((ctx) => {
         const view = ctx.get(editorViewCtx);

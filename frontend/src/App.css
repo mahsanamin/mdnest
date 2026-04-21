@@ -2483,6 +2483,11 @@ pre:hover .code-copy-btn {
   flex: 1;
   overflow-y: auto;
   padding: 0;
+  /* position: relative so the floating Comment button and any other
+     absolutely-positioned children anchor to the scrollable content area
+     rather than a far-up ancestor. Without this, the button lands off-
+     screen once the user scrolls. */
+  position: relative;
 }
 
 .live-editor-content {
