@@ -4,6 +4,25 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v3.4.0 — Federated Identity via Firebase
+
+### Features
+- **Sign in with Google across multiple mdnest servers.** New `USER_PROVIDER=firebase` mode (layered on `AUTH_MODE=multi`) turns identity into a shared service: one Google account signs you into every mdnest server that points at the same Firebase project. See `docs/firebase-setup.md` for the step-by-step.
+- **TOTP shared across servers.** In Firebase mode, 2FA secrets live in Firestore at `totp/{firebase_uid}`. Enroll once in Google Authenticator → the same code works on every server. No per-server re-enrollment.
+- **Invite flow unchanged.** Admins still invite by email. When a user with that email signs in via Google, the pre-existing row is claimed (firebase_uid attached) and their grants take effect.
+- **`ADMIN_EMAILS` bootstrap.** Comma-separated list in `mdnest.conf` gets promoted to admin on every startup — declarative admin provisioning that survives restarts.
+- **`totp_enabled` in JWT claims.** The frontend can render "Enable 2FA" vs "Manage 2FA" without hitting the TOTP store on every request. The actual 2FA gate still runs at login against fresh state.
+- **Local mode unchanged.** Servers without `USER_PROVIDER=firebase` behave identically to v3.3.0 — no new required config, no migration required to existing data.
+
+### Internal
+- New `store.TOTPStore` interface with `PostgresTOTPStore` (local mode) and `firebase.TOTPStore` (Firestore) implementations. TOTP handlers, login flow, and admin 2FA reset all route through the interface.
+- New `backend/firebase` package wrapping the Firebase Admin SDK (Auth + Firestore).
+- Migration 005 adds `users.firebase_uid UNIQUE`, drops `NOT NULL` on `password_hash` and `username`, indexes `firebase_uid` and `email`. Additive-only; safe on local-mode databases.
+- Frontend: new `firebase-config.js` and `LoginFirebase.jsx`; existing `Login.jsx` and `Settings.jsx` are unchanged in local mode, gated behind a config check in Firebase mode.
+- `setup.sh` validates Firebase config, mounts the service-account + web-config JSON files into the backend container.
+
+---
+
 ## v3.3.0 — Inline Comments
 
 ### Features

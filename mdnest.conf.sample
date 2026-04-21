@@ -57,7 +57,37 @@ GIT_AUTHOR_EMAIL=you@example.com
 
 # Live collaboration (optional, requires AUTH_MODE=multi)
 # Enables real-time cursor presence and conflict detection via WebSocket.
+# Also required for the inline comments feature (/api/comments).
 # ENABLE_LIVE_COLLAB=false
+
+# ==========================================================================
+# Federated identity via Firebase (optional, requires AUTH_MODE=multi)
+# ==========================================================================
+# Turn identity into a shared service across multiple mdnest servers. Users
+# sign in with Google; TOTP enrolls ONCE in Firestore and works on every
+# server that points at the same Firebase project. Each server still decides
+# which emails are authorized and at what role.
+#
+# Step-by-step setup (create project, download keys, configure OAuth):
+#     docs/firebase-setup.md
+#
+# Quick reference:
+#   1. Create a Firebase project at https://console.firebase.google.com
+#   2. Enable Google sign-in (Authentication → Sign-in method).
+#   3. Enable Firestore in production mode.
+#   4. Download a service account JSON (Project settings → Service accounts).
+#   5. Copy the web SDK config JSON (Project settings → Your apps → Web).
+#   6. Fill in the four fields below.
+#   7. Add your email to ADMIN_EMAILS so you get admin role on first sign-in.
+#
+# USER_PROVIDER=firebase
+# FIREBASE_PROJECT_ID=your-project-id
+# FIREBASE_SERVICE_ACCOUNT=/home/you/mdnest/firebase-service-account.json
+# FIREBASE_WEB_CONFIG=/home/you/mdnest/firebase-web-config.json
+#
+# Emails promoted to admin on every startup (comma-separated, case-insensitive).
+# Removals are NOT auto-demoted — demote explicitly via the admin UI.
+# ADMIN_EMAILS=you@example.com,teammate@example.com
 
 # HTTPS with Caddy (optional)
 # Set CADDY_DOMAIN to enable automatic HTTPS via Let's Encrypt.

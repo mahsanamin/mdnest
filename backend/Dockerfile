@@ -1,5 +1,7 @@
 # Stage 1: Build
-FROM golang:1.24-alpine AS builder
+# Bumped to 1.25 for the Firebase Admin SDK (firebase.google.com/go/v4
+# transitively requires 1.25+).
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
