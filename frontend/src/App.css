@@ -1634,24 +1634,22 @@ pre:hover .code-copy-btn {
   cursor: not-allowed;
 }
 
-/* Bouncing arrow shown above Go To target text. Disappears after ~2.6s. */
-.comment-goto-arrow {
-  position: absolute;
-  z-index: 200;
-  pointer-events: none;
-  transform: translateX(-50%);
-  animation: comment-goto-bounce 0.6s ease-in-out infinite, comment-goto-fade 2.6s ease forwards;
-  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.4));
+/* Transient flash applied to commented text when Go To is invoked.
+   Rides on top of .comment-highlight — adds a pulsing yellow glow so the
+   user's eye is drawn to it, then fades out. */
+.comment-flash-active {
+  background-color: #fde047 !important;
+  color: #1e1e2e !important;
+  border-radius: 2px;
+  animation: comment-flash-editor 1.8s ease;
 }
 
-@keyframes comment-goto-bounce {
-  0%, 100% { transform: translate(-50%, 0); }
-  50% { transform: translate(-50%, -8px); }
-}
-
-@keyframes comment-goto-fade {
-  0%, 80% { opacity: 1; }
-  100% { opacity: 0; }
+@keyframes comment-flash-editor {
+  0%   { box-shadow: 0 0 0 3px #facc15, 0 0 16px 4px rgba(253, 224, 71, 0.9); }
+  25%  { box-shadow: 0 0 0 3px transparent, 0 0 8px 2px rgba(253, 224, 71, 0.3); }
+  50%  { box-shadow: 0 0 0 3px #facc15, 0 0 16px 4px rgba(253, 224, 71, 0.8); }
+  75%  { box-shadow: 0 0 0 3px transparent, 0 0 8px 2px rgba(253, 224, 71, 0.3); }
+  100% { box-shadow: 0 0 0 1px #facc15; }
 }
 
 /* Flash animation for a comment card when it's targeted from the editor

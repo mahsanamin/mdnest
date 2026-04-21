@@ -82,23 +82,44 @@ const commentHighlightPlugin = $prose(() => {
     key: commentHighlightKey,
     state: {
       init() {
-        return { anchors: [], decorations: DecorationSet.empty };
+        return { anchors: [], decorations: DecorationSet.empty, flash: null };
       },
       apply(tr, old) {
         const meta = tr.getMeta(commentHighlightKey);
+        let anchors = old.anchors;
+        let decorations = old.decorations;
+        let flash = old.flash;
+
         if (meta && Array.isArray(meta.anchors)) {
-          return { anchors: meta.anchors, decorations: buildCommentDecorations(tr.doc, meta.anchors) };
+          anchors = meta.anchors;
+          decorations = buildCommentDecorations(tr.doc, anchors);
+        } else if (tr.docChanged) {
+          decorations = buildCommentDecorations(tr.doc, anchors);
         }
-        if (tr.docChanged) {
-          return { anchors: old.anchors, decorations: buildCommentDecorations(tr.doc, old.anchors) };
+
+        if (meta && 'flash' in meta) {
+          flash = meta.flash; // { from, to } or null
+        } else if (flash && tr.docChanged) {
+          const nf = tr.mapping.map(flash.from);
+          const nt = tr.mapping.map(flash.to);
+          flash = nt > nf ? { from: nf, to: nt } : null;
         }
-        return old;
+
+        return { anchors, decorations, flash };
       },
     },
     props: {
       decorations(state) {
         const s = this.getState(state);
-        return s ? s.decorations : null;
+        if (!s) return null;
+        if (!s.flash) return s.decorations;
+        try {
+          return s.decorations.add(state.doc, [
+            Decoration.inline(s.flash.from, s.flash.to, { class: 'comment-flash-active' }),
+          ]);
+        } catch {
+          return s.decorations;
+        }
       },
     },
   });
@@ -346,8 +367,7 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly, onComment, c
   const [viewerSvg, setViewerSvg] = useState(null);
   const wrapperRef = useRef(null);
   const [selectionPopup, setSelectionPopup] = useState(null); // {top, left, text, start, end}
-  const [goToArrow, setGoToArrow] = useState(null); // {top, left}
-  const arrowTimerRef = useRef(null);
+  const flashTimerRef = useRef(null);
 
   // Track text selection for comment button
   useEffect(() => {
@@ -553,7 +573,8 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly, onComment, c
   // Go-to handler: finds anchor text and picks the occurrence closest to the
   // comment's stored rangeStart. This disambiguates when the same text appears
   // more than once (or when a shorter anchor is a substring of a longer one).
-  // After scrolling, shows a bouncing arrow above the text to draw attention.
+  // After scrolling, sets a transient "flash" decoration on the text so the
+  // highlight itself pulses — same visual language as the sidebar flash.
   const goToComment = useCallback((comment) => {
     const anchorText = typeof comment === 'string' ? comment : comment?.anchorText;
     const hintPos = typeof comment === 'object' && comment ? Number(comment.rangeStart || 0) : 0;
@@ -581,30 +602,21 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly, onComment, c
           const d = Math.abs(m.from - hintPos);
           if (d < bestDist) { best = m; bestDist = d; }
         }
-        const tr = view.state.tr.setSelection(
-          TextSelection.create(view.state.doc, best.from, best.to)
-        );
+        const tr = view.state.tr
+          .setSelection(TextSelection.create(view.state.doc, best.from, best.to))
+          .setMeta(commentHighlightKey, { flash: { from: best.from, to: best.to } });
         view.dispatch(tr.scrollIntoView());
         view.focus();
 
-        // Position a bouncing arrow above the target, relative to the wrapper.
-        // Deferred so the scroll has settled before we measure coords.
-        setTimeout(() => {
+        if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+        flashTimerRef.current = setTimeout(() => {
           try {
-            const v = ctx.get(editorViewCtx);
-            const startCoords = v.coordsAtPos(best.from);
-            const endCoords = v.coordsAtPos(best.to);
-            const wrapper = wrapperRef.current;
-            if (!wrapper) return;
-            const rect = wrapper.getBoundingClientRect();
-            const midX = (startCoords.left + endCoords.left) / 2;
-            const top = startCoords.top - rect.top + wrapper.scrollTop - 36;
-            const left = midX - rect.left + wrapper.scrollLeft;
-            setGoToArrow({ top, left });
-            if (arrowTimerRef.current) clearTimeout(arrowTimerRef.current);
-            arrowTimerRef.current = setTimeout(() => setGoToArrow(null), 2600);
+            editor.action((c2) => {
+              const v2 = c2.get(editorViewCtx);
+              v2.dispatch(v2.state.tr.setMeta(commentHighlightKey, { flash: null }));
+            });
           } catch {}
-        }, 120);
+        }, 1800);
       });
     } catch (e) {
       console.error('Go to comment failed:', e);
@@ -627,7 +639,7 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly, onComment, c
     return () => el.removeEventListener('click', onClick);
   }, [onHighlightClick]);
 
-  useEffect(() => () => { if (arrowTimerRef.current) clearTimeout(arrowTimerRef.current); }, []);
+  useEffect(() => () => { if (flashTimerRef.current) clearTimeout(flashTimerRef.current); }, []);
 
   // Expose goToComment to parent
   useEffect(() => {
@@ -664,19 +676,6 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly, onComment, c
           >
             💬 Comment
           </button>
-        )}
-        {goToArrow && (
-          <div
-            className="comment-goto-arrow"
-            style={{ top: goToArrow.top, left: goToArrow.left }}
-            aria-hidden="true"
-          >
-            <svg width="22" height="26" viewBox="0 0 22 26" fill="none">
-              <path d="M11 2 L11 20 M4 14 L11 22 L18 14"
-                stroke="#facc15" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
-                fill="none" />
-            </svg>
-          </div>
         )}
       </div>
       {viewerSvg && (
