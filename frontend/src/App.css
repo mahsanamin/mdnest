@@ -1340,12 +1340,15 @@ pre:hover .code-copy-btn {
 /* Comment Sidebar */
 .comment-sidebar {
   position: fixed;
-  top: 0;
+  /* Sit below the toolbar (min-height 44px + 0.5rem top/bottom padding
+     + 1px border ≈ 61px) so the settings/comments icons stay clickable. */
+  top: 61px;
   right: 0;
   bottom: 0;
   width: 320px;
   background: #181825;
   border-left: 1px solid #313244;
+  border-top: 1px solid #313244;
   z-index: 9000;
   display: flex;
   flex-direction: column;

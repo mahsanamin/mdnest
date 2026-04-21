@@ -910,7 +910,27 @@ function App() {
           }}
           onRefresh={handleRefresh}
           commentCount={comments.filter(c => !c.parentId && !c.resolved).length}
-          onToggleComments={() => setShowComments(v => !v)}
+          onToggleComments={() => {
+            const next = !showComments;
+            setShowComments(next);
+            // When opening comments, snap the user to Live editor — that's
+            // the only surface where highlights render, selection → Comment
+            // works, and Go To can scroll to the text.
+            if (next) {
+              if (viewMode === 'preview') {
+                setViewMode('editor');
+                localStorage.setItem('mdnest_view_mode', 'editor');
+              }
+              if (editorMode !== 'live') {
+                setEditorMode('live');
+                localStorage.setItem('mdnest_editor_mode', 'live');
+              }
+              if (isMobile && mobileView === 'preview') {
+                setMobileView('editor');
+                localStorage.setItem('mdnest_mobile_view', 'editor');
+              }
+            }
+          }}
           wsStatus={appConfig?.liveCollab ? wsStatus : null}
         />
         {appConfig?.liveCollab && presenceUsers.length > 1 && (
@@ -959,6 +979,10 @@ function App() {
                         onHighlightClick={(commentId) => {
                           setShowComments(true);
                           setHighlightedCommentId(commentId);
+                          if (viewMode === 'preview') {
+                            setViewMode('editor');
+                            localStorage.setItem('mdnest_view_mode', 'editor');
+                          }
                         }}
                       />
                     </Suspense>
