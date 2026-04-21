@@ -9,6 +9,7 @@ import { history } from '@milkdown/plugin-history';
 import { clipboard } from '@milkdown/plugin-clipboard';
 import { replaceAll, callCommand, $view, insert, $prose } from '@milkdown/utils';
 import { Plugin, PluginKey, TextSelection } from '@milkdown/prose/state';
+import { Decoration, DecorationSet } from '@milkdown/prose/view';
 import { deleteRow, deleteColumn, deleteTable } from '@milkdown/prose/tables';
 import { uploadImage } from '../api.js';
 import { htmlToMarkdown, hasRichContent } from '../html-to-md.js';
@@ -34,6 +35,65 @@ import {
   addColAfterCommand,
   toggleStrikethroughCommand,
 } from '@milkdown/preset-gfm';
+
+// Plugin: persistent inline highlights for commented text.
+// Built as ProseMirror Decorations (not DOM edits) so the editor state stays consistent.
+const commentHighlightKey = new PluginKey('comment-highlight');
+
+function buildCommentDecorations(doc, anchors) {
+  if (!anchors || anchors.length === 0) return DecorationSet.empty;
+  const decorations = [];
+  const seen = new Set();
+  for (const anchor of anchors) {
+    const text = anchor?.text;
+    if (!text || text.length < 2) continue;
+    doc.descendants((node, nodePos) => {
+      if (!node.isText) return;
+      const nodeText = node.text || '';
+      let startIdx = 0;
+      while (true) {
+        const idx = nodeText.indexOf(text, startIdx);
+        if (idx < 0) break;
+        const from = nodePos + idx;
+        const to = from + text.length;
+        const key = `${from}-${to}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          decorations.push(Decoration.inline(from, to, { class: 'comment-highlight' }));
+        }
+        startIdx = idx + 1;
+      }
+    });
+  }
+  return DecorationSet.create(doc, decorations);
+}
+
+const commentHighlightPlugin = $prose(() => {
+  return new Plugin({
+    key: commentHighlightKey,
+    state: {
+      init() {
+        return { anchors: [], decorations: DecorationSet.empty };
+      },
+      apply(tr, old) {
+        const meta = tr.getMeta(commentHighlightKey);
+        if (meta && Array.isArray(meta.anchors)) {
+          return { anchors: meta.anchors, decorations: buildCommentDecorations(tr.doc, meta.anchors) };
+        }
+        if (tr.docChanged) {
+          return { anchors: old.anchors, decorations: buildCommentDecorations(tr.doc, old.anchors) };
+        }
+        return old;
+      },
+    },
+    props: {
+      decorations(state) {
+        const s = this.getState(state);
+        return s ? s.decorations : null;
+      },
+    },
+  });
+});
 
 // Plugin: auto-convert empty block nodes (heading, blockquote) to paragraph on backspace
 const clearEmptyBlockPlugin = $prose((ctx) => {
@@ -176,7 +236,8 @@ function MilkdownEditor({ content, onChange, readOnly, onEditorReady }) {
       .use(history)
       .use(clipboard)
       .use(mermaidNodeView)
-      .use(clearEmptyBlockPlugin);
+      .use(clearEmptyBlockPlugin)
+      .use(commentHighlightPlugin);
   }, [readOnly]);
 
   // Unsuppress on real user interaction — keydown/mousedown in the editor area.
@@ -461,39 +522,56 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly, onComment, c
     return () => el.removeEventListener('mermaid-fullscreen', handler);
   }, []);
 
-  // Go-to handler: finds anchor text in ProseMirror doc and selects it
-  const goToComment = useCallback((anchorText) => {
+  // Push active comment anchors into the highlight plugin whenever comments change.
+  useEffect(() => {
+    if (!editor) return;
+    const anchors = (comments || [])
+      .filter((c) => !c.resolved && c.anchorText)
+      .map((c) => ({ text: c.anchorText, id: c.id }));
+    try {
+      editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        const tr = view.state.tr.setMeta(commentHighlightKey, { anchors });
+        view.dispatch(tr);
+      });
+    } catch {}
+  }, [editor, comments]);
+
+  // Go-to handler: finds anchor text and picks the occurrence closest to the
+  // comment's stored rangeStart. This disambiguates when the same text appears
+  // more than once (or when a shorter anchor is a substring of a longer one).
+  const goToComment = useCallback((comment) => {
+    const anchorText = typeof comment === 'string' ? comment : comment?.anchorText;
+    const hintPos = typeof comment === 'object' && comment ? Number(comment.rangeStart || 0) : 0;
     if (!editor || !anchorText) return;
     try {
       editor.action((ctx) => {
         const view = ctx.get(editorViewCtx);
-        const docText = view.state.doc.textContent;
-        const idx = docText.indexOf(anchorText);
-        if (idx < 0) return;
-
-        // Find the actual ProseMirror position by walking the doc
-        let pos = 0;
-        let found = false;
+        const matches = [];
         view.state.doc.descendants((node, nodePos) => {
-          if (found) return false;
-          if (node.isText) {
-            const textIdx = node.text.indexOf(anchorText);
-            if (textIdx >= 0) {
-              pos = nodePos + textIdx;
-              found = true;
-              return false;
-            }
+          if (!node.isText) return;
+          const nodeText = node.text || '';
+          let startIdx = 0;
+          while (true) {
+            const idx = nodeText.indexOf(anchorText, startIdx);
+            if (idx < 0) break;
+            const from = nodePos + idx;
+            matches.push({ from, to: from + anchorText.length });
+            startIdx = idx + 1;
           }
         });
-
-        if (found) {
-          // Set selection to the anchor text range
-          const tr = view.state.tr.setSelection(
-            TextSelection.create(view.state.doc, pos, pos + anchorText.length)
-          );
-          view.dispatch(tr.scrollIntoView());
-          view.focus();
+        if (matches.length === 0) return;
+        let best = matches[0];
+        let bestDist = Math.abs(best.from - hintPos);
+        for (const m of matches) {
+          const d = Math.abs(m.from - hintPos);
+          if (d < bestDist) { best = m; bestDist = d; }
         }
+        const tr = view.state.tr.setSelection(
+          TextSelection.create(view.state.doc, best.from, best.to)
+        );
+        view.dispatch(tr.scrollIntoView());
+        view.focus();
       });
     } catch (e) {
       console.error('Go to comment failed:', e);

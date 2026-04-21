@@ -1520,6 +1520,32 @@ pre:hover .code-copy-btn {
   opacity: 0.9;
 }
 
+/* Persistent yellow highlight for commented text (ProseMirror decoration).
+   Bright yellow so it reads clearly on both light and dark themes. */
+.comment-highlight {
+  background-color: #fde047 !important;
+  color: #1e1e2e !important;
+  border-radius: 2px;
+  padding: 1px 1px;
+  box-shadow: 0 0 0 1px #facc15;
+}
+
+.comment-highlight * {
+  color: #1e1e2e !important;
+}
+
+@media print {
+  .comment-highlight {
+    background-color: transparent !important;
+    color: inherit !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+  }
+  .comment-highlight * {
+    color: inherit !important;
+  }
+}
+
 .comment-anchor-preview {
   font-size: 0.78rem;
   color: #a6adc8;

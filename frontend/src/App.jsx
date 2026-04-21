@@ -1041,7 +1041,7 @@ function App() {
           userInfo={userInfo}
           pendingSelection={pendingCommentSelection}
           onSelectionConsumed={() => setPendingCommentSelection(null)}
-          onGoTo={(anchorText) => { if (goToCommentRef.current) goToCommentRef.current(anchorText); }}
+          onGoTo={(c) => { if (goToCommentRef.current) goToCommentRef.current(c); }}
         />
       )}
     </div>

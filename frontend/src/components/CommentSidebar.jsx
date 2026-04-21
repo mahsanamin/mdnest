@@ -100,7 +100,7 @@ function CommentSidebar({ comments, ns, currentPath, onRefresh, onClose, userInf
             <div className="comment-body">{c.body}</div>
             <div className="comment-actions">
               {c.anchorText && onGoTo && (
-                <button onClick={() => onGoTo(c.anchorText)}>Go to</button>
+                <button onClick={() => onGoTo(c)}>Go to</button>
               )}
               <button onClick={() => handleResolve(c.id, true)}>Resolve</button>
               {userInfo && (userInfo.role === 'admin' || userInfo.id === c.authorId) && (
