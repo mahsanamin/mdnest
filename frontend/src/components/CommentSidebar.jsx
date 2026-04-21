@@ -101,12 +101,11 @@ function CommentSidebar({ comments, ns, currentPath, onRefresh, onClose, userInf
             <div className="comment-actions">
               {c.anchorText && (
                 <button onClick={() => {
-                  const mark = document.querySelector(`mark.comment-mark[data-comment-id="${c.id}"]`);
-                  if (mark) {
-                    mark.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    mark.style.background = '#89b4fa44';
-                    setTimeout(() => { mark.style.background = ''; }, 2000);
-                  }
+                  // Clear any existing selection first
+                  window.getSelection().removeAllRanges();
+                  // Use browser's native find — highlights text exactly like Cmd+F
+                  // Doesn't modify DOM, doesn't appear in print
+                  window.find(c.anchorText, false, false, true);
                 }}>Go to</button>
               )}
               <button onClick={() => handleResolve(c.id, true)}>Resolve</button>

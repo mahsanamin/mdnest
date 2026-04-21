@@ -461,54 +461,8 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly, onComment, c
     return () => el.removeEventListener('mermaid-fullscreen', handler);
   }, []);
 
-  // Highlight commented text in the DOM by finding anchor text and wrapping with <mark>
-  useEffect(() => {
-    const wrapper = wrapperRef.current;
-    if (!wrapper) return;
-
-    // Clear previous highlights
-    wrapper.querySelectorAll('mark.comment-mark').forEach(mark => {
-      const parent = mark.parentNode;
-      while (mark.firstChild) parent.insertBefore(mark.firstChild, mark);
-      parent.removeChild(mark);
-      parent.normalize();
-    });
-
-    const activeComments = (comments || []).filter(c => !c.resolved && c.anchorText);
-    if (activeComments.length === 0) return;
-
-    const timer = setTimeout(() => {
-      const editorEl = wrapper.querySelector('.live-editor-content');
-      if (!editorEl) return;
-
-      for (const comment of activeComments) {
-        const anchor = comment.anchorText.trim();
-        if (!anchor || anchor.length < 3) continue;
-
-        // Walk text nodes to find the anchor text
-        const walker = document.createTreeWalker(editorEl, NodeFilter.SHOW_TEXT);
-        let node;
-        let found = false;
-        while ((node = walker.nextNode()) && !found) {
-          const idx = node.textContent.indexOf(anchor);
-          if (idx < 0) continue;
-
-          // Split and wrap
-          const range = document.createRange();
-          range.setStart(node, idx);
-          range.setEnd(node, idx + anchor.length);
-          const mark = document.createElement('mark');
-          mark.className = 'comment-mark';
-          mark.dataset.commentId = comment.id;
-          mark.title = `${comment.author}: ${comment.body.slice(0, 80)}`;
-          range.surroundContents(mark);
-          found = true;
-        }
-      }
-    }, 300);
-
-    return () => clearTimeout(timer);
-  }, [comments, content]);
+  // Comments prop received but highlighting is done via browser's native
+  // window.find() when user clicks "Go to" in the sidebar. No DOM modification needed.
 
   return (
     <div className="live-editor-pane">
