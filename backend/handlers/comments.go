@@ -15,17 +15,20 @@ import (
 )
 
 // Comment represents a single comment on a note.
+// A comment with ParentID set is a reply in a thread; replies inherit their
+// parent's anchor and resolved state at render time.
 type Comment struct {
-	ID         string    `json:"id"`
-	AuthorID   int       `json:"authorId"`
-	Author     string    `json:"author"`
-	RangeStart int       `json:"rangeStart"`
-	RangeEnd   int       `json:"rangeEnd"`
-	AnchorText string    `json:"anchorText"`
-	Body       string    `json:"body"`
-	CreatedAt  string    `json:"createdAt"`
-	Resolved   bool      `json:"resolved"`
-	DeletedAt  *string   `json:"deletedAt,omitempty"`
+	ID         string  `json:"id"`
+	ParentID   string  `json:"parentId,omitempty"`
+	AuthorID   int     `json:"authorId"`
+	Author     string  `json:"author"`
+	RangeStart int     `json:"rangeStart"`
+	RangeEnd   int     `json:"rangeEnd"`
+	AnchorText string  `json:"anchorText"`
+	Body       string  `json:"body"`
+	CreatedAt  string  `json:"createdAt"`
+	Resolved   bool    `json:"resolved"`
+	DeletedAt  *string `json:"deletedAt,omitempty"`
 }
 
 // CommentsHandler handles CRUD for inline comments.
@@ -117,6 +120,7 @@ func (h *CommentsHandler) createComment(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var req struct {
+		ParentID   string `json:"parentId"`
 		RangeStart int    `json:"rangeStart"`
 		RangeEnd   int    `json:"rangeEnd"`
 		AnchorText string `json:"anchorText"`
@@ -146,6 +150,7 @@ func (h *CommentsHandler) createComment(w http.ResponseWriter, r *http.Request) 
 	commentID, _ := GenerateNoteID() // Reuse UUID generator for comment IDs
 	comment := Comment{
 		ID:         "c_" + commentID[:8],
+		ParentID:   req.ParentID,
 		AuthorID:   uc.ID,
 		Author:     uc.Username,
 		RangeStart: req.RangeStart,

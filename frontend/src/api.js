@@ -356,11 +356,11 @@ export async function listComments(ns, path) {
   return res.json();
 }
 
-export async function createComment(ns, path, { rangeStart, rangeEnd, anchorText, body }) {
+export async function createComment(ns, path, { rangeStart, rangeEnd, anchorText, body, parentId }) {
   const res = await request(`/comments?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ rangeStart, rangeEnd, anchorText, body }),
+    body: JSON.stringify({ rangeStart, rangeEnd, anchorText, body, parentId: parentId || '' }),
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));

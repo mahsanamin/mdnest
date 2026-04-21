@@ -906,7 +906,7 @@ function App() {
             }
           }}
           onRefresh={handleRefresh}
-          commentCount={comments.filter(c => !c.resolved).length}
+          commentCount={comments.filter(c => !c.parentId && !c.resolved).length}
           onToggleComments={() => setShowComments(v => !v)}
           wsStatus={appConfig?.liveCollab ? wsStatus : null}
         />

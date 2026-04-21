@@ -4,14 +4,23 @@ import { createComment, resolveComment, deleteComment } from '../api.js';
 function CommentSidebar({ comments, ns, currentPath, onRefresh, onClose, userInfo, pendingSelection, onSelectionConsumed, onGoTo }) {
   const [newComment, setNewComment] = useState('');
   const [adding, setAdding] = useState(false);
+  const [replyingTo, setReplyingTo] = useState(null); // parent comment id
+  const [replyBody, setReplyBody] = useState('');
+  const [replyPosting, setReplyPosting] = useState(false);
   const textareaRef = useRef(null);
+  const replyRef = useRef(null);
 
-  // Auto-focus textarea when sidebar opens with a pending selection
   useEffect(() => {
     if (pendingSelection && textareaRef.current) {
       textareaRef.current.focus();
     }
   }, [pendingSelection]);
+
+  useEffect(() => {
+    if (replyingTo && replyRef.current) {
+      replyRef.current.focus();
+    }
+  }, [replyingTo]);
 
   const handleAdd = useCallback(async () => {
     if (!newComment.trim() || !ns || !currentPath) return;
@@ -31,7 +40,28 @@ function CommentSidebar({ comments, ns, currentPath, onRefresh, onClose, userInf
     } finally {
       setAdding(false);
     }
-  }, [newComment, ns, currentPath, onRefresh]);
+  }, [newComment, ns, currentPath, pendingSelection, onRefresh, onSelectionConsumed]);
+
+  const handleReply = useCallback(async (parent) => {
+    if (!replyBody.trim() || !ns || !currentPath) return;
+    setReplyPosting(true);
+    try {
+      await createComment(ns, currentPath, {
+        parentId: parent.id,
+        rangeStart: parent.rangeStart,
+        rangeEnd: parent.rangeEnd,
+        anchorText: parent.anchorText,
+        body: replyBody.trim(),
+      });
+      setReplyBody('');
+      setReplyingTo(null);
+      if (onRefresh) onRefresh();
+    } catch (e) {
+      console.error('Failed to add reply:', e);
+    } finally {
+      setReplyPosting(false);
+    }
+  }, [replyBody, ns, currentPath, onRefresh]);
 
   const handleResolve = useCallback(async (id, resolved) => {
     try {
@@ -51,8 +81,102 @@ function CommentSidebar({ comments, ns, currentPath, onRefresh, onClose, userInf
     }
   }, [ns, currentPath, onRefresh]);
 
-  const activeComments = (comments || []).filter(c => !c.resolved);
-  const resolvedComments = (comments || []).filter(c => c.resolved);
+  // Group comments into threads: top-level (no parentId) with their replies.
+  const threads = (comments || []).reduce((acc, c) => {
+    if (!c.parentId) {
+      acc.push({ ...c, replies: [] });
+    }
+    return acc;
+  }, []);
+  const byId = new Map(threads.map((t) => [t.id, t]));
+  for (const c of comments || []) {
+    if (c.parentId && byId.has(c.parentId)) {
+      byId.get(c.parentId).replies.push(c);
+    }
+  }
+  // Sort replies oldest-first within each thread
+  for (const t of threads) {
+    t.replies.sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+  }
+
+  const activeThreads = threads.filter((t) => !t.resolved);
+  const resolvedThreads = threads.filter((t) => t.resolved);
+
+  const canDelete = (c) => userInfo && (userInfo.role === 'admin' || userInfo.id === c.authorId);
+
+  const renderReply = (r) => (
+    <div key={r.id} className="comment-reply">
+      <div className="comment-item-header">
+        <span className="comment-author">{r.author}</span>
+        <span className="comment-time">{formatTime(r.createdAt)}</span>
+      </div>
+      <div className="comment-body">{r.body}</div>
+      {canDelete(r) && (
+        <div className="comment-actions">
+          <button className="danger" onClick={() => handleDelete(r.id)}>Delete</button>
+        </div>
+      )}
+    </div>
+  );
+
+  const renderThread = (c) => (
+    <div key={c.id} className={`comment-item${c.resolved ? ' resolved' : ''}`}>
+      <div className="comment-item-header">
+        <span className="comment-author">{c.author}</span>
+        <span className="comment-time">{formatTime(c.createdAt)}</span>
+      </div>
+      {c.anchorText && (
+        <div className="comment-anchor">&ldquo;{c.anchorText.slice(0, 60)}{c.anchorText.length > 60 ? '...' : ''}&rdquo;</div>
+      )}
+      <div className="comment-body">{c.body}</div>
+
+      {c.replies.length > 0 && (
+        <div className="comment-thread">
+          {c.replies.map(renderReply)}
+        </div>
+      )}
+
+      <div className="comment-actions">
+        {c.anchorText && onGoTo && (
+          <button onClick={() => onGoTo(c)}>Go to</button>
+        )}
+        {!c.resolved && (
+          <button onClick={() => { setReplyingTo(c.id); setReplyBody(''); }}>Reply</button>
+        )}
+        {!c.resolved && (
+          <button onClick={() => handleResolve(c.id, true)}>Resolve</button>
+        )}
+        {c.resolved && (
+          <button onClick={() => handleResolve(c.id, false)}>Reopen</button>
+        )}
+        {canDelete(c) && (
+          <button className="danger" onClick={() => handleDelete(c.id)}>Delete</button>
+        )}
+      </div>
+
+      {replyingTo === c.id && (
+        <div className="comment-reply-form">
+          <textarea
+            ref={replyRef}
+            placeholder="Reply..."
+            value={replyBody}
+            onChange={(e) => setReplyBody(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleReply(c); }
+              if (e.key === 'Escape') { setReplyingTo(null); setReplyBody(''); }
+            }}
+            rows={2}
+          />
+          <div className="comment-reply-actions">
+            <button onClick={() => handleReply(c)} disabled={replyPosting || !replyBody.trim()}>
+              {replyPosting ? 'Sending...' : 'Send'}
+            </button>
+            <button onClick={() => { setReplyingTo(null); setReplyBody(''); }}>Cancel</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div className="comment-sidebar">
@@ -84,47 +208,16 @@ function CommentSidebar({ comments, ns, currentPath, onRefresh, onClose, userInf
       </div>
 
       <div className="comment-sidebar-list">
-        {activeComments.length === 0 && resolvedComments.length === 0 && (
+        {activeThreads.length === 0 && resolvedThreads.length === 0 && (
           <div className="comment-empty">No comments yet</div>
         )}
 
-        {activeComments.map((c) => (
-          <div key={c.id} className="comment-item">
-            <div className="comment-item-header">
-              <span className="comment-author">{c.author}</span>
-              <span className="comment-time">{formatTime(c.createdAt)}</span>
-            </div>
-            {c.anchorText && (
-              <div className="comment-anchor">&ldquo;{c.anchorText.slice(0, 60)}{c.anchorText.length > 60 ? '...' : ''}&rdquo;</div>
-            )}
-            <div className="comment-body">{c.body}</div>
-            <div className="comment-actions">
-              {c.anchorText && onGoTo && (
-                <button onClick={() => onGoTo(c)}>Go to</button>
-              )}
-              <button onClick={() => handleResolve(c.id, true)}>Resolve</button>
-              {userInfo && (userInfo.role === 'admin' || userInfo.id === c.authorId) && (
-                <button className="danger" onClick={() => handleDelete(c.id)}>Delete</button>
-              )}
-            </div>
-          </div>
-        ))}
+        {activeThreads.map(renderThread)}
 
-        {resolvedComments.length > 0 && (
+        {resolvedThreads.length > 0 && (
           <>
             <div className="comment-section-label">Resolved</div>
-            {resolvedComments.map((c) => (
-              <div key={c.id} className="comment-item resolved">
-                <div className="comment-item-header">
-                  <span className="comment-author">{c.author}</span>
-                  <span className="comment-time">{formatTime(c.createdAt)}</span>
-                </div>
-                <div className="comment-body">{c.body}</div>
-                <div className="comment-actions">
-                  <button onClick={() => handleResolve(c.id, false)}>Reopen</button>
-                </div>
-              </div>
-            ))}
+            {resolvedThreads.map(renderThread)}
           </>
         )}
       </div>

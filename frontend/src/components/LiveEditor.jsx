@@ -525,8 +525,10 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly, onComment, c
   // Push active comment anchors into the highlight plugin whenever comments change.
   useEffect(() => {
     if (!editor) return;
+    // Highlight only top-level threads (no parentId). Replies inherit their
+    // parent's anchor, so adding them would just create duplicate decorations.
     const anchors = (comments || [])
-      .filter((c) => !c.resolved && c.anchorText)
+      .filter((c) => !c.parentId && !c.resolved && c.anchorText)
       .map((c) => ({ text: c.anchorText, id: c.id }));
     try {
       editor.action((ctx) => {

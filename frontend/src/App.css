@@ -1546,6 +1546,89 @@ pre:hover .code-copy-btn {
   }
 }
 
+/* Threaded replies under a top-level comment */
+.comment-thread {
+  margin: 8px 0 0 0;
+  padding-left: 10px;
+  border-left: 2px solid #45475a;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.comment-reply {
+  background: #181825;
+  border: 1px solid #313244;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 0.85rem;
+}
+
+.comment-reply .comment-item-header {
+  margin-bottom: 3px;
+}
+
+.comment-reply .comment-body {
+  font-size: 0.85rem;
+}
+
+.comment-reply .comment-actions {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: none;
+}
+
+.comment-reply-form {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed #45475a;
+}
+
+.comment-reply-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: #181825;
+  color: #cdd6f4;
+  border: 1px solid #313244;
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-family: inherit;
+  font-size: 0.85rem;
+  resize: vertical;
+}
+
+.comment-reply-form textarea:focus {
+  outline: none;
+  border-color: #89b4fa;
+}
+
+.comment-reply-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.comment-reply-actions button {
+  padding: 4px 10px;
+  font-size: 0.78rem;
+  background: #313244;
+  color: #cdd6f4;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.comment-reply-actions button:first-child {
+  background: #89b4fa;
+  color: #1e1e2e;
+  font-weight: 600;
+}
+
+.comment-reply-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .comment-anchor-preview {
   font-size: 0.78rem;
   color: #a6adc8;
