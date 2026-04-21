@@ -900,6 +900,124 @@ curl -X POST "http://localhost:8286/api/move?ns=personal&from=drafts&to=archive/
 
 ---
 
+## Comments
+
+> **Multi-user mode only.** All comment endpoints require a valid JWT.
+
+Comments are anchored to notes by an invisible UUID marker (`<!-- mdnest:<uuid> -->`) appended at the end of each note's content. The marker is stripped from the response body on GET and re-injected on PUT, so clients never see it. Comment data lives at `<namespace>/.mdnest/comments/<uuid>.jsonl` — append-only JSONL with soft deletes. Moving or renaming a file preserves its UUID and therefore its comments.
+
+### GET /api/comments
+
+List all active (non-deleted) comments for a note, including both top-level threads and replies.
+
+**Query parameters:**
+
+| Param | Description |
+|-------|-------------|
+| `ns`   | Namespace name (required) |
+| `path` | Note path within the namespace (required) |
+
+**Response:**
+
+```json
+[
+  {
+    "id": "c_a1b2c3d4",
+    "parentId": "",
+    "authorId": 42,
+    "author": "alice",
+    "rangeStart": 120,
+    "rangeEnd": 145,
+    "anchorText": "the selected phrase",
+    "body": "What did you mean here?",
+    "createdAt": "2026-04-21T10:14:32Z",
+    "resolved": false
+  },
+  {
+    "id": "c_e5f6a7b8",
+    "parentId": "c_a1b2c3d4",
+    "authorId": 7,
+    "author": "bob",
+    "rangeStart": 120,
+    "rangeEnd": 145,
+    "anchorText": "the selected phrase",
+    "body": "Reworded — better now?",
+    "createdAt": "2026-04-21T10:18:05Z",
+    "resolved": false
+  }
+]
+```
+
+A comment with a non-empty `parentId` is a reply within the parent's thread.
+
+### POST /api/comments
+
+Create a comment or reply.
+
+**Query parameters:**
+
+| Param | Description |
+|-------|-------------|
+| `ns`   | Namespace name (required) |
+| `path` | Note path within the namespace (required) |
+
+**Request body:**
+
+```json
+{
+  "parentId": "",
+  "rangeStart": 120,
+  "rangeEnd": 145,
+  "anchorText": "the selected phrase",
+  "body": "What did you mean here?"
+}
+```
+
+- Omit or empty-string `parentId` for a top-level thread.
+- Set `parentId` to an existing comment's `id` to post a reply. Replies typically copy the parent's `rangeStart`/`rangeEnd`/`anchorText` so they share an anchor.
+- `body` is required.
+
+**Response:** the created comment (201 Created).
+
+### PATCH /api/comments?id=\<comment-id\>
+
+Update a comment — typically to toggle resolved state, optionally to edit the body.
+
+**Query parameters:**
+
+| Param | Description |
+|-------|-------------|
+| `ns`   | Namespace name (required) |
+| `path` | Note path within the namespace (required) |
+| `id`   | Comment id (required) |
+
+**Request body (any subset):**
+
+```json
+{
+  "resolved": true,
+  "body": "Updated comment text"
+}
+```
+
+**Response:** `{"status":"ok"}`.
+
+### DELETE /api/comments?id=\<comment-id\>
+
+Soft-delete a comment. The JSONL file is rewritten with a `deletedAt` timestamp on the matching entry; subsequent GET calls filter it out.
+
+**Query parameters:**
+
+| Param | Description |
+|-------|-------------|
+| `ns`   | Namespace name (required) |
+| `path` | Note path within the namespace (required) |
+| `id`   | Comment id (required) |
+
+**Response:** `{"status":"ok"}`.
+
+---
+
 ## File Serving
 
 ### GET /api/files/{namespace}/{path}

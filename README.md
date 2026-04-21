@@ -7,6 +7,7 @@ Deploy on a spare machine, a home server, or a cheap VPS. Use it as a personal k
 ### Why mdnest?
 
 - **Live rich editor.** Obsidian-style editing where markdown renders inline as you type. Bold shows bold, headings render as headings, tables are click-to-edit. Switch between Live and Basic (plain textarea) modes.
+- **Inline comments with threads.** Highlight any text and leave a comment; commented passages stay visibly highlighted in yellow, and reviewers can reply in a thread. Click a highlight to jump to the conversation. Comments are anchored to invisible UUIDs, so moving or renaming files keeps them attached (multi-user mode).
 - **Interactive diagrams.** Mermaid diagrams render in-place with click-to-edit labels. Edit node text directly on the diagram without touching code.
 - **Host once, access everywhere.** Set up on any always-on machine and reach it securely from all your devices via Tailscale -- phone, laptop, tablet, any browser.
 - **Personal or team.** Run in single-user mode (default, no database) for a private knowledge base, or enable multi-user mode with roles, permissions, namespace-level access control, and two-factor authentication.

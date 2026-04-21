@@ -310,6 +310,24 @@ Migrations run automatically and are idempotent -- safe to run on every startup.
 
 ---
 
+## Comment Storage (multi-user mode)
+
+Inline comments are anchored to notes by an invisible UUID, not by path. This means a file can be renamed, moved across folders, or namespaces without losing its comment history.
+
+**UUID marker.** Each note carries an HTML-comment marker at the bottom: `<!-- mdnest:<uuid> -->`. Markdown renderers ignore HTML comments, so it's invisible in preview, print, and export. `backend/handlers/noteid.go` handles the lifecycle:
+
+- `ExtractNoteID(content)` — strips the marker and returns `(uuid, cleanBody)`. Called inside `notes.go` GET so clients never see it.
+- `InjectNoteID(content, uuid)` — appends the marker to the bottom of a note's content. Called inside `notes.go` PUT so every save re-embeds the id the file had before.
+- `EnsureNoteID(absPath)` — reads the file, generates a UUID if none exists, writes it back atomically, and returns the id. Called by the comments handler on every request.
+
+ETags are computed against the **clean** content (marker stripped) so a save that only re-embeds the same UUID is treated as unchanged.
+
+**Comment data.** Stored as append-only JSON Lines at `<namespace>/.mdnest/comments/<uuid>.jsonl`. Each line is a `Comment` object with `id`, optional `parentId` (for replies), `rangeStart/End`, `anchorText`, `body`, `authorId/Author`, `createdAt`, `resolved`, and `deletedAt`. Create is a pure `O_APPEND` write (concurrency-safe). Update/Resolve/Delete rewrites the whole file — acceptable at typical comment volumes.
+
+The `.mdnest/` directory is filtered out of the tree listing and search endpoints, so it never leaks into the UI.
+
+---
+
 ## Security
 
 ### Path Traversal Protection
