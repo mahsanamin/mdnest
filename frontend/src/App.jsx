@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Login from './components/Login.jsx';
+import LoginFirebase from './components/LoginFirebase.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import Toolbar from './components/Toolbar.jsx';
 import { lazy, Suspense } from 'react';
@@ -26,10 +27,18 @@ import {
   moveItem,
   fetchConfig,
   fetchMe,
-  logout,
+  logout as apiLogout,
   PermissionError,
 } from './api.js';
+import { initFirebase, signOutFirebase } from './firebase-config.js';
 import './App.css';
+
+// Top-level logout. In Firebase mode we also clear the local Google session
+// so the Google account chooser shows up on next sign-in. Does NOT revoke
+// the user's Google account globally.
+function logout() {
+  signOutFirebase().finally(apiLogout);
+}
 
 // URL helpers: store ns and path in hash like #ns/path/to/note.md
 function parseHash() {
@@ -163,9 +172,18 @@ function App() {
 
   const canWriteCurrent = canWrite(currentPath);
 
-  // Fetch app config on mount (before auth)
+  // Fetch app config on mount (before auth). If the server is in Firebase
+  // mode, the embedded firebaseWebConfig lets us init the Firebase SDK
+  // before the user clicks "Sign in with Google".
   useEffect(() => {
-    fetchConfig().then(setAppConfig).catch(() => setAppConfig({ authMode: 'single' }));
+    fetchConfig()
+      .then((cfg) => {
+        setAppConfig(cfg);
+        if (cfg?.userProvider === 'firebase' && cfg?.firebaseWebConfig) {
+          initFirebase(cfg.firebaseWebConfig);
+        }
+      })
+      .catch(() => setAppConfig({ authMode: 'single' }));
   }, []);
 
   // Version check: poll /api/config every 60s, compare server version vs build version
@@ -859,6 +877,13 @@ function App() {
   }, [currentPath, selectedNs, handleContextAction]);
 
   if (!authenticated) {
+    // Render the Firebase flow only once the backend config has loaded so
+    // we know which login component to mount. While appConfig is still
+    // null, show a minimal splash to avoid flashing the wrong form.
+    if (!appConfig) return <div className="login-screen"><div className="login-box"><h1>mdnest</h1></div></div>;
+    if (appConfig.userProvider === 'firebase') {
+      return <LoginFirebase onLogin={() => window.location.reload()} />;
+    }
     return <Login onLogin={() => window.location.reload()} />;
   }
 
@@ -1052,7 +1077,7 @@ function App() {
         </div>
       </div>
       {showChangePassword && (
-        <Settings onClose={() => setShowChangePassword(false)} />
+        <Settings onClose={() => setShowChangePassword(false)} userProvider={appConfig?.userProvider} />
       )}
       {shareTarget && (
         <ShareDialog
