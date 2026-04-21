@@ -40,30 +40,63 @@ import {
 // Built as ProseMirror Decorations (not DOM edits) so the editor state stays consistent.
 const commentHighlightKey = new PluginKey('comment-highlight');
 
+// Build a concatenation of every inline text node in the doc with a mapping
+// from string offsets back to ProseMirror positions. This lets us find anchor
+// text that spans inline marks (bold, italic, links, inline code) where the
+// text is split across multiple text nodes.
+function buildTextIndex(doc) {
+  let combined = '';
+  const segs = []; // { strStart, length, posBase }
+  doc.descendants((node, pos) => {
+    if (node.isText) {
+      segs.push({ strStart: combined.length, length: node.text.length, posBase: pos });
+      combined += node.text;
+    }
+  });
+  return { combined, segs };
+}
+
+// Map a string offset (into `combined`) to a ProseMirror doc position.
+function strIdxToDocPos(segs, idx) {
+  for (const s of segs) {
+    if (idx >= s.strStart && idx <= s.strStart + s.length) {
+      return s.posBase + (idx - s.strStart);
+    }
+  }
+  return -1;
+}
+
+function findAnchorMatches(doc, anchorText) {
+  const { combined, segs } = buildTextIndex(doc);
+  const matches = [];
+  if (!anchorText || anchorText.length < 2) return matches;
+  let startIdx = 0;
+  while (true) {
+    const idx = combined.indexOf(anchorText, startIdx);
+    if (idx < 0) break;
+    const from = strIdxToDocPos(segs, idx);
+    const to = strIdxToDocPos(segs, idx + anchorText.length);
+    if (from >= 0 && to > from) matches.push({ from, to });
+    startIdx = idx + 1;
+  }
+  return matches;
+}
+
 function buildCommentDecorations(doc, anchors) {
   if (!anchors || anchors.length === 0) return DecorationSet.empty;
   const rangeMap = new Map(); // key -> { from, to, ids:[] }
   for (const anchor of anchors) {
     const text = anchor?.text;
     if (!text || text.length < 2) continue;
-    doc.descendants((node, nodePos) => {
-      if (!node.isText) return;
-      const nodeText = node.text || '';
-      let startIdx = 0;
-      while (true) {
-        const idx = nodeText.indexOf(text, startIdx);
-        if (idx < 0) break;
-        const from = nodePos + idx;
-        const to = from + text.length;
-        const key = `${from}-${to}`;
-        if (!rangeMap.has(key)) {
-          rangeMap.set(key, { from, to, ids: [anchor.id] });
-        } else {
-          rangeMap.get(key).ids.push(anchor.id);
-        }
-        startIdx = idx + 1;
+    const matches = findAnchorMatches(doc, text);
+    for (const { from, to } of matches) {
+      const key = `${from}-${to}`;
+      if (!rangeMap.has(key)) {
+        rangeMap.set(key, { from, to, ids: [anchor.id] });
+      } else {
+        rangeMap.get(key).ids.push(anchor.id);
       }
-    });
+    }
   }
   const decorations = [];
   for (const { from, to, ids } of rangeMap.values()) {
@@ -584,19 +617,7 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly, onComment, c
     try {
       editor.action((ctx) => {
         const view = ctx.get(editorViewCtx);
-        const matches = [];
-        view.state.doc.descendants((node, nodePos) => {
-          if (!node.isText) return;
-          const nodeText = node.text || '';
-          let startIdx = 0;
-          while (true) {
-            const idx = nodeText.indexOf(anchorText, startIdx);
-            if (idx < 0) break;
-            const from = nodePos + idx;
-            matches.push({ from, to: from + anchorText.length });
-            startIdx = idx + 1;
-          }
-        });
+        const matches = findAnchorMatches(view.state.doc, anchorText);
         if (matches.length === 0) return;
         let best = matches[0];
         let bestDist = Math.abs(best.from - hintPos);
