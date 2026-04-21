@@ -36,6 +36,7 @@ type AuthHandler struct {
 
 	// Multi mode fields (nil in single mode)
 	userStore  store.UserStore
+	totpStore  store.TOTPStore
 	require2FA bool
 }
 
@@ -76,10 +77,11 @@ func NewAuthHandler(username, password, jwtSecret, secretsDir string) *AuthHandl
 }
 
 // NewMultiAuthHandler creates a new auth handler for multi-user mode.
-func NewMultiAuthHandler(jwtSecret string, userStore store.UserStore, require2FA bool) *AuthHandler {
+func NewMultiAuthHandler(jwtSecret string, userStore store.UserStore, totpStore store.TOTPStore, require2FA bool) *AuthHandler {
 	return &AuthHandler{
 		secret:     []byte(jwtSecret),
 		userStore:  userStore,
+		totpStore:  totpStore,
 		require2FA: require2FA,
 	}
 }
@@ -222,8 +224,16 @@ func (h *AuthHandler) loginMulti(w http.ResponseWriter, req loginRequest) {
 		return
 	}
 
-	// Check if 2FA is enabled — verify code
-	if user.TOTPEnabled {
+	// Consult the TOTP store — in local mode this reads the users table, in
+	// Firebase mode it reads Firestore so 2FA state is shared across servers.
+	_, totpEnabled, _, err := h.totpStore.Get(user.ID)
+	if err != nil {
+		log.Printf("failed to read totp state for user %d: %v", user.ID, err)
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		return
+	}
+
+	if totpEnabled {
 		tempToken, err := CreateTempToken(user, h.secret, "totp")
 		if err != nil {
 			http.Error(w, `{"error":"failed to generate token"}`, http.StatusInternalServerError)
@@ -238,7 +248,7 @@ func (h *AuthHandler) loginMulti(w http.ResponseWriter, req loginRequest) {
 	}
 
 	// Check if 2FA is required by admin but user hasn't set it up yet
-	if h.require2FA && !user.TOTPEnabled {
+	if h.require2FA && !totpEnabled {
 		tempToken, err := CreateTempToken(user, h.secret, "totp_setup")
 		if err != nil {
 			http.Error(w, `{"error":"failed to generate token"}`, http.StatusInternalServerError)
@@ -253,16 +263,21 @@ func (h *AuthHandler) loginMulti(w http.ResponseWriter, req loginRequest) {
 	}
 
 	// No extra steps — issue full JWT
-	h.issueFullToken(w, user)
+	h.issueFullToken(w, user, totpEnabled)
 }
 
-func (h *AuthHandler) issueFullToken(w http.ResponseWriter, user *store.User) {
+// issueFullToken mints the long-lived mdnest JWT. totpEnabled is embedded as a
+// claim so the frontend/middleware can tell whether the user has 2FA set up
+// without hitting the TOTP store on every request. It's informational only —
+// real 2FA enforcement happens at login time, not on claim inspection.
+func (h *AuthHandler) issueFullToken(w http.ResponseWriter, user *store.User, totpEnabled bool) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"sub":     user.Username,
-		"user_id": user.ID,
-		"role":    user.Role,
-		"iat":     time.Now().Unix(),
-		"exp":     time.Now().Add(30 * 24 * time.Hour).Unix(),
+		"sub":          user.Username,
+		"user_id":      user.ID,
+		"role":         user.Role,
+		"totp_enabled": totpEnabled,
+		"iat":          time.Now().Unix(),
+		"exp":          time.Now().Add(30 * 24 * time.Hour).Unix(),
 	})
 
 	tokenString, err := token.SignedString(h.secret)
@@ -318,8 +333,14 @@ func (h *AuthHandler) HandleForcedPasswordChange(w http.ResponseWriter, r *http.
 
 	log.Printf("forced password change for user: %s (id: %d)", user.Username, user.ID)
 
-	// If 2FA is enabled, require TOTP next
-	if user.TOTPEnabled {
+	// If 2FA is enabled (per the TOTP store, which may be Firestore), require TOTP next.
+	_, totpEnabled, _, err := h.totpStore.Get(user.ID)
+	if err != nil {
+		log.Printf("failed to read totp state for user %d: %v", user.ID, err)
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		return
+	}
+	if totpEnabled {
 		tempToken, err := CreateTempToken(user, h.secret, "totp")
 		if err != nil {
 			http.Error(w, `{"error":"failed to generate token"}`, http.StatusInternalServerError)
@@ -334,7 +355,7 @@ func (h *AuthHandler) HandleForcedPasswordChange(w http.ResponseWriter, r *http.
 	}
 
 	// No 2FA — issue full JWT
-	h.issueFullToken(w, user)
+	h.issueFullToken(w, user, false)
 }
 
 // ChangePassword handles POST /api/auth/change-password (authenticated).

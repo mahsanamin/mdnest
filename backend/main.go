@@ -100,7 +100,14 @@ func main() {
 			log.Printf("seeded admin user: %s (%s)", user, email)
 		}
 
-		authHandler = handlers.NewMultiAuthHandler(jwtSecret, userStore, require2FA)
+	}
+
+	// TOTP storage: Postgres in local multi-user mode, Firestore in Firebase
+	// mode (overridden further down once we know the user provider).
+	var totpStore store.TOTPStore
+	if multiMode {
+		totpStore = store.NewPostgresTOTPStore(userStore)
+		authHandler = handlers.NewMultiAuthHandler(jwtSecret, userStore, totpStore, require2FA)
 	} else {
 		authHandler = handlers.NewAuthHandler(user, password, jwtSecret, secretsDir)
 	}
@@ -176,7 +183,7 @@ func main() {
 	var totpHandler *handlers.TOTPHandler
 	if multiMode {
 		totpIssuer := env("TOTP_ISSUER", "mdnest")
-		totpHandler = handlers.NewTOTPHandler(jwtSecret, userStore, totpIssuer)
+		totpHandler = handlers.NewTOTPHandler(jwtSecret, userStore, totpStore, totpIssuer)
 		mux.Handle("/api/auth/totp/setup", authMiddleware.Wrap(http.HandlerFunc(totpHandler.HandleSetupTOTP)))
 		mux.Handle("/api/auth/totp/verify-setup", authMiddleware.Wrap(http.HandlerFunc(totpHandler.HandleVerifySetup)))
 		mux.Handle("/api/auth/totp/disable", authMiddleware.Wrap(http.HandlerFunc(totpHandler.HandleDisableTOTP)))
