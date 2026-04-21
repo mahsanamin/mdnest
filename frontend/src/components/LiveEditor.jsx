@@ -369,10 +369,16 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly, onComment, c
   const [selectionPopup, setSelectionPopup] = useState(null); // {top, left, text, start, end}
   const flashTimerRef = useRef(null);
 
-  // Track text selection for comment button
+  // Track text selection for comment button — only when the triggering
+  // gesture happened inside the editor. Otherwise a sidebar click (e.g.
+  // Go To) programmatically sets a selection and we end up popping the
+  // "Comment" button at weird positions.
   useEffect(() => {
     if (!editor || !onComment) return;
-    const checkSelection = () => {
+    const checkSelection = (e) => {
+      const wrapper = wrapperRef.current;
+      if (!wrapper) return;
+      if (e && e.target && !wrapper.contains(e.target)) return;
       try {
         editor.action((ctx) => {
           const view = ctx.get(editorViewCtx);
@@ -382,12 +388,8 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly, onComment, c
           const selectedText = view.state.doc.textBetween(from, to, ' ');
           if (!selectedText.trim()) { setSelectionPopup(null); return; }
 
-          // Get screen coordinates of the selection end
           const coords = view.coordsAtPos(to);
-          const wrapper = wrapperRef.current;
-          if (!wrapper) { setSelectionPopup(null); return; }
           const rect = wrapper.getBoundingClientRect();
-
           setSelectionPopup({
             top: coords.top - rect.top + wrapper.scrollTop + 20,
             left: Math.min(coords.left - rect.left, rect.width - 120),
@@ -607,6 +609,7 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly, onComment, c
           .setMeta(commentHighlightKey, { flash: { from: best.from, to: best.to } });
         view.dispatch(tr.scrollIntoView());
         view.focus();
+        setSelectionPopup(null);
 
         if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
         flashTimerRef.current = setTimeout(() => {
