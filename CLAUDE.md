@@ -26,6 +26,8 @@ backend/
     upload.go                # POST /api/folder, /api/upload, GET /api/files/
     move.go                  # POST /api/move?ns=&from=&to=
     path.go                  # SafePath(), RequireNamespace() — shared utils
+    noteid.go                # ExtractNoteID / InjectNoteID / EnsureNoteID (UUID marker)
+    comments.go              # GET/POST/PATCH/DELETE /api/comments?ns=&path=&id=
   middleware/
     auth.go                  # JWT validation middleware
     cors.go                  # CORS middleware
@@ -49,6 +51,7 @@ frontend/
       MermaidBlock.jsx       # Inline mermaid with Source/Preview toggle + click-to-edit labels
       Preview.jsx            # Rendered markdown (marked + mermaid)
       ContextMenu.jsx        # Right-click / long-press floating menu
+      CommentSidebar.jsx     # Inline comments: slide-out panel, threads, replies, Go To
 
 mcp-server/
   index.js                   # MCP server entry — tools + resources wrapping REST API

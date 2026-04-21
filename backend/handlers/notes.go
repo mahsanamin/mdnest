@@ -84,7 +84,12 @@ func (h *NoteHandler) getNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	etag := contentETag(data)
+	// Strip the mdnest note ID marker before returning to frontend.
+	// The marker is invisible to users — only used for comment linking.
+	content := string(data)
+	noteID, cleanContent := ExtractNoteID(content)
+
+	etag := contentETag([]byte(cleanContent))
 
 	// Support conditional requests — return 304 if content hasn't changed
 	if ifNoneMatch := r.Header.Get("If-None-Match"); ifNoneMatch == etag {
@@ -94,7 +99,10 @@ func (h *NoteHandler) getNote(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
 	w.Header().Set("ETag", etag)
-	w.Write(data)
+	if noteID != "" {
+		w.Header().Set("X-Note-ID", noteID)
+	}
+	w.Write([]byte(cleanContent))
 }
 
 func (h *NoteHandler) updateNote(w http.ResponseWriter, r *http.Request) {
@@ -121,10 +129,14 @@ func (h *NoteHandler) updateNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// If-Match: optimistic locking for conflict detection
+	// Extract existing note ID from current file (preserve it across edits)
+	existingNoteID, currentClean := ExtractNoteID(string(currentData))
+
+	// If-Match: optimistic locking — compare against clean content ETag
+	// (frontend never sees the marker, so its ETag is based on clean content)
 	ifMatch := r.Header.Get("If-Match")
 	if ifMatch != "" {
-		currentETag := contentETag(currentData)
+		currentETag := contentETag([]byte(currentClean))
 		if ifMatch != currentETag {
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("ETag", currentETag)
@@ -142,15 +154,29 @@ func (h *NoteHandler) updateNote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"failed to read body"}`, http.StatusBadRequest)
 		return
 	}
+
+	// Inject note ID into the content before writing to disk.
+	// If note already had one, preserve it. Otherwise generate a new one.
+	writeContent := string(body)
+	if existingNoteID != "" {
+		writeContent = InjectNoteID(writeContent, existingNoteID)
+	} else {
+		newID, err := GenerateNoteID()
+		if err == nil {
+			writeContent = InjectNoteID(writeContent, newID)
+		}
+	}
+
 	if err := os.MkdirAll(filepath.Dir(absPath), 0755); err != nil {
 		http.Error(w, `{"error":"failed to create directories"}`, http.StatusInternalServerError)
 		return
 	}
-	if err := os.WriteFile(absPath, body, 0644); err != nil {
+	if err := os.WriteFile(absPath, []byte(writeContent), 0644); err != nil {
 		http.Error(w, `{"error":"failed to write file"}`, http.StatusInternalServerError)
 		return
 	}
 
+	// ETag is based on the clean content (without marker) — matches what frontend sees
 	newETag := contentETag(body)
 
 	// Broadcast file-changed to other users on this note

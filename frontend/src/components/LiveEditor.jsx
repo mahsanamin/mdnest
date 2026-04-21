@@ -8,7 +8,8 @@ import { listener, listenerCtx } from '@milkdown/plugin-listener';
 import { history } from '@milkdown/plugin-history';
 import { clipboard } from '@milkdown/plugin-clipboard';
 import { replaceAll, callCommand, $view, insert, $prose } from '@milkdown/utils';
-import { Plugin, PluginKey } from '@milkdown/prose/state';
+import { Plugin, PluginKey, TextSelection } from '@milkdown/prose/state';
+import { Decoration, DecorationSet } from '@milkdown/prose/view';
 import { deleteRow, deleteColumn, deleteTable } from '@milkdown/prose/tables';
 import { uploadImage } from '../api.js';
 import { htmlToMarkdown, hasRichContent } from '../html-to-md.js';
@@ -34,6 +35,139 @@ import {
   addColAfterCommand,
   toggleStrikethroughCommand,
 } from '@milkdown/preset-gfm';
+
+// Plugin: persistent inline highlights for commented text.
+// Built as ProseMirror Decorations (not DOM edits) so the editor state stays consistent.
+const commentHighlightKey = new PluginKey('comment-highlight');
+
+// Build a concatenation of every inline text node in the doc with a mapping
+// from string offsets back to ProseMirror positions. This lets us find anchor
+// text that spans inline marks (bold, italic, links, inline code) where the
+// text is split across multiple text nodes.
+function buildTextIndex(doc) {
+  let combined = '';
+  const segs = []; // { strStart, length, posBase }
+  doc.descendants((node, pos) => {
+    if (node.isText) {
+      segs.push({ strStart: combined.length, length: node.text.length, posBase: pos });
+      combined += node.text;
+    }
+  });
+  return { combined, segs };
+}
+
+// Map a string offset (into `combined`) to a ProseMirror doc position.
+function strIdxToDocPos(segs, idx) {
+  for (const s of segs) {
+    if (idx >= s.strStart && idx <= s.strStart + s.length) {
+      return s.posBase + (idx - s.strStart);
+    }
+  }
+  return -1;
+}
+
+function findAnchorMatches(doc, anchorText) {
+  const { combined, segs } = buildTextIndex(doc);
+  const matches = [];
+  if (!anchorText || anchorText.length < 2) return matches;
+  let startIdx = 0;
+  while (true) {
+    const idx = combined.indexOf(anchorText, startIdx);
+    if (idx < 0) break;
+    const from = strIdxToDocPos(segs, idx);
+    const to = strIdxToDocPos(segs, idx + anchorText.length);
+    if (from >= 0 && to > from) matches.push({ from, to });
+    startIdx = idx + 1;
+  }
+  return matches;
+}
+
+function buildCommentDecorations(doc, anchors) {
+  if (!anchors || anchors.length === 0) return DecorationSet.empty;
+  const rangeMap = new Map(); // key -> { from, to, ids:[] }
+  for (const anchor of anchors) {
+    const text = anchor?.text;
+    if (!text || text.length < 2) continue;
+    const matches = findAnchorMatches(doc, text);
+    if (matches.length === 0) continue;
+
+    // Highlight only the occurrence whose position is closest to where the
+    // comment was originally placed. Without this, a comment on "good"
+    // would light up every "good" in the document.
+    const hintPos = Number(anchor.rangeStart ?? 0);
+    let best = matches[0];
+    let bestDist = Math.abs(best.from - hintPos);
+    for (const m of matches) {
+      const d = Math.abs(m.from - hintPos);
+      if (d < bestDist) { best = m; bestDist = d; }
+    }
+
+    const key = `${best.from}-${best.to}`;
+    if (!rangeMap.has(key)) {
+      rangeMap.set(key, { from: best.from, to: best.to, ids: [anchor.id] });
+    } else {
+      rangeMap.get(key).ids.push(anchor.id);
+    }
+  }
+  const decorations = [];
+  for (const { from, to, ids } of rangeMap.values()) {
+    decorations.push(
+      Decoration.inline(from, to, {
+        class: 'comment-highlight',
+        'data-comment-ids': ids.join(','),
+      })
+    );
+  }
+  return DecorationSet.create(doc, decorations);
+}
+
+const commentHighlightPlugin = $prose(() => {
+  return new Plugin({
+    key: commentHighlightKey,
+    state: {
+      init() {
+        return { anchors: [], decorations: DecorationSet.empty, flash: null };
+      },
+      apply(tr, old) {
+        const meta = tr.getMeta(commentHighlightKey);
+        let anchors = old.anchors;
+        let decorations = old.decorations;
+        let flash = old.flash;
+
+        if (meta && Array.isArray(meta.anchors)) {
+          anchors = meta.anchors;
+          decorations = buildCommentDecorations(tr.doc, anchors);
+        } else if (tr.docChanged) {
+          decorations = buildCommentDecorations(tr.doc, anchors);
+        }
+
+        if (meta && 'flash' in meta) {
+          flash = meta.flash; // { from, to } or null
+        } else if (flash && tr.docChanged) {
+          const nf = tr.mapping.map(flash.from);
+          const nt = tr.mapping.map(flash.to);
+          flash = nt > nf ? { from: nf, to: nt } : null;
+        }
+
+        return { anchors, decorations, flash };
+      },
+    },
+    props: {
+      decorations(state) {
+        const s = this.getState(state);
+        if (!s) return null;
+        if (!s.flash) return s.decorations;
+        try {
+          return s.decorations.add(state.doc, [
+            Decoration.inline(s.flash.from, s.flash.to, { class: 'comment-flash-active' }),
+          ]);
+        } catch {
+          return s.decorations;
+        }
+      },
+    },
+  });
+});
 
 // Plugin: auto-convert empty block nodes (heading, blockquote) to paragraph on backspace
 const clearEmptyBlockPlugin = $prose((ctx) => {
@@ -176,7 +310,8 @@ function MilkdownEditor({ content, onChange, readOnly, onEditorReady }) {
       .use(history)
       .use(clipboard)
       .use(mermaidNodeView)
-      .use(clearEmptyBlockPlugin);
+      .use(clearEmptyBlockPlugin)
+      .use(commentHighlightPlugin);
   }, [readOnly]);
 
   // Unsuppress on real user interaction — keydown/mousedown in the editor area.
@@ -271,10 +406,52 @@ function LiveToolbar({ editor }) {
   );
 }
 
-function LiveEditor({ content, onChange, currentPath, ns, readOnly }) {
+function LiveEditor({ content, onChange, currentPath, ns, readOnly, onComment, comments, onGoToReady, onHighlightClick }) {
   const [editor, setEditor] = useState(null);
   const [viewerSvg, setViewerSvg] = useState(null);
   const wrapperRef = useRef(null);
+  const [selectionPopup, setSelectionPopup] = useState(null); // {top, left, text, start, end}
+  const flashTimerRef = useRef(null);
+
+  // Track text selection for comment button — only when the triggering
+  // gesture happened inside the editor. Otherwise a sidebar click (e.g.
+  // Go To) programmatically sets a selection and we end up popping the
+  // "Comment" button at weird positions.
+  useEffect(() => {
+    if (!editor || !onComment) return;
+    const checkSelection = (e) => {
+      const wrapper = wrapperRef.current;
+      if (!wrapper) return;
+      if (e && e.target && !wrapper.contains(e.target)) return;
+      try {
+        editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx);
+          const { from, to } = view.state.selection;
+          if (to - from < 3) { setSelectionPopup(null); return; }
+
+          const selectedText = view.state.doc.textBetween(from, to, ' ');
+          if (!selectedText.trim()) { setSelectionPopup(null); return; }
+
+          const coords = view.coordsAtPos(to);
+          const rect = wrapper.getBoundingClientRect();
+          setSelectionPopup({
+            top: coords.top - rect.top + wrapper.scrollTop + 20,
+            left: Math.min(coords.left - rect.left, rect.width - 120),
+            text: selectedText,
+            start: from,
+            end: to,
+          });
+        });
+      } catch {}
+    };
+
+    document.addEventListener('mouseup', checkSelection);
+    document.addEventListener('keyup', checkSelection);
+    return () => {
+      document.removeEventListener('mouseup', checkSelection);
+      document.removeEventListener('keyup', checkSelection);
+    };
+  }, [editor, onComment]);
 
   // Handle image paste and rich HTML paste
   useEffect(() => {
@@ -422,6 +599,90 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly }) {
     return () => el.removeEventListener('mermaid-fullscreen', handler);
   }, []);
 
+  // Push active comment anchors into the highlight plugin whenever comments change.
+  useEffect(() => {
+    if (!editor) return;
+    // Highlight only top-level threads (no parentId). Replies inherit their
+    // parent's anchor, so adding them would just create duplicate decorations.
+    // rangeStart flows through so the decoration picker can disambiguate
+    // multiple occurrences of the same anchor text.
+    const anchors = (comments || [])
+      .filter((c) => !c.parentId && !c.resolved && c.anchorText)
+      .map((c) => ({ text: c.anchorText, id: c.id, rangeStart: c.rangeStart }));
+    try {
+      editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        const tr = view.state.tr.setMeta(commentHighlightKey, { anchors });
+        view.dispatch(tr);
+      });
+    } catch {}
+  }, [editor, comments]);
+
+  // Go-to handler: finds anchor text and picks the occurrence closest to the
+  // comment's stored rangeStart. This disambiguates when the same text appears
+  // more than once (or when a shorter anchor is a substring of a longer one).
+  // After scrolling, sets a transient "flash" decoration on the text so the
+  // highlight itself pulses — same visual language as the sidebar flash.
+  const goToComment = useCallback((comment) => {
+    const anchorText = typeof comment === 'string' ? comment : comment?.anchorText;
+    const hintPos = typeof comment === 'object' && comment ? Number(comment.rangeStart || 0) : 0;
+    if (!editor || !anchorText) return;
+    try {
+      editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        const matches = findAnchorMatches(view.state.doc, anchorText);
+        if (matches.length === 0) return;
+        let best = matches[0];
+        let bestDist = Math.abs(best.from - hintPos);
+        for (const m of matches) {
+          const d = Math.abs(m.from - hintPos);
+          if (d < bestDist) { best = m; bestDist = d; }
+        }
+        const tr = view.state.tr
+          .setSelection(TextSelection.create(view.state.doc, best.from, best.to))
+          .setMeta(commentHighlightKey, { flash: { from: best.from, to: best.to } });
+        view.dispatch(tr.scrollIntoView());
+        view.focus();
+        setSelectionPopup(null);
+
+        if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+        flashTimerRef.current = setTimeout(() => {
+          try {
+            editor.action((c2) => {
+              const v2 = c2.get(editorViewCtx);
+              v2.dispatch(v2.state.tr.setMeta(commentHighlightKey, { flash: null }));
+            });
+          } catch {}
+        }, 1800);
+      });
+    } catch (e) {
+      console.error('Go to comment failed:', e);
+    }
+  }, [editor]);
+
+  // Clicking a yellow comment-highlight in the editor opens the sidebar
+  // and flashes the relevant comment card.
+  useEffect(() => {
+    const el = wrapperRef.current;
+    if (!el || !onHighlightClick) return;
+    const onClick = (e) => {
+      const target = e.target.closest && e.target.closest('.comment-highlight');
+      if (!target) return;
+      const ids = (target.getAttribute('data-comment-ids') || '').split(',').filter(Boolean);
+      if (ids.length === 0) return;
+      onHighlightClick(ids[0]);
+    };
+    el.addEventListener('click', onClick);
+    return () => el.removeEventListener('click', onClick);
+  }, [onHighlightClick]);
+
+  useEffect(() => () => { if (flashTimerRef.current) clearTimeout(flashTimerRef.current); }, []);
+
+  // Expose goToComment to parent
+  useEffect(() => {
+    if (onGoToReady) onGoToReady(goToComment);
+  }, [goToComment, onGoToReady]);
+
   return (
     <div className="live-editor-pane">
       {readOnly && <div className="editor-readonly-bar">Read-only</div>}
@@ -435,6 +696,24 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly }) {
             onEditorReady={setEditor}
           />
         </MilkdownProvider>
+        {selectionPopup && onComment && (
+          <button
+            className="comment-selection-btn"
+            style={{ top: selectionPopup.top, left: selectionPopup.left }}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onComment({
+                rangeStart: selectionPopup.start,
+                rangeEnd: selectionPopup.end,
+                anchorText: selectionPopup.text,
+              });
+              setSelectionPopup(null);
+            }}
+          >
+            💬 Comment
+          </button>
+        )}
       </div>
       {viewerSvg && (
         <MermaidViewer svgContent={viewerSvg} onClose={() => setViewerSvg(null)} />

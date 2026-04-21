@@ -132,6 +132,46 @@ This renders as an interactive diagram in the preview pane. Mermaid supports man
 
 ---
 
+## Inline Comments
+
+> **Requires multi-user mode with live collaboration enabled** (`AUTH_MODE=multi` and `ENABLE_LIVE_COLLAB=true`). Each comment is tied to a real user account and relies on the WebSocket hub. In single-user mode or when live collab is off the comment UI is hidden.
+
+Leave feedback on any part of a note without touching its content.
+
+### Adding a comment
+
+1. Open a note in **Live** editor mode.
+2. Select the text you want to comment on. A small **💬 Comment** button appears next to the selection.
+3. Click it — the comment panel slides out on the right with the quoted text above the reply box.
+4. Type your message and press **Enter** (use **Shift+Enter** for a newline). The selected text is now highlighted in bright yellow inside the editor.
+
+You can also open the panel without a selection via the speech-bubble icon in the toolbar and leave a general note-level comment.
+
+### Yellow highlights
+
+Every active comment anchor stays highlighted in the editor while you browse the note — you see at a glance which passages have been discussed. Highlights are transparent in the browser print dialog and in PDF exports, so they never leak into shared or printed copies.
+
+### Threaded replies
+
+Click **Reply** on any open thread to continue the conversation under the main comment. Replies show in an indented box below the parent, share the parent's anchor, and stay grouped together. Press **Enter** to send, **Esc** to cancel.
+
+### Jumping between comments and text
+
+- **Click any yellow highlight** in the editor to open the sidebar and pulse the matching thread into view.
+- Click **Go To** on any thread in the sidebar to scroll the editor to the commented text — the highlight briefly pulses so you can't miss it.
+
+### Resolving, reopening, deleting
+
+- **Resolve** collapses the thread into the "Resolved" section at the bottom of the sidebar. Resolved threads stop highlighting their text.
+- **Reopen** brings a resolved thread back to active and restores its highlight.
+- **Delete** is available to the comment's author and to admins. Soft-deleted comments are removed from the sidebar and the JSONL file keeps a `deletedAt` timestamp.
+
+### Comments survive file moves
+
+Every note carries an invisible `<!-- mdnest:<uuid> -->` marker at its bottom that's stripped on GET and re-injected on save. Comments are stored at `<namespace>/.mdnest/comments/<uuid>.jsonl`. Moving or renaming a file preserves the UUID inside the content, so its comment history follows it — no broken links.
+
+---
+
 ## Task Checkboxes
 
 Standard markdown task list syntax is supported:

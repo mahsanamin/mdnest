@@ -10,11 +10,13 @@ import ContextMenu from './components/ContextMenu.jsx';
 import Settings from './components/Settings.jsx';
 import AdminPanel from './components/AdminPanel.jsx';
 import PresenceBar from './components/PresenceBar.jsx';
+import CommentSidebar from './components/CommentSidebar.jsx';
 import ShareDialog from './components/ShareDialog.jsx';
 import CollabClient from './collab.js';
 import {
   getToken,
   getNote,
+  listComments,
   saveNote,
   getTree,
   getNamespaces,
@@ -99,6 +101,11 @@ function App() {
   const [ctxMenu, setCtxMenu] = useState({ visible: false, x: 0, y: 0, target: null });
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
+  const [comments, setComments] = useState([]);
+  const [showComments, setShowComments] = useState(false);
+  const [pendingCommentSelection, setPendingCommentSelection] = useState(null);
+  const [highlightedCommentId, setHighlightedCommentId] = useState(null);
+  const goToCommentRef = useRef(null);
   const editorWrapperRef = useRef(null);
   const previewWrapperRef = useRef(null);
   const scrollSyncRef = useRef(false);
@@ -119,6 +126,10 @@ function App() {
   const [userInfo, setUserInfo] = useState(null); // {id, username, role, grants}
   const isMulti = appConfig?.authMode === 'multi';
   const isAdmin = !isMulti || userInfo?.role === 'admin';
+  // Comments need real user identity AND the WebSocket hub (so other clients
+  // see new/resolved comments without a manual refresh), so gate on liveCollab
+  // — which itself is only true when multi mode is on.
+  const commentsEnabled = !!appConfig?.liveCollab;
 
   // Live collaboration state
   const [presenceUsers, setPresenceUsers] = useState([]);
@@ -342,6 +353,9 @@ function App() {
           setSavedContent('');
           setHash(selectedNs, null);
         });
+        if (commentsEnabled) {
+          listComments(selectedNs, currentPath).then(setComments).catch(() => setComments([]));
+        }
       }
     });
 
@@ -506,10 +520,13 @@ function App() {
       setSavedContent(text);
       etagRef.current = etag;
       restoreScrollPosition(ns, path);
+      if (commentsEnabled) {
+        listComments(ns, path).then(setComments).catch(() => setComments([]));
+      }
     } catch (e) {
       console.error('Failed to open note:', e);
     }
-  }, [restoreScrollPosition]);
+  }, [restoreScrollPosition, commentsEnabled]);
 
   const handleSelectNs = useCallback((ns) => {
     setSelectedNs(ns);
@@ -533,6 +550,10 @@ function App() {
       setConflictBanner(null);
       setSidebarVisible(false);
       restoreScrollPosition(selectedNs, path);
+      // Load comments for this note (only when comments feature is enabled)
+      if (commentsEnabled) {
+        listComments(selectedNs, path).then(setComments).catch(() => setComments([]));
+      }
     } catch (e) {
       if (e.name === 'PermissionError') {
         alert('Access denied: you do not have permission to read this file.');
@@ -541,6 +562,12 @@ function App() {
       }
     }
   }, [selectedNs]);
+
+  const refreshComments = useCallback(() => {
+    if (selectedNs && currentPath) {
+      listComments(selectedNs, currentPath).then(setComments).catch(() => setComments([]));
+    }
+  }, [selectedNs, currentPath]);
 
   const handleContentChange = useCallback((newContent) => {
     setContent(newContent);
@@ -892,6 +919,28 @@ function App() {
             }
           }}
           onRefresh={handleRefresh}
+          commentCount={commentsEnabled ? comments.filter(c => !c.parentId && !c.resolved).length : 0}
+          onToggleComments={!commentsEnabled ? null : () => {
+            const next = !showComments;
+            setShowComments(next);
+            // When opening comments, snap the user to Live editor — that's
+            // the only surface where highlights render, selection → Comment
+            // works, and Go To can scroll to the text.
+            if (next) {
+              if (viewMode === 'preview') {
+                setViewMode('editor');
+                localStorage.setItem('mdnest_view_mode', 'editor');
+              }
+              if (editorMode !== 'live') {
+                setEditorMode('live');
+                localStorage.setItem('mdnest_editor_mode', 'live');
+              }
+              if (isMobile && mobileView === 'preview') {
+                setMobileView('editor');
+                localStorage.setItem('mdnest_mobile_view', 'editor');
+              }
+            }
+          }}
           wsStatus={appConfig?.liveCollab ? wsStatus : null}
         />
         {appConfig?.liveCollab && presenceUsers.length > 1 && (
@@ -931,6 +980,20 @@ function App() {
                         currentPath={currentPath}
                         ns={selectedNs}
                         readOnly={!canWriteCurrent}
+                        comments={commentsEnabled ? comments : []}
+                        onComment={!commentsEnabled ? null : (sel) => {
+                          setPendingCommentSelection(sel);
+                          setShowComments(true);
+                        }}
+                        onGoToReady={(fn) => { goToCommentRef.current = fn; }}
+                        onHighlightClick={!commentsEnabled ? null : (commentId) => {
+                          setShowComments(true);
+                          setHighlightedCommentId(commentId);
+                          if (viewMode === 'preview') {
+                            setViewMode('editor');
+                            localStorage.setItem('mdnest_view_mode', 'editor');
+                          }
+                        }}
                       />
                     </Suspense>
                   ) : (
@@ -1009,6 +1072,21 @@ function App() {
         isAdmin={isAdmin && isMulti}
         selectedNs={selectedNs}
       />
+      {commentsEnabled && showComments && currentPath && (
+        <CommentSidebar
+          comments={comments}
+          ns={selectedNs}
+          currentPath={currentPath}
+          onRefresh={refreshComments}
+          onClose={() => { setShowComments(false); setPendingCommentSelection(null); }}
+          userInfo={userInfo}
+          pendingSelection={pendingCommentSelection}
+          onSelectionConsumed={() => setPendingCommentSelection(null)}
+          onGoTo={(c) => { if (goToCommentRef.current) goToCommentRef.current(c); }}
+          highlightedId={highlightedCommentId}
+          onHighlightConsumed={() => setHighlightedCommentId(null)}
+        />
+      )}
     </div>
   );
 }

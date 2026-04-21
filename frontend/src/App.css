@@ -1292,6 +1292,38 @@ pre:hover .code-copy-btn {
   background: #f38ba822 !important;
 }
 
+.toolbar-comments {
+  background: transparent !important;
+  border: none !important;
+  color: #6c7086 !important;
+  padding: 0.2rem 0.4rem !important;
+  cursor: pointer;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.toolbar-comments:hover {
+  color: #cdd6f4 !important;
+}
+
+.comment-badge {
+  position: absolute;
+  top: -2px;
+  right: -4px;
+  background: #89b4fa;
+  color: #1e1e2e;
+  font-size: 0.6rem;
+  font-weight: 700;
+  min-width: 14px;
+  height: 14px;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 3px;
+}
+
 .toolbar-settings {
   background: transparent !important;
   border: none !important;
@@ -1303,6 +1335,356 @@ pre:hover .code-copy-btn {
 
 .toolbar-settings:hover {
   color: #cdd6f4 !important;
+}
+
+/* Comment Sidebar */
+.comment-sidebar {
+  position: fixed;
+  /* Sit below the toolbar (min-height 44px + 0.5rem top/bottom padding
+     + 1px border ≈ 61px) so the settings/comments icons stay clickable. */
+  top: 61px;
+  right: 0;
+  bottom: 0;
+  width: 320px;
+  background: #181825;
+  border-left: 1px solid #313244;
+  border-top: 1px solid #313244;
+  z-index: 9000;
+  display: flex;
+  flex-direction: column;
+  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.3);
+}
+
+.comment-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid #313244;
+}
+
+.comment-sidebar-header h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: #cdd6f4;
+}
+
+.comment-sidebar-close {
+  background: none;
+  border: none;
+  color: #6c7086;
+  font-size: 1.2rem;
+  cursor: pointer;
+}
+
+.comment-sidebar-close:hover {
+  color: #cdd6f4;
+}
+
+.comment-sidebar-add {
+  padding: 12px 16px;
+  border-bottom: 1px solid #313244;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.comment-sidebar-add textarea {
+  background: #1e1e2e;
+  border: 1px solid #313244;
+  border-radius: 6px;
+  color: #cdd6f4;
+  padding: 8px;
+  font-size: 0.82rem;
+  resize: none;
+  outline: none;
+}
+
+.comment-sidebar-add textarea:focus {
+  border-color: #89b4fa;
+}
+
+.comment-sidebar-add button {
+  align-self: flex-end;
+  background: #89b4fa;
+  color: #1e1e2e;
+  border: none;
+  padding: 4px 14px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.comment-sidebar-add button:disabled {
+  opacity: 0.5;
+}
+
+.comment-sidebar-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+.comment-empty {
+  padding: 24px 16px;
+  text-align: center;
+  color: #585b70;
+  font-size: 0.85rem;
+}
+
+.comment-item {
+  padding: 10px 16px;
+  border-bottom: 1px solid #313244;
+}
+
+.comment-item.resolved {
+  opacity: 0.5;
+}
+
+.comment-item-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.comment-author {
+  font-weight: 600;
+  font-size: 0.82rem;
+  color: #89b4fa;
+}
+
+.comment-time {
+  font-size: 0.72rem;
+  color: #585b70;
+}
+
+.comment-anchor {
+  font-size: 0.78rem;
+  color: #a6adc8;
+  font-style: italic;
+  margin-bottom: 4px;
+  padding: 3px 6px;
+  background: #1e1e2e;
+  border-radius: 3px;
+  border-left: 2px solid #89b4fa;
+}
+
+.comment-body {
+  font-size: 0.85rem;
+  color: #cdd6f4;
+  line-height: 1.4;
+  margin-bottom: 6px;
+}
+
+.comment-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.comment-actions button {
+  background: #313244;
+  color: #a6adc8;
+  border: none;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.comment-actions button:hover {
+  background: #45475a;
+  color: #cdd6f4;
+}
+
+.comment-actions button.danger:hover {
+  background: #f38ba822;
+  color: #f38ba8;
+}
+
+/* Floating comment button on text selection */
+.comment-selection-btn {
+  position: absolute;
+  z-index: 100;
+  background: #89b4fa;
+  color: #1e1e2e;
+  border: none;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  white-space: nowrap;
+}
+
+.comment-selection-btn:hover {
+  opacity: 0.9;
+}
+
+/* Persistent yellow highlight for commented text (ProseMirror decoration).
+   Bright yellow so it reads clearly on both light and dark themes. */
+.comment-highlight {
+  background-color: #fde047 !important;
+  color: #1e1e2e !important;
+  border-radius: 2px;
+  padding: 1px 1px;
+  box-shadow: 0 0 0 1px #facc15;
+  cursor: pointer;
+}
+
+.comment-highlight:hover {
+  background-color: #fef08a !important;
+}
+
+.comment-highlight * {
+  color: #1e1e2e !important;
+}
+
+@media print {
+  .comment-highlight {
+    background-color: transparent !important;
+    color: inherit !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+  }
+  .comment-highlight * {
+    color: inherit !important;
+  }
+}
+
+/* Threaded replies under a top-level comment */
+.comment-thread {
+  margin: 8px 0 0 0;
+  padding-left: 10px;
+  border-left: 2px solid #45475a;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.comment-reply {
+  background: #181825;
+  border: 1px solid #313244;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 0.85rem;
+}
+
+.comment-reply .comment-item-header {
+  margin-bottom: 3px;
+}
+
+.comment-reply .comment-body {
+  font-size: 0.85rem;
+}
+
+.comment-reply .comment-actions {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: none;
+}
+
+.comment-reply-form {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed #45475a;
+}
+
+.comment-reply-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: #181825;
+  color: #cdd6f4;
+  border: 1px solid #313244;
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-family: inherit;
+  font-size: 0.85rem;
+  resize: vertical;
+}
+
+.comment-reply-form textarea:focus {
+  outline: none;
+  border-color: #89b4fa;
+}
+
+.comment-reply-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.comment-reply-actions button {
+  padding: 4px 10px;
+  font-size: 0.78rem;
+  background: #313244;
+  color: #cdd6f4;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.comment-reply-actions button:first-child {
+  background: #89b4fa;
+  color: #1e1e2e;
+  font-weight: 600;
+}
+
+.comment-reply-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Transient flash applied to commented text when Go To is invoked.
+   Rides on top of .comment-highlight — adds a pulsing yellow glow so the
+   user's eye is drawn to it, then fades out. */
+.comment-flash-active {
+  background-color: #fde047 !important;
+  color: #1e1e2e !important;
+  border-radius: 2px;
+  animation: comment-flash-editor 1.8s ease;
+}
+
+@keyframes comment-flash-editor {
+  0%   { box-shadow: 0 0 0 3px #facc15, 0 0 16px 4px rgba(253, 224, 71, 0.9); }
+  25%  { box-shadow: 0 0 0 3px transparent, 0 0 8px 2px rgba(253, 224, 71, 0.3); }
+  50%  { box-shadow: 0 0 0 3px #facc15, 0 0 16px 4px rgba(253, 224, 71, 0.8); }
+  75%  { box-shadow: 0 0 0 3px transparent, 0 0 8px 2px rgba(253, 224, 71, 0.3); }
+  100% { box-shadow: 0 0 0 1px #facc15; }
+}
+
+/* Flash animation for a comment card when it's targeted from the editor
+   (either click-through on a highlight, or Go To). */
+.comment-item.flashing {
+  animation: comment-flash 1.6s ease;
+}
+
+@keyframes comment-flash {
+  0%   { box-shadow: 0 0 0 2px #fde047, 0 0 16px 4px rgba(253, 224, 71, 0.7); background: #3b3720; }
+  50%  { box-shadow: 0 0 0 2px #fde047, 0 0 16px 4px rgba(253, 224, 71, 0.5); background: #2c2a1e; }
+  100% { box-shadow: none; background: inherit; }
+}
+
+.comment-anchor-preview {
+  font-size: 0.78rem;
+  color: #a6adc8;
+  font-style: italic;
+  padding: 6px 8px;
+  background: #1e1e2e;
+  border-radius: 4px;
+  border-left: 2px solid #89b4fa;
+  max-height: 60px;
+  overflow: hidden;
+}
+
+.comment-section-label {
+  padding: 8px 16px 4px;
+  font-size: 0.72rem;
+  color: #585b70;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 /* Modal */
@@ -2104,6 +2486,11 @@ pre:hover .code-copy-btn {
   flex: 1;
   overflow-y: auto;
   padding: 0;
+  /* position: relative so the floating Comment button and any other
+     absolutely-positioned children anchor to the scrollable content area
+     rather than a far-up ancestor. Without this, the button lands off-
+     screen once the user scrolls. */
+  position: relative;
 }
 
 .live-editor-content {
