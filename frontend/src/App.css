@@ -1501,33 +1501,6 @@ pre:hover .code-copy-btn {
 }
 
 /* Floating comment button on text selection */
-/* Comment highlight marks on text — visible while reading */
-mark.comment-mark {
-  background: #f9e2af33;
-  border-bottom: 2px solid #f9e2af88;
-  color: inherit;
-  cursor: pointer;
-  border-radius: 2px;
-  padding: 0 1px;
-}
-
-mark.comment-mark:hover {
-  background: #f9e2af55;
-}
-
-mark.comment-mark-flash {
-  background: #f9e2af88 !important;
-  transition: background 0.3s;
-}
-
-@media print {
-  mark.comment-mark {
-    background: none !important;
-    border: none !important;
-    padding: 0 !important;
-  }
-}
-
 .comment-selection-btn {
   position: absolute;
   z-index: 100;

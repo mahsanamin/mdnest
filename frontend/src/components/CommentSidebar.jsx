@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { createComment, resolveComment, deleteComment } from '../api.js';
 
-function CommentSidebar({ comments, ns, currentPath, onRefresh, onClose, userInfo, pendingSelection, onSelectionConsumed }) {
+function CommentSidebar({ comments, ns, currentPath, onRefresh, onClose, userInfo, pendingSelection, onSelectionConsumed, onGoTo }) {
   const [newComment, setNewComment] = useState('');
   const [adding, setAdding] = useState(false);
   const textareaRef = useRef(null);
@@ -99,16 +99,8 @@ function CommentSidebar({ comments, ns, currentPath, onRefresh, onClose, userInf
             )}
             <div className="comment-body">{c.body}</div>
             <div className="comment-actions">
-              {c.anchorText && (
-                <button onClick={() => {
-                  const mark = document.querySelector(`mark.comment-mark[data-comment-id="${c.id}"]`);
-                  if (mark) {
-                    mark.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    // Flash highlight
-                    mark.classList.add('comment-mark-flash');
-                    setTimeout(() => mark.classList.remove('comment-mark-flash'), 2000);
-                  }
-                }}>Go to</button>
+              {c.anchorText && onGoTo && (
+                <button onClick={() => onGoTo(c.anchorText)}>Go to</button>
               )}
               <button onClick={() => handleResolve(c.id, true)}>Resolve</button>
               {userInfo && (userInfo.role === 'admin' || userInfo.id === c.authorId) && (

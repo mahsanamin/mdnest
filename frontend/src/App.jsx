@@ -104,6 +104,7 @@ function App() {
   const [comments, setComments] = useState([]);
   const [showComments, setShowComments] = useState(false);
   const [pendingCommentSelection, setPendingCommentSelection] = useState(null);
+  const goToCommentRef = useRef(null);
   const editorWrapperRef = useRef(null);
   const previewWrapperRef = useRef(null);
   const scrollSyncRef = useRef(false);
@@ -951,6 +952,7 @@ function App() {
                           setPendingCommentSelection(sel);
                           setShowComments(true);
                         }}
+                        onGoToReady={(fn) => { goToCommentRef.current = fn; }}
                       />
                     </Suspense>
                   ) : (
@@ -1039,6 +1041,7 @@ function App() {
           userInfo={userInfo}
           pendingSelection={pendingCommentSelection}
           onSelectionConsumed={() => setPendingCommentSelection(null)}
+          onGoTo={(anchorText) => { if (goToCommentRef.current) goToCommentRef.current(anchorText); }}
         />
       )}
     </div>

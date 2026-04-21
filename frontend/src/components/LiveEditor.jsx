@@ -8,7 +8,7 @@ import { listener, listenerCtx } from '@milkdown/plugin-listener';
 import { history } from '@milkdown/plugin-history';
 import { clipboard } from '@milkdown/plugin-clipboard';
 import { replaceAll, callCommand, $view, insert, $prose } from '@milkdown/utils';
-import { Plugin, PluginKey } from '@milkdown/prose/state';
+import { Plugin, PluginKey, TextSelection } from '@milkdown/prose/state';
 import { deleteRow, deleteColumn, deleteTable } from '@milkdown/prose/tables';
 import { uploadImage } from '../api.js';
 import { htmlToMarkdown, hasRichContent } from '../html-to-md.js';
@@ -271,7 +271,7 @@ function LiveToolbar({ editor }) {
   );
 }
 
-function LiveEditor({ content, onChange, currentPath, ns, readOnly, onComment, comments }) {
+function LiveEditor({ content, onChange, currentPath, ns, readOnly, onComment, comments, onGoToReady }) {
   const [editor, setEditor] = useState(null);
   const [viewerSvg, setViewerSvg] = useState(null);
   const wrapperRef = useRef(null);
@@ -461,57 +461,49 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly, onComment, c
     return () => el.removeEventListener('mermaid-fullscreen', handler);
   }, []);
 
-  // Highlight commented text with <mark> elements in the editor DOM.
-  // Runs after content renders. Hidden from print via CSS.
-  useEffect(() => {
-    const wrapper = wrapperRef.current;
-    if (!wrapper) return;
+  // Go-to handler: finds anchor text in ProseMirror doc and selects it
+  const goToComment = useCallback((anchorText) => {
+    if (!editor || !anchorText) return;
+    try {
+      editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        const docText = view.state.doc.textContent;
+        const idx = docText.indexOf(anchorText);
+        if (idx < 0) return;
 
-    const timer = setTimeout(() => {
-      // Clear old marks
-      wrapper.querySelectorAll('mark.comment-mark').forEach(m => {
-        const parent = m.parentNode;
-        while (m.firstChild) parent.insertBefore(m.firstChild, m);
-        parent.removeChild(m);
-        parent.normalize();
-      });
+        // Find the actual ProseMirror position by walking the doc
+        let pos = 0;
+        let found = false;
+        view.state.doc.descendants((node, nodePos) => {
+          if (found) return false;
+          if (node.isText) {
+            const textIdx = node.text.indexOf(anchorText);
+            if (textIdx >= 0) {
+              pos = nodePos + textIdx;
+              found = true;
+              return false;
+            }
+          }
+        });
 
-      const active = (comments || []).filter(c => !c.resolved && c.anchorText?.trim());
-      if (!active.length) return;
-
-      const editorEl = wrapper.querySelector('.live-editor-content');
-      if (!editorEl) return;
-
-      for (const c of active) {
-        const anchor = c.anchorText.trim();
-        if (anchor.length < 2) continue;
-
-        // Walk text nodes
-        const walker = document.createTreeWalker(editorEl, NodeFilter.SHOW_TEXT);
-        let node;
-        while ((node = walker.nextNode())) {
-          const idx = node.textContent.indexOf(anchor);
-          if (idx < 0) continue;
-
-          try {
-            // Only wrap if the text node has enough content
-            if (idx + anchor.length > node.textContent.length) continue;
-            const range = document.createRange();
-            range.setStart(node, idx);
-            range.setEnd(node, idx + anchor.length);
-            const mark = document.createElement('mark');
-            mark.className = 'comment-mark';
-            mark.dataset.commentId = c.id;
-            mark.title = `${c.author}: ${c.body.slice(0, 80)}`;
-            range.surroundContents(mark);
-          } catch { /* skip if range crosses element boundaries */ }
-          break; // Only highlight first occurrence
+        if (found) {
+          // Set selection to the anchor text range
+          const tr = view.state.tr.setSelection(
+            TextSelection.create(view.state.doc, pos, pos + anchorText.length)
+          );
+          view.dispatch(tr.scrollIntoView());
+          view.focus();
         }
-      }
-    }, 500);
+      });
+    } catch (e) {
+      console.error('Go to comment failed:', e);
+    }
+  }, [editor]);
 
-    return () => clearTimeout(timer);
-  }, [comments, content]);
+  // Expose goToComment to parent
+  useEffect(() => {
+    if (onGoToReady) onGoToReady(goToComment);
+  }, [goToComment, onGoToReady]);
 
   return (
     <div className="live-editor-pane">
