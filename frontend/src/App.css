@@ -1501,12 +1501,14 @@ pre:hover .code-copy-btn {
 }
 
 /* Floating comment button on text selection */
-/* Comment highlight overlay on text */
-.comment-highlight-overlay {
+/* Comment highlight on text */
+mark.comment-mark {
   background: #89b4fa22;
-  border-bottom: 2px solid #89b4fa66;
+  border-bottom: 2px solid #89b4fa88;
+  color: inherit;
+  cursor: pointer;
   border-radius: 2px;
-  z-index: 1;
+  padding: 1px 0;
 }
 
 .comment-selection-btn {

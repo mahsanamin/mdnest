@@ -461,65 +461,54 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly, onComment, c
     return () => el.removeEventListener('mermaid-fullscreen', handler);
   }, []);
 
-  // Highlight commented text ranges in the editor
+  // Highlight commented text in the DOM by finding anchor text and wrapping with <mark>
   useEffect(() => {
-    if (!editor || !comments?.length) return;
     const wrapper = wrapperRef.current;
     if (!wrapper) return;
 
-    // Clear existing highlights
-    wrapper.querySelectorAll('.comment-highlight').forEach(el => {
-      const parent = el.parentNode;
-      parent.replaceChild(document.createTextNode(el.textContent), el);
+    // Clear previous highlights
+    wrapper.querySelectorAll('mark.comment-mark').forEach(mark => {
+      const parent = mark.parentNode;
+      while (mark.firstChild) parent.insertBefore(mark.firstChild, mark);
+      parent.removeChild(mark);
       parent.normalize();
     });
 
-    // Apply highlights for active comments with anchor text
-    const activeComments = comments.filter(c => !c.resolved && c.anchorText);
+    const activeComments = (comments || []).filter(c => !c.resolved && c.anchorText);
     if (activeComments.length === 0) return;
 
-    // Debounce to avoid running during edits
     const timer = setTimeout(() => {
-      try {
-        editor.action((ctx) => {
-          const view = ctx.get(editorViewCtx);
-          const doc = view.state.doc;
-          const docText = doc.textContent;
+      const editorEl = wrapper.querySelector('.live-editor-content');
+      if (!editorEl) return;
 
-          for (const comment of activeComments) {
-            const anchor = comment.anchorText;
-            const idx = docText.indexOf(anchor);
-            if (idx < 0) continue;
+      for (const comment of activeComments) {
+        const anchor = comment.anchorText.trim();
+        if (!anchor || anchor.length < 3) continue;
 
-            // Find the DOM range for this text position
-            const from = idx;
-            const to = idx + anchor.length;
+        // Walk text nodes to find the anchor text
+        const walker = document.createTreeWalker(editorEl, NodeFilter.SHOW_TEXT);
+        let node;
+        let found = false;
+        while ((node = walker.nextNode()) && !found) {
+          const idx = node.textContent.indexOf(anchor);
+          if (idx < 0) continue;
 
-            try {
-              const startCoords = view.coordsAtPos(from);
-              const endCoords = view.coordsAtPos(to);
-              if (!startCoords || !endCoords) continue;
-
-              // Create a highlight overlay
-              const wrapperRect = wrapper.getBoundingClientRect();
-              const highlight = document.createElement('div');
-              highlight.className = 'comment-highlight-overlay';
-              highlight.title = `${comment.author}: ${comment.body.slice(0, 50)}`;
-              highlight.style.position = 'absolute';
-              highlight.style.top = `${startCoords.top - wrapperRect.top + wrapper.scrollTop}px`;
-              highlight.style.left = `${startCoords.left - wrapperRect.left}px`;
-              highlight.style.width = `${endCoords.right - startCoords.left}px`;
-              highlight.style.height = `${startCoords.bottom - startCoords.top}px`;
-              highlight.style.pointerEvents = 'none';
-              wrapper.appendChild(highlight);
-            } catch {}
-          }
-        });
-      } catch {}
-    }, 500);
+          // Split and wrap
+          const range = document.createRange();
+          range.setStart(node, idx);
+          range.setEnd(node, idx + anchor.length);
+          const mark = document.createElement('mark');
+          mark.className = 'comment-mark';
+          mark.dataset.commentId = comment.id;
+          mark.title = `${comment.author}: ${comment.body.slice(0, 80)}`;
+          range.surroundContents(mark);
+          found = true;
+        }
+      }
+    }, 300);
 
     return () => clearTimeout(timer);
-  }, [editor, comments, content]);
+  }, [comments, content]);
 
   return (
     <div className="live-editor-pane">

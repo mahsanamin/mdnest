@@ -99,6 +99,16 @@ function CommentSidebar({ comments, ns, currentPath, onRefresh, onClose, userInf
             )}
             <div className="comment-body">{c.body}</div>
             <div className="comment-actions">
+              {c.anchorText && (
+                <button onClick={() => {
+                  const mark = document.querySelector(`mark.comment-mark[data-comment-id="${c.id}"]`);
+                  if (mark) {
+                    mark.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    mark.style.background = '#89b4fa44';
+                    setTimeout(() => { mark.style.background = ''; }, 2000);
+                  }
+                }}>Go to</button>
+              )}
               <button onClick={() => handleResolve(c.id, true)}>Resolve</button>
               {userInfo && (userInfo.role === 'admin' || userInfo.id === c.authorId) && (
                 <button className="danger" onClick={() => handleDelete(c.id)}>Delete</button>
