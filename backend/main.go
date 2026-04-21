@@ -131,7 +131,12 @@ func main() {
 	moveHandler := handlers.NewMoveHandler(absNotesDir)
 	searchHandler := handlers.NewSearchHandler(absNotesDir)
 	tokenHandler := handlers.NewTokenHandler(secretsDir)
-	commentsHandler := handlers.NewCommentsHandler(absNotesDir)
+	// Comments are a multi-user-only feature — author identity, threaded
+	// replies, and author-gated deletes all require a real user context.
+	var commentsHandler *handlers.CommentsHandler
+	if multiMode {
+		commentsHandler = handlers.NewCommentsHandler(absNotesDir)
+	}
 
 	// Wrap mutating handlers to invalidate search cache + notify tree change
 	// Only invalidate search cache and broadcast tree-changed on mutating requests.
@@ -192,7 +197,7 @@ func main() {
 		mux.Handle("/api/namespaces", authMiddleware.Wrap(http.HandlerFunc(nsHandler.ListNamespaces)))
 		mux.Handle("/api/tree", authMiddleware.Wrap(http.HandlerFunc(treeHandler.GetTree)))
 		mux.Handle("/api/note", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(noteHandler.Handle))))
-		mux.Handle("/api/comments", authMiddleware.Wrap(http.HandlerFunc(commentsHandler.Handle)))
+		// /api/comments intentionally unregistered in single mode.
 		mux.Handle("/api/folder", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(uploadHandler.HandleFolder))))
 		mux.Handle("/api/upload", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(uploadHandler.HandleUpload))))
 		mux.Handle("/api/move", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(moveHandler.HandleMove))))

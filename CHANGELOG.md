@@ -19,6 +19,7 @@ All notable changes to mdnest are documented here.
 
 ### Fixes
 - **Floating Comment popup at wrong positions** — suppressed when the triggering mouseup/keyup comes from outside the editor (e.g. clicking Go To in the sidebar no longer resurrects the popup).
+- **Single-user mode logout on comment** — the comment UI was showing in single mode but the handler required a user context, returning 401 and triggering the global 401 → logout handler. Comments are now hidden in single mode and the `/api/comments` route is unregistered there.
 
 ---
 

@@ -349,7 +349,9 @@ function App() {
           setSavedContent('');
           setHash(selectedNs, null);
         });
-        listComments(selectedNs, currentPath).then(setComments).catch(() => setComments([]));
+        if (isMulti) {
+          listComments(selectedNs, currentPath).then(setComments).catch(() => setComments([]));
+        }
       }
     });
 
@@ -514,11 +516,13 @@ function App() {
       setSavedContent(text);
       etagRef.current = etag;
       restoreScrollPosition(ns, path);
-      listComments(ns, path).then(setComments).catch(() => setComments([]));
+      if (isMulti) {
+        listComments(ns, path).then(setComments).catch(() => setComments([]));
+      }
     } catch (e) {
       console.error('Failed to open note:', e);
     }
-  }, [restoreScrollPosition]);
+  }, [restoreScrollPosition, isMulti]);
 
   const handleSelectNs = useCallback((ns) => {
     setSelectedNs(ns);
@@ -542,8 +546,10 @@ function App() {
       setConflictBanner(null);
       setSidebarVisible(false);
       restoreScrollPosition(selectedNs, path);
-      // Load comments for this note
-      listComments(selectedNs, path).then(setComments).catch(() => setComments([]));
+      // Load comments for this note (multi-user mode only)
+      if (isMulti) {
+        listComments(selectedNs, path).then(setComments).catch(() => setComments([]));
+      }
     } catch (e) {
       if (e.name === 'PermissionError') {
         alert('Access denied: you do not have permission to read this file.');
@@ -909,8 +915,8 @@ function App() {
             }
           }}
           onRefresh={handleRefresh}
-          commentCount={comments.filter(c => !c.parentId && !c.resolved).length}
-          onToggleComments={() => {
+          commentCount={isMulti ? comments.filter(c => !c.parentId && !c.resolved).length : 0}
+          onToggleComments={!isMulti ? null : () => {
             const next = !showComments;
             setShowComments(next);
             // When opening comments, snap the user to Live editor — that's
@@ -970,13 +976,13 @@ function App() {
                         currentPath={currentPath}
                         ns={selectedNs}
                         readOnly={!canWriteCurrent}
-                        comments={comments}
-                        onComment={(sel) => {
+                        comments={isMulti ? comments : []}
+                        onComment={!isMulti ? null : (sel) => {
                           setPendingCommentSelection(sel);
                           setShowComments(true);
                         }}
                         onGoToReady={(fn) => { goToCommentRef.current = fn; }}
-                        onHighlightClick={(commentId) => {
+                        onHighlightClick={!isMulti ? null : (commentId) => {
                           setShowComments(true);
                           setHighlightedCommentId(commentId);
                           if (viewMode === 'preview') {
@@ -1062,7 +1068,7 @@ function App() {
         isAdmin={isAdmin && isMulti}
         selectedNs={selectedNs}
       />
-      {showComments && currentPath && (
+      {isMulti && showComments && currentPath && (
         <CommentSidebar
           comments={comments}
           ns={selectedNs}
