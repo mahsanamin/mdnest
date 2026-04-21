@@ -42,8 +42,7 @@ const commentHighlightKey = new PluginKey('comment-highlight');
 
 function buildCommentDecorations(doc, anchors) {
   if (!anchors || anchors.length === 0) return DecorationSet.empty;
-  const decorations = [];
-  const seen = new Set();
+  const rangeMap = new Map(); // key -> { from, to, ids:[] }
   for (const anchor of anchors) {
     const text = anchor?.text;
     if (!text || text.length < 2) continue;
@@ -57,13 +56,23 @@ function buildCommentDecorations(doc, anchors) {
         const from = nodePos + idx;
         const to = from + text.length;
         const key = `${from}-${to}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          decorations.push(Decoration.inline(from, to, { class: 'comment-highlight' }));
+        if (!rangeMap.has(key)) {
+          rangeMap.set(key, { from, to, ids: [anchor.id] });
+        } else {
+          rangeMap.get(key).ids.push(anchor.id);
         }
         startIdx = idx + 1;
       }
     });
+  }
+  const decorations = [];
+  for (const { from, to, ids } of rangeMap.values()) {
+    decorations.push(
+      Decoration.inline(from, to, {
+        class: 'comment-highlight',
+        'data-comment-ids': ids.join(','),
+      })
+    );
   }
   return DecorationSet.create(doc, decorations);
 }
@@ -332,11 +341,13 @@ function LiveToolbar({ editor }) {
   );
 }
 
-function LiveEditor({ content, onChange, currentPath, ns, readOnly, onComment, comments, onGoToReady }) {
+function LiveEditor({ content, onChange, currentPath, ns, readOnly, onComment, comments, onGoToReady, onHighlightClick }) {
   const [editor, setEditor] = useState(null);
   const [viewerSvg, setViewerSvg] = useState(null);
   const wrapperRef = useRef(null);
   const [selectionPopup, setSelectionPopup] = useState(null); // {top, left, text, start, end}
+  const [goToArrow, setGoToArrow] = useState(null); // {top, left}
+  const arrowTimerRef = useRef(null);
 
   // Track text selection for comment button
   useEffect(() => {
@@ -542,6 +553,7 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly, onComment, c
   // Go-to handler: finds anchor text and picks the occurrence closest to the
   // comment's stored rangeStart. This disambiguates when the same text appears
   // more than once (or when a shorter anchor is a substring of a longer one).
+  // After scrolling, shows a bouncing arrow above the text to draw attention.
   const goToComment = useCallback((comment) => {
     const anchorText = typeof comment === 'string' ? comment : comment?.anchorText;
     const hintPos = typeof comment === 'object' && comment ? Number(comment.rangeStart || 0) : 0;
@@ -574,11 +586,48 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly, onComment, c
         );
         view.dispatch(tr.scrollIntoView());
         view.focus();
+
+        // Position a bouncing arrow above the target, relative to the wrapper.
+        // Deferred so the scroll has settled before we measure coords.
+        setTimeout(() => {
+          try {
+            const v = ctx.get(editorViewCtx);
+            const startCoords = v.coordsAtPos(best.from);
+            const endCoords = v.coordsAtPos(best.to);
+            const wrapper = wrapperRef.current;
+            if (!wrapper) return;
+            const rect = wrapper.getBoundingClientRect();
+            const midX = (startCoords.left + endCoords.left) / 2;
+            const top = startCoords.top - rect.top + wrapper.scrollTop - 36;
+            const left = midX - rect.left + wrapper.scrollLeft;
+            setGoToArrow({ top, left });
+            if (arrowTimerRef.current) clearTimeout(arrowTimerRef.current);
+            arrowTimerRef.current = setTimeout(() => setGoToArrow(null), 2600);
+          } catch {}
+        }, 120);
       });
     } catch (e) {
       console.error('Go to comment failed:', e);
     }
   }, [editor]);
+
+  // Clicking a yellow comment-highlight in the editor opens the sidebar
+  // and flashes the relevant comment card.
+  useEffect(() => {
+    const el = wrapperRef.current;
+    if (!el || !onHighlightClick) return;
+    const onClick = (e) => {
+      const target = e.target.closest && e.target.closest('.comment-highlight');
+      if (!target) return;
+      const ids = (target.getAttribute('data-comment-ids') || '').split(',').filter(Boolean);
+      if (ids.length === 0) return;
+      onHighlightClick(ids[0]);
+    };
+    el.addEventListener('click', onClick);
+    return () => el.removeEventListener('click', onClick);
+  }, [onHighlightClick]);
+
+  useEffect(() => () => { if (arrowTimerRef.current) clearTimeout(arrowTimerRef.current); }, []);
 
   // Expose goToComment to parent
   useEffect(() => {
@@ -615,6 +664,19 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly, onComment, c
           >
             💬 Comment
           </button>
+        )}
+        {goToArrow && (
+          <div
+            className="comment-goto-arrow"
+            style={{ top: goToArrow.top, left: goToArrow.left }}
+            aria-hidden="true"
+          >
+            <svg width="22" height="26" viewBox="0 0 22 26" fill="none">
+              <path d="M11 2 L11 20 M4 14 L11 22 L18 14"
+                stroke="#facc15" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
+                fill="none" />
+            </svg>
+          </div>
         )}
       </div>
       {viewerSvg && (

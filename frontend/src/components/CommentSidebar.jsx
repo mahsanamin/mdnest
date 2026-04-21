@@ -1,14 +1,16 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { createComment, resolveComment, deleteComment } from '../api.js';
 
-function CommentSidebar({ comments, ns, currentPath, onRefresh, onClose, userInfo, pendingSelection, onSelectionConsumed, onGoTo }) {
+function CommentSidebar({ comments, ns, currentPath, onRefresh, onClose, userInfo, pendingSelection, onSelectionConsumed, onGoTo, highlightedId, onHighlightConsumed }) {
   const [newComment, setNewComment] = useState('');
   const [adding, setAdding] = useState(false);
   const [replyingTo, setReplyingTo] = useState(null); // parent comment id
   const [replyBody, setReplyBody] = useState('');
   const [replyPosting, setReplyPosting] = useState(false);
+  const [flashingId, setFlashingId] = useState(null);
   const textareaRef = useRef(null);
   const replyRef = useRef(null);
+  const itemRefs = useRef({}); // commentId -> DOM node
 
   useEffect(() => {
     if (pendingSelection && textareaRef.current) {
@@ -21,6 +23,26 @@ function CommentSidebar({ comments, ns, currentPath, onRefresh, onClose, userInf
       replyRef.current.focus();
     }
   }, [replyingTo]);
+
+  // When a comment is requested to be highlighted (click-through from editor
+  // or Go To), scroll its card into view and briefly flash it.
+  useEffect(() => {
+    if (!highlightedId) return;
+    // Walk up: if this is a reply, scroll to the parent thread card.
+    let targetId = highlightedId;
+    const target = (comments || []).find((c) => c.id === highlightedId);
+    if (target && target.parentId) targetId = target.parentId;
+    const node = itemRefs.current[targetId];
+    if (node && typeof node.scrollIntoView === 'function') {
+      node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    setFlashingId(targetId);
+    const t = setTimeout(() => {
+      setFlashingId(null);
+      if (onHighlightConsumed) onHighlightConsumed();
+    }, 1600);
+    return () => clearTimeout(t);
+  }, [highlightedId, comments, onHighlightConsumed]);
 
   const handleAdd = useCallback(async () => {
     if (!newComment.trim() || !ns || !currentPath) return;
@@ -120,7 +142,11 @@ function CommentSidebar({ comments, ns, currentPath, onRefresh, onClose, userInf
   );
 
   const renderThread = (c) => (
-    <div key={c.id} className={`comment-item${c.resolved ? ' resolved' : ''}`}>
+    <div
+      key={c.id}
+      ref={(el) => { itemRefs.current[c.id] = el; }}
+      className={`comment-item${c.resolved ? ' resolved' : ''}${flashingId === c.id ? ' flashing' : ''}`}
+    >
       <div className="comment-item-header">
         <span className="comment-author">{c.author}</span>
         <span className="comment-time">{formatTime(c.createdAt)}</span>

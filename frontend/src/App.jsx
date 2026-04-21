@@ -104,6 +104,7 @@ function App() {
   const [comments, setComments] = useState([]);
   const [showComments, setShowComments] = useState(false);
   const [pendingCommentSelection, setPendingCommentSelection] = useState(null);
+  const [highlightedCommentId, setHighlightedCommentId] = useState(null);
   const goToCommentRef = useRef(null);
   const editorWrapperRef = useRef(null);
   const previewWrapperRef = useRef(null);
@@ -348,6 +349,7 @@ function App() {
           setSavedContent('');
           setHash(selectedNs, null);
         });
+        listComments(selectedNs, currentPath).then(setComments).catch(() => setComments([]));
       }
     });
 
@@ -512,6 +514,7 @@ function App() {
       setSavedContent(text);
       etagRef.current = etag;
       restoreScrollPosition(ns, path);
+      listComments(ns, path).then(setComments).catch(() => setComments([]));
     } catch (e) {
       console.error('Failed to open note:', e);
     }
@@ -953,6 +956,10 @@ function App() {
                           setShowComments(true);
                         }}
                         onGoToReady={(fn) => { goToCommentRef.current = fn; }}
+                        onHighlightClick={(commentId) => {
+                          setShowComments(true);
+                          setHighlightedCommentId(commentId);
+                        }}
                       />
                     </Suspense>
                   ) : (
@@ -1042,6 +1049,8 @@ function App() {
           pendingSelection={pendingCommentSelection}
           onSelectionConsumed={() => setPendingCommentSelection(null)}
           onGoTo={(c) => { if (goToCommentRef.current) goToCommentRef.current(c); }}
+          highlightedId={highlightedCommentId}
+          onHighlightConsumed={() => setHighlightedCommentId(null)}
         />
       )}
     </div>
