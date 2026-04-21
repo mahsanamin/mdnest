@@ -1,13 +1,17 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/mdnest/mdnest/backend/collab"
+	"github.com/mdnest/mdnest/backend/firebase"
 	"github.com/mdnest/mdnest/backend/handlers"
 	"github.com/mdnest/mdnest/backend/middleware"
 	"github.com/mdnest/mdnest/backend/store"
@@ -79,6 +83,14 @@ func main() {
 		log.Println("2FA is REQUIRED for all users")
 	}
 
+	// Federated identity (optional, multi-mode only). When enabled, the login
+	// endpoint accepts Firebase ID tokens and TOTP state is kept in Firestore
+	// so one enrollment works across every server sharing the Firebase project.
+	userProvider := env("USER_PROVIDER", "local")
+	if userProvider == "firebase" && !multiMode {
+		log.Fatal("USER_PROVIDER=firebase requires AUTH_MODE=multi")
+	}
+
 	// Create auth handler based on mode
 	var authHandler *handlers.AuthHandler
 	var userStore store.UserStore
@@ -102,12 +114,41 @@ func main() {
 
 	}
 
-	// TOTP storage: Postgres in local multi-user mode, Firestore in Firebase
-	// mode (overridden further down once we know the user provider).
+	// TOTP storage: Postgres in local multi-user mode, Firestore when
+	// USER_PROVIDER=firebase. AuthHandler gets the matching store so login
+	// reads fresh 2FA state from the right place.
 	var totpStore store.TOTPStore
+	var firebaseClient *firebase.Client
 	if multiMode {
-		totpStore = store.NewPostgresTOTPStore(userStore)
+		if userProvider == "firebase" {
+			c, err := firebase.NewClient(context.Background(),
+				env("FIREBASE_SERVICE_ACCOUNT", ""),
+				env("FIREBASE_PROJECT_ID", ""))
+			if err != nil {
+				log.Fatalf("failed to init firebase client: %v", err)
+			}
+			firebaseClient = c
+			totpStore = firebase.NewTOTPStore(c.Firestore, userStore)
+			log.Println("USER_PROVIDER=firebase — federated identity via Firebase Auth")
+		} else {
+			totpStore = store.NewPostgresTOTPStore(userStore)
+		}
 		authHandler = handlers.NewMultiAuthHandler(jwtSecret, userStore, totpStore, require2FA)
+
+		// Reconcile ADMIN_EMAILS on startup (idempotent). Emails removed from
+		// the list are NOT auto-demoted — operator must demote explicitly.
+		adminEmails := parseAdminEmails(env("ADMIN_EMAILS", ""))
+		for email := range adminEmails {
+			if promoted, err := userStore.PromoteToAdmin(email); err != nil {
+				log.Printf("admin email reconcile failed for %s: %v", email, err)
+			} else if promoted {
+				log.Printf("ADMIN_EMAILS: promoted %s to admin", email)
+			}
+		}
+
+		if firebaseClient != nil {
+			authHandler.SetFirebase(firebaseClient, adminEmails)
+		}
 	} else {
 		authHandler = handlers.NewAuthHandler(user, password, jwtSecret, secretsDir)
 	}
@@ -173,6 +214,13 @@ func main() {
 
 	serverAlias := env("SERVER_ALIAS", "")
 	configHandler := handlers.NewConfigHandler(authMode, enableCollab, serverAlias, require2FA)
+	if firebaseClient != nil {
+		webCfg, err := readFirebaseWebConfig(env("FIREBASE_WEB_CONFIG", ""))
+		if err != nil {
+			log.Fatalf("failed to read FIREBASE_WEB_CONFIG: %v", err)
+		}
+		configHandler.SetFirebase(webCfg)
+	}
 	mux.HandleFunc("/api/config", configHandler.HandleConfig)
 	mux.HandleFunc("/api/auth/login", authHandler.Login)
 	mux.Handle("/api/auth/change-password", authMiddleware.Wrap(http.HandlerFunc(authHandler.ChangePassword)))
@@ -257,4 +305,36 @@ func main() {
 	if err := http.ListenAndServe(":"+port, handler); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// parseAdminEmails turns a comma-separated env string into a lowercased
+// set used by the Firebase claim path to bootstrap admin role.
+func parseAdminEmails(s string) map[string]bool {
+	out := map[string]bool{}
+	for _, raw := range strings.Split(s, ",") {
+		e := strings.ToLower(strings.TrimSpace(raw))
+		if e != "" {
+			out[e] = true
+		}
+	}
+	return out
+}
+
+// readFirebaseWebConfig loads the Firebase web-config JSON file (the one
+// you download from Project settings → Your apps → Web) so the backend
+// can hand it to the frontend via /api/config. Keeping it here (rather
+// than asking nginx to serve the file) means zero nginx config changes.
+func readFirebaseWebConfig(path string) (map[string]interface{}, error) {
+	if path == "" {
+		return nil, os.ErrNotExist
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var out map[string]interface{}
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
