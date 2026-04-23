@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Login from './components/Login.jsx';
 import LoginFirebase from './components/LoginFirebase.jsx';
+import LoginSSO from './components/LoginSSO.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import Toolbar from './components/Toolbar.jsx';
 import { lazy, Suspense } from 'react';
@@ -40,6 +41,29 @@ function logout() {
   signOutFirebase().finally(apiLogout);
 }
 
+// If we arrived here from /api/auth/sso/callback the JWT is sitting in the
+// URL fragment as #sso_token=<jwt>, and errors as #sso_error=<code>.
+// Reads once on page load, strips the hash, and returns any error code for
+// the LoginSSO component to render. Lazy useState initialiser calls it
+// exactly once per mount so it doesn't race with React's normal hash
+// handling used for note navigation.
+function consumeSSOHashOnLoad() {
+  if (typeof window === 'undefined') return null;
+  const h = window.location.hash || '';
+  if (h.startsWith('#sso_token=')) {
+    const token = decodeURIComponent(h.slice('#sso_token='.length));
+    try { localStorage.setItem('mdnest_token', token); } catch {}
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    return null;
+  }
+  if (h.startsWith('#sso_error=')) {
+    const code = decodeURIComponent(h.slice('#sso_error='.length));
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    return code;
+  }
+  return null;
+}
+
 // URL helpers: store ns and path in hash like #ns/path/to/note.md
 function parseHash() {
   const hash = window.location.hash.replace(/^#\/?/, '');
@@ -62,6 +86,7 @@ function setHash(ns, path) {
 }
 
 function App() {
+  const [ssoError, setSsoError] = useState(() => consumeSSOHashOnLoad());
   const [authenticated, setAuthenticated] = useState(!!getToken());
   const [namespaces, setNamespaces] = useState([]);
   const [selectedNs, setSelectedNs] = useState(null);
@@ -883,6 +908,9 @@ function App() {
     if (!appConfig) return <div className="login-screen"><div className="login-box"><h1>mdnest</h1></div></div>;
     if (appConfig.userProvider === 'firebase') {
       return <LoginFirebase onLogin={() => window.location.reload()} />;
+    }
+    if (appConfig.userProvider === 'sso') {
+      return <LoginSSO providerLabel={appConfig.ssoProvider} errorCode={ssoError} />;
     }
     return <Login onLogin={() => window.location.reload()} />;
   }

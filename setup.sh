@@ -70,6 +70,12 @@ while IFS= read -r line; do
     FIREBASE_SERVICE_ACCOUNT) FIREBASE_SERVICE_ACCOUNT="$value" ;;
     FIREBASE_WEB_CONFIG) FIREBASE_WEB_CONFIG="$value" ;;
     ADMIN_EMAILS) ADMIN_EMAILS="$value" ;;
+    SSO_ISSUER_URL) SSO_ISSUER_URL="$value" ;;
+    SSO_CLIENT_ID) SSO_CLIENT_ID="$value" ;;
+    SSO_CLIENT_SECRET) SSO_CLIENT_SECRET="$value" ;;
+    SSO_REDIRECT_URL) SSO_REDIRECT_URL="$value" ;;
+    SSO_ALLOWED_DOMAINS) SSO_ALLOWED_DOMAINS="$value" ;;
+    SSO_PROVIDER_LABEL) SSO_PROVIDER_LABEL="$value" ;;
     MOUNT_*)
       name="${key#MOUNT_}"
       MOUNT_NAMES+=("$name")
@@ -130,6 +136,31 @@ if [ "$USER_PROVIDER" = "firebase" ]; then
   echo "  Project: $FIREBASE_PROJECT_ID"
 fi
 
+# Validate SSO mode config — see docs/sso-setup.md for how to create the
+# OAuth client, configure redirect URIs, etc.
+if [ "$USER_PROVIDER" = "sso" ]; then
+  if [ "$AUTH_MODE" != "multi" ]; then
+    echo "Error: USER_PROVIDER=sso requires AUTH_MODE=multi."
+    exit 1
+  fi
+  if [ -z "$SSO_ISSUER_URL" ]; then
+    echo "Error: USER_PROVIDER=sso requires SSO_ISSUER_URL in $CONF."
+    echo "       Google: https://accounts.google.com"
+    echo "       Okta:   https://<your-org>.okta.com"
+    exit 1
+  fi
+  if [ -z "$SSO_CLIENT_ID" ] || [ -z "$SSO_CLIENT_SECRET" ]; then
+    echo "Error: USER_PROVIDER=sso requires SSO_CLIENT_ID and SSO_CLIENT_SECRET in $CONF."
+    echo "       Ask your devops for the OAuth client credentials, or see docs/sso-setup.md."
+    exit 1
+  fi
+  echo "User provider: sso (generic OIDC — 2FA is delegated to the IdP)"
+  echo "  Issuer: $SSO_ISSUER_URL"
+  if [ -n "$SSO_ALLOWED_DOMAINS" ]; then
+    echo "  Allowed email domains: $SSO_ALLOWED_DOMAINS"
+  fi
+fi
+
 if [ ${#MOUNT_NAMES[@]} -eq 0 ]; then
   echo "Error: No MOUNT_ entries found in $CONF."
   echo "Add at least one line like: MOUNT_myrepo=/path/to/directory"
@@ -171,6 +202,18 @@ if [ "$USER_PROVIDER" = "firebase" ]; then
 FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID}
 FIREBASE_SERVICE_ACCOUNT=/etc/mdnest/firebase-service-account.json
 FIREBASE_WEB_CONFIG=/etc/mdnest/firebase-web-config.json
+ADMIN_EMAILS=${ADMIN_EMAILS:-}
+EOF
+fi
+
+if [ "$USER_PROVIDER" = "sso" ]; then
+  cat >> .env <<EOF
+SSO_ISSUER_URL=${SSO_ISSUER_URL}
+SSO_CLIENT_ID=${SSO_CLIENT_ID}
+SSO_CLIENT_SECRET=${SSO_CLIENT_SECRET}
+SSO_REDIRECT_URL=${SSO_REDIRECT_URL:-}
+SSO_ALLOWED_DOMAINS=${SSO_ALLOWED_DOMAINS:-}
+SSO_PROVIDER_LABEL=${SSO_PROVIDER_LABEL:-}
 ADMIN_EMAILS=${ADMIN_EMAILS:-}
 EOF
 fi

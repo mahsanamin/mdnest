@@ -89,6 +89,32 @@ GIT_AUTHOR_EMAIL=you@example.com
 # Removals are NOT auto-demoted — demote explicitly via the admin UI.
 # ADMIN_EMAILS=you@example.com,teammate@example.com
 
+# ==========================================================================
+# Corporate SSO via generic OIDC (optional, requires AUTH_MODE=multi)
+# ==========================================================================
+# Alternative to the Firebase block above. Users sign in through your
+# corporate IdP (Google Workspace, Okta, Microsoft Entra, Keycloak, Auth0 —
+# anything that speaks OIDC discovery). Email is the primary identity key —
+# the user must ALREADY exist in mdnest's users table (invited by an admin).
+# No auto-provisioning. The IdP owns MFA, so local 2FA is skipped entirely.
+#
+# Step-by-step setup (create OAuth client, register redirect URI, fill in
+# these values): docs/sso-setup.md
+#
+# USER_PROVIDER=sso
+# SSO_ISSUER_URL=https://accounts.google.com        # Google's OIDC issuer
+# SSO_CLIENT_ID=<from-devops>
+# SSO_CLIENT_SECRET=<from-devops>
+#
+# Optional — restrict sign-in to specific corporate domains:
+# SSO_ALLOWED_DOMAINS=wego.com
+#
+# Optional — override the button label shown on the sign-in page:
+# SSO_PROVIDER_LABEL=Google
+#
+# Optional — only set if your redirect URI isn't FRONTEND_ORIGIN/api/auth/sso/callback:
+# SSO_REDIRECT_URL=https://notes.example.com/api/auth/sso/callback
+
 # HTTPS with Caddy (optional)
 # Set CADDY_DOMAIN to enable automatic HTTPS via Let's Encrypt.
 # Caddy runs as a container, terminates TLS, and proxies to the frontend.

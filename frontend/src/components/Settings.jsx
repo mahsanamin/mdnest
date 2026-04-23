@@ -8,9 +8,11 @@ function getServerUrl() {
 
 function Settings({ onClose, userProvider }) {
   const [tab, setTab] = useState('tokens');
-  // In Firebase mode there's no local password to change — identity lives
-  // with Google. Hide the Credentials tab so it doesn't confuse users.
-  const passwordEnabled = userProvider !== 'firebase';
+  // Hide Credentials + 2FA in any federated mode — identity lives with the
+  // external provider (Firebase Auth / corporate SSO IdP), not in mdnest's
+  // users table. Keeping the tab visible would be misleading and the
+  // change-password endpoint refuses these accounts anyway.
+  const passwordEnabled = userProvider !== 'firebase' && userProvider !== 'sso';
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
