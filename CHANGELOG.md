@@ -4,22 +4,26 @@ All notable changes to mdnest are documented here.
 
 ---
 
-## v3.4.0 — Federated Identity via Firebase
+## v3.4.0 — Corporate SSO + Federated Identity
 
 ### Features
-- **Sign in with Google across multiple mdnest servers.** New `USER_PROVIDER=firebase` mode (layered on `AUTH_MODE=multi`) turns identity into a shared service: one Google account signs you into every mdnest server that points at the same Firebase project. See `docs/firebase-setup.md` for the step-by-step.
-- **TOTP shared across servers.** In Firebase mode, 2FA secrets live in Firestore at `totp/{firebase_uid}`. Enroll once in Google Authenticator → the same code works on every server. No per-server re-enrollment.
-- **Invite flow unchanged.** Admins still invite by email. When a user with that email signs in via Google, the pre-existing row is claimed (firebase_uid attached) and their grants take effect.
-- **`ADMIN_EMAILS` bootstrap.** Comma-separated list in `mdnest.conf` gets promoted to admin on every startup — declarative admin provisioning that survives restarts.
-- **`totp_enabled` in JWT claims.** The frontend can render "Enable 2FA" vs "Manage 2FA" without hitting the TOTP store on every request. The actual 2FA gate still runs at login against fresh state.
-- **Local mode unchanged.** Servers without `USER_PROVIDER=firebase` behave identically to v3.3.0 — no new required config, no migration required to existing data.
+- **Corporate SSO via generic OIDC.** New `USER_PROVIDER=sso` mode (requires `AUTH_MODE=multi`). Users sign in through your IdP (Google Workspace, Okta, Microsoft Entra, Keycloak, Auth0 — anything that speaks OIDC discovery). Backend uses `coreos/go-oidc` + `oauth2` with PKCE; state/nonce/code-verifier carried in a short-lived HMAC-signed cookie. The IdP owns MFA, so mdnest's local 2FA is skipped in this mode. See `docs/sso-setup.md`.
+- **Email-gated sign-in, no auto-provisioning.** An SSO sign-in only succeeds if the email is already in the mdnest `users` table (invited by an admin). Role, grants, and blocked flag stay in Postgres. Rejection paths redirect back with `#sso_error=<code>` for the frontend to surface.
+- **Optional `SSO_ALLOWED_DOMAINS`** allowlist for corporate-domain-only sign-in.
+- **Firebase identity (peer mode).** `USER_PROVIDER=firebase` is also available for teams that prefer Firebase Auth + Firestore-backed shared TOTP. Docs: `docs/firebase-setup.md`. Chosen mode is exclusive per server; Firebase is not required and carries no overhead when not enabled.
+- **`store.TOTPStore` interface.** TOTP handlers, login flow, and admin 2FA reset now route through an interface with Postgres and Firestore implementations. Makes the 2FA surface swappable and explicit.
+- **`totp_enabled` JWT claim.** Populated at login-issue time so the frontend can render "Enable 2FA" vs "Manage 2FA" without hitting the TOTP store on every request. Real 2FA enforcement still runs against fresh state at login.
+- **`ADMIN_EMAILS` bootstrap.** Comma-separated list in `mdnest.conf` is reconciled into `role='admin'` on every startup. Removals are NOT auto-demoted — operator demotes explicitly.
 
 ### Internal
-- New `store.TOTPStore` interface with `PostgresTOTPStore` (local mode) and `firebase.TOTPStore` (Firestore) implementations. TOTP handlers, login flow, and admin 2FA reset all route through the interface.
-- New `backend/firebase` package wrapping the Firebase Admin SDK (Auth + Firestore).
-- Migration 005 adds `users.firebase_uid UNIQUE`, drops `NOT NULL` on `password_hash` and `username`, indexes `firebase_uid` and `email`. Additive-only; safe on local-mode databases.
-- Frontend: new `firebase-config.js` and `LoginFirebase.jsx`; existing `Login.jsx` and `Settings.jsx` are unchanged in local mode, gated behind a config check in Firebase mode.
-- `setup.sh` validates Firebase config, mounts the service-account + web-config JSON files into the backend container.
+- New `backend/sso/` package: OIDC relying-party with PKCE, cookie-based state, domain allowlist, `SanitizeFromPath` to prevent open-redirect abuse through the post-login `from=` param.
+- New `backend/handlers/sso.go` wiring two routes: `GET /api/auth/sso/start`, `GET /api/auth/sso/callback`. Only registered when `ssoClient != nil`, so misconfigurations 404 cleanly.
+- New `backend/firebase/` package: Firebase Admin SDK wrapper + Firestore TOTP store. Only instantiated when `USER_PROVIDER=firebase`.
+- Migration 005: `users.firebase_uid TEXT UNIQUE`, `DROP NOT NULL` on `password_hash` / `username`, indexes on `firebase_uid` and `email`. Additive; safe on local-mode databases.
+- Frontend: `LoginSSO.jsx` for SSO mode, `LoginFirebase.jsx` for Firebase mode, unchanged `Login.jsx` for local mode. `App.jsx` picks the right one from `/api/config.userProvider`. Hash-fragment token handoff (`#sso_token=…`) for the SSO callback.
+- `Settings.jsx` hides the "Credentials" tab in both federated modes (no local password to change).
+- `setup.sh` validates SSO / Firebase config at rebuild time, emits env vars into `.env`, mounts Firebase JSON files when needed.
+- Dockerfile: Go image bumped to `golang:1.25-alpine` (Firebase Admin SDK requires Go 1.25+).
 
 ---
 

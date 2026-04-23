@@ -51,13 +51,17 @@ function consumeSSOHashOnLoad() {
   if (typeof window === 'undefined') return null;
   const h = window.location.hash || '';
   if (h.startsWith('#sso_token=')) {
-    const token = decodeURIComponent(h.slice('#sso_token='.length));
-    try { localStorage.setItem('mdnest_token', token); } catch {}
+    let token = '';
+    try { token = decodeURIComponent(h.slice('#sso_token='.length)); } catch {}
+    if (token) {
+      try { localStorage.setItem('mdnest_token', token); } catch {}
+    }
     window.history.replaceState(null, '', window.location.pathname + window.location.search);
     return null;
   }
   if (h.startsWith('#sso_error=')) {
-    const code = decodeURIComponent(h.slice('#sso_error='.length));
+    let code = '';
+    try { code = decodeURIComponent(h.slice('#sso_error='.length)); } catch {}
     window.history.replaceState(null, '', window.location.pathname + window.location.search);
     return code;
   }
