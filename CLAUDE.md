@@ -88,7 +88,7 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 - Mobile: responsive at 768px breakpoint, sidebar becomes slide-over overlay
 - URL state: hash-based routing (#namespace/path/to/note.md)
 - API calls: all go through api.js which handles JWT and 401 redirects
-- marked v15: use plain renderer object (NOT `new marked.Renderer()`), method signature is `({ text, lang })` for code blocks
+- marked v15: use plain renderer object (NOT `new marked.Renderer()`), method signature is `({ text, lang })` for code blocks. **Register the renderer via `new Marked().use({renderer: {...}})`, NOT via the per-call `marked(src, {renderer})` option** — the per-call form replaces the default renderer entirely (no fallback), so any token type you don't override crashes with `this.renderer.X is not a function`. Also: never call `this.parser.parseInline(token.tokens)` from a custom `listitem`; task items with nested blocks will blow up with `Token with "list" type was not found`. Rely on marked's built-in GFM task rendering and re-wire the checkboxes in the DOM post-pass.
 - Mermaid: rendered post-DOM-insert by querying `.mermaid-source` divs
 - Two editor modes: Basic (textarea, Editor.jsx) and Live (Milkdown, LiveEditor.jsx)
 - Live editor: lazy-loaded via React.lazy(), only downloads when user switches to Live mode
