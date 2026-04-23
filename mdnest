@@ -46,6 +46,32 @@ load_default() {
   return 1
 }
 
+# Deprecation nudge. "default" as an alias is no longer created at login
+# time (we refuse it and pull from /api/config instead), but existing
+# installs may still have one. Let the user know how to fix it, once per
+# invocation so scripts don't get spammed.
+warn_if_default_alias() {
+  if [ "$CURRENT_ALIAS" = "default" ] && [ -z "$MDNEST_DEFAULT_WARNED" ]; then
+    export MDNEST_DEFAULT_WARNED=1
+    cat >&2 <<'WARN'
+Notice: you're using the deprecated @default alias. Rename it so the
+server has a real name in your CLI:
+  mdnest rename @default @<new-name>
+The server's own SERVER_ALIAS (in mdnest.conf) will be picked up
+automatically on next login if set.
+WARN
+  fi
+}
+
+# Pulls SERVER_ALIAS (if any) out of the target server's /api/config.
+# Stdout is the alias, or empty if none / unreachable.
+fetch_server_alias() {
+  local url="$1"
+  curl -s --max-time 5 "${url}/api/config" 2>/dev/null \
+    | grep -o '"serverAlias":"[^"]*"' \
+    | cut -d'"' -f4
+}
+
 require_server() {
   if [ -z "$MDNEST_URL" ] || [ -z "$MDNEST_TOKEN" ]; then
     echo "Not logged in. Run: mdnest login @alias <url> <token>" >&2
@@ -121,53 +147,81 @@ urlencode() {
 # ─── Commands ───────────────────────────────────────────────────────────────
 
 cmd_login() {
-  local alias="" url="" tok=""
+  local alias="" url="" tok="" alias_source=""
 
   if [[ "$1" == @* ]]; then
     alias="${1#@}"
     url="$2"
     tok="$3"
+    alias_source="explicit"
   else
     url="$1"
     tok="$2"
-    alias="default"
+    alias_source="autodetect"
   fi
 
   if [ -z "$url" ] || [ -z "$tok" ]; then
     cat <<'USAGE'
 Usage:
-  mdnest login @alias <url> <token>    Multi-server (you choose the alias name)
-  mdnest login <url> <token>           Single server (alias = "default")
+  mdnest login @alias <url> <token>   Pick the alias yourself.
+  mdnest login <url> <token>          Use the server's own SERVER_ALIAS
+                                      (server must set it in mdnest.conf).
 
-The @alias is any name you choose (e.g. @work, @home, @staging).
-Login creates or overwrites the alias. To rename: logout + login with new name.
+The @alias is any short name (e.g. @work, @home, @staging). It shows up
+in your paths (mdnest://@alias/ns/file.md) and in copy-path URIs from
+the web UI.
 
 Examples:
-  mdnest login @work https://work-server:3236 mdnest_abc123
-  mdnest login @personal https://home:3236 mdnest_def456
-  mdnest login https://myserver:3236 mdnest_abc123
+  mdnest login @work     https://work.example.com  mdnest_abc123
+  mdnest login @personal https://home.example.com  mdnest_def456
+  mdnest login           https://myserver.com      mdnest_xyz789
 USAGE
     exit 1
   fi
 
   url="${url%/}"
+
+  # Resolve alias when it wasn't given explicitly: ask the server.
+  if [ "$alias_source" = "autodetect" ]; then
+    alias=$(fetch_server_alias "$url")
+    if [ -z "$alias" ]; then
+      cat >&2 <<ERR
+Error: this server has no SERVER_ALIAS configured, so the CLI can't
+pick a name for it automatically.
+
+Fix one of:
+  1. Pass an alias explicitly:
+       mdnest login @<name> $url $tok
+  2. Set SERVER_ALIAS in the server's mdnest.conf and rebuild:
+       SERVER_ALIAS=work
+
+(We used to silently name it @default, but that hid which server was
+which — so it's blocked now.)
+ERR
+      exit 1
+    fi
+  fi
+
+  # Refuse the literal "default" alias — it carries the same confusion
+  # we're trying to kill.
+  if [ "$alias" = "default" ]; then
+    cat >&2 <<'ERR'
+Error: '@default' is not a valid alias — pick a meaningful name like
+@work, @home, @staging. The name appears in copy-path URIs from the
+web UI, so it should identify the server.
+ERR
+    exit 1
+  fi
+
   mkdir -p "$SERVERS_DIR"
 
-  # Warn if overwriting a different server without alias
-  if [ "$alias" = "default" ] && [ -f "$(get_server_file "default")" ]; then
+  # Overwriting an existing alias is fine (same name, same server,
+  # just rotating the token). Warn only if the URL changes underneath.
+  if [ -f "$(get_server_file "$alias")" ]; then
     local existing_url
-    existing_url=$(grep '^url=' "$(get_server_file "default")" 2>/dev/null | cut -d= -f2-)
+    existing_url=$(grep '^url=' "$(get_server_file "$alias")" 2>/dev/null | cut -d= -f2-)
     if [ -n "$existing_url" ] && [ "$existing_url" != "$url" ]; then
-      echo "Warning: replacing existing default server ($existing_url)"
-      echo "  To keep both servers, use aliases:"
-      echo "    mdnest login @name1 $existing_url <token>"
-      echo "    mdnest login @name2 $url <token>"
-      echo ""
-      read -p "Continue and replace default? (y/N): " confirm
-      if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
-        echo "Cancelled. Use: mdnest login @alias $url $tok"
-        exit 0
-      fi
+      echo "Warning: @${alias} currently points at ${existing_url}; replacing with ${url}."
     fi
   fi
 
@@ -177,16 +231,20 @@ token=${tok}
 EOF
   chmod 600 "$(get_server_file "$alias")"
 
-  if [ "$alias" = "default" ] || [ ! -f "$DEFAULT_FILE" ]; then
+  # First login on a fresh machine → become the default.
+  if [ ! -f "$DEFAULT_FILE" ]; then
     echo "$alias" > "$DEFAULT_FILE"
   fi
 
-  if [ -f "$LEGACY_CONFIG" ] && [ "$alias" = "default" ]; then
+  # Old flat config becomes meaningless once we've captured a named alias.
+  if [ -f "$LEGACY_CONFIG" ]; then
     rm -f "$LEGACY_CONFIG"
   fi
 
   if MDNEST_URL="$url" MDNEST_TOKEN="$tok" api GET "/namespaces" > /dev/null 2>&1; then
-    echo "Logged in to @${alias} (${url})"
+    local resolution_note=""
+    [ "$alias_source" = "autodetect" ] && resolution_note=" (SERVER_ALIAS from /api/config)"
+    echo "Logged in to @${alias} (${url})${resolution_note}"
     SERVER_VER=$(curl -s "${url}/api/config" 2>/dev/null | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
     if [ -n "$SERVER_VER" ]; then
       CLI_MAJOR="${MDNEST_CLI_VERSION%%.*}"
@@ -198,6 +256,43 @@ EOF
   else
     echo "Warning: could not reach $url — credentials saved, will retry on next command"
   fi
+}
+
+cmd_rename() {
+  local old="${1#@}" new="${2#@}"
+  if [ -z "$old" ] || [ -z "$new" ]; then
+    cat >&2 <<'USAGE'
+Usage: mdnest rename @<old-alias> @<new-alias>
+
+Rename a server alias. Updates the default pointer if it referred to
+the old name. Useful for cleaning up @default installed by older CLI
+versions.
+
+Example:
+  mdnest rename @default @work
+USAGE
+    exit 1
+  fi
+  if [ "$new" = "default" ]; then
+    echo "Error: '@default' is not allowed — pick a meaningful name." >&2
+    exit 1
+  fi
+  local old_file new_file
+  old_file="$(get_server_file "$old")"
+  new_file="$(get_server_file "$new")"
+  if [ ! -f "$old_file" ]; then
+    echo "No server aliased @${old}" >&2
+    exit 1
+  fi
+  if [ -f "$new_file" ]; then
+    echo "Error: @${new} already exists. Choose a different name or logout @${new} first." >&2
+    exit 1
+  fi
+  mv "$old_file" "$new_file"
+  if [ -f "$DEFAULT_FILE" ] && [ "$(cat "$DEFAULT_FILE")" = "$old" ]; then
+    echo "$new" > "$DEFAULT_FILE"
+  fi
+  echo "Renamed @${old} → @${new}"
 }
 
 cmd_logout() {
@@ -404,11 +499,11 @@ PATH FORMAT
 
 SERVER MANAGEMENT
   login    @alias <url> <token>   Add or overwrite a server alias (you choose the name)
+  login    <url> <token>          Use the server's own SERVER_ALIAS (it must be set)
   logout   [@alias]               Remove a server (omit alias to remove all)
+  rename   @old @new               Rename a server alias (also updates default)
   servers  [-v]                   List servers (add -v to include namespaces)
   whoami   [-v]                   Show CLI version + servers
-
-  Login creates the alias. There is no rename — logout + login with new name.
 
 NOTE OPERATIONS
   create   <path> [content]       Create a NEW file (fails if already exists)
@@ -427,8 +522,15 @@ OTHER
   docs                            Print full CLI reference
 
 EXAMPLES
-  # Setup
+  # Setup — pick your own alias name
   mdnest login @work https://work.company.com:3236 mdnest_abc123
+
+  # Setup — let the CLI use the server's own SERVER_ALIAS (must be set on server)
+  mdnest login https://work.company.com:3236 mdnest_abc123
+
+  # Rename a legacy @default alias installed by older CLI
+  mdnest rename @default @work
+
   mdnest servers -v                                          # discover aliases + namespaces
 
   # Create a new file (use "create", NOT "write")
@@ -458,17 +560,18 @@ shift 2>/dev/null || true
 case "$CMD" in
   login)    cmd_login "$@" ;;
   logout)   cmd_logout "$@" ;;
+  rename)   cmd_rename "$@" ;;
   servers)  cmd_servers "$@" ;;
   whoami)   cmd_whoami "$@" ;;
-  list)     load_default; cmd_list "$@" ;;
-  read)     load_default; cmd_read "$@" ;;
-  write)    load_default; cmd_write "$@" ;;
-  create)   load_default; cmd_create "$@" ;;
-  append)   load_default; cmd_append "$@" ;;
-  prepend)  load_default; cmd_prepend "$@" ;;
-  delete)   load_default; cmd_delete "$@" ;;
-  move)     load_default; cmd_move "$@" ;;
-  search)   load_default; cmd_search "$@" ;;
+  list)     load_default; warn_if_default_alias; cmd_list "$@" ;;
+  read)     load_default; warn_if_default_alias; cmd_read "$@" ;;
+  write)    load_default; warn_if_default_alias; cmd_write "$@" ;;
+  create)   load_default; warn_if_default_alias; cmd_create "$@" ;;
+  append)   load_default; warn_if_default_alias; cmd_append "$@" ;;
+  prepend)  load_default; warn_if_default_alias; cmd_prepend "$@" ;;
+  delete)   load_default; warn_if_default_alias; cmd_delete "$@" ;;
+  move)     load_default; warn_if_default_alias; cmd_move "$@" ;;
+  search)   load_default; warn_if_default_alias; cmd_search "$@" ;;
   note)     cmd_note_legacy "$@" ;;
   version|--version|-v) echo "mdnest CLI v${MDNEST_CLI_VERSION}" ;;
   docs)
