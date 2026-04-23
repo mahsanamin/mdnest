@@ -1,7 +1,54 @@
-import { useEffect, useRef, useMemo, useCallback, useState } from 'react';
+import { Component, useEffect, useRef, useMemo, useCallback, useState } from 'react';
 import { Marked } from 'marked';
 import mermaid, { fixMermaidTextColors } from '../mermaid-config.js';
 import MermaidViewer from './MermaidViewer.jsx';
+
+// Safety net for any render-time exception inside Preview (mostly marked, but
+// also mermaid rendering, task-checkbox DOM work, etc.). Without this, a
+// thrown error propagates up the tree and unmounts the whole app until reload.
+class PreviewErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+  componentDidCatch(error, info) {
+    console.error('Preview crashed:', error, info);
+  }
+  componentDidUpdate(prevProps) {
+    // Reset the boundary when the user navigates to a different note so a
+    // bad file doesn't permanently black out the preview pane.
+    if (this.state.error && prevProps.resetKey !== this.props.resetKey) {
+      this.setState({ error: null });
+    }
+  }
+  render() {
+    if (this.state.error) {
+      const msg = this.state.error.message || String(this.state.error);
+      return (
+        <div className="preview-pane-wrapper">
+          <div className="preview-pane">
+            <div className="preview-render-error">
+              <strong>Preview crashed.</strong>
+              <p>{msg}</p>
+              <p className="preview-render-error-hint">
+                Switch to <em>Editor</em> view above to keep working, or pick another file.
+              </p>
+              <button
+                className="preview-export-btn"
+                onClick={() => this.setState({ error: null })}
+                style={{ marginTop: 8 }}
+              >Try again</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 function getBaseDir(ns, notePath) {
   const nsPrefix = ns ? encodeURIComponent(ns) + '/' : '';
@@ -13,6 +60,23 @@ function getBaseDir(ns, notePath) {
 }
 
 function renderMarkdown(source, ns, notePath) {
+  try {
+    return renderMarkdownUnsafe(source, ns, notePath);
+  } catch (err) {
+    // Never let a malformed note take the whole app down. Log for devs,
+    // show a readable placeholder so the user can switch modes or edit.
+    console.error('Preview render failed:', err);
+    const msg = err && err.message ? err.message : String(err);
+    const safe = msg.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return `<div class="preview-render-error">
+      <strong>Preview could not render this file.</strong>
+      <p>${safe}</p>
+      <p class="preview-render-error-hint">Switch to <em>Editor</em> view to see the raw markdown, or report this file.</p>
+    </div>`;
+  }
+}
+
+function renderMarkdownUnsafe(source, ns, notePath) {
   const baseDir = getBaseDir(ns, notePath);
 
   // marked v15 notes:
@@ -346,4 +410,15 @@ function Preview({ content, currentPath, ns, onCheckboxToggle }) {
   );
 }
 
-export default Preview;
+// Default export is the boundary-wrapped component. resetKey is derived from
+// the note identity so switching files clears any previous error state.
+function PreviewWithBoundary(props) {
+  const resetKey = `${props.ns || ''}|${props.currentPath || ''}`;
+  return (
+    <PreviewErrorBoundary resetKey={resetKey}>
+      <Preview {...props} />
+    </PreviewErrorBoundary>
+  );
+}
+
+export default PreviewWithBoundary;

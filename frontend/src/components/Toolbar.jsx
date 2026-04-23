@@ -8,7 +8,11 @@ function Toolbar({ currentPath, onToggleSidebar, onChangePassword, onRename, onD
     onRefresh().finally(() => setTimeout(() => setRefreshing(false), 2000));
   }, [refreshing, onRefresh]);
 
-  const showEditorToggle = currentPath && viewMode === 'editor' && onEditorModeChange;
+  // Allow flipping Basic/Live even when no file is open — so a user whose
+  // Live-mode crashed on the previous file can pre-switch to Basic before
+  // opening the next one. Requires viewMode !== 'preview' (editor isn't
+  // visible in preview-only mode anyway).
+  const showEditorToggle = viewMode !== 'preview' && onEditorModeChange;
 
   return (
     <div className="toolbar">
@@ -46,7 +50,11 @@ function Toolbar({ currentPath, onToggleSidebar, onChangePassword, onRename, onD
           </span>
         )}
       </span>
-      {currentPath && (
+      {/* View mode toggle is shown even without a file open so the user can
+          never get trapped in a mode that crashed on the previous file. The
+          buttons just mutate the persisted preference; they take effect
+          when the next file is opened. */}
+      {onViewModeChange && (
         <div className="toolbar-view-toggle">
           <button
             className={viewMode === 'editor' ? 'active' : ''}
