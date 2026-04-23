@@ -7,9 +7,11 @@ require github.com/golang-jwt/jwt/v5 v5.2.2
 require (
 	cloud.google.com/go/firestore v1.22.0
 	firebase.google.com/go/v4 v4.19.0
+	github.com/coreos/go-oidc/v3 v3.18.0
 	github.com/lib/pq v1.12.0
 	github.com/pquerna/otp v1.5.0
 	golang.org/x/crypto v0.49.0
+	golang.org/x/oauth2 v0.36.0
 	google.golang.org/api v0.276.0
 	google.golang.org/grpc v1.80.0
 	nhooyr.io/websocket v1.8.17
@@ -35,7 +37,7 @@ require (
 	github.com/envoyproxy/go-control-plane/envoy v1.36.0 // indirect
 	github.com/envoyproxy/protoc-gen-validate v1.3.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
-	github.com/go-jose/go-jose/v4 v4.1.3 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
@@ -56,7 +58,6 @@ require (
 	go.opentelemetry.io/otel/sdk/metric v1.43.0 // indirect
 	go.opentelemetry.io/otel/trace v1.43.0 // indirect
 	golang.org/x/net v0.52.0 // indirect
-	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/text v0.35.0 // indirect

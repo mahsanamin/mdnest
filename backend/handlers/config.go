@@ -11,8 +11,9 @@ type ConfigHandler struct {
 	liveCollab   bool
 	serverAlias  string
 	require2FA   bool
-	userProvider string                 // "local" or "firebase"
+	userProvider string                 // "local" | "firebase" | "sso"
 	firebaseWeb  map[string]interface{} // parsed firebase-web-config.json (Firebase mode only)
+	ssoProvider  string                 // human label for the SSO button (e.g. "Google")
 }
 
 // NewConfigHandler creates a new config handler.
@@ -33,6 +34,17 @@ func (h *ConfigHandler) SetFirebase(webConfig map[string]interface{}) {
 	h.firebaseWeb = webConfig
 }
 
+// SetSSO marks this deployment as running in SSO mode. providerLabel is an
+// optional human-readable label the frontend shows on the sign-in button
+// (e.g. "Google", "Okta"). Defaults to "SSO" when empty.
+func (h *ConfigHandler) SetSSO(providerLabel string) {
+	h.userProvider = "sso"
+	if providerLabel == "" {
+		providerLabel = "SSO"
+	}
+	h.ssoProvider = providerLabel
+}
+
 // HandleConfig handles GET /api/config (unauthenticated).
 func (h *ConfigHandler) HandleConfig(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -51,6 +63,9 @@ func (h *ConfigHandler) HandleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.userProvider == "firebase" && h.firebaseWeb != nil {
 		resp["firebaseWebConfig"] = h.firebaseWeb
+	}
+	if h.userProvider == "sso" {
+		resp["ssoProvider"] = h.ssoProvider
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
