@@ -1,5 +1,5 @@
 import { useEffect, useRef, useMemo, useCallback, useState } from 'react';
-import { marked } from 'marked';
+import { Marked } from 'marked';
 import mermaid, { fixMermaidTextColors } from '../mermaid-config.js';
 import MermaidViewer from './MermaidViewer.jsx';
 
@@ -15,37 +15,47 @@ function getBaseDir(ns, notePath) {
 function renderMarkdown(source, ns, notePath) {
   const baseDir = getBaseDir(ns, notePath);
 
-  // marked v15 requires a plain-object renderer (not `new Renderer()`).
-  // We do NOT override `listitem` — marked already renders GFM task lists
-  // as <li><input type="checkbox" disabled>. The previous override called
+  // marked v15 notes:
+  //  - The Renderer class is gone / works differently. Use a plain object.
+  //  - Passing `renderer: {...}` as a per-call option REPLACES the entire
+  //    renderer with no fallback — any token type whose method you don't
+  //    supply (heading, paragraph, table, blockquote, …) blows up at render
+  //    time with "this.renderer.X is not a function".
+  //  - new Marked().use({ renderer: {...} }) MERGES your partial renderer
+  //    with the built-in defaults, which is what we want.
+  // We also do NOT override `listitem`. Marked v15 already renders GFM task
+  // lists as <li><input type="checkbox" disabled>. The old override called
   // parseInline on block-level token.tokens and blew up whenever a task
   // item contained a nested list ("Token with 'list' type was not found").
   // Task checkboxes are re-enabled + wired up in the DOM post-pass.
-  const renderer = {
-    link({ href, title, text }) {
-      const titleAttr = title ? ` title="${title}"` : '';
-      return `<a href="${href}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`;
+  const inst = new Marked({ breaks: true, gfm: true });
+  inst.use({
+    renderer: {
+      link({ href, title, text }) {
+        const titleAttr = title ? ` title="${title}"` : '';
+        return `<a href="${href}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`;
+      },
+      image({ href, title, text }) {
+        let src = href || '';
+        if (src && !src.startsWith('http') && !src.startsWith('data:') && !src.startsWith('/')) {
+          src = baseDir + src;
+        }
+        const titleAttr = title ? ` title="${title}"` : '';
+        return `<img src="${src}" alt="${text || ''}"${titleAttr} />`;
+      },
+      code({ text, lang }) {
+        const codeText = text || '';
+        const codeLang = (lang || '').trim().toLowerCase();
+        if (codeLang === 'mermaid') {
+          return `<div class="mermaid-source" data-mermaid="${encodeURIComponent(codeText)}"></div>`;
+        }
+        const escaped = codeText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        return `<pre><code class="language-${codeLang}">${escaped}</code></pre>`;
+      },
     },
-    image({ href, title, text }) {
-      let src = href || '';
-      if (src && !src.startsWith('http') && !src.startsWith('data:') && !src.startsWith('/')) {
-        src = baseDir + src;
-      }
-      const titleAttr = title ? ` title="${title}"` : '';
-      return `<img src="${src}" alt="${text || ''}"${titleAttr} />`;
-    },
-    code({ text, lang }) {
-      const codeText = text || '';
-      const codeLang = (lang || '').trim().toLowerCase();
-      if (codeLang === 'mermaid') {
-        return `<div class="mermaid-source" data-mermaid="${encodeURIComponent(codeText)}"></div>`;
-      }
-      const escaped = codeText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      return `<pre><code class="language-${codeLang}">${escaped}</code></pre>`;
-    },
-  };
+  });
 
-  return marked(source, { renderer, breaks: true, gfm: true });
+  return inst.parse(source);
 }
 
 function Preview({ content, currentPath, ns, onCheckboxToggle }) {
