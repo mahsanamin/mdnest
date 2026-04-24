@@ -167,6 +167,16 @@ if [ ${#MOUNT_NAMES[@]} -eq 0 ]; then
   exit 1
 fi
 
+# Strongly recommend (but don't force) a server alias. Without it, the
+# mdnest CLI can't auto-pick an alias on `mdnest login <url> <token>` and
+# will require every user to pass an explicit @alias.
+if [ -z "$SERVER_ALIAS" ]; then
+  echo "Warning: SERVER_ALIAS is not set in $CONF."
+  echo "  Add a line like 'SERVER_ALIAS=work' so the CLI can name this"
+  echo "  server automatically. Skipping for now (CLI users will need to"
+  echo "  pass @alias on every login)."
+fi
+
 echo "Found ${#MOUNT_NAMES[@]} namespace(s):"
 for i in "${!MOUNT_NAMES[@]}"; do
   if [ ! -d "${MOUNT_PATHS[$i]}" ]; then

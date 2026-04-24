@@ -7,8 +7,12 @@ MDNEST_USER=admin
 MDNEST_PASSWORD=changeme
 MDNEST_JWT_SECRET=changeme
 
-# Server alias (used in CLI paths, e.g. @work/namespace/path)
-# SERVER_ALIAS=work
+# Server alias — a short name for THIS server that shows up in CLI paths
+# and copy-path URIs from the web UI (e.g. mdnest://@work/namespace/path).
+# Strongly recommended. When set, `mdnest login <url> <token>` auto-picks
+# this as the CLI alias. Leave it unset only if you want CLI users to
+# always pass @alias explicitly on login.
+SERVER_ALIAS=mdnest
 
 # Frontend origin (for CORS)
 FRONTEND_ORIGIN=http://localhost:3236

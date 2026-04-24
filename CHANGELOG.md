@@ -27,6 +27,28 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v3.3.1 — Preview crash hotfix + CLI server-alias cleanup
+
+### Breaking (CLI)
+- **No more silent `@default` alias.** `mdnest login <url> <token>` without an explicit `@alias` used to create an alias literally named `default` — which hid which server was which in copy-path URIs. Now the CLI fetches `/api/config` and uses the server's `SERVER_ALIAS` automatically. If the server doesn't advertise one, login refuses with an actionable error: either pass `@alias` explicitly or set `SERVER_ALIAS=<name>` in the server's `mdnest.conf` and rebuild.
+- **`@default` is rejected as an alias name** at login time.
+- **New `mdnest rename @old @new` command** so users stuck with an existing `@default` alias can fix it in one step. Updates the default-server pointer if it referred to the old name.
+- **Existing `@default` aliases keep working** (backward-compat for scripts) but print a one-line deprecation nudge per invocation pointing at `rename`.
+
+### Server
+- **`SERVER_ALIAS` soft-required.** Backend logs a `WARNING` on startup if it's unset, and `setup.sh` prints a warning at rebuild. Not a hard failure (existing installs keep running), but CLI users on unnamed servers have to pass `@alias` manually until it's set.
+- `mdnest.conf.sample` now ships with `SERVER_ALIAS=mdnest` uncommented and a comment explaining why.
+
+### Fixes
+- **Preview crash on task lists with nested content** — clicking Split or Preview view on a file whose task list contained nested blocks (sub-lists, multi-paragraph items) threw `Token with "list" type was not found` from marked and took the preview tree down. Root cause: the custom `listitem` renderer called `parseInline` on block-level tokens. Fixed by dropping the override entirely — marked v15 already renders GFM task lists as `<li><input type="checkbox">`, and we re-wire those in the DOM post-pass.
+- **Preview crash on headings / paragraphs / tables** — follow-up regression from the first fix attempt. Passing a plain-object `renderer` via the per-call `marked(src, {renderer})` option **replaces** the default renderer entirely in marked v15, instead of merging with it. Any token type not explicitly overridden (heading, paragraph, table, blockquote, etc.) crashed with `this.renderer.X is not a function`. Fixed by switching to `new Marked().use({renderer: {...}})`, which merges with defaults.
+
+### Robustness
+- **Preview error containment** — `renderMarkdown` is now wrapped in try/catch, and the `Preview` component is wrapped in a `PreviewErrorBoundary`. A malformed note (or any future renderer bug) now shows a readable error panel inside the preview pane instead of unmounting the whole app. The boundary auto-resets when the user navigates to a different note, so a single bad file doesn't permanently black out the pane.
+- **View-mode toggle visible without a file open** — previously the Editor / Split / Preview and Basic / Live toggles were hidden when no file was selected. That trapped users in a bad mode after a crash: every file they tried to open re-triggered the same render path. Toggles are now always visible so users can pre-switch to a safe mode before opening the next file.
+
+---
+
 ## v3.3.0 — Inline Comments
 
 ### Features

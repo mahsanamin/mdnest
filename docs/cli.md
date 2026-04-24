@@ -14,20 +14,35 @@ No dependencies — just bash and curl.
 
 ## Login
 
-### Single server
+Every server you log into gets a short **alias** (`@work`, `@home`, etc). The alias appears in your paths (`@work/engineering/README.md`) and in copy-path URIs from the web UI.
+
+### Pick the alias yourself
 
 ```bash
-mdnest login https://myserver:3236 <api-token>
+mdnest login @work     https://work-server:3236  <token>
+mdnest login @personal https://home-server:3236  <token>
 ```
 
-### Multiple servers
+### Let the CLI use the server's own `SERVER_ALIAS`
+
+If the server has `SERVER_ALIAS=work` set in its `mdnest.conf`, the CLI can pick that up automatically:
 
 ```bash
-mdnest login @work https://work-server:3236 <token>
-mdnest login @personal https://home-server:3236 <token>
+mdnest login https://work-server:3236 <token>
+# → Logged in to @work (https://work-server:3236) (SERVER_ALIAS from /api/config)
 ```
 
-Create API tokens in the web UI: Settings > API Tokens.
+If the server doesn't advertise a `SERVER_ALIAS`, the CLI refuses — you'll be told to either pass `@alias` explicitly or configure `SERVER_ALIAS` on the server. (There is no more silent `@default` — that hid which server was which.)
+
+### Rename an existing alias
+
+If you have an older `@default` alias from a previous CLI version, rename it:
+
+```bash
+mdnest rename @default @work
+```
+
+Create API tokens in the web UI: Settings → API Tokens.
 
 ## Path format
 
@@ -106,9 +121,11 @@ mdnest search engineering "meeting"
 
 ```bash
 mdnest servers                   # list all configured servers + versions
+mdnest servers -v                # also list namespaces per server
 mdnest whoami                    # CLI version + all servers
 mdnest logout @work              # remove one server
 mdnest logout                    # remove all
+mdnest rename @old @new          # rename a server alias (updates the default pointer too)
 ```
 
 ## Legacy commands (backward compatible)

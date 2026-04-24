@@ -248,6 +248,9 @@ func main() {
 	mux := http.NewServeMux()
 
 	serverAlias := env("SERVER_ALIAS", "")
+	if serverAlias == "" {
+		log.Println("WARNING: SERVER_ALIAS is not set in mdnest.conf — the mdnest CLI will require users to pass an @alias manually when they log in. Add SERVER_ALIAS=<short-name> for automatic CLI alias resolution.")
+	}
 	configHandler := handlers.NewConfigHandler(authMode, enableCollab, serverAlias, require2FA)
 	if firebaseClient != nil {
 		webCfg, err := readFirebaseWebConfig(env("FIREBASE_WEB_CONFIG", ""))

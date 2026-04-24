@@ -1,7 +1,54 @@
-import { useEffect, useRef, useMemo, useCallback, useState } from 'react';
-import { marked, Renderer } from 'marked';
+import { Component, useEffect, useRef, useMemo, useCallback, useState } from 'react';
+import { Marked } from 'marked';
 import mermaid, { fixMermaidTextColors } from '../mermaid-config.js';
 import MermaidViewer from './MermaidViewer.jsx';
+
+// Safety net for any render-time exception inside Preview (mostly marked, but
+// also mermaid rendering, task-checkbox DOM work, etc.). Without this, a
+// thrown error propagates up the tree and unmounts the whole app until reload.
+class PreviewErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+  componentDidCatch(error, info) {
+    console.error('Preview crashed:', error, info);
+  }
+  componentDidUpdate(prevProps) {
+    // Reset the boundary when the user navigates to a different note so a
+    // bad file doesn't permanently black out the preview pane.
+    if (this.state.error && prevProps.resetKey !== this.props.resetKey) {
+      this.setState({ error: null });
+    }
+  }
+  render() {
+    if (this.state.error) {
+      const msg = this.state.error.message || String(this.state.error);
+      return (
+        <div className="preview-pane-wrapper">
+          <div className="preview-pane">
+            <div className="preview-render-error">
+              <strong>Preview crashed.</strong>
+              <p>{msg}</p>
+              <p className="preview-render-error-hint">
+                Switch to <em>Editor</em> view above to keep working, or pick another file.
+              </p>
+              <button
+                className="preview-export-btn"
+                onClick={() => this.setState({ error: null })}
+                style={{ marginTop: 8 }}
+              >Try again</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 function getBaseDir(ns, notePath) {
   const nsPrefix = ns ? encodeURIComponent(ns) + '/' : '';
@@ -13,52 +60,66 @@ function getBaseDir(ns, notePath) {
 }
 
 function renderMarkdown(source, ns, notePath) {
+  try {
+    return renderMarkdownUnsafe(source, ns, notePath);
+  } catch (err) {
+    // Never let a malformed note take the whole app down. Log for devs,
+    // show a readable placeholder so the user can switch modes or edit.
+    console.error('Preview render failed:', err);
+    const msg = err && err.message ? err.message : String(err);
+    const safe = msg.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return `<div class="preview-render-error">
+      <strong>Preview could not render this file.</strong>
+      <p>${safe}</p>
+      <p class="preview-render-error-hint">Switch to <em>Editor</em> view to see the raw markdown, or report this file.</p>
+    </div>`;
+  }
+}
+
+function renderMarkdownUnsafe(source, ns, notePath) {
   const baseDir = getBaseDir(ns, notePath);
-  let taskIndex = 0;
 
-  const renderer = new Renderer();
+  // marked v15 notes:
+  //  - The Renderer class is gone / works differently. Use a plain object.
+  //  - Passing `renderer: {...}` as a per-call option REPLACES the entire
+  //    renderer with no fallback — any token type whose method you don't
+  //    supply (heading, paragraph, table, blockquote, …) blows up at render
+  //    time with "this.renderer.X is not a function".
+  //  - new Marked().use({ renderer: {...} }) MERGES your partial renderer
+  //    with the built-in defaults, which is what we want.
+  // We also do NOT override `listitem`. Marked v15 already renders GFM task
+  // lists as <li><input type="checkbox" disabled>. The old override called
+  // parseInline on block-level token.tokens and blew up whenever a task
+  // item contained a nested list ("Token with 'list' type was not found").
+  // Task checkboxes are re-enabled + wired up in the DOM post-pass.
+  const inst = new Marked({ breaks: true, gfm: true });
+  inst.use({
+    renderer: {
+      link({ href, title, text }) {
+        const titleAttr = title ? ` title="${title}"` : '';
+        return `<a href="${href}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`;
+      },
+      image({ href, title, text }) {
+        let src = href || '';
+        if (src && !src.startsWith('http') && !src.startsWith('data:') && !src.startsWith('/')) {
+          src = baseDir + src;
+        }
+        const titleAttr = title ? ` title="${title}"` : '';
+        return `<img src="${src}" alt="${text || ''}"${titleAttr} />`;
+      },
+      code({ text, lang }) {
+        const codeText = text || '';
+        const codeLang = (lang || '').trim().toLowerCase();
+        if (codeLang === 'mermaid') {
+          return `<div class="mermaid-source" data-mermaid="${encodeURIComponent(codeText)}"></div>`;
+        }
+        const escaped = codeText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        return `<pre><code class="language-${codeLang}">${escaped}</code></pre>`;
+      },
+    },
+  });
 
-  renderer.link = function ({ href, title, text }) {
-    const titleAttr = title ? ` title="${title}"` : '';
-    return `<a href="${href}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`;
-  };
-
-  renderer.image = function ({ href, title, text }) {
-    let src = href || '';
-    if (src && !src.startsWith('http') && !src.startsWith('data:') && !src.startsWith('/')) {
-      src = baseDir + src;
-    }
-    const titleAttr = title ? ` title="${title}"` : '';
-    return `<img src="${src}" alt="${text || ''}"${titleAttr} />`;
-  };
-
-  renderer.code = function ({ text, lang }) {
-    const codeText = text || '';
-    const codeLang = (lang || '').trim().toLowerCase();
-    if (codeLang === 'mermaid') {
-      return `<div class="mermaid-source" data-mermaid="${encodeURIComponent(codeText)}"></div>`;
-    }
-    const escaped = codeText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    return `<pre><code class="language-${codeLang}">${escaped}</code></pre>`;
-  };
-
-  const origListitem = renderer.listitem.bind(renderer);
-  renderer.listitem = function (token) {
-    const raw = token.raw || '';
-    const isChecked = raw.trimStart().startsWith('- [x]') || raw.trimStart().startsWith('* [x]');
-    const isUnchecked = raw.trimStart().startsWith('- [ ]') || raw.trimStart().startsWith('* [ ]');
-    if (isChecked || isUnchecked) {
-      const text = this.parser.parseInline(token.tokens);
-      const idx = taskIndex++;
-      const checked = isChecked ? 'checked' : '';
-      const checkbox = `<input type="checkbox" class="task-checkbox" data-task-index="${idx}" ${checked} />`;
-      const cleanText = text.replace(/^\[[ x]\]\s*/, '');
-      return `<li class="task-item">${checkbox}${cleanText}</li>\n`;
-    }
-    return origListitem(token);
-  };
-
-  return marked(source, { renderer, breaks: true });
+  return inst.parse(source);
 }
 
 function Preview({ content, currentPath, ns, onCheckboxToggle }) {
@@ -75,10 +136,21 @@ function Preview({ content, currentPath, ns, onCheckboxToggle }) {
     if (!el) return;
     el.innerHTML = html;
 
-    // Checkbox handling
-    el.querySelectorAll('.task-checkbox').forEach((cb) => {
-      cb.addEventListener('change', (e) => {
-        const idx = parseInt(e.target.dataset.taskIndex, 10);
+    // Task checkbox handling. marked v15 emits GFM task lists as
+    // <li><input type="checkbox" disabled [checked]> text</li> — we re-enable
+    // those here, style their parent <li>, and wire a click handler that
+    // walks the source markdown to find the matching line to toggle.
+    let taskIdx = 0;
+    el.querySelectorAll('li > input[type="checkbox"]').forEach((cb) => {
+      if (onCheckboxToggle) {
+        cb.removeAttribute('disabled');
+      }
+      cb.classList.add('task-checkbox');
+      const li = cb.parentElement;
+      if (li) li.classList.add('task-item');
+      const idx = taskIdx++;
+      if (!onCheckboxToggle) return;
+      cb.addEventListener('change', () => {
         const lines = (content || '').split('\n');
         let taskCount = 0;
         for (let i = 0; i < lines.length; i++) {
@@ -338,4 +410,15 @@ function Preview({ content, currentPath, ns, onCheckboxToggle }) {
   );
 }
 
-export default Preview;
+// Default export is the boundary-wrapped component. resetKey is derived from
+// the note identity so switching files clears any previous error state.
+function PreviewWithBoundary(props) {
+  const resetKey = `${props.ns || ''}|${props.currentPath || ''}`;
+  return (
+    <PreviewErrorBoundary resetKey={resetKey}>
+      <Preview {...props} />
+    </PreviewErrorBoundary>
+  );
+}
+
+export default PreviewWithBoundary;
