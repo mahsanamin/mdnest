@@ -136,6 +136,50 @@ Admin: reset a user's 2FA. Requires admin role.
 
 ---
 
+### Corporate SSO (USER_PROVIDER=sso)
+
+Both endpoints are only mounted when `USER_PROVIDER=sso` is set and the OIDC client initializes successfully at startup. Under any other configuration they return 404. See `docs/sso-setup.md` for the operator checklist.
+
+#### GET /api/auth/sso/start
+Kicks off the OIDC authorization-code + PKCE flow. Generates CSRF state, OIDC nonce, and the PKCE verifier; packs them into a short-lived HMAC-signed cookie; returns a 302 to the IdP's authorize URL.
+
+**Query parameters:**
+
+| Param | Description |
+|-------|-------------|
+| `from` | Optional absolute path on this origin (e.g. `/growth/foo.md`) — where to land after a successful sign-in. Anything with a scheme, host, or query string is rejected and replaced with `/` to prevent open-redirect abuse. |
+
+**Response:** 302 redirect to the IdP, with `Set-Cookie: mdnest_sso_state=...; HttpOnly; SameSite=Lax; Max-Age=600`.
+
+#### GET /api/auth/sso/callback
+The IdP redirects the browser here after the user authenticates. The backend verifies the state cookie, exchanges the code with PKCE, verifies the ID token, checks the email against the local `users` table, and mints the same JWT the classic password flow issues.
+
+**Query parameters (sent by the IdP):** `state`, `code`, or `error` on failure.
+
+**Response:** 302 redirect back to the frontend. On success:
+
+```
+Location: <FRONTEND_ORIGIN>/<from>#sso_token=<jwt>
+```
+
+On failure:
+
+```
+Location: <FRONTEND_ORIGIN>/#sso_error=<code>
+```
+
+| Error code | Meaning |
+|------------|---------|
+| `sso_denied:<reason>` | IdP rejected the sign-in (user cancelled, scope not approved). |
+| `sso_failed` | State cookie expired, code exchange failed, or ID token verification failed. |
+| `sso_not_invited` | IdP authenticated the user, but no mdnest row matches their email. |
+| `sso_blocked` | User row exists but `blocked=true`. |
+| `sso_internal` | Backend error during user lookup or JWT signing. |
+
+The frontend consumes the fragment on load (`localStorage.setItem('mdnest_token', …)`), strips the hash, and proceeds normally. 2FA is not prompted in SSO mode — the IdP owns MFA.
+
+---
+
 ### API Tokens: /api/auth/tokens
 
 Manage long-lived API tokens for CLI and MCP access. Tokens are prefixed with `mdnest_` and stored as SHA-256 hashes.

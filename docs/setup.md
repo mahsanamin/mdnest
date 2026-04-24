@@ -59,6 +59,15 @@ On first run, `setup.sh` copies `mdnest.conf.sample` to `mdnest.conf` and exits,
 | `POSTGRES_DB` | `mdnest` | PostgreSQL database name (only when `AUTH_MODE=multi`) |
 | `POSTGRES_USER` | `mdnest` | PostgreSQL user (only when `AUTH_MODE=multi`) |
 | `POSTGRES_PASSWORD` | *(none, required when multi)* | PostgreSQL password (only when `AUTH_MODE=multi`) |
+| `USER_PROVIDER` | `local` | Identity provider when `AUTH_MODE=multi`: `local` (username/password + Postgres TOTP), `firebase` (see `docs/firebase-setup.md`), or `sso` (generic OIDC — see `docs/sso-setup.md`). |
+| `SSO_ISSUER_URL` | *(required when `USER_PROVIDER=sso`)* | OIDC issuer URL, e.g. `https://accounts.google.com`, `https://<org>.okta.com`. |
+| `SSO_CLIENT_ID` | *(required when `USER_PROVIDER=sso`)* | OAuth client ID from your IdP. |
+| `SSO_CLIENT_SECRET` | *(required when `USER_PROVIDER=sso`)* | OAuth client secret from your IdP. |
+| `SSO_REDIRECT_URL` | `<FRONTEND_ORIGIN>/api/auth/sso/callback` | Override if your callback URL doesn't match the default. |
+| `SSO_ALLOWED_DOMAINS` | *(none)* | Comma-separated email-domain allowlist, e.g. `example.com`. Leave empty to allow any verified email. |
+| `SSO_PROVIDER_LABEL` | `SSO` | Text on the sign-in button (e.g. `Google`, `Okta`). |
+| `FIREBASE_PROJECT_ID`, `FIREBASE_SERVICE_ACCOUNT`, `FIREBASE_WEB_CONFIG` | *(required when `USER_PROVIDER=firebase`)* | See `docs/firebase-setup.md`. |
+| `ADMIN_EMAILS` | *(none)* | Comma-separated emails promoted to `role=admin` on every startup. |
 | `SSH_KEY_PATH` | *(none)* | Path to SSH private key on the host. Mounted into the backend for git pull via sync button. Must be passphrase-free. |
 | `CADDY_DOMAIN` | *(none)* | Domain name for automatic HTTPS via Caddy. When set, adds a Caddy container and makes backend/frontend ports internal-only. Requires a DNS A record pointing to the server. |
 | `MOUNT_<name>` | *(none, at least one required)* | Maps a namespace to a host directory. See below. |
