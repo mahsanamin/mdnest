@@ -11,23 +11,34 @@ import (
 
 // MeHandler returns the current user's info and grants.
 type MeHandler struct {
-	userStore  store.UserStore
-	grantStore store.GrantStore
+	userStore    store.UserStore
+	grantStore   store.GrantStore
+	nsAdminStore store.NamespaceAdminStore
 }
 
 // NewMeHandler creates a new MeHandler.
-func NewMeHandler(userStore store.UserStore, grantStore store.GrantStore) *MeHandler {
-	return &MeHandler{userStore: userStore, grantStore: grantStore}
+func NewMeHandler(userStore store.UserStore, grantStore store.GrantStore, nsAdminStore store.NamespaceAdminStore) *MeHandler {
+	return &MeHandler{userStore: userStore, grantStore: grantStore, nsAdminStore: nsAdminStore}
 }
 
 type meResponse struct {
-	ID        int       `json:"id"`
-	Email     string    `json:"email"`
-	Username  string    `json:"username"`
-	AvatarURL string    `json:"avatar_url,omitempty"`
-	Role      string    `json:"role"`
-	CreatedAt string    `json:"created_at"`
+	ID        int    `json:"id"`
+	Email     string `json:"email"`
+	Username  string `json:"username"`
+	AvatarURL string `json:"avatar_url,omitempty"`
+	Role      string `json:"role"`
+	CreatedAt string `json:"created_at"`
 	Grants    []meGrant `json:"grants"`
+	// IsSuperAdmin is true only for the global "superadmin" role. The
+	// frontend uses this to show / hide the system-wide admin actions
+	// (reset 2FA, delete user, promote between roles, sync all).
+	IsSuperAdmin bool `json:"is_super_admin"`
+	// AdminNamespaces is the list of namespaces this user is a
+	// namespace-scoped admin of (empty for collaborators and
+	// superadmins). The frontend uses it to show only the relevant
+	// scope in the admin panel and to show an "(admin)" badge in the
+	// sidebar.
+	AdminNamespaces []string `json:"admin_namespaces"`
 }
 
 type meGrant struct {
@@ -75,14 +86,25 @@ func (h *MeHandler) HandleMe(w http.ResponseWriter, r *http.Request) {
 	if user.AvatarURL != nil {
 		avatar = *user.AvatarURL
 	}
+
+	var adminNs []string
+	if h.nsAdminStore != nil {
+		adminNs, _ = h.nsAdminStore.ListByUser(user.ID)
+	}
+	if adminNs == nil {
+		adminNs = []string{}
+	}
+
 	resp := meResponse{
-		ID:        user.ID,
-		Email:     user.Email,
-		Username:  user.Username,
-		AvatarURL: avatar,
-		Role:      user.Role,
-		CreatedAt: user.CreatedAt.Format(time.RFC3339),
-		Grants:    meGrants,
+		ID:              user.ID,
+		Email:           user.Email,
+		Username:        user.Username,
+		AvatarURL:       avatar,
+		Role:            user.Role,
+		CreatedAt:       user.CreatedAt.Format(time.RFC3339),
+		Grants:          meGrants,
+		IsSuperAdmin:    user.Role == "superadmin",
+		AdminNamespaces: adminNs,
 	}
 
 	w.Header().Set("Content-Type", "application/json")

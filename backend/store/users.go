@@ -50,7 +50,7 @@ type UserStore interface {
 
 	// Firebase identity federation.
 	UpsertFirebaseUser(email, firebaseUID, displayName string, adminEmails map[string]bool) (*User, error)
-	PromoteToAdmin(email string) (bool, error)
+	PromoteToSuperAdmin(email string) (bool, error)
 
 	// BackfillSSOProfile fills in display name + avatar from the IdP on
 	// every successful SSO login, but only when the row's value is empty
@@ -306,12 +306,17 @@ func (s *PostgresUserStore) UpsertFirebaseUser(email, firebaseUID, displayName s
 	return nil, fmt.Errorf("user %s is not invited on this server", email)
 }
 
-// PromoteToAdmin sets role='admin' for any user matching the given email.
-// Idempotent — safe to call on every startup for every ADMIN_EMAILS entry.
-// Returns true if a row was updated.
-func (s *PostgresUserStore) PromoteToAdmin(email string) (bool, error) {
+// PromoteToSuperAdmin sets role='superadmin' for any user matching the given
+// email. Idempotent — safe to call on every startup for every ADMIN_EMAILS
+// entry. Returns true if a row was updated.
+//
+// As of v3.5.0 ADMIN_EMAILS auto-promotes to superadmin (the global
+// "everything" role); old role='admin' was migrated to 'superadmin' by
+// migration 007 to preserve current behavior. The new namespace-scoped
+// 'admin' role is assigned via /api/admin/namespace-admins, not here.
+func (s *PostgresUserStore) PromoteToSuperAdmin(email string) (bool, error) {
 	res, err := s.db.Exec(
-		`UPDATE users SET role = 'admin' WHERE lower(email) = lower($1) AND role <> 'admin'`,
+		`UPDATE users SET role = 'superadmin' WHERE lower(email) = lower($1) AND role <> 'superadmin'`,
 		email,
 	)
 	if err != nil {

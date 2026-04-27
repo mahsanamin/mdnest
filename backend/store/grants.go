@@ -29,6 +29,7 @@ type GrantStore interface {
 	CreateGrant(userID int, namespace, path, permission string, grantedBy *int) (*Grant, error)
 	UpdateGrantPermission(id int, permission string) error
 	DeleteGrant(id int) error
+	GetGrant(id int) (*Grant, error)
 	GetGrantsForUser(userID int) ([]Grant, error)
 	GetGrantsForNamespace(namespace string) ([]Grant, error)
 	GetGrantsForPath(namespace, path string) ([]GrantWithUser, error)
@@ -108,6 +109,19 @@ func (s *PostgresGrantStore) GetGrantsForPath(namespace, path string) ([]GrantWi
 		grants = append(grants, g)
 	}
 	return grants, rows.Err()
+}
+
+// GetGrant returns a single grant by id, or (nil, nil) if not found.
+func (s *PostgresGrantStore) GetGrant(id int) (*Grant, error) {
+	row := s.db.QueryRow(
+		`SELECT id, user_id, namespace, path, permission, granted_by, created_at
+		 FROM access_grants WHERE id = $1`, id,
+	)
+	g, err := ScanGrant(row)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch grant: %w", err)
+	}
+	return g, nil
 }
 
 func (s *PostgresGrantStore) DeleteGrant(id int) error {

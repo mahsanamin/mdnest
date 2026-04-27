@@ -172,12 +172,14 @@ func main() {
 
 		// Reconcile ADMIN_EMAILS on startup (idempotent). Emails removed from
 		// the list are NOT auto-demoted — operator must demote explicitly.
+		// As of v3.5.0 these emails are promoted to superadmin (global), not
+		// the new namespace-scoped admin role.
 		adminEmails := parseAdminEmails(env("ADMIN_EMAILS", ""))
 		for email := range adminEmails {
-			if promoted, err := userStore.PromoteToAdmin(email); err != nil {
+			if promoted, err := userStore.PromoteToSuperAdmin(email); err != nil {
 				log.Printf("admin email reconcile failed for %s: %v", email, err)
 			} else if promoted {
-				log.Printf("ADMIN_EMAILS: promoted %s to admin", email)
+				log.Printf("ADMIN_EMAILS: promoted %s to superadmin", email)
 			}
 		}
 
@@ -191,9 +193,11 @@ func main() {
 	// Permission checker (nil in single mode, wraps grant checks in multi mode)
 	var perms *middleware.PermissionChecker
 	var grantStore store.GrantStore
+	var nsAdminStore store.NamespaceAdminStore
 	if multiMode {
 		grantStore = store.NewPostgresGrantStore(db)
-		perms = middleware.NewPermissionChecker(grantStore)
+		nsAdminStore = store.NewPostgresNamespaceAdminStore(db)
+		perms = middleware.NewPermissionChecker(grantStore, nsAdminStore)
 	}
 
 	// Live collaboration hub (optional, multi mode only)
@@ -321,22 +325,34 @@ func main() {
 
 	// Multi-mode routes (require admin role for /admin/*, authenticated for /me)
 	if multiMode {
-		adminHandler := handlers.NewAdminHandler(userStore, grantStore, collabHub)
-		meHandler := handlers.NewMeHandler(userStore, grantStore)
+		adminHandler := handlers.NewAdminHandler(userStore, grantStore, nsAdminStore, collabHub)
+		meHandler := handlers.NewMeHandler(userStore, grantStore, nsAdminStore)
 
+		// Admin endpoints: outer gate is RequireAdmin (= any admin role).
+		// Per-namespace scoping is done inside each handler so namespace
+		// admins are limited to their own namespaces while superadmins
+		// see / mutate everything.
 		mux.Handle("/api/admin/invite", authMiddleware.Wrap(middleware.RequireAdmin(http.HandlerFunc(adminHandler.HandleInvite))))
-		mux.Handle("/api/admin/users", authMiddleware.Wrap(middleware.RequireAdmin(http.HandlerFunc(adminHandler.HandleUsers))))
 		mux.Handle("/api/admin/grants", authMiddleware.Wrap(middleware.RequireAdmin(http.HandlerFunc(adminHandler.HandleGrants))))
+		mux.Handle("/api/admin/namespace-admins", authMiddleware.Wrap(middleware.RequireAdmin(http.HandlerFunc(adminHandler.HandleNamespaceAdmins))))
 		mux.Handle("/api/me", authMiddleware.Wrap(http.HandlerFunc(meHandler.HandleMe)))
 
-		// Admin: reset 2FA
+		// Users endpoint: GET is RequireAdmin (handler scopes the list);
+		// PUT/DELETE (role change, user delete) are SuperAdmin-only —
+		// dispatched inside HandleUsers, but we lock the route shape too
+		// by gating with RequireAdmin and letting the handler 403 on
+		// non-superadmin role/delete. We keep RequireAdmin here because
+		// the GET path is allowed for namespace admins.
+		mux.Handle("/api/admin/users", authMiddleware.Wrap(middleware.RequireAdmin(http.HandlerFunc(adminHandler.HandleUsers))))
+
+		// Reset 2FA is global — superadmin only.
 		if totpHandler != nil {
-			mux.Handle("/api/admin/reset-2fa", authMiddleware.Wrap(middleware.RequireAdmin(http.HandlerFunc(totpHandler.HandleAdminResetTOTP))))
+			mux.Handle("/api/admin/reset-2fa", authMiddleware.Wrap(middleware.RequireSuperAdmin(http.HandlerFunc(totpHandler.HandleAdminResetTOTP))))
 		}
 	}
 
 	// Git sync endpoints (admin-only in multi mode, always allowed in single)
-	syncHandler := handlers.NewSyncHandler(absNotesDir, searchHandler.InvalidateCache)
+	syncHandler := handlers.NewSyncHandler(absNotesDir, searchHandler.InvalidateCache, nsAdminStore)
 	if multiMode {
 		mux.Handle("/api/admin/sync", authMiddleware.Wrap(middleware.RequireAdmin(http.HandlerFunc(syncHandler.HandleSync))))
 		mux.Handle("/api/admin/sync-status", authMiddleware.Wrap(http.HandlerFunc(syncHandler.HandleSyncStatus)))
