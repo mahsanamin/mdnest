@@ -25,6 +25,10 @@ All notable changes to mdnest are documented here.
 - **Sidebar admin scope hint.** Namespace admins see a yellow "Admin of: <ns list>" badge at the top of the admin panel so they know what they're managing.
 - **New "Namespace Admins" tab in the admin panel.** Pick a namespace, see who admins it, promote any non-superadmin user, demote with one click. Visible to anyone with the panel; the backend scopes both reads and writes.
 
+### Configurable grant depth
+
+- **`GRANT_MAX_DEPTH`** in `mdnest.conf` caps how deep into a namespace tree an admin can scope a grant. `/` is depth 0 (always allowed), `/foo` is 1, `/foo/bar` is 2. New grants beyond the limit are rejected at `POST /api/admin/grants` with a 400 explaining the depth and the configured limit. Existing rows are grandfathered — only new INSERTs are checked. Default `3`. Set to `0` for no limit. The PathPicker dropdown in the admin UI reads the same value from `/api/config` and hides too-deep folders so admins can't pick something the API will reject.
+
 ### Dev-only
 
 - **`INSECURE_DEV_LOGIN` backdoor** for local SSO testing. When set to `true` in `mdnest.conf`, the backend registers `POST /api/auth/dev-login` which mints a 30-day session JWT for any **existing** user by email — completely bypassing the IdP. Identity rules match SSO (no auto-provisioning, blocked users still rejected). Off by default; the route 404s when the flag is unset. The default sign-in page is unchanged (still strict SSO); the bypass is reachable only by manually navigating to `/?login=dev`. While enabled, every authenticated page renders a sticky red warning banner, and the backend logs a multi-line warning at startup. Strictly for local development — never enable on a non-localhost deployment. New `LoginDev.jsx` component, `devLoginEnabled` field on `/api/config`.

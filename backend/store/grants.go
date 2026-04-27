@@ -259,6 +259,32 @@ func (s *PostgresGrantStore) GetAccessibleNamespaces(userID int) ([]string, erro
 	return nsList, rows.Err()
 }
 
+// PathDepth returns the number of non-empty segments in a path:
+//   "/"            → 0
+//   "/foo"         → 1
+//   "/foo/bar"     → 2
+//   "/foo/bar/baz" → 3
+//
+// Used by the GRANT_MAX_DEPTH check at grant-creation time. Leading
+// and trailing slashes are ignored; "//" collapses are treated as a
+// single separator (so accidentally-malformed paths don't game the
+// limit).
+func PathDepth(p string) int {
+	s := strings.Trim(p, "/")
+	if s == "" {
+		return 0
+	}
+	depth := 1
+	prev := byte(0)
+	for i := 0; i < len(s); i++ {
+		if s[i] == '/' && prev != '/' {
+			depth++
+		}
+		prev = s[i]
+	}
+	return depth
+}
+
 // pathCovers returns true if grantPath covers requestPath.
 // "/" covers everything. "/foo" covers "/foo", "/foo/bar", "/foo/bar/baz".
 func pathCovers(grantPath, requestPath string) bool {

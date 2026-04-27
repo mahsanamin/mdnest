@@ -26,21 +26,28 @@ type AdminHandler struct {
 	// (firebase/sso) the IdP owns identity, so invite forms only need
 	// email — username and password are derived / ignored.
 	userProvider string
+	// grantMaxDepth caps how deep into a namespace tree a grant's path
+	// can target ("/" = 0, "/a/b" = 2). New grants beyond this depth
+	// are rejected; existing rows are grandfathered. <= 0 means
+	// unlimited.
+	grantMaxDepth int
 }
 
 // NewAdminHandler creates a new admin handler. userProvider should be one
 // of "local", "firebase", or "sso" — it controls how strict the invite
-// form is (federated modes accept email-only).
-func NewAdminHandler(userStore store.UserStore, grantStore store.GrantStore, nsAdminStore store.NamespaceAdminStore, hub *collab.Hub, userProvider string) *AdminHandler {
+// form is (federated modes accept email-only). grantMaxDepth bounds
+// admin-created grant paths; pass 0 (or negative) for no limit.
+func NewAdminHandler(userStore store.UserStore, grantStore store.GrantStore, nsAdminStore store.NamespaceAdminStore, hub *collab.Hub, userProvider string, grantMaxDepth int) *AdminHandler {
 	if userProvider == "" {
 		userProvider = "local"
 	}
 	return &AdminHandler{
-		userStore:    userStore,
-		grantStore:   grantStore,
-		nsAdminStore: nsAdminStore,
-		hub:          hub,
-		userProvider: userProvider,
+		userStore:     userStore,
+		grantStore:    grantStore,
+		nsAdminStore:  nsAdminStore,
+		hub:           hub,
+		userProvider:  userProvider,
+		grantMaxDepth: grantMaxDepth,
 	}
 }
 
@@ -501,6 +508,16 @@ func (h *AdminHandler) createGrant(w http.ResponseWriter, r *http.Request) {
 	if !h.callerCanAdminNamespace(r, req.Namespace) {
 		http.Error(w, `{"error":"you don't admin that namespace"}`, http.StatusForbidden)
 		return
+	}
+
+	// Path-depth ceiling. "/" is depth 0 and always allowed; this only
+	// caps grants that drill into subfolders. Existing too-deep rows
+	// are grandfathered — only new INSERTs are checked.
+	if h.grantMaxDepth > 0 {
+		if d := store.PathDepth(req.Path); d > h.grantMaxDepth {
+			http.Error(w, fmt.Sprintf(`{"error":"grant path is %d levels deep — server limit is %d (set GRANT_MAX_DEPTH in mdnest.conf to change)"}`, d, h.grantMaxDepth), http.StatusBadRequest)
+			return
+		}
 	}
 
 	var grantedBy *int

@@ -77,6 +77,7 @@ while IFS= read -r line; do
     SSO_ALLOWED_DOMAINS) SSO_ALLOWED_DOMAINS="$value" ;;
     SSO_PROVIDER_LABEL) SSO_PROVIDER_LABEL="$value" ;;
     INSECURE_DEV_LOGIN) INSECURE_DEV_LOGIN="$value" ;;
+    GRANT_MAX_DEPTH) GRANT_MAX_DEPTH="$value" ;;
     MOUNT_*)
       name="${key#MOUNT_}"
       MOUNT_NAMES+=("$name")
@@ -207,6 +208,7 @@ TOTP_ISSUER=${TOTP_ISSUER:-mdnest}
 SERVER_ALIAS=${SERVER_ALIAS:-}
 USER_PROVIDER=${USER_PROVIDER:-local}
 INSECURE_DEV_LOGIN=${INSECURE_DEV_LOGIN:-false}
+GRANT_MAX_DEPTH=${GRANT_MAX_DEPTH:-3}
 EOF
 
 if [ "$USER_PROVIDER" = "firebase" ]; then

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/mdnest/mdnest/backend/collab"
@@ -23,6 +24,21 @@ func env(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// envInt reads an integer env var, falling back to the given default if
+// unset or unparseable.
+func envInt(key string, fallback int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		log.Printf("WARNING: %s=%q is not a valid integer, using default %d", key, v, fallback)
+		return fallback
+	}
+	return n
 }
 
 func main() {
@@ -255,7 +271,24 @@ func main() {
 	if serverAlias == "" {
 		log.Println("WARNING: SERVER_ALIAS is not set in mdnest.conf — the mdnest CLI will require users to pass an @alias manually when they log in. Add SERVER_ALIAS=<short-name> for automatic CLI alias resolution.")
 	}
+
+	// GRANT_MAX_DEPTH bounds how deep into a namespace tree a grant's
+	// path can target. "/" = depth 0 and is always allowed; "/a/b" = 2,
+	// etc. Default 3, which covers most real-world structures (top
+	// folder + one or two layers) without letting operators create
+	// hard-to-audit scoped grants. Set to 0 (or negative) for no limit.
+	grantMaxDepth := envInt("GRANT_MAX_DEPTH", 3)
+	if grantMaxDepth < 0 {
+		grantMaxDepth = 0
+	}
+	if grantMaxDepth > 0 {
+		log.Printf("GRANT_MAX_DEPTH=%d — grants on paths deeper than this will be rejected", grantMaxDepth)
+	} else {
+		log.Println("GRANT_MAX_DEPTH=0 — no depth limit on grant paths")
+	}
+
 	configHandler := handlers.NewConfigHandler(authMode, enableCollab, serverAlias, require2FA)
+	configHandler.SetGrantMaxDepth(grantMaxDepth)
 	if firebaseClient != nil {
 		webCfg, err := readFirebaseWebConfig(env("FIREBASE_WEB_CONFIG", ""))
 		if err != nil {
@@ -346,7 +379,7 @@ func main() {
 
 	// Multi-mode routes (require admin role for /admin/*, authenticated for /me)
 	if multiMode {
-		adminHandler := handlers.NewAdminHandler(userStore, grantStore, nsAdminStore, collabHub, userProvider)
+		adminHandler := handlers.NewAdminHandler(userStore, grantStore, nsAdminStore, collabHub, userProvider, grantMaxDepth)
 		meHandler := handlers.NewMeHandler(userStore, grantStore, nsAdminStore)
 
 		// Admin endpoints: outer gate is RequireAdmin (= any admin role).

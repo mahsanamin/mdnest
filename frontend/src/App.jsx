@@ -963,6 +963,7 @@ function App() {
       isSuperAdmin={isSuperAdmin}
       adminNamespaces={adminNamespaces}
       userProvider={appConfig?.userProvider || 'local'}
+      grantMaxDepth={appConfig?.grantMaxDepth || 0}
     />;
   }
 

@@ -14,7 +14,7 @@ import {
 } from '../api.js';
 import PathPicker from './PathPicker.jsx';
 
-function AdminPanel({ onClose, namespaces, isSuperAdmin, adminNamespaces, userProvider = 'local' }) {
+function AdminPanel({ onClose, namespaces, isSuperAdmin, adminNamespaces, userProvider = 'local', grantMaxDepth = 0 }) {
   const [tab, setTab] = useState('users');
 
   // Manageable namespaces: superadmin can manage all; namespace admins
@@ -44,7 +44,7 @@ function AdminPanel({ onClose, namespaces, isSuperAdmin, adminNamespaces, userPr
         <button className={tab === 'nsadmins' ? 'active' : ''} onClick={() => setTab('nsadmins')}>Namespace Admins</button>
       </div>
       {tab === 'users' && <UsersTab isSuperAdmin={isSuperAdmin} manageableNs={manageableNs} isFederated={isFederated} />}
-      {tab === 'grants' && <GrantsTab namespaces={manageableNs} />}
+      {tab === 'grants' && <GrantsTab namespaces={manageableNs} grantMaxDepth={grantMaxDepth} />}
       {tab === 'nsadmins' && <NamespaceAdminsTab manageableNs={manageableNs} />}
     </div>
   );
@@ -244,7 +244,7 @@ function InviteForm({ isSuperAdmin, manageableNs, isFederated, onDone }) {
   );
 }
 
-function GrantsTab({ namespaces }) {
+function GrantsTab({ namespaces, grantMaxDepth }) {
   const [users, setUsers] = useState([]);
   const [grants, setGrants] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -344,7 +344,7 @@ function GrantsTab({ namespaces }) {
                         ))}
                       </div>
                     )}
-                    <UserAddGrant userId={user.id} namespaces={namespaces} existingGrants={userGrants} onDone={loadAll} />
+                    <UserAddGrant userId={user.id} namespaces={namespaces} grantMaxDepth={grantMaxDepth} existingGrants={userGrants} onDone={loadAll} />
                   </div>
                 )}
               </div>
@@ -356,7 +356,7 @@ function GrantsTab({ namespaces }) {
   );
 }
 
-function UserAddGrant({ userId, namespaces, existingGrants, onDone }) {
+function UserAddGrant({ userId, namespaces, grantMaxDepth, existingGrants, onDone }) {
   const [ns, setNs] = useState('');
   const [path, setPath] = useState('/');
   const [perm, setPerm] = useState('write');
@@ -386,7 +386,7 @@ function UserAddGrant({ userId, namespaces, existingGrants, onDone }) {
             <option key={n} value={n}>{n}</option>
           ))}
         </select>
-        <PathPicker namespace={ns} value={path} onChange={setPath} />
+        <PathPicker namespace={ns} value={path} onChange={setPath} maxDepth={grantMaxDepth} />
         <select value={perm} onChange={(e) => setPerm(e.target.value)}>
           <option value="write">Can edit</option>
           <option value="read">Can view</option>
