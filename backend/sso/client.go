@@ -152,6 +152,7 @@ type VerifiedClaims struct {
 	Email         string
 	EmailVerified bool
 	Name          string
+	Picture       string // OIDC `picture` claim (profile image URL); empty if the IdP doesn't provide one
 	Subject       string
 	From          string // where the original request wanted to land
 }
@@ -203,6 +204,7 @@ func (c *Client) ExchangeCallback(ctx context.Context, cookieValue, state, code 
 		Email         string `json:"email"`
 		EmailVerified bool   `json:"email_verified"`
 		Name          string `json:"name"`
+		Picture       string `json:"picture"`
 	}
 	if err := idToken.Claims(&claims); err != nil {
 		return nil, fmt.Errorf("claim decode: %w", err)
@@ -219,6 +221,7 @@ func (c *Client) ExchangeCallback(ctx context.Context, cookieValue, state, code 
 		Email:         email,
 		EmailVerified: claims.EmailVerified,
 		Name:          claims.Name,
+		Picture:       claims.Picture,
 		Subject:       idToken.Subject,
 		From:          sc.From,
 	}, nil

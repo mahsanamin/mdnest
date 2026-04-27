@@ -25,6 +25,7 @@ type User struct {
 	TOTPEnabled        bool
 	RecoveryCodes      *string // JSON array of hashed recovery codes (nil if not set up)
 	Blocked            bool
+	AvatarURL          *string // profile picture URL from IdP; nil if not set
 }
 
 // UserStore defines user CRUD operations.
@@ -50,6 +51,12 @@ type UserStore interface {
 	// Firebase identity federation.
 	UpsertFirebaseUser(email, firebaseUID, displayName string, adminEmails map[string]bool) (*User, error)
 	PromoteToAdmin(email string) (bool, error)
+
+	// BackfillSSOProfile fills in display name + avatar from the IdP on
+	// every successful SSO login, but only when the row's value is empty
+	// (we never overwrite an admin-set username with the IdP's name).
+	// avatarURL always wins because picture URLs rotate at the IdP.
+	BackfillSSOProfile(userID int, displayName, avatarURL string) error
 }
 
 // PostgresUserStore implements UserStore against a Postgres database.
@@ -62,7 +69,7 @@ func NewPostgresUserStore(db *DB) *PostgresUserStore {
 	return &PostgresUserStore{db: db}
 }
 
-const userColumns = `id, email, username, password_hash, firebase_uid, role, invited_by, created_at, must_change_password, totp_secret, totp_enabled, recovery_codes, blocked`
+const userColumns = `id, email, username, password_hash, firebase_uid, role, invited_by, created_at, must_change_password, totp_secret, totp_enabled, recovery_codes, blocked, avatar_url`
 
 func (s *PostgresUserStore) CreateUser(email, username, password, role string, invitedBy *int) (*User, error) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -103,9 +110,10 @@ func scanUserRow(scan func(dest ...interface{}) error) (*User, error) {
 	var username sql.NullString
 	var passwordHash sql.NullString
 	var firebaseUID sql.NullString
+	var avatarURL sql.NullString
 	if err := scan(
 		&u.ID, &u.Email, &username, &passwordHash, &firebaseUID, &u.Role, &u.InvitedBy, &u.CreatedAt,
-		&u.MustChangePassword, &u.TOTPSecret, &u.TOTPEnabled, &u.RecoveryCodes, &u.Blocked,
+		&u.MustChangePassword, &u.TOTPSecret, &u.TOTPEnabled, &u.RecoveryCodes, &u.Blocked, &avatarURL,
 	); err != nil {
 		return nil, err
 	}
@@ -118,6 +126,10 @@ func scanUserRow(scan func(dest ...interface{}) error) (*User, error) {
 	if firebaseUID.Valid && firebaseUID.String != "" {
 		s := firebaseUID.String
 		u.FirebaseUID = &s
+	}
+	if avatarURL.Valid && avatarURL.String != "" {
+		s := avatarURL.String
+		u.AvatarURL = &s
 	}
 	return &u, nil
 }
@@ -307,6 +319,34 @@ func (s *PostgresUserStore) PromoteToAdmin(email string) (bool, error) {
 	}
 	n, _ := res.RowsAffected()
 	return n > 0, nil
+}
+
+// BackfillSSOProfile updates avatar_url unconditionally (IdP picture URLs
+// rotate, so we always refresh) and username only when it's currently NULL
+// or empty (never overwrite an admin-curated value). Empty inputs are skipped
+// so a missing IdP claim doesn't blank out an existing value.
+func (s *PostgresUserStore) BackfillSSOProfile(userID int, displayName, avatarURL string) error {
+	if displayName == "" && avatarURL == "" {
+		return nil
+	}
+	if avatarURL != "" {
+		if _, err := s.db.Exec(
+			`UPDATE users SET avatar_url = $1 WHERE id = $2`,
+			avatarURL, userID,
+		); err != nil {
+			return err
+		}
+	}
+	if displayName != "" {
+		if _, err := s.db.Exec(
+			`UPDATE users SET username = $1
+			 WHERE id = $2 AND (username IS NULL OR username = '')`,
+			displayName, userID,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func lower(s string) string {

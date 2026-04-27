@@ -118,6 +118,22 @@ func (h *SSOHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Mirror the IdP's display name + profile picture into the local row
+	// so the frontend can show a real face + name. Username only fills
+	// when it's still empty (admin-set values are never overwritten);
+	// avatar refreshes every login since picture URLs rotate at the IdP.
+	if err := h.userStore.BackfillSSOProfile(user.ID, claims.Name, claims.Picture); err != nil {
+		log.Printf("sso profile backfill failed for user %d: %v", user.ID, err)
+		// Non-fatal — proceed with login.
+	} else if claims.Name != "" || claims.Picture != "" {
+		// Re-fetch so the JWT/sub fallback below sees the freshly-written
+		// username (otherwise a brand-new user would still have sub=email
+		// for one extra login until they refresh).
+		if refreshed, err := h.userStore.GetUserByID(user.ID); err == nil && refreshed != nil {
+			user = refreshed
+		}
+	}
+
 	// SSO mode skips 2FA — the IdP owns MFA. Mint the full mdnest JWT
 	// directly. `totp_enabled` is always false in this mode.
 	//

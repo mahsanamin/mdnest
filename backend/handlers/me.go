@@ -21,12 +21,13 @@ func NewMeHandler(userStore store.UserStore, grantStore store.GrantStore) *MeHan
 }
 
 type meResponse struct {
-	ID        int         `json:"id"`
-	Email     string      `json:"email"`
-	Username  string      `json:"username"`
-	Role      string      `json:"role"`
-	CreatedAt string      `json:"created_at"`
-	Grants    []meGrant   `json:"grants"`
+	ID        int       `json:"id"`
+	Email     string    `json:"email"`
+	Username  string    `json:"username"`
+	AvatarURL string    `json:"avatar_url,omitempty"`
+	Role      string    `json:"role"`
+	CreatedAt string    `json:"created_at"`
+	Grants    []meGrant `json:"grants"`
 }
 
 type meGrant struct {
@@ -70,10 +71,15 @@ func (h *MeHandler) HandleMe(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	avatar := ""
+	if user.AvatarURL != nil {
+		avatar = *user.AvatarURL
+	}
 	resp := meResponse{
 		ID:        user.ID,
 		Email:     user.Email,
 		Username:  user.Username,
+		AvatarURL: avatar,
 		Role:      user.Role,
 		CreatedAt: user.CreatedAt.Format(time.RFC3339),
 		Grants:    meGrants,

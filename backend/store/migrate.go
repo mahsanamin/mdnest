@@ -73,6 +73,17 @@ var migrations = []struct {
 			CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 		`,
 	},
+	{
+		// Profile metadata from federated identity providers (SSO `picture` and
+		// `name` claims, Firebase displayName / photoURL). Used by the frontend
+		// to render the user's actual face + name in the sidebar instead of
+		// the "?" placeholder. Plain TEXT, no constraints — IdP URLs are
+		// arbitrary HTTPS, names can be any unicode.
+		name: "006_add_avatar_url",
+		sql: `
+			ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT;
+		`,
+	},
 }
 
 // Migrate runs all pending migrations. Safe to call on every startup.
