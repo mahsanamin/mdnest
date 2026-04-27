@@ -283,6 +283,20 @@ When the server is updated to a new version, active browser sessions will see a 
 
 Click "Refresh Now" to reload and pick up the latest frontend. The check runs every 60 seconds.
 
+## Roles (multi-user mode)
+
+mdnest has three user roles in multi-user mode:
+
+- **Super-admin** — global administrator. Sees and manages every namespace and every user, can promote/demote roles, reset 2FA, delete users, and sync any namespace. There must always be at least one super-admin in a deployment.
+- **Admin** — namespace-scoped administrator. Has full read+write access to one or more specific namespaces and can invite users, manage grants, promote co-admins, and trigger git-sync **for those namespaces only**. Cannot reset 2FA, delete users, or change global roles.
+- **Collaborator** — has only the per-namespace / per-path access grants assigned to them, no administrative powers.
+
+If you can see the **Admin** button in the top-right, you have at least namespace-admin scope. The admin panel shows your scope as a yellow "Admin of: …" badge so you know which namespaces you're managing.
+
+To make someone a namespace admin, open the admin panel → **Namespace Admins** tab → pick the namespace → pick the user → "Make admin of …". The promotion auto-grants write access to the namespace and bumps their role; demoting reverses the role bump (the access grant is left in place so removing the admin role doesn't surprise them with lost access).
+
+---
+
 ## Per-File Preferences
 
 mdnest remembers your preferences for each file individually:

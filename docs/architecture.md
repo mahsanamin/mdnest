@@ -297,10 +297,29 @@ When `AUTH_MODE=multi`, the backend auto-creates these tables on startup:
 | Table | Purpose |
 |-------|---------|
 | `schema_migrations` | Tracks which migrations have been applied |
-| `users` | User accounts (email, username, bcrypt password hash, role) |
+| `users` | User accounts (email, username, bcrypt password hash, role, avatar_url, firebase_uid) |
 | `access_grants` | Namespace and directory-level permissions per user |
+| `namespace_admins` | (v3.5.0+) Maps users to the namespaces they administer |
 
 Migrations run automatically and are idempotent -- safe to run on every startup.
+
+### Permission precedence (v3.5.0+)
+
+Every namespace-scoped request is checked through `middleware.PermissionChecker`, which resolves access in this order:
+
+```mermaid
+flowchart TD
+    A[Request: ns + path + read/write] --> B{role}
+    B -->|superadmin| ALLOW[Allow]
+    B -->|admin| C{ns in namespace_admins<br/>for this user?}
+    C -->|yes| ALLOW
+    C -->|no| D{Matching grant<br/>in access_grants?}
+    B -->|collaborator| D
+    D -->|yes| ALLOW
+    D -->|no| DENY[Deny — 403]
+```
+
+This is also the rule applied to API tokens — a token resolves to its creator's `UserContext` at validation time, so the same precedence chain runs and admin-role tokens are scoped to their owner's admin namespaces (no system-wide bypass).
 
 ### Trade-offs
 

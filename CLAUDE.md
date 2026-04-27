@@ -39,8 +39,9 @@ backend/
     cors.go                  # CORS middleware
   store/
     db.go                    # Postgres connection pool (multi mode only)
-    migrate.go               # Auto-migration: schema_migrations, users, access_grants, firebase_uid (005), avatar_url (006)
-    users.go                 # UserStore (Postgres) + UpsertFirebaseUser / PromoteToAdmin
+    migrate.go               # Auto-migration: schema_migrations, users, access_grants, firebase_uid (005), avatar_url (006), namespace_admins (007)
+    users.go                 # UserStore (Postgres) + UpsertFirebaseUser / PromoteToSuperAdmin
+    namespace_admins.go      # NamespaceAdminStore — per-namespace admin scope (v3.5.0+)
     totp_store.go            # TOTPStore interface + PostgresTOTPStore
 
 frontend/
@@ -81,6 +82,7 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 - External dependencies: golang-jwt/jwt/v5, lib/pq (Postgres driver), golang.org/x/crypto (bcrypt)
 - Two auth modes: `AUTH_MODE=single` (file-based, no DB) or `AUTH_MODE=multi` (Postgres)
 - Three identity providers (multi-mode only): `USER_PROVIDER=local` (default, username/password), `USER_PROVIDER=firebase` (Firebase Auth + Firestore TOTP), `USER_PROVIDER=sso` (generic OIDC). Exclusive; chosen at startup. In `sso` mode 2FA is skipped entirely (IdP owns MFA) and local password endpoints are unused. See `docs/sso-setup.md` and `docs/firebase-setup.md`.
+- **Three role values** (v3.5.0+): `superadmin` (global), `admin` (namespace-scoped via the `namespace_admins` table), `collaborator` (per-grant only). Pre-v3.5.0 `admin` is migrated to `superadmin` by migration 007. `ADMIN_EMAILS` auto-promotes to `superadmin`. Permission checks go through `middleware.PermissionChecker.hasAdminScope(uc, ns)` — superadmin bypasses everywhere; admin only for `namespace_admins` rows; everyone else falls through to grants. API tokens follow the same precedence chain (no admin bypass for tokens).
 - In single mode, the store/ package is not initialized — zero DB dependency
 - All handlers take `notesDir` (absolute path) in constructor
 - All file APIs require `ns` query param (namespace = top-level dir under NOTES_DIR)
