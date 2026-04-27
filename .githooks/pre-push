@@ -46,16 +46,22 @@ else
 fi
 
 # 5. Backend: govulncheck (if installed)
-# Only fails on dependency vulnerabilities — stdlib issues require Go updates
-# and are tracked separately.
+# Output classification:
+#   "No vulnerabilities found." → clean
+#   contains "from the Go standard library" only → stdlib-only WARN
+#     (worth a Go bump but doesn't block; the production Docker
+#     image's golang base often clears these even when the local
+#     `go` toolchain is older)
+#   anything else with vuln output → BLOCK (dependency vuln)
 GOVULNCHECK="$(go env GOPATH 2>/dev/null)/bin/govulncheck"
 if [ -x "$GOVULNCHECK" ]; then
   echo -n "Backend security (govulncheck)... "
   VULN_OUT=$(cd backend && "$GOVULNCHECK" ./... 2>&1) || true
-  if echo "$VULN_OUT" | grep -q "affected by 0 vulnerabilities"; then
+  if echo "$VULN_OUT" | grep -q "No vulnerabilities found"; then
     echo "OK"
-  elif echo "$VULN_OUT" | grep -q "Standard library"; then
-    # Only stdlib — warn but don't block
+  elif echo "$VULN_OUT" | grep -qE "from the Go standard library" \
+       && ! echo "$VULN_OUT" | grep -qE "in (packages you import|modules you require)"; then
+    # Only stdlib hits — warn but don't block
     echo "WARN (stdlib only — update Go to fix)"
   else
     echo "VULNERABILITIES FOUND"
@@ -97,6 +103,28 @@ else
   echo "MISMATCH"
   echo "  backend: $BE_VER, frontend: $FE_VER, CLI: $CLI_VER"
   FAILED=1
+fi
+
+# 8. Shell scripts: shellcheck (if installed)
+# Mirrors the CI workflow gate: severity `error` only. Lower-severity
+# findings (warnings / info) are non-blocking for now.
+if command -v shellcheck >/dev/null 2>&1; then
+  echo -n "Shell scripts (shellcheck)... "
+  if shellcheck -S error \
+       setup.sh \
+       mdnest-server \
+       mdnest \
+       git-sync/sync.sh \
+       install-cli.sh \
+       .githooks/pre-push >/dev/null 2>&1; then
+    echo "OK"
+  else
+    echo "ISSUES FOUND"
+    echo "  Run: shellcheck -S error setup.sh mdnest-server mdnest git-sync/sync.sh install-cli.sh .githooks/pre-push"
+    FAILED=1
+  fi
+else
+  echo "Shell scripts: skipped (shellcheck not installed — brew install shellcheck)"
 fi
 
 echo ""
