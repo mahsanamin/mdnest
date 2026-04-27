@@ -3055,25 +3055,62 @@ pre:hover .code-copy-btn {
   border: 1px solid #f9e2af44;
 }
 
-/* Loud sticky banner shown when INSECURE_DEV_LOGIN=true. Lives at the
-   top of the app shell so it's impossible to miss. */
-.dev-login-banner {
-  position: sticky;
-  top: 0;
+/* Small fixed pill shown when INSECURE_DEV_LOGIN=true. Hover reveals
+   the full explanation in a custom tooltip. Bottom-right placement
+   keeps it clear of the toolbar (top) and the sidebar resizer (left). */
+.dev-login-pill {
+  position: fixed;
+  bottom: 12px;
+  right: 12px;
   z-index: 1000;
-  padding: 8px 16px;
+  padding: 4px 10px;
   background: #f38ba8;
   color: #1e1e2e;
-  font-size: 0.85rem;
-  font-weight: 600;
-  text-align: center;
-  border-bottom: 2px solid #cba6f7;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  border-radius: 12px;
+  cursor: help;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  user-select: none;
 }
-.dev-login-banner code {
-  background: rgba(30, 30, 46, 0.18);
+.dev-login-pill-icon { font-size: 0.85rem; }
+.dev-login-pill-tooltip {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  width: 320px;
+  padding: 10px 12px;
+  background: #1e1e2e;
+  color: #cdd6f4;
+  border: 1px solid #f38ba8;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.5;
+  text-align: left;
+  white-space: normal;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+.dev-login-pill-tooltip strong {
+  display: block;
+  margin-bottom: 4px;
+  color: #f38ba8;
+}
+.dev-login-pill-tooltip code {
+  background: rgba(243, 139, 168, 0.18);
   padding: 1px 4px;
   border-radius: 3px;
-  font-size: 0.85em;
+  font-size: 0.9em;
+}
+.dev-login-pill:hover .dev-login-pill-tooltip,
+.dev-login-pill:focus-within .dev-login-pill-tooltip {
+  display: block;
 }
 
 /* Inline warning shown inside the LoginDev form. */

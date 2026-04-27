@@ -969,13 +969,20 @@ function App() {
   return (
     <div className="app">
       {appConfig?.devLoginEnabled && (
-        // Sticky warning bar — visible on every authenticated screen
-        // whenever INSECURE_DEV_LOGIN is on. Loud on purpose so a stray
-        // production deploy with this flag is impossible to miss.
-        <div className="dev-login-banner">
-          ⚠ INSECURE_DEV_LOGIN is enabled — anyone reaching this server can
-          impersonate any user via <code>/?login=dev</code>. Disable in <code>mdnest.conf</code>{' '}
-          before sharing this URL.
+        // Small fixed-position warning pill — visible on every
+        // authenticated screen but unobtrusive. Hover for the full
+        // explanation. Loud enough that a stray production deploy with
+        // this flag is impossible to miss; small enough to ignore once
+        // you've registered it.
+        <div className="dev-login-pill" role="status" aria-label="Dev login backdoor enabled">
+          <span className="dev-login-pill-icon" aria-hidden="true">⚠</span>
+          <span className="dev-login-pill-label">DEV LOGIN</span>
+          <span className="dev-login-pill-tooltip">
+            <strong>INSECURE_DEV_LOGIN is enabled.</strong>
+            Anyone reaching this server can impersonate any user via{' '}
+            <code>/?login=dev</code>. Disable in <code>mdnest.conf</code> before
+            sharing this URL.
+          </span>
         </div>
       )}
       <Sidebar
