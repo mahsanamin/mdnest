@@ -147,6 +147,18 @@ GIT_AUTHOR_EMAIL=you@example.com
 # structures). Set to 0 for no limit.
 # GRANT_MAX_DEPTH=3
 
+# ==========================================================================
+# Docker compose project name
+# ==========================================================================
+# Pin the project name so this install can run side-by-side with another
+# mdnest install in a different directory. By default docker compose
+# names the project after the current directory, so two checkouts in
+# folders both named "mdnest" (e.g. one for development, one tracking
+# release) end up sharing containers and clobbering each other on every
+# rebuild. Setting this to a unique value per install removes the conflict.
+# Leave commented for a single install — the default works fine.
+# COMPOSE_PROJECT_NAME=mdnest-dev
+
 # HTTPS with Caddy (optional)
 # Set CADDY_DOMAIN to enable automatic HTTPS via Let's Encrypt.
 # Caddy runs as a container, terminates TLS, and proxies to the frontend.

@@ -215,7 +215,12 @@ function App() {
   const canWrite = useCallback((path) => {
     if (!isMulti) return true;
     if (!userInfo) return false;
-    if (userInfo.role === 'admin') return true;
+    // Superadmin bypasses everywhere; namespace-admin of the selected ns
+    // bypasses for that ns. Beyond that, fall through to the explicit
+    // grants — namespace admins also get an auto-grant on '/' so this
+    // is belt+suspenders.
+    if (userInfo.is_super_admin) return true;
+    if (userInfo.role === 'admin' && selectedNs && (userInfo.admin_namespaces || []).includes(selectedNs)) return true;
     if (!userInfo.grants || !selectedNs) return false;
     const checkPath = path ? '/' + path : '/';
     for (const g of userInfo.grants) {

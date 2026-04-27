@@ -124,7 +124,12 @@ function CommentSidebar({ comments, ns, currentPath, onRefresh, onClose, userInf
   const activeThreads = threads.filter((t) => !t.resolved);
   const resolvedThreads = threads.filter((t) => t.resolved);
 
-  const canDelete = (c) => userInfo && (userInfo.role === 'admin' || userInfo.id === c.authorId);
+  // Authors can always delete their own. Superadmins and (today)
+  // namespace-scoped admins can delete anyone's — preserves pre-v3.5.0
+  // behavior where role==='admin' could moderate. The pre-existing
+  // gap that any admin can delete across any namespace is out of scope
+  // for this release; revisit alongside per-namespace comment auth.
+  const canDelete = (c) => userInfo && (userInfo.is_super_admin || userInfo.role === 'admin' || userInfo.id === c.authorId);
 
   const renderReply = (r) => (
     <div key={r.id} className="comment-reply">

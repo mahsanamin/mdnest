@@ -27,6 +27,10 @@ BACKEND_PORT=""
 FRONTEND_PORT=""
 GIT_AUTHOR_NAME=""
 GIT_AUTHOR_EMAIL=""
+# Optional — only emitted to .env when mdnest.conf sets it. Initialised
+# empty here so a value left over in the shell environment can't leak
+# in and silently rename containers on rebuild.
+COMPOSE_PROJECT_NAME=""
 declare -a MOUNT_NAMES=()
 declare -a MOUNT_PATHS=()
 
@@ -78,6 +82,7 @@ while IFS= read -r line; do
     SSO_PROVIDER_LABEL) SSO_PROVIDER_LABEL="$value" ;;
     INSECURE_DEV_LOGIN) INSECURE_DEV_LOGIN="$value" ;;
     GRANT_MAX_DEPTH) GRANT_MAX_DEPTH="$value" ;;
+    COMPOSE_PROJECT_NAME) COMPOSE_PROJECT_NAME="$value" ;;
     MOUNT_*)
       name="${key#MOUNT_}"
       MOUNT_NAMES+=("$name")
@@ -210,6 +215,15 @@ USER_PROVIDER=${USER_PROVIDER:-local}
 INSECURE_DEV_LOGIN=${INSECURE_DEV_LOGIN:-false}
 GRANT_MAX_DEPTH=${GRANT_MAX_DEPTH:-3}
 EOF
+
+# Optional COMPOSE_PROJECT_NAME — pinned only when the operator sets one
+# in mdnest.conf. Lets two parallel installs in differently-named (or
+# similarly-named!) directories run side-by-side without their docker
+# compose projects colliding. When unset, docker compose falls back to
+# the default behavior (project name = current dir basename).
+if [ -n "$COMPOSE_PROJECT_NAME" ]; then
+  echo "COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME}" >> .env
+fi
 
 if [ "$USER_PROVIDER" = "firebase" ]; then
   cat >> .env <<EOF
