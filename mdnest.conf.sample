@@ -119,6 +119,46 @@ GIT_AUTHOR_EMAIL=you@example.com
 # Optional — only set if your redirect URI isn't FRONTEND_ORIGIN/api/auth/sso/callback:
 # SSO_REDIRECT_URL=https://notes.example.com/api/auth/sso/callback
 
+# ==========================================================================
+# INSECURE: dev-only login backdoor (for local SSO testing)
+# ==========================================================================
+# When INSECURE_DEV_LOGIN=true, an unauthenticated POST /api/auth/dev-login
+# endpoint is registered that mints a 30-day session JWT for ANY existing
+# user, by email — completely bypassing the IdP. The default sign-in page
+# is unchanged (still strict SSO); the backdoor is only accessible by
+# manually opening http://<host>/?login=dev. While enabled, every
+# authenticated page renders a sticky red warning bar.
+#
+# This is for local development only. NEVER set true on a non-localhost
+# deployment — anyone who can reach the backend can impersonate any user.
+# Leave commented (defaults to false).
+# INSECURE_DEV_LOGIN=true
+
+# ==========================================================================
+# Grant path depth limit
+# ==========================================================================
+# How deep into a namespace tree an admin can scope a grant. "/" is depth 0
+# and is always allowed; "/foo" is depth 1; "/foo/bar" is depth 2; etc.
+# New grants beyond this depth are rejected at the API. Existing rows are
+# grandfathered (no migration). PathPicker in the admin UI also hides
+# folders past this depth.
+#
+# Default: 3 (covers top folder + two layers, which fits most org
+# structures). Set to 0 for no limit.
+# GRANT_MAX_DEPTH=3
+
+# ==========================================================================
+# Docker compose project name
+# ==========================================================================
+# Pin the project name so this install can run side-by-side with another
+# mdnest install in a different directory. By default docker compose
+# names the project after the current directory, so two checkouts in
+# folders both named "mdnest" (e.g. one for development, one tracking
+# release) end up sharing containers and clobbering each other on every
+# rebuild. Setting this to a unique value per install removes the conflict.
+# Leave commented for a single install — the default works fine.
+# COMPOSE_PROJECT_NAME=mdnest-dev
+
 # HTTPS with Caddy (optional)
 # Set CADDY_DOMAIN to enable automatic HTTPS via Let's Encrypt.
 # Caddy runs as a container, terminates TLS, and proxies to the frontend.

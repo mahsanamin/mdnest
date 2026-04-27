@@ -3025,6 +3025,26 @@ pre:hover .code-copy-btn {
   font-weight: 600;
 }
 
+.role-badge.superadmin {
+  background: #fab38722;
+  color: #fab387;
+}
+
+/* Inline role picker in the Users table — same color cues as .role-badge
+   so the accent for the current role still reads at a glance, but the
+   control is editable. */
+.admin-role-select {
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+.admin-role-select.role-superadmin { background: #fab38722; color: #fab387; border-color: #fab38744; }
+.admin-role-select.role-admin      { background: #f38ba822; color: #f38ba8; border-color: #f38ba844; }
+.admin-role-select.role-collaborator { background: #89b4fa22; color: #89b4fa; border-color: #89b4fa44; }
+
 .role-badge.admin {
   background: #f38ba822;
   color: #f38ba8;
@@ -3033,6 +3053,101 @@ pre:hover .code-copy-btn {
 .role-badge.collaborator {
   background: #89b4fa22;
   color: #89b4fa;
+}
+
+.admin-header-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.admin-scope-badge {
+  font-size: 0.8rem;
+  padding: 4px 10px;
+  border-radius: 12px;
+  background: #f9e2af22;
+  color: #f9e2af;
+  border: 1px solid #f9e2af44;
+}
+
+/* Small fixed pill shown when INSECURE_DEV_LOGIN=true. Hover reveals
+   the full explanation in a custom tooltip. Bottom-right placement
+   keeps it clear of the toolbar (top) and the sidebar resizer (left). */
+.dev-login-pill {
+  position: fixed;
+  bottom: 12px;
+  right: 12px;
+  z-index: 1000;
+  padding: 4px 10px;
+  background: #f38ba8;
+  color: #1e1e2e;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  border-radius: 12px;
+  cursor: help;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  user-select: none;
+}
+.dev-login-pill-icon { font-size: 0.85rem; }
+.dev-login-pill-tooltip {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  width: 320px;
+  padding: 10px 12px;
+  background: #1e1e2e;
+  color: #cdd6f4;
+  border: 1px solid #f38ba8;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.5;
+  text-align: left;
+  white-space: normal;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+.dev-login-pill-tooltip strong {
+  display: block;
+  margin-bottom: 4px;
+  color: #f38ba8;
+}
+.dev-login-pill-tooltip code {
+  background: rgba(243, 139, 168, 0.18);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 0.9em;
+}
+.dev-login-pill:hover .dev-login-pill-tooltip,
+.dev-login-pill:focus-within .dev-login-pill-tooltip {
+  display: block;
+}
+
+/* Inline warning shown inside the LoginDev form. */
+.dev-login-warning {
+  background: #f38ba822;
+  border: 1px solid #f38ba8;
+  color: #f38ba8;
+  padding: 12px 14px;
+  border-radius: 6px;
+  margin-bottom: 16px;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+.dev-login-warning strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 0.95rem;
+}
+.dev-login-warning code {
+  background: rgba(243, 139, 168, 0.18);
+  padding: 1px 4px;
+  border-radius: 3px;
 }
 
 .perm-badge {

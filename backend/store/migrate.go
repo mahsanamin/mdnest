@@ -84,6 +84,28 @@ var migrations = []struct {
 			ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT;
 		`,
 	},
+	{
+		// Three-tier role hierarchy: superadmin (global) / admin (per
+		// namespace via namespace_admins) / collaborator (grants only).
+		// Existing global admins are renamed to superadmin so they keep
+		// the all-namespaces bypass. New admins post-upgrade are
+		// namespace-scoped — their administrative powers depend on rows
+		// in namespace_admins, and they get an implicit write grant on
+		// the namespaces they admin (created by the promote handler).
+		name: "007_namespace_admins",
+		sql: `
+			UPDATE users SET role = 'superadmin' WHERE role = 'admin';
+
+			CREATE TABLE IF NOT EXISTS namespace_admins (
+				user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+				namespace  TEXT NOT NULL,
+				granted_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				PRIMARY KEY (user_id, namespace)
+			);
+			CREATE INDEX IF NOT EXISTS idx_namespace_admins_namespace ON namespace_admins(namespace);
+		`,
+	},
 }
 
 // Migrate runs all pending migrations. Safe to call on every startup.

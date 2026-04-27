@@ -142,11 +142,14 @@ func (h *TokenHandler) listTokens(w http.ResponseWriter, r *http.Request) {
 
 	uc := middleware.UserFromContext(r.Context())
 
-	// Return tokens without the actual token value or hash
+	// Return tokens without the actual token value or hash. Scope:
+	// superadmins see all; everyone else (admin, collaborator) sees own.
+	// (As of v3.5.0 the namespace-scoped admin role no longer gets
+	// system-wide visibility into other users' tokens — that's a
+	// superadmin-only audit capability.)
 	safe := make([]map[string]string, 0, len(h.store.Tokens))
 	for _, t := range h.store.Tokens {
-		// In multi mode, non-admins only see their own tokens
-		if uc != nil && uc.Role != "admin" && t.UserID != uc.ID {
+		if uc != nil && uc.Role != "superadmin" && t.UserID != uc.ID {
 			continue
 		}
 		safe = append(safe, map[string]string{
@@ -229,10 +232,18 @@ func (h *TokenHandler) revokeToken(w http.ResponseWriter, r *http.Request) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
+	uc := middleware.UserFromContext(r.Context())
+
 	found := false
 	filtered := make([]APIToken, 0, len(h.store.Tokens))
 	for _, t := range h.store.Tokens {
 		if t.ID == id {
+			// Scope: superadmin can revoke any token; anyone else can
+			// only revoke tokens they own.
+			if uc != nil && uc.Role != "superadmin" && t.UserID != uc.ID {
+				http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+				return
+			}
 			found = true
 			log.Printf("API token revoked: %s (%s)", t.Name, t.ID)
 			continue

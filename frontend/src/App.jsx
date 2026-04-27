@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import Login from './components/Login.jsx';
 import LoginFirebase from './components/LoginFirebase.jsx';
 import LoginSSO from './components/LoginSSO.jsx';
+import LoginDev from './components/LoginDev.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import Toolbar from './components/Toolbar.jsx';
 import { lazy, Suspense } from 'react';
@@ -179,9 +180,18 @@ function App() {
 
   // Multi-user state
   const [appConfig, setAppConfig] = useState(null); // {authMode, version, liveCollab}
-  const [userInfo, setUserInfo] = useState(null); // {id, username, role, grants}
+  const [userInfo, setUserInfo] = useState(null); // {id, username, role, grants, is_super_admin, admin_namespaces}
   const isMulti = appConfig?.authMode === 'multi';
-  const isAdmin = !isMulti || userInfo?.role === 'admin';
+  // v3.5.0 role hierarchy: superadmin (global), admin (namespace-scoped),
+  // collaborator (grants-only). isSuperAdmin gates global-only UI
+  // (delete user, role toggle, reset 2FA); adminNamespaces is the list
+  // of namespaces this user can manage; isAnyAdmin is the predicate for
+  // showing the admin panel button at all. Single-user mode is treated
+  // as full superadmin.
+  const isSuperAdmin = !isMulti || !!userInfo?.is_super_admin;
+  const adminNamespaces = userInfo?.admin_namespaces || [];
+  const isAnyAdmin = isSuperAdmin || adminNamespaces.length > 0;
+  const isAdmin = isAnyAdmin;
   // Comments need real user identity AND the WebSocket hub (so other clients
   // see new/resolved comments without a manual refresh), so gate on liveCollab
   // — which itself is only true when multi mode is on.
@@ -205,7 +215,12 @@ function App() {
   const canWrite = useCallback((path) => {
     if (!isMulti) return true;
     if (!userInfo) return false;
-    if (userInfo.role === 'admin') return true;
+    // Superadmin bypasses everywhere; namespace-admin of the selected ns
+    // bypasses for that ns. Beyond that, fall through to the explicit
+    // grants — namespace admins also get an auto-grant on '/' so this
+    // is belt+suspenders.
+    if (userInfo.is_super_admin) return true;
+    if (userInfo.role === 'admin' && selectedNs && (userInfo.admin_namespaces || []).includes(selectedNs)) return true;
     if (!userInfo.grants || !selectedNs) return false;
     const checkPath = path ? '/' + path : '/';
     for (const g of userInfo.grants) {
@@ -928,6 +943,15 @@ function App() {
     // we know which login component to mount. While appConfig is still
     // null, show a minimal splash to avoid flashing the wrong form.
     if (!appConfig) return <div className="login-screen"><div className="login-box"><h1>mdnest</h1></div></div>;
+
+    // Hidden dev-login route — only when the operator manually visits
+    // /?login=dev AND the backend has INSECURE_DEV_LOGIN=true. The
+    // default flow below is unchanged (still strict SSO).
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('login') === 'dev' && appConfig.devLoginEnabled) {
+      return <LoginDev onLogin={() => window.location.reload()} />;
+    }
+
     if (appConfig.userProvider === 'firebase') {
       return <LoginFirebase onLogin={() => window.location.reload()} />;
     }
@@ -938,11 +962,35 @@ function App() {
   }
 
   if (showAdminPanel && isAdmin && isMulti) {
-    return <AdminPanel onClose={() => setShowAdminPanel(false)} namespaces={namespaces} />;
+    return <AdminPanel
+      onClose={() => setShowAdminPanel(false)}
+      namespaces={namespaces}
+      isSuperAdmin={isSuperAdmin}
+      adminNamespaces={adminNamespaces}
+      userProvider={appConfig?.userProvider || 'local'}
+      grantMaxDepth={appConfig?.grantMaxDepth || 0}
+    />;
   }
 
   return (
     <div className="app">
+      {appConfig?.devLoginEnabled && (
+        // Small fixed-position warning pill — visible on every
+        // authenticated screen but unobtrusive. Hover for the full
+        // explanation. Loud enough that a stray production deploy with
+        // this flag is impossible to miss; small enough to ignore once
+        // you've registered it.
+        <div className="dev-login-pill" role="status" aria-label="Dev login backdoor enabled">
+          <span className="dev-login-pill-icon" aria-hidden="true">⚠</span>
+          <span className="dev-login-pill-label">DEV LOGIN</span>
+          <span className="dev-login-pill-tooltip">
+            <strong>INSECURE_DEV_LOGIN is enabled.</strong>
+            Anyone reaching this server can impersonate any user via{' '}
+            <code>/?login=dev</code>. Disable in <code>mdnest.conf</code> before
+            sharing this URL.
+          </span>
+        </div>
+      )}
       <Sidebar
         tree={tree}
         onSelect={openNote}

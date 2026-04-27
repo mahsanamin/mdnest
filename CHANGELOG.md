@@ -4,6 +4,48 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v3.5.0 — Namespace-scoped Admin role + SuperAdmin + token access scoping
+
+### Breaking changes
+
+- **Existing `role='admin'` users are migrated to `role='superadmin'` on first startup of v3.5.0.** They keep current behaviour — global access to every namespace, every user-management endpoint, every grant. This is a one-shot rename done by migration 007 and only fires when the migration runs the first time. No action required from operators.
+- **The new `role='admin'` is namespace-scoped, not global.** A user with `role='admin'` can only manage the namespaces listed for them in the new `namespace_admins` table — they invite users into those namespaces, manage grants on them, promote co-admins, and trigger git-sync for them. They cannot delete users, change anyone's role, reset 2FA, or sync globally — those are SuperAdmin-only.
+- **API tokens no longer get a system-wide admin bypass.** Pre-v3.5.0, an admin's token bypassed every permission check. Post-v3.5.0 a token resolves to its creator's current scope at request time: superadmin tokens are still global, namespace-admin tokens work only on their owner's admin namespaces, collaborator tokens work only on their owner's grants. Revoking a user's grant immediately revokes their tokens for that namespace too.
+- **`ADMIN_EMAILS` now auto-promotes to `superadmin`** (was `admin`). This preserves the operator-bootstrap intent across the role rename.
+
+### Features
+
+- **Three-tier role hierarchy.** SuperAdmin (global) / Admin (namespace-scoped) / Collaborator (grants only). The model lets a multi-tenant deployment have one superadmin operator and per-team admins who can run their own namespace without seeing other teams' data.
+- **`namespace_admins(user_id, namespace, granted_by, created_at)` table.** Migration 007 creates it; the `PermissionChecker` consults it on every `role='admin'` request to decide whether the namespace is in scope. The hot path is a single-row `EXISTS` query.
+- **New endpoints `/api/admin/namespace-admins`** — `GET ?ns=<n>` lists admins of a namespace, `POST {user_id, namespace}` promotes (auto-bumps `users.role` from collaborator to admin, auto-creates a `permission='write'` grant on `/`), `DELETE ?user_id=<id>&ns=<n>` demotes (auto-reverts to collaborator if no other admin namespaces; the auto-grant is left in place so access doesn't disappear by surprise).
+- **`/api/me` exposes `is_super_admin` and `admin_namespaces`** so the frontend can scope the admin panel without an extra round-trip on every page load.
+- **`/api/admin/users` is filtered by caller scope.** SuperAdmins see all users; namespace admins see only users with grants or namespace_admins entries on their own namespaces (plus self).
+- **`/api/admin/grants` is filtered by caller scope.** Same model: superadmin sees all, namespace admin sees only their namespaces. Create / update / delete return 403 if the target grant isn't in the caller's admin scope.
+- **Reset 2FA, delete user, change role** are SuperAdmin-only. Promoting between superadmin/admin/collaborator globally requires SuperAdmin. Promoting another user as namespace admin only requires admin scope on the target namespace.
+- **Sidebar admin scope hint.** Namespace admins see a yellow "Admin of: <ns list>" badge at the top of the admin panel so they know what they're managing.
+- **New "Namespace Admins" tab in the admin panel.** Pick a namespace, see who admins it, promote any non-superadmin user, demote with one click. Visible to anyone with the panel; the backend scopes both reads and writes.
+
+### Configurable grant depth
+
+- **`GRANT_MAX_DEPTH`** in `mdnest.conf` caps how deep into a namespace tree an admin can scope a grant. `/` is depth 0 (always allowed), `/foo` is 1, `/foo/bar` is 2. New grants beyond the limit are rejected at `POST /api/admin/grants` with a 400 explaining the depth and the configured limit. Existing rows are grandfathered — only new INSERTs are checked. Default `3`. Set to `0` for no limit. The PathPicker dropdown in the admin UI reads the same value from `/api/config` and hides too-deep folders so admins can't pick something the API will reject.
+
+### Dev-only
+
+- **`INSECURE_DEV_LOGIN` backdoor** for local SSO testing. When set to `true` in `mdnest.conf`, the backend registers `POST /api/auth/dev-login` which mints a 30-day session JWT for any **existing** user by email — completely bypassing the IdP. Identity rules match SSO (no auto-provisioning, blocked users still rejected). Off by default; the route 404s when the flag is unset. The default sign-in page is unchanged (still strict SSO); the bypass is reachable only by manually navigating to `/?login=dev`. While enabled, every authenticated page renders a sticky red warning banner, and the backend logs a multi-line warning at startup. Strictly for local development — never enable on a non-localhost deployment. New `LoginDev.jsx` component, `devLoginEnabled` field on `/api/config`.
+
+### Internal
+
+- New `backend/store/namespace_admins.go`: `NamespaceAdminStore` interface + Postgres impl with `Add`, `Remove`, `IsAdminOf`, `ListByUser`, `ListByNamespace`, `CountByUser`. `Add` is idempotent via `ON CONFLICT DO NOTHING` so promote re-runs are safe.
+- `backend/middleware/permission.go`: new constructor `NewPermissionChecker(grantStore, nsAdminStore)` and a `hasAdminScope(uc, ns)` helper. The three places that used to short-circuit on `Role == "admin"` now go through it.
+- `backend/middleware/admin.go`: `RequireAdmin` now means "any admin role"; new `RequireSuperAdmin` for the global gate. `IsSuperAdmin(ctx)` helper added.
+- `backend/handlers/admin.go`: every method now scopes through `callerCanAdminNamespace` / `callerAdminNamespaces`. `ensureNotLastAdmin` → `ensureNotLastSuperAdmin` (only superadmins are deadlock-load-bearing).
+- `backend/handlers/sync.go` takes an `nsAdminStore` and returns 403 when the caller isn't allowed to sync the requested namespace.
+- `backend/handlers/tokens.go`: `listTokens` and `revokeToken` no longer give `role=='admin'` system-wide visibility — superadmin only. Owners always see / revoke their own.
+- `backend/store/grants.go`: + `GetGrant(id)` so admin handlers can authorize the action against the target grant's namespace.
+- Frontend: `App.jsx` derives `isSuperAdmin` and `adminNamespaces` from `/api/me`; threads them into `AdminPanel`. The panel hides global actions (Cycle role, Delete user) for non-superadmins, locks the Invite namespace dropdown to admin scope, adds the Namespace Admins tab. New `api.js` helpers: `adminListNamespaceAdmins`, `adminAddNamespaceAdmin`, `adminRemoveNamespaceAdmin`. `adminInviteUser` accepts a `namespace`.
+
+---
+
 ## v3.4.0 — Corporate SSO + Federated Identity
 
 ### Features

@@ -8,17 +8,44 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/mdnest/mdnest/backend/middleware"
+	"github.com/mdnest/mdnest/backend/store"
 )
 
 // SyncHandler handles git pull and cache refresh for namespaces.
 type SyncHandler struct {
 	notesDir        string
 	invalidateCache func(ns string)
+	// nsAdminStore is consulted to allow namespace-scoped admins to sync
+	// only the namespaces they administer. Nil in single-user mode.
+	nsAdminStore store.NamespaceAdminStore
 }
 
-// NewSyncHandler creates a new sync handler.
-func NewSyncHandler(notesDir string, invalidateCache func(string)) *SyncHandler {
-	return &SyncHandler{notesDir: notesDir, invalidateCache: invalidateCache}
+// NewSyncHandler creates a new sync handler. nsAdminStore may be nil in
+// single-user mode — sync auth in that case is left entirely to the
+// caller (no user context, full access).
+func NewSyncHandler(notesDir string, invalidateCache func(string), nsAdminStore store.NamespaceAdminStore) *SyncHandler {
+	return &SyncHandler{notesDir: notesDir, invalidateCache: invalidateCache, nsAdminStore: nsAdminStore}
+}
+
+// callerCanSync returns true if the request's user is allowed to sync the
+// given namespace: superadmins always; namespace admins only on their
+// own namespaces; collaborators never (they should never reach here —
+// the outer route gate is RequireAdmin).
+func (h *SyncHandler) callerCanSync(r *http.Request, ns string) bool {
+	uc := middleware.UserFromContext(r.Context())
+	if uc == nil {
+		return true // single-user mode
+	}
+	if uc.Role == "superadmin" {
+		return true
+	}
+	if uc.Role == "admin" && h.nsAdminStore != nil && ns != "" {
+		ok, _ := h.nsAdminStore.IsAdminOf(uc.ID, ns)
+		return ok
+	}
+	return false
 }
 
 type syncStatusResponse struct {
@@ -107,6 +134,11 @@ func (h *SyncHandler) HandleSync(w http.ResponseWriter, r *http.Request) {
 
 	if strings.Contains(ns, "/") || strings.Contains(ns, "..") || strings.HasPrefix(ns, ".") {
 		http.Error(w, `{"error":"invalid namespace"}`, http.StatusBadRequest)
+		return
+	}
+
+	if !h.callerCanSync(r, ns) {
+		http.Error(w, `{"error":"you don't admin that namespace"}`, http.StatusForbidden)
 		return
 	}
 

@@ -249,11 +249,13 @@ curl -X DELETE "http://localhost:8286/api/auth/tokens?id=a1b2c3d4" \
 
 ## Admin (multi-user mode only)
 
-These endpoints are only available when `AUTH_MODE=multi`. All require admin role -- non-admin users receive a 403.
+These endpoints are only available when `AUTH_MODE=multi`. All require an admin role (`superadmin` or `admin`) — collaborators receive a 403.
+
+**v3.5.0 role hierarchy:** `superadmin` (global), `admin` (namespace-scoped via the `namespace_admins` table), `collaborator` (grants only). Endpoints below indicate which role is required and how the response is filtered for namespace admins.
 
 ### POST /api/admin/invite
 
-Create a new user.
+Create a new user. Available to any admin role; the `namespace` field is **required for namespace admins** (the new user is auto-granted `permission='write'` on `/` of that namespace; if `role='admin'` is also passed, the new user is added to `namespace_admins` for that ns). SuperAdmin can omit `namespace` and grant access separately.
 
 **Request body** (JSON):
 
@@ -262,7 +264,8 @@ Create a new user.
 | `email` | string | yes | User's email (must be unique) |
 | `username` | string | yes | Login username (must be unique) |
 | `password` | string | yes | Initial password |
-| `role` | string | no | `admin` or `collaborator` (default: `collaborator`) |
+| `role` | string | no | `superadmin`, `admin`, or `collaborator` (default: `collaborator`). Only SuperAdmin can invite a SuperAdmin. |
+| `namespace` | string | required for namespace admins | The namespace the new user is granted access to. Caller must admin this namespace. |
 
 **Response** (201 Created):
 
@@ -283,7 +286,7 @@ Create a new user.
 curl -X POST "http://localhost:8286/api/admin/invite" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"email": "bob@example.com", "username": "bob", "password": "securepass", "role": "collaborator"}'
+  -d '{"email": "bob@example.com", "username": "bob", "password": "securepass", "role": "collaborator", "namespace": "growth"}'
 ```
 
 **Error responses:**
@@ -291,8 +294,11 @@ curl -X POST "http://localhost:8286/api/admin/invite" \
 | Status | Body | Cause |
 |--------|------|-------|
 | 400 | `{"error":"email, username, and password are required"}` | Missing fields |
-| 400 | `{"error":"role must be admin or collaborator"}` | Invalid role |
-| 403 | `{"error":"admin access required"}` | Non-admin user |
+| 400 | `{"error":"role must be superadmin, admin, or collaborator"}` | Invalid role |
+| 400 | `{"error":"namespace is required when inviting as a namespace admin"}` | Non-superadmin caller didn't pass namespace |
+| 403 | `{"error":"admin access required"}` | Collaborator caller |
+| 403 | `{"error":"only superadmin can invite a superadmin"}` | Non-superadmin tried to mint a superadmin |
+| 403 | `{"error":"you don't admin that namespace"}` | Caller is not an admin of the target namespace |
 | 409 | `{"error":"email already in use"}` | Duplicate email |
 | 409 | `{"error":"username already in use"}` | Duplicate username |
 
@@ -300,22 +306,22 @@ curl -X POST "http://localhost:8286/api/admin/invite" \
 
 ### GET /api/admin/users
 
-List all users.
+List users. Available to any admin role; **the result is filtered by caller scope**: SuperAdmin sees all; namespace admin sees only users with grants or `namespace_admins` entries on namespaces they administer (plus self).
 
 **Response** (200 OK):
 
 ```json
 [
-  {"id": 1, "email": "admin@mdnest.local", "username": "admin", "role": "admin", "created_at": "2026-03-28T10:00:00Z"},
+  {"id": 1, "email": "admin@mdnest.local", "username": "admin", "role": "superadmin", "created_at": "2026-03-28T10:00:00Z"},
   {"id": 2, "email": "bob@example.com", "username": "bob", "role": "collaborator", "invited_by": 1, "created_at": "2026-03-28T12:00:00Z"}
 ]
 ```
 
 ---
 
-### PUT /api/admin/users?id=\<user-id\>
+### PUT /api/admin/users?id=\<user-id\> *(SuperAdmin only)*
 
-Update a user's role.
+Update a user's global role. The new role must be one of `superadmin`, `admin`, or `collaborator`. Setting `admin` here only flips the global role string — to actually grant administrative power on a namespace, use `POST /api/admin/namespace-admins` instead.
 
 **Request body:**
 
@@ -333,13 +339,15 @@ Update a user's role.
 
 | Status | Body | Cause |
 |--------|------|-------|
-| 400 | `{"error":"cannot remove the last admin"}` | Demoting the only admin |
+| 400 | `{"error":"role must be superadmin, admin, or collaborator"}` | Invalid role |
+| 400 | `{"error":"cannot remove the last superadmin"}` | Demoting the only superadmin |
+| 403 | `{"error":"superadmin access required"}` | Non-superadmin caller |
 
 ---
 
-### DELETE /api/admin/users?id=\<user-id\>
+### DELETE /api/admin/users?id=\<user-id\> *(SuperAdmin only)*
 
-Delete a user. Access grants are cascade-deleted.
+Delete a user. Access grants and `namespace_admins` rows are cascade-deleted.
 
 **Response** (200 OK):
 
@@ -352,25 +360,79 @@ Delete a user. Access grants are cascade-deleted.
 | Status | Body | Cause |
 |--------|------|-------|
 | 400 | `{"error":"cannot delete yourself"}` | Attempting self-deletion |
-| 400 | `{"error":"cannot remove the last admin"}` | Deleting the only admin |
+| 400 | `{"error":"cannot remove the last superadmin"}` | Deleting the only superadmin |
+| 403 | `{"error":"superadmin access required"}` | Non-superadmin caller |
 | 404 | `{"error":"user not found"}` | User ID does not exist |
 
 **Examples:**
 
 ```bash
-# List users
+# List users (filtered for namespace admins)
 curl "http://localhost:8286/api/admin/users" -H "Authorization: Bearer $TOKEN"
 
-# Change role
+# Change role (superadmin only)
 curl -X PUT "http://localhost:8286/api/admin/users?id=2" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"role": "admin"}'
 
-# Delete user
+# Delete user (superadmin only)
 curl -X DELETE "http://localhost:8286/api/admin/users?id=2" \
   -H "Authorization: Bearer $TOKEN"
 ```
+
+---
+
+### Namespace Admin assignments *(v3.5.0+)*
+
+The new `namespace_admins` table maps users to the namespaces they can administer. Three endpoints manage it.
+
+#### GET /api/admin/namespace-admins?ns=\<namespace\>
+
+List the admins of a namespace. Caller must admin the namespace (or be SuperAdmin).
+
+**Response** (200 OK):
+
+```json
+[
+  {
+    "user_id": 20,
+    "username": "farooq",
+    "email": "farooq@example.com",
+    "namespace": "growth",
+    "granted_by": 19,
+    "created_at": "2026-04-27T11:38:26Z"
+  }
+]
+```
+
+#### POST /api/admin/namespace-admins
+
+Promote a user to admin of a namespace. Caller must already admin the namespace (or be SuperAdmin). Side effects: the target's `users.role` is bumped to `admin` if currently `collaborator`; an `access_grants` row with `permission='write'` on `path='/'` is created if one doesn't already exist (so the new admin can actually open the notes they administer). Idempotent — re-running on an existing pair returns `{"status":"ok"}` without changes.
+
+**Request body:**
+
+```json
+{"user_id": 20, "namespace": "growth"}
+```
+
+**Response** (201 Created):
+
+```json
+{"status": "ok"}
+```
+
+#### DELETE /api/admin/namespace-admins?user_id=\<id\>&ns=\<namespace\>
+
+Demote. Removes the `namespace_admins` row. If the user has no other rows after the delete, their `users.role` is reverted to `collaborator`. The auto-created write grant is **left in place** — operators who want to remove that access too should `DELETE /api/admin/grants?id=…` separately.
+
+**Response** (200 OK):
+
+```json
+{"status": "deleted"}
+```
+
+---
 
 ---
 
@@ -468,7 +530,7 @@ curl -X DELETE "http://localhost:8286/api/admin/grants?id=1" \
 
 ### GET /api/me
 
-Returns the current user's profile and access grants. Requires authentication (any role).
+Returns the current user's profile, role, access grants, and (v3.5.0+) the namespaces they administer. Requires authentication (any role).
 
 **Response** (200 OK):
 
@@ -478,16 +540,20 @@ Returns the current user's profile and access grants. Requires authentication (a
   "email": "bob@example.com",
   "username": "bob",
   "avatar_url": "https://lh3.googleusercontent.com/a/...",
-  "role": "collaborator",
+  "role": "admin",
   "created_at": "2026-03-28T12:00:00Z",
   "grants": [
-    {"id": 1, "namespace": "work", "path": "/", "permission": "write"},
-    {"id": 2, "namespace": "personal", "path": "/docs", "permission": "read"}
-  ]
+    {"id": 1, "namespace": "growth", "path": "/", "permission": "write"}
+  ],
+  "is_super_admin": false,
+  "admin_namespaces": ["growth"]
 }
 ```
 
-`avatar_url` is populated from the IdP's `picture` OIDC claim on every SSO login (see `docs/sso-setup.md`). Omitted from the JSON response when empty.
+- `role` is one of `superadmin`, `admin`, or `collaborator` (v3.5.0+).
+- `is_super_admin` is `true` only for the global `superadmin` role.
+- `admin_namespaces` is the list of namespaces this user administers (always empty for `superadmin` and `collaborator`; `superadmin`'s authority is global, not stored as namespace_admins rows).
+- `avatar_url` is populated from the IdP's `picture` OIDC claim on every SSO login (see `docs/sso-setup.md`). Omitted from the JSON response when empty.
 
 ---
 
