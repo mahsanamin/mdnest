@@ -295,11 +295,15 @@ func SanitizeFromPath(raw string) string {
 		if u.Scheme != "" || u.Host != "" {
 			return "/"
 		}
-		// Keep only the path + fragment, never the query (could be used to smuggle tokens).
+		// Path only. We deliberately drop fragments and queries:
+		//   - Fragments collide with our #sso_token= handoff. URLs only allow
+		//     one #, so combining /#some-note + #sso_token=… produces a
+		//     concatenated mess that the frontend can't parse and the user
+		//     gets stuck on the login screen.
+		//   - Queries could be used to smuggle tokens or open-redirect markers.
+		// Note navigation isn't worth the breakage — users land at the root
+		// after SSO and re-navigate from there.
 		out := u.Path
-		if u.Fragment != "" {
-			out += "#" + u.Fragment
-		}
 		if !strings.HasPrefix(out, "/") {
 			return "/"
 		}

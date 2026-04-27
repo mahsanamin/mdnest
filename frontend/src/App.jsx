@@ -50,18 +50,36 @@ function logout() {
 function consumeSSOHashOnLoad() {
   if (typeof window === 'undefined') return null;
   const h = window.location.hash || '';
-  if (h.startsWith('#sso_token=')) {
+  // Find the SSO marker anywhere in the fragment, not just at the start.
+  // URLs only allow ONE fragment, so if the user had a stale note hash like
+  // "#finops" before logout, the SSO callback redirect can end up producing
+  // "#finops#sso_token=..." (the second "#" gets folded into the fragment
+  // string). A naive startsWith would miss it and the user would get stuck
+  // on the login screen. The backend now strips fragments from the SSO
+  // "from" path so this shouldn't happen anymore — but be defensive.
+  const findValue = (marker) => {
+    const idx = h.indexOf(marker);
+    if (idx < 0) return null;
+    const tail = h.slice(idx + marker.length);
+    const amp = tail.indexOf('&');
+    return amp >= 0 ? tail.slice(0, amp) : tail;
+  };
+
+  const tokenRaw = findValue('sso_token=');
+  if (tokenRaw !== null) {
     let token = '';
-    try { token = decodeURIComponent(h.slice('#sso_token='.length)); } catch {}
+    try { token = decodeURIComponent(tokenRaw); } catch {}
     if (token) {
       try { localStorage.setItem('mdnest_token', token); } catch {}
     }
     window.history.replaceState(null, '', window.location.pathname + window.location.search);
     return null;
   }
-  if (h.startsWith('#sso_error=')) {
+
+  const errRaw = findValue('sso_error=');
+  if (errRaw !== null) {
     let code = '';
-    try { code = decodeURIComponent(h.slice('#sso_error='.length)); } catch {}
+    try { code = decodeURIComponent(errRaw); } catch {}
     window.history.replaceState(null, '', window.location.pathname + window.location.search);
     return code;
   }

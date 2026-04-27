@@ -120,8 +120,20 @@ func (h *SSOHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 
 	// SSO mode skips 2FA — the IdP owns MFA. Mint the full mdnest JWT
 	// directly. `totp_enabled` is always false in this mode.
+	//
+	// `sub` falls back through username → IdP display name → email so the
+	// frontend always has something human-readable to show, even when the
+	// users row was created via a minimal SQL INSERT (username NULL because
+	// migration 005 made it nullable).
+	sub := user.Username
+	if sub == "" {
+		sub = claims.Name
+	}
+	if sub == "" {
+		sub = claims.Email
+	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"sub":          user.Username,
+		"sub":          sub,
 		"user_id":      user.ID,
 		"role":         user.Role,
 		"totp_enabled": false,
