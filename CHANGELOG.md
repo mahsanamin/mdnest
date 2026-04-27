@@ -4,6 +4,21 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v3.5.1 — Go 1.26 bump for stdlib CVEs
+
+### Security
+
+- **Bumped Go to 1.26** (was 1.25). Clears five stdlib vulnerabilities flagged by govulncheck against the 1.25 line:
+  - `GO-2026-4865` — `html/template` JS context tracking bug (XSS)
+  - `GO-2026-4866` — `crypto/x509`
+  - `GO-2026-4870` — `crypto/tls` KeyUpdate DoS
+  - `GO-2026-4946` — `crypto/x509` slow policy validation
+  - `GO-2026-4947` — `crypto/x509` slow chain building
+- `backend/go.mod`: `go 1.25.0` → `go 1.26.2`. `backend/Dockerfile`: `golang:1.25-alpine` → `golang:1.26-alpine` (the moving tag tracks the latest 1.26.x patch so future fixes land on rebuild without manual bumps).
+- No code changes required for the bump — `go mod tidy` was a no-op, `go build` and `go vet` clean, and the production-style `docker compose build --no-cache` succeeded against the new image.
+
+---
+
 ## v3.5.0 — Namespace-scoped Admin role + SuperAdmin + token access scoping
 
 ### Breaking changes

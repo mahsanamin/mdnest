@@ -74,7 +74,7 @@ func (h *ConfigHandler) HandleConfig(w http.ResponseWriter, r *http.Request) {
 		"liveCollab":   h.liveCollab,
 		"require2FA":   h.require2FA,
 		"userProvider": h.userProvider,
-		"version":      "3.5.0",
+		"version":      "3.5.1",
 	}
 	if h.serverAlias != "" {
 		resp["serverAlias"] = h.serverAlias
