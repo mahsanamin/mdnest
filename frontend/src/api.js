@@ -426,4 +426,4 @@ export async function deleteComment(ns, path, commentId) {
   return res.json();
 }
 
-export { getToken, clearToken, PermissionError };
+export { getToken, setToken, clearToken, PermissionError };

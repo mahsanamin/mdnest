@@ -7,13 +7,14 @@ import (
 
 // ConfigHandler returns public configuration (no auth required).
 type ConfigHandler struct {
-	authMode     string
-	liveCollab   bool
-	serverAlias  string
-	require2FA   bool
-	userProvider string                 // "local" | "firebase" | "sso"
-	firebaseWeb  map[string]interface{} // parsed firebase-web-config.json (Firebase mode only)
-	ssoProvider  string                 // human label for the SSO button (e.g. "Google")
+	authMode        string
+	liveCollab      bool
+	serverAlias     string
+	require2FA      bool
+	userProvider    string                 // "local" | "firebase" | "sso"
+	firebaseWeb     map[string]interface{} // parsed firebase-web-config.json (Firebase mode only)
+	ssoProvider     string                 // human label for the SSO button (e.g. "Google")
+	devLoginEnabled bool                   // INSECURE_DEV_LOGIN is on (signals frontend to expose /?login=dev + warning bar)
 }
 
 // NewConfigHandler creates a new config handler.
@@ -45,6 +46,13 @@ func (h *ConfigHandler) SetSSO(providerLabel string) {
 	h.ssoProvider = providerLabel
 }
 
+// SetDevLoginEnabled flips on the INSECURE_DEV_LOGIN signal so the
+// frontend knows to (a) accept /?login=dev navigations, (b) render a
+// loud warning bar in every authenticated view.
+func (h *ConfigHandler) SetDevLoginEnabled(enabled bool) {
+	h.devLoginEnabled = enabled
+}
+
 // HandleConfig handles GET /api/config (unauthenticated).
 func (h *ConfigHandler) HandleConfig(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -66,6 +74,9 @@ func (h *ConfigHandler) HandleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.userProvider == "sso" {
 		resp["ssoProvider"] = h.ssoProvider
+	}
+	if h.devLoginEnabled {
+		resp["devLoginEnabled"] = true
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)

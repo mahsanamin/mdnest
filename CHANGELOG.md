@@ -25,6 +25,10 @@ All notable changes to mdnest are documented here.
 - **Sidebar admin scope hint.** Namespace admins see a yellow "Admin of: <ns list>" badge at the top of the admin panel so they know what they're managing.
 - **New "Namespace Admins" tab in the admin panel.** Pick a namespace, see who admins it, promote any non-superadmin user, demote with one click. Visible to anyone with the panel; the backend scopes both reads and writes.
 
+### Dev-only
+
+- **`INSECURE_DEV_LOGIN` backdoor** for local SSO testing. When set to `true` in `mdnest.conf`, the backend registers `POST /api/auth/dev-login` which mints a 30-day session JWT for any **existing** user by email — completely bypassing the IdP. Identity rules match SSO (no auto-provisioning, blocked users still rejected). Off by default; the route 404s when the flag is unset. The default sign-in page is unchanged (still strict SSO); the bypass is reachable only by manually navigating to `/?login=dev`. While enabled, every authenticated page renders a sticky red warning banner, and the backend logs a multi-line warning at startup. Strictly for local development — never enable on a non-localhost deployment. New `LoginDev.jsx` component, `devLoginEnabled` field on `/api/config`.
+
 ### Internal
 
 - New `backend/store/namespace_admins.go`: `NamespaceAdminStore` interface + Postgres impl with `Add`, `Remove`, `IsAdminOf`, `ListByUser`, `ListByNamespace`, `CountByUser`. `Add` is idempotent via `ON CONFLICT DO NOTHING` so promote re-runs are safe.

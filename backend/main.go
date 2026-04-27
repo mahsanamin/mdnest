@@ -266,6 +266,21 @@ func main() {
 	if ssoClient != nil {
 		configHandler.SetSSO(env("SSO_PROVIDER_LABEL", "SSO"))
 	}
+
+	// INSECURE_DEV_LOGIN backdoor: only honored when the env var is true
+	// AND we're in multi mode (no users table = nothing to look up). Off
+	// by default. The route below is registered only when the flag is on,
+	// and /api/config exposes a devLoginEnabled boolean so the frontend
+	// can render the dev-login page + a sticky warning bar.
+	devLoginEnabled := multiMode && env("INSECURE_DEV_LOGIN", "false") == "true"
+	if devLoginEnabled {
+		log.Println("===========================================================")
+		log.Println("WARNING: INSECURE_DEV_LOGIN=true — /api/auth/dev-login is")
+		log.Println("active. ANY existing user can be impersonated by email")
+		log.Println("without OAuth. NEVER enable this on a non-local deployment.")
+		log.Println("===========================================================")
+		configHandler.SetDevLoginEnabled(true)
+	}
 	mux.HandleFunc("/api/config", configHandler.HandleConfig)
 
 	// SSO routes — only registered when an SSO client was built at startup.
@@ -280,6 +295,12 @@ func main() {
 		)
 		mux.HandleFunc("/api/auth/sso/start", ssoHandler.HandleStart)
 		mux.HandleFunc("/api/auth/sso/callback", ssoHandler.HandleCallback)
+	}
+	// Dev-only backdoor route — registered only when INSECURE_DEV_LOGIN
+	// is set, otherwise this URL 404s like any other non-existent path.
+	if devLoginEnabled {
+		devLoginHandler := handlers.NewDevLoginHandler(userStore, jwtSecret)
+		mux.HandleFunc("/api/auth/dev-login", devLoginHandler.HandleDevLogin)
 	}
 	mux.HandleFunc("/api/auth/login", authHandler.Login)
 	mux.Handle("/api/auth/change-password", authMiddleware.Wrap(http.HandlerFunc(authHandler.ChangePassword)))

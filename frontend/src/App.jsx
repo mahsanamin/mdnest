@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import Login from './components/Login.jsx';
 import LoginFirebase from './components/LoginFirebase.jsx';
 import LoginSSO from './components/LoginSSO.jsx';
+import LoginDev from './components/LoginDev.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import Toolbar from './components/Toolbar.jsx';
 import { lazy, Suspense } from 'react';
@@ -937,6 +938,15 @@ function App() {
     // we know which login component to mount. While appConfig is still
     // null, show a minimal splash to avoid flashing the wrong form.
     if (!appConfig) return <div className="login-screen"><div className="login-box"><h1>mdnest</h1></div></div>;
+
+    // Hidden dev-login route — only when the operator manually visits
+    // /?login=dev AND the backend has INSECURE_DEV_LOGIN=true. The
+    // default flow below is unchanged (still strict SSO).
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('login') === 'dev' && appConfig.devLoginEnabled) {
+      return <LoginDev onLogin={() => window.location.reload()} />;
+    }
+
     if (appConfig.userProvider === 'firebase') {
       return <LoginFirebase onLogin={() => window.location.reload()} />;
     }
@@ -958,6 +968,16 @@ function App() {
 
   return (
     <div className="app">
+      {appConfig?.devLoginEnabled && (
+        // Sticky warning bar — visible on every authenticated screen
+        // whenever INSECURE_DEV_LOGIN is on. Loud on purpose so a stray
+        // production deploy with this flag is impossible to miss.
+        <div className="dev-login-banner">
+          ⚠ INSECURE_DEV_LOGIN is enabled — anyone reaching this server can
+          impersonate any user via <code>/?login=dev</code>. Disable in <code>mdnest.conf</code>{' '}
+          before sharing this URL.
+        </div>
+      )}
       <Sidebar
         tree={tree}
         onSelect={openNote}

@@ -76,6 +76,7 @@ while IFS= read -r line; do
     SSO_REDIRECT_URL) SSO_REDIRECT_URL="$value" ;;
     SSO_ALLOWED_DOMAINS) SSO_ALLOWED_DOMAINS="$value" ;;
     SSO_PROVIDER_LABEL) SSO_PROVIDER_LABEL="$value" ;;
+    INSECURE_DEV_LOGIN) INSECURE_DEV_LOGIN="$value" ;;
     MOUNT_*)
       name="${key#MOUNT_}"
       MOUNT_NAMES+=("$name")
@@ -205,6 +206,7 @@ REQUIRE_2FA=${REQUIRE_2FA:-false}
 TOTP_ISSUER=${TOTP_ISSUER:-mdnest}
 SERVER_ALIAS=${SERVER_ALIAS:-}
 USER_PROVIDER=${USER_PROVIDER:-local}
+INSECURE_DEV_LOGIN=${INSECURE_DEV_LOGIN:-false}
 EOF
 
 if [ "$USER_PROVIDER" = "firebase" ]; then

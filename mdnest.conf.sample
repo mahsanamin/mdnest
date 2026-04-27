@@ -119,6 +119,21 @@ GIT_AUTHOR_EMAIL=you@example.com
 # Optional — only set if your redirect URI isn't FRONTEND_ORIGIN/api/auth/sso/callback:
 # SSO_REDIRECT_URL=https://notes.example.com/api/auth/sso/callback
 
+# ==========================================================================
+# INSECURE: dev-only login backdoor (for local SSO testing)
+# ==========================================================================
+# When INSECURE_DEV_LOGIN=true, an unauthenticated POST /api/auth/dev-login
+# endpoint is registered that mints a 30-day session JWT for ANY existing
+# user, by email — completely bypassing the IdP. The default sign-in page
+# is unchanged (still strict SSO); the backdoor is only accessible by
+# manually opening http://<host>/?login=dev. While enabled, every
+# authenticated page renders a sticky red warning bar.
+#
+# This is for local development only. NEVER set true on a non-localhost
+# deployment — anyone who can reach the backend can impersonate any user.
+# Leave commented (defaults to false).
+# INSECURE_DEV_LOGIN=true
+
 # HTTPS with Caddy (optional)
 # Set CADDY_DOMAIN to enable automatic HTTPS via Let's Encrypt.
 # Caddy runs as a container, terminates TLS, and proxies to the frontend.
