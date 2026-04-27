@@ -78,19 +78,21 @@ function UsersTab({ isSuperAdmin, manageableNs, isFederated }) {
     }
   };
 
-  // Cycles superadmin <-> admin <-> collaborator. Only superadmins can
-  // call this — the backend enforces the same.
-  const handleCycleRole = async (user) => {
-    let next;
-    if (user.role === 'collaborator') next = 'admin';
-    else if (user.role === 'admin') next = 'superadmin';
-    else next = 'collaborator';
-    if (!confirm(`Change ${user.username}'s role to ${next}?`)) return;
+  // Pick a role directly. Backend rejects "cannot remove the last
+  // superadmin" and other invalid transitions, so we surface the error
+  // and reload to revert the optimistic select state.
+  const handleRoleChange = async (user, newRole) => {
+    if (newRole === user.role) return;
+    if (!confirm(`Change ${user.username || user.email}'s role from ${user.role} to ${newRole}?`)) {
+      load();
+      return;
+    }
     try {
-      await adminUpdateRole(user.id, next);
+      await adminUpdateRole(user.id, newRole);
       load();
     } catch (e) {
       alert(e.message);
+      load();
     }
   };
 
@@ -130,14 +132,24 @@ function UsersTab({ isSuperAdmin, manageableNs, isFederated }) {
               <td>{u.username}</td>
               <td>{u.email}</td>
               <td>
-                <span className={`role-badge ${u.role}`}>{u.role}</span>
+                {isSuperAdmin ? (
+                  <select
+                    className={`admin-role-select role-${u.role}`}
+                    value={u.role}
+                    onChange={(e) => handleRoleChange(u, e.target.value)}
+                    title="Change role. Note: setting Admin here only flips the global flag — namespace scope is assigned in the Namespace Admins tab."
+                  >
+                    <option value="collaborator">Collaborator</option>
+                    <option value="admin">Admin</option>
+                    <option value="superadmin">Super-admin</option>
+                  </select>
+                ) : (
+                  <span className={`role-badge ${u.role}`}>{u.role}</span>
+                )}
               </td>
               <td>{new Date(u.created_at).toLocaleDateString()}</td>
               {isSuperAdmin && (
                 <td>
-                  <button className="admin-action-btn" onClick={() => handleCycleRole(u)} title="Cycle role: collaborator → admin → superadmin → collaborator">
-                    Cycle role
-                  </button>
                   <button className="admin-action-btn danger" onClick={() => handleDelete(u)} title="Delete user">
                     Delete
                   </button>

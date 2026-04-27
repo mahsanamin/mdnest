@@ -3030,6 +3030,21 @@ pre:hover .code-copy-btn {
   color: #fab387;
 }
 
+/* Inline role picker in the Users table — same color cues as .role-badge
+   so the accent for the current role still reads at a glance, but the
+   control is editable. */
+.admin-role-select {
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+.admin-role-select.role-superadmin { background: #fab38722; color: #fab387; border-color: #fab38744; }
+.admin-role-select.role-admin      { background: #f38ba822; color: #f38ba8; border-color: #f38ba844; }
+.admin-role-select.role-collaborator { background: #89b4fa22; color: #89b4fa; border-color: #89b4fa44; }
+
 .role-badge.admin {
   background: #f38ba822;
   color: #f38ba8;
