@@ -2,9 +2,11 @@
 # (the syntax line enables BuildKit cache mounts below)
 
 # Stage 1: Build
-# Bumped to 1.25 for the Firebase Admin SDK (firebase.google.com/go/v4
-# transitively requires 1.25+).
-FROM golang:1.25-alpine AS builder
+# Bumped to 1.26 in v3.5.0 to clear stdlib CVEs in the 1.25 line
+# (GO-2026-4865/4866/4870/4946/4947 — all crypto/x509, crypto/tls,
+# html/template). The 1.26-alpine moving tag pulls the latest 1.26.x
+# patch so we keep up with future fixes without manual bumps.
+FROM golang:1.26-alpine AS builder
 
 WORKDIR /app
 
