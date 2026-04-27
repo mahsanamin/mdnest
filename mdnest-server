@@ -78,9 +78,13 @@ case "$CMD" in
       compose build --no-cache frontend backend
       compose up --force-recreate -d "$@"
     else
-      # Always --no-cache for backend (Go compiles in seconds, cache causes stale binaries)
-      compose build --no-cache backend
-      compose build frontend
+      # Use Docker layer cache for the build. The Dockerfile's BuildKit
+      # cache mounts (/go/pkg/mod, /root/.cache/go-build) keep the Go
+      # module + incremental compile caches warm even when layers are
+      # invalidated, so we get fast rebuilds (~10-30s) instead of cold
+      # full compiles (~180-235s post-Firebase). If you suspect a stale
+      # binary, use `rebuild --full` which forces --no-cache.
+      compose build backend frontend
       # --force-recreate guarantees containers re-read .env even when the
       # image hash didn't change (e.g. conf-only edit triggering rebuild).
       # Postgres + git-sync are not in this list, so they keep running.
