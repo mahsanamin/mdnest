@@ -6,8 +6,13 @@ function getServerUrl() {
   return window.location.origin;
 }
 
-function Settings({ onClose }) {
+function Settings({ onClose, userProvider }) {
   const [tab, setTab] = useState('tokens');
+  // Hide Credentials + 2FA in any federated mode — identity lives with the
+  // external provider (Firebase Auth / corporate SSO IdP), not in mdnest's
+  // users table. Keeping the tab visible would be misleading and the
+  // change-password endpoint refuses these accounts anyway.
+  const passwordEnabled = userProvider !== 'firebase' && userProvider !== 'sso';
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -21,13 +26,15 @@ function Settings({ onClose }) {
           <button className={tab === 'cli' ? 'active' : ''} onClick={() => setTab('cli')}>CLI</button>
           <button className={tab === 'mcp' ? 'active' : ''} onClick={() => setTab('mcp')}>MCP</button>
           <button className={tab === 'api' ? 'active' : ''} onClick={() => setTab('api')}>API</button>
-          <button className={tab === 'password' ? 'active' : ''} onClick={() => setTab('password')}>Credentials</button>
+          {passwordEnabled && (
+            <button className={tab === 'password' ? 'active' : ''} onClick={() => setTab('password')}>Credentials</button>
+          )}
         </div>
         {tab === 'tokens' && <TokensTab />}
         {tab === 'cli' && <CliTab />}
         {tab === 'mcp' && <McpTab />}
         {tab === 'api' && <ApiTab />}
-        {tab === 'password' && <PasswordTab />}
+        {tab === 'password' && passwordEnabled && <PasswordTab />}
       </div>
     </div>
   );

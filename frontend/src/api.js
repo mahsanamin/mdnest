@@ -48,11 +48,15 @@ export async function fetchConfig() {
 
 // --- Auth ---
 
-export async function login(username, password) {
+// Accepts either (username, password) — classic local-mode form — or a
+// single object body like { idToken } for Firebase sign-in. The backend
+// picks the right branch based on which fields are present.
+export async function login(a, b) {
+  const body = typeof a === 'object' && a !== null ? a : { username: a, password: b };
   const res = await fetch(`${BASE}/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));

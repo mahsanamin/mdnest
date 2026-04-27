@@ -65,6 +65,17 @@ while IFS= read -r line; do
     SEARCH_MAX_FILE_SIZE) SEARCH_MAX_FILE_SIZE="$value" ;;
     SEARCH_WORKERS) SEARCH_WORKERS="$value" ;;
     SEARCH_CACHE_TTL) SEARCH_CACHE_TTL="$value" ;;
+    USER_PROVIDER) USER_PROVIDER="$value" ;;
+    FIREBASE_PROJECT_ID) FIREBASE_PROJECT_ID="$value" ;;
+    FIREBASE_SERVICE_ACCOUNT) FIREBASE_SERVICE_ACCOUNT="$value" ;;
+    FIREBASE_WEB_CONFIG) FIREBASE_WEB_CONFIG="$value" ;;
+    ADMIN_EMAILS) ADMIN_EMAILS="$value" ;;
+    SSO_ISSUER_URL) SSO_ISSUER_URL="$value" ;;
+    SSO_CLIENT_ID) SSO_CLIENT_ID="$value" ;;
+    SSO_CLIENT_SECRET) SSO_CLIENT_SECRET="$value" ;;
+    SSO_REDIRECT_URL) SSO_REDIRECT_URL="$value" ;;
+    SSO_ALLOWED_DOMAINS) SSO_ALLOWED_DOMAINS="$value" ;;
+    SSO_PROVIDER_LABEL) SSO_PROVIDER_LABEL="$value" ;;
     MOUNT_*)
       name="${key#MOUNT_}"
       MOUNT_NAMES+=("$name")
@@ -97,6 +108,57 @@ if [ "$AUTH_MODE" = "multi" ]; then
   echo "  Database: ${POSTGRES_USER}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}"
 else
   echo "Auth mode: single (file-based, default)"
+fi
+
+# Validate Firebase mode config — see docs/firebase-setup.md for how to
+# create the project and download these two files.
+USER_PROVIDER="${USER_PROVIDER:-local}"
+if [ "$USER_PROVIDER" = "firebase" ]; then
+  if [ "$AUTH_MODE" != "multi" ]; then
+    echo "Error: USER_PROVIDER=firebase requires AUTH_MODE=multi."
+    exit 1
+  fi
+  if [ -z "$FIREBASE_PROJECT_ID" ]; then
+    echo "Error: USER_PROVIDER=firebase requires FIREBASE_PROJECT_ID in $CONF."
+    exit 1
+  fi
+  if [ -z "$FIREBASE_SERVICE_ACCOUNT" ] || [ ! -f "$FIREBASE_SERVICE_ACCOUNT" ]; then
+    echo "Error: FIREBASE_SERVICE_ACCOUNT must point to an existing service-account JSON file."
+    echo "       See docs/firebase-setup.md step 4 for how to download it."
+    exit 1
+  fi
+  if [ -z "$FIREBASE_WEB_CONFIG" ] || [ ! -f "$FIREBASE_WEB_CONFIG" ]; then
+    echo "Error: FIREBASE_WEB_CONFIG must point to an existing firebase-web-config JSON file."
+    echo "       See docs/firebase-setup.md step 5 for how to save it."
+    exit 1
+  fi
+  echo "User provider: firebase (federated identity across mdnest servers)"
+  echo "  Project: $FIREBASE_PROJECT_ID"
+fi
+
+# Validate SSO mode config — see docs/sso-setup.md for how to create the
+# OAuth client, configure redirect URIs, etc.
+if [ "$USER_PROVIDER" = "sso" ]; then
+  if [ "$AUTH_MODE" != "multi" ]; then
+    echo "Error: USER_PROVIDER=sso requires AUTH_MODE=multi."
+    exit 1
+  fi
+  if [ -z "$SSO_ISSUER_URL" ]; then
+    echo "Error: USER_PROVIDER=sso requires SSO_ISSUER_URL in $CONF."
+    echo "       Google: https://accounts.google.com"
+    echo "       Okta:   https://<your-org>.okta.com"
+    exit 1
+  fi
+  if [ -z "$SSO_CLIENT_ID" ] || [ -z "$SSO_CLIENT_SECRET" ]; then
+    echo "Error: USER_PROVIDER=sso requires SSO_CLIENT_ID and SSO_CLIENT_SECRET in $CONF."
+    echo "       Ask your devops for the OAuth client credentials, or see docs/sso-setup.md."
+    exit 1
+  fi
+  echo "User provider: sso (generic OIDC — 2FA is delegated to the IdP)"
+  echo "  Issuer: $SSO_ISSUER_URL"
+  if [ -n "$SSO_ALLOWED_DOMAINS" ]; then
+    echo "  Allowed email domains: $SSO_ALLOWED_DOMAINS"
+  fi
 fi
 
 if [ ${#MOUNT_NAMES[@]} -eq 0 ]; then
@@ -142,7 +204,29 @@ ENABLE_LIVE_COLLAB=${ENABLE_LIVE_COLLAB:-false}
 REQUIRE_2FA=${REQUIRE_2FA:-false}
 TOTP_ISSUER=${TOTP_ISSUER:-mdnest}
 SERVER_ALIAS=${SERVER_ALIAS:-}
+USER_PROVIDER=${USER_PROVIDER:-local}
 EOF
+
+if [ "$USER_PROVIDER" = "firebase" ]; then
+  cat >> .env <<EOF
+FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID}
+FIREBASE_SERVICE_ACCOUNT=/etc/mdnest/firebase-service-account.json
+FIREBASE_WEB_CONFIG=/etc/mdnest/firebase-web-config.json
+ADMIN_EMAILS=${ADMIN_EMAILS:-}
+EOF
+fi
+
+if [ "$USER_PROVIDER" = "sso" ]; then
+  cat >> .env <<EOF
+SSO_ISSUER_URL=${SSO_ISSUER_URL}
+SSO_CLIENT_ID=${SSO_CLIENT_ID}
+SSO_CLIENT_SECRET=${SSO_CLIENT_SECRET}
+SSO_REDIRECT_URL=${SSO_REDIRECT_URL:-}
+SSO_ALLOWED_DOMAINS=${SSO_ALLOWED_DOMAINS:-}
+SSO_PROVIDER_LABEL=${SSO_PROVIDER_LABEL:-}
+ADMIN_EMAILS=${ADMIN_EMAILS:-}
+EOF
+fi
 
 if [ "$AUTH_MODE" = "multi" ]; then
   cat >> .env <<EOF
@@ -165,6 +249,15 @@ for i in "${!MOUNT_NAMES[@]}"; do
   GITSYNC_VOLUMES="$GITSYNC_VOLUMES      - ${MOUNT_PATHS[$i]}:/data/notes/${MOUNT_NAMES[$i]}
 "
 done
+
+# Firebase mode: mount the service-account JSON (backend-only, reads for
+# Admin SDK) and the web-config JSON (backend reads it, serves it inline
+# via /api/config so the frontend can init the Firebase SDK).
+if [ "$USER_PROVIDER" = "firebase" ]; then
+  BACKEND_VOLUMES="${BACKEND_VOLUMES}      - ${FIREBASE_SERVICE_ACCOUNT}:/etc/mdnest/firebase-service-account.json:ro
+      - ${FIREBASE_WEB_CONFIG}:/etc/mdnest/firebase-web-config.json:ro
+"
+fi
 
 # SSH key for git pull/push (backend sync button + git-sync sidecar)
 SSH_KEY_VOLUME=""

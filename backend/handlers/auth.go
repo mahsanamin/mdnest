@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"log"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/mdnest/mdnest/backend/firebase"
 	"github.com/mdnest/mdnest/backend/middleware"
 	"github.com/mdnest/mdnest/backend/store"
 	"golang.org/x/crypto/bcrypt"
@@ -36,12 +38,20 @@ type AuthHandler struct {
 
 	// Multi mode fields (nil in single mode)
 	userStore  store.UserStore
+	totpStore  store.TOTPStore
 	require2FA bool
+
+	// Firebase mode (nil unless USER_PROVIDER=firebase). When set, Login
+	// accepts {idToken} in addition to {username, password} — Firebase-
+	// verified idTokens resolve to a local users row via UpsertFirebaseUser.
+	firebaseClient *firebase.Client
+	adminEmails    map[string]bool
 }
 
 type loginRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+	Username string `json:"username,omitempty"`
+	Password string `json:"password,omitempty"`
+	IDToken  string `json:"idToken,omitempty"` // Firebase ID token (USER_PROVIDER=firebase)
 }
 
 type loginResponse struct {
@@ -76,12 +86,21 @@ func NewAuthHandler(username, password, jwtSecret, secretsDir string) *AuthHandl
 }
 
 // NewMultiAuthHandler creates a new auth handler for multi-user mode.
-func NewMultiAuthHandler(jwtSecret string, userStore store.UserStore, require2FA bool) *AuthHandler {
+func NewMultiAuthHandler(jwtSecret string, userStore store.UserStore, totpStore store.TOTPStore, require2FA bool) *AuthHandler {
 	return &AuthHandler{
 		secret:     []byte(jwtSecret),
 		userStore:  userStore,
+		totpStore:  totpStore,
 		require2FA: require2FA,
 	}
+}
+
+// SetFirebase enables the Firebase login branch on an existing multi-mode
+// auth handler. adminEmails is the normalized-lowercase set of emails that
+// should be promoted to admin on first Firebase claim.
+func (h *AuthHandler) SetFirebase(client *firebase.Client, adminEmails map[string]bool) {
+	h.firebaseClient = client
+	h.adminEmails = adminEmails
 }
 
 // IsMultiMode returns true if the handler is in multi-user mode.
@@ -161,11 +180,90 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Firebase branch takes precedence when an idToken is supplied. Classic
+	// username+password still works alongside it — the branch is per-request,
+	// not per-server — but in practice the frontend in Firebase mode never
+	// sends the username form.
+	if req.IDToken != "" && h.firebaseClient != nil {
+		h.loginFirebase(w, r, req.IDToken)
+		return
+	}
+
 	if h.IsMultiMode() {
 		h.loginMulti(w, req)
 	} else {
 		h.loginSingle(w, req)
 	}
+}
+
+// loginFirebase verifies a Firebase ID token, upserts the matching local
+// users row, and proceeds through the same TOTP / blocked / token flow as
+// loginMulti. Everything past the identity check is shared.
+func (h *AuthHandler) loginFirebase(w http.ResponseWriter, r *http.Request, idToken string) {
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	verified, err := h.firebaseClient.VerifyIDToken(ctx, idToken)
+	if err != nil {
+		log.Printf("firebase verify failed: %v", err)
+		http.Error(w, `{"error":"invalid firebase token"}`, http.StatusUnauthorized)
+		return
+	}
+	if verified.Email == "" {
+		http.Error(w, `{"error":"firebase account has no email"}`, http.StatusForbidden)
+		return
+	}
+
+	user, err := h.userStore.UpsertFirebaseUser(verified.Email, verified.UID, verified.Name, h.adminEmails)
+	if err != nil {
+		// Treat "not invited" / uid-mismatch as forbidden rather than 500.
+		log.Printf("firebase upsert failed for %s: %v", verified.Email, err)
+		http.Error(w, `{"error":"account is not authorized on this server"}`, http.StatusForbidden)
+		return
+	}
+	if user.Blocked {
+		http.Error(w, `{"error":"your account has been blocked. Contact your administrator."}`, http.StatusForbidden)
+		return
+	}
+
+	// Read TOTP state from whatever backing store is wired (Firestore in
+	// Firebase mode), then reuse the existing temp-token / full-token flow.
+	_, totpEnabled, _, err := h.totpStore.Get(user.ID)
+	if err != nil {
+		log.Printf("failed to read totp state for user %d: %v", user.ID, err)
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		return
+	}
+
+	if totpEnabled {
+		tempToken, err := CreateTempToken(user, h.secret, "totp")
+		if err != nil {
+			http.Error(w, `{"error":"failed to generate token"}`, http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(loginResponse{
+			Status:    "totp_required",
+			TempToken: tempToken,
+		})
+		return
+	}
+
+	if h.require2FA && !totpEnabled {
+		tempToken, err := CreateTempToken(user, h.secret, "totp_setup")
+		if err != nil {
+			http.Error(w, `{"error":"failed to generate token"}`, http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(loginResponse{
+			Status:    "totp_setup_required",
+			TempToken: tempToken,
+		})
+		return
+	}
+
+	h.issueFullToken(w, user, false)
 }
 
 func (h *AuthHandler) loginSingle(w http.ResponseWriter, req loginRequest) {
@@ -222,8 +320,16 @@ func (h *AuthHandler) loginMulti(w http.ResponseWriter, req loginRequest) {
 		return
 	}
 
-	// Check if 2FA is enabled — verify code
-	if user.TOTPEnabled {
+	// Consult the TOTP store — in local mode this reads the users table, in
+	// Firebase mode it reads Firestore so 2FA state is shared across servers.
+	_, totpEnabled, _, err := h.totpStore.Get(user.ID)
+	if err != nil {
+		log.Printf("failed to read totp state for user %d: %v", user.ID, err)
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		return
+	}
+
+	if totpEnabled {
 		tempToken, err := CreateTempToken(user, h.secret, "totp")
 		if err != nil {
 			http.Error(w, `{"error":"failed to generate token"}`, http.StatusInternalServerError)
@@ -238,7 +344,7 @@ func (h *AuthHandler) loginMulti(w http.ResponseWriter, req loginRequest) {
 	}
 
 	// Check if 2FA is required by admin but user hasn't set it up yet
-	if h.require2FA && !user.TOTPEnabled {
+	if h.require2FA && !totpEnabled {
 		tempToken, err := CreateTempToken(user, h.secret, "totp_setup")
 		if err != nil {
 			http.Error(w, `{"error":"failed to generate token"}`, http.StatusInternalServerError)
@@ -253,16 +359,21 @@ func (h *AuthHandler) loginMulti(w http.ResponseWriter, req loginRequest) {
 	}
 
 	// No extra steps — issue full JWT
-	h.issueFullToken(w, user)
+	h.issueFullToken(w, user, totpEnabled)
 }
 
-func (h *AuthHandler) issueFullToken(w http.ResponseWriter, user *store.User) {
+// issueFullToken mints the long-lived mdnest JWT. totpEnabled is embedded as a
+// claim so the frontend/middleware can tell whether the user has 2FA set up
+// without hitting the TOTP store on every request. It's informational only —
+// real 2FA enforcement happens at login time, not on claim inspection.
+func (h *AuthHandler) issueFullToken(w http.ResponseWriter, user *store.User, totpEnabled bool) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"sub":     user.Username,
-		"user_id": user.ID,
-		"role":    user.Role,
-		"iat":     time.Now().Unix(),
-		"exp":     time.Now().Add(30 * 24 * time.Hour).Unix(),
+		"sub":          user.Username,
+		"user_id":      user.ID,
+		"role":         user.Role,
+		"totp_enabled": totpEnabled,
+		"iat":          time.Now().Unix(),
+		"exp":          time.Now().Add(30 * 24 * time.Hour).Unix(),
 	})
 
 	tokenString, err := token.SignedString(h.secret)
@@ -318,8 +429,14 @@ func (h *AuthHandler) HandleForcedPasswordChange(w http.ResponseWriter, r *http.
 
 	log.Printf("forced password change for user: %s (id: %d)", user.Username, user.ID)
 
-	// If 2FA is enabled, require TOTP next
-	if user.TOTPEnabled {
+	// If 2FA is enabled (per the TOTP store, which may be Firestore), require TOTP next.
+	_, totpEnabled, _, err := h.totpStore.Get(user.ID)
+	if err != nil {
+		log.Printf("failed to read totp state for user %d: %v", user.ID, err)
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		return
+	}
+	if totpEnabled {
 		tempToken, err := CreateTempToken(user, h.secret, "totp")
 		if err != nil {
 			http.Error(w, `{"error":"failed to generate token"}`, http.StatusInternalServerError)
@@ -334,7 +451,7 @@ func (h *AuthHandler) HandleForcedPasswordChange(w http.ResponseWriter, r *http.
 	}
 
 	// No 2FA — issue full JWT
-	h.issueFullToken(w, user)
+	h.issueFullToken(w, user, false)
 }
 
 // ChangePassword handles POST /api/auth/change-password (authenticated).

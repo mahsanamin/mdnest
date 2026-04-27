@@ -333,12 +333,29 @@ function Sidebar({
 
 function UserFooter({ userInfo, onLogout, onAdminPanel }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [avatarFailed, setAvatarFailed] = useState(false);
   const menuRef = useRef(null);
 
-  const initials = useMemo(() => {
-    if (!userInfo?.username) return '?';
-    return userInfo.username.slice(0, 2).toUpperCase();
+  // Display name picks the first non-empty of: username, email local-part,
+  // or "User" — so a freshly-claimed SSO row with username NULL still shows
+  // something readable (e.g. "ahsan.amin") instead of the placeholder.
+  const displayName = useMemo(() => {
+    if (userInfo?.username) return userInfo.username;
+    if (userInfo?.email) return userInfo.email.split('@')[0];
+    return 'User';
   }, [userInfo]);
+
+  const initials = useMemo(() => {
+    return (displayName || '?').slice(0, 2).toUpperCase();
+  }, [displayName]);
+
+  // Avatar URL comes from /api/me as avatar_url (set by SSO callback from
+  // the IdP's `picture` claim). Falls back to initials if absent or the
+  // image fails to load.
+  const avatarURL = userInfo?.avatar_url;
+  const showImg = avatarURL && !avatarFailed;
+
+  useEffect(() => { setAvatarFailed(false); }, [avatarURL]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -354,9 +371,20 @@ function UserFooter({ userInfo, onLogout, onAdminPanel }) {
   return (
     <div className="sidebar-footer" ref={menuRef}>
       <div className="sidebar-user-row" onClick={() => setMenuOpen(!menuOpen)}>
-        <div className="user-avatar">{initials}</div>
+        <div className="user-avatar">
+          {showImg ? (
+            <img
+              src={avatarURL}
+              alt=""
+              onError={() => setAvatarFailed(true)}
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            initials
+          )}
+        </div>
         <div className="sidebar-user-info">
-          <span className="sidebar-username">{userInfo?.username || 'User'}</span>
+          <span className="sidebar-username">{displayName}</span>
           <span className="sidebar-role">{userInfo?.role || ''}</span>
         </div>
       </div>

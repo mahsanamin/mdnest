@@ -2377,6 +2377,14 @@ pre:hover .code-copy-btn {
   font-weight: 700;
   flex-shrink: 0;
   letter-spacing: 0.5px;
+  overflow: hidden;
+}
+
+.user-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .sidebar-user-info {

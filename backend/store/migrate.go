@@ -58,6 +58,32 @@ var migrations = []struct {
 			ALTER TABLE users ADD COLUMN IF NOT EXISTS blocked BOOLEAN NOT NULL DEFAULT false;
 		`,
 	},
+	{
+		// Federated identity: Firebase Auth becomes the identity source, but
+		// authorization (role, grants, blocked) stays per-server in Postgres.
+		// Additive-only — safe on local-mode deployments that never enable
+		// Firebase. Existing rows keep their username/password_hash values;
+		// we just drop the NOT NULL so Firebase-claimed rows don't require them.
+		name: "005_add_firebase_uid",
+		sql: `
+			ALTER TABLE users ADD COLUMN IF NOT EXISTS firebase_uid TEXT UNIQUE;
+			ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL;
+			ALTER TABLE users ALTER COLUMN username DROP NOT NULL;
+			CREATE INDEX IF NOT EXISTS idx_users_firebase_uid ON users(firebase_uid);
+			CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+		`,
+	},
+	{
+		// Profile metadata from federated identity providers (SSO `picture` and
+		// `name` claims, Firebase displayName / photoURL). Used by the frontend
+		// to render the user's actual face + name in the sidebar instead of
+		// the "?" placeholder. Plain TEXT, no constraints — IdP URLs are
+		// arbitrary HTTPS, names can be any unicode.
+		name: "006_add_avatar_url",
+		sql: `
+			ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT;
+		`,
+	},
 }
 
 // Migrate runs all pending migrations. Safe to call on every startup.

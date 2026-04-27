@@ -1,7 +1,7 @@
 {
   "name": "mdnest-frontend",
   "private": true,
-  "version": "3.3.1",
+  "version": "3.4.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -17,6 +17,7 @@
     "@milkdown/preset-commonmark": "^7.20.0",
     "@milkdown/preset-gfm": "^7.20.0",
     "@milkdown/react": "^7.20.0",
+    "firebase": "^12.12.1",
     "marked": "^15.0.0",
     "mermaid": "^11.4.0",
     "react": "^19.0.0",

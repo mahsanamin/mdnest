@@ -28,20 +28,31 @@ backend/
     path.go                  # SafePath(), RequireNamespace() — shared utils
     noteid.go                # ExtractNoteID / InjectNoteID / EnsureNoteID (UUID marker)
     comments.go              # GET/POST/PATCH/DELETE /api/comments?ns=&path=&id=
+    sso.go                   # GET /api/auth/sso/{start,callback} (USER_PROVIDER=sso only)
+  firebase/                  # Firebase Auth + Firestore (USER_PROVIDER=firebase only)
+    client.go                # Admin SDK wrapper (VerifyIDToken)
+    totp_store.go            # Firestore-backed store.TOTPStore impl
+  sso/                       # Generic OIDC relying-party (USER_PROVIDER=sso)
+    client.go                # coreos/go-oidc + oauth2 with PKCE, signed state cookie
   middleware/
     auth.go                  # JWT validation middleware
     cors.go                  # CORS middleware
   store/
     db.go                    # Postgres connection pool (multi mode only)
-    migrate.go               # Auto-migration: schema_migrations, users, access_grants
+    migrate.go               # Auto-migration: schema_migrations, users, access_grants, firebase_uid (005), avatar_url (006)
+    users.go                 # UserStore (Postgres) + UpsertFirebaseUser / PromoteToAdmin
+    totp_store.go            # TOTPStore interface + PostgresTOTPStore
 
 frontend/
   src/
     App.jsx                  # Root: auth, namespace/tree state, context menu, URL routing
     api.js                   # All API calls (fetch wrapper with JWT + 401 handling)
     mermaid-config.js         # Shared mermaid init, theme, and fixMermaidTextColors()
+    firebase-config.js       # Firebase SDK lazy init (USER_PROVIDER=firebase only)
     components/
-      Login.jsx              # Auth form
+      Login.jsx              # Auth form (USER_PROVIDER=local)
+      LoginFirebase.jsx      # "Sign in with Google" button (USER_PROVIDER=firebase)
+      LoginSSO.jsx           # Corporate SSO sign-in button (USER_PROVIDER=sso)
       Sidebar.jsx            # Namespace picker, tree area, expand/collapse
       TreeNode.jsx           # Recursive tree node (drag-drop, context menu, long-press)
       Toolbar.jsx            # Top bar: hamburger, +Note, +Folder, path display
@@ -69,6 +80,7 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 - Standard library only, no web framework — just net/http with ServeMux
 - External dependencies: golang-jwt/jwt/v5, lib/pq (Postgres driver), golang.org/x/crypto (bcrypt)
 - Two auth modes: `AUTH_MODE=single` (file-based, no DB) or `AUTH_MODE=multi` (Postgres)
+- Three identity providers (multi-mode only): `USER_PROVIDER=local` (default, username/password), `USER_PROVIDER=firebase` (Firebase Auth + Firestore TOTP), `USER_PROVIDER=sso` (generic OIDC). Exclusive; chosen at startup. In `sso` mode 2FA is skipped entirely (IdP owns MFA) and local password endpoints are unused. See `docs/sso-setup.md` and `docs/firebase-setup.md`.
 - In single mode, the store/ package is not initialized — zero DB dependency
 - All handlers take `notesDir` (absolute path) in constructor
 - All file APIs require `ns` query param (namespace = top-level dir under NOTES_DIR)

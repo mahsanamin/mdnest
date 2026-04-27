@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Login from './components/Login.jsx';
+import LoginFirebase from './components/LoginFirebase.jsx';
+import LoginSSO from './components/LoginSSO.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import Toolbar from './components/Toolbar.jsx';
 import { lazy, Suspense } from 'react';
@@ -26,10 +28,63 @@ import {
   moveItem,
   fetchConfig,
   fetchMe,
-  logout,
+  logout as apiLogout,
   PermissionError,
 } from './api.js';
+import { initFirebase, signOutFirebase } from './firebase-config.js';
 import './App.css';
+
+// Top-level logout. In Firebase mode we also clear the local Google session
+// so the Google account chooser shows up on next sign-in. Does NOT revoke
+// the user's Google account globally.
+function logout() {
+  signOutFirebase().finally(apiLogout);
+}
+
+// If we arrived here from /api/auth/sso/callback the JWT is sitting in the
+// URL fragment as #sso_token=<jwt>, and errors as #sso_error=<code>.
+// Reads once on page load, strips the hash, and returns any error code for
+// the LoginSSO component to render. Lazy useState initialiser calls it
+// exactly once per mount so it doesn't race with React's normal hash
+// handling used for note navigation.
+function consumeSSOHashOnLoad() {
+  if (typeof window === 'undefined') return null;
+  const h = window.location.hash || '';
+  // Find the SSO marker anywhere in the fragment, not just at the start.
+  // URLs only allow ONE fragment, so if the user had a stale note hash like
+  // "#finops" before logout, the SSO callback redirect can end up producing
+  // "#finops#sso_token=..." (the second "#" gets folded into the fragment
+  // string). A naive startsWith would miss it and the user would get stuck
+  // on the login screen. The backend now strips fragments from the SSO
+  // "from" path so this shouldn't happen anymore — but be defensive.
+  const findValue = (marker) => {
+    const idx = h.indexOf(marker);
+    if (idx < 0) return null;
+    const tail = h.slice(idx + marker.length);
+    const amp = tail.indexOf('&');
+    return amp >= 0 ? tail.slice(0, amp) : tail;
+  };
+
+  const tokenRaw = findValue('sso_token=');
+  if (tokenRaw !== null) {
+    let token = '';
+    try { token = decodeURIComponent(tokenRaw); } catch {}
+    if (token) {
+      try { localStorage.setItem('mdnest_token', token); } catch {}
+    }
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    return null;
+  }
+
+  const errRaw = findValue('sso_error=');
+  if (errRaw !== null) {
+    let code = '';
+    try { code = decodeURIComponent(errRaw); } catch {}
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    return code;
+  }
+  return null;
+}
 
 // URL helpers: store ns and path in hash like #ns/path/to/note.md
 function parseHash() {
@@ -53,6 +108,7 @@ function setHash(ns, path) {
 }
 
 function App() {
+  const [ssoError, setSsoError] = useState(() => consumeSSOHashOnLoad());
   const [authenticated, setAuthenticated] = useState(!!getToken());
   const [namespaces, setNamespaces] = useState([]);
   const [selectedNs, setSelectedNs] = useState(null);
@@ -163,9 +219,18 @@ function App() {
 
   const canWriteCurrent = canWrite(currentPath);
 
-  // Fetch app config on mount (before auth)
+  // Fetch app config on mount (before auth). If the server is in Firebase
+  // mode, the embedded firebaseWebConfig lets us init the Firebase SDK
+  // before the user clicks "Sign in with Google".
   useEffect(() => {
-    fetchConfig().then(setAppConfig).catch(() => setAppConfig({ authMode: 'single' }));
+    fetchConfig()
+      .then((cfg) => {
+        setAppConfig(cfg);
+        if (cfg?.userProvider === 'firebase' && cfg?.firebaseWebConfig) {
+          initFirebase(cfg.firebaseWebConfig);
+        }
+      })
+      .catch(() => setAppConfig({ authMode: 'single' }));
   }, []);
 
   // Version check: poll /api/config every 60s, compare server version vs build version
@@ -859,6 +924,16 @@ function App() {
   }, [currentPath, selectedNs, handleContextAction]);
 
   if (!authenticated) {
+    // Render the Firebase flow only once the backend config has loaded so
+    // we know which login component to mount. While appConfig is still
+    // null, show a minimal splash to avoid flashing the wrong form.
+    if (!appConfig) return <div className="login-screen"><div className="login-box"><h1>mdnest</h1></div></div>;
+    if (appConfig.userProvider === 'firebase') {
+      return <LoginFirebase onLogin={() => window.location.reload()} />;
+    }
+    if (appConfig.userProvider === 'sso') {
+      return <LoginSSO providerLabel={appConfig.ssoProvider} errorCode={ssoError} />;
+    }
     return <Login onLogin={() => window.location.reload()} />;
   }
 
@@ -1052,7 +1127,7 @@ function App() {
         </div>
       </div>
       {showChangePassword && (
-        <Settings onClose={() => setShowChangePassword(false)} />
+        <Settings onClose={() => setShowChangePassword(false)} userProvider={appConfig?.userProvider} />
       )}
       {shareTarget && (
         <ShareDialog

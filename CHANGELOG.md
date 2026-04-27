@@ -4,6 +4,34 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v3.4.0 — Corporate SSO + Federated Identity
+
+### Features
+- **`mdnest-server reload`** — new lightweight subcommand for config-only edits. Regenerates `.env` + `docker-compose.yml` from `mdnest.conf` and force-recreates `backend` + `frontend` (and `git-sync` if enabled) so they re-read the new env. No image rebuild — ~10s vs `rebuild`'s 60-90s. Postgres and other persistent services are left untouched. Use after editing `mdnest.conf` (e.g. flipping `USER_PROVIDER`, adding a `MOUNT_*`, rotating an SSO secret).
+- **`mdnest-server rebuild` always force-recreates app containers.** Previously the default rebuild relied on the `--no-cache` backend build to change the image hash, which usually triggered recreation but could miss conf-only changes that produced an identical binary. Now `rebuild` always passes `--force-recreate` to `compose up -d` for `backend` + `frontend`, guaranteeing the new `.env` is read. Postgres + git-sync still stay running. `--full` continues to nuke everything for the rare cases that need it.
+- **Backend Dockerfile: BuildKit cache mounts.** `/root/.cache/go-build` and `/go/pkg/mod` are now persisted across builds. After v3.4.0 added Firebase Admin SDK + grpc + protobuf, a clean `go build` was taking 180-235s on a small EC2. With cache mounts the first build is unchanged, but every subsequent rebuild reuses the precompiled package archives → typically **10-30s** for source-only changes. The default `rebuild` also drops `--no-cache` to take advantage of layer caching too; `rebuild --full` keeps `--no-cache` for the paranoid case.
+- **`mdnest-server` disables BuildKit attestations.** Sets `BUILDX_NO_DEFAULT_ATTESTATIONS=1` at the top of the script so every build skips SLSA provenance + SBOM generation. These are designed for images pushed to a registry; we build locally, so they're pure overhead and can hang at "resolving provenance for metadata file" depending on the host's network conditions. Skipping them never affects image content or behaviour.
+- **Corporate SSO via generic OIDC.** New `USER_PROVIDER=sso` mode (requires `AUTH_MODE=multi`). Users sign in through your IdP (Google Workspace, Okta, Microsoft Entra, Keycloak, Auth0 — anything that speaks OIDC discovery). Backend uses `coreos/go-oidc` + `oauth2` with PKCE; state/nonce/code-verifier carried in a short-lived HMAC-signed cookie. The IdP owns MFA, so mdnest's local 2FA is skipped in this mode. See `docs/sso-setup.md`.
+- **Email-gated sign-in, no auto-provisioning.** An SSO sign-in only succeeds if the email is already in the mdnest `users` table (invited by an admin). Role, grants, and blocked flag stay in Postgres. Rejection paths redirect back with `#sso_error=<code>` for the frontend to surface.
+- **Optional `SSO_ALLOWED_DOMAINS`** allowlist for corporate-domain-only sign-in.
+- **Firebase identity (peer mode).** `USER_PROVIDER=firebase` is also available for teams that prefer Firebase Auth + Firestore-backed shared TOTP. Docs: `docs/firebase-setup.md`. Chosen mode is exclusive per server; Firebase is not required and carries no overhead when not enabled.
+- **`store.TOTPStore` interface.** TOTP handlers, login flow, and admin 2FA reset now route through an interface with Postgres and Firestore implementations. Makes the 2FA surface swappable and explicit.
+- **`totp_enabled` JWT claim.** Populated at login-issue time so the frontend can render "Enable 2FA" vs "Manage 2FA" without hitting the TOTP store on every request. Real 2FA enforcement still runs against fresh state at login.
+- **`ADMIN_EMAILS` bootstrap.** Comma-separated list in `mdnest.conf` is reconciled into `role='admin'` on every startup. Removals are NOT auto-demoted — operator demotes explicitly.
+- **Profile name + avatar from the IdP.** SSO callback now reads the `name` and `picture` OIDC claims from the ID token. Avatar is mirrored into a new `users.avatar_url` column on every login (picture URLs rotate at the IdP). Username is filled in once when the row's value is empty — admin-set usernames are never overwritten. The sidebar renders `<img>` from `avatar_url` with a graceful fallback to initials when the image fails to load. New users created by the SQL-INSERT bootstrap path get their real face + name automatically on first sign-in instead of "User" / "?". Migration 006 adds the column; additive, safe in all modes.
+
+### Internal
+- New `backend/sso/` package: OIDC relying-party with PKCE, cookie-based state, domain allowlist, `SanitizeFromPath` to prevent open-redirect abuse through the post-login `from=` param.
+- New `backend/handlers/sso.go` wiring two routes: `GET /api/auth/sso/start`, `GET /api/auth/sso/callback`. Only registered when `ssoClient != nil`, so misconfigurations 404 cleanly.
+- New `backend/firebase/` package: Firebase Admin SDK wrapper + Firestore TOTP store. Only instantiated when `USER_PROVIDER=firebase`.
+- Migration 005: `users.firebase_uid TEXT UNIQUE`, `DROP NOT NULL` on `password_hash` / `username`, indexes on `firebase_uid` and `email`. Additive; safe on local-mode databases.
+- Frontend: `LoginSSO.jsx` for SSO mode, `LoginFirebase.jsx` for Firebase mode, unchanged `Login.jsx` for local mode. `App.jsx` picks the right one from `/api/config.userProvider`. Hash-fragment token handoff (`#sso_token=…`) for the SSO callback.
+- `Settings.jsx` hides the "Credentials" tab in both federated modes (no local password to change).
+- `setup.sh` validates SSO / Firebase config at rebuild time, emits env vars into `.env`, mounts Firebase JSON files when needed.
+- Dockerfile: Go image bumped to `golang:1.25-alpine` (Firebase Admin SDK requires Go 1.25+).
+
+---
+
 ## v3.3.1 — Preview crash hotfix + CLI server-alias cleanup
 
 ### Breaking (CLI)

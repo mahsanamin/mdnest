@@ -8,9 +8,13 @@ mdnest is a privately-hosted markdown notes app. Your notes are plain `.md` file
 
 ### Logging In
 
-Open mdnest in your browser (e.g., `http://localhost:3236`). You will see a login screen. In single-user mode, enter the username and password from your configuration (`MDNEST_USER` and `MDNEST_PASSWORD`). In multi-user mode, use the credentials provided by your admin.
+Open mdnest in your browser (e.g., `http://localhost:3236`). The login screen adapts to how the server is configured:
 
-After a successful login, the session lasts 24 hours before you need to log in again.
+- **Single-user mode:** enter the username and password from `MDNEST_USER` / `MDNEST_PASSWORD`.
+- **Multi-user mode (local):** enter the credentials provided by your admin. 2FA may be required.
+- **Multi-user mode with SSO:** a single **Sign in with \<provider\>** button (Google, Okta, etc.). Your admin must have invited your corporate email first — otherwise you'll see "account is not authorized on this server". See `docs/sso-setup.md` for operator setup.
+
+After a successful login, the session lasts 30 days before you need to log in again.
 
 ### Your First Note
 
