@@ -8,29 +8,45 @@ import {
   adminCreateGrant,
   adminUpdateGrant,
   adminDeleteGrant,
+  adminListNamespaceAdmins,
+  adminAddNamespaceAdmin,
+  adminRemoveNamespaceAdmin,
 } from '../api.js';
 import PathPicker from './PathPicker.jsx';
 
-function AdminPanel({ onClose, namespaces }) {
+function AdminPanel({ onClose, namespaces, isSuperAdmin, adminNamespaces }) {
   const [tab, setTab] = useState('users');
+
+  // Manageable namespaces: superadmin can manage all; namespace admins
+  // only their own.
+  const manageableNs = isSuperAdmin ? namespaces : (namespaces || []).filter((n) => adminNamespaces.includes(n));
 
   return (
     <div className="admin-panel">
       <div className="admin-header">
         <h2>Admin Panel</h2>
-        <button className="admin-close" onClick={onClose}>Back to notes</button>
+        <div className="admin-header-meta">
+          {!isSuperAdmin && (
+            <span className="admin-scope-badge" title="Your administrative scope">
+              Admin of: {adminNamespaces.join(', ') || '(none)'}
+            </span>
+          )}
+          <button className="admin-close" onClick={onClose}>Back to notes</button>
+        </div>
       </div>
       <div className="admin-tabs">
         <button className={tab === 'users' ? 'active' : ''} onClick={() => setTab('users')}>Users</button>
         <button className={tab === 'grants' ? 'active' : ''} onClick={() => setTab('grants')}>Access Grants</button>
+        <button className={tab === 'nsadmins' ? 'active' : ''} onClick={() => setTab('nsadmins')}>Namespace Admins</button>
       </div>
-      {tab === 'users' && <UsersTab />}
-      {tab === 'grants' && <GrantsTab namespaces={namespaces} />}
+      {tab === 'users' && <UsersTab isSuperAdmin={isSuperAdmin} manageableNs={manageableNs} />}
+      {tab === 'grants' && <GrantsTab namespaces={manageableNs} />}
+      {tab === 'nsadmins' && <NamespaceAdminsTab manageableNs={manageableNs} />}
     </div>
   );
 }
 
-function UsersTab() {
+function UsersTab({ isSuperAdmin, manageableNs }) {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showInvite, setShowInvite] = useState(false);
@@ -58,11 +74,16 @@ function UsersTab() {
     }
   };
 
-  const handleToggleRole = async (user) => {
-    const newRole = user.role === 'admin' ? 'collaborator' : 'admin';
-    if (!confirm(`Change ${user.username}'s role to ${newRole}?`)) return;
+  // Cycles superadmin <-> admin <-> collaborator. Only superadmins can
+  // call this — the backend enforces the same.
+  const handleCycleRole = async (user) => {
+    let next;
+    if (user.role === 'collaborator') next = 'admin';
+    else if (user.role === 'admin') next = 'superadmin';
+    else next = 'collaborator';
+    if (!confirm(`Change ${user.username}'s role to ${next}?`)) return;
     try {
-      await adminUpdateRole(user.id, newRole);
+      await adminUpdateRole(user.id, next);
       load();
     } catch (e) {
       alert(e.message);
@@ -80,7 +101,13 @@ function UsersTab() {
         </button>
       </div>
 
-      {showInvite && <InviteForm onDone={() => { setShowInvite(false); load(); }} />}
+      {showInvite && (
+        <InviteForm
+          isSuperAdmin={isSuperAdmin}
+          manageableNs={manageableNs}
+          onDone={() => { setShowInvite(false); load(); }}
+        />
+      )}
 
       <table className="admin-table">
         <thead>
@@ -89,7 +116,7 @@ function UsersTab() {
             <th>Email</th>
             <th>Role</th>
             <th>Created</th>
-            <th>Actions</th>
+            {isSuperAdmin && <th>Actions</th>}
           </tr>
         </thead>
         <tbody>
@@ -101,14 +128,16 @@ function UsersTab() {
                 <span className={`role-badge ${u.role}`}>{u.role}</span>
               </td>
               <td>{new Date(u.created_at).toLocaleDateString()}</td>
-              <td>
-                <button className="admin-action-btn" onClick={() => handleToggleRole(u)} title={`Change to ${u.role === 'admin' ? 'collaborator' : 'admin'}`}>
-                  {u.role === 'admin' ? 'Demote' : 'Promote'}
-                </button>
-                <button className="admin-action-btn danger" onClick={() => handleDelete(u)} title="Delete user">
-                  Delete
-                </button>
-              </td>
+              {isSuperAdmin && (
+                <td>
+                  <button className="admin-action-btn" onClick={() => handleCycleRole(u)} title="Cycle role: collaborator → admin → superadmin → collaborator">
+                    Cycle role
+                  </button>
+                  <button className="admin-action-btn danger" onClick={() => handleDelete(u)} title="Delete user">
+                    Delete
+                  </button>
+                </td>
+              )}
             </tr>
           ))}
         </tbody>
@@ -117,11 +146,15 @@ function UsersTab() {
   );
 }
 
-function InviteForm({ onDone }) {
+function InviteForm({ isSuperAdmin, manageableNs, onDone }) {
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState('collaborator');
+  // Namespace is mandatory for non-superadmin callers — the backend
+  // requires it. For superadmin it's optional (they can grant access
+  // separately via the Grants tab).
+  const [namespace, setNamespace] = useState(manageableNs?.[0] || '');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -130,7 +163,7 @@ function InviteForm({ onDone }) {
     setError('');
     setLoading(true);
     try {
-      await adminInviteUser(email, username, password, role);
+      await adminInviteUser(email, username, password, role, namespace || undefined);
       onDone();
     } catch (err) {
       setError(err.message);
@@ -150,7 +183,20 @@ function InviteForm({ onDone }) {
         <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required />
         <select value={role} onChange={(e) => setRole(e.target.value)}>
           <option value="collaborator">Collaborator</option>
-          <option value="admin">Admin</option>
+          <option value="admin">Admin (of this namespace)</option>
+          {isSuperAdmin && <option value="superadmin">Super-admin (global)</option>}
+        </select>
+      </div>
+      <div className="admin-form-row">
+        <select
+          value={namespace}
+          onChange={(e) => setNamespace(e.target.value)}
+          required={!isSuperAdmin}
+        >
+          <option value="">{isSuperAdmin ? '(no namespace — grant later)' : 'Select namespace'}</option>
+          {(manageableNs || []).map((ns) => (
+            <option key={ns} value={ns}>{ns}</option>
+          ))}
         </select>
       </div>
       <button type="submit" disabled={loading}>{loading ? 'Inviting...' : 'Invite'}</button>
@@ -308,6 +354,118 @@ function UserAddGrant({ userId, namespaces, existingGrants, onDone }) {
         <button type="submit" disabled={!ns}>+ Add</button>
       </div>
     </form>
+  );
+}
+
+// NamespaceAdminsTab — promote / demote users as namespace admins of a
+// chosen namespace. Visible to anyone who can see the panel; the backend
+// scopes both the read (list) and the write (add/remove) operations.
+function NamespaceAdminsTab({ manageableNs }) {
+  const [selectedNs, setSelectedNs] = useState(manageableNs?.[0] || '');
+  const [admins, setAdmins] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [pickUserId, setPickUserId] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(async () => {
+    if (!selectedNs) return;
+    setLoading(true);
+    setError('');
+    try {
+      const [a, u] = await Promise.all([
+        adminListNamespaceAdmins(selectedNs),
+        adminListUsers(),
+      ]);
+      setAdmins(a);
+      setUsers(u);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedNs]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handlePromote = async () => {
+    if (!pickUserId) return;
+    setError('');
+    try {
+      await adminAddNamespaceAdmin(parseInt(pickUserId, 10), selectedNs);
+      setPickUserId('');
+      load();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const handleDemote = async (userId) => {
+    if (!confirm(`Remove this user as admin of "${selectedNs}"? Their existing access grant is left in place.`)) return;
+    try {
+      await adminRemoveNamespaceAdmin(userId, selectedNs);
+      load();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  if (!manageableNs || manageableNs.length === 0) {
+    return <div className="admin-section">No namespaces available to administer.</div>;
+  }
+
+  // Candidates for promotion: users not already admin of this ns,
+  // excluding superadmins (who already have global access).
+  const adminUserIds = new Set(admins.map((a) => a.user_id));
+  const candidates = users.filter((u) => u.role !== 'superadmin' && !adminUserIds.has(u.id));
+
+  return (
+    <div className="admin-section">
+      <div className="admin-section-header">
+        <h3>Namespace Admins</h3>
+        <select value={selectedNs} onChange={(e) => setSelectedNs(e.target.value)}>
+          {manageableNs.map((ns) => <option key={ns} value={ns}>{ns}</option>)}
+        </select>
+      </div>
+
+      {error && <div className="admin-error">{error}</div>}
+      {loading && <div className="admin-hint">Loading…</div>}
+
+      <table className="admin-table">
+        <thead>
+          <tr>
+            <th>Username</th>
+            <th>Email</th>
+            <th>Granted</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {admins.length === 0 ? (
+            <tr><td colSpan="4" className="admin-hint">No namespace admins yet.</td></tr>
+          ) : admins.map((a) => (
+            <tr key={a.user_id}>
+              <td>{a.username || '(no username)'}</td>
+              <td>{a.email}</td>
+              <td>{new Date(a.created_at).toLocaleDateString()}</td>
+              <td>
+                <button className="admin-action-btn danger" onClick={() => handleDemote(a.user_id)}>Remove</button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <div className="admin-form-row" style={{ marginTop: 16 }}>
+        <select value={pickUserId} onChange={(e) => setPickUserId(e.target.value)}>
+          <option value="">Pick a user to promote…</option>
+          {candidates.map((u) => (
+            <option key={u.id} value={u.id}>{u.username || u.email} ({u.role})</option>
+          ))}
+        </select>
+        <button onClick={handlePromote} disabled={!pickUserId}>+ Make admin of {selectedNs}</button>
+      </div>
+    </div>
   );
 }
 

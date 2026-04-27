@@ -263,11 +263,11 @@ export async function adminListUsers() {
   return res.json();
 }
 
-export async function adminInviteUser(email, username, password, role) {
+export async function adminInviteUser(email, username, password, role, namespace) {
   const res = await request('/admin/invite', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, username, password, role }),
+    body: JSON.stringify({ email, username, password, role, namespace }),
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
@@ -334,6 +334,41 @@ export async function adminUpdateGrant(id, permission) {
 export async function adminDeleteGrant(id) {
   const res = await request(`/admin/grants?id=${id}`, { method: 'DELETE' });
   if (!res.ok) throw new Error('Failed to delete grant');
+  return res.json();
+}
+
+// --- Namespace admin assignments (v3.5.0+) ---
+
+export async function adminListNamespaceAdmins(ns) {
+  const res = await request(`/admin/namespace-admins?ns=${encodeURIComponent(ns)}`);
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to list namespace admins');
+  }
+  return res.json();
+}
+
+export async function adminAddNamespaceAdmin(userId, namespace) {
+  const res = await request('/admin/namespace-admins', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_id: userId, namespace }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to add namespace admin');
+  }
+  return res.json();
+}
+
+export async function adminRemoveNamespaceAdmin(userId, ns) {
+  const res = await request(`/admin/namespace-admins?user_id=${userId}&ns=${encodeURIComponent(ns)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to remove namespace admin');
+  }
   return res.json();
 }
 

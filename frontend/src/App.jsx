@@ -179,9 +179,18 @@ function App() {
 
   // Multi-user state
   const [appConfig, setAppConfig] = useState(null); // {authMode, version, liveCollab}
-  const [userInfo, setUserInfo] = useState(null); // {id, username, role, grants}
+  const [userInfo, setUserInfo] = useState(null); // {id, username, role, grants, is_super_admin, admin_namespaces}
   const isMulti = appConfig?.authMode === 'multi';
-  const isAdmin = !isMulti || userInfo?.role === 'admin';
+  // v3.5.0 role hierarchy: superadmin (global), admin (namespace-scoped),
+  // collaborator (grants-only). isSuperAdmin gates global-only UI
+  // (delete user, role toggle, reset 2FA); adminNamespaces is the list
+  // of namespaces this user can manage; isAnyAdmin is the predicate for
+  // showing the admin panel button at all. Single-user mode is treated
+  // as full superadmin.
+  const isSuperAdmin = !isMulti || !!userInfo?.is_super_admin;
+  const adminNamespaces = userInfo?.admin_namespaces || [];
+  const isAnyAdmin = isSuperAdmin || adminNamespaces.length > 0;
+  const isAdmin = isAnyAdmin;
   // Comments need real user identity AND the WebSocket hub (so other clients
   // see new/resolved comments without a manual refresh), so gate on liveCollab
   // — which itself is only true when multi mode is on.
@@ -938,7 +947,12 @@ function App() {
   }
 
   if (showAdminPanel && isAdmin && isMulti) {
-    return <AdminPanel onClose={() => setShowAdminPanel(false)} namespaces={namespaces} />;
+    return <AdminPanel
+      onClose={() => setShowAdminPanel(false)}
+      namespaces={namespaces}
+      isSuperAdmin={isSuperAdmin}
+      adminNamespaces={adminNamespaces}
+    />;
   }
 
   return (

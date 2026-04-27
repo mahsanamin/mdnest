@@ -3025,6 +3025,11 @@ pre:hover .code-copy-btn {
   font-weight: 600;
 }
 
+.role-badge.superadmin {
+  background: #fab38722;
+  color: #fab387;
+}
+
 .role-badge.admin {
   background: #f38ba822;
   color: #f38ba8;
@@ -3033,6 +3038,21 @@ pre:hover .code-copy-btn {
 .role-badge.collaborator {
   background: #89b4fa22;
   color: #89b4fa;
+}
+
+.admin-header-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.admin-scope-badge {
+  font-size: 0.8rem;
+  padding: 4px 10px;
+  border-radius: 12px;
+  background: #f9e2af22;
+  color: #f9e2af;
+  border: 1px solid #f9e2af44;
 }
 
 .perm-badge {
