@@ -39,7 +39,7 @@ backend/
     cors.go                  # CORS middleware
   store/
     db.go                    # Postgres connection pool (multi mode only)
-    migrate.go               # Auto-migration: schema_migrations, users, access_grants
+    migrate.go               # Auto-migration: schema_migrations, users, access_grants, firebase_uid (005), avatar_url (006)
     users.go                 # UserStore (Postgres) + UpsertFirebaseUser / PromoteToAdmin
     totp_store.go            # TOTPStore interface + PostgresTOTPStore
 

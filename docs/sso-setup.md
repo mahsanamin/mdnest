@@ -106,6 +106,8 @@ Each server is configured independently. Pointing two mdnest servers at the *sam
 
 **Only 2FA at the IdP.** `REQUIRE_2FA` in `mdnest.conf` is ignored with a log notice when `USER_PROVIDER=sso`. The TOTP handlers aren't registered at all in this mode — your IdP enforces MFA, and we don't mirror it locally. If you later flip back to `local`, users will need to re-enroll TOTP.
 
+**Profile name + picture come from the IdP.** Every successful SSO login mirrors the `name` and `picture` claims from the OIDC ID token into the local `users` row (`username` filled in once when empty, `avatar_url` refreshed on each login since picture URLs rotate). The sidebar renders the picture as an `<img>` with a graceful fallback to initials if the image fails to load. New users created via the SQL-INSERT bootstrap path automatically pick up their real face + name on first sign-in. Admin-set usernames are never overwritten — the backfill only fills empty slots.
+
 **Switching back to `local` is destructive.** If you go `sso` → `local`, existing rows have no password (or a stale one) and you'll need to `AdminResetPassword` each user.
 
 **Email is matched case-insensitively** on the backend, but the allowlist comparison also lowercases, so `User@Wego.com` and `user@wego.com` both hit the same row and both pass the domain check for `wego.com`.

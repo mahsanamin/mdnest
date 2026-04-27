@@ -477,6 +477,7 @@ Returns the current user's profile and access grants. Requires authentication (a
   "id": 2,
   "email": "bob@example.com",
   "username": "bob",
+  "avatar_url": "https://lh3.googleusercontent.com/a/...",
   "role": "collaborator",
   "created_at": "2026-03-28T12:00:00Z",
   "grants": [
@@ -485,6 +486,8 @@ Returns the current user's profile and access grants. Requires authentication (a
   ]
 }
 ```
+
+`avatar_url` is populated from the IdP's `picture` OIDC claim on every SSO login (see `docs/sso-setup.md`). Omitted from the JSON response when empty.
 
 ---
 
