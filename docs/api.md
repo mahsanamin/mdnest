@@ -25,7 +25,7 @@ Common HTTP status codes across all endpoints:
 
 ### POST /api/auth/login
 
-Authenticate with username and password. Returns a JWT token valid for 24 hours.
+Authenticate with username and password (local mode), or post a Firebase ID token (Firebase mode). In SSO mode this endpoint is unused — use `/api/auth/sso/start` instead. Returns a JWT valid for 30 days.
 
 This is the only endpoint that does **not** require the `Authorization` header.
 

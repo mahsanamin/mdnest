@@ -42,7 +42,9 @@ If you have an older `@default` alias from a previous CLI version, rename it:
 mdnest rename @default @work
 ```
 
-Create API tokens in the web UI: Settings → API Tokens.
+Create API tokens in the web UI: Settings → API Tokens. Tokens work regardless of how the server authenticates users (local password, SSO, Firebase) — the token authenticates *you* directly, no IdP round-trip.
+
+API tokens inherit your current access at request time (v3.5.0+). If you're a SuperAdmin, your token has SuperAdmin scope. If you're a namespace admin of `growth`, your token can read/write within `growth` only. If your access is revoked or your namespace-admin row is removed, your token loses that access immediately on the next request.
 
 ## Path format
 

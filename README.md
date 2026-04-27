@@ -1,32 +1,34 @@
 # mdnest
 
-Powerful, privately-hosted Markdown notes -- use it the way you like.
+Privately-hosted markdown notes — for one person or a small team.
 
-Deploy on a spare machine, a home server, or a cheap VPS. Use it as a personal knowledge base or a collaborative workspace for your team. Access your notes from your laptop, phone, tablet -- or let AI agents read and write directly. Everything stays on your hardware.
+Deploy on a spare machine, a home server, a cloud VM, or behind a corporate VPN. Run it as a personal knowledge base or as a small company's shared knowledge base where everyone signs in with their corporate SSO and access is scoped per namespace. Notes are plain `.md` files on disk; the engine adds editing, search, comments, AI integration, and team-level access control on top.
+
+Accessible from a browser on any device, from a CLI in any terminal, and from AI agents over the bundled MCP server. Everything stays on your hardware.
 
 ### Why mdnest?
 
 - **Live rich editor.** Obsidian-style editing where markdown renders inline as you type. Bold shows bold, headings render as headings, tables are click-to-edit. Switch between Live and Basic (plain textarea) modes.
-- **Inline comments with threads.** Highlight any text and leave a comment; commented passages stay visibly highlighted in yellow, and reviewers can reply in a thread. Click a highlight to jump to the conversation. Comments are anchored to invisible UUIDs, so moving or renaming files keeps them attached (multi-user mode).
+- **Solo or team — same engine.** Run in single-user mode (default, no database) for a private knowledge base, or enable multi-user mode with a three-tier role hierarchy, per-namespace access grants, and corporate SSO.
+- **Corporate SSO with one setting.** Point mdnest at your OIDC provider (Google Workspace, Okta, Microsoft Entra, Keycloak, Auth0) and users sign in with their existing corporate accounts. The IdP handles MFA; mdnest still owns per-namespace authorization. Flip `USER_PROVIDER=sso` in `mdnest.conf` — no code changes required. See [docs/sso-setup.md](docs/sso-setup.md).
+- **Namespace-scoped admins.** A small company can have one or two SuperAdmins overall plus per-team Admins who manage just their own namespace — invite users into their team, manage grants, trigger git-sync — without seeing or touching other teams' data. See [docs/security.md](docs/security.md#layer-3--authorization).
+- **Inline comments with threads.** Highlight any text and leave a comment; commented passages stay visibly highlighted in yellow, and reviewers can reply in a thread. Click a highlight to jump to the conversation. Comments are anchored to invisible UUIDs, so moving or renaming files keeps them attached.
+- **Live collaboration.** Multiple people editing the same note see each other's cursors and changes in real time over WebSocket. Toggle with `ENABLE_LIVE_COLLAB=true`.
 - **Interactive diagrams.** Mermaid diagrams render in-place with click-to-edit labels. Edit node text directly on the diagram without touching code.
-- **Host once, access everywhere.** Set up on any always-on machine and reach it securely from all your devices via Tailscale -- phone, laptop, tablet, any browser.
-- **Personal or team.** Run in single-user mode (default, no database) for a private knowledge base, or enable multi-user mode with roles, permissions, namespace-level access control, and two-factor authentication.
-- **Corporate SSO.** Point mdnest at your OIDC provider (Google Workspace, Okta, Microsoft Entra, Keycloak, Auth0) and users sign in with their existing corporate accounts. The IdP handles MFA; mdnest still owns per-namespace grants. One setting flip (`USER_PROVIDER=sso`) — no code changes required.
 - **AI-native.** Built-in MCP server lets Claude, Cursor, and other AI agents read, write, search, and organize your notes. Your knowledge base becomes context for your AI workflows.
-- **API-first.** Full REST API + CLI with multi-server support. Build scripts, automations, or integrations on top of your notes.
-- **Plain files, no lock-in.** Notes are `.md` files in directories on disk. No proprietary format. `cat`, `grep`, `git` -- your notes work with every tool you already use.
-- **Private by default.** Binds to localhost. No cloud, no third-party services, no telemetry. Add Tailscale for encrypted remote access only to your devices.
-- **Git backup on your terms.** Optionally auto-commit and push to a private GitHub repo. You control when and where.
+- **API-first.** Full REST API + CLI with multi-server support (`mdnest read @work/eng/spec.md`). Build scripts, automations, or integrations on top of your notes.
+- **Plain files, no lock-in.** Notes are `.md` files in directories on disk. No proprietary format. `cat`, `grep`, `git` — your notes work with every tool you already use.
+- **Private by default.** Binds to localhost. No cloud, no third-party services, no telemetry. Add Tailscale for solo remote access, or a TLS reverse proxy (Caddy / nginx / Cloudflare Tunnel) for a team install.
+- **Git backup on your terms.** Optional sidecar auto-commits and pushes to a private GitHub repo on a schedule you control.
 
 ### Who is this for?
 
-- **Individual developers** who want a personal knowledge base on their own hardware
-- **Small teams** who need a privately-hosted shared notes platform with access control
-- People who need their notes accessible from multiple devices and AI tools
-- Anyone who doesn't want to trust a SaaS with their private notes
-- People who think in markdown, folders, code blocks, and diagrams
+- **Individual developers** who want a personal knowledge base on their own hardware.
+- **Small teams (1–50 people)** who need a self-hosted shared knowledge base with corporate-SSO sign-in and per-team access control — without licensing, vendor lock-in, or a SaaS subscription.
+- **AI tinkerers** who want their notes to be a first-class context source for Claude, Cursor, and other agents through MCP.
+- **People who think in markdown** — folders, code blocks, diagrams, plain text — and want their tools to leave the format alone.
 
-**Comfortable range: 1,000-5,000 notes out of the box.** For larger repositories (5,000-20,000+), tune the [search settings](#search) -- just configuration, no architectural changes.
+**Comfortable range: 1,000–5,000 notes out of the box.** For larger repositories (5,000–20,000+), tune the [search settings](#search) — just configuration, no architectural changes.
 
 ## Prerequisites
 
@@ -203,13 +205,20 @@ For 10,000+ notes: set `SEARCH_WORKERS=16` and `SEARCH_CACHE_TTL=60`.
 
 ## Multi-User Mode
 
-By default, mdnest runs in **single-user mode** -- one user, file-based auth, no database. This is ideal for personal use.
+By default, mdnest runs in **single-user mode** — one user, file-based auth, no database. Ideal for personal use.
 
-To enable **multi-user mode** with roles and namespace-level access control, set `AUTH_MODE=multi` in `mdnest.conf`. This requires a PostgreSQL database, which `setup.sh` adds automatically to `docker-compose.yml`.
+**Multi-user mode** adds a three-tier role hierarchy, per-namespace grants, optional 2FA, and your choice of three identity providers (corporate SSO, Firebase Auth, or local username/password). Set `AUTH_MODE=multi` in `mdnest.conf` and `setup.sh` adds a Postgres container automatically.
 
-```
+```ini
 AUTH_MODE=multi
 POSTGRES_PASSWORD=a-secure-password
+
+# Pick an identity provider:
+USER_PROVIDER=local         # username/password + per-user TOTP (default)
+# or
+USER_PROVIDER=sso           # corporate OIDC — see docs/sso-setup.md
+# or
+USER_PROVIDER=firebase      # Firebase Auth + Firestore TOTP — see docs/firebase-setup.md
 ```
 
 Then rebuild:
@@ -218,16 +227,39 @@ Then rebuild:
 ./mdnest-server rebuild
 ```
 
-The first user (from `MDNEST_USER` / `MDNEST_PASSWORD`) is created as an admin on first startup.
+### Roles
+
+- **SuperAdmin** — global. Manages everyone, every namespace, every grant. Promote with `ADMIN_EMAILS=ops@example.com` in `mdnest.conf` (auto-promoted on every startup).
+- **Admin** — namespace-scoped. Manages users, grants, and git-sync for just the namespaces in their `namespace_admins` rows. Cannot reset 2FA or change global roles.
+- **Collaborator** — per-grant access only. Sees only the namespaces / paths assigned to them.
+
+Assign namespace admins via the admin panel's **Namespace Admins** tab, or `POST /api/admin/namespace-admins`. See [docs/security.md](docs/security.md) for the full authorization model and [docs/api.md](docs/api.md) for the API.
+
+### Recommended team install — corporate SSO
+
+For a small company deploying mdnest as a shared knowledge base:
+
+```ini
+AUTH_MODE=multi
+USER_PROVIDER=sso
+SSO_ISSUER_URL=https://accounts.google.com    # or your IdP
+SSO_CLIENT_ID=...
+SSO_CLIENT_SECRET=...
+SSO_ALLOWED_DOMAINS=example.com               # optional but recommended
+ADMIN_EMAILS=ops@example.com,you@example.com  # auto-promoted to superadmin
+POSTGRES_PASSWORD=a-secure-password
+```
+
+Plus a TLS reverse proxy ([Caddy](docs/setup.md#option-1-caddy-built-in-simplest), [nginx + certbot](docs/setup.md#option-3-nginx-reverse-proxy--certbot), or [Cloudflare Tunnel](docs/setup.md#option-4-cloudflare-tunnel)) so the backend stays loopback-only and only the proxy is exposed.
 
 **Upgrading an existing single-user instance to multi-user:**
 
-1. Edit `mdnest.conf`: add `AUTH_MODE=multi` and `POSTGRES_PASSWORD=<secure>`
-2. `./mdnest-server setup` -- regenerates docker-compose.yml with a Postgres service
-3. `./mdnest-server migrate` -- starts Postgres and creates the database tables
-4. `./mdnest-server rebuild` -- rebuilds and starts everything
+1. Edit `mdnest.conf`: add `AUTH_MODE=multi`, `POSTGRES_PASSWORD=<secure>`, and your `USER_PROVIDER` settings.
+2. `./mdnest-server rebuild` — regenerates docker-compose.yml with a Postgres service, runs migrations on first start, seeds the initial admin.
 
-See [docs/setup.md](docs/setup.md) for full details on multi-user configuration.
+Existing notes on disk are untouched. The database stores only user accounts and access grants.
+
+See [docs/setup.md](docs/setup.md) for the full multi-user walkthrough, [docs/sso-setup.md](docs/sso-setup.md) for IdP-specific (Google / Okta / Entra / Keycloak / Auth0) instructions, and [docs/firebase-setup.md](docs/firebase-setup.md) for the Firebase peer-mode setup.
 
 ## Namespaces
 
@@ -302,11 +334,14 @@ tailscale serve off       # remove all rules
 
 ## Documentation
 
-- [docs/security.md](docs/security.md) -- Security Model
-- [docs/api.md](docs/api.md) -- API Reference
-- [docs/setup.md](docs/setup.md) -- Setup and Configuration
-- [docs/user-guide.md](docs/user-guide.md) -- User Guide
-- [docs/architecture.md](docs/architecture.md) -- Architecture
+- [docs/setup.md](docs/setup.md) — Setup, configuration, env vars
+- [docs/user-guide.md](docs/user-guide.md) — End-user walkthrough
+- [docs/security.md](docs/security.md) — Threat model, identity, authorization, role hierarchy
+- [docs/architecture.md](docs/architecture.md) — Backend / frontend / database layout
+- [docs/api.md](docs/api.md) — Full REST API reference with curl examples
+- [docs/cli.md](docs/cli.md) — `mdnest` CLI for terminal access (multi-server)
+- [docs/sso-setup.md](docs/sso-setup.md) — Corporate SSO (Google / Okta / Entra / Keycloak / Auth0)
+- [docs/firebase-setup.md](docs/firebase-setup.md) — Firebase Auth peer mode
 
 ## License
 

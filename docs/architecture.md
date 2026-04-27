@@ -6,47 +6,60 @@ This document describes how mdnest is structured, how its components interact, a
 
 ## High-Level Architecture
 
-```
-                          +-------------------+
-                          |     Browser       |
-                          |  (React + Vite)   |
-                          +--------+----------+
-                                   |
-                              HTTPS/HTTP
-                                   |
-                          +--------v----------+
-                          |      Nginx        |
-                          |  (static files +  |
-                          |   reverse proxy)  |
-                          +--------+----------+
-                                   |
-                              /api/*
-                                   |
-                          +--------v----------+
-                          |   Go Backend      |
-                          |  (net/http + JWT) |
-                          +------+-+----------+
-                                 | |
-                   +-------------+ +-------------+
-                   |                             |
-              os.ReadFile                   (multi mode
-              os.WriteFile                    only)
-              os.Rename                        |
-                   |                   +--------v----------+
-          +--------v----------+        |   PostgreSQL      |
-          |   Filesystem      |        | (users, grants,   |
-          | (mounted volumes) |        |  permissions)     |
-          +-------------------+        +-------------------+
-                   |
-          +--------v----------+
-          |   git-sync        |
-          |  (optional cron)  |
-          +-------------------+
+```mermaid
+flowchart TD
+    user[Browser / CLI / MCP agent]
+
+    subgraph proxy[Optional TLS proxy<br/>Caddy / nginx / Cloudflare Tunnel]
+      tls[(:443)]
+    end
+
+    user -->|HTTPS| tls
+    user -->|HTTP localhost / Tailscale| nginx
+
+    tls --> nginx
+
+    subgraph fe[Frontend container]
+      nginx[nginx<br/>static SPA + /api proxy]
+    end
+
+    subgraph be[Backend container — Go net/http]
+      router[ServeMux<br/>+ auth middleware<br/>+ permission checker]
+      collab[collab.Hub<br/>WebSocket fanout]
+      router --> collab
+    end
+
+    nginx -->|/api/*| router
+    nginx -->|/api/ws upgrade| collab
+
+    subgraph idp[Identity provider — multi mode only]
+      local[(local: Postgres bcrypt + TOTP)]
+      sso[(sso: external OIDC IdP)]
+      firebase[(firebase: Firebase Auth + Firestore)]
+    end
+
+    router -. login flow .-> idp
+
+    subgraph data[Data]
+      fs[(Filesystem<br/>mounted note dirs)]
+      pg[(PostgreSQL<br/>users / grants /<br/>namespace_admins)]
+    end
+
+    router --> fs
+    router -.multi mode only.-> pg
+
+    sync[git-sync sidecar<br/>optional, per-namespace] --> fs
+    sync -->|push / pull| github[(remote git)]
 ```
 
-The frontend is a single-page React application served as static files by Nginx. Nginx also proxies all `/api/*` requests to the Go backend. The backend reads and writes markdown files directly on the filesystem. An optional git-sync sidecar periodically commits and pushes changes to a remote repository.
+**The pieces:**
 
-In **multi-user mode** (`AUTH_MODE=multi`), the backend also connects to a PostgreSQL database for user management and access control. The database stores only user accounts and permissions -- notes remain as files on disk.
+- **Frontend** is a single-page React app bundled by Vite, served as static files by Nginx. Nginx also proxies `/api/*` to the backend (and upgrades `/api/ws` to a WebSocket).
+- **Backend** is a single Go binary using only `net/http` from the standard library. All routes are registered on a `ServeMux` in `main.go` and wrapped with an auth middleware + (in multi mode) a `PermissionChecker` that consults the role/grant model.
+- **Identity** in multi-mode is provided by one of three exclusive plugins: `local` (username + password + Postgres-backed TOTP), `sso` (generic OIDC relying party), or `firebase` (Firebase Auth + Firestore TOTP). Pick one with `USER_PROVIDER=` in `mdnest.conf`. Single-mode skips this layer entirely.
+- **PostgreSQL** is added by `setup.sh` automatically when `AUTH_MODE=multi`. It stores user accounts, access grants, and (v3.5.0+) namespace-admin assignments. **Note content is never in the database** — files on disk are the source of truth in every mode.
+- **Live collaboration** uses an in-process `collab.Hub` that fans WebSocket events between connected clients (presence, cursors, tree-changed events, comment broadcasts). Gated on `ENABLE_LIVE_COLLAB=true` in multi mode.
+- **git-sync** is an optional sidecar that commits + pulls + pushes each namespace on a timer. Auto-enabled when SSH keys are present in `git-sync/keys/`.
 
 ---
 
@@ -55,47 +68,118 @@ In **multi-user mode** (`AUTH_MODE=multi`), the backend also connects to a Postg
 ```
 mdnest/
   backend/
-    main.go                  # Entry point, route registration, AUTH_MODE branching
-    Dockerfile               # Multi-stage build: Go compile then Alpine runtime
+    main.go                    # Entry point. Reads conf, picks identity provider,
+                               # builds handlers + middleware, registers routes.
+    Dockerfile                 # Multi-stage build: golang:1.26-alpine → alpine:latest.
+                               # BuildKit cache mounts persist Go module + build caches.
     handlers/
-      auth.go                # POST /api/auth/login, POST /api/auth/change-password
-      tokens.go              # GET/POST/DELETE /api/auth/tokens -- API token management
-      namespaces.go          # GET /api/namespaces -- list top-level dirs
-      tree.go                # GET /api/tree -- recursive directory listing
-      notes.go               # GET/POST/PUT/PATCH/DELETE /api/note -- CRUD + append/prepend
-      search.go              # GET /api/search -- concurrent content search with caching
-      upload.go              # POST /api/upload, POST /api/folder, GET /api/files/*
-      move.go                # POST /api/move -- rename/move files and folders
-      path.go                # SafePath() and RequireNamespace() helpers
+      auth.go                  # POST /api/auth/login, POST /api/auth/change-password.
+      tokens.go                # API token CRUD + validation. Tokens resolve to
+                               # creator's UserContext at request time (v3.5.0+:
+                               # no system-wide admin bypass).
+      totp.go                  # TOTP setup / verify / disable. Multi-mode + non-SSO only.
+      sso.go                   # GET /api/auth/sso/start + /callback. Generic OIDC relying
+                               # party (USER_PROVIDER=sso only).
+      dev_login.go             # POST /api/auth/dev-login — INSECURE_DEV_LOGIN backdoor.
+                               # Only registered when the env flag is set.
+      namespaces.go            # GET /api/namespaces — filtered through PermissionChecker.
+      tree.go                  # GET /api/tree — recursive directory listing.
+      notes.go                 # GET/POST/PUT/PATCH/DELETE /api/note — CRUD + append/prepend.
+      noteid.go                # ExtractNoteID/InjectNoteID/EnsureNoteID — invisible UUID
+                               # marker that anchors comments across renames + moves.
+      comments.go              # GET/POST/PATCH/DELETE /api/comments — multi-mode + collab.
+      search.go                # GET /api/search — concurrent content search with caching.
+      upload.go                # POST /api/upload, POST /api/folder, GET /api/files/*.
+      move.go                  # POST /api/move — rename + move within a namespace.
+      sync.go                  # POST /api/admin/sync — per-namespace git pull/push.
+                               # Scoped to caller's admin namespaces in multi mode.
+      admin.go                 # User management + grants + namespace-admin assignments.
+                               # Three-tier role hierarchy: superadmin / admin / collaborator.
+      me.go                    # GET /api/me — current user + grants + admin scope.
+      config.go                # GET /api/config — unauthenticated. Tells the frontend
+                               # which mode + provider + flags are live.
+      ws.go                    # /api/ws WebSocket handler for live collab. Verifies JWT.
+      path.go                  # SafePath() + RequireNamespace() — path traversal defense.
     middleware/
-      auth.go                # JWT validation middleware
-      cors.go                # CORS header middleware
+      auth.go                  # JWT + API token validation.
+      context.go               # UserContext + IsAdmin / IsSuperAdmin helpers.
+      cors.go                  # CORS header middleware.
+      admin.go                 # RequireAdmin (any admin role) + RequireSuperAdmin gates.
+      permission.go            # PermissionChecker — superadmin → namespace-admin → grant
+                               # precedence chain. RequireRead/Write/Move/NsAccess wrappers.
     store/
-      db.go                  # PostgreSQL connection pool (multi mode only)
-      migrate.go             # Auto-migration with schema tracking
+      db.go                    # PostgreSQL connection pool. Multi mode only.
+      migrate.go               # Auto-migration. Currently 7 migrations; idempotent on
+                               # every startup. See "Database schema" below.
+      users.go                 # UserStore interface + PostgresUserStore. CreateUser,
+                               # UpdateRole, BackfillSSOProfile (avatar + name from IdP),
+                               # PromoteToSuperAdmin (ADMIN_EMAILS reconcile).
+      grants.go                # GrantStore + PathDepth (used by GRANT_MAX_DEPTH ceiling).
+      namespace_admins.go      # NamespaceAdminStore (v3.5.0+) — per-namespace admin scope.
+      totp_store.go            # TOTPStore interface + Postgres impl.
+    sso/
+      client.go                # OIDC relying-party with PKCE + signed state cookie.
+                               # SanitizeFromPath protects against open-redirect abuse.
+    firebase/
+      client.go                # Firebase Admin SDK wrapper. VerifyIDToken on login.
+      totp_store.go            # Firestore-backed TOTPStore impl (shared MFA across
+                               # mdnest servers using the same Firebase project).
+    collab/
+      hub.go                   # In-process WebSocket fanout: presence, cursors, tree
+                               # change events, comment broadcasts.
+
   frontend/
-    Dockerfile               # Multi-stage build: npm build then Nginx serve
-    nginx.conf               # Nginx config for SPA routing + API proxy
+    Dockerfile                 # Multi-stage: node:20-alpine build → nginx:alpine serve.
+    nginx.conf                 # Nginx config for SPA routing + /api proxy + /api/ws upgrade.
     src/
-      main.jsx               # React entry point
-      App.jsx                # Root component, layout, routing
-      api.js                 # API client -- all fetch calls to the backend
+      main.jsx                 # React entry point.
+      App.jsx                  # Root component. Auth state, namespace + tree state,
+                               # URL hash routing, editor mode, live-collab wiring,
+                               # admin-panel scope derivation, dev-login pill.
+      api.js                   # All fetch calls. JWT in localStorage, 401 → clear + reload.
+      mermaid-config.js        # Shared mermaid init + theme.
+      firebase-config.js       # Firebase SDK lazy init (Firebase mode only).
       components/
-        Login.jsx            # Login form
-        Sidebar.jsx          # Namespace selector + folder tree
-        TreeNode.jsx         # Recursive tree node (expand/collapse, drag-drop)
-        Editor.jsx           # Markdown text editor
-        EditorToolbar.jsx    # Formatting buttons (bold, italic, heading, etc.)
-        Preview.jsx          # Rendered markdown preview (marked + mermaid)
-        Toolbar.jsx          # Top toolbar (new note, new folder)
-        ContextMenu.jsx      # Right-click / long-press context menu
+        Login.jsx              # Local-mode login form (USER_PROVIDER=local).
+        LoginSSO.jsx           # "Sign in with <provider>" button (USER_PROVIDER=sso).
+        LoginFirebase.jsx      # Firebase Google sign-in button (USER_PROVIDER=firebase).
+        LoginDev.jsx           # Email-only impersonation form behind /?login=dev
+                               # (only when INSECURE_DEV_LOGIN=true).
+        Sidebar.jsx            # Namespace dropdown, folder tree, sync, user menu w/ avatar.
+        TreeNode.jsx           # Recursive tree node — expand, drag-drop, context menu.
+        Editor.jsx             # Basic mode: textarea + paste/drop handlers.
+        EditorToolbar.jsx      # Markdown formatting buttons (Basic mode).
+        LiveEditor.jsx         # Live mode: Milkdown rich editor. Lazy-loaded.
+        MermaidBlock.jsx       # Inline mermaid with click-to-edit labels.
+        Preview.jsx            # Rendered markdown (marked + mermaid + KaTeX).
+        Toolbar.jsx            # View + editor mode toggle, file actions, comment icon.
+        ContextMenu.jsx        # Right-click / long-press menu.
+        AdminPanel.jsx         # Three tabs: Users, Access Grants, Namespace Admins.
+                               # Scope-aware: superadmin sees all, namespace admin sees
+                               # only their namespaces. Role dropdown for SuperAdmin.
+        CommentSidebar.jsx     # Inline-comment threads with replies, resolve, delete.
+        Settings.jsx           # User settings: credentials (local), TOTP, API tokens.
+        PathPicker.jsx         # Folder dropdown for grants. Filters by GRANT_MAX_DEPTH.
+
+  mcp-server/                  # Standalone Node.js MCP server. Wraps the REST API for
+    index.js                   # AI agents (Claude, Cursor, etc.).
+    package.json
+
   git-sync/
-    sync.sh                  # Shell script: commit + pull + push loop
-  mdnest                     # Client CLI (login, note read/write/append, works from any machine)
-  mdnest-server              # Server management CLI (start, stop, rebuild, runs from project dir)
-  setup.sh                   # Reads mdnest.conf, generates .env + docker-compose.yml
-  mdnest.conf.sample         # Sample configuration file
-  docker-compose.yml         # Generated by setup.sh (not checked in)
+    sync.sh                    # commit + pull + push loop, runs every GIT_SYNC_INTERVAL.
+    keys/                      # Per-namespace SSH keys (gitignored).
+
+  mdnest                       # Client CLI — multi-server, @alias-based path syntax.
+  mdnest-server                # Server management CLI — start, stop, rebuild, reload,
+                               # add-namespace, remove-namespace.
+  setup.sh                     # Reads mdnest.conf → emits .env + docker-compose.yml.
+  install-cli.sh               # One-shot CLI installer (curl | bash).
+  mdnest.conf.sample           # Annotated template for mdnest.conf (gitignored).
+  mdnest.conf                  # Per-install config (gitignored).
+  .env                         # Generated by setup.sh (gitignored).
+  docker-compose.yml           # Generated by setup.sh (gitignored).
+  .githooks/pre-push           # Builds, audits, version + lock-file checks.
+  .github/workflows/security-audit.yml   # govulncheck + npm audit + shellcheck on PR.
 ```
 
 ---
@@ -108,37 +192,84 @@ The backend is written in Go using only the standard library's `net/http` packag
 
 ### Routing
 
-Routes are registered on a standard `http.ServeMux` in `main.go`:
+Routes are registered on a standard `http.ServeMux` in `main.go`. The set varies by mode + flags:
+
+**Always registered (any mode):**
+
+| Route | Handler | Notes |
+|---|---|---|
+| `GET /api/config` | `ConfigHandler.HandleConfig` | Unauthenticated. Tells the frontend what mode + provider + flags are live. |
+| `POST /api/auth/login` | `authHandler.Login` | Username/password (local) or `{idToken}` (Firebase). |
+| `POST /api/auth/change-password` | `authHandler.ChangePassword` | Auth required. |
+| `GET/POST/DELETE /api/auth/tokens` | `tokenHandler.HandleTokens` | API token CRUD. |
+| `GET /api/namespaces` | `nsHandler.ListNamespaces` | Filtered through PermissionChecker in multi mode. |
+| `GET /api/tree` | `treeHandler.GetTree` | Per-ns access required (multi mode). |
+| `* /api/note` | `noteHandler.Handle` | GET = read, POST/PUT/PATCH = write, DELETE = delete. |
+| `POST /api/folder` | `uploadHandler.HandleFolder` | Write required. |
+| `POST /api/upload` | `uploadHandler.HandleUpload` | Write required. |
+| `POST /api/move` | `moveHandler.HandleMove` | Write required on both source + destination. |
+| `GET /api/search` | `searchHandler.HandleSearch` | Per-ns access required. |
+| `GET /api/files/{ns}/{path}` | `uploadHandler.HandleServeFile` | Auth + ns access. |
+
+**Multi mode adds:**
+
+| Route | Handler | Notes |
+|---|---|---|
+| `GET /api/me` | `meHandler.HandleMe` | Returns role, grants, `is_super_admin`, `admin_namespaces`. |
+| `* /api/admin/users` | `adminHandler.HandleUsers` | GET filtered by scope; PUT/DELETE = SuperAdmin only. |
+| `POST /api/admin/invite` | `adminHandler.HandleInvite` | Namespace required for non-superadmin callers. |
+| `* /api/admin/grants` | `adminHandler.HandleGrants` | CRUD; scoped to caller's admin namespaces. |
+| `* /api/admin/namespace-admins` | `adminHandler.HandleNamespaceAdmins` | (v3.5.0+) Promote/demote per-namespace admins. |
+| `POST /api/admin/sync` | `syncHandler.HandleSync` | `?ns=`-scoped to caller's admin namespaces. |
+| `GET /api/admin/sync-status` | `syncHandler.HandleSyncStatus` | Read git remote state. |
+| `* /api/comments` | `commentsHandler.Handle` | Only when `ENABLE_LIVE_COLLAB=true`. |
+| `GET /api/ws` | `wsHandler.HandleWS` | WebSocket — only when `ENABLE_LIVE_COLLAB=true`. |
+
+**Local mode + non-SSO adds (TOTP routes):**
 
 | Route | Handler |
-|-------|---------|
-| `/api/auth/login` | `AuthHandler.Login` |
-| `/api/namespaces` | `NamespaceHandler.ListNamespaces` |
-| `/api/tree` | `TreeHandler.GetTree` |
-| `/api/note` | `NoteHandler.Handle` (dispatches by HTTP method) |
-| `/api/folder` | `UploadHandler.HandleFolder` |
-| `/api/upload` | `UploadHandler.HandleUpload` |
-| `/api/move` | `MoveHandler.HandleMove` |
-| `/api/files/` | `UploadHandler.HandleServeFile` |
+|---|---|
+| `POST /api/auth/totp/setup` | `totpHandler.HandleSetupTOTP` |
+| `POST /api/auth/totp/verify-setup` | `totpHandler.HandleVerifySetup` |
+| `POST /api/auth/totp/disable` | `totpHandler.HandleDisableTOTP` |
+| `POST /api/auth/verify-totp` | `totpHandler.HandleVerifyLoginTOTP` |
+| `POST /api/auth/totp/setup-with-temp` | `totpHandler.HandleSetupTOTPWithTemp` |
+| `POST /api/admin/reset-2fa` | `totpHandler.HandleAdminResetTOTP` (SuperAdmin only) |
 
-All routes except `/api/auth/login` are wrapped with the auth middleware.
+**SSO mode adds:**
+
+| Route | Handler |
+|---|---|
+| `GET /api/auth/sso/start` | `ssoHandler.HandleStart` |
+| `GET /api/auth/sso/callback` | `ssoHandler.HandleCallback` |
+
+**Dev backdoor (only when `INSECURE_DEV_LOGIN=true`):**
+
+| Route | Handler |
+|---|---|
+| `POST /api/auth/dev-login` | `devLoginHandler.HandleDevLogin` |
+
+Every route except the unauthenticated handful (`/api/config`, `/api/auth/login`, `/api/auth/sso/*`, `/api/auth/dev-login`, `/api/auth/verify-totp`) is wrapped with `authMiddleware.Wrap`.
 
 ### Authentication
 
-mdnest supports two auth modes, configured via `AUTH_MODE`:
+**Single mode** (`AUTH_MODE=single`, default):
+- Username/password compared against `auth.json` (bcrypt) or env vars (default credentials).
+- Login uses `crypto/subtle.ConstantTimeCompare` for the bcrypt result to prevent timing-based username enumeration.
+- No database — file-only.
 
-**Single mode** (default, `AUTH_MODE=single`):
-- **Login:** Accepts username/password as JSON. Credentials are compared using `crypto/subtle.ConstantTimeCompare` to prevent timing attacks. On success, returns a JWT token signed with HS256.
-- Credentials are stored in a file (`auth.json`) or read from environment variables.
+**Multi mode** (`AUTH_MODE=multi`) supports three exclusive identity providers, picked at startup via `USER_PROVIDER=`:
 
-**Multi mode** (`AUTH_MODE=multi`):
-- **Login:** Credentials are verified against the PostgreSQL `users` table (bcrypt-hashed passwords).
-- Users are managed by admins via the API. The first user is seeded from `MDNEST_USER` / `MDNEST_PASSWORD` on initial startup.
-- The database stores only user accounts and access grants -- notes remain as files.
+| Provider | Login flow | Where credentials live |
+|---|---|---|
+| `local` | username/password → bcrypt match in Postgres → optional TOTP step → JWT | `users.password_hash` (bcrypt), `users.totp_secret` (encrypted) |
+| `sso` | redirect to IdP → callback verifies state cookie + PKCE + ID token → email match in Postgres → JWT (no TOTP step; IdP owns MFA) | IdP — mdnest never sees the user's password |
+| `firebase` | frontend signs in via Firebase Auth → posts ID token → backend verifies via Admin SDK → email match → optional TOTP from Firestore → JWT | Firebase Auth + Firestore TOTP |
 
-**Common to both modes:**
-- **Token expiry:** Tokens expire after 24 hours. The `exp` claim is checked by the JWT library during parsing.
-- **Middleware:** Every protected route is wrapped by `AuthMiddleware.Wrap`, which extracts the `Bearer` token from the `Authorization` header, parses and validates it, and rejects requests with a 401 if the token is missing, malformed, or expired.
+**Common to all modes:**
+- Issued JWTs are HS256 with claims: `sub` (display name), `user_id`, `role`, `totp_enabled`, `iat`, `exp` (30 days).
+- `authMiddleware.Wrap` extracts the `Authorization: Bearer <token>` (or `mdnest_<token>` for API tokens), validates, and attaches a `UserContext{ID, Username, Role}` to the request.
+- API tokens are matched by SHA-256 hash of the raw token, then resolved to their creator's `UserContext` — so token requests run through the same `PermissionChecker` precedence chain as JWT requests (no admin bypass for tokens, v3.5.0+).
 
 ### File-Based Note Storage
 
@@ -179,20 +310,25 @@ The `RequireNamespace` function validates that the `ns` query parameter is a sim
 ### Key Components
 
 | Component | Responsibility |
-|-----------|---------------|
-| `App.jsx` | Top-level layout, state management, URL hash routing, editor mode switching |
-| `Login.jsx` | Login form, calls `/api/auth/login` |
-| `Sidebar.jsx` | Namespace dropdown, folder tree, sync button, user menu |
-| `TreeNode.jsx` | Single node in the tree; handles expand/collapse, drag-and-drop, context menu |
-| `Editor.jsx` | Basic mode: textarea for editing markdown, formatting toolbar, paste/drop |
-| `EditorToolbar.jsx` | Buttons that insert markdown formatting (Basic mode only) |
-| `LiveEditor.jsx` | Live mode: Milkdown rich editor with inline rendering, table controls, mermaid node views |
-| `MermaidBlock.jsx` | Inline mermaid diagram with Source/Preview toggle and click-to-edit labels |
-| `Preview.jsx` | Renders markdown to HTML using marked, mermaid diagrams, collapsible headings |
-| `Toolbar.jsx` | View mode toggle, Basic/Live toggle, file actions |
-| `ContextMenu.jsx` | Right-click/long-press menu with copy path, manage access |
-| `AdminPanel.jsx` | User management, access grants (admin only) |
-| `ShareDialog.jsx` | Directory-level sharing dialog |
+|---|---|
+| `App.jsx` | Top-level layout, state, URL hash routing, editor mode switching, auth state, admin-panel scope derivation, live-collab wiring, dev-login pill |
+| `Login.jsx` | Local-mode login form (`USER_PROVIDER=local`) |
+| `LoginSSO.jsx` | "Sign in with `<provider>`" button for `USER_PROVIDER=sso` |
+| `LoginFirebase.jsx` | Firebase Google sign-in for `USER_PROVIDER=firebase` |
+| `LoginDev.jsx` | Email-only impersonation form behind `/?login=dev` (only renders when `appConfig.devLoginEnabled === true`) |
+| `Sidebar.jsx` | Namespace dropdown, folder tree, sync button, user menu w/ avatar |
+| `TreeNode.jsx` | Recursive tree node — expand/collapse, drag-drop, context menu, long-press |
+| `Toolbar.jsx` | View mode toggle, Basic/Live toggle, file actions, comment icon |
+| `Editor.jsx` | Basic mode — textarea + paste/drop handlers |
+| `EditorToolbar.jsx` | Markdown formatting buttons (Basic mode only) |
+| `LiveEditor.jsx` | Live mode — Milkdown rich editor, lazy-loaded chunk |
+| `MermaidBlock.jsx` | Inline mermaid with Source/Preview toggle + click-to-edit labels |
+| `Preview.jsx` | Rendered markdown via marked + mermaid + KaTeX, collapsible headings |
+| `ContextMenu.jsx` | Right-click / long-press floating menu |
+| `AdminPanel.jsx` | Admin panel — Users tab (with role dropdown), Access Grants, Namespace Admins. Scope-aware: superadmin sees all, namespace admin only their namespaces |
+| `CommentSidebar.jsx` | Inline comments — slide-out panel, threaded replies, Go-To, resolve, delete |
+| `Settings.jsx` | User settings — credentials (local mode), TOTP, API tokens |
+| `PathPicker.jsx` | Folder dropdown for grants. Filters by `appConfig.grantMaxDepth` |
 
 ### Editor Architecture
 
@@ -223,8 +359,8 @@ Both the backend and frontend use multi-stage Dockerfiles to keep production ima
 
 **Backend (`backend/Dockerfile`):**
 
-1. **Build stage:** `golang:1.23-alpine` -- compiles the Go binary with `CGO_ENABLED=0` for a static build.
-2. **Runtime stage:** `alpine:latest` -- copies only the compiled binary. Final image is minimal.
+1. **Build stage:** `golang:1.26-alpine` (moving tag — pulls latest 1.26.x patch on every build, automatically clearing newly-disclosed stdlib CVEs without manual bumps). Compiles the Go binary with `CGO_ENABLED=0` for a static build. BuildKit cache mounts persist `/go/pkg/mod` and `/root/.cache/go-build` across rebuilds.
+2. **Runtime stage:** `alpine:latest` — copies only the compiled binary plus `ca-certificates`, `git`, and `openssh-client` (used by the sync handler). Final image is small.
 
 **Frontend (`frontend/Dockerfile`):**
 
@@ -257,8 +393,8 @@ The backend's `NOTES_DIR` is set to `/data/notes` inside the container. Each mou
 
 The git-sync container receives the same mounts plus:
 
-- `./git-sync/sync.sh:/sync.sh:ro` -- the sync script
-- `${HOME}/.ssh:/root/.ssh:ro` -- SSH keys for pushing to the remote
+- `./git-sync/sync.sh:/sync.sh:ro` — the sync script.
+- `./git-sync/keys:/keys:ro` — per-namespace (or shared `default`) SSH keys. The script resolves keys in order: `/keys/<namespace>` → `/keys/default` → no key (commits locally, skips push). Passphrase-free keys only — there's no SSH agent inside the container.
 
 ---
 
@@ -365,7 +501,7 @@ Login credentials are compared using `crypto/subtle.ConstantTimeCompare`, which 
 
 ### JWT Expiry
 
-Tokens are signed with HS256 and expire after 24 hours. The `exp` claim is validated on every request by the JWT parsing library. Expired tokens are rejected with a 401.
+Tokens are signed with HS256 and expire after 30 days. The `exp` claim is validated on every request by the JWT parsing library. Expired tokens are rejected with a 401, which the frontend's `api.js` catches and clears the localStorage token to bounce the user back to the login screen.
 
 ### CORS
 

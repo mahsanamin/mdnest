@@ -67,9 +67,15 @@ On first run, `setup.sh` copies `mdnest.conf.sample` to `mdnest.conf` and exits,
 | `SSO_ALLOWED_DOMAINS` | *(none)* | Comma-separated email-domain allowlist, e.g. `example.com`. Leave empty to allow any verified email. |
 | `SSO_PROVIDER_LABEL` | `SSO` | Text on the sign-in button (e.g. `Google`, `Okta`). |
 | `FIREBASE_PROJECT_ID`, `FIREBASE_SERVICE_ACCOUNT`, `FIREBASE_WEB_CONFIG` | *(required when `USER_PROVIDER=firebase`)* | See `docs/firebase-setup.md`. |
-| `ADMIN_EMAILS` | *(none)* | Comma-separated emails promoted to `role=admin` on every startup. |
+| `ADMIN_EMAILS` | *(none)* | Comma-separated emails auto-promoted to `role=superadmin` on every startup (idempotent — removals are NOT auto-demoted). |
+| `REQUIRE_2FA` | `false` | Force TOTP enrollment on next login for all users (local + Firebase only — ignored in SSO mode). |
+| `ENABLE_LIVE_COLLAB` | `false` | Enable WebSocket-based live collaboration: presence, cursors, comments, real-time tree updates. Multi mode only. |
+| `GRANT_MAX_DEPTH` | `3` | Cap on how deep into a namespace tree a grant's path can go (`/` = depth 0). New grants beyond this depth return 400. Existing rows are grandfathered. Set `0` for no limit. |
+| `INSECURE_DEV_LOGIN` | `false` | **Dev-only.** Enables `POST /api/auth/dev-login` which mints a session for any existing user by email — bypassing the IdP. Loud red warning pill renders on every authenticated page while this is on. NEVER enable on a non-localhost deployment. |
+| `COMPOSE_PROJECT_NAME` | *(unset = directory basename)* | Override the docker compose project name. Useful when running parallel installs from differently-named (or similarly-named) directories so their containers don't collide. |
 | `SSH_KEY_PATH` | *(none)* | Path to SSH private key on the host. Mounted into the backend for git pull via sync button. Must be passphrase-free. |
 | `CADDY_DOMAIN` | *(none)* | Domain name for automatic HTTPS via Caddy. When set, adds a Caddy container and makes backend/frontend ports internal-only. Requires a DNS A record pointing to the server. |
+| `SERVER_ALIAS` | *(none)* | Short name advertised by `/api/config` so the `mdnest` CLI can auto-pick the right `@alias` on `mdnest login <url> <token>`. |
 | `MOUNT_<name>` | *(none, at least one required)* | Maps a namespace to a host directory. See below. |
 
 ### Example Configuration
@@ -206,6 +212,55 @@ If you already have a running single-user mdnest and want to enable multi-user:
    ```
 
 Your existing notes and configuration remain untouched. The database only stores user accounts and access permissions -- your notes are still plain files on disk.
+
+### Recommended: Team install with corporate SSO
+
+For a small company deploying mdnest as a shared knowledge base, the recommended config is multi-user mode + corporate SSO + a TLS reverse proxy:
+
+```ini
+# Auth
+AUTH_MODE=multi
+USER_PROVIDER=sso
+ENABLE_LIVE_COLLAB=true
+GRANT_MAX_DEPTH=3
+ADMIN_EMAILS=ops-lead@example.com,you@example.com    # auto-promoted to superadmin
+
+# Postgres
+POSTGRES_PASSWORD=<long-random-string>
+
+# OIDC (from your IdP — see docs/sso-setup.md)
+SSO_ISSUER_URL=https://accounts.google.com
+SSO_CLIENT_ID=<from-IdP>
+SSO_CLIENT_SECRET=<from-IdP>
+SSO_ALLOWED_DOMAINS=example.com
+SSO_PROVIDER_LABEL=Google
+
+# TLS via Caddy (built-in HTTPS)
+CADDY_DOMAIN=notes.example.com
+FRONTEND_ORIGIN=https://notes.example.com
+
+# JWT secret — use a fresh long random value
+MDNEST_JWT_SECRET=<long-random-string>
+
+# Mounts (one per team / topic)
+MOUNT_engineering=/srv/notes/engineering
+MOUNT_design=/srv/notes/design
+MOUNT_ops=/srv/notes/ops
+```
+
+```bash
+./mdnest-server rebuild
+```
+
+What this gets you:
+
+- All identity centralized in your IdP — users sign in with their existing corporate account, MFA enforced where the IdP enforces it.
+- One or two SuperAdmins (the `ADMIN_EMAILS` list) who manage the system globally, plus per-team Admins assigned via the **Namespace Admins** tab in the admin UI. Each per-team Admin can invite their teammates and manage grants on their own namespace without seeing other teams.
+- Public TLS via Caddy + Let's Encrypt, with the backend bound only to a Docker-internal network. The reverse proxy is the only thing exposed.
+- Live collaboration (cursors, presence, real-time comments) on by default for multi-user installs.
+- Per-team git backup if each `MOUNT_*` is a separate git repo with a deploy key in `git-sync/keys/<namespace>` — see [Git Sync](#git-sync) below.
+
+After the first sign-in, your `ADMIN_EMAILS` users are SuperAdmin. From the admin panel they can invite the rest of the team and assign per-namespace Admins.
 
 ### Using an External PostgreSQL
 

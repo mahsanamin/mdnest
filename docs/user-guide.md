@@ -1,6 +1,8 @@
 # mdnest User Guide
 
-mdnest is a privately-hosted markdown notes app. Your notes are plain `.md` files on disk, and mdnest provides a clean web interface to browse, edit, and organize them. It works for personal use (single-user mode) or team collaboration (multi-user mode).
+mdnest is a privately-hosted markdown notes app. Your notes are plain `.md` files on disk, and mdnest provides a clean web interface to browse, edit, and organize them. It works for personal use (single-user mode) or team collaboration (multi-user mode with role-based access, namespace-scoped admins, and corporate SSO).
+
+If you're an end-user being added to your team's mdnest, read **Logging In** and **The Sidebar** below — that's enough to get going. The rest is reference. If you also have admin scope, see **Roles & administration** further down.
 
 ---
 
@@ -8,13 +10,15 @@ mdnest is a privately-hosted markdown notes app. Your notes are plain `.md` file
 
 ### Logging In
 
-Open mdnest in your browser (e.g., `http://localhost:3236`). The login screen adapts to how the server is configured:
+Open mdnest in your browser (your admin will give you the URL). The login screen adapts to how the server is configured:
 
-- **Single-user mode:** enter the username and password from `MDNEST_USER` / `MDNEST_PASSWORD`.
-- **Multi-user mode (local):** enter the credentials provided by your admin. 2FA may be required.
-- **Multi-user mode with SSO:** a single **Sign in with \<provider\>** button (Google, Okta, etc.). Your admin must have invited your corporate email first — otherwise you'll see "account is not authorized on this server". See `docs/sso-setup.md` for operator setup.
+- **Multi-user mode with SSO** *(typical team install)*: a single **Sign in with \<provider\>** button (Google, Okta, Microsoft Entra, etc.). Click it, complete the IdP flow on the IdP's page, and you're back in mdnest. Your admin must have invited your corporate email first — otherwise you'll see "account is not authorized on this server" after the IdP round-trip.
+- **Multi-user mode (local):** enter the credentials your admin provided. 2FA may be required on first sign-in or if your admin enabled `REQUIRE_2FA`.
+- **Single-user mode** *(personal install)*: enter the username and password from `mdnest.conf`'s `MDNEST_USER` / `MDNEST_PASSWORD`.
 
-After a successful login, the session lasts 30 days before you need to log in again.
+A successful login gives you a 30-day session. The browser stores a JWT in `localStorage`; closing the tab doesn't sign you out, but clearing site data does.
+
+After login your name and IdP profile picture appear at the bottom of the sidebar. The picture refreshes from the IdP on every sign-in (since profile-picture URLs at Google etc. rotate).
 
 ### Your First Note
 
@@ -42,6 +46,37 @@ Below the namespace selector, the folder tree shows all files and folders in the
 - Hidden files (those starting with `.`) are not shown. This keeps `.git` directories and other dotfiles out of the way.
 
 On mobile, tap the hamburger menu icon in the top-left corner to show or hide the sidebar.
+
+---
+
+## Roles & administration (multi-user mode)
+
+mdnest has three user roles. Most teammates are collaborators — only people who manage the install or a specific team's namespace get an admin role.
+
+| Role | Scope | What they can do |
+|---|---|---|
+| **Super-admin** | Global | Manage every user, every namespace, every grant. Promote / demote between roles, reset 2FA, delete users, sync any namespace. There must always be at least one super-admin. |
+| **Admin** | Per-namespace (one or more) | Within their namespaces only — invite teammates, create / edit / revoke grants, promote co-admins, trigger git-sync. Implicit read+write on those namespaces. **Cannot** reset 2FA, delete users, or change global roles. |
+| **Collaborator** | Per-grant only | Read or write only on the specific namespaces / paths the admin has granted them. No admin panel button. |
+
+Where each role comes from:
+
+- **Super-admin** is set in `mdnest.conf` via `ADMIN_EMAILS=ops@example.com,you@example.com` (auto-promoted on every server startup), or by another super-admin via the admin panel's role dropdown.
+- **Admin** is *namespace-scoped* — assigned per namespace. Open the admin panel → **Namespace Admins** tab → pick a namespace → pick a user → **Make admin of `<namespace>`**. The promotion auto-grants the user `write` access on `/` of that namespace and bumps their `users.role` from `collaborator` to `admin`.
+- **Collaborator** is the default for newly-invited users. They get explicit `access_grants` rows for the namespaces / paths the inviting admin scoped them to.
+
+If you can see the **Admin** button in the top-right of the app, you have at least namespace-admin scope. The admin panel shows your scope as a yellow `Admin of: <namespace list>` badge so you know what you're managing. Super-admins see "Admin of: (none)" and full reign over everything.
+
+### Inviting a user
+
+Open the admin panel → **Users** tab → **+ Invite User**. Fill in the form:
+
+- **Email** — required. In SSO / Firebase mode this is also the IdP login key; in local mode it's just an identifier.
+- **Username + password** — *only shown in local mode.* In SSO and Firebase mode, identity comes from the IdP and the form is email-only (the panel also displays a one-line note explaining this).
+- **Role** — Collaborator by default. Admins can also invite as **Admin (of this namespace)**. Super-admins additionally have **Super-admin (global)**.
+- **Namespace** — required when you're a namespace-admin (you can only invite into namespaces you administer). Optional for super-admins (they can grant access later via the **Access Grants** tab).
+
+The invited user can sign in immediately — no email confirmation is sent. Tell them the URL and they're in.
 
 ---
 
@@ -133,6 +168,24 @@ graph TD
 ````
 
 This renders as an interactive diagram in the preview pane. Mermaid supports many diagram types including flowcharts, sequence diagrams, Gantt charts, class diagrams, and more. Refer to the [Mermaid documentation](https://mermaid.js.org/intro/) for the full syntax reference.
+
+---
+
+## Live Collaboration
+
+> **Requires multi-user mode with `ENABLE_LIVE_COLLAB=true`** in `mdnest.conf`.
+
+When live collab is on, mdnest opens a WebSocket from your browser to the backend on sign-in. While that connection is open, the app fans real-time events between everyone editing in the same namespace:
+
+- **Presence.** A small avatar stack at the top of the editor shows who else has the same note open right now. Tooltips reveal usernames.
+- **Cursors.** When a teammate is editing the same note in **Live** mode, you see their cursor as a thin coloured caret with their name on it. Cursor positions update in real time.
+- **Typing indicator.** When someone is actively typing, their avatar in the presence stack pulses faintly so you know to expect changes.
+- **Conflict banner.** If two people save the same note within the auto-save window, the second save shows a "your edit is based on a stale copy" banner with a one-click reload. This rarely fires — the cursor sharing usually keeps people out of each other's way.
+- **Tree refresh.** When someone else creates / renames / deletes a file in your namespace, your sidebar updates within a second without a manual refresh.
+
+Live collab is gated on the WebSocket hub being up. If `/api/ws` is unreachable (server restart, proxy hiccup), the editor still works — you just lose the presence + cursor + auto-tree-refresh features until the connection reconnects (the app retries with backoff).
+
+In single-user mode or when `ENABLE_LIVE_COLLAB=false`, none of this loads — there's nothing to collaborate on.
 
 ---
 
@@ -282,20 +335,6 @@ When the server is updated to a new version, active browser sessions will see a 
 > **New version available: v3.1.0 → v3.2.0** [Refresh Now]
 
 Click "Refresh Now" to reload and pick up the latest frontend. The check runs every 60 seconds.
-
-## Roles (multi-user mode)
-
-mdnest has three user roles in multi-user mode:
-
-- **Super-admin** — global administrator. Sees and manages every namespace and every user, can promote/demote roles, reset 2FA, delete users, and sync any namespace. There must always be at least one super-admin in a deployment.
-- **Admin** — namespace-scoped administrator. Has full read+write access to one or more specific namespaces and can invite users, manage grants, promote co-admins, and trigger git-sync **for those namespaces only**. Cannot reset 2FA, delete users, or change global roles.
-- **Collaborator** — has only the per-namespace / per-path access grants assigned to them, no administrative powers.
-
-If you can see the **Admin** button in the top-right, you have at least namespace-admin scope. The admin panel shows your scope as a yellow "Admin of: …" badge so you know which namespaces you're managing.
-
-To make someone a namespace admin, open the admin panel → **Namespace Admins** tab → pick the namespace → pick the user → "Make admin of …". The promotion auto-grants write access to the namespace and bumps their role; demoting reverses the role bump (the access grant is left in place so removing the admin role doesn't surprise them with lost access).
-
----
 
 ## Per-File Preferences
 
