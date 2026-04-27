@@ -14,12 +14,16 @@ import {
 } from '../api.js';
 import PathPicker from './PathPicker.jsx';
 
-function AdminPanel({ onClose, namespaces, isSuperAdmin, adminNamespaces }) {
+function AdminPanel({ onClose, namespaces, isSuperAdmin, adminNamespaces, userProvider = 'local' }) {
   const [tab, setTab] = useState('users');
 
   // Manageable namespaces: superadmin can manage all; namespace admins
   // only their own.
   const manageableNs = isSuperAdmin ? namespaces : (namespaces || []).filter((n) => adminNamespaces.includes(n));
+
+  // In federated modes (firebase, sso) the IdP owns identity, so the
+  // invite form skips username + password (backfilled / unused).
+  const isFederated = userProvider === 'firebase' || userProvider === 'sso';
 
   return (
     <div className="admin-panel">
@@ -39,14 +43,14 @@ function AdminPanel({ onClose, namespaces, isSuperAdmin, adminNamespaces }) {
         <button className={tab === 'grants' ? 'active' : ''} onClick={() => setTab('grants')}>Access Grants</button>
         <button className={tab === 'nsadmins' ? 'active' : ''} onClick={() => setTab('nsadmins')}>Namespace Admins</button>
       </div>
-      {tab === 'users' && <UsersTab isSuperAdmin={isSuperAdmin} manageableNs={manageableNs} />}
+      {tab === 'users' && <UsersTab isSuperAdmin={isSuperAdmin} manageableNs={manageableNs} isFederated={isFederated} />}
       {tab === 'grants' && <GrantsTab namespaces={manageableNs} />}
       {tab === 'nsadmins' && <NamespaceAdminsTab manageableNs={manageableNs} />}
     </div>
   );
 }
 
-function UsersTab({ isSuperAdmin, manageableNs }) {
+function UsersTab({ isSuperAdmin, manageableNs, isFederated }) {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showInvite, setShowInvite] = useState(false);
@@ -105,6 +109,7 @@ function UsersTab({ isSuperAdmin, manageableNs }) {
         <InviteForm
           isSuperAdmin={isSuperAdmin}
           manageableNs={manageableNs}
+          isFederated={isFederated}
           onDone={() => { setShowInvite(false); load(); }}
         />
       )}
@@ -146,7 +151,7 @@ function UsersTab({ isSuperAdmin, manageableNs }) {
   );
 }
 
-function InviteForm({ isSuperAdmin, manageableNs, onDone }) {
+function InviteForm({ isSuperAdmin, manageableNs, isFederated, onDone }) {
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -163,7 +168,17 @@ function InviteForm({ isSuperAdmin, manageableNs, onDone }) {
     setError('');
     setLoading(true);
     try {
-      await adminInviteUser(email, username, password, role, namespace || undefined);
+      // In federated modes (firebase/sso) we send only email — backend
+      // derives a placeholder username from the email's local-part and
+      // generates a random unused password. The IdP's `name` claim
+      // overwrites the username on first sign-in.
+      await adminInviteUser(
+        email,
+        isFederated ? '' : username,
+        isFederated ? '' : password,
+        role,
+        namespace || undefined,
+      );
       onDone();
     } catch (err) {
       setError(err.message);
@@ -175,19 +190,32 @@ function InviteForm({ isSuperAdmin, manageableNs, onDone }) {
   return (
     <form className="admin-invite-form" onSubmit={handleSubmit}>
       {error && <div className="admin-error">{error}</div>}
+      {isFederated && (
+        <div className="admin-hint">
+          {/* The user asked: "When SSO is enabled why do we need
+              password / username?" Answer in-place so it's clear. */}
+          Identity comes from your IdP. We only need the user's email — name and
+          profile picture are pulled from the OIDC <code>name</code> /{' '}
+          <code>picture</code> claims on first sign-in.
+        </div>
+      )}
       <div className="admin-form-row">
         <input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-        <input type="text" placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} required />
+        {!isFederated && (
+          <input type="text" placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} required />
+        )}
       </div>
+      {!isFederated && (
+        <div className="admin-form-row">
+          <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+        </div>
+      )}
       <div className="admin-form-row">
-        <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required />
         <select value={role} onChange={(e) => setRole(e.target.value)}>
           <option value="collaborator">Collaborator</option>
           <option value="admin">Admin (of this namespace)</option>
           {isSuperAdmin && <option value="superadmin">Super-admin (global)</option>}
         </select>
-      </div>
-      <div className="admin-form-row">
         <select
           value={namespace}
           onChange={(e) => setNamespace(e.target.value)}

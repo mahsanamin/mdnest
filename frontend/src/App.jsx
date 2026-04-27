@@ -952,6 +952,7 @@ function App() {
       namespaces={namespaces}
       isSuperAdmin={isSuperAdmin}
       adminNamespaces={adminNamespaces}
+      userProvider={appConfig?.userProvider || 'local'}
     />;
   }
 

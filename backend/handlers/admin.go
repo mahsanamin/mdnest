@@ -1,11 +1,14 @@
 package handlers
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/mdnest/mdnest/backend/collab"
@@ -19,16 +22,32 @@ type AdminHandler struct {
 	grantStore   store.GrantStore
 	nsAdminStore store.NamespaceAdminStore
 	hub          *collab.Hub // nil if collab disabled
+	// userProvider is "local" | "firebase" | "sso". In federated modes
+	// (firebase/sso) the IdP owns identity, so invite forms only need
+	// email — username and password are derived / ignored.
+	userProvider string
 }
 
-// NewAdminHandler creates a new admin handler.
-func NewAdminHandler(userStore store.UserStore, grantStore store.GrantStore, nsAdminStore store.NamespaceAdminStore, hub *collab.Hub) *AdminHandler {
+// NewAdminHandler creates a new admin handler. userProvider should be one
+// of "local", "firebase", or "sso" — it controls how strict the invite
+// form is (federated modes accept email-only).
+func NewAdminHandler(userStore store.UserStore, grantStore store.GrantStore, nsAdminStore store.NamespaceAdminStore, hub *collab.Hub, userProvider string) *AdminHandler {
+	if userProvider == "" {
+		userProvider = "local"
+	}
 	return &AdminHandler{
 		userStore:    userStore,
 		grantStore:   grantStore,
 		nsAdminStore: nsAdminStore,
 		hub:          hub,
+		userProvider: userProvider,
 	}
+}
+
+// isFederated reports whether identity comes from an external IdP.
+// In federated modes username + password are not user-supplied.
+func (h *AdminHandler) isFederated() bool {
+	return h.userProvider == "firebase" || h.userProvider == "sso"
 }
 
 // callerCanAdminNamespace returns true if the request's user is allowed to
@@ -118,8 +137,26 @@ func (h *AdminHandler) HandleInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Email == "" || req.Username == "" || req.Password == "" {
-		http.Error(w, `{"error":"email, username, and password are required"}`, http.StatusBadRequest)
+	if req.Email == "" {
+		http.Error(w, `{"error":"email is required"}`, http.StatusBadRequest)
+		return
+	}
+	if h.isFederated() {
+		// IdP owns identity. Username gets backfilled from the OIDC
+		// `name` claim on first sign-in (see BackfillSSOProfile);
+		// password is never used. Generate placeholders so the existing
+		// CreateUser flow stays unchanged — the username placeholder is
+		// just the email's local-part (still has to be unique across
+		// users), and the password is a random unguessable string we
+		// throw away.
+		if req.Username == "" {
+			req.Username = deriveUsernameFromEmail(req.Email)
+		}
+		if req.Password == "" {
+			req.Password = randomPlaceholderPassword()
+		}
+	} else if req.Username == "" || req.Password == "" {
+		http.Error(w, `{"error":"username and password are required"}`, http.StatusBadRequest)
 		return
 	}
 
@@ -855,4 +892,45 @@ func (h *AdminHandler) removeNamespaceAdmin(w http.ResponseWriter, r *http.Reque
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
+}
+
+// deriveUsernameFromEmail returns a sane default username for federated
+// invites: the email's local-part, lowercased, with characters outside
+// [a-z0-9._-] stripped. The username column is still UNIQUE so the
+// CreateUser duplicate check will surface conflicts; in federated mode
+// the IdP-provided `name` claim later overwrites this on first login
+// via BackfillSSOProfile (only when the slot is still empty), so this
+// is just a bootstrap placeholder that's good enough for one signup.
+func deriveUsernameFromEmail(email string) string {
+	at := strings.Index(email, "@")
+	local := email
+	if at > 0 {
+		local = email[:at]
+	}
+	local = strings.ToLower(local)
+	clean := make([]byte, 0, len(local))
+	for i := 0; i < len(local); i++ {
+		c := local[i]
+		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-' {
+			clean = append(clean, c)
+		}
+	}
+	if len(clean) == 0 {
+		return "user"
+	}
+	return string(clean)
+}
+
+// randomPlaceholderPassword returns 32 bytes of base64url-encoded
+// randomness for federated users whose password_hash is never read for
+// authentication. We still generate one (vs. leaving NULL) so the
+// existing CreateUser bcrypt+INSERT flow runs unchanged.
+func randomPlaceholderPassword() string {
+	var b [24]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// crypto/rand failure is extremely rare; fall back to a marker
+		// rather than crashing the request.
+		return "sso-placeholder-do-not-use"
+	}
+	return base64.RawURLEncoding.EncodeToString(b[:])
 }

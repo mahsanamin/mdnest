@@ -325,7 +325,7 @@ func main() {
 
 	// Multi-mode routes (require admin role for /admin/*, authenticated for /me)
 	if multiMode {
-		adminHandler := handlers.NewAdminHandler(userStore, grantStore, nsAdminStore, collabHub)
+		adminHandler := handlers.NewAdminHandler(userStore, grantStore, nsAdminStore, collabHub, userProvider)
 		meHandler := handlers.NewMeHandler(userStore, grantStore, nsAdminStore)
 
 		// Admin endpoints: outer gate is RequireAdmin (= any admin role).
