@@ -4,6 +4,13 @@ set -e
 # Change to the directory where this script lives
 cd "$(dirname "$0")"
 
+# Disable BuildKit's SLSA provenance + SBOM attestations. They're meant for
+# images pushed to a registry; we build locally, so they're pure overhead and
+# can hang at "resolving provenance for metadata file" on networks where the
+# attestation phase tries to reach external services. Skipping them shaves
+# minutes off rebuilds and never affects the actual image content.
+export BUILDX_NO_DEFAULT_ATTESTATIONS=1
+
 # Auto-detect if git-sync should be enabled:
 # keys exist in git-sync/keys/ → include --profile sync
 SYNC_PROFILE=""
