@@ -477,7 +477,7 @@ The feature is gated on `enableCollab` in `backend/main.go` (which itself requir
 - `InjectNoteID(content, uuid)` — appends the marker to the bottom of a note's content. Called inside `notes.go` PUT so every save re-embeds the id the file had before.
 - `EnsureNoteID(absPath)` — reads the file, generates a UUID if none exists, writes it back atomically, and returns the id. Called by the comments handler on every request.
 
-ETags are computed against the **clean** content (marker stripped) so a save that only re-embeds the same UUID is treated as unchanged.
+ETags are computed against the **clean** content (marker stripped) so a save that only re-embeds the same UUID is treated as unchanged. The clean content is run through `canonicalForETag` (`notes.go`) — currently just `strings.TrimRight(s, "\n")` — before hashing, so the value is stable regardless of whether `EnsureNoteID` has lazily injected the marker yet. This eliminates the bogus "modified by another user" 409 that used to fire on the first save of a freshly-created note when the comments-load race injected the marker between the editor's GET and its first auto-save.
 
 **Comment data.** Stored as append-only JSON Lines at `<namespace>/.mdnest/comments/<uuid>.jsonl`. Each line is a `Comment` object with `id`, optional `parentId` (for replies), `rangeStart/End`, `anchorText`, `body`, `authorId/Author`, `createdAt`, `resolved`, and `deletedAt`. Create is a pure `O_APPEND` write (concurrency-safe). Update/Resolve/Delete rewrites the whole file — acceptable at typical comment volumes.
 
