@@ -102,7 +102,7 @@ Right-click (desktop) or long-press (mobile) on any folder in the tree to open a
 
 Right-click or long-press on a file to:
 
-- Rename the file
+- Rename the file -- if you don't type an extension, the original one is preserved (so renaming `notes.md` to `summary` becomes `summary.md`).
 - Delete the file
 
 ---

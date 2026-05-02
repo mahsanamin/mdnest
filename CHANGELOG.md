@@ -4,6 +4,14 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v3.5.4 — Fix renamed file vanishing from the sidebar when extension is dropped
+
+### Bug fixes
+
+- **Renaming a note to a name without a file extension silently hid it from the tree.** The sidebar only lists files with a recognized text extension (`.md`, `.txt`, `.json`, `.sql`, `.csv`, `.yaml`, `.yml`, `.markdown`) — that's `tree.go`'s `textExtensions` filter. The rename prompt accepted any string and passed it straight to `/api/move`, so typing `foo` while renaming `foo.md` wrote `foo` to disk and the file disappeared from the sidebar: still on disk, no error, no warning. Fixed in `App.jsx` by mirroring `doCreateNote`'s extension-preserving behaviour — when the target is a file and the typed name contains no `.`, the original extension is auto-appended. Folders are exempt; explicit extension changes (`foo.md` → `foo.txt`) still work as before.
+
+---
+
 ## v3.5.3 — Fix bogus 409 "modified by another user" on first save of new notes
 
 ### Bug fixes
