@@ -4,11 +4,12 @@ All notable changes to mdnest are documented here.
 
 ---
 
-## v3.5.2 — Fix empty tree for superadmin in multi mode
+## v3.5.2 — Fix empty tree for superadmin + fix bogus 409 on first save of new notes
 
 ### Bug fixes
 
 - **Superadmin users saw an empty file tree in multi-user mode.** The grant filter in the tree handler only bypassed filtering for `role="admin"` (namespace-admin), not `role="superadmin"`. Since superadmins have no explicit grant rows (they're meant to have implicit full access), `filterTreeByGrants` stripped every node — returning an empty root. Fixed by adding the `"superadmin"` role check alongside `"admin"` in `tree.go`.
+- **"This file was modified by another user" 409 on the first save of a freshly-created note.** Notes carry an invisible `<!-- mdnest:UUID -->` marker so comments survive renames; the marker is lazy-injected by `EnsureNoteID` the first time a comments endpoint touches a file. `ExtractNoteID` returned the body in two different shapes — bytes-as-is when no marker, with a trailing `\n` normalization when the marker was present — so the ETag computed by `getNote` *before* the lazy injection didn't match the ETag computed by `updateNote` *after*. The frontend's first autosave hit the conflict path with no actual conflict, the user lost their typed content on refresh. Same defect also fired on every save *after* the first (since `newETag = sha256(body)` ignored the same normalization). Fixed in `notes.go` by adding `canonicalForETag`, a helper that drops trailing newlines from clean note content. Wrapped around all three ETag call sites (`getNote`, `updateNote` `currentETag`, `updateNote` `newETag`) so the hash is identical regardless of whether the marker has been injected yet — the race becomes mathematically irrelevant. Bytes on disk and bytes returned to the editor are unchanged; only the hash input is canonicalized. Genuine conflicts (real concurrent edits) still 409 correctly.
 
 ---
 

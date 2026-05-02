@@ -35,6 +35,29 @@ func contentETag(data []byte) string {
 	return `"` + hex.EncodeToString(hash[:16]) + `"`
 }
 
+// canonicalForETag drops trailing newlines from clean note content. The
+// note marker (`<!-- mdnest:<uuid> -->`) is injected lazily — the first
+// time a comments endpoint touches a file (via EnsureNoteID), the file
+// gets rewritten with the marker. ExtractNoteID's body output for a
+// marker-bearing file ends in `\n` (it normalizes), but for a marker-less
+// file it returns the bytes as-is. Without this helper, those two states
+// would produce different ETags for what is semantically the same
+// content, and the first save after the lazy injection 409s with
+// "file was modified by another user". Trimming trailing `\n` here
+// makes the two cases converge:
+//
+//	""                              → ""    → sha256("")
+//	"\n\n<!-- mdnest:UUID -->\n"    → "\n"  → "" → sha256("")  (matches)
+//	"Hello"                         → "Hello"   → sha256("Hello")
+//	"Hello\n\n<!-- mdnest:UUID -->\n" → "Hello\n" → "Hello" → sha256("Hello") (matches)
+//
+// Trailing whitespace is markdown-irrelevant, so collapsing it for ETag
+// purposes is safe. The bytes stored on disk and returned to the editor
+// are unaffected — only the hash input changes.
+func canonicalForETag(clean string) string {
+	return strings.TrimRight(clean, "\n")
+}
+
 func (h *NoteHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -89,7 +112,9 @@ func (h *NoteHandler) getNote(w http.ResponseWriter, r *http.Request) {
 	content := string(data)
 	noteID, cleanContent := ExtractNoteID(content)
 
-	etag := contentETag([]byte(cleanContent))
+	// Canonicalize for ETag so the value is stable across the lazy
+	// marker-injection state. See canonicalForETag for the why.
+	etag := contentETag([]byte(canonicalForETag(cleanContent)))
 
 	// Support conditional requests — return 304 if content hasn't changed
 	if ifNoneMatch := r.Header.Get("If-None-Match"); ifNoneMatch == etag {
@@ -133,10 +158,13 @@ func (h *NoteHandler) updateNote(w http.ResponseWriter, r *http.Request) {
 	existingNoteID, currentClean := ExtractNoteID(string(currentData))
 
 	// If-Match: optimistic locking — compare against clean content ETag
-	// (frontend never sees the marker, so its ETag is based on clean content)
+	// (frontend never sees the marker, so its ETag is based on clean content).
+	// canonicalForETag keeps the hash stable across the marker injection
+	// state so a fresh file's pre-injection ETag still matches after
+	// EnsureNoteID lazily rewrites the file with the marker.
 	ifMatch := r.Header.Get("If-Match")
 	if ifMatch != "" {
-		currentETag := contentETag([]byte(currentClean))
+		currentETag := contentETag([]byte(canonicalForETag(currentClean)))
 		if ifMatch != currentETag {
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("ETag", currentETag)
@@ -176,8 +204,11 @@ func (h *NoteHandler) updateNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ETag is based on the clean content (without marker) — matches what frontend sees
-	newETag := contentETag(body)
+	// ETag is based on the clean content (without marker) — matches what
+	// the frontend sees. canonicalForETag keeps it consistent with what
+	// the next If-Match check will compute (which goes through
+	// ExtractNoteID's trailing-\n normalization).
+	newETag := contentETag([]byte(canonicalForETag(string(body))))
 
 	// Broadcast file-changed to other users on this note
 	if h.hub != nil {
