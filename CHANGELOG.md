@@ -4,6 +4,14 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v3.5.2 — Fix empty tree for superadmin in multi mode
+
+### Bug fixes
+
+- **Superadmin users saw an empty file tree in multi-user mode.** The grant filter in the tree handler only bypassed filtering for `role="admin"` (namespace-admin), not `role="superadmin"`. Since superadmins have no explicit grant rows (they're meant to have implicit full access), `filterTreeByGrants` stripped every node — returning an empty root. Fixed by adding the `"superadmin"` role check alongside `"admin"` in `tree.go`.
+
+---
+
 ## v3.5.1 — Go 1.26 bump for stdlib CVEs
 
 ### Security
