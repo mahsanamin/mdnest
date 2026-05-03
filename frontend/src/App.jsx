@@ -812,8 +812,20 @@ function App() {
       case 'rename': {
         if (!target || !selectedNs) return;
         const oldName = target.name || target.path.split('/').pop();
-        const newName = prompt('Rename to:', oldName);
-        if (!newName || newName === oldName) return;
+        let newName = prompt('Rename to:', oldName);
+        if (!newName) return;
+        // Preserve the file's extension if the user typed a name without one.
+        // Without this, renaming foo.md to "foo" writes "foo" to disk, and the
+        // tree filter drops files without a recognized text extension — so the
+        // file silently disappears from the sidebar.
+        const isFolder = target.type === 'folder' || target.type === 'directory';
+        if (!isFolder) {
+          const lastDot = oldName.lastIndexOf('.');
+          if (lastDot > 0 && !newName.includes('.')) {
+            newName += oldName.substring(lastDot);
+          }
+        }
+        if (newName === oldName) return;
         const parts = target.path.split('/');
         parts.pop();
         const newPath = parts.length > 0 ? parts.join('/') + '/' + newName : newName;
