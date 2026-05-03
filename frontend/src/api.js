@@ -191,6 +191,7 @@ export async function saveNote(ns, path, content, ifMatch, opts = {}) {
   if (ifMatch) headers['If-Match'] = ifMatch;
   let url = `/note?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}`;
   if (opts.allowEmpty) url += '&allow-empty=1';
+  if (opts.restoreFrom) url += `&restore-from=${encodeURIComponent(opts.restoreFrom)}`;
   const res = await request(url, {
     method: 'PUT',
     headers,
@@ -212,6 +213,40 @@ export async function saveNote(ns, path, content, ifMatch, opts = {}) {
 // operations (e.g. a context-menu "Clear note" item); never for autosave.
 export async function clearNote(ns, path, ifMatch) {
   return saveNote(ns, path, '', ifMatch, { allowEmpty: true });
+}
+
+// --- Note version history (v3.7.0+, requires git-sync sidecar) ---
+
+// Fetch the per-file commit history. Returns an array of
+// { commit, unix_ts, author, message } sorted newest-first, capped at 50.
+// Returns null when git-sync isn't configured for this namespace (404)
+// so callers can hide the History UI gracefully.
+export async function getNoteHistory(ns, path) {
+  const res = await request(`/note/history?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}`);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error('Failed to load history');
+  return res.json();
+}
+
+// Fetch a file's content at a specific commit SHA.
+// ref must be a hex string (commit SHA); branch names are rejected by
+// the backend.
+export async function getNoteAtCommit(ns, path, ref) {
+  const res = await request(`/note/at?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}&ref=${encodeURIComponent(ref)}`);
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to load historical version');
+  }
+  return res.text();
+}
+
+// Restore a file to a previous version. Goes through the regular saveNote
+// path (so the empty-overwrite guard, ETag conflict detection, and
+// websocket file-changed broadcast all run as usual), with restore-from
+// tagging the broadcast so other connected users see a distinct
+// "X restored this file" banner instead of the conflict banner.
+export async function restoreNote(ns, path, ref, content, ifMatch) {
+  return saveNote(ns, path, content, ifMatch, { restoreFrom: ref });
 }
 
 export async function createNote(ns, path) {

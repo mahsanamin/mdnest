@@ -80,6 +80,15 @@ function ContextMenu({ visible, x, y, target, onAction, onClose, canWrite, isAdm
     items.push({ label: 'Delete', action: 'delete-file', danger: true });
   }
 
+  // History — available for any file the user can read. The handler
+  // checks server-side whether git-sync is configured for the namespace
+  // and shows an appropriate message inside the modal if not, so we
+  // don't need to gate the menu item on git-sync state here.
+  if (isFile) {
+    items.push({ separator: true });
+    items.push({ label: 'History', action: 'history' });
+  }
+
   // Copy path — available for both files and folders
   if (isFile || isFolder) {
     if (items.length > 0) items.push({ separator: true });

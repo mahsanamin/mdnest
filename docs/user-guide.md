@@ -160,9 +160,15 @@ Changes are saved automatically in both modes. There is no manual save button --
 
 ## Recovering lost content
 
-If you lose content -- accidental delete, a stuck undo, fat-fingered overwrite -- there are two recovery paths depending on whether you've enabled the optional **git-sync** sidecar.
+If you lose content -- accidental delete, a stuck undo, fat-fingered overwrite -- there are three recovery paths depending on whether you've enabled the optional **git-sync** sidecar.
 
-### With git-sync (recommended, default for most installs)
+### In-app History (v3.7.0+, fastest)
+
+Right-click any note → **History**. A modal opens listing the most recent 50 git-sync commits affecting that file, newest first. Click any commit to preview its content, then click **Restore this version** to write that older content back. The restoration itself goes through the regular save path, so it's also versioned -- if you restore to the wrong commit, the History modal can take you back.
+
+If git-sync isn't configured for the namespace, the modal tells you so and points at the setup hint. In multi-user installs, if other people are currently viewing the same file, the modal warns you and asks for confirmation before restoring; they see an info banner explaining what happened so it's not a silent surprise.
+
+### With git-sync (manual, via the git remote)
 
 If `git-sync/keys/` has any SSH key, every namespace is being auto-committed to the corresponding git remote on a regular cadence (default 600s -- tunable via `GIT_SYNC_INTERVAL` in `mdnest.conf`). Every change you've made is in commit history. You haven't lost it.
 
@@ -198,7 +204,7 @@ If `git-sync/keys/` is empty, no remote backup exists. Recovery options narrow:
 
 **Strong recommendation:** if you keep anything important in mdnest, enable git-sync. It's the difference between "10 minutes of edits at risk" and "everything since the last good copy is gone."
 
-A future release (v3.7.0+) is planned to surface git-sync's history through a "View History" button in the editor's right-click menu, so recovery doesn't require leaving mdnest. Until then, the GitHub UI / shell paths above are how it's done.
+For the common case, the in-app History modal (v3.7.0+) handles it without leaving mdnest -- the manual paths above are still useful for renamed files, bulk recoveries, or restoring multiple files at once.
 
 ---
 

@@ -4,6 +4,23 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v3.7.0 — In-app version history with restore (single + multi mode)
+
+### New features
+
+- **Right-click any note → History.** Opens a modal listing the most recent 50 commits affecting that file from the per-namespace git-sync repo, newest first. Selecting a commit shows its content as of that point, and **Restore this version** writes the old content back through the regular save path (so the v3.6.1 empty-overwrite guard, the ETag conflict check, and the websocket file-changed broadcast all run as usual — restoration is not a separate write path that could carry a new class of bugs). Works in both single mode and multi mode; the only requirement is that git-sync is configured for the namespace. If it isn't, the modal says so clearly with a one-line setup hint.
+- **Multi-user awareness on restore.** When a user clicks Restore in a multi-user install with live collab on, the resulting websocket `file-changed` event now carries `reason: "restored"` and the restored-from SHA, so other users currently on the same file see a distinct **info-coloured banner** ("X restored this file to an earlier version (sha)") instead of the usual yellow conflict banner. Their unsaved local changes are preserved until they choose to reload — same UX shape as the existing conflict banner, deliberately a different colour and copy because a restore is an intentional action by another user, not a divergence.
+- **Backend endpoints (also new).** `GET /api/note/history?ns=&path=` returns `[{commit, unix_ts, author, message}]` (capped at 50, newest first); `GET /api/note/at?ns=&path=&ref=<sha>` returns the file's content at a specific commit. `ref` is required to be a 7-40 char hex SHA — branch names, `HEAD~N`, and other git ref forms are rejected to keep the surface predictable. Both endpoints are read-only and gated by the same `RequireNsAccess` middleware that protects `GET /api/note`. `PUT /api/note` accepts a new optional `?restore-from=<sha>` query parameter that adds the broadcast tagging without changing any safety logic.
+
+### Notes
+
+- **No file locks.** The user explicitly asked whether this should add a per-file lock primitive (acquire-while-editing). Decision: no. The existing optimistic-concurrency model (ETag + the new info banner + the existing presence bar) handles the multi-user restore case cleanly without introducing the stale-lock / lock-takeover / lock-expiration UX surface that locking inevitably brings. If real users hit conflicts the new banner can't mediate, locking can be designed as its own feature later.
+- **No diff highlighting for now.** The History modal shows old content as a plain `<pre>` rather than a coloured diff. A diff library can be wired in later if there's appetite; the simpler viewer is enough for v3.7.0.
+- **No `--follow` for renamed files.** Per-file history starts when the file was named what it's named now. If a file was renamed, its pre-rename commits aren't in the modal — fall back to the GitHub UI for that case. Easy to add later.
+- **Read-only collaborators** can browse history and view old content; the **Restore** button is disabled for them with a tooltip.
+
+---
+
 ## v3.6.1 — Stop the Live editor's undo from erasing your notes
 
 ### New (small UX add)

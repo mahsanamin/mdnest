@@ -58,6 +58,14 @@ type OutgoingMessage struct {
 	By       int         `json:"by,omitempty"`
 	ETag     string      `json:"etag,omitempty"`
 	Content  string      `json:"content,omitempty"`
+	// Reason explains *why* a file-changed message was sent, when it's
+	// non-default. Empty/omitted = a normal save (existing behaviour).
+	// "restored" = a deliberate restore of an older version via
+	// PUT /api/note?restore-from=<sha>. The frontend renders a
+	// distinct (info-coloured) banner for restores so other users
+	// know it was an intentional action, not a conflict.
+	Reason         string `json:"reason,omitempty"`
+	RestoreFromRef string `json:"restoreFromRef,omitempty"`
 }
 
 // Color palette for user cursors (Catppuccin colors).
@@ -163,13 +171,19 @@ func (h *Hub) BroadcastContent(ns, path string, from *Conn, content string) {
 }
 
 // BroadcastFileChanged notifies all users on a note that it was saved.
-func (h *Hub) BroadcastFileChanged(ns, path string, byUserID int, byUsername string, etag string) {
+// reason is optional: pass "" for a normal save, "restored" for a
+// version-history restore (frontend renders a different banner). When
+// reason is "restored", restoreFromRef should carry the SHA the file
+// was restored from so the banner can quote it.
+func (h *Hub) BroadcastFileChanged(ns, path string, byUserID int, byUsername string, etag, reason, restoreFromRef string) {
 	key := noteKey(ns, path)
 	h.broadcastToOthers(key, byUserID, OutgoingMessage{
-		Type:     "file-changed",
-		By:       byUserID,
-		Username: byUsername,
-		ETag:     etag,
+		Type:           "file-changed",
+		By:             byUserID,
+		Username:       byUsername,
+		ETag:           etag,
+		Reason:         reason,
+		RestoreFromRef: restoreFromRef,
 	})
 }
 
