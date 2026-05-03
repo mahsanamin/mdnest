@@ -70,7 +70,7 @@ mcp-server/
   package.json
 
 mdnest                       # Client CLI (login, note read/write/append, works from any machine)
-mdnest-server                # Server management CLI (start, stop, rebuild, runs from project dir)
+mdnest-server                # Server management CLI (start, stop, rebuild, reset-password, runs from project dir)
 setup.sh                     # Reads mdnest.conf, generates docker-compose.yml + .env
 mdnest.conf.sample           # Template config with MOUNT_ entries
 ```

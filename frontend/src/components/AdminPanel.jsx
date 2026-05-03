@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   adminListUsers,
   adminInviteUser,
   adminDeleteUser,
   adminUpdateRole,
+  adminResetPassword,
   adminListGrants,
   adminCreateGrant,
   adminUpdateGrant,
@@ -43,17 +44,24 @@ function AdminPanel({ onClose, namespaces, isSuperAdmin, adminNamespaces, userPr
         <button className={tab === 'grants' ? 'active' : ''} onClick={() => setTab('grants')}>Access Grants</button>
         <button className={tab === 'nsadmins' ? 'active' : ''} onClick={() => setTab('nsadmins')}>Namespace Admins</button>
       </div>
-      {tab === 'users' && <UsersTab isSuperAdmin={isSuperAdmin} manageableNs={manageableNs} isFederated={isFederated} />}
+      {tab === 'users' && <UsersTab isSuperAdmin={isSuperAdmin} manageableNs={manageableNs} isFederated={isFederated} userProvider={userProvider} />}
       {tab === 'grants' && <GrantsTab namespaces={manageableNs} grantMaxDepth={grantMaxDepth} />}
       {tab === 'nsadmins' && <NamespaceAdminsTab manageableNs={manageableNs} />}
     </div>
   );
 }
 
-function UsersTab({ isSuperAdmin, manageableNs, isFederated }) {
+function UsersTab({ isSuperAdmin, manageableNs, isFederated, userProvider }) {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showInvite, setShowInvite] = useState(false);
+  const [resetTarget, setResetTarget] = useState(null);
+
+  // Password reset is only meaningful for the local identity provider —
+  // Firebase / SSO accounts authenticate against the IdP and have no
+  // local password. Superadmins reset other superadmins through the
+  // host-side mdnest-server CLI, not the UI.
+  const canShowReset = isSuperAdmin && userProvider === 'local';
 
   const load = useCallback(async () => {
     try {
@@ -116,6 +124,14 @@ function UsersTab({ isSuperAdmin, manageableNs, isFederated }) {
         />
       )}
 
+      {resetTarget && (
+        <ResetPasswordModal
+          user={resetTarget}
+          onClose={() => setResetTarget(null)}
+          onDone={() => { setResetTarget(null); load(); }}
+        />
+      )}
+
       <table className="admin-table">
         <thead>
           <tr>
@@ -150,6 +166,16 @@ function UsersTab({ isSuperAdmin, manageableNs, isFederated }) {
               <td>{new Date(u.created_at).toLocaleDateString()}</td>
               {isSuperAdmin && (
                 <td>
+                  {canShowReset && u.role !== 'superadmin' && (
+                    <button
+                      className="admin-action-btn"
+                      onClick={() => setResetTarget(u)}
+                      title="Set a new password — user is forced to change it on next login"
+                      style={{ marginRight: 6 }}
+                    >
+                      Reset password
+                    </button>
+                  )}
                   <button className="admin-action-btn danger" onClick={() => handleDelete(u)} title="Delete user">
                     Delete
                   </button>
@@ -159,6 +185,80 @@ function UsersTab({ isSuperAdmin, manageableNs, isFederated }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function ResetPasswordModal({ user, onClose, onDone }) {
+  const [pw, setPw] = useState('');
+  const [pw2, setPw2] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (pw.length < 8) {
+      setError('Password must be at least 8 characters.');
+      return;
+    }
+    if (pw !== pw2) {
+      setError('Passwords do not match.');
+      return;
+    }
+    setLoading(true);
+    try {
+      await adminResetPassword(user.id, pw);
+      onDone();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h3>Reset password — {user.username || user.email}</h3>
+        <p className="admin-hint" style={{ marginTop: 0 }}>
+          They will be forced to choose a new password on their next login.
+          Send the temporary password over a secure channel.
+        </p>
+        <form onSubmit={handleSubmit}>
+          {error && <div className="admin-error">{error}</div>}
+          <div className="admin-form-row">
+            <input
+              ref={inputRef}
+              type="password"
+              placeholder="New temporary password"
+              value={pw}
+              onChange={(e) => setPw(e.target.value)}
+              autoComplete="new-password"
+              required
+            />
+          </div>
+          <div className="admin-form-row">
+            <input
+              type="password"
+              placeholder="Confirm password"
+              value={pw2}
+              onChange={(e) => setPw2(e.target.value)}
+              autoComplete="new-password"
+              required
+            />
+          </div>
+          <div className="admin-form-row" style={{ justifyContent: 'flex-end', gap: 8 }}>
+            <button type="button" onClick={onClose} disabled={loading}>Cancel</button>
+            <button type="submit" disabled={loading}>{loading ? 'Resetting…' : 'Reset password'}</button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

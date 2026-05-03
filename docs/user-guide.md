@@ -78,6 +78,31 @@ Open the admin panel → **Users** tab → **+ Invite User**. Fill in the form:
 
 The invited user can sign in immediately — no email confirmation is sent. Tell them the URL and they're in.
 
+### Resetting a forgotten password *(v3.6.0+, local provider only)*
+
+A user forgot their password? Two paths, depending on what role they hold and who's doing the reset:
+
+**From the Admin Panel** (super-admins, for collaborators and namespace-admins):
+
+1. Open the admin panel → **Users** tab.
+2. Find the user. Click **Reset password**.
+3. Type a temporary password twice. Send it over a secure channel (Slack DM, password manager — not email).
+4. The user logs in with the temp password and is immediately forced to pick their own. The temp password becomes single-use; nothing else in the app is reachable until they change it.
+
+The button is hidden for super-admin rows on purpose — see below.
+
+**From the host shell** (super-admins resetting another super-admin, or any case where you don't want a UI round-trip):
+
+```bash
+./mdnest-server reset-password user@example.com
+```
+
+Prompts twice with hidden input, pipes the password into the backend container via stdin (so it never appears in `ps`, your shell history, or process arguments). The same forced-change flow applies on next login. Works for any user role, including super-admins.
+
+**Why super-admins can't reset other super-admins from the UI:** if any super-admin can change any other super-admin's password from the web app, one compromised super-admin account is enough to lock out every other super-admin. The host CLI gates the same operation behind shell access to the server — a much higher bar — so the legitimate "my colleague forgot their super-admin password" case is still a one-line fix, while a compromised web session can't escalate.
+
+This whole feature is local-provider only. In Firebase / SSO mode the IdP owns the password — reset it there.
+
 ---
 
 ## Creating Notes and Folders

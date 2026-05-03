@@ -4,6 +4,21 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v3.6.0 — Admin password reset (UI + host CLI)
+
+### New features
+
+- **Superadmins can reset another user's password from the Admin Panel.** Each non-superadmin row in Admin → Users now has a "Reset password" button (visible only to superadmins, only when `USER_PROVIDER=local`). The dialog asks for a new password twice; on submit the target user's `must_change_password` flag is set so their next login is gated on picking their own password before they can do anything else (the existing forced-change flow in `Login.jsx` already handled this case for invited users — we just reuse it).
+- **Resetting another superadmin's password from the UI is intentionally blocked.** That would be a lateral-escalation primitive — one compromised superadmin could lock out every other superadmin in a single click. The UI button is hidden for superadmin rows and the `/api/admin/reset-password` endpoint returns 403 if the target's role is `superadmin`. The legitimate recovery case (a colleague forgot their superadmin password) is handled by the new host-side CLI below.
+- **`mdnest-server reset-password <email>`** — host-shell command for resetting *any* user's password, including superadmins. Prompts for the new password with hidden input (twice), pipes it via stdin to a one-shot backend container so the password never appears in argv or shell history. Validates `AUTH_MODE=multi` + `USER_PROVIDER=local` and refuses otherwise. Same `must_change_password=true` guarantee — the temp password is single-use.
+
+### Notes
+
+- No database changes. The `must_change_password` column has existed since the original multi-mode work, so this release is additive: any existing schema works unchanged.
+- Federated providers (`firebase`, `sso`) reject the new endpoint — identity is owned by the IdP. Reset there.
+
+---
+
 ## v3.5.4 — Fix renamed file vanishing from the sidebar when extension is dropped
 
 ### Bug fixes
