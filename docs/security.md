@@ -211,6 +211,23 @@ For local development and SSO testing, `INSECURE_DEV_LOGIN=true` enables `POST /
 
 The flag is off by default. Never set it on a non-localhost deployment — anyone who can reach the backend port can impersonate any user.
 
+### Password reset access boundary *(v3.6.0+)*
+
+Resetting another user's password is a privileged operation, and the system splits it into two paths with deliberately different access bars.
+
+| Reset target | Allowed actor | Path |
+|---|---|---|
+| Collaborator / namespace-admin | Any super-admin | Admin Panel → Users → **Reset password** (`POST /api/admin/reset-password`) |
+| Super-admin | Anyone with shell access on the host | `./mdnest-server reset-password <email>` |
+
+The web endpoint refuses to act on a super-admin target (`403`). That's deliberate: web sessions are easier to compromise than host-shell access, and "any super-admin can replace any other super-admin's password from the UI" is a one-click takeover primitive — one phished super-admin can lock out every other super-admin and then own the system. Forcing the cross-super-admin case through the host CLI raises the bar to whoever has SSH on the box, which is typically a much smaller and better-protected set of people.
+
+Both paths set `must_change_password=true` so the temp password is single-use — the target is forced to pick their own on next login before they can reach anything else in the app.
+
+The host CLI accepts the new password on stdin (not as an argv argument), so it never appears in `ps`, the shell history, or the audit log. Backend logs the actor + target user IDs and the email, but never the password itself.
+
+This whole feature only applies in `USER_PROVIDER=local`. In Firebase / SSO mode the IdP owns the password and both paths refuse.
+
 ### Secrets to rotate
 
 | Secret | Where | When to rotate |

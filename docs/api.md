@@ -383,6 +383,47 @@ curl -X DELETE "http://localhost:8286/api/admin/users?id=2" \
 
 ---
 
+### POST /api/admin/reset-password *(SuperAdmin only, v3.6.0+)*
+
+Reset another user's password. The new password is written immediately and `must_change_password` is set so the target is forced to pick their own on next login.
+
+**Resetting another superadmin's password is rejected** (403). That's a lateral-escalation primitive — one compromised superadmin could lock out the others. The legitimate recovery path is the host-side `mdnest-server reset-password` CLI, which requires shell access on the server.
+
+Available only when `USER_PROVIDER=local`. Federated providers reject the call (the IdP owns identity).
+
+**Request body:**
+
+```json
+{"user_id": 7, "new_password": "temp-Hk7p2Q9x"}
+```
+
+**Response** (200 OK):
+
+```json
+{"status": "ok"}
+```
+
+**Error responses:**
+
+| Status | Body | Cause |
+|--------|------|-------|
+| 400 | `{"error":"user_id and new_password are required"}` | Missing field |
+| 400 | `{"error":"password reset is not available — identity is owned by your IdP"}` | `USER_PROVIDER` is `firebase` or `sso` |
+| 403 | `{"error":"superadmin access required"}` | Caller is not a superadmin |
+| 403 | `{"error":"cannot reset another superadmin's password from the UI — use the mdnest-server reset-password CLI on the host"}` | Target's role is `superadmin` |
+| 404 | `{"error":"user not found"}` | `user_id` does not exist |
+
+**Example:**
+
+```bash
+curl -X POST "http://localhost:8286/api/admin/reset-password" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"user_id": 7, "new_password": "temp-Hk7p2Q9x"}'
+```
+
+---
+
 ### Namespace Admin assignments *(v3.5.0+)*
 
 The new `namespace_admins` table maps users to the namespaces they can administer. Three endpoints manage it.
