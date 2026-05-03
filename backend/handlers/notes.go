@@ -183,6 +183,20 @@ func (h *NoteHandler) updateNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Last-line-of-defense against destructive autosave: refuse to truncate
+	// a non-empty file to empty unless the caller explicitly opts in via
+	// ?allow-empty=1. Editor bugs (e.g. Milkdown undo overshoot, racing
+	// note-switch with a debounced autosave) can briefly hand us a
+	// zero-byte body for a file that currently has content; without this
+	// guard, that body would silently overwrite the file and the previous
+	// content would be gone from disk. The deliberate "clear this file"
+	// path in the UI sets the flag; autosave never does.
+	allowEmpty := r.URL.Query().Get("allow-empty") == "1"
+	if len(body) == 0 && len(currentClean) > 0 && !allowEmpty {
+		http.Error(w, `{"error":"refusing to overwrite a non-empty note with empty content; pass ?allow-empty=1 to confirm"}`, http.StatusConflict)
+		return
+	}
+
 	// Inject note ID into the content before writing to disk.
 	// If note already had one, preserve it. Otherwise generate a new one.
 	writeContent := string(body)

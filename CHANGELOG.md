@@ -4,6 +4,15 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v3.6.1 — Stop the Live editor's undo from erasing your notes
+
+### Bug fixes (critical — data-loss prevention)
+
+- **Pressing Cmd+Z 2-3 times in the Live editor could silently erase a non-empty note.** The data-loss path was a chain of four cooperating defects, and any single one of them would have prevented the loss. We've fixed all four. (1) The frontend's `content` state defaulted to `''` and was reset to `''` on namespace change / failed load / browser-nav transitions, so for a brief window the Milkdown editor was initialized with empty content even when a real (non-empty) note was about to load. That empty state ended up as a reachable entry in ProseMirror's undo stack — pressing Cmd+Z walked back through your typing and then into that empty load. (2) `<LiveEditor>` had no `key` prop, so the same Milkdown instance carried across note switches and Cmd+Z could walk into another note's history. (3) `handleContentChange`'s 800ms debounced autosave fired unconditionally — when the editor briefly held empty content, the autosave dutifully committed empty bytes to disk. (4) The backend's `PUT /api/note` had no guard against truncating a non-empty file to empty. Fixed in `App.jsx` (initial state is now `null` until a note is loaded; setting `null` during transitions instead of `''`; autosave skips when `newContent === ''` and the loaded content was non-empty; `key={ns/path}` on `<LiveEditor>` and `<Editor>` so each note gets a fresh instance with its own undo stack), `LiveEditor.jsx` (only mounts when content is a real string, so the empty-during-load transition no longer enters the undo stack), and `notes.go` (refuses to overwrite a non-empty file with an empty body unless the request explicitly passes `?allow-empty=1` — autosave never does, so the silent-truncation path is closed even if every layer above somehow fails).
+- **Recovery for already-lost content:** if your install runs the optional git-sync sidecar (default cadence 600s), every note has a complete commit history in the per-namespace git repo. Browse the repo on GitHub to find a `sync: <UTC-timestamp>` commit before the destructive undo, view the file at that commit, and copy the content back. We are surfacing this as an in-app "Version history" button in v3.7.0 so future recovery doesn't require the GitHub UI.
+
+---
+
 ## v3.6.0 — Admin password reset (UI + host CLI)
 
 ### New features
