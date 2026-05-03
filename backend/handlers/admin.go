@@ -414,6 +414,62 @@ func (h *AdminHandler) updateUserRole(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
+// HandleResetPassword handles POST /api/admin/reset-password.
+// Superadmin-only. Sets a new password on the target user and forces them
+// to pick their own on next login (must_change_password=true). Resetting
+// another superadmin's password is forbidden — that's a lateral-escalation
+// vector, and ops can use the host-side `mdnest-server reset-password` CLI
+// for the legitimate recovery case.
+func (h *AdminHandler) HandleResetPassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	if h.isFederated() {
+		http.Error(w, `{"error":"password reset is not available — identity is owned by your IdP"}`, http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		UserID      int    `json:"user_id"`
+		NewPassword string `json:"new_password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
+		return
+	}
+	if req.UserID == 0 || req.NewPassword == "" {
+		http.Error(w, `{"error":"user_id and new_password are required"}`, http.StatusBadRequest)
+		return
+	}
+
+	target, err := h.userStore.GetUserByID(req.UserID)
+	if err != nil || target == nil {
+		http.Error(w, `{"error":"user not found"}`, http.StatusNotFound)
+		return
+	}
+	if target.Role == "superadmin" {
+		http.Error(w, `{"error":"cannot reset another superadmin's password from the UI — use the mdnest-server reset-password CLI on the host"}`, http.StatusForbidden)
+		return
+	}
+
+	if err := h.userStore.AdminResetPassword(req.UserID, req.NewPassword); err != nil {
+		log.Printf("admin reset-password failed for user %d: %v", req.UserID, err)
+		http.Error(w, `{"error":"failed to reset password"}`, http.StatusInternalServerError)
+		return
+	}
+
+	uc := middleware.UserFromContext(r.Context())
+	actorID := 0
+	if uc != nil {
+		actorID = uc.ID
+	}
+	log.Printf("admin reset password: target=%d (%s) actor=%d", target.ID, target.Email, actorID)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
 // --- Grant management ---
 
 type createGrantRequest struct {

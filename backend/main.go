@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -44,6 +46,12 @@ func envInt(key string, fallback int) int {
 func main() {
 	// Support -migrate flag for running migrations only (then exit)
 	migrateOnly := len(os.Args) > 1 && os.Args[1] == "-migrate"
+	// Support -reset-password <email> for ops-side recovery (then exit).
+	// Reads the new password from stdin so it never lands in shell history.
+	resetPasswordEmail := ""
+	if len(os.Args) > 2 && os.Args[1] == "-reset-password" {
+		resetPasswordEmail = os.Args[2]
+	}
 
 	user := env("MDNEST_USER", "admin")
 	password := env("MDNEST_PASSWORD", "changeme")
@@ -84,9 +92,17 @@ func main() {
 			log.Println("migrations complete — exiting (migrate-only mode)")
 			return
 		}
+
+		if resetPasswordEmail != "" {
+			runResetPassword(db, resetPasswordEmail)
+			return
+		}
 	} else {
 		if migrateOnly {
 			log.Fatal("ERROR: -migrate flag requires AUTH_MODE=multi")
+		}
+		if resetPasswordEmail != "" {
+			log.Fatal("ERROR: -reset-password requires AUTH_MODE=multi")
 		}
 		log.Println("AUTH_MODE=single — file-based auth (no database)")
 	}
@@ -403,6 +419,11 @@ func main() {
 		if totpHandler != nil {
 			mux.Handle("/api/admin/reset-2fa", authMiddleware.Wrap(middleware.RequireSuperAdmin(http.HandlerFunc(totpHandler.HandleAdminResetTOTP))))
 		}
+
+		// Password reset: superadmin-only. The handler additionally rejects
+		// resetting other superadmins' passwords — that case must go through
+		// the host-side mdnest-server reset-password CLI.
+		mux.Handle("/api/admin/reset-password", authMiddleware.Wrap(middleware.RequireSuperAdmin(http.HandlerFunc(adminHandler.HandleResetPassword))))
 	}
 
 	// Git sync endpoints (admin-only in multi mode, always allowed in single)
@@ -456,6 +477,42 @@ func parseAdminEmails(s string) map[string]bool {
 		}
 	}
 	return out
+}
+
+// runResetPassword resets a user's password from the host shell. Reads the
+// new password from stdin (one line) so it never appears in argv / history,
+// then writes a bcrypt hash and forces must_change_password=true so the
+// user is prompted to pick their own on next login. Local-provider only —
+// Firebase / SSO accounts have no local password to reset.
+func runResetPassword(db *store.DB, email string) {
+	provider := env("USER_PROVIDER", "local")
+	if provider != "local" {
+		log.Fatalf("ERROR: -reset-password is only valid for USER_PROVIDER=local (this server uses %q)", provider)
+	}
+
+	userStore := store.NewPostgresUserStore(db)
+	user, err := userStore.GetUserByEmail(email)
+	if err != nil {
+		log.Fatalf("ERROR: failed to look up user: %v", err)
+	}
+	if user == nil {
+		log.Fatalf("ERROR: no user found with email %q", email)
+	}
+
+	reader := bufio.NewReader(os.Stdin)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		log.Fatalf("ERROR: failed to read password from stdin: %v", err)
+	}
+	newPassword := strings.TrimRight(line, "\r\n")
+	if newPassword == "" {
+		log.Fatal("ERROR: empty password")
+	}
+
+	if err := userStore.AdminResetPassword(user.ID, newPassword); err != nil {
+		log.Fatalf("ERROR: failed to reset password: %v", err)
+	}
+	fmt.Printf("Password reset for %s (id=%d). They will be required to choose a new one on next login.\n", user.Email, user.ID)
 }
 
 // readFirebaseWebConfig loads the Firebase web-config JSON file (the one

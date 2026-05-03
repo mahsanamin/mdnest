@@ -149,6 +149,61 @@ case "$CMD" in
     compose run --rm backend ./mdnest -migrate
     echo "Migrations complete."
     ;;
+  reset-password)
+    # Host-side password reset for any user (incl. superadmins). Prompts
+    # for a new password (hidden input, never written to argv or shell
+    # history), pipes it to the backend binary via stdin, and forces
+    # must_change_password=true so the user must pick their own on next
+    # login. Multi-mode + USER_PROVIDER=local only.
+    EMAIL="$1"
+    if [ -z "$EMAIL" ]; then
+      echo "Usage: mdnest-server reset-password <email>"
+      exit 1
+    fi
+    if [ ! -f ".env" ]; then
+      echo "Error: .env not found. Run './mdnest-server setup' first."
+      exit 1
+    fi
+    AUTH_MODE=$(grep '^AUTH_MODE=' .env 2>/dev/null | cut -d= -f2)
+    if [ "$AUTH_MODE" != "multi" ]; then
+      echo "Error: reset-password requires AUTH_MODE=multi (this server uses '$AUTH_MODE')."
+      exit 1
+    fi
+    USER_PROVIDER=$(grep '^USER_PROVIDER=' .env 2>/dev/null | cut -d= -f2)
+    USER_PROVIDER="${USER_PROVIDER:-local}"
+    if [ "$USER_PROVIDER" != "local" ]; then
+      echo "Error: reset-password is only valid for USER_PROVIDER=local (this server uses '$USER_PROVIDER')."
+      echo "Identity is owned by your IdP — reset the password there."
+      exit 1
+    fi
+
+    # Hidden password prompt (read -s suppresses echo). Repeat to confirm.
+    printf "New password for %s: " "$EMAIL"
+    stty -echo 2>/dev/null
+    read -r PW1
+    stty echo 2>/dev/null
+    echo
+    if [ -z "$PW1" ]; then
+      echo "Aborted: empty password."
+      exit 1
+    fi
+    printf "Confirm password: "
+    stty -echo 2>/dev/null
+    read -r PW2
+    stty echo 2>/dev/null
+    echo
+    if [ "$PW1" != "$PW2" ]; then
+      echo "Aborted: passwords do not match."
+      exit 1
+    fi
+
+    # Make sure postgres is up so the one-shot backend container can connect.
+    compose up -d postgres >/dev/null
+    # -T: no TTY, so we can pipe the password via stdin.
+    # The Go binary reads one line from stdin and treats it as the new
+    # password — so it never appears in argv (`ps`) or shell history.
+    printf '%s\n' "$PW1" | compose run --rm -T backend ./mdnest -reset-password "$EMAIL"
+    ;;
   dev-setup)
     echo "Setting up development environment..."
     git config core.hooksPath .githooks
@@ -677,6 +732,7 @@ Commands:
   status      Show running containers
   update      Pull latest code, rebuild, and start
   migrate     Run database migrations (multi-user mode only)
+  reset-password <email>   Reset a user's password (multi mode + local provider)
   install-cli Install the mdnest CLI system-wide (/usr/local/bin)
   dev-setup   Configure git hooks (pre-push: build, audit, version check)
 
@@ -698,6 +754,7 @@ Examples:
   mdnest-server dev-setup        # enable pre-push security hooks
   mdnest-server export-2fa user  # export TOTP secret for sharing
   mdnest-server import-2fa user SECRET  # import TOTP from another server
+  mdnest-server reset-password user@example.com  # reset a forgotten password
   mdnest-server logs             # all service logs
   mdnest-server logs backend     # backend only
   mdnest-server logs git-sync    # git sync only

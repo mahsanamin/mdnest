@@ -285,6 +285,19 @@ export async function adminDeleteUser(id) {
   return res.json();
 }
 
+export async function adminResetPassword(userId, newPassword) {
+  const res = await request('/admin/reset-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user_id: userId, new_password: newPassword }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to reset password');
+  }
+  return res.json();
+}
+
 export async function adminUpdateRole(id, role) {
   const res = await request(`/admin/users?id=${id}`, {
     method: 'PUT',
