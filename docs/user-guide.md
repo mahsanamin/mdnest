@@ -149,11 +149,56 @@ mdnest has two editing modes, switchable from the toolbar when in editor-only vi
 - Mermaid diagrams render in-place with Source/Preview/Fullscreen/Copy/Zoom buttons
 - Click any mermaid node label to edit it directly on the diagram
 - Paste from Google Docs or Confluence -- auto-converts to markdown
-- Full formatting toolbar: Bold, Italic, Strikethrough, Code, Headings, Lists, Blockquote, Link, Code block, Table with row/column controls
+- Full formatting toolbar: Undo, Redo, Bold, Italic, Strikethrough, Code, Headings, Lists, Blockquote, Link, Code block, Table with row/column controls
+- **Undo / Redo** *(v3.6.1+)*: the curved-arrow buttons at the start of the toolbar. Same as `Cmd+Z` / `Cmd+Shift+Z` (or `Ctrl+Z` / `Ctrl+Shift+Z`) on the keyboard. macOS uses `Cmd+Shift+Z` for redo, not `Cmd+Y`.
 
 Live Mode is only available in editor-only view (the pen icon). Split view always uses Basic Mode with a separate preview pane.
 
-Changes are saved automatically in both modes. There is no manual save button -- your edits are sent to the backend as you type.
+Changes are saved automatically in both modes. There is no manual save button -- your edits are sent to the backend as you type. As of v3.6.1, autosave will refuse to truncate a non-empty note to empty (a defensive guard against editor bugs that could otherwise wipe content); to deliberately empty a file, delete it via right-click → Delete.
+
+---
+
+## Recovering lost content
+
+If you lose content -- accidental delete, a stuck undo, fat-fingered overwrite -- there are two recovery paths depending on whether you've enabled the optional **git-sync** sidecar.
+
+### With git-sync (recommended, default for most installs)
+
+If `git-sync/keys/` has any SSH key, every namespace is being auto-committed to the corresponding git remote on a regular cadence (default 600s -- tunable via `GIT_SYNC_INTERVAL` in `mdnest.conf`). Every change you've made is in commit history. You haven't lost it.
+
+**Recover via the git remote (e.g. GitHub):**
+
+1. Open the namespace's git repo (e.g. `https://github.com/<you>/<namespace>/commits/main`).
+2. Find a `sync: <UTC-timestamp>` commit *before* the loss. Click into it.
+3. Browse to the file. Click **Raw** or use the file viewer to see the old content.
+4. Copy the content back into the mdnest editor and save -- it'll be picked up by the next sync cycle and re-committed alongside the original history.
+
+**Recover via shell (if you have access to the host):**
+
+```bash
+# List recent sync commits with timestamps
+docker exec mdnest-git-sync-1 sh -c 'cd /data/notes/<namespace> && git log --oneline -30'
+
+# View the file at a specific commit
+docker exec mdnest-git-sync-1 sh -c 'cd /data/notes/<namespace> && git show <commit-hash>:path/to/note.md'
+
+# Or restore the whole file in place (will be saved + re-synced)
+docker exec mdnest-git-sync-1 sh -c 'cd /data/notes/<namespace> && git checkout <commit-hash> -- path/to/note.md'
+```
+
+The recovery gap is at most one git-sync cycle (default 10 minutes; lower the cycle in `mdnest.conf` if recovery latency matters more to you than commit volume).
+
+### Without git-sync
+
+If `git-sync/keys/` is empty, no remote backup exists. Recovery options narrow:
+
+- macOS Time Machine, ZFS snapshots, or any host-level filesystem snapshotting.
+- An external mdnest CLI write history (if you used `mdnest write` -- the file at the time of write is in your shell history).
+- Otherwise, the content is gone from mdnest's data layer.
+
+**Strong recommendation:** if you keep anything important in mdnest, enable git-sync. It's the difference between "10 minutes of edits at risk" and "everything since the last good copy is gone."
+
+A future release (v3.7.0+) is planned to surface git-sync's history through a "View History" button in the editor's right-click menu, so recovery doesn't require leaving mdnest. Until then, the GitHub UI / shell paths above are how it's done.
 
 ---
 
