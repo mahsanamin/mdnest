@@ -5,7 +5,7 @@ import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react';
 import { commonmark, codeBlockSchema } from '@milkdown/preset-commonmark';
 import { gfm } from '@milkdown/preset-gfm';
 import { listener, listenerCtx } from '@milkdown/plugin-listener';
-import { history } from '@milkdown/plugin-history';
+import { history, undoCommand, redoCommand } from '@milkdown/plugin-history';
 import { clipboard } from '@milkdown/plugin-clipboard';
 import { replaceAll, callCommand, $view, insert, $prose } from '@milkdown/utils';
 import { Plugin, PluginKey, TextSelection } from '@milkdown/prose/state';
@@ -368,6 +368,15 @@ function LiveToolbar({ editor }) {
   };
   return (
     <div className="live-toolbar">
+      <div className="live-toolbar-group">
+        <button onMouseDown={(e) => { e.preventDefault(); cmd(undoCommand); }} title="Undo (Cmd/Ctrl+Z)" aria-label="Undo">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-15-6.7L3 13"/></svg>
+        </button>
+        <button onMouseDown={(e) => { e.preventDefault(); cmd(redoCommand); }} title="Redo (Cmd/Ctrl+Shift+Z)" aria-label="Redo">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 7v6h-6"/><path d="M3 17a9 9 0 0 1 15-6.7L21 13"/></svg>
+        </button>
+      </div>
+      <span className="live-toolbar-sep" />
       <div className="live-toolbar-group">
         <button onMouseDown={(e) => { e.preventDefault(); cmd(toggleStrongCommand); }} title="Bold"><b>B</b></button>
         <button onMouseDown={(e) => { e.preventDefault(); cmd(toggleEmphasisCommand); }} title="Italic"><i>I</i></button>
