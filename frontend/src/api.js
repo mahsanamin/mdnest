@@ -186,10 +186,12 @@ export async function getNote(ns, path) {
   return { text, etag, noteId };
 }
 
-export async function saveNote(ns, path, content, ifMatch) {
+export async function saveNote(ns, path, content, ifMatch, opts = {}) {
   const headers = {};
   if (ifMatch) headers['If-Match'] = ifMatch;
-  const res = await request(`/note?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}`, {
+  let url = `/note?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}`;
+  if (opts.allowEmpty) url += '&allow-empty=1';
+  const res = await request(url, {
     method: 'PUT',
     headers,
     body: content,
@@ -203,6 +205,13 @@ export async function saveNote(ns, path, content, ifMatch) {
   }
   if (!res.ok) throw new Error('Failed to save note');
   return res.json();
+}
+
+// Explicit "make this file empty" action. Bypasses the backend's refuse-to-
+// truncate-to-empty guard via ?allow-empty=1. Use this for deliberate clear
+// operations (e.g. a context-menu "Clear note" item); never for autosave.
+export async function clearNote(ns, path, ifMatch) {
+  return saveNote(ns, path, '', ifMatch, { allowEmpty: true });
 }
 
 export async function createNote(ns, path) {

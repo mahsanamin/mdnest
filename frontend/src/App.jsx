@@ -115,7 +115,13 @@ function App() {
   const [selectedNs, setSelectedNs] = useState(null);
   const [tree, setTree] = useState([]);
   const [currentPath, setCurrentPath] = useState(null);
-  const [content, setContent] = useState('');
+  // null = no note loaded yet (initial mount, after closing a note, or while
+  // a getNote() is in flight). The editor components key off this — they
+  // only mount when content is a real string, so the "empty during async
+  // load" state never enters Milkdown's undo stack as a reachable history
+  // entry. Pre-v3.6.1 this defaulted to '' and pressing Cmd+Z could walk
+  // the undo stack into that empty state, wiping real content.
+  const [content, setContent] = useState(null);
   const [sidebarWidth, setSidebarWidth] = useState(260);
   const [savedContent, setSavedContent] = useState('');
   const saveTimerRef = useRef(null);
@@ -429,7 +435,7 @@ function App() {
           etagRef.current = etag;
         }).catch(() => {
           setCurrentPath(null);
-          setContent('');
+          setContent(null);
           setSavedContent('');
           setHash(selectedNs, null);
         });
@@ -500,7 +506,7 @@ function App() {
           openNoteDirect(ns, path);
         } else {
           setCurrentPath(null);
-          setContent('');
+          setContent(null);
           setSavedContent('');
         }
       }
@@ -611,10 +617,11 @@ function App() {
   const handleSelectNs = useCallback((ns) => {
     setSelectedNs(ns);
     setCurrentPath(null);
-    setContent('');
+    setContent(null);
     setSavedContent('');
     setTree([]);
     setHash(ns, null);
+    if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
   }, []);
 
   const openNote = useCallback(async (path) => {
@@ -661,19 +668,29 @@ function App() {
 
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     const timer = setTimeout(async () => {
-      if (currentPath && selectedNs) {
-        try {
-          const result = await saveNote(selectedNs, currentPath, newContent, etagRef.current);
-          setSavedContent(newContent);
-          if (result.etag) etagRef.current = result.etag;
-        } catch (e) {
-          if (e.status === 409) {
-            setConflictBanner({ username: 'another user', etag: e.etag });
-          } else if (e.name === 'PermissionError') {
-            console.error('Save blocked: no write permission');
-          } else {
-            console.error('Auto-save failed:', e);
-          }
+      if (!currentPath || !selectedNs) return;
+      // Safety against destructive autosave: never write empty content
+      // when we know the file had content when we loaded it. This is the
+      // path that, pre-v3.6.1, allowed Milkdown's undo-to-empty to land
+      // on disk via the debounced auto-PUT and erase the user's work.
+      // The deliberate clear-this-file path uses clearNote() (allow-empty=1)
+      // and bypasses this guard. The backend has the same check as a
+      // last line of defense in case this ever fails to fire.
+      if (newContent === '' && (savedContentRef.current || '') !== '') {
+        console.warn('mdnest: autosave skipped — refusing to overwrite non-empty note with empty content. Use the explicit clear action to deliberately empty a file.');
+        return;
+      }
+      try {
+        const result = await saveNote(selectedNs, currentPath, newContent, etagRef.current);
+        setSavedContent(newContent);
+        if (result.etag) etagRef.current = result.etag;
+      } catch (e) {
+        if (e.status === 409) {
+          setConflictBanner({ username: 'another user', etag: e.etag });
+        } else if (e.name === 'PermissionError') {
+          console.error('Save blocked: no write permission');
+        } else {
+          console.error('Auto-save failed:', e);
         }
       }
     }, 800);
@@ -690,6 +707,7 @@ function App() {
   }, []);
 
   const handleCheckboxToggle = useCallback(async (lineIndex) => {
+    if (content === null) return;
     const lines = content.split('\n');
     const line = lines[lineIndex];
     if (!line) return;
@@ -772,7 +790,7 @@ function App() {
         if (!confirm(`Delete "${target.name || target.path}"?`)) return;
         try {
           await deleteNote(selectedNs, target.path);
-          if (currentPath === target.path) { setCurrentPath(null); setContent(''); setSavedContent(''); }
+          if (currentPath === target.path) { setCurrentPath(null); setContent(null); setSavedContent(''); }
           await refreshTree();
         } catch (e) { alert('Failed to delete: ' + e.message); }
         break;
@@ -782,7 +800,7 @@ function App() {
         if (!confirm(`Delete folder "${target.name || target.path}" and all its contents?`)) return;
         try {
           await deleteNote(selectedNs, target.path);
-          if (currentPath && currentPath.startsWith(target.path)) { setCurrentPath(null); setContent(''); setSavedContent(''); }
+          if (currentPath && currentPath.startsWith(target.path)) { setCurrentPath(null); setContent(null); setSavedContent(''); }
           await refreshTree();
         } catch (e) { alert('Failed to delete folder: ' + e.message); }
         break;
@@ -1107,9 +1125,16 @@ function App() {
                   className={`editor-wrapper${mobileView === 'editor' ? ' mobile-active' : ''}`}
                   style={!isMobile && viewMode === 'split' ? { flex: `0 0 ${splitRatio}%` } : undefined}
                 >
-                  {editorMode === 'live' ? (
+                  {content === null ? (
+                    <div className="editor-loading">Loading note…</div>
+                  ) : editorMode === 'live' ? (
                     <Suspense fallback={<div className="editor-loading">Loading live editor...</div>}>
+                      {/* key forces a fresh Milkdown instance per note, so the
+                          undo stack is per-note (no cross-note Cmd+Z) and never
+                          contains the moment-the-prop-was-empty (because we only
+                          mount once content is a real string). */}
                       <LiveEditor
+                        key={`${selectedNs}/${currentPath}`}
                         content={content}
                         onChange={canWriteCurrent ? handleContentChange : null}
                         currentPath={currentPath}
@@ -1133,6 +1158,7 @@ function App() {
                     </Suspense>
                   ) : (
                     <Editor
+                      key={`${selectedNs}/${currentPath}`}
                       content={content}
                       onChange={canWriteCurrent ? handleContentChange : null}
                       currentPath={currentPath}
@@ -1175,7 +1201,7 @@ function App() {
                   className={`preview-wrapper${mobileView === 'preview' ? ' mobile-active' : ''}`}
                   style={!isMobile && viewMode === 'split' ? { flex: `0 0 ${100 - splitRatio}%` } : undefined}
                 >
-                  <Preview content={content} currentPath={currentPath} ns={selectedNs} onCheckboxToggle={canWriteCurrent ? handleCheckboxToggle : null} />
+                  <Preview content={content || ''} currentPath={currentPath} ns={selectedNs} onCheckboxToggle={canWriteCurrent ? handleCheckboxToggle : null} />
                 </div>
               )}
             </>
