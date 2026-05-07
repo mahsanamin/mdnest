@@ -38,6 +38,12 @@ function TreeNode({ node, onSelect, currentPath, depth, onContextMenu, onDrop, e
   }, [node, onContextMenu]);
 
   const handleTouchStart = useCallback((e) => {
+    // Stop the bubble so the parent .sidebar-tree's empty-area long-press
+    // timer doesn't ALSO schedule and fire ~the same 500ms later with
+    // target=null, overwriting our file/folder menu with the empty-area
+    // ("New Note / New Folder" only) one. Mirrors what handleRightClick
+    // does for desktop.
+    e.stopPropagation();
     touchMoved.current = false;
     longPressFired.current = false;
     longPressTimer.current = setTimeout(() => {
@@ -106,7 +112,10 @@ function TreeNode({ node, onSelect, currentPath, depth, onContextMenu, onDrop, e
     <div className="tree-node">
       <div
         className={`tree-row${isActive ? ' active' : ''}${dragOver ? ' drag-over' : ''}`}
-        style={{ paddingLeft: `${depth * 0.75 + 0.5}rem` }}
+        // CSS variable so .tree-row can compute its padding differently
+        // per breakpoint (desktop: 0.75rem/level, mobile: 0.4rem/level).
+        // See .tree-row in App.css.
+        style={{ '--tree-depth': depth }}
         onClick={handleClick}
         onContextMenu={handleRightClick}
         onTouchStart={handleTouchStart}

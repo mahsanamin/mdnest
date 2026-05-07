@@ -537,12 +537,26 @@
   display: flex;
   align-items: center;
   gap: 0.3rem;
-  padding: 0.3rem 0.5rem;
+  /* padding-left is computed per depth via --tree-depth (set inline in
+     TreeNode.jsx). Keeping the right + vertical padding fixed here. */
+  padding: 0.3rem 0.5rem 0.3rem calc(var(--tree-depth, 0) * 0.75rem + 0.5rem);
   cursor: pointer;
   font-size: 0.85rem;
   color: #bac2de;
   border-radius: 4px;
   margin: 0 0.25rem;
+  min-width: 0;
+}
+
+/* Truncate long file/folder names instead of wrapping or pushing the
+   chevron off-screen. The native title="" tooltip still shows the
+   full name on hover. */
+.tree-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
 }
 
 .tree-row:hover {
@@ -2204,17 +2218,35 @@ pre:hover .code-copy-btn {
     display: block;
   }
 
-  /* Sidebar becomes slide-over overlay */
+  /* Sidebar becomes slide-over overlay. Width grows with the device —
+     was a flat 280px which truncated deeply-nested folder names on
+     anything wider. min(...) caps it for tablets in landscape. */
   .sidebar {
     position: fixed;
     top: 0;
     left: 0;
     bottom: 0;
-    width: 280px;
-    min-width: 280px;
+    width: min(88vw, 360px);
+    min-width: min(88vw, 360px);
     z-index: 8000;
     transform: translateX(-100%);
     transition: transform 0.25s ease;
+  }
+
+  /* Tighter per-level indent on phones — desktop is 0.75rem/level which
+     at depth 7 eats ~92px of left padding. 0.4rem/level halves that
+     while still showing hierarchy. */
+  .tree-row {
+    padding-left: calc(var(--tree-depth, 0) * 0.4rem + 0.5rem);
+    /* Touch-target minimum (Apple HIG / Material Design). Without this
+       rows are ~26px and siblings get fat-fingered. */
+    min-height: 40px;
+  }
+
+  /* Slightly larger label on phones — small headings are hard to scan
+     at arm's length, and we now have horizontal room for it. */
+  .tree-row {
+    font-size: 0.92rem;
   }
 
   .sidebar.sidebar-open {
