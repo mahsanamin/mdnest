@@ -94,6 +94,23 @@ function Sidebar({
   const [searching, setSearching] = useState(false);
   const searchTimer = useRef(null);
 
+  // "Show full names" toggle. When on, .sidebar-tree gets the
+  // .full-names class which lets labels wrap instead of ellipsizing —
+  // useful on mobile when you want to scan long names without
+  // committing to a tap. Persisted in localStorage so the choice
+  // sticks across visits. Default off — clean uniform rhythm.
+  const [fullNames, setFullNames] = useState(() => {
+    try { return localStorage.getItem('mdnest_tree_full_names') === '1'; }
+    catch { return false; }
+  });
+  const toggleFullNames = useCallback(() => {
+    setFullNames((prev) => {
+      const next = !prev;
+      try { localStorage.setItem('mdnest_tree_full_names', next ? '1' : '0'); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
+
   const handleExpandAll = () => setExpandAll(true);
   const handleCollapseAll = () => setExpandAll(false);
   const resetExpandAll = () => setTimeout(() => setExpandAll(null), 50);
@@ -205,6 +222,16 @@ function Sidebar({
               onClick={() => { handleCollapseAll(); resetExpandAll(); }}
               title="Collapse all folders"
             ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 15 12 9 18 15"/><line x1="6" y1="20" x2="18" y2="20"/></svg></button>
+            {/* Toggle to wrap long folder/file names in the tree
+                (default off → ellipsize; on → wrap to as many lines as
+                needed). Active state shows the icon outlined to make
+                the current mode obvious at a glance. */}
+            <button
+              className={`tree-control-btn${fullNames ? ' active' : ''}`}
+              onClick={toggleFullNames}
+              title={fullNames ? 'Compact: ellipsize long names' : 'Show full names (wrap long names)'}
+              aria-pressed={fullNames}
+            ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="15" y2="12"/><line x1="3" y1="18" x2="18" y2="18"/></svg></button>
           </div>
         </div>
         {syncInfo && (
@@ -264,7 +291,7 @@ function Sidebar({
         {searching && <div className="search-status">Searching...</div>}
 
         <div
-          className="sidebar-tree"
+          className={`sidebar-tree${fullNames ? ' full-names' : ''}`}
           ref={treeAreaRef}
           onContextMenu={handleEmptyContextMenu}
           onTouchStart={handleEmptyTouchStart}

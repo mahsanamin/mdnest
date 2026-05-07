@@ -250,11 +250,28 @@
 
 .toolbar-path {
   flex: 1;
+  display: flex;
+  align-items: center;
+  min-width: 0;
   color: #6c7086;
   font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+/* Path is split into dir + base spans (Toolbar.jsx) so the filename
+   never gets cut off on a narrow screen. The dir half shrinks and
+   ellipsizes; the base half stays visible. */
+.toolbar-path-dir {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
+  flex-shrink: 1;
+}
+.toolbar-path-base {
+  flex-shrink: 0;
+  color: #cdd6f4;
+  font-weight: 500;
 }
 
 .toolbar button {
@@ -394,6 +411,41 @@
   background: #313244;
   color: #cdd6f4;
   border-color: #45475a;
+}
+
+/* Active/pressed state for toggle-style tree-control buttons (e.g. the
+   "show full names" toggle). Catppuccin blue accent so the on-state is
+   readable at a glance. */
+.tree-control-btn.active {
+  background: #313244;
+  color: #89b4fa;
+  border-color: #89b4fa55;
+}
+.tree-control-btn.active:hover {
+  color: #74c7ec;
+  border-color: #89b4fa;
+}
+
+/* Full-names mode: labels wrap to as many lines as the name needs.
+   Adjust row alignment so chevron + icon stay near the top of a tall
+   wrapped row instead of vertically centering against a 3-line label
+   (which would feel disconnected from the first line of text). */
+.sidebar-tree.full-names .tree-label {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  overflow: visible;
+  text-overflow: clip;
+  line-height: 1.3;
+}
+.sidebar-tree.full-names .tree-row {
+  align-items: flex-start;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+.sidebar-tree.full-names .tree-arrow,
+.sidebar-tree.full-names .tree-arrow-spacer,
+.sidebar-tree.full-names .tree-icon-svg {
+  margin-top: 2px;
 }
 
 .ns-label {
@@ -2218,16 +2270,18 @@ pre:hover .code-copy-btn {
     display: block;
   }
 
-  /* Sidebar becomes slide-over overlay. Width grows with the device —
-     was a flat 280px which truncated deeply-nested folder names on
-     anything wider. min(...) caps it for tablets in landscape. */
+  /* Sidebar becomes slide-over overlay. Width covers most of the phone
+     screen (94vw) up to a 420px cap on tablets — a slide-over hides the
+     editor anyway, so reserving more room for the tree gives long
+     folder/file names actual room to breathe. Was min(88vw, 360px),
+     before that was a flat 280px. */
   .sidebar {
     position: fixed;
     top: 0;
     left: 0;
     bottom: 0;
-    width: min(88vw, 360px);
-    min-width: min(88vw, 360px);
+    width: min(94vw, 420px);
+    min-width: min(94vw, 420px);
     z-index: 8000;
     transform: translateX(-100%);
     transition: transform 0.25s ease;
@@ -2340,6 +2394,15 @@ pre:hover .code-copy-btn {
   /* Compact toolbar file actions on mobile */
   .toolbar-file-actions {
     margin-right: 4px;
+  }
+
+  /* Hide inline Rename/Delete buttons that live inside .toolbar-path on
+     phones — they were getting clipped off the right edge anyway, since
+     the path's basename is flex-shrink: 0 and refused to give up room.
+     Both actions are already in the file's long-press context menu in
+     the tree, so nothing's lost — toolbar just decluttered. */
+  .toolbar-path-actions {
+    display: none;
   }
 
   .toolbar-action {
