@@ -391,10 +391,21 @@ CADDYEOF
   CADDY_VOLUMES="  caddy-data:
   caddy-config:"
 else
-  BACKEND_PORT_LINE="    ports:
-      - \"${BIND_ADDRESS}:${BACKEND_PORT}:8080\""
-  FRONTEND_PORT_LINE="    ports:
-      - \"${BIND_ADDRESS}:${FRONTEND_PORT}:80\""
+  # BIND_ADDRESS may be a single IP or a comma-separated list (e.g.
+  # "127.0.0.1,100.73.118.115" to bind localhost + a Tailscale address).
+  # Docker rejects a multi-IP value inside one port mapping, so emit one
+  # mapping line per IP.
+  BACKEND_PORT_LINE="    ports:"
+  FRONTEND_PORT_LINE="    ports:"
+  IFS=',' read -ra BIND_IPS <<< "$BIND_ADDRESS"
+  for ip in "${BIND_IPS[@]}"; do
+    ip="${ip// /}"
+    [ -z "$ip" ] && continue
+    BACKEND_PORT_LINE="${BACKEND_PORT_LINE}
+      - \"${ip}:${BACKEND_PORT}:8080\""
+    FRONTEND_PORT_LINE="${FRONTEND_PORT_LINE}
+      - \"${ip}:${FRONTEND_PORT}:80\""
+  done
 fi
 
 # Generate docker-compose.yml

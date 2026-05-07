@@ -22,6 +22,10 @@ BACKEND_PORT=8286
 FRONTEND_PORT=3236
 # Bind address: 127.0.0.1 = localhost only (default)
 # Only set to 0.0.0.0 if you understand the security implications.
+# Comma-separated values bind multiple host IPs — useful when you want
+# localhost AND a private overlay address (Tailscale, ZeroTier, VPN) but
+# NOT 0.0.0.0. Each IP must be valid for an interface on this host.
+# Example: BIND_ADDRESS=127.0.0.1,100.73.118.115
 # BIND_ADDRESS=127.0.0.1
 
 # Git sync (optional — auto-enabled when keys are in git-sync/keys/)
