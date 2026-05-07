@@ -16,6 +16,7 @@ import PresenceBar from './components/PresenceBar.jsx';
 import CommentSidebar from './components/CommentSidebar.jsx';
 import ShareDialog from './components/ShareDialog.jsx';
 import HistoryModal from './components/HistoryModal.jsx';
+import ReleaseNotesModal from './components/ReleaseNotesModal.jsx';
 import CollabClient from './collab.js';
 import {
   getToken,
@@ -218,6 +219,12 @@ function App() {
   // historyModal is { ns, path } when the History modal is open, null otherwise.
   const [historyModal, setHistoryModal] = useState(null);
   const [updateAvailable, setUpdateAvailable] = useState(null); // {current, latest}
+  // Server-side update notice — surfaces a newer mdnest GitHub release.
+  // Distinct from `updateAvailable` (that one means "your browser bundle is
+  // older than the running server, refresh the tab"). dismissedReleaseVer
+  // hides the badge after the user has acknowledged a specific version.
+  const [showReleaseNotes, setShowReleaseNotes] = useState(false);
+  const [dismissedReleaseVer, setDismissedReleaseVer] = useState(() => localStorage.getItem('mdnest_dismissed_release_version') || '');
   const [wsStatus, setWsStatus] = useState('disconnected'); // 'connected' | 'connecting' | 'disconnected'
   const etagRef = useRef(null);
   const collabRef = useRef(null);
@@ -1072,6 +1079,14 @@ function App() {
         onRefreshTree={handleRefresh}
         isAdmin={isAdmin}
         serverVersion={appConfig?.version}
+        updateAvailableVersion={
+          appConfig?.latestRelease &&
+          isVersionNewer(appConfig.latestRelease.version, appConfig.version) &&
+          appConfig.latestRelease.version !== dismissedReleaseVer
+            ? appConfig.latestRelease.version
+            : null
+        }
+        onShowReleaseNotes={() => setShowReleaseNotes(true)}
         width={sidebarWidth}
         onResize={setSidebarWidth}
       />
@@ -1295,6 +1310,19 @@ function App() {
         isAdmin={isAdmin && isMulti}
         selectedNs={selectedNs}
       />
+      {showReleaseNotes && appConfig?.latestRelease && (
+        <ReleaseNotesModal
+          release={appConfig.latestRelease}
+          runningVersion={appConfig.version}
+          onClose={() => setShowReleaseNotes(false)}
+          onDismiss={() => {
+            const v = appConfig.latestRelease.version;
+            localStorage.setItem('mdnest_dismissed_release_version', v);
+            setDismissedReleaseVer(v);
+            setShowReleaseNotes(false);
+          }}
+        />
+      )}
       {commentsEnabled && showComments && currentPath && (
         <CommentSidebar
           comments={comments}
@@ -1312,6 +1340,30 @@ function App() {
       )}
     </div>
   );
+}
+
+// isVersionNewer returns true when `a` is a strictly higher semver than `b`.
+// Both are bare versions like "3.8.1" (no leading "v"). Missing components
+// default to 0, so "3.8" is treated as "3.8.0". Non-numeric components fall
+// back to a string compare on the suffix, which is good enough for the tag
+// formats mdnest actually publishes (semver, occasionally with a "-rc.N"
+// pre-release suffix that should sort before the final release).
+function isVersionNewer(a, b) {
+  if (!a || !b) return false;
+  const parse = (v) => String(v).split(/[.-]/).map((part) => {
+    const n = Number(part);
+    return Number.isFinite(n) ? n : part;
+  });
+  const pa = parse(a);
+  const pb = parse(b);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] === undefined ? 0 : pa[i];
+    const y = pb[i] === undefined ? 0 : pb[i];
+    if (x === y) continue;
+    if (typeof x === 'number' && typeof y === 'number') return x > y;
+    return String(x) > String(y);
+  }
+  return false;
 }
 
 export default App;

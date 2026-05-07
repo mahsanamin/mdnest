@@ -3445,6 +3445,95 @@ pre:hover .code-copy-btn {
   opacity: 0.9;
 }
 
+/* ===== Sidebar update-available badge =====
+   Shown next to the version in the sidebar footer when /api/config reports
+   a newer mdnest release on GitHub. Click → opens ReleaseNotesModal. */
+.sidebar-update-badge {
+  background: #f9e2af;
+  color: #1e1e2e;
+  border: none;
+  border-radius: 999px;
+  padding: 1px 8px;
+  margin-left: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+  line-height: 1.5;
+}
+.sidebar-update-badge:hover {
+  background: #fab387;
+}
+
+/* ===== Release notes modal ===== */
+.release-notes-modal {
+  max-width: 720px;
+  width: 90vw;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+.release-notes-meta {
+  font-size: 0.85rem;
+  color: #a6adc8;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.release-notes-meta strong { color: #cdd6f4; }
+.release-notes-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  background: #181825;
+  border: 1px solid #313244;
+  border-radius: 6px;
+  padding: 14px 18px;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+.release-notes-body h1,
+.release-notes-body h2,
+.release-notes-body h3 {
+  margin-top: 1em;
+  margin-bottom: 0.4em;
+  color: #cdd6f4;
+}
+.release-notes-body h1 { font-size: 1.15rem; }
+.release-notes-body h2 { font-size: 1.05rem; }
+.release-notes-body h3 { font-size: 0.95rem; }
+.release-notes-body code {
+  background: #313244;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 0.85em;
+}
+.release-notes-body pre {
+  background: #11111b;
+  padding: 10px 12px;
+  border-radius: 4px;
+  overflow-x: auto;
+}
+.release-notes-body ul,
+.release-notes-body ol {
+  padding-left: 1.4em;
+}
+.release-notes-body a {
+  color: #89b4fa;
+  text-decoration: none;
+}
+.release-notes-body a:hover { text-decoration: underline; }
+.release-notes-link {
+  display: inline-block;
+  background: #89b4fa;
+  color: #1e1e2e;
+  text-decoration: none;
+  padding: 6px 14px;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.release-notes-link:hover { opacity: 0.9; }
+
 /* ===== Conflict banner ===== */
 .conflict-banner {
   display: flex;

@@ -57,6 +57,8 @@ function Sidebar({
   width,
   onResize,
   serverVersion,
+  updateAvailableVersion,
+  onShowReleaseNotes,
 }) {
   const [syncing, setSyncing] = useState(false);
   const [syncInfo, setSyncInfo] = useState(null); // {isGitRepo, hasRemote, lastCommit, ...}
@@ -301,6 +303,16 @@ function Sidebar({
         <div className="sidebar-server-info">
           <span>{window.location.host}</span>
           {serverVersion && <span>v{serverVersion}</span>}
+          {updateAvailableVersion && onShowReleaseNotes && (
+            <button
+              type="button"
+              className="sidebar-update-badge"
+              onClick={onShowReleaseNotes}
+              title={`mdnest v${updateAvailableVersion} is available — click to see what's new`}
+            >
+              ↑ v{updateAvailableVersion}
+            </button>
+          )}
         </div>
         {onResize && (
           <div

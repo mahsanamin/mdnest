@@ -106,11 +106,21 @@ func (h *ConfigHandler) HandleConfig(w http.ResponseWriter, r *http.Request) {
 		// Skip the field entirely until the first poll succeeds — the
 		// frontend treats absence as "unknown, no banner."
 		if s.LatestVersion != "" {
-			resp["latestRelease"] = map[string]interface{}{
+			rel := map[string]interface{}{
 				"version":   s.LatestVersion,
 				"url":       s.ReleaseURL,
 				"checkedAt": s.CheckedAt.Format("2006-01-02T15:04:05Z"),
 			}
+			if s.Name != "" {
+				rel["name"] = s.Name
+			}
+			if s.Notes != "" {
+				rel["notes"] = s.Notes
+			}
+			if !s.PublishedAt.IsZero() {
+				rel["publishedAt"] = s.PublishedAt.Format("2006-01-02T15:04:05Z")
+			}
+			resp["latestRelease"] = rel
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")

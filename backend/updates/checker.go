@@ -23,14 +23,27 @@ const (
 	// Wait this long before the first check so a transient network blip at
 	// boot doesn't show up in the logs as the first thing the operator sees.
 	firstCheckDelay = 30 * time.Second
+	// Cap how much of the release body we ship to the frontend. The full
+	// changelog is one click away on GitHub — this keeps /api/config tiny
+	// even if a future release ends up with a giant body.
+	notesMaxBytes = 8 * 1024
 )
 
 // Status is the snapshot the config endpoint exposes. CheckedAt is zero if a
 // check has never succeeded — the frontend should treat that as "unknown,
 // don't render a banner."
+//
+// Name and Notes carry GitHub's "release name" and "release body" (the
+// markdown changelog the release was published with) so the frontend can
+// show *what changed* rather than just a version number. Notes is capped
+// (see notesMaxBytes) to keep the config payload small — anyone who wants
+// the full text follows ReleaseURL.
 type Status struct {
 	LatestVersion string    `json:"latestVersion,omitempty"`
 	ReleaseURL    string    `json:"releaseUrl,omitempty"`
+	Name          string    `json:"name,omitempty"`
+	Notes         string    `json:"notes,omitempty"`
+	PublishedAt   time.Time `json:"publishedAt,omitempty"`
 	CheckedAt     time.Time `json:"checkedAt,omitempty"`
 }
 
@@ -112,9 +125,12 @@ func (c *Checker) checkOnce(ctx context.Context) error {
 	}
 
 	var release struct {
-		TagName string `json:"tag_name"`
-		HTMLURL string `json:"html_url"`
-		Draft   bool   `json:"draft"`
+		TagName     string    `json:"tag_name"`
+		Name        string    `json:"name"`
+		HTMLURL     string    `json:"html_url"`
+		Body        string    `json:"body"`
+		Draft       bool      `json:"draft"`
+		PublishedAt time.Time `json:"published_at"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
 		return err
@@ -127,10 +143,18 @@ func (c *Checker) checkOnce(ctx context.Context) error {
 		return errors.New("release has no tag_name")
 	}
 
+	notes := strings.TrimSpace(release.Body)
+	if len(notes) > notesMaxBytes {
+		notes = notes[:notesMaxBytes] + "\n\n…\n*(truncated — see full release notes on GitHub)*"
+	}
+
 	c.mu.Lock()
 	c.status = Status{
 		LatestVersion: version,
 		ReleaseURL:    release.HTMLURL,
+		Name:          strings.TrimSpace(release.Name),
+		Notes:         notes,
+		PublishedAt:   release.PublishedAt,
 		CheckedAt:     time.Now().UTC(),
 	}
 	c.mu.Unlock()
