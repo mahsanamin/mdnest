@@ -16,6 +16,7 @@ import PresenceBar from './components/PresenceBar.jsx';
 import CommentSidebar from './components/CommentSidebar.jsx';
 import ShareDialog from './components/ShareDialog.jsx';
 import HistoryModal from './components/HistoryModal.jsx';
+import MoveToModal from './components/MoveToModal.jsx';
 import ReleaseNotesModal from './components/ReleaseNotesModal.jsx';
 import CollabClient from './collab.js';
 import {
@@ -131,6 +132,11 @@ function App() {
   const [namespaces, setNamespaces] = useState([]);
   const [selectedNs, setSelectedNs] = useState(null);
   const [tree, setTree] = useState([]);
+  // True while a getTree() request is in flight. Surfaced in the sidebar
+  // so slow connections show a "Loading…" hint instead of the
+  // "No files yet" empty-state copy (which made it look like the
+  // namespace itself was empty mid-fetch).
+  const [treeLoading, setTreeLoading] = useState(false);
   const [currentPath, setCurrentPath] = useState(null);
   // null = no note loaded yet (initial mount, after closing a note, or while
   // a getNote() is in flight). The editor components key off this — they
@@ -233,6 +239,11 @@ function App() {
   const [restoreBanner, setRestoreBanner] = useState(null); // {username, ref, etag}
   // historyModal is { ns, path } when the History modal is open, null otherwise.
   const [historyModal, setHistoryModal] = useState(null);
+  // moveModal is { ns, target } when the Move-to picker is open. The
+  // picker replaces drag-and-drop on touch devices (where draggable is
+  // false on tree rows) and is also available from the context menu on
+  // desktop as a more accessible alternative to dragging.
+  const [moveModal, setMoveModal] = useState(null);
   const [updateAvailable, setUpdateAvailable] = useState(null); // {current, latest}
   // Server-side update notice — surfaces a newer mdnest GitHub release.
   // Distinct from `updateAvailable` (that one means "your browser bundle is
@@ -425,11 +436,14 @@ function App() {
   const refreshTree = useCallback(async (ns) => {
     const target = ns || selectedNs;
     if (!target) return;
+    setTreeLoading(true);
     try {
       const data = await getTree(target);
       setTree(data.children || []);
     } catch (e) {
       console.error('Failed to load file tree:', e);
+    } finally {
+      setTreeLoading(false);
     }
   }, [selectedNs]);
 
@@ -861,6 +875,14 @@ function App() {
         setHistoryModal({ ns: selectedNs, path: target.path });
         break;
       }
+      case 'move': {
+        if (!target || !selectedNs) return;
+        // The MoveToModal handles the destination picking, the API
+        // call, and the validity filtering itself. We just open it
+        // with the target and hand back a refresh on success.
+        setMoveModal({ ns: selectedNs, target });
+        break;
+      }
       case 'delete-folder': {
         if (!target || !selectedNs) return;
         if (!confirm(`Delete folder "${target.name || target.path}" and all its contents?`)) return;
@@ -1089,6 +1111,7 @@ function App() {
       )}
       <Sidebar
         tree={tree}
+        treeLoading={treeLoading}
         onSelect={openNote}
         currentPath={currentPath}
         namespaces={namespaces}
@@ -1323,6 +1346,23 @@ function App() {
             setContent(text);
             setSavedContent(text);
             setHistoryModal(null);
+          }}
+        />
+      )}
+      {moveModal && (
+        <MoveToModal
+          namespace={moveModal.ns}
+          source={moveModal.target}
+          onClose={() => setMoveModal(null)}
+          onMoved={async (newPath) => {
+            setMoveModal(null);
+            await refreshTree();
+            // If the user moved the file that's currently open, follow
+            // it to its new path so the editor stays in sync.
+            if (moveModal.target.path === currentPath) {
+              setCurrentPath(newPath);
+              setHash(selectedNs, newPath);
+            }
           }}
         />
       )}

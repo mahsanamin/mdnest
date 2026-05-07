@@ -38,6 +38,7 @@ function formatSyncTime(dateStr) {
 
 function Sidebar({
   tree,
+  treeLoading,
   onSelect,
   currentPath,
   namespaces,
@@ -293,8 +294,26 @@ function Sidebar({
           {searchQuery.trim() && filteredTree.length === 0 && !showContentResults && !searching && (
             <div className="sidebar-empty">No matches</div>
           )}
-          {!searchQuery.trim() && (!tree || tree.length === 0) && (
+          {/* Distinguish "still loading" from "genuinely empty" — on a slow
+              connection the tree may take seconds to arrive, and the
+              previous "No files yet" copy made it look like the namespace
+              had no content. Show a spinner while in flight; only fall
+              back to "No files yet" once the load has actually completed. */}
+          {!searchQuery.trim() && (!tree || tree.length === 0) && treeLoading && (
+            <div className="sidebar-tree-loading">
+              <span className="sidebar-spinner" aria-hidden="true" />
+              <span>Loading…</span>
+            </div>
+          )}
+          {!searchQuery.trim() && (!tree || tree.length === 0) && !treeLoading && (
             <div className="sidebar-empty">No files yet</div>
+          )}
+          {/* When the tree IS already populated and a refresh is in
+              flight (e.g. after rename/move/sync), show a thin
+              indicator at the top instead of clearing the tree.
+              Subtle so it doesn't distract during normal use. */}
+          {tree && tree.length > 0 && treeLoading && (
+            <div className="sidebar-tree-refreshing" aria-hidden="true" />
           )}
         </div>
         {(userInfo || onLogout) && (

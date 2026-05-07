@@ -73,10 +73,14 @@ function ContextMenu({ visible, x, y, target, onAction, onClose, canWrite, isAdm
 
   if (isFolder && hasWrite) {
     items.push({ label: 'Rename', action: 'rename' });
+    items.push({ label: 'Move to…', action: 'move' });
     items.push({ label: 'Delete Folder', action: 'delete-folder', danger: true });
   }
 
   if (isFile && hasWrite) {
+    // Move appears between Rename and Delete to mirror the folder block
+    // and to put the destructive action last.
+    items.push({ label: 'Move to…', action: 'move' });
     items.push({ label: 'Delete', action: 'delete-file', danger: true });
   }
 
