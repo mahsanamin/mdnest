@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -224,16 +225,30 @@ func (h *NoteHandler) updateNote(w http.ResponseWriter, r *http.Request) {
 	// ExtractNoteID's trailing-\n normalization).
 	newETag := contentETag([]byte(canonicalForETag(string(body))))
 
-	// Broadcast file-changed to other users on this note
+	uc := middleware.UserFromContext(r.Context())
+	username := "unknown"
+	userID := 0
+	if uc != nil {
+		username = uc.Username
+		userID = uc.ID
+	}
+
+	// Detect restore intent. Logged unconditionally for ops visibility
+	// (single mode has no hub, but operators still want a paper trail).
+	reason := ""
+	restoreFromRef := ""
+	if rf := r.URL.Query().Get("restore-from"); rf != "" && shaRe.MatchString(rf) {
+		reason = "restored"
+		restoreFromRef = rf
+		log.Printf("restore: ns=%s path=%s from=%s by=%s", ns, reqPath, rf, username)
+	}
+
+	// Broadcast file-changed to other users on this note (multi-mode +
+	// live-collab only — h.hub is nil otherwise). When reason="restored"
+	// the frontend renders an info banner instead of the conflict
+	// banner; restores are deliberate actions, not conflicts.
 	if h.hub != nil {
-		uc := middleware.UserFromContext(r.Context())
-		username := "unknown"
-		userID := 0
-		if uc != nil {
-			username = uc.Username
-			userID = uc.ID
-		}
-		h.hub.BroadcastFileChanged(ns, reqPath, userID, username, newETag)
+		h.hub.BroadcastFileChanged(ns, reqPath, userID, username, newETag, reason, restoreFromRef)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

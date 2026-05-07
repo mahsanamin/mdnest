@@ -242,6 +242,7 @@ func main() {
 
 	nsHandler := handlers.NewNamespaceHandler(absNotesDir, perms)
 	noteHandler := handlers.NewNoteHandler(absNotesDir)
+	historyHandler := handlers.NewHistoryHandler(absNotesDir)
 	if collabHub != nil {
 		noteHandler.SetCollabHub(collabHub)
 	}
@@ -373,6 +374,10 @@ func main() {
 		mux.Handle("/api/namespaces", authMiddleware.Wrap(http.HandlerFunc(nsHandler.ListNamespaces)))
 		mux.Handle("/api/tree", authMiddleware.Wrap(perms.RequireNsAccess(http.HandlerFunc(treeHandler.GetTree))))
 		mux.Handle("/api/note", authMiddleware.Wrap(perms.ReadWriteRouter(invalidateSearch(http.HandlerFunc(noteHandler.Handle)))))
+		// History endpoints — read-only, gate on read access (anyone who
+		// can read the file can see its version history).
+		mux.Handle("/api/note/history", authMiddleware.Wrap(perms.RequireNsAccess(http.HandlerFunc(historyHandler.HandleHistory))))
+		mux.Handle("/api/note/at", authMiddleware.Wrap(perms.RequireNsAccess(http.HandlerFunc(historyHandler.HandleNoteAt))))
 		if commentsHandler != nil {
 			mux.Handle("/api/comments", authMiddleware.Wrap(perms.RequireNsAccess(http.HandlerFunc(commentsHandler.Handle))))
 		}
@@ -385,6 +390,10 @@ func main() {
 		mux.Handle("/api/namespaces", authMiddleware.Wrap(http.HandlerFunc(nsHandler.ListNamespaces)))
 		mux.Handle("/api/tree", authMiddleware.Wrap(http.HandlerFunc(treeHandler.GetTree)))
 		mux.Handle("/api/note", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(noteHandler.Handle))))
+		// History endpoints work in single mode too — git-sync runs
+		// orthogonally to AUTH_MODE.
+		mux.Handle("/api/note/history", authMiddleware.Wrap(http.HandlerFunc(historyHandler.HandleHistory)))
+		mux.Handle("/api/note/at", authMiddleware.Wrap(http.HandlerFunc(historyHandler.HandleNoteAt)))
 		// /api/comments intentionally unregistered in single mode.
 		mux.Handle("/api/folder", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(uploadHandler.HandleFolder))))
 		mux.Handle("/api/upload", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(uploadHandler.HandleUpload))))

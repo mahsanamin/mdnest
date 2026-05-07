@@ -3479,6 +3479,158 @@ pre:hover .code-copy-btn {
   opacity: 0.9;
 }
 
+/* Restore banner — info-coloured (blue), shown when another user
+   restored an older version of the current file via the History modal.
+   Same shape as conflict-banner; different palette signals "deliberate
+   action by another user, not a conflict". */
+.restore-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #89b4fa22;
+  border-bottom: 1px solid #89b4fa44;
+  color: #89b4fa;
+  font-size: 0.82rem;
+  flex-shrink: 0;
+}
+
+.restore-banner button {
+  background: #313244;
+  color: #cdd6f4;
+  border: none;
+  padding: 3px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.restore-banner button:first-of-type {
+  background: #89b4fa;
+  color: #1e1e2e;
+  font-weight: 600;
+}
+
+.restore-banner button:hover {
+  opacity: 0.9;
+}
+
+/* ===== History modal (v3.7.0+) ===== */
+.history-modal {
+  width: min(900px, 92vw);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.history-body {
+  display: flex;
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+  margin-top: 8px;
+}
+
+.history-list {
+  width: 240px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  border-right: 1px solid #313244;
+  padding-right: 8px;
+  max-height: 56vh;
+}
+
+.history-commit-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  text-align: left;
+  cursor: pointer;
+  color: #cdd6f4;
+  font-size: 0.78rem;
+}
+
+.history-commit-item:hover {
+  background: #313244;
+}
+
+.history-commit-item.selected {
+  background: #45475a;
+  border-color: #89b4fa;
+}
+
+.history-commit-when {
+  font-weight: 600;
+}
+
+.history-commit-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  color: #a6adc8;
+}
+
+.history-commit-author {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-right: 4px;
+}
+
+.history-commit-sha {
+  color: #6c7086;
+}
+
+.history-commit-msg {
+  font-size: 0.74rem;
+  color: #a6adc8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-preview {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-height: 56vh;
+}
+
+.history-preview-header {
+  font-size: 0.78rem;
+  color: #a6adc8;
+  margin-bottom: 6px;
+}
+
+.history-content {
+  flex: 1;
+  overflow: auto;
+  background: #11111b;
+  color: #cdd6f4;
+  border: 1px solid #313244;
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  margin: 0;
+}
+
+.history-presence {
+  margin-top: 8px;
+  color: #f9e2af;
+}
+
 /* ===== Remote cursor overlay ===== */
 .editor-container {
   position: relative;

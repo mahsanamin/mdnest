@@ -15,6 +15,7 @@ import AdminPanel from './components/AdminPanel.jsx';
 import PresenceBar from './components/PresenceBar.jsx';
 import CommentSidebar from './components/CommentSidebar.jsx';
 import ShareDialog from './components/ShareDialog.jsx';
+import HistoryModal from './components/HistoryModal.jsx';
 import CollabClient from './collab.js';
 import {
   getToken,
@@ -208,6 +209,14 @@ function App() {
   const [remoteCursors, setRemoteCursors] = useState({});
   const [typingUsers, setTypingUsers] = useState({}); // {userId: username}
   const [conflictBanner, setConflictBanner] = useState(null); // {username, etag}
+  // restoreBanner is shown when another user used the History modal to
+  // restore an older version of the current file. It's deliberately a
+  // separate state from conflictBanner because a restore is an
+  // intentional action by another user, not a conflict — the UX is an
+  // info banner, not a warning banner.
+  const [restoreBanner, setRestoreBanner] = useState(null); // {username, ref, etag}
+  // historyModal is { ns, path } when the History modal is open, null otherwise.
+  const [historyModal, setHistoryModal] = useState(null);
   const [updateAvailable, setUpdateAvailable] = useState(null); // {current, latest}
   const [wsStatus, setWsStatus] = useState('disconnected'); // 'connected' | 'connecting' | 'disconnected'
   const etagRef = useRef(null);
@@ -324,28 +333,40 @@ function App() {
             if (selectedNsRef.current) refreshTree(selectedNsRef.current);
           }, 1000);
           break;
-        case 'file-changed':
-          // Another user saved — update etag and reload if no local edits
+        case 'file-changed': {
+          // Another user saved (or restored) — update etag and reload if
+          // no local edits. Restores get a separate "info" banner instead
+          // of the yellow conflict banner; same auto-reload-when-clean
+          // path otherwise.
           etagRef.current = msg.etag;
-          if ((contentRef.current || '').trim() === (savedContentRef.current || '').trim()) {
+          const isRestore = msg.reason === 'restored';
+          const isClean = (contentRef.current || '').trim() === (savedContentRef.current || '').trim();
+          if (isClean) {
             setConflictBanner(null);
-            // Use refs for current namespace/path
             const ns = selectedNsRef.current;
             const path = currentPathRef.current;
             if (ns && path) {
               getNote(ns, path).then(({ text, etag }) => {
-                // Verify user hasn't switched files while getNote was in flight
                 if (selectedNsRef.current === ns && currentPathRef.current === path) {
                   setContent(text);
                   setSavedContent(text);
                   etagRef.current = etag;
+                  if (isRestore) {
+                    // Show a brief info banner so the user knows their
+                    // content updated because of an explicit restore by
+                    // someone else, not a normal save.
+                    setRestoreBanner({ username: msg.username, ref: msg.restoreFromRef });
+                  }
                 }
               }).catch(() => {});
             }
+          } else if (isRestore) {
+            setRestoreBanner({ username: msg.username, ref: msg.restoreFromRef, etag: msg.etag });
           } else {
             setConflictBanner({ username: msg.username, etag: msg.etag });
           }
           break;
+        }
       }
     }, setWsStatus);
     collabRef.current = client;
@@ -795,6 +816,17 @@ function App() {
         } catch (e) { alert('Failed to delete: ' + e.message); }
         break;
       }
+      case 'history': {
+        if (!target || !selectedNs) return;
+        // Open the file first if it's not already open — the modal
+        // restores into whatever's currently in the editor, and we
+        // want that to be this file.
+        if (currentPath !== target.path) {
+          await openNote(target.path);
+        }
+        setHistoryModal({ ns: selectedNs, path: target.path });
+        break;
+      }
       case 'delete-folder': {
         if (!target || !selectedNs) return;
         if (!confirm(`Delete folder "${target.name || target.path}" and all its contents?`)) return;
@@ -1112,6 +1144,15 @@ function App() {
             <button onClick={() => setConflictBanner(null)}>Dismiss</button>
           </div>
         )}
+        {restoreBanner && (
+          <div className="restore-banner">
+            {restoreBanner.username} restored this file to an earlier version
+            {restoreBanner.ref ? ` (${restoreBanner.ref.slice(0, 7)})` : ''}.
+            {restoreBanner.etag ? ' Your unsaved changes are kept until you reload.' : ' Content has been updated.'}
+            {restoreBanner.etag && <button onClick={handleReloadNote}>Reload</button>}
+            <button onClick={() => setRestoreBanner(null)}>Dismiss</button>
+          </div>
+        )}
         <div className="split-view">
           {currentPath ? (
             <>
@@ -1220,6 +1261,27 @@ function App() {
           namespace={shareTarget.namespace}
           path={shareTarget.path}
           onClose={() => setShareTarget(null)}
+        />
+      )}
+      {historyModal && (
+        <HistoryModal
+          ns={historyModal.ns}
+          path={historyModal.path}
+          currentETag={etagRef.current}
+          canWrite={canWriteCurrent}
+          otherUserNames={(presenceUsers || []).filter(u => u.id !== userInfo?.id).map(u => u.username)}
+          onClose={() => setHistoryModal(null)}
+          onRestored={(text) => {
+            // Restore went through saveNote → backend wrote the file →
+            // backend broadcast file-changed back to us. The collab
+            // handler (case 'file-changed' above) will refresh content
+            // and etag. We also update local state immediately so the
+            // editor reflects the restored content without waiting for
+            // the round-trip through the websocket.
+            setContent(text);
+            setSavedContent(text);
+            setHistoryModal(null);
+          }}
         />
       )}
       <ContextMenu

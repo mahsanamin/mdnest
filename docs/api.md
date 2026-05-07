@@ -818,13 +818,17 @@ Update an existing note. Fails if the file does not exist.
 |-------|----------|-------------|
 | `ns` | yes | Namespace name |
 | `path` | yes | Relative path to the file |
+| `allow-empty` | no | Set to `1` to permit overwriting a non-empty file with empty content. Without this, the backend returns 409 to defend against destructive autosave (v3.6.1+). |
+| `restore-from` | no | A 7-40 char hex commit SHA. When set, the request is treated as a deliberate version restore and the websocket `file-changed` broadcast carries `reason: "restored"` so other connected users see an info banner instead of the conflict banner (v3.7.0+). |
 
 **Request body:** The new file content (replaces the entire file).
+
+**Headers:** Optional `If-Match: <etag>` enforces optimistic concurrency — a stale ETag returns 409 with the current ETag in the response.
 
 **Response** (200 OK):
 
 ```json
-{"status": "ok"}
+{"status": "ok", "etag": "\"<sha256>\""}
 ```
 
 **Example:**
@@ -836,6 +840,11 @@ curl -X PUT "http://localhost:8286/api/note?ns=personal&path=todo.md" \
 
 - [x] Set up mdnest
 - [ ] Write documentation"
+
+# Restore a file to an old version (also re-broadcasts as a restore event):
+curl -X PUT "http://localhost:8286/api/note?ns=personal&path=todo.md&restore-from=a1b2c3d" \
+  -H "Authorization: Bearer $TOKEN" \
+  --data-binary @old-version.md
 ```
 
 **Error responses:**
@@ -844,6 +853,64 @@ curl -X PUT "http://localhost:8286/api/note?ns=personal&path=todo.md" \
 |--------|------|-------|
 | 400 | `{"error":"invalid path"}` | Path is empty or attempts directory traversal |
 | 404 | `{"error":"not found"}` | File does not exist |
+| 409 | `{"error":"refusing to overwrite a non-empty note with empty content; pass ?allow-empty=1 to confirm"}` | v3.6.1+ guard against destructive autosave |
+| 409 | `{"error":"file was modified by another user", "etag":"..."}` | If-Match ETag is stale |
+
+---
+
+### GET /api/note/history *(v3.7.0+)*
+
+Return up to 50 most recent commits affecting the given file, newest first. Reads from the namespace's git-sync repository (`.git/` in the namespace directory). Works in single mode and multi mode identically; the only requirement is that git-sync is configured for the namespace.
+
+**Query parameters:**
+
+| Param | Required | Description |
+|-------|----------|-------------|
+| `ns` | yes | Namespace name |
+| `path` | yes | Relative path to the file |
+
+**Response** (200 OK):
+
+```json
+[
+  {"commit": "a1b2c3d4...", "unix_ts": 1714567890, "author": "Alice", "message": "sync: 2026-05-03 10:42:13 UTC"},
+  {"commit": "e5f6789a...", "unix_ts": 1714560000, "author": "Bob", "message": "Edit"}
+]
+```
+
+Returns an empty array when the namespace is a git repo but no commits have touched the file yet.
+
+**Error responses:**
+
+| Status | Body | Cause |
+|--------|------|-------|
+| 400 | `{"error":"invalid path"}` | Path traversal or empty path |
+| 404 | `{"error":"namespace not found"}` | Namespace doesn't exist |
+| 404 | `{"error":"git-sync is not configured for this namespace"}` | Namespace dir has no `.git/` |
+
+---
+
+### GET /api/note/at *(v3.7.0+)*
+
+Return the file's content as it was at a specific commit. Read-only; the response carries no ETag (history is a snapshot, not editable through this endpoint — restoration goes through `PUT /api/note?restore-from=<sha>`).
+
+**Query parameters:**
+
+| Param | Required | Description |
+|-------|----------|-------------|
+| `ns` | yes | Namespace name |
+| `path` | yes | Relative path to the file |
+| `ref` | yes | A 7-40 char hex commit SHA. Branch names, `HEAD~N`, tags, and other ref forms are rejected. |
+
+**Response** (200 OK): The file's content at that commit, as `text/markdown; charset=utf-8`. The mdnest invisible note-ID marker is stripped (matching `GET /api/note` behaviour).
+
+**Error responses:**
+
+| Status | Body | Cause |
+|--------|------|-------|
+| 400 | `{"error":"invalid ref — must be a commit SHA"}` | `ref` doesn't match `^[0-9a-f]{7,40}$` |
+| 404 | `{"error":"file not found at that commit"}` | The path didn't exist at that commit, or the SHA is unknown |
+| 404 | `{"error":"git-sync is not configured for this namespace"}` | Namespace dir has no `.git/` |
 
 ---
 
