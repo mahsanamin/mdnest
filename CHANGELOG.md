@@ -4,6 +4,22 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v3.8.0 — Update notifications, version compare, and multi-IP bind
+
+### New features
+
+- **"Update available" badge with release notes.** The backend now polls the GitHub releases API once every 24 hours and includes the latest release (version, name, publish date, full markdown body) on `/api/config`. When a newer mdnest is published, a small badge appears next to the version in the sidebar footer. Clicking it opens a modal that renders the release notes inline so you can see *what actually changed* (features, bug fixes, breaking notes) before deciding to update — not just the version number. Per-version "don't remind me" dismissal is saved in localStorage; a newer release re-arms the badge automatically.
+- **Compare two versions in the History modal.** A new "Compare to:" dropdown above the preview pane lets you pick any other commit, or the live "Current version", to diff against the primary selection. Green-tinted lines exist only in the target, red-tinted lines only in the primary — so when you're considering a restore, you can read exactly what would change and decide before clicking Restore. Diff is line-based (LCS); identical inputs short-circuit to "no differences."
+- **Comma-separated `BIND_ADDRESS` for multi-IP binding.** `BIND_ADDRESS=127.0.0.1,100.73.118.115` now works — useful for binding localhost plus a private overlay address (Tailscale, ZeroTier, VPN) without falling back to `0.0.0.0`. Previously a comma-separated value was passed verbatim to a single Docker port mapping, so `mdnest-server rebuild` failed with `invalid IP address`. Single-IP behavior is unchanged.
+
+### Notes
+
+- **Update check is opt-out, not opt-in.** Default-on so most operators learn about security patches; air-gapped or privacy-sensitive installs can set `DISABLE_UPDATE_CHECK=true` in `mdnest.conf` (or `UPDATE_CHECK_REPO=<owner/repo>` to point at a fork). Failures are logged at info level and never block startup. The backend hits GitHub from one IP per server per day — user IPs are never exposed to GitHub.
+- **Release-notes payload is capped.** Release bodies over 8 KB are truncated in `/api/config` with a "see full release notes on GitHub" hint, to keep the config payload small even if a future release ships with a giant body.
+- **No new database migration.** This release is config-and-UI only on the multi-mode side; no schema changes.
+
+---
+
 ## v3.7.0 — In-app version history with restore (single + multi mode)
 
 ### New features

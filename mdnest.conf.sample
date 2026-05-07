@@ -163,6 +163,20 @@ GIT_AUTHOR_EMAIL=you@example.com
 # Leave commented for a single install — the default works fine.
 # COMPOSE_PROJECT_NAME=mdnest-dev
 
+# ==========================================================================
+# Update availability check
+# ==========================================================================
+# By default the backend polls https://api.github.com/repos/mahsanamin/mdnest
+# once every 24 hours and surfaces the latest release on /api/config so the
+# frontend can hint when a newer mdnest is available (with the release notes
+# inline). One outbound HTTPS request per server per day; failures are
+# logged at info level and ignored.
+#
+# Set to true on air-gapped / privacy-sensitive installs to disable the
+# check entirely. UPDATE_CHECK_REPO can override the upstream repo for forks.
+# DISABLE_UPDATE_CHECK=true
+# UPDATE_CHECK_REPO=mahsanamin/mdnest
+
 # HTTPS with Caddy (optional)
 # Set CADDY_DOMAIN to enable automatic HTTPS via Let's Encrypt.
 # Caddy runs as a container, terminates TLS, and proxies to the frontend.
