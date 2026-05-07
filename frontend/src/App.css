@@ -3720,6 +3720,61 @@ pre:hover .code-copy-btn {
   color: #f9e2af;
 }
 
+/* Compare-to selector that sits above the preview pane in the History modal. */
+.history-compare-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.history-compare-row label {
+  font-size: 0.75rem;
+  color: #a6adc8;
+}
+.history-compare-row select {
+  background: #1e1e2e;
+  color: #cdd6f4;
+  border: 1px solid #45475a;
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 0.78rem;
+  max-width: 280px;
+}
+
+/* Unified diff rows. Catppuccin red/green tinting at low opacity so long
+   diffs stay readable; markers in the gutter mirror standard +/- diff. */
+.history-diff {
+  padding: 6px 0;
+}
+.diff-row {
+  display: flex;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  padding: 0 12px;
+}
+.diff-marker {
+  flex: 0 0 16px;
+  color: #6c7086;
+  user-select: none;
+}
+.diff-text {
+  flex: 1;
+}
+.diff-add {
+  background: #a6e3a122;
+}
+.diff-add .diff-marker {
+  color: #a6e3a1;
+}
+.diff-del {
+  background: #f38ba822;
+}
+.diff-del .diff-marker {
+  color: #f38ba8;
+}
+
 /* ===== Remote cursor overlay ===== */
 .editor-container {
   position: relative;
