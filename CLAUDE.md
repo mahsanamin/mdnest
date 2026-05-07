@@ -28,6 +28,7 @@ backend/
     path.go                  # SafePath(), RequireNamespace() — shared utils
     noteid.go                # ExtractNoteID / InjectNoteID / EnsureNoteID (UUID marker)
     comments.go              # GET/POST/PATCH/DELETE /api/comments?ns=&path=&id=
+    history.go               # GET /api/note/history, /api/note/at — git-sync version history (v3.7.0+)
     sso.go                   # GET /api/auth/sso/{start,callback} (USER_PROVIDER=sso only)
   firebase/                  # Firebase Auth + Firestore (USER_PROVIDER=firebase only)
     client.go                # Admin SDK wrapper (VerifyIDToken)
@@ -64,6 +65,7 @@ frontend/
       Preview.jsx            # Rendered markdown (marked + mermaid)
       ContextMenu.jsx        # Right-click / long-press floating menu
       CommentSidebar.jsx     # Inline comments: slide-out panel, threads, replies, Go To
+      HistoryModal.jsx       # Per-file git-sync history viewer + restore (v3.7.0+)
 
 mcp-server/
   index.js                   # MCP server entry — tools + resources wrapping REST API
