@@ -110,6 +110,21 @@ function setHash(ns, path) {
   window.history.replaceState(null, '', '#' + hash);
 }
 
+// decodeJwtSub returns the `sub` claim of the JWT (the username), without
+// verifying the signature. Used in single-user mode where there's no
+// /api/me endpoint to fetch user info from — we just need the display
+// name for the sidebar, and the JWT already carries it.
+function decodeJwtSub(token) {
+  if (!token) return null;
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    return JSON.parse(atob(parts[1])).sub || null;
+  } catch {
+    return null;
+  }
+}
+
 function App() {
   const [ssoError, setSsoError] = useState(() => consumeSSOHashOnLoad());
   const [authenticated, setAuthenticated] = useState(!!getToken());
@@ -427,6 +442,18 @@ function App() {
       if (isMulti) {
         const me = await fetchMe().catch(() => null);
         setUserInfo(me);
+      } else {
+        // Single mode has no /api/me endpoint, but the JWT's `sub` claim is
+        // MDNEST_USER from mdnest.conf — read it client-side so the sidebar
+        // shows the configured name instead of the "User" fallback. The
+        // single-mode user implicitly owns everything, so role flags match
+        // a superadmin for UI-gating purposes.
+        const username = decodeJwtSub(getToken());
+        setUserInfo(
+          username
+            ? { username, role: 'admin', is_super_admin: true, admin_namespaces: [], grants: [] }
+            : null
+        );
       }
 
       const nsList = await loadNamespaces();
@@ -1071,7 +1098,7 @@ function App() {
         onDrop={canWrite('') ? handleTreeDrop : null}
         visible={sidebarVisible}
         onClose={() => setSidebarVisible(false)}
-        userInfo={isMulti ? userInfo : null}
+        userInfo={userInfo}
         onLogout={logout}
         onAdminPanel={isAdmin && isMulti ? () => setShowAdminPanel(true) : null}
         onNewNote={canWrite('') ? () => doCreateNote(null) : null}
