@@ -66,6 +66,7 @@ frontend/
       ContextMenu.jsx        # Right-click / long-press floating menu
       CommentSidebar.jsx     # Inline comments: slide-out panel, threads, replies, Go To
       HistoryModal.jsx       # Per-file git-sync history viewer + restore (v3.7.0+)
+      MoveToModal.jsx        # Touch-friendly destination picker for "Move to…" context action (v3.8.0+)
 
 mcp-server/
   index.js                   # MCP server entry — tools + resources wrapping REST API

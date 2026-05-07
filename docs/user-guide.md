@@ -123,11 +123,13 @@ Right-click (desktop) or long-press (mobile) on any folder in the tree to open a
 - Create a new note inside that folder
 - Create a new subfolder
 - Rename the folder
+- **Move to…** -- pick a destination folder from a touch-friendly list (added v3.8.0). Useful on mobile, where HTML5 drag-and-drop is disabled.
 - Delete the folder and its contents
 
 Right-click or long-press on a file to:
 
 - Rename the file -- if you don't type an extension, the original one is preserved (so renaming `notes.md` to `summary` becomes `summary.md`).
+- **Move to…** -- pick a destination folder (added v3.8.0). Same picker as the folder context menu.
 - Delete the file
 
 ---
@@ -377,9 +379,13 @@ The context menu provides quick actions for files and folders in the sidebar.
 
 mdnest is designed to work on mobile browsers.
 
-- **Sidebar toggle:** Tap the hamburger menu icon (top-left) to show or hide the sidebar.
+- **Sidebar toggle:** Tap the hamburger menu icon (top-left) to show or hide the sidebar. The sidebar opens as a slide-over up to 420px wide so long names fit.
 - **Editor/Preview toggle:** On small screens, the editor and preview are shown one at a time. Use the toggle to switch between them.
 - **Context menu:** Long-press on a file or folder to open the context menu (equivalent to right-click on desktop).
+- **Moving files:** Long-press → **Move to…** opens a destination picker. HTML5 drag-and-drop is disabled on touch (it interferes with scrolling), so this is the touch-friendly path for moves.
+- **Show full names:** Tree labels ellipsize by default to keep the visual rhythm consistent. Tap the lines icon in the tree control bar to switch to wrap mode and read long file/folder names in full. The choice is remembered across visits.
+- **Loading state:** A centered spinner shows while the tree loads on a slow connection; a thin animated bar appears at the top of the tree during a refresh so silence on the network never looks like an empty namespace.
+- **Toolbar path:** The currently-open file's basename always stays visible — only the parent path gets ellipsized when the toolbar is cramped.
 
 ---
 
