@@ -1026,6 +1026,15 @@
   position: relative;
   user-select: none;
 }
+/* Wrapper that absorbs mousedown so ProseMirror's table editing
+   plugin doesn't see the click as a cell-selection trigger. */
+.tcc-cell-checkbox-wrap {
+  display: inline-block;
+  user-select: none;
+  -webkit-user-select: none;
+  vertical-align: middle;
+  line-height: 1;
+}
 
 /* Collapsible headings */
 .collapsible-heading {

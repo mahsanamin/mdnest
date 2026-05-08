@@ -265,15 +265,52 @@ function buildTableCellCheckboxDecorations(doc, viewRef) {
 }
 
 function makeCheckboxWidget(viewRef, from, to, checked) {
+  // Wrap the <input> in a contentEditable=false span. Why a wrapper:
+  // when a bare input sits inside a ProseMirror node-view-managed
+  // cell, mousedown on the input bubbles up to ProseMirror's table
+  // editing plugin, which selects the cell (visually "expanding" it
+  // with cell-selection highlight) before our click handler fires.
+  // The wrapper acts as the event boundary — we stopPropagation on
+  // every mouse + pointer event at this layer so ProseMirror never
+  // sees the interaction. The input keeps native checkbox styling
+  // and accessibility (Space/Enter still toggles via keyboard).
+  const wrap = document.createElement('span');
+  wrap.className = 'tcc-cell-checkbox-wrap';
+  wrap.contentEditable = 'false';
+  wrap.setAttribute('aria-hidden', 'false');
+
   const input = document.createElement('input');
   input.type = 'checkbox';
   input.className = 'tcc-cell-checkbox';
   input.checked = checked;
   input.contentEditable = 'false';
-  input.addEventListener('mousedown', (e) => e.preventDefault());
-  input.addEventListener('click', (e) => {
-    e.preventDefault();
+  input.tabIndex = -1; // don't steal focus on Tab navigation in cells
+
+  const stop = (e) => {
     e.stopPropagation();
+  };
+  // mousedown is what ProseMirror's tableEditingPlugin listens to
+  // for cell selection — we additionally preventDefault on the
+  // outer wrapper so the click never enters the ProseMirror view's
+  // event pipeline. The native checkbox's own toggle still happens
+  // because we listen for `click` on the input below and dispatch
+  // ourselves; we don't rely on the default toggle (which would race
+  // against our state-driven re-render of the widget).
+  ['mousedown', 'pointerdown', 'touchstart'].forEach((evt) => {
+    wrap.addEventListener(evt, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    });
+  });
+  ['mouseup', 'pointerup', 'touchend', 'dblclick'].forEach((evt) => {
+    wrap.addEventListener(evt, stop);
+  });
+
+  const toggle = (e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     const view = viewRef.current;
     if (!view) return;
     const next = checked ? '[ ]' : '[x]';
@@ -284,8 +321,15 @@ function makeCheckboxWidget(viewRef, from, to, checked) {
     // the head-of-state mapping just to be safe.
     const tr = state.tr.replaceWith(from, to, state.schema.text(next));
     view.dispatch(tr);
+  };
+  input.addEventListener('click', toggle);
+  // Keyboard: Space/Enter on a focused checkbox should still toggle.
+  input.addEventListener('keydown', (e) => {
+    if (e.key === ' ' || e.key === 'Enter') toggle(e);
   });
-  return input;
+
+  wrap.appendChild(input);
+  return wrap;
 }
 
 const tableCellCheckboxPlugin = $prose(() => {
