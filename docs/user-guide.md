@@ -385,6 +385,7 @@ mdnest is designed to work on mobile browsers.
 - **Moving files:** Long-press → **Move to…** opens a destination picker. HTML5 drag-and-drop is disabled on touch (it interferes with scrolling), so this is the touch-friendly path for moves.
 - **Show full names:** Tree labels ellipsize by default to keep the visual rhythm consistent. Tap the lines icon in the tree control bar to switch to wrap mode and read long file/folder names in full. The choice is remembered across visits.
 - **Loading state:** A centered spinner shows while the tree loads on a slow connection; a thin animated bar appears at the top of the tree during a refresh so silence on the network never looks like an empty namespace.
+- **Refresh tree:** A refresh icon sits in the tree-control row at the top of the sidebar. Tap it to reload the tree — useful for files created outside the browser (via the `mdnest` CLI, MCP, or git-sync) when live-collab isn't enabled or no file is open to keep the WebSocket alive.
 - **Toolbar path:** The currently-open file's basename always stays visible — only the parent path gets ellipsized when the toolbar is cramped.
 
 ---

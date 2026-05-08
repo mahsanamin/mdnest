@@ -63,6 +63,24 @@ function Sidebar({
 }) {
   const [syncing, setSyncing] = useState(false);
   const [syncInfo, setSyncInfo] = useState(null); // {isGitRepo, hasRemote, lastCommit, ...}
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Manual tree refresh — always-visible escape hatch for cases where the
+  // automatic propagation can't reach the client: single mode (no
+  // WebSocket at all), multi mode without ENABLE_LIVE_COLLAB, or a
+  // collab-enabled session with no file open (the per-file WS is closed
+  // until a note is selected, so a `tree-changed` broadcast never arrives).
+  // Files created via the `mdnest` CLI hit those exact paths.
+  const handleManualRefresh = useCallback(async () => {
+    if (refreshing || !onRefreshTree) return;
+    setRefreshing(true);
+    try {
+      await onRefreshTree();
+    } finally {
+      // Hold the spin briefly so it registers visually even on fast refreshes.
+      setTimeout(() => setRefreshing(false), 600);
+    }
+  }, [refreshing, onRefreshTree]);
 
   // Fetch sync status when namespace changes
   useEffect(() => {
@@ -200,6 +218,18 @@ function Sidebar({
             <span className="ns-label">{selectedNs || 'mdnest'}</span>
           )}
           <div className="sidebar-tree-controls">
+            {/* Manual tree refresh — always visible (desktop + mobile) so
+                the user has a touch-friendly way to pick up files created
+                outside the UI (CLI, MCP, git-sync) without doing a full
+                browser reload. The toolbar's refresh button only appears
+                when a file is open; this one is the no-file-open path. */}
+            <button
+              className={`tree-control-btn${refreshing ? ' spinning' : ''}`}
+              onClick={handleManualRefresh}
+              disabled={refreshing || !selectedNs}
+              title="Refresh tree"
+              aria-label="Refresh tree"
+            >&#8635;</button>
             {syncInfo && isAdmin && (
               syncInfo.isGitRepo && syncInfo.hasRemote ? (
                 <button
