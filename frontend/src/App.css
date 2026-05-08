@@ -2441,6 +2441,30 @@ pre:hover .code-copy-btn {
     display: none;
   }
 
+  /* On phones the toolbar can't afford to give the filename half the
+     row — view toggle, settings, and comments compete for the same
+     space. Drop the dirname prefix entirely (the sidebar already
+     shows where you are in the tree), and let the basename ellipsize
+     instead of pinning at flex-shrink: 0. The toolbar-path container
+     also yields its flex:1 grow on mobile so the other toolbar items
+     keep their natural width — the path takes only what it needs up
+     to a sensible cap. Full path is still on title="" for long-press
+     reveal. */
+  .toolbar-path {
+    flex: 0 1 auto;
+    max-width: 45%;
+    font-size: 0.78rem;
+  }
+  .toolbar-path-dir {
+    display: none;
+  }
+  .toolbar-path-base {
+    flex-shrink: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+
   .toolbar-action {
     font-size: 0.7rem !important;
     padding: 0.1rem 0.4rem !important;
