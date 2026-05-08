@@ -233,18 +233,6 @@ function Sidebar({
               title="Refresh tree"
               aria-label="Refresh tree"
             ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
-            {syncInfo && isAdmin && (
-              syncInfo.isGitRepo && syncInfo.hasRemote ? (
-                <button
-                  className={`tree-control-btn sync-btn${syncing ? ' spinning' : ''}`}
-                  onClick={handleSync}
-                  disabled={syncing}
-                  title={syncInfo.lastCommit ? `Last synced: ${formatSyncTime(syncInfo.lastCommit)}\n${syncInfo.remoteUrl || ''}` : 'Git pull & refresh'}
-                >&#8635;</button>
-              ) : (
-                <span className="sync-disabled" title="No git remote configured">&#8861;</span>
-              )
-            )}
             <button
               className="tree-control-btn"
               onClick={() => { handleExpandAll(); resetExpandAll(); }}
@@ -275,6 +263,26 @@ function Sidebar({
                 <span className="sync-status-text">
                   {syncInfo.lastCommit ? `Synced ${formatSyncTime(syncInfo.lastCommit)}` : 'Connected'}
                 </span>
+                {/* Git pull button lives next to the "Synced X ago" text
+                    so it's contextually grouped with the git-sync metadata
+                    rather than floating in the generic tree-control row.
+                    Uses a git-branch glyph + "Pull" label to make it
+                    obvious this is a git operation, not a generic tree
+                    refresh (which lives in the tree-control row above
+                    with a two-arrow loop icon). Admin-only — same gate
+                    as before. */}
+                {isAdmin && (
+                  <button
+                    className={`sync-status-btn${syncing ? ' spinning' : ''}`}
+                    onClick={handleSync}
+                    disabled={syncing}
+                    title={syncInfo.lastCommit ? `Git pull & refresh\nLast synced: ${formatSyncTime(syncInfo.lastCommit)}\n${syncInfo.remoteUrl || ''}` : 'Git pull & refresh'}
+                    aria-label="Git pull"
+                  >
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+                    <span>Pull</span>
+                  </button>
+                )}
               </>
             ) : (
               <>

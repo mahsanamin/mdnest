@@ -387,6 +387,42 @@
   cursor: default;
 }
 
+/* Inline "Pull" button inside .sync-status-bar — sits to the right of
+   the "Synced X ago" text. Compact (the status bar is only 0.68rem),
+   visually grouped with the git metadata. Spins on click via the
+   shared .spinning rule. */
+.sync-status-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding: 2px 7px;
+  background: transparent;
+  color: #89b4fa;
+  border: 1px solid #313244;
+  border-radius: 4px;
+  font-size: 0.68rem;
+  font-weight: 500;
+  cursor: pointer;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.sync-status-btn:hover:not(:disabled) {
+  background: #313244;
+  border-color: #45475a;
+  color: #b4befe;
+}
+
+.sync-status-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.sync-status-btn.spinning svg {
+  animation: spin 1s linear infinite;
+}
+
 .tree-control-btn {
   padding: 2px 5px;
   background: transparent;
