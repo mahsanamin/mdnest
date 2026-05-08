@@ -200,6 +200,121 @@ const clearEmptyBlockPlugin = $prose((ctx) => {
   });
 });
 
+// Plugin: render `[ ]` / `[x]` inside table cells as interactive checkboxes.
+//
+// Why a decoration plugin and not a schema extension? GFM's table_cell
+// node admits only `paragraph+` content — list items (where Milkdown's
+// task-list-item lives) are not allowed children. Trying to widen the
+// content expression breaks the ProseMirror tables editing plugin
+// (cell selection, tab navigation, paste rules all assume the
+// paragraph-only shape). So instead of changing the schema we layer
+// pure visual decorations on top of literal `[ ]` / `[x]` text:
+//   * an inline decoration with class `tcc-bracket-text` hides the
+//     three characters via CSS (display:none does break cursor flow,
+//     so we use width:0 + visibility:hidden so the cursor steps over
+//     the brackets cleanly);
+//   * a widget decoration at the same position renders an
+//     `<input type="checkbox">` with `contentEditable=false` and a
+//     click handler that dispatches a transaction replacing the
+//     three-char text range with the toggled token. The widget is
+//     rebuilt on every transaction (apply() runs `buildDecorations`
+//     against `tr.doc`) so its captured `from`/`to` positions are
+//     always fresh.
+// Round-trip: the underlying text in the document remains literal
+// `[ ]` / `[x]`, so toMarkdown serializes it unchanged. Rerendering
+// the same markdown reapplies the decorations. Same trick works in
+// any inline context (not only table cells), but we scope the scan
+// to cells to avoid stepping on the existing GFM task-list rendering
+// for top-level bullet lists.
+const tableCellCheckboxKey = new PluginKey('table-cell-checkbox');
+const TASK_RE = /\[([ xX])\]/g;
+
+function buildTableCellCheckboxDecorations(doc, viewRef) {
+  const decorations = [];
+  doc.descendants((cell, cellPos) => {
+    if (cell.type.name !== 'table_cell' && cell.type.name !== 'table_header') {
+      return true;
+    }
+    const cellContentStart = cellPos + 1;
+    cell.descendants((child, posInCell) => {
+      if (!child.isText) return true;
+      const text = child.text || '';
+      TASK_RE.lastIndex = 0;
+      let m;
+      while ((m = TASK_RE.exec(text)) !== null) {
+        const from = cellContentStart + posInCell + m.index;
+        const to = from + 3;
+        const checked = m[1].toLowerCase() === 'x';
+
+        decorations.push(
+          Decoration.inline(from, to, { class: 'tcc-bracket-text' })
+        );
+        decorations.push(
+          Decoration.widget(
+            from,
+            () => makeCheckboxWidget(viewRef, from, to, checked),
+            { side: -1, ignoreSelection: true }
+          )
+        );
+      }
+      return false; // text nodes have no children
+    });
+    return false; // already scanned this cell's contents
+  });
+  return DecorationSet.create(doc, decorations);
+}
+
+function makeCheckboxWidget(viewRef, from, to, checked) {
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.className = 'tcc-cell-checkbox';
+  input.checked = checked;
+  input.contentEditable = 'false';
+  input.addEventListener('mousedown', (e) => e.preventDefault());
+  input.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const view = viewRef.current;
+    if (!view) return;
+    const next = checked ? '[ ]' : '[x]';
+    const { state } = view;
+    // The decoration plugin rebuilds on every transaction, so `from`
+    // is the position at the time this widget was painted. If a
+    // concurrent transaction shifted the doc since, we map through
+    // the head-of-state mapping just to be safe.
+    const tr = state.tr.replaceWith(from, to, state.schema.text(next));
+    view.dispatch(tr);
+  });
+  return input;
+}
+
+const tableCellCheckboxPlugin = $prose(() => {
+  const viewRef = { current: null };
+  return new Plugin({
+    key: tableCellCheckboxKey,
+    view(editorView) {
+      viewRef.current = editorView;
+      return {
+        destroy() { viewRef.current = null; },
+      };
+    },
+    state: {
+      init(_, state) {
+        return buildTableCellCheckboxDecorations(state.doc, viewRef);
+      },
+      apply(tr, old) {
+        if (!tr.docChanged) return old.map(tr.mapping, tr.doc);
+        return buildTableCellCheckboxDecorations(tr.doc, viewRef);
+      },
+    },
+    props: {
+      decorations(state) {
+        return tableCellCheckboxKey.getState(state);
+      },
+    },
+  });
+});
+
 // ProseMirror node view for mermaid code blocks
 // Renders MermaidBlock React component in place of the <pre> element
 const mermaidNodeView = $view(codeBlockSchema.node, (ctx) => {
@@ -311,7 +426,8 @@ function MilkdownEditor({ content, onChange, readOnly, onEditorReady }) {
       .use(clipboard)
       .use(mermaidNodeView)
       .use(clearEmptyBlockPlugin)
-      .use(commentHighlightPlugin);
+      .use(commentHighlightPlugin)
+      .use(tableCellCheckboxPlugin);
   }, [readOnly]);
 
   // Unsuppress on real user interaction — keydown/mousedown in the editor area.

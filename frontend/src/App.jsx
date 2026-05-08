@@ -779,12 +779,23 @@ function App() {
     if (collabRef.current) collabRef.current.sendSelection(fromLine, fromCh, toLine, toCh);
   }, []);
 
-  const handleCheckboxToggle = useCallback(async (lineIndex) => {
+  const handleCheckboxToggle = useCallback(async (lineIndex, colIndex) => {
     if (content === null) return;
     const lines = content.split('\n');
     const line = lines[lineIndex];
     if (!line) return;
-    if (line.includes('- [ ]')) {
+    // colIndex provided → toggle the bracket pair starting at that
+    // column. Used for in-cell checkboxes (no list-item prefix).
+    if (typeof colIndex === 'number') {
+      const segment = line.substr(colIndex, 3);
+      if (segment === '[ ]') {
+        lines[lineIndex] = line.substr(0, colIndex) + '[x]' + line.substr(colIndex + 3);
+      } else if (segment === '[x]' || segment === '[X]') {
+        lines[lineIndex] = line.substr(0, colIndex) + '[ ]' + line.substr(colIndex + 3);
+      } else {
+        return;
+      }
+    } else if (line.includes('- [ ]')) {
       lines[lineIndex] = line.replace('- [ ]', '- [x]');
     } else if (line.includes('- [x]')) {
       lines[lineIndex] = line.replace('- [x]', '- [ ]');

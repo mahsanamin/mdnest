@@ -998,6 +998,35 @@
   margin-left: -1.2rem;
 }
 
+/* In-cell checkboxes (tableCellCheckboxPlugin in LiveEditor + the
+   matching DOM post-pass in Preview). The plugin paints a
+   contentEditable=false <input type="checkbox"> widget at the start
+   of every `[ ]` / `[x]` literal in a table cell, and hides the three
+   bracket characters via .tcc-bracket-text. We use width:0 +
+   visibility:hidden (rather than display:none) so the cursor steps
+   over the brackets without ProseMirror losing track of inline
+   positions. */
+.tcc-bracket-text {
+  display: inline-block;
+  width: 0;
+  overflow: hidden;
+  visibility: hidden;
+}
+.tcc-cell-checkbox,
+.preview-pane td .task-cell-checkbox,
+.preview-pane th .task-cell-checkbox {
+  margin-right: 0.35rem;
+  cursor: pointer;
+  accent-color: #89b4fa;
+  width: 1em;
+  height: 1em;
+  vertical-align: middle;
+}
+.tcc-cell-checkbox {
+  position: relative;
+  user-select: none;
+}
+
 /* Collapsible headings */
 .collapsible-heading {
   user-select: text;
