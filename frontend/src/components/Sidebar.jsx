@@ -263,24 +263,26 @@ function Sidebar({
                 <span className="sync-status-text">
                   {syncInfo.lastCommit ? `Synced ${formatSyncTime(syncInfo.lastCommit)}` : 'Connected'}
                 </span>
-                {/* Git pull button lives next to the "Synced X ago" text
+                {/* Git sync button lives next to the "Synced X ago" text
                     so it's contextually grouped with the git-sync metadata
                     rather than floating in the generic tree-control row.
-                    Uses a git-branch glyph + "Pull" label to make it
-                    obvious this is a git operation, not a generic tree
-                    refresh (which lives in the tree-control row above
-                    with a two-arrow loop icon). Admin-only — same gate
-                    as before. */}
+                    Uses a git-branch glyph + "Sync" label — the backend
+                    handler does all three of: commit pending changes,
+                    pull --ff-only, push. So "Sync" is the truthful name;
+                    "Pull" was misleading. Distinct from the generic
+                    tree-refresh in the tree-control row above (two-arrow
+                    loop icon, no git side-effects). Admin-only — same
+                    gate as before. */}
                 {isAdmin && (
                   <button
                     className={`sync-status-btn${syncing ? ' spinning' : ''}`}
                     onClick={handleSync}
                     disabled={syncing}
-                    title={syncInfo.lastCommit ? `Git pull & refresh\nLast synced: ${formatSyncTime(syncInfo.lastCommit)}\n${syncInfo.remoteUrl || ''}` : 'Git pull & refresh'}
-                    aria-label="Git pull"
+                    title={syncInfo.lastCommit ? `Git sync (commit + pull + push)\nLast synced: ${formatSyncTime(syncInfo.lastCommit)}\n${syncInfo.remoteUrl || ''}` : 'Git sync (commit + pull + push)'}
+                    aria-label="Git sync"
                   >
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
-                    <span>Pull</span>
+                    <span>Sync</span>
                   </button>
                 )}
               </>
