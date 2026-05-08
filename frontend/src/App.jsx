@@ -7,6 +7,7 @@ import Sidebar from './components/Sidebar.jsx';
 import Toolbar from './components/Toolbar.jsx';
 import { lazy, Suspense } from 'react';
 import Editor from './components/Editor.jsx';
+import EditorErrorBoundary from './components/EditorErrorBoundary.jsx';
 const LiveEditor = lazy(() => import('./components/LiveEditor.jsx'));
 import Preview from './components/Preview.jsx';
 import ContextMenu from './components/ContextMenu.jsx';
@@ -167,6 +168,9 @@ function App() {
   const [viewMode, setViewMode] = useState(() => localStorage.getItem('mdnest_view_mode') || 'editor');
   const [editorMode, setEditorMode] = useState('live');
   const [editorModeReady, setEditorModeReady] = useState(false);
+  // When the Live editor throws on a specific file, remember that path
+  // so the post-fallback banner can name it. Cleared on file change.
+  const [liveCrashedFor, setLiveCrashedFor] = useState(null);
 
   // Helper: get/set per-file preferences from localStorage
   const getFilePrefs = useCallback((ns, path) => {
@@ -1164,6 +1168,9 @@ function App() {
           onEditorModeChange={(mode) => {
             setEditorMode(mode);
             localStorage.setItem('mdnest_editor_mode', mode);
+            // User explicitly opted back into Live for this file — clear
+            // the post-crash banner so we don't leave a stale notice up.
+            if (mode === 'live') setLiveCrashedFor(null);
             if (selectedNs && currentPath) {
               restoreScrollPosition(selectedNs, currentPath);
             }
@@ -1218,6 +1225,13 @@ function App() {
             <button onClick={() => setRestoreBanner(null)}>Dismiss</button>
           </div>
         )}
+        {liveCrashedFor && liveCrashedFor === currentPath && (
+          <div className="restore-banner">
+            Live editor failed to load this file — switched to Basic mode so you can keep working.
+            You can try Live again from the toolbar; the crash is usually content-specific.
+            <button onClick={() => setLiveCrashedFor(null)}>Dismiss</button>
+          </div>
+        )}
         <div className="split-view">
           {currentPath ? (
             <>
@@ -1234,34 +1248,48 @@ function App() {
                   {content === null ? (
                     <div className="editor-loading">Loading note…</div>
                   ) : editorMode === 'live' ? (
-                    <Suspense fallback={<div className="editor-loading">Loading live editor...</div>}>
-                      {/* key forces a fresh Milkdown instance per note, so the
-                          undo stack is per-note (no cross-note Cmd+Z) and never
-                          contains the moment-the-prop-was-empty (because we only
-                          mount once content is a real string). */}
-                      <LiveEditor
-                        key={`${selectedNs}/${currentPath}`}
-                        content={content}
-                        onChange={canWriteCurrent ? handleContentChange : null}
-                        currentPath={currentPath}
-                        ns={selectedNs}
-                        readOnly={!canWriteCurrent}
-                        comments={commentsEnabled ? comments : []}
-                        onComment={!commentsEnabled ? null : (sel) => {
-                          setPendingCommentSelection(sel);
-                          setShowComments(true);
-                        }}
-                        onGoToReady={(fn) => { goToCommentRef.current = fn; }}
-                        onHighlightClick={!commentsEnabled ? null : (commentId) => {
-                          setShowComments(true);
-                          setHighlightedCommentId(commentId);
-                          if (viewMode === 'preview') {
-                            setViewMode('editor');
-                            localStorage.setItem('mdnest_view_mode', 'editor');
-                          }
-                        }}
-                      />
-                    </Suspense>
+                    <EditorErrorBoundary
+                      resetKey={`${selectedNs}/${currentPath}`}
+                      onError={() => {
+                        // Live editor blew up on this file (Milkdown
+                        // parse, plugin init, node-view crash, etc.).
+                        // Auto-fallback to Basic so the user can still
+                        // edit, persist that choice, and remember the
+                        // path so the banner can name it.
+                        setLiveCrashedFor(currentPath);
+                        setEditorMode('basic');
+                        try { localStorage.setItem('mdnest_editor_mode', 'basic'); } catch { /* ignore */ }
+                      }}
+                    >
+                      <Suspense fallback={<div className="editor-loading">Loading live editor...</div>}>
+                        {/* key forces a fresh Milkdown instance per note, so the
+                            undo stack is per-note (no cross-note Cmd+Z) and never
+                            contains the moment-the-prop-was-empty (because we only
+                            mount once content is a real string). */}
+                        <LiveEditor
+                          key={`${selectedNs}/${currentPath}`}
+                          content={content}
+                          onChange={canWriteCurrent ? handleContentChange : null}
+                          currentPath={currentPath}
+                          ns={selectedNs}
+                          readOnly={!canWriteCurrent}
+                          comments={commentsEnabled ? comments : []}
+                          onComment={!commentsEnabled ? null : (sel) => {
+                            setPendingCommentSelection(sel);
+                            setShowComments(true);
+                          }}
+                          onGoToReady={(fn) => { goToCommentRef.current = fn; }}
+                          onHighlightClick={!commentsEnabled ? null : (commentId) => {
+                            setShowComments(true);
+                            setHighlightedCommentId(commentId);
+                            if (viewMode === 'preview') {
+                              setViewMode('editor');
+                              localStorage.setItem('mdnest_view_mode', 'editor');
+                            }
+                          }}
+                        />
+                      </Suspense>
+                    </EditorErrorBoundary>
                   ) : (
                     <Editor
                       key={`${selectedNs}/${currentPath}`}
