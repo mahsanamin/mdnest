@@ -7,7 +7,7 @@ import { gfm } from '@milkdown/preset-gfm';
 import { listener, listenerCtx } from '@milkdown/plugin-listener';
 import { history, undoCommand, redoCommand } from '@milkdown/plugin-history';
 import { clipboard } from '@milkdown/plugin-clipboard';
-import { replaceAll, callCommand, $view, insert, $prose } from '@milkdown/utils';
+import { replaceAll, callCommand, $view, insert, $prose, markdownToSlice } from '@milkdown/utils';
 import { Plugin, PluginKey, TextSelection } from '@milkdown/prose/state';
 import { Decoration, DecorationSet } from '@milkdown/prose/view';
 import { deleteRow, deleteColumn, deleteTable } from '@milkdown/prose/tables';
@@ -577,11 +577,35 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly, onComment, c
         }
       }
 
+      // pasteMarkdown — go through markdownToSlice (which does a
+      // markdown → ProseMirror doc → DOM → Slice round trip via the
+      // schema's parseDOM rules). The DOM detour matters for task
+      // list items: GFM's listItemSchema renders `<li data-item-type="task" data-checked="...">`,
+      // and parseDOM picks the `checked` attr back out — so a pasted
+      // `- [ ] Mercury` survives as an interactive task item. The
+      // older `insert(md)` path skipped the DOM round trip and used
+      // `Slice(doc.content, selection.openStart, selection.openEnd)`,
+      // which mis-identified block content as inline when the cursor
+      // sat in a paragraph and silently flattened bullets/checkboxes
+      // to plain lines.
+      const pasteMarkdown = (md) => {
+        if (!md || !editor) return false;
+        let inserted = false;
+        editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx);
+          const slice = markdownToSlice(md)(ctx);
+          if (!slice) return;
+          view.dispatch(view.state.tr.replaceSelection(slice).scrollIntoView());
+          inserted = true;
+        });
+        return inserted;
+      };
+
       // 3. Rich HTML → convert to markdown then insert as parsed nodes
       if (html && hasRichContent(html)) {
         e.preventDefault();
         const md = htmlToMarkdown(html);
-        if (editor) editor.action(insert(md));
+        pasteMarkdown(md);
         return;
       }
 
@@ -589,7 +613,7 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly, onComment, c
       const text = cb.getData('text/plain');
       if (text && editor && /^[\s]*[#\-*>|`\[]/.test(text)) {
         e.preventDefault();
-        editor.action(insert(text));
+        pasteMarkdown(text);
         return;
       }
       // Otherwise: default Milkdown paste

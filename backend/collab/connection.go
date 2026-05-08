@@ -52,7 +52,7 @@ func (c *Conn) Send(data []byte) {
 // Blocks until the connection is closed.
 func (c *Conn) ReadLoop(ctx context.Context, hub *Hub, ns, path string) {
 	defer func() {
-		hub.Leave(ns, path, c.User.ID)
+		hub.Leave(ns, path, c)
 		c.ws.Close(websocket.StatusNormalClosure, "")
 	}()
 
