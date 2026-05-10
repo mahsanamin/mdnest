@@ -38,6 +38,8 @@ backend/
   middleware/
     auth.go                  # JWT validation middleware
     cors.go                  # CORS middleware
+  updates/                   # Background poller for newer mdnest releases (v3.8.0+)
+    checker.go               # 24h GitHub releases poll, served on /api/config as latestRelease
   store/
     db.go                    # Postgres connection pool (multi mode only)
     migrate.go               # Auto-migration: schema_migrations, users, access_grants, firebase_uid (005), avatar_url (006), namespace_admins (007)

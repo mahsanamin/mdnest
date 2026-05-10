@@ -59,6 +59,10 @@ In all three cases, mdnest itself stays bound to loopback inside Docker and only
 
 Binding to all interfaces drops the network boundary entirely. Anyone on the same network sees your login page. That's only acceptable if you're already behind a real reverse proxy that terminates TLS and a firewall that restricts source IPs. **Don't do it on a residential network or a public-IP VM with no proxy in front of it.**
 
+### Multi-IP bind *(v3.8.0+)*
+
+`BIND_ADDRESS` accepts a comma-separated list — the published ports bind to each address independently. The common pattern is `BIND_ADDRESS=127.0.0.1,100.73.118.115`: localhost stays usable on the host, and the Tailscale / WireGuard / VPN address is reachable to your other devices on the overlay network — but the public NIC is still dark. This is strictly safer than `0.0.0.0` because traffic from the LAN or the public internet never reaches the listener at all.
+
 ---
 
 ## Layer 2 — Identity
@@ -227,6 +231,16 @@ Both paths set `must_change_password=true` so the temp password is single-use �
 The host CLI accepts the new password on stdin (not as an argv argument), so it never appears in `ps`, the shell history, or the audit log. Backend logs the actor + target user IDs and the email, but never the password itself.
 
 This whole feature only applies in `USER_PROVIDER=local`. In Firebase / SSO mode the IdP owns the password and both paths refuse.
+
+### Outbound GitHub poll *(v3.8.0+)*
+
+mdnest's backend reaches out to `api.github.com` once every 24 hours to check whether a newer release is available, so the sidebar can surface release notes when one drops. This is the only outbound network call the backend itself makes; everything else stays inside your install.
+
+- **What gets sent.** A single unauthenticated GET to `https://api.github.com/repos/<UPDATE_CHECK_REPO>/releases/latest`. No headers identify your install — GitHub sees one request from your server's egress IP per day.
+- **What gets stored.** The latest release's `tag_name`, `name`, `published_at`, and the markdown `body` (truncated to 8 KB), held in memory only. Nothing is persisted server-side. Frontend dismissals (per-version "don't remind me") live in browser localStorage.
+- **Failure mode.** Network errors are logged at info level and never block startup or any user-facing path.
+- **Opt-out.** Set `DISABLE_UPDATE_CHECK=true` in `mdnest.conf` for air-gapped or privacy-sensitive installs. The badge disappears and the goroutine never starts. Set `UPDATE_CHECK_REPO=<owner>/<repo>` to point at a fork instead of upstream.
+- **User IPs.** End-user browsers do not contact GitHub. The check happens server-side; the client only reads the cached result from `/api/config`.
 
 ### Secrets to rotate
 
