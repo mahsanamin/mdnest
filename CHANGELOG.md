@@ -4,6 +4,25 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v3.9.0 — Tree auto-refresh in single mode + host-side token CLI + path-confusion guard
+
+### New features
+
+- **`mdnest update`** (and `mdnest upgrade`) — self-update verb on the CLI. Re-fetches the latest `mdnest` script from upstream and replaces itself in place; safe on Unix because the kernel keeps the running inode alive until the current invocation exits, so the next call picks up the new code. Reports the upgrade path (`vX.Y.Z -> vA.B.C`) and short-circuits with "up to date" when current matches latest. `--force` re-downloads regardless. Closes the discoverability gap where the only update path was remembering the `install-cli.sh` URL and re-piping it into bash.
+- **`mdnest-server create-token <name>`** — host-side API token provisioning. Generates a token, persists it to the same `tokens.json` store the web UI uses, and prints just the raw token to stdout so callers can capture it: `TOKEN=$(./mdnest-server create-token foo)`. Same trust model as `reset-password` — anyone with shell access to the server can mint tokens, which is by design (server shell = full operator trust). In single mode the token is bound to `MDNEST_USER` for clarity in logs / UI; in multi-mode this CLI exits with a clear error pointing at the web UI's per-user token flow (web-UI tokens bind to the logged-in user, which the CLI can't disambiguate from the host).
+
+### Bug fixes
+
+- **Tree auto-refreshes in single mode** (and multi-mode without `ENABLE_LIVE_COLLAB`). Previously the tree was kept in sync via the WebSocket `tree-changed` event, which only fires in multi-mode + live-collab installs. Without it, a file created from the CLI / MCP / git-sync / another browser tab stayed invisible until the user clicked the Refresh button. Now the frontend polls the tree every 60s when no websocket is connected (skipped when the tab is hidden so backgrounded sessions don't burn requests). Costs one tree GET per minute per active session.
+- **Better error when creating a file at a path that conflicts with an existing directory.** `POST /api/note?path=foo/bar.md` while a directory `foo/bar/` already exists at the same level used to silently create a misplaced sibling — agents (and humans) frequently meant "create a file inside `foo/bar/`" and didn't realize the path syntax was wrong. Now the backend detects this case and returns 409 with a clear hint: `a directory named 'foo/bar' exists at this location — to create a file inside it use path 'foo/bar/<filename>.md'`. POSTing directly to a directory path also returns a more informative 409 instead of the misleading "file already exists." Same `safePath` checks; just a smarter conflict message.
+- **CLI-minted API tokens validate without a server restart.** The token store loads `tokens.json` once at startup and serves all subsequent validations from memory. The new `create-token` CLI runs in a one-shot container that writes the file but can't update the running server's in-memory map, so newly-minted tokens were rejected with `401 invalid API token` until the next rebuild. Fixed in `tokens.go`: on a hash miss the validator re-reads `tokens.json` from disk before giving up. Successful validations stay fast (in-memory hit, no I/O); only misses pay the file-read cost. Same logic mirrored in `ResolveAPITokenUser` for multi-mode user-resolution misses.
+
+### Notes
+
+- This release is on `release/v3.9.0`.
+
+---
+
 ## v3.8.0 — Update notifications, version compare, and multi-IP bind
 
 ### New features

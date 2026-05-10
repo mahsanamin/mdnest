@@ -556,9 +556,26 @@ function App() {
     return () => clearInterval(interval);
   }, [authenticated, selectedNs, currentPath]);
 
-  // Auto-refresh tree every 15s to pick up new/deleted files from CLI, git, etc.
-  // Tree refresh is handled by WebSocket tree-changed events.
-  // No polling needed — saves server load with many users.
+  // Auto-refresh the tree every 60s when the live-collab websocket isn't
+  // available. With websocket: tree-changed events handle external writes
+  // (CLI, MCP, git-sync, another browser tab). Without it: the tree stays
+  // stale until the user clicks the Refresh button. This polling fallback
+  // closes that gap for single-mode and multi-mode-without-collab installs
+  // — costs one tree GET per minute per active session, which is cheap
+  // (the tree is a small JSON document and the handler caches each node's
+  // stat in the request scope).
+  useEffect(() => {
+    if (!authenticated || !selectedNs) return;
+    if (appConfig?.liveCollab) return; // websocket already covers this
+    const interval = setInterval(() => {
+      // Skip if browser tab is hidden — saves a request per minute per
+      // backgrounded tab.
+      if (typeof document !== 'undefined' && document.hidden) return;
+      const ns = selectedNsRef.current;
+      if (ns) refreshTree(ns).catch(() => {});
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [authenticated, selectedNs, appConfig?.liveCollab, refreshTree]);
 
   // Update URL hash
   useEffect(() => {

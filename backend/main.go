@@ -53,6 +53,15 @@ func main() {
 	if len(os.Args) > 2 && os.Args[1] == "-reset-password" {
 		resetPasswordEmail = os.Args[2]
 	}
+	// Support -create-token <name> for host-side API token provisioning
+	// (then exit). Useful when an operator wants to wire an external
+	// agent / CLI / script without going through the web UI's
+	// Settings → API Tokens flow. Prints just the raw token to stdout
+	// so callers can capture it: `TOKEN=$(./mdnest -create-token open-claw)`.
+	createTokenName := ""
+	if len(os.Args) > 2 && os.Args[1] == "-create-token" {
+		createTokenName = os.Args[2]
+	}
 
 	user := env("MDNEST_USER", "admin")
 	password := env("MDNEST_PASSWORD", "changeme")
@@ -110,6 +119,46 @@ func main() {
 
 	secretsDir := env("SECRETS_DIR", filepath.Join(absNotesDir, ".secrets"))
 	multiMode := authMode == "multi"
+
+	// -create-token <name> short-circuit. Generates an API token, persists
+	// it to secretsDir/tokens.json (the same store the HTTP token API
+	// uses), prints just the raw token to stdout, and exits. Other log
+	// noise goes to stderr so callers can `TOKEN=$(... -create-token ...)`
+	// safely. Multi-mode tokens are owned by users — if the caller wants
+	// per-user multi-mode tokens, they can use the web UI; the host-side
+	// CLI here always creates a single-mode-style token (UserID=0,
+	// resolved as the default admin context by the auth middleware).
+	if createTokenName != "" {
+		// Multi-mode tokens MUST be bound to a user — without it, the
+		// auth middleware can't resolve a UserContext and every
+		// permission-gated request would 403. We refuse rather than
+		// silently mint a useless / footgun token. Multi-mode operators
+		// can create tokens via the web UI (Settings → API Tokens),
+		// which binds them to the logged-in user automatically.
+		if multiMode {
+			log.Fatalf("ERROR: -create-token requires AUTH_MODE=single. " +
+				"Multi-mode tokens are owned by users and must be created via " +
+				"the web UI (Settings → API Tokens) so they bind to your account.")
+		}
+		if err := os.MkdirAll(secretsDir, 0700); err != nil {
+			log.Fatalf("ERROR: failed to create secrets dir: %v", err)
+		}
+		th := handlers.NewTokenHandler(secretsDir)
+		// Single mode: bind the token to MDNEST_USER for clarity in
+		// logs/UI. UserID stays 0 because there's no DB user table —
+		// the auth middleware skips per-user resolution in single mode
+		// anyway, so the security posture is identical to web-UI-
+		// created tokens (same hash check, same trust scope).
+		token, _, err := th.CreateAPIToken(createTokenName, 0, user, "")
+		if err != nil {
+			log.Fatalf("ERROR: failed to create token: %v", err)
+		}
+		// Raw token to stdout (and ONLY the raw token); meta to stderr so
+		// shell capture is clean.
+		log.Printf("API token '%s' created (owner: %s) — copy it now, it won't be shown again", createTokenName, user)
+		fmt.Println(token)
+		return
+	}
 
 	// 2FA requirement (optional, multi mode only)
 	require2FA := multiMode && env("REQUIRE_2FA", "false") == "true"
