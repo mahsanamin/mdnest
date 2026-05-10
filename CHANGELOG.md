@@ -18,7 +18,7 @@ All notable changes to mdnest are documented here.
 
 ### Notes
 
-- This release is on `release/v3.9.0`. Version files in code (`backend/handlers/config.go`, `frontend/package.json`, `mdnest`) are deliberately unbumped — the version bump lands as the last commit before merge.
+- This release is on `release/v3.9.0`.
 
 ---
 
