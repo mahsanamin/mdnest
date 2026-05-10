@@ -164,6 +164,59 @@ function Preview({ content, currentPath, ns, onCheckboxToggle }) {
       });
     });
 
+    // In-cell task checkboxes — marked emits `[ ]` / `[x]` inside table
+    // cells as plain text (GFM only renders task syntax inside list
+    // items). Walk every td/th text node, replace each match with an
+    // <input type="checkbox">, and wire a click handler that finds the
+    // matching N-th `[ ]`/`[x]` literal in the source markdown and
+    // toggles it. Indexed left-to-right top-to-bottom across the whole
+    // document for deterministic mapping.
+    if (onCheckboxToggle) {
+      let cellTaskIdx = 0;
+      el.querySelectorAll('td, th').forEach((cell) => {
+        const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT, null);
+        const targets = [];
+        let n;
+        while ((n = walker.nextNode())) targets.push(n);
+        targets.forEach((textNode) => {
+          const text = textNode.nodeValue || '';
+          if (!/\[[ xX]\]/.test(text)) return;
+          const frag = document.createDocumentFragment();
+          let last = 0;
+          const re = /\[([ xX])\]/g;
+          let mm;
+          while ((mm = re.exec(text)) !== null) {
+            if (mm.index > last) frag.appendChild(document.createTextNode(text.slice(last, mm.index)));
+            const checked = mm[1].toLowerCase() === 'x';
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.className = 'task-cell-checkbox';
+            cb.checked = checked;
+            const myIdx = cellTaskIdx++;
+            cb.addEventListener('change', () => {
+              const lines = (content || '').split('\n');
+              let count = 0;
+              for (let i = 0; i < lines.length; i++) {
+                const localRe = /\[([ xX])\]/g;
+                let lm;
+                while ((lm = localRe.exec(lines[i])) !== null) {
+                  if (count === myIdx) {
+                    onCheckboxToggle(i, lm.index);
+                    return;
+                  }
+                  count++;
+                }
+              }
+            });
+            frag.appendChild(cb);
+            last = mm.index + mm[0].length;
+          }
+          if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+          textNode.parentNode.replaceChild(frag, textNode);
+        });
+      });
+    }
+
     // Force all links to open in new tab (safety net)
     el.querySelectorAll('a[href]').forEach((a) => {
       if (!a.getAttribute('target')) a.setAttribute('target', '_blank');

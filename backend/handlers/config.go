@@ -3,6 +3,8 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/mdnest/mdnest/backend/updates"
 )
 
 // ConfigHandler returns public configuration (no auth required).
@@ -16,6 +18,7 @@ type ConfigHandler struct {
 	ssoProvider     string                 // human label for the SSO button (e.g. "Google")
 	devLoginEnabled bool                   // INSECURE_DEV_LOGIN is on (signals frontend to expose /?login=dev + warning bar)
 	grantMaxDepth   int                    // server-side ceiling on grant path depth (0 = no limit). PathPicker uses this to filter the dropdown.
+	updateChecker   *updates.Checker       // optional — polls GitHub releases so the frontend can hint when a newer mdnest is available
 }
 
 // NewConfigHandler creates a new config handler.
@@ -63,6 +66,13 @@ func (h *ConfigHandler) SetGrantMaxDepth(depth int) {
 	h.grantMaxDepth = depth
 }
 
+// SetUpdateChecker wires in the GitHub-release poller. When set, /api/config
+// includes a latestRelease object (once the first poll has succeeded) so the
+// frontend can hint that a newer mdnest version is available.
+func (h *ConfigHandler) SetUpdateChecker(c *updates.Checker) {
+	h.updateChecker = c
+}
+
 // HandleConfig handles GET /api/config (unauthenticated).
 func (h *ConfigHandler) HandleConfig(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -74,7 +84,7 @@ func (h *ConfigHandler) HandleConfig(w http.ResponseWriter, r *http.Request) {
 		"liveCollab":   h.liveCollab,
 		"require2FA":   h.require2FA,
 		"userProvider": h.userProvider,
-		"version":      "3.7.0",
+		"version":      "3.8.0",
 	}
 	if h.serverAlias != "" {
 		resp["serverAlias"] = h.serverAlias
@@ -90,6 +100,28 @@ func (h *ConfigHandler) HandleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.grantMaxDepth > 0 {
 		resp["grantMaxDepth"] = h.grantMaxDepth
+	}
+	if h.updateChecker != nil {
+		s := h.updateChecker.Status()
+		// Skip the field entirely until the first poll succeeds — the
+		// frontend treats absence as "unknown, no banner."
+		if s.LatestVersion != "" {
+			rel := map[string]interface{}{
+				"version":   s.LatestVersion,
+				"url":       s.ReleaseURL,
+				"checkedAt": s.CheckedAt.Format("2006-01-02T15:04:05Z"),
+			}
+			if s.Name != "" {
+				rel["name"] = s.Name
+			}
+			if s.Notes != "" {
+				rel["notes"] = s.Notes
+			}
+			if !s.PublishedAt.IsZero() {
+				rel["publishedAt"] = s.PublishedAt.Format("2006-01-02T15:04:05Z")
+			}
+			resp["latestRelease"] = rel
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)

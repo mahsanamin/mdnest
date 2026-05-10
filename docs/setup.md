@@ -51,6 +51,7 @@ On first run, `setup.sh` copies `mdnest.conf.sample` to `mdnest.conf` and exits,
 | `FRONTEND_ORIGIN` | `http://localhost:<FRONTEND_PORT>` | The full URL where the frontend is served. Used for CORS. Update this if you use a custom domain or reverse proxy. |
 | `BACKEND_PORT` | `8286` | Host port mapped to the backend container (port 8080 internally) |
 | `FRONTEND_PORT` | `3236` | Host port mapped to the frontend container (port 80 internally) |
+| `BIND_ADDRESS` | `127.0.0.1` | Host IP(s) to bind the published ports to. Comma-separated for multi-IP (e.g. `127.0.0.1,100.73.118.115`) so you can expose mdnest over a Tailscale / VPN address while keeping the LAN dark, without falling back to `0.0.0.0`. |
 | `GIT_AUTHOR_NAME` | *(none)* | Name used for git commits when git-sync is enabled |
 | `GIT_AUTHOR_EMAIL` | *(none)* | Email used for git commits when git-sync is enabled |
 | `AUTH_MODE` | `single` | Auth mode: `single` (file-based, no DB) or `multi` (Postgres-backed users & permissions) |
@@ -76,6 +77,8 @@ On first run, `setup.sh` copies `mdnest.conf.sample` to `mdnest.conf` and exits,
 | `SSH_KEY_PATH` | *(none)* | Path to SSH private key on the host. Mounted into the backend for git pull via sync button. Must be passphrase-free. |
 | `CADDY_DOMAIN` | *(none)* | Domain name for automatic HTTPS via Caddy. When set, adds a Caddy container and makes backend/frontend ports internal-only. Requires a DNS A record pointing to the server. |
 | `SERVER_ALIAS` | *(none)* | Short name advertised by `/api/config` so the `mdnest` CLI can auto-pick the right `@alias` on `mdnest login <url> <token>`. |
+| `DISABLE_UPDATE_CHECK` *(v3.8.0+)* | `false` | When `true`, the backend stops polling GitHub for newer mdnest releases. The "Update available" badge in the sidebar disappears. Useful for air-gapped or privacy-sensitive installs. |
+| `UPDATE_CHECK_REPO` *(v3.8.0+)* | `mahsanamin/mdnest` | Owner/repo to poll for releases. Override if you've forked mdnest and want the badge to track your fork instead of upstream. |
 | `MOUNT_<name>` | *(none, at least one required)* | Maps a namespace to a host directory. See below. |
 
 ### Example Configuration

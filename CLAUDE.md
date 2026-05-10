@@ -38,6 +38,8 @@ backend/
   middleware/
     auth.go                  # JWT validation middleware
     cors.go                  # CORS middleware
+  updates/                   # Background poller for newer mdnest releases (v3.8.0+)
+    checker.go               # 24h GitHub releases poll, served on /api/config as latestRelease
   store/
     db.go                    # Postgres connection pool (multi mode only)
     migrate.go               # Auto-migration: schema_migrations, users, access_grants, firebase_uid (005), avatar_url (006), namespace_admins (007)
@@ -66,6 +68,8 @@ frontend/
       ContextMenu.jsx        # Right-click / long-press floating menu
       CommentSidebar.jsx     # Inline comments: slide-out panel, threads, replies, Go To
       HistoryModal.jsx       # Per-file git-sync history viewer + restore (v3.7.0+)
+      MoveToModal.jsx        # Touch-friendly destination picker for "Move to…" context action (v3.8.0+)
+      EditorErrorBoundary.jsx # React error boundary around Live editor — catches Milkdown crashes and flips to Basic (v3.8.0+)
 
 mcp-server/
   index.js                   # MCP server entry — tools + resources wrapping REST API

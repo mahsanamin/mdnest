@@ -19,6 +19,7 @@ import (
 	"github.com/mdnest/mdnest/backend/middleware"
 	"github.com/mdnest/mdnest/backend/sso"
 	"github.com/mdnest/mdnest/backend/store"
+	"github.com/mdnest/mdnest/backend/updates"
 )
 
 func env(key, fallback string) string {
@@ -306,6 +307,15 @@ func main() {
 
 	configHandler := handlers.NewConfigHandler(authMode, enableCollab, serverAlias, require2FA)
 	configHandler.SetGrantMaxDepth(grantMaxDepth)
+
+	// Update-availability check — opt out by setting DISABLE_UPDATE_CHECK=true.
+	// One HTTPS GET to api.github.com per server every 24h; failures are silent
+	// (logged at info level) so air-gapped installs aren't noisy.
+	if env("DISABLE_UPDATE_CHECK", "false") != "true" {
+		updateChecker := updates.New(env("UPDATE_CHECK_REPO", ""))
+		updateChecker.Start(context.Background())
+		configHandler.SetUpdateChecker(updateChecker)
+	}
 	if firebaseClient != nil {
 		webCfg, err := readFirebaseWebConfig(env("FIREBASE_WEB_CONFIG", ""))
 		if err != nil {

@@ -7,7 +7,7 @@ import { gfm } from '@milkdown/preset-gfm';
 import { listener, listenerCtx } from '@milkdown/plugin-listener';
 import { history, undoCommand, redoCommand } from '@milkdown/plugin-history';
 import { clipboard } from '@milkdown/plugin-clipboard';
-import { replaceAll, callCommand, $view, insert, $prose } from '@milkdown/utils';
+import { replaceAll, callCommand, $view, insert, $prose, markdownToSlice } from '@milkdown/utils';
 import { Plugin, PluginKey, TextSelection } from '@milkdown/prose/state';
 import { Decoration, DecorationSet } from '@milkdown/prose/view';
 import { deleteRow, deleteColumn, deleteTable } from '@milkdown/prose/tables';
@@ -200,6 +200,165 @@ const clearEmptyBlockPlugin = $prose((ctx) => {
   });
 });
 
+// Plugin: render `[ ]` / `[x]` inside table cells as interactive checkboxes.
+//
+// Why a decoration plugin and not a schema extension? GFM's table_cell
+// node admits only `paragraph+` content — list items (where Milkdown's
+// task-list-item lives) are not allowed children. Trying to widen the
+// content expression breaks the ProseMirror tables editing plugin
+// (cell selection, tab navigation, paste rules all assume the
+// paragraph-only shape). So instead of changing the schema we layer
+// pure visual decorations on top of literal `[ ]` / `[x]` text:
+//   * an inline decoration with class `tcc-bracket-text` hides the
+//     three characters via CSS (display:none does break cursor flow,
+//     so we use width:0 + visibility:hidden so the cursor steps over
+//     the brackets cleanly);
+//   * a widget decoration at the same position renders an
+//     `<input type="checkbox">` with `contentEditable=false` and a
+//     click handler that dispatches a transaction replacing the
+//     three-char text range with the toggled token. The widget is
+//     rebuilt on every transaction (apply() runs `buildDecorations`
+//     against `tr.doc`) so its captured `from`/`to` positions are
+//     always fresh.
+// Round-trip: the underlying text in the document remains literal
+// `[ ]` / `[x]`, so toMarkdown serializes it unchanged. Rerendering
+// the same markdown reapplies the decorations. Same trick works in
+// any inline context (not only table cells), but we scope the scan
+// to cells to avoid stepping on the existing GFM task-list rendering
+// for top-level bullet lists.
+const tableCellCheckboxKey = new PluginKey('table-cell-checkbox');
+const TASK_RE = /\[([ xX])\]/g;
+
+function buildTableCellCheckboxDecorations(doc, viewRef) {
+  const decorations = [];
+  doc.descendants((cell, cellPos) => {
+    if (cell.type.name !== 'table_cell' && cell.type.name !== 'table_header') {
+      return true;
+    }
+    const cellContentStart = cellPos + 1;
+    cell.descendants((child, posInCell) => {
+      if (!child.isText) return true;
+      const text = child.text || '';
+      TASK_RE.lastIndex = 0;
+      let m;
+      while ((m = TASK_RE.exec(text)) !== null) {
+        const from = cellContentStart + posInCell + m.index;
+        const to = from + 3;
+        const checked = m[1].toLowerCase() === 'x';
+
+        decorations.push(
+          Decoration.inline(from, to, { class: 'tcc-bracket-text' })
+        );
+        decorations.push(
+          Decoration.widget(
+            from,
+            () => makeCheckboxWidget(viewRef, from, to, checked),
+            { side: -1, ignoreSelection: true }
+          )
+        );
+      }
+      return false; // text nodes have no children
+    });
+    return false; // already scanned this cell's contents
+  });
+  return DecorationSet.create(doc, decorations);
+}
+
+function makeCheckboxWidget(viewRef, from, to, checked) {
+  // Wrap the <input> in a contentEditable=false span. Why a wrapper:
+  // when a bare input sits inside a ProseMirror node-view-managed
+  // cell, mousedown on the input bubbles up to ProseMirror's table
+  // editing plugin, which selects the cell (visually "expanding" it
+  // with cell-selection highlight) before our click handler fires.
+  // The wrapper acts as the event boundary — we stopPropagation on
+  // every mouse + pointer event at this layer so ProseMirror never
+  // sees the interaction. The input keeps native checkbox styling
+  // and accessibility (Space/Enter still toggles via keyboard).
+  const wrap = document.createElement('span');
+  wrap.className = 'tcc-cell-checkbox-wrap';
+  wrap.contentEditable = 'false';
+  wrap.setAttribute('aria-hidden', 'false');
+
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.className = 'tcc-cell-checkbox';
+  input.checked = checked;
+  input.contentEditable = 'false';
+  input.tabIndex = -1; // don't steal focus on Tab navigation in cells
+
+  const stop = (e) => {
+    e.stopPropagation();
+  };
+  // mousedown is what ProseMirror's tableEditingPlugin listens to
+  // for cell selection — we additionally preventDefault on the
+  // outer wrapper so the click never enters the ProseMirror view's
+  // event pipeline. The native checkbox's own toggle still happens
+  // because we listen for `click` on the input below and dispatch
+  // ourselves; we don't rely on the default toggle (which would race
+  // against our state-driven re-render of the widget).
+  ['mousedown', 'pointerdown', 'touchstart'].forEach((evt) => {
+    wrap.addEventListener(evt, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    });
+  });
+  ['mouseup', 'pointerup', 'touchend', 'dblclick'].forEach((evt) => {
+    wrap.addEventListener(evt, stop);
+  });
+
+  const toggle = (e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    const view = viewRef.current;
+    if (!view) return;
+    const next = checked ? '[ ]' : '[x]';
+    const { state } = view;
+    // The decoration plugin rebuilds on every transaction, so `from`
+    // is the position at the time this widget was painted. If a
+    // concurrent transaction shifted the doc since, we map through
+    // the head-of-state mapping just to be safe.
+    const tr = state.tr.replaceWith(from, to, state.schema.text(next));
+    view.dispatch(tr);
+  };
+  input.addEventListener('click', toggle);
+  // Keyboard: Space/Enter on a focused checkbox should still toggle.
+  input.addEventListener('keydown', (e) => {
+    if (e.key === ' ' || e.key === 'Enter') toggle(e);
+  });
+
+  wrap.appendChild(input);
+  return wrap;
+}
+
+const tableCellCheckboxPlugin = $prose(() => {
+  const viewRef = { current: null };
+  return new Plugin({
+    key: tableCellCheckboxKey,
+    view(editorView) {
+      viewRef.current = editorView;
+      return {
+        destroy() { viewRef.current = null; },
+      };
+    },
+    state: {
+      init(_, state) {
+        return buildTableCellCheckboxDecorations(state.doc, viewRef);
+      },
+      apply(tr, old) {
+        if (!tr.docChanged) return old.map(tr.mapping, tr.doc);
+        return buildTableCellCheckboxDecorations(tr.doc, viewRef);
+      },
+    },
+    props: {
+      decorations(state) {
+        return tableCellCheckboxKey.getState(state);
+      },
+    },
+  });
+});
+
 // ProseMirror node view for mermaid code blocks
 // Renders MermaidBlock React component in place of the <pre> element
 const mermaidNodeView = $view(codeBlockSchema.node, (ctx) => {
@@ -311,7 +470,8 @@ function MilkdownEditor({ content, onChange, readOnly, onEditorReady }) {
       .use(clipboard)
       .use(mermaidNodeView)
       .use(clearEmptyBlockPlugin)
-      .use(commentHighlightPlugin);
+      .use(commentHighlightPlugin)
+      .use(tableCellCheckboxPlugin);
   }, [readOnly]);
 
   // Unsuppress on real user interaction — keydown/mousedown in the editor area.
@@ -577,11 +737,35 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly, onComment, c
         }
       }
 
+      // pasteMarkdown — go through markdownToSlice (which does a
+      // markdown → ProseMirror doc → DOM → Slice round trip via the
+      // schema's parseDOM rules). The DOM detour matters for task
+      // list items: GFM's listItemSchema renders `<li data-item-type="task" data-checked="...">`,
+      // and parseDOM picks the `checked` attr back out — so a pasted
+      // `- [ ] Mercury` survives as an interactive task item. The
+      // older `insert(md)` path skipped the DOM round trip and used
+      // `Slice(doc.content, selection.openStart, selection.openEnd)`,
+      // which mis-identified block content as inline when the cursor
+      // sat in a paragraph and silently flattened bullets/checkboxes
+      // to plain lines.
+      const pasteMarkdown = (md) => {
+        if (!md || !editor) return false;
+        let inserted = false;
+        editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx);
+          const slice = markdownToSlice(md)(ctx);
+          if (!slice) return;
+          view.dispatch(view.state.tr.replaceSelection(slice).scrollIntoView());
+          inserted = true;
+        });
+        return inserted;
+      };
+
       // 3. Rich HTML → convert to markdown then insert as parsed nodes
       if (html && hasRichContent(html)) {
         e.preventDefault();
         const md = htmlToMarkdown(html);
-        if (editor) editor.action(insert(md));
+        pasteMarkdown(md);
         return;
       }
 
@@ -589,7 +773,7 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly, onComment, c
       const text = cb.getData('text/plain');
       if (text && editor && /^[\s]*[#\-*>|`\[]/.test(text)) {
         e.preventDefault();
-        editor.action(insert(text));
+        pasteMarkdown(text);
         return;
       }
       // Otherwise: default Milkdown paste

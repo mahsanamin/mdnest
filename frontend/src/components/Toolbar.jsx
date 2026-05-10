@@ -33,8 +33,24 @@ function Toolbar({ currentPath, onToggleSidebar, onChangePassword, onRename, onD
           >Live</button>
         </div>
       )}
-      <span className="toolbar-path">
-        {currentPath || 'No file selected'}
+      {/* Path display splits dir + basename so the filename never gets
+          ellipsized away on narrow screens. .toolbar-path-dir shrinks
+          and ellipsizes; .toolbar-path-base has flex-shrink: 0 so it
+          stays visible even when the toolbar is cramped. Full path is
+          on the title="" attribute for desktop hover reveal. */}
+      <span className="toolbar-path" title={currentPath || ''}>
+        {!currentPath && 'No file selected'}
+        {currentPath && (() => {
+          const idx = currentPath.lastIndexOf('/');
+          const dir = idx >= 0 ? currentPath.substring(0, idx + 1) : '';
+          const base = idx >= 0 ? currentPath.substring(idx + 1) : currentPath;
+          return (
+            <>
+              {dir && <span className="toolbar-path-dir">{dir}</span>}
+              <span className="toolbar-path-base">{base}</span>
+            </>
+          );
+        })()}
         {currentPath && (
           <button
             className={`toolbar-inline-refresh${refreshing ? ' spinning' : ''}`}

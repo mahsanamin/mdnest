@@ -7,6 +7,7 @@ import Sidebar from './components/Sidebar.jsx';
 import Toolbar from './components/Toolbar.jsx';
 import { lazy, Suspense } from 'react';
 import Editor from './components/Editor.jsx';
+import EditorErrorBoundary from './components/EditorErrorBoundary.jsx';
 const LiveEditor = lazy(() => import('./components/LiveEditor.jsx'));
 import Preview from './components/Preview.jsx';
 import ContextMenu from './components/ContextMenu.jsx';
@@ -16,6 +17,8 @@ import PresenceBar from './components/PresenceBar.jsx';
 import CommentSidebar from './components/CommentSidebar.jsx';
 import ShareDialog from './components/ShareDialog.jsx';
 import HistoryModal from './components/HistoryModal.jsx';
+import MoveToModal from './components/MoveToModal.jsx';
+import ReleaseNotesModal from './components/ReleaseNotesModal.jsx';
 import CollabClient from './collab.js';
 import {
   getToken,
@@ -109,12 +112,32 @@ function setHash(ns, path) {
   window.history.replaceState(null, '', '#' + hash);
 }
 
+// decodeJwtSub returns the `sub` claim of the JWT (the username), without
+// verifying the signature. Used in single-user mode where there's no
+// /api/me endpoint to fetch user info from — we just need the display
+// name for the sidebar, and the JWT already carries it.
+function decodeJwtSub(token) {
+  if (!token) return null;
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    return JSON.parse(atob(parts[1])).sub || null;
+  } catch {
+    return null;
+  }
+}
+
 function App() {
   const [ssoError, setSsoError] = useState(() => consumeSSOHashOnLoad());
   const [authenticated, setAuthenticated] = useState(!!getToken());
   const [namespaces, setNamespaces] = useState([]);
   const [selectedNs, setSelectedNs] = useState(null);
   const [tree, setTree] = useState([]);
+  // True while a getTree() request is in flight. Surfaced in the sidebar
+  // so slow connections show a "Loading…" hint instead of the
+  // "No files yet" empty-state copy (which made it look like the
+  // namespace itself was empty mid-fetch).
+  const [treeLoading, setTreeLoading] = useState(false);
   const [currentPath, setCurrentPath] = useState(null);
   // null = no note loaded yet (initial mount, after closing a note, or while
   // a getNote() is in flight). The editor components key off this — they
@@ -145,6 +168,9 @@ function App() {
   const [viewMode, setViewMode] = useState(() => localStorage.getItem('mdnest_view_mode') || 'editor');
   const [editorMode, setEditorMode] = useState('live');
   const [editorModeReady, setEditorModeReady] = useState(false);
+  // When the Live editor throws on a specific file, remember that path
+  // so the post-fallback banner can name it. Cleared on file change.
+  const [liveCrashedFor, setLiveCrashedFor] = useState(null);
 
   // Helper: get/set per-file preferences from localStorage
   const getFilePrefs = useCallback((ns, path) => {
@@ -217,7 +243,18 @@ function App() {
   const [restoreBanner, setRestoreBanner] = useState(null); // {username, ref, etag}
   // historyModal is { ns, path } when the History modal is open, null otherwise.
   const [historyModal, setHistoryModal] = useState(null);
+  // moveModal is { ns, target } when the Move-to picker is open. The
+  // picker replaces drag-and-drop on touch devices (where draggable is
+  // false on tree rows) and is also available from the context menu on
+  // desktop as a more accessible alternative to dragging.
+  const [moveModal, setMoveModal] = useState(null);
   const [updateAvailable, setUpdateAvailable] = useState(null); // {current, latest}
+  // Server-side update notice — surfaces a newer mdnest GitHub release.
+  // Distinct from `updateAvailable` (that one means "your browser bundle is
+  // older than the running server, refresh the tab"). dismissedReleaseVer
+  // hides the badge after the user has acknowledged a specific version.
+  const [showReleaseNotes, setShowReleaseNotes] = useState(false);
+  const [dismissedReleaseVer, setDismissedReleaseVer] = useState(() => localStorage.getItem('mdnest_dismissed_release_version') || '');
   const [wsStatus, setWsStatus] = useState('disconnected'); // 'connected' | 'connecting' | 'disconnected'
   const etagRef = useRef(null);
   const collabRef = useRef(null);
@@ -403,11 +440,14 @@ function App() {
   const refreshTree = useCallback(async (ns) => {
     const target = ns || selectedNs;
     if (!target) return;
+    setTreeLoading(true);
     try {
       const data = await getTree(target);
       setTree(data.children || []);
     } catch (e) {
       console.error('Failed to load file tree:', e);
+    } finally {
+      setTreeLoading(false);
     }
   }, [selectedNs]);
 
@@ -420,6 +460,18 @@ function App() {
       if (isMulti) {
         const me = await fetchMe().catch(() => null);
         setUserInfo(me);
+      } else {
+        // Single mode has no /api/me endpoint, but the JWT's `sub` claim is
+        // MDNEST_USER from mdnest.conf — read it client-side so the sidebar
+        // shows the configured name instead of the "User" fallback. The
+        // single-mode user implicitly owns everything, so role flags match
+        // a superadmin for UI-gating purposes.
+        const username = decodeJwtSub(getToken());
+        setUserInfo(
+          username
+            ? { username, role: 'admin', is_super_admin: true, admin_namespaces: [], grants: [] }
+            : null
+        );
       }
 
       const nsList = await loadNamespaces();
@@ -727,12 +779,23 @@ function App() {
     if (collabRef.current) collabRef.current.sendSelection(fromLine, fromCh, toLine, toCh);
   }, []);
 
-  const handleCheckboxToggle = useCallback(async (lineIndex) => {
+  const handleCheckboxToggle = useCallback(async (lineIndex, colIndex) => {
     if (content === null) return;
     const lines = content.split('\n');
     const line = lines[lineIndex];
     if (!line) return;
-    if (line.includes('- [ ]')) {
+    // colIndex provided → toggle the bracket pair starting at that
+    // column. Used for in-cell checkboxes (no list-item prefix).
+    if (typeof colIndex === 'number') {
+      const segment = line.substr(colIndex, 3);
+      if (segment === '[ ]') {
+        lines[lineIndex] = line.substr(0, colIndex) + '[x]' + line.substr(colIndex + 3);
+      } else if (segment === '[x]' || segment === '[X]') {
+        lines[lineIndex] = line.substr(0, colIndex) + '[ ]' + line.substr(colIndex + 3);
+      } else {
+        return;
+      }
+    } else if (line.includes('- [ ]')) {
       lines[lineIndex] = line.replace('- [ ]', '- [x]');
     } else if (line.includes('- [x]')) {
       lines[lineIndex] = line.replace('- [x]', '- [ ]');
@@ -825,6 +888,14 @@ function App() {
           await openNote(target.path);
         }
         setHistoryModal({ ns: selectedNs, path: target.path });
+        break;
+      }
+      case 'move': {
+        if (!target || !selectedNs) return;
+        // The MoveToModal handles the destination picking, the API
+        // call, and the validity filtering itself. We just open it
+        // with the target and hand back a refresh on success.
+        setMoveModal({ ns: selectedNs, target });
         break;
       }
       case 'delete-folder': {
@@ -1055,6 +1126,7 @@ function App() {
       )}
       <Sidebar
         tree={tree}
+        treeLoading={treeLoading}
         onSelect={openNote}
         currentPath={currentPath}
         namespaces={namespaces}
@@ -1064,7 +1136,7 @@ function App() {
         onDrop={canWrite('') ? handleTreeDrop : null}
         visible={sidebarVisible}
         onClose={() => setSidebarVisible(false)}
-        userInfo={isMulti ? userInfo : null}
+        userInfo={userInfo}
         onLogout={logout}
         onAdminPanel={isAdmin && isMulti ? () => setShowAdminPanel(true) : null}
         onNewNote={canWrite('') ? () => doCreateNote(null) : null}
@@ -1072,6 +1144,14 @@ function App() {
         onRefreshTree={handleRefresh}
         isAdmin={isAdmin}
         serverVersion={appConfig?.version}
+        updateAvailableVersion={
+          appConfig?.latestRelease &&
+          isVersionNewer(appConfig.latestRelease.version, appConfig.version) &&
+          appConfig.latestRelease.version !== dismissedReleaseVer
+            ? appConfig.latestRelease.version
+            : null
+        }
+        onShowReleaseNotes={() => setShowReleaseNotes(true)}
         width={sidebarWidth}
         onResize={setSidebarWidth}
       />
@@ -1099,6 +1179,9 @@ function App() {
           onEditorModeChange={(mode) => {
             setEditorMode(mode);
             localStorage.setItem('mdnest_editor_mode', mode);
+            // User explicitly opted back into Live for this file — clear
+            // the post-crash banner so we don't leave a stale notice up.
+            if (mode === 'live') setLiveCrashedFor(null);
             if (selectedNs && currentPath) {
               restoreScrollPosition(selectedNs, currentPath);
             }
@@ -1153,6 +1236,13 @@ function App() {
             <button onClick={() => setRestoreBanner(null)}>Dismiss</button>
           </div>
         )}
+        {liveCrashedFor && liveCrashedFor === currentPath && (
+          <div className="restore-banner">
+            Live editor failed to load this file — switched to Basic mode so you can keep working.
+            You can try Live again from the toolbar; the crash is usually content-specific.
+            <button onClick={() => setLiveCrashedFor(null)}>Dismiss</button>
+          </div>
+        )}
         <div className="split-view">
           {currentPath ? (
             <>
@@ -1169,34 +1259,48 @@ function App() {
                   {content === null ? (
                     <div className="editor-loading">Loading note…</div>
                   ) : editorMode === 'live' ? (
-                    <Suspense fallback={<div className="editor-loading">Loading live editor...</div>}>
-                      {/* key forces a fresh Milkdown instance per note, so the
-                          undo stack is per-note (no cross-note Cmd+Z) and never
-                          contains the moment-the-prop-was-empty (because we only
-                          mount once content is a real string). */}
-                      <LiveEditor
-                        key={`${selectedNs}/${currentPath}`}
-                        content={content}
-                        onChange={canWriteCurrent ? handleContentChange : null}
-                        currentPath={currentPath}
-                        ns={selectedNs}
-                        readOnly={!canWriteCurrent}
-                        comments={commentsEnabled ? comments : []}
-                        onComment={!commentsEnabled ? null : (sel) => {
-                          setPendingCommentSelection(sel);
-                          setShowComments(true);
-                        }}
-                        onGoToReady={(fn) => { goToCommentRef.current = fn; }}
-                        onHighlightClick={!commentsEnabled ? null : (commentId) => {
-                          setShowComments(true);
-                          setHighlightedCommentId(commentId);
-                          if (viewMode === 'preview') {
-                            setViewMode('editor');
-                            localStorage.setItem('mdnest_view_mode', 'editor');
-                          }
-                        }}
-                      />
-                    </Suspense>
+                    <EditorErrorBoundary
+                      resetKey={`${selectedNs}/${currentPath}`}
+                      onError={() => {
+                        // Live editor blew up on this file (Milkdown
+                        // parse, plugin init, node-view crash, etc.).
+                        // Auto-fallback to Basic so the user can still
+                        // edit, persist that choice, and remember the
+                        // path so the banner can name it.
+                        setLiveCrashedFor(currentPath);
+                        setEditorMode('basic');
+                        try { localStorage.setItem('mdnest_editor_mode', 'basic'); } catch { /* ignore */ }
+                      }}
+                    >
+                      <Suspense fallback={<div className="editor-loading">Loading live editor...</div>}>
+                        {/* key forces a fresh Milkdown instance per note, so the
+                            undo stack is per-note (no cross-note Cmd+Z) and never
+                            contains the moment-the-prop-was-empty (because we only
+                            mount once content is a real string). */}
+                        <LiveEditor
+                          key={`${selectedNs}/${currentPath}`}
+                          content={content}
+                          onChange={canWriteCurrent ? handleContentChange : null}
+                          currentPath={currentPath}
+                          ns={selectedNs}
+                          readOnly={!canWriteCurrent}
+                          comments={commentsEnabled ? comments : []}
+                          onComment={!commentsEnabled ? null : (sel) => {
+                            setPendingCommentSelection(sel);
+                            setShowComments(true);
+                          }}
+                          onGoToReady={(fn) => { goToCommentRef.current = fn; }}
+                          onHighlightClick={!commentsEnabled ? null : (commentId) => {
+                            setShowComments(true);
+                            setHighlightedCommentId(commentId);
+                            if (viewMode === 'preview') {
+                              setViewMode('editor');
+                              localStorage.setItem('mdnest_view_mode', 'editor');
+                            }
+                          }}
+                        />
+                      </Suspense>
+                    </EditorErrorBoundary>
                   ) : (
                     <Editor
                       key={`${selectedNs}/${currentPath}`}
@@ -1284,6 +1388,23 @@ function App() {
           }}
         />
       )}
+      {moveModal && (
+        <MoveToModal
+          namespace={moveModal.ns}
+          source={moveModal.target}
+          onClose={() => setMoveModal(null)}
+          onMoved={async (newPath) => {
+            setMoveModal(null);
+            await refreshTree();
+            // If the user moved the file that's currently open, follow
+            // it to its new path so the editor stays in sync.
+            if (moveModal.target.path === currentPath) {
+              setCurrentPath(newPath);
+              setHash(selectedNs, newPath);
+            }
+          }}
+        />
+      )}
       <ContextMenu
         visible={ctxMenu.visible}
         x={ctxMenu.x}
@@ -1295,6 +1416,19 @@ function App() {
         isAdmin={isAdmin && isMulti}
         selectedNs={selectedNs}
       />
+      {showReleaseNotes && appConfig?.latestRelease && (
+        <ReleaseNotesModal
+          release={appConfig.latestRelease}
+          runningVersion={appConfig.version}
+          onClose={() => setShowReleaseNotes(false)}
+          onDismiss={() => {
+            const v = appConfig.latestRelease.version;
+            localStorage.setItem('mdnest_dismissed_release_version', v);
+            setDismissedReleaseVer(v);
+            setShowReleaseNotes(false);
+          }}
+        />
+      )}
       {commentsEnabled && showComments && currentPath && (
         <CommentSidebar
           comments={comments}
@@ -1312,6 +1446,30 @@ function App() {
       )}
     </div>
   );
+}
+
+// isVersionNewer returns true when `a` is a strictly higher semver than `b`.
+// Both are bare versions like "3.8.1" (no leading "v"). Missing components
+// default to 0, so "3.8" is treated as "3.8.0". Non-numeric components fall
+// back to a string compare on the suffix, which is good enough for the tag
+// formats mdnest actually publishes (semver, occasionally with a "-rc.N"
+// pre-release suffix that should sort before the final release).
+function isVersionNewer(a, b) {
+  if (!a || !b) return false;
+  const parse = (v) => String(v).split(/[.-]/).map((part) => {
+    const n = Number(part);
+    return Number.isFinite(n) ? n : part;
+  });
+  const pa = parse(a);
+  const pb = parse(b);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] === undefined ? 0 : pa[i];
+    const y = pb[i] === undefined ? 0 : pb[i];
+    if (x === y) continue;
+    if (typeof x === 'number' && typeof y === 'number') return x > y;
+    return String(x) > String(y);
+  }
+  return false;
 }
 
 export default App;

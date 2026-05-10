@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { getNoteHistory, getNoteAtCommit, restoreNote } from '../api.js';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { getNoteHistory, getNoteAtCommit, getNote, restoreNote } from '../api.js';
 
 // HistoryModal — view per-file git-sync history and (optionally) restore
 // an older version. Reads from GET /api/note/history, displays the most
@@ -27,6 +27,13 @@ export default function HistoryModal({
   const [preview, setPreview] = useState(''); // content at selected commit
   const [previewLoading, setPreviewLoading] = useState(false);
   const [restoring, setRestoring] = useState(false);
+  // Diff support: when compareTo is non-null, the right pane shows a unified
+  // diff between `selected`'s content and `compareTo`'s content. compareTo
+  // is either 'current' (the live working file via getNote) or another
+  // commit object from `commits`. Default null = single-content view.
+  const [compareTo, setCompareTo] = useState(null);
+  const [compareContent, setCompareContent] = useState('');
+  const [compareLoading, setCompareLoading] = useState(false);
 
   // Load the commit list once when the modal opens.
   useEffect(() => {
@@ -61,6 +68,40 @@ export default function HistoryModal({
       .finally(() => { if (!cancelled) setPreviewLoading(false); });
     return () => { cancelled = true; };
   }, [ns, path, selected]);
+
+  // Load comparison content when compareTo changes. 'current' fetches the
+  // live note via getNote (no ref), so the diff reflects what restoring
+  // `selected` would actually undo right now. A commit object fetches that
+  // commit's content via getNoteAtCommit.
+  useEffect(() => {
+    if (!compareTo) { setCompareContent(''); return; }
+    let cancelled = false;
+    setCompareLoading(true);
+    const p = compareTo === 'current'
+      ? getNote(ns, path).then((r) => r.text)
+      : getNoteAtCommit(ns, path, compareTo.commit);
+    p.then((text) => { if (!cancelled) setCompareContent(text); })
+      .catch((err) => { if (!cancelled) setCompareContent('(failed to load: ' + err.message + ')'); })
+      .finally(() => { if (!cancelled) setCompareLoading(false); });
+    return () => { cancelled = true; };
+  }, [ns, path, compareTo]);
+
+  // Recompute the unified diff whenever either side changes. Memoised
+  // because diffLines is O(m*n) — fine for typical note files (a few KB)
+  // but no need to redo it on every render.
+  const diffRows = useMemo(() => {
+    if (!compareTo || !preview || !compareContent) return null;
+    return diffLines(preview, compareContent);
+  }, [compareTo, preview, compareContent]);
+
+  // Drop the comparison target if the user picks a new primary commit and
+  // the comparison was that same commit — pointless to diff a commit
+  // against itself.
+  useEffect(() => {
+    if (compareTo && compareTo !== 'current' && selected && compareTo.commit === selected.commit) {
+      setCompareTo(null);
+    }
+  }, [selected, compareTo]);
 
   const handleRestore = useCallback(async () => {
     if (!selected) return;
@@ -120,16 +161,64 @@ export default function HistoryModal({
 
           <div className="history-preview">
             {selected ? (
-              previewLoading ? (
-                <div className="admin-hint">Loading preview…</div>
-              ) : (
-                <>
-                  <div className="history-preview-header">
-                    Content as of <strong>{absoluteTime(selected.unix_ts)}</strong> ({selected.commit.slice(0, 7)})
+              <>
+                <div className="history-preview-header">
+                  {compareTo ? (
+                    <>
+                      Diff: <strong>{selected.commit.slice(0, 7)}</strong>
+                      {' '}({absoluteTime(selected.unix_ts)})
+                      {' → '}
+                      <strong>{compareTo === 'current' ? 'current' : compareTo.commit.slice(0, 7)}</strong>
+                      {compareTo !== 'current' && ` (${absoluteTime(compareTo.unix_ts)})`}
+                    </>
+                  ) : (
+                    <>Content as of <strong>{absoluteTime(selected.unix_ts)}</strong> ({selected.commit.slice(0, 7)})</>
+                  )}
+                  <div className="history-compare-row">
+                    <label>Compare to:</label>
+                    <select
+                      value={compareTo === 'current' ? '__current' : (compareTo ? compareTo.commit : '')}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (!v) setCompareTo(null);
+                        else if (v === '__current') setCompareTo('current');
+                        else {
+                          const c = (commits || []).find((x) => x.commit === v);
+                          if (c) setCompareTo(c);
+                        }
+                      }}
+                    >
+                      <option value="">— (show content)</option>
+                      <option value="__current">Current version</option>
+                      {(commits || [])
+                        .filter((c) => !selected || c.commit !== selected.commit)
+                        .map((c) => (
+                          <option key={c.commit} value={c.commit}>
+                            {c.commit.slice(0, 7)} — {relativeTime(c.unix_ts)}
+                          </option>
+                        ))}
+                    </select>
                   </div>
+                </div>
+                {previewLoading || compareLoading ? (
+                  <div className="admin-hint">Loading…</div>
+                ) : compareTo && diffRows ? (
+                  diffRows.length === 0 ? (
+                    <div className="admin-hint">No differences — these versions are identical.</div>
+                  ) : (
+                    <pre className="history-content history-diff">
+                      {diffRows.map((row, i) => (
+                        <div key={i} className={`diff-row diff-${row.type}`}>
+                          <span className="diff-marker">{row.type === 'add' ? '+' : row.type === 'del' ? '-' : ' '}</span>
+                          <span className="diff-text">{row.text}</span>
+                        </div>
+                      ))}
+                    </pre>
+                  )
+                ) : (
                   <pre className="history-content">{preview}</pre>
-                </>
-              )
+                )}
+              </>
             ) : (
               <div className="admin-hint">Select a commit on the left to preview its content.</div>
             )}
@@ -170,4 +259,49 @@ function relativeTime(unixTs) {
 
 function absoluteTime(unixTs) {
   return new Date(unixTs * 1000).toLocaleString();
+}
+
+// diffLines returns a unified diff between two strings as an array of
+// { type: 'same' | 'add' | 'del', text } rows. "del" lines exist only in
+// `oldText`; "add" lines exist only in `newText`. Used in compare mode to
+// show what restoring an older version would actually change vs current.
+//
+// LCS-based — O(m*n) time/space. Note files are typically a few KB / a few
+// hundred lines, so this is fine. If a future use case lands a 10k-line
+// file in here, swap in a Myers diff library.
+function diffLines(oldText, newText) {
+  const oldLines = (oldText || '').split('\n');
+  const newLines = (newText || '').split('\n');
+  const m = oldLines.length;
+  const n = newLines.length;
+  // dp[i][j] = LCS length of oldLines[i..] and newLines[j..].
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = m - 1; i >= 0; i--) {
+    for (let j = n - 1; j >= 0; j--) {
+      dp[i][j] = oldLines[i] === newLines[j]
+        ? dp[i + 1][j + 1] + 1
+        : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+  const out = [];
+  let i = 0;
+  let j = 0;
+  while (i < m && j < n) {
+    if (oldLines[i] === newLines[j]) {
+      out.push({ type: 'same', text: oldLines[i] });
+      i++; j++;
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      out.push({ type: 'del', text: oldLines[i] });
+      i++;
+    } else {
+      out.push({ type: 'add', text: newLines[j] });
+      j++;
+    }
+  }
+  while (i < m) out.push({ type: 'del', text: oldLines[i++] });
+  while (j < n) out.push({ type: 'add', text: newLines[j++] });
+  // If the only rows are "same" (identical inputs), return [] so the UI
+  // can show "no differences" rather than a blank diff pane.
+  if (out.every((r) => r.type === 'same')) return [];
+  return out;
 }

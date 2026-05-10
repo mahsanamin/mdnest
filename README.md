@@ -20,7 +20,8 @@ Accessible from a browser on any device, from a CLI in any terminal, and from AI
 - **Plain files, no lock-in.** Notes are `.md` files in directories on disk. No proprietary format. `cat`, `grep`, `git` — your notes work with every tool you already use.
 - **Private by default.** Binds to localhost. No cloud, no third-party services, no telemetry. Add Tailscale for solo remote access, or a TLS reverse proxy (Caddy / nginx / Cloudflare Tunnel) for a team install.
 - **Git backup on your terms.** Optional sidecar auto-commits and pushes to a private GitHub repo on a schedule you control.
-- **In-app version history.** When git-sync is enabled, right-click any note → **History** to browse past versions and one-click restore. Restoration is itself versioned — undoable through the same modal. No leaving the app to find an old version.
+- **In-app version history.** When git-sync is enabled, right-click any note → **History** to browse past versions, **compare any two of them as a diff**, and one-click restore. Restoration is itself versioned — undoable through the same modal. No leaving the app to find an old version.
+- **Update-aware.** The backend polls GitHub for newer releases once a day; when one drops, a small badge in the sidebar footer surfaces the release notes inline so you can read what actually changed before deciding to update. Opt-out via `DISABLE_UPDATE_CHECK=true` for air-gapped installs.
 
 ### Who is this for?
 
@@ -186,7 +187,7 @@ Everything is driven by `mdnest.conf`. Run `./mdnest-server rebuild` after any c
 | `MDNEST_JWT_SECRET` | JWT signing secret | `changeme` |
 | `BACKEND_PORT` | Backend API port | `8286` |
 | `FRONTEND_PORT` | Frontend UI port | `3236` |
-| `BIND_ADDRESS` | Network bind address | `127.0.0.1` |
+| `BIND_ADDRESS` | Host IP(s) to bind to. Comma-separated for multi-IP (e.g. `127.0.0.1,100.73.118.115`) — useful for localhost + a Tailscale / VPN address without `0.0.0.0`. | `127.0.0.1` |
 | `MOUNT_<name>` | Map a host directory as a namespace | -- |
 | `AUTH_MODE` | `single` (file-based, no DB) or `multi` (Postgres-backed users & permissions) | `single` |
 | `POSTGRES_PASSWORD` | PostgreSQL password (required when `AUTH_MODE=multi`) | -- |

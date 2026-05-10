@@ -22,6 +22,10 @@ BACKEND_PORT=8286
 FRONTEND_PORT=3236
 # Bind address: 127.0.0.1 = localhost only (default)
 # Only set to 0.0.0.0 if you understand the security implications.
+# Comma-separated values bind multiple host IPs — useful when you want
+# localhost AND a private overlay address (Tailscale, ZeroTier, VPN) but
+# NOT 0.0.0.0. Each IP must be valid for an interface on this host.
+# Example: BIND_ADDRESS=127.0.0.1,100.73.118.115
 # BIND_ADDRESS=127.0.0.1
 
 # Git sync (optional — auto-enabled when keys are in git-sync/keys/)
@@ -158,6 +162,20 @@ GIT_AUTHOR_EMAIL=you@example.com
 # rebuild. Setting this to a unique value per install removes the conflict.
 # Leave commented for a single install — the default works fine.
 # COMPOSE_PROJECT_NAME=mdnest-dev
+
+# ==========================================================================
+# Update availability check
+# ==========================================================================
+# By default the backend polls https://api.github.com/repos/mahsanamin/mdnest
+# once every 24 hours and surfaces the latest release on /api/config so the
+# frontend can hint when a newer mdnest is available (with the release notes
+# inline). One outbound HTTPS request per server per day; failures are
+# logged at info level and ignored.
+#
+# Set to true on air-gapped / privacy-sensitive installs to disable the
+# check entirely. UPDATE_CHECK_REPO can override the upstream repo for forks.
+# DISABLE_UPDATE_CHECK=true
+# UPDATE_CHECK_REPO=mahsanamin/mdnest
 
 # HTTPS with Caddy (optional)
 # Set CADDY_DOMAIN to enable automatic HTTPS via Let's Encrypt.

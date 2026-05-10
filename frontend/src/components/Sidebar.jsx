@@ -38,6 +38,7 @@ function formatSyncTime(dateStr) {
 
 function Sidebar({
   tree,
+  treeLoading,
   onSelect,
   currentPath,
   namespaces,
@@ -57,9 +58,29 @@ function Sidebar({
   width,
   onResize,
   serverVersion,
+  updateAvailableVersion,
+  onShowReleaseNotes,
 }) {
   const [syncing, setSyncing] = useState(false);
   const [syncInfo, setSyncInfo] = useState(null); // {isGitRepo, hasRemote, lastCommit, ...}
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Manual tree refresh — always-visible escape hatch for cases where the
+  // automatic propagation can't reach the client: single mode (no
+  // WebSocket at all), multi mode without ENABLE_LIVE_COLLAB, or a
+  // collab-enabled session with no file open (the per-file WS is closed
+  // until a note is selected, so a `tree-changed` broadcast never arrives).
+  // Files created via the `mdnest` CLI hit those exact paths.
+  const handleManualRefresh = useCallback(async () => {
+    if (refreshing || !onRefreshTree) return;
+    setRefreshing(true);
+    try {
+      await onRefreshTree();
+    } finally {
+      // Hold the spin briefly so it registers visually even on fast refreshes.
+      setTimeout(() => setRefreshing(false), 600);
+    }
+  }, [refreshing, onRefreshTree]);
 
   // Fetch sync status when namespace changes
   useEffect(() => {
@@ -90,6 +111,23 @@ function Sidebar({
   const [contentResults, setContentResults] = useState(null);
   const [searching, setSearching] = useState(false);
   const searchTimer = useRef(null);
+
+  // "Show full names" toggle. When on, .sidebar-tree gets the
+  // .full-names class which lets labels wrap instead of ellipsizing —
+  // useful on mobile when you want to scan long names without
+  // committing to a tap. Persisted in localStorage so the choice
+  // sticks across visits. Default off — clean uniform rhythm.
+  const [fullNames, setFullNames] = useState(() => {
+    try { return localStorage.getItem('mdnest_tree_full_names') === '1'; }
+    catch { return false; }
+  });
+  const toggleFullNames = useCallback(() => {
+    setFullNames((prev) => {
+      const next = !prev;
+      try { localStorage.setItem('mdnest_tree_full_names', next ? '1' : '0'); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
 
   const handleExpandAll = () => setExpandAll(true);
   const handleCollapseAll = () => setExpandAll(false);
@@ -180,18 +218,21 @@ function Sidebar({
             <span className="ns-label">{selectedNs || 'mdnest'}</span>
           )}
           <div className="sidebar-tree-controls">
-            {syncInfo && isAdmin && (
-              syncInfo.isGitRepo && syncInfo.hasRemote ? (
-                <button
-                  className={`tree-control-btn sync-btn${syncing ? ' spinning' : ''}`}
-                  onClick={handleSync}
-                  disabled={syncing}
-                  title={syncInfo.lastCommit ? `Last synced: ${formatSyncTime(syncInfo.lastCommit)}\n${syncInfo.remoteUrl || ''}` : 'Git pull & refresh'}
-                >&#8635;</button>
-              ) : (
-                <span className="sync-disabled" title="No git remote configured">&#8861;</span>
-              )
-            )}
+            {/* Manual tree refresh — always visible (desktop + mobile) so
+                the user has a touch-friendly way to pick up files created
+                outside the UI (CLI, MCP, git-sync) without doing a full
+                browser reload. The toolbar's refresh button only appears
+                when a file is open; this one is the no-file-open path.
+                Distinct two-arrow loop icon so it doesn't get confused
+                with the admin-only git-sync button (single circle arrow,
+                same glyph as &#8635;) that may render right next to it. */}
+            <button
+              className={`tree-control-btn${refreshing ? ' spinning' : ''}`}
+              onClick={handleManualRefresh}
+              disabled={refreshing || !selectedNs}
+              title="Refresh tree"
+              aria-label="Refresh tree"
+            ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
             <button
               className="tree-control-btn"
               onClick={() => { handleExpandAll(); resetExpandAll(); }}
@@ -202,6 +243,16 @@ function Sidebar({
               onClick={() => { handleCollapseAll(); resetExpandAll(); }}
               title="Collapse all folders"
             ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 15 12 9 18 15"/><line x1="6" y1="20" x2="18" y2="20"/></svg></button>
+            {/* Toggle to wrap long folder/file names in the tree
+                (default off → ellipsize; on → wrap to as many lines as
+                needed). Active state shows the icon outlined to make
+                the current mode obvious at a glance. */}
+            <button
+              className={`tree-control-btn${fullNames ? ' active' : ''}`}
+              onClick={toggleFullNames}
+              title={fullNames ? 'Compact: ellipsize long names' : 'Show full names (wrap long names)'}
+              aria-pressed={fullNames}
+            ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="15" y2="12"/><line x1="3" y1="18" x2="18" y2="18"/></svg></button>
           </div>
         </div>
         {syncInfo && (
@@ -212,6 +263,28 @@ function Sidebar({
                 <span className="sync-status-text">
                   {syncInfo.lastCommit ? `Synced ${formatSyncTime(syncInfo.lastCommit)}` : 'Connected'}
                 </span>
+                {/* Git sync button lives next to the "Synced X ago" text
+                    so it's contextually grouped with the git-sync metadata
+                    rather than floating in the generic tree-control row.
+                    Uses a git-branch glyph + "Sync" label — the backend
+                    handler does all three of: commit pending changes,
+                    pull --ff-only, push. So "Sync" is the truthful name;
+                    "Pull" was misleading. Distinct from the generic
+                    tree-refresh in the tree-control row above (two-arrow
+                    loop icon, no git side-effects). Admin-only — same
+                    gate as before. */}
+                {isAdmin && (
+                  <button
+                    className={`sync-status-btn${syncing ? ' spinning' : ''}`}
+                    onClick={handleSync}
+                    disabled={syncing}
+                    title={syncInfo.lastCommit ? `Git sync (commit + pull + push)\nLast synced: ${formatSyncTime(syncInfo.lastCommit)}\n${syncInfo.remoteUrl || ''}` : 'Git sync (commit + pull + push)'}
+                    aria-label="Git sync"
+                  >
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+                    <span>Sync</span>
+                  </button>
+                )}
               </>
             ) : (
               <>
@@ -261,7 +334,7 @@ function Sidebar({
         {searching && <div className="search-status">Searching...</div>}
 
         <div
-          className="sidebar-tree"
+          className={`sidebar-tree${fullNames ? ' full-names' : ''}`}
           ref={treeAreaRef}
           onContextMenu={handleEmptyContextMenu}
           onTouchStart={handleEmptyTouchStart}
@@ -291,8 +364,26 @@ function Sidebar({
           {searchQuery.trim() && filteredTree.length === 0 && !showContentResults && !searching && (
             <div className="sidebar-empty">No matches</div>
           )}
-          {!searchQuery.trim() && (!tree || tree.length === 0) && (
+          {/* Distinguish "still loading" from "genuinely empty" — on a slow
+              connection the tree may take seconds to arrive, and the
+              previous "No files yet" copy made it look like the namespace
+              had no content. Show a spinner while in flight; only fall
+              back to "No files yet" once the load has actually completed. */}
+          {!searchQuery.trim() && (!tree || tree.length === 0) && treeLoading && (
+            <div className="sidebar-tree-loading">
+              <span className="sidebar-spinner" aria-hidden="true" />
+              <span>Loading…</span>
+            </div>
+          )}
+          {!searchQuery.trim() && (!tree || tree.length === 0) && !treeLoading && (
             <div className="sidebar-empty">No files yet</div>
+          )}
+          {/* When the tree IS already populated and a refresh is in
+              flight (e.g. after rename/move/sync), show a thin
+              indicator at the top instead of clearing the tree.
+              Subtle so it doesn't distract during normal use. */}
+          {tree && tree.length > 0 && treeLoading && (
+            <div className="sidebar-tree-refreshing" aria-hidden="true" />
           )}
         </div>
         {(userInfo || onLogout) && (
@@ -301,6 +392,16 @@ function Sidebar({
         <div className="sidebar-server-info">
           <span>{window.location.host}</span>
           {serverVersion && <span>v{serverVersion}</span>}
+          {updateAvailableVersion && onShowReleaseNotes && (
+            <button
+              type="button"
+              className="sidebar-update-badge"
+              onClick={onShowReleaseNotes}
+              title={`mdnest v${updateAvailableVersion} is available — click to see what's new`}
+            >
+              ↑ v{updateAvailableVersion}
+            </button>
+          )}
         </div>
         {onResize && (
           <div

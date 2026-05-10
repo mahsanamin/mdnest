@@ -250,11 +250,28 @@
 
 .toolbar-path {
   flex: 1;
+  display: flex;
+  align-items: center;
+  min-width: 0;
   color: #6c7086;
   font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+/* Path is split into dir + base spans (Toolbar.jsx) so the filename
+   never gets cut off on a narrow screen. The dir half shrinks and
+   ellipsizes; the base half stays visible. */
+.toolbar-path-dir {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
+  flex-shrink: 1;
+}
+.toolbar-path-base {
+  flex-shrink: 0;
+  color: #cdd6f4;
+  font-weight: 500;
 }
 
 .toolbar button {
@@ -370,6 +387,42 @@
   cursor: default;
 }
 
+/* Inline "Pull" button inside .sync-status-bar — sits to the right of
+   the "Synced X ago" text. Compact (the status bar is only 0.68rem),
+   visually grouped with the git metadata. Spins on click via the
+   shared .spinning rule. */
+.sync-status-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding: 2px 7px;
+  background: transparent;
+  color: #89b4fa;
+  border: 1px solid #313244;
+  border-radius: 4px;
+  font-size: 0.68rem;
+  font-weight: 500;
+  cursor: pointer;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.sync-status-btn:hover:not(:disabled) {
+  background: #313244;
+  border-color: #45475a;
+  color: #b4befe;
+}
+
+.sync-status-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.sync-status-btn.spinning svg {
+  animation: spin 1s linear infinite;
+}
+
 .tree-control-btn {
   padding: 2px 5px;
   background: transparent;
@@ -394,6 +447,41 @@
   background: #313244;
   color: #cdd6f4;
   border-color: #45475a;
+}
+
+/* Active/pressed state for toggle-style tree-control buttons (e.g. the
+   "show full names" toggle). Catppuccin blue accent so the on-state is
+   readable at a glance. */
+.tree-control-btn.active {
+  background: #313244;
+  color: #89b4fa;
+  border-color: #89b4fa55;
+}
+.tree-control-btn.active:hover {
+  color: #74c7ec;
+  border-color: #89b4fa;
+}
+
+/* Full-names mode: labels wrap to as many lines as the name needs.
+   Adjust row alignment so chevron + icon stay near the top of a tall
+   wrapped row instead of vertically centering against a 3-line label
+   (which would feel disconnected from the first line of text). */
+.sidebar-tree.full-names .tree-label {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  overflow: visible;
+  text-overflow: clip;
+  line-height: 1.3;
+}
+.sidebar-tree.full-names .tree-row {
+  align-items: flex-start;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+.sidebar-tree.full-names .tree-arrow,
+.sidebar-tree.full-names .tree-arrow-spacer,
+.sidebar-tree.full-names .tree-icon-svg {
+  margin-top: 2px;
 }
 
 .ns-label {
@@ -537,12 +625,26 @@
   display: flex;
   align-items: center;
   gap: 0.3rem;
-  padding: 0.3rem 0.5rem;
+  /* padding-left is computed per depth via --tree-depth (set inline in
+     TreeNode.jsx). Keeping the right + vertical padding fixed here. */
+  padding: 0.3rem 0.5rem 0.3rem calc(var(--tree-depth, 0) * 0.75rem + 0.5rem);
   cursor: pointer;
   font-size: 0.85rem;
   color: #bac2de;
   border-radius: 4px;
   margin: 0 0.25rem;
+  min-width: 0;
+}
+
+/* Truncate long file/folder names instead of wrapping or pushing the
+   chevron off-screen. The native title="" tooltip still shows the
+   full name on hover. */
+.tree-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
 }
 
 .tree-row:hover {
@@ -894,6 +996,44 @@
 .preview-pane li.task-item {
   list-style: none;
   margin-left: -1.2rem;
+}
+
+/* In-cell checkboxes (tableCellCheckboxPlugin in LiveEditor + the
+   matching DOM post-pass in Preview). The plugin paints a
+   contentEditable=false <input type="checkbox"> widget at the start
+   of every `[ ]` / `[x]` literal in a table cell, and hides the three
+   bracket characters via .tcc-bracket-text. We use width:0 +
+   visibility:hidden (rather than display:none) so the cursor steps
+   over the brackets without ProseMirror losing track of inline
+   positions. */
+.tcc-bracket-text {
+  display: inline-block;
+  width: 0;
+  overflow: hidden;
+  visibility: hidden;
+}
+.tcc-cell-checkbox,
+.preview-pane td .task-cell-checkbox,
+.preview-pane th .task-cell-checkbox {
+  margin-right: 0.35rem;
+  cursor: pointer;
+  accent-color: #89b4fa;
+  width: 1em;
+  height: 1em;
+  vertical-align: middle;
+}
+.tcc-cell-checkbox {
+  position: relative;
+  user-select: none;
+}
+/* Wrapper that absorbs mousedown so ProseMirror's table editing
+   plugin doesn't see the click as a cell-selection trigger. */
+.tcc-cell-checkbox-wrap {
+  display: inline-block;
+  user-select: none;
+  -webkit-user-select: none;
+  vertical-align: middle;
+  line-height: 1;
 }
 
 /* Collapsible headings */
@@ -2204,17 +2344,37 @@ pre:hover .code-copy-btn {
     display: block;
   }
 
-  /* Sidebar becomes slide-over overlay */
+  /* Sidebar becomes slide-over overlay. Width covers most of the phone
+     screen (94vw) up to a 420px cap on tablets — a slide-over hides the
+     editor anyway, so reserving more room for the tree gives long
+     folder/file names actual room to breathe. Was min(88vw, 360px),
+     before that was a flat 280px. */
   .sidebar {
     position: fixed;
     top: 0;
     left: 0;
     bottom: 0;
-    width: 280px;
-    min-width: 280px;
+    width: min(94vw, 420px);
+    min-width: min(94vw, 420px);
     z-index: 8000;
     transform: translateX(-100%);
     transition: transform 0.25s ease;
+  }
+
+  /* Tighter per-level indent on phones — desktop is 0.75rem/level which
+     at depth 7 eats ~92px of left padding. 0.4rem/level halves that
+     while still showing hierarchy. */
+  .tree-row {
+    padding-left: calc(var(--tree-depth, 0) * 0.4rem + 0.5rem);
+    /* Touch-target minimum (Apple HIG / Material Design). Without this
+       rows are ~26px and siblings get fat-fingered. */
+    min-height: 40px;
+  }
+
+  /* Slightly larger label on phones — small headings are hard to scan
+     at arm's length, and we now have horizontal room for it. */
+  .tree-row {
+    font-size: 0.92rem;
   }
 
   .sidebar.sidebar-open {
@@ -2308,6 +2468,39 @@ pre:hover .code-copy-btn {
   /* Compact toolbar file actions on mobile */
   .toolbar-file-actions {
     margin-right: 4px;
+  }
+
+  /* Hide inline Rename/Delete buttons that live inside .toolbar-path on
+     phones — they were getting clipped off the right edge anyway, since
+     the path's basename is flex-shrink: 0 and refused to give up room.
+     Both actions are already in the file's long-press context menu in
+     the tree, so nothing's lost — toolbar just decluttered. */
+  .toolbar-path-actions {
+    display: none;
+  }
+
+  /* On phones the toolbar can't afford to give the filename half the
+     row — view toggle, settings, and comments compete for the same
+     space. Drop the dirname prefix entirely (the sidebar already
+     shows where you are in the tree), and let the basename ellipsize
+     instead of pinning at flex-shrink: 0. The toolbar-path container
+     also yields its flex:1 grow on mobile so the other toolbar items
+     keep their natural width — the path takes only what it needs up
+     to a sensible cap. Full path is still on title="" for long-press
+     reveal. */
+  .toolbar-path {
+    flex: 0 1 auto;
+    max-width: 45%;
+    font-size: 0.78rem;
+  }
+  .toolbar-path-dir {
+    display: none;
+  }
+  .toolbar-path-base {
+    flex-shrink: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
   }
 
   .toolbar-action {
@@ -3445,6 +3638,95 @@ pre:hover .code-copy-btn {
   opacity: 0.9;
 }
 
+/* ===== Sidebar update-available badge =====
+   Shown next to the version in the sidebar footer when /api/config reports
+   a newer mdnest release on GitHub. Click → opens ReleaseNotesModal. */
+.sidebar-update-badge {
+  background: #f9e2af;
+  color: #1e1e2e;
+  border: none;
+  border-radius: 999px;
+  padding: 1px 8px;
+  margin-left: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+  line-height: 1.5;
+}
+.sidebar-update-badge:hover {
+  background: #fab387;
+}
+
+/* ===== Release notes modal ===== */
+.release-notes-modal {
+  max-width: 720px;
+  width: 90vw;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+.release-notes-meta {
+  font-size: 0.85rem;
+  color: #a6adc8;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.release-notes-meta strong { color: #cdd6f4; }
+.release-notes-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  background: #181825;
+  border: 1px solid #313244;
+  border-radius: 6px;
+  padding: 14px 18px;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+.release-notes-body h1,
+.release-notes-body h2,
+.release-notes-body h3 {
+  margin-top: 1em;
+  margin-bottom: 0.4em;
+  color: #cdd6f4;
+}
+.release-notes-body h1 { font-size: 1.15rem; }
+.release-notes-body h2 { font-size: 1.05rem; }
+.release-notes-body h3 { font-size: 0.95rem; }
+.release-notes-body code {
+  background: #313244;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 0.85em;
+}
+.release-notes-body pre {
+  background: #11111b;
+  padding: 10px 12px;
+  border-radius: 4px;
+  overflow-x: auto;
+}
+.release-notes-body ul,
+.release-notes-body ol {
+  padding-left: 1.4em;
+}
+.release-notes-body a {
+  color: #89b4fa;
+  text-decoration: none;
+}
+.release-notes-body a:hover { text-decoration: underline; }
+.release-notes-link {
+  display: inline-block;
+  background: #89b4fa;
+  color: #1e1e2e;
+  text-decoration: none;
+  padding: 6px 14px;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.release-notes-link:hover { opacity: 0.9; }
+
 /* ===== Conflict banner ===== */
 .conflict-banner {
   display: flex;
@@ -3629,6 +3911,262 @@ pre:hover .code-copy-btn {
 .history-presence {
   margin-top: 8px;
   color: #f9e2af;
+}
+
+/* Compare-to selector that sits above the preview pane in the History modal. */
+.history-compare-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.history-compare-row label {
+  font-size: 0.75rem;
+  color: #a6adc8;
+}
+.history-compare-row select {
+  background: #1e1e2e;
+  color: #cdd6f4;
+  border: 1px solid #45475a;
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 0.78rem;
+  max-width: 280px;
+}
+
+/* History modal — stack the commit list above the content pane on
+   phones. The desktop layout is a 240px commit list + flex-1 preview
+   side-by-side, which on a ~330px-wide phone modal collapses the
+   preview to ~60px and stairsteps every line of content. Below 768px
+   we go column-vertical: list takes the top third, preview the rest. */
+@media (max-width: 768px) {
+  .history-modal {
+    width: min(640px, 96vw);
+    max-height: 92vh;
+  }
+  .history-body {
+    flex-direction: column;
+    gap: 8px;
+  }
+  .history-list {
+    width: auto;
+    max-height: 28vh;
+    /* Border moves from the right edge to the bottom edge to match the
+       new stacking direction. */
+    border-right: none;
+    border-bottom: 1px solid #313244;
+    padding-right: 0;
+    padding-bottom: 8px;
+  }
+  .history-preview {
+    max-height: 50vh;
+  }
+  /* Compare-to row was display:flex with a fixed-width select that could
+     overflow on narrow screens. Allow it to wrap. */
+  .history-compare-row {
+    flex-wrap: wrap;
+  }
+  .history-compare-row select {
+    max-width: 100%;
+    flex: 1;
+  }
+  /* Slightly larger touch targets for selecting commits on mobile. */
+  .history-commit-item {
+    padding: 10px 12px;
+  }
+}
+
+/* Sidebar tree-load indicators. Two states:
+
+   1) Initial / namespace-switch load (tree is empty + loading) → centered
+      spinner + "Loading…" text in the tree area. Replaces the "No files
+      yet" copy so users on slow connections don't think their namespace
+      is empty.
+
+   2) Refresh load (tree already populated + loading) → thin animated
+      bar pinned to the top of the tree area. Subtle on purpose; the
+      visible tree stays readable during the brief refresh window. */
+
+.sidebar-tree-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 32px 16px;
+  color: #6c7086;
+  font-size: 0.85rem;
+}
+
+.sidebar-spinner {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid #313244;
+  border-top-color: #89b4fa;
+  animation: sidebar-spinner-rotate 0.8s linear infinite;
+}
+
+@keyframes sidebar-spinner-rotate {
+  to { transform: rotate(360deg); }
+}
+
+.sidebar-tree-refreshing {
+  position: sticky;
+  top: 0;
+  height: 2px;
+  margin: -1px 0 4px;
+  background: linear-gradient(90deg, transparent, #89b4fa, transparent);
+  background-size: 200% 100%;
+  animation: sidebar-progress-slide 1.1s linear infinite;
+  border-radius: 1px;
+  pointer-events: none;
+}
+
+@keyframes sidebar-progress-slide {
+  0%   { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+/* MoveToModal — destination picker for moving a file or folder. The
+   list is touch-target sized (44px rows) so it works without zooming
+   on phones, and replaces drag-and-drop on touch devices where
+   draggable=false. */
+.moveto-modal {
+  width: min(520px, 94vw);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+.moveto-source {
+  font-size: 0.82rem;
+  color: #a6adc8;
+  margin: 6px 0 12px;
+}
+.moveto-source code {
+  background: #11111b;
+  padding: 2px 6px;
+  border-radius: 4px;
+  word-break: break-all;
+}
+.moveto-loading,
+.moveto-empty {
+  padding: 24px 12px;
+  text-align: center;
+  color: #6c7086;
+  font-size: 0.85rem;
+}
+.moveto-error {
+  background: #f38ba822;
+  border: 1px solid #f38ba8;
+  color: #f38ba8;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  margin-bottom: 8px;
+}
+.moveto-list {
+  flex: 1;
+  overflow-y: auto;
+  border: 1px solid #313244;
+  border-radius: 6px;
+  background: #11111b;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.moveto-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 6px 12px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: #cdd6f4;
+  font-size: 0.88rem;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+.moveto-item:hover {
+  background: #1e1e2e;
+}
+.moveto-item.selected {
+  background: #45475a;
+  border-color: #89b4fa;
+}
+.moveto-item:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.moveto-icon { flex-shrink: 0; }
+.moveto-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.moveto-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+.moveto-actions button {
+  padding: 8px 16px;
+  min-height: 40px;
+  border: 1px solid #45475a;
+  border-radius: 6px;
+  background: #313244;
+  color: #cdd6f4;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+.moveto-actions button.primary {
+  background: #89b4fa;
+  color: #1e1e2e;
+  border-color: #89b4fa;
+}
+.moveto-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Unified diff rows. Catppuccin red/green tinting at low opacity so long
+   diffs stay readable; markers in the gutter mirror standard +/- diff. */
+.history-diff {
+  padding: 6px 0;
+}
+.diff-row {
+  display: flex;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  padding: 0 12px;
+}
+.diff-marker {
+  flex: 0 0 16px;
+  color: #6c7086;
+  user-select: none;
+}
+.diff-text {
+  flex: 1;
+}
+.diff-add {
+  background: #a6e3a122;
+}
+.diff-add .diff-marker {
+  color: #a6e3a1;
+}
+.diff-del {
+  background: #f38ba822;
+}
+.diff-del .diff-marker {
+  color: #f38ba8;
 }
 
 /* ===== Remote cursor overlay ===== */
