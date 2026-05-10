@@ -267,9 +267,27 @@ func (h *NoteHandler) createNote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid path"}`, http.StatusBadRequest)
 		return
 	}
-	if _, err := os.Stat(absPath); err == nil {
+	if info, err := os.Stat(absPath); err == nil {
+		if info.IsDir() {
+			http.Error(w, `{"error":"path is an existing directory; provide a filename inside it (e.g. <path>/<filename>.md)"}`, http.StatusConflict)
+			return
+		}
 		http.Error(w, `{"error":"file already exists"}`, http.StatusConflict)
 		return
+	}
+	// Catch the agent-side path-confusion case: caller passed something
+	// like 'foo/bar.md' while a directory 'foo/bar/' already exists at
+	// the same level. Filesystem-wise these are unrelated entries, but
+	// the agent almost certainly meant 'put a file inside foo/bar/' and
+	// got the path syntax wrong. Surface a helpful 409 instead of
+	// silently creating the misplaced sibling.
+	if ext := filepath.Ext(absPath); ext != "" {
+		stripped := strings.TrimSuffix(absPath, ext)
+		if info, err := os.Stat(stripped); err == nil && info.IsDir() {
+			rel := strings.TrimSuffix(reqPath, ext)
+			http.Error(w, `{"error":"a directory named '`+rel+`' exists at this location — to create a file inside it use path '`+rel+`/<filename>.md'"}`, http.StatusConflict)
+			return
+		}
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxNoteSize))
 	if err != nil {

@@ -83,13 +83,9 @@ func generateID() string {
 	return hex.EncodeToString(b)
 }
 
-// ValidateAPIToken checks if a raw token matches any stored token.
-// Returns true if valid.
-func (h *TokenHandler) ValidateAPIToken(rawToken string) bool {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-
-	hash := hashToken(rawToken)
+// hashMatchesAny scans the in-memory store for a hash match. Caller is
+// responsible for holding h.mu (read lock is enough).
+func (h *TokenHandler) hashMatchesAny(hash string) bool {
 	for _, t := range h.store.Tokens {
 		if t.TokenHash == hash {
 			return true
@@ -98,22 +94,63 @@ func (h *TokenHandler) ValidateAPIToken(rawToken string) bool {
 	return false
 }
 
+// ValidateAPIToken checks if a raw token matches any stored token.
+// Returns true if valid.
+//
+// Cache-miss reload: if the token isn't found in the in-memory store,
+// we reload tokens.json from disk and check again. This catches tokens
+// minted by the host-side `mdnest-server create-token` CLI, which runs
+// in a one-shot container that writes the file but can't update the
+// running server's in-memory state. Successful validations stay fast
+// (one read-lock + map walk); only misses pay the file-read cost.
+func (h *TokenHandler) ValidateAPIToken(rawToken string) bool {
+	hash := hashToken(rawToken)
+	h.mu.RLock()
+	if h.hashMatchesAny(hash) {
+		h.mu.RUnlock()
+		return true
+	}
+	h.mu.RUnlock()
+
+	h.mu.Lock()
+	// Re-check after grabbing the write lock in case another goroutine
+	// reloaded between our read and write.
+	if h.hashMatchesAny(hash) {
+		h.mu.Unlock()
+		return true
+	}
+	h.load()
+	matched := h.hashMatchesAny(hash)
+	h.mu.Unlock()
+	return matched
+}
+
 // ResolveAPITokenUser returns the UserContext for an API token (multi mode).
 // Returns nil if the token has no associated user (single mode / legacy tokens).
 func (h *TokenHandler) ResolveAPITokenUser(rawToken string) *middleware.UserContext {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-
 	hash := hashToken(rawToken)
+	h.mu.RLock()
 	for _, t := range h.store.Tokens {
 		if t.TokenHash == hash && t.UserID > 0 {
-			return &middleware.UserContext{
-				ID:       t.UserID,
-				Username: t.Username,
-				Role:     t.UserRole,
-			}
+			uc := &middleware.UserContext{ID: t.UserID, Username: t.Username, Role: t.UserRole}
+			h.mu.RUnlock()
+			return uc
 		}
 	}
+	h.mu.RUnlock()
+	// ValidateAPIToken's cache-miss reload usually warmed our in-memory
+	// store already, but be defensive in case a CLI-minted multi-mode
+	// token (with a user binding) lands between Validate and Resolve.
+	h.mu.Lock()
+	h.load()
+	for _, t := range h.store.Tokens {
+		if t.TokenHash == hash && t.UserID > 0 {
+			uc := &middleware.UserContext{ID: t.UserID, Username: t.Username, Role: t.UserRole}
+			h.mu.Unlock()
+			return uc
+		}
+	}
+	h.mu.Unlock()
 	return nil
 }
 
@@ -164,6 +201,45 @@ func (h *TokenHandler) listTokens(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(safe)
 }
 
+// CreateAPIToken creates a new API token, persists it, and returns the raw
+// token string and the stored entry. The raw token is the only place
+// the caller can ever read this value — it isn't kept anywhere; only
+// its sha256 hash is stored. Used by both the HTTP handler and the
+// host-side `mdnest-server create-token` CLI.
+func (h *TokenHandler) CreateAPIToken(name string, userID int, username, role string) (string, *APIToken, error) {
+	token, err := generateToken()
+	if err != nil {
+		return "", nil, err
+	}
+
+	suffix := token
+	if len(suffix) > 4 {
+		suffix = suffix[len(suffix)-4:]
+	}
+
+	entry := APIToken{
+		ID:          generateID(),
+		Name:        name,
+		TokenHash:   hashToken(token),
+		TokenSuffix: suffix,
+		CreatedAt:   time.Now().UTC().Format(time.RFC3339),
+		UserID:      userID,
+		Username:    username,
+		UserRole:    role,
+	}
+
+	h.mu.Lock()
+	h.store.Tokens = append(h.store.Tokens, entry)
+	saveErr := h.save()
+	h.mu.Unlock()
+
+	if saveErr != nil {
+		return "", nil, saveErr
+	}
+	log.Printf("API token created: %s (%s)", entry.Name, entry.ID)
+	return token, &entry, nil
+}
+
 func (h *TokenHandler) createToken(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name string `json:"name"`
@@ -173,43 +249,20 @@ func (h *TokenHandler) createToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := generateToken()
-	if err != nil {
-		http.Error(w, `{"error":"failed to generate token"}`, http.StatusInternalServerError)
-		return
-	}
-
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	suffix := token
-	if len(suffix) > 4 {
-		suffix = suffix[len(suffix)-4:]
-	}
-
-	entry := APIToken{
-		ID:          generateID(),
-		Name:        req.Name,
-		TokenHash:   hashToken(token),
-		TokenSuffix: suffix,
-		CreatedAt:   time.Now().UTC().Format(time.RFC3339),
-	}
-
-	// In multi mode, associate token with the creating user
+	userID := 0
+	username := ""
+	role := ""
 	if uc := middleware.UserFromContext(r.Context()); uc != nil {
-		entry.UserID = uc.ID
-		entry.Username = uc.Username
-		entry.UserRole = uc.Role
+		userID = uc.ID
+		username = uc.Username
+		role = uc.Role
 	}
 
-	h.store.Tokens = append(h.store.Tokens, entry)
-
-	if err := h.save(); err != nil {
-		http.Error(w, `{"error":"failed to save token"}`, http.StatusInternalServerError)
+	token, entry, err := h.CreateAPIToken(req.Name, userID, username, role)
+	if err != nil {
+		http.Error(w, `{"error":"failed to create token"}`, http.StatusInternalServerError)
 		return
 	}
-
-	log.Printf("API token created: %s (%s)", req.Name, entry.ID)
 
 	// Return the token value — this is the only time it's shown
 	w.Header().Set("Content-Type", "application/json")

@@ -204,6 +204,31 @@ case "$CMD" in
     # password — so it never appears in argv (`ps`) or shell history.
     printf '%s\n' "$PW1" | compose run --rm -T backend ./mdnest -reset-password "$EMAIL"
     ;;
+  create-token)
+    # Host-side API token provisioning. Useful when an external agent /
+    # CLI / script needs to talk to mdnest and you don't want to click
+    # through Settings → API Tokens in the web UI. Prints just the raw
+    # token to stdout so callers can capture it:
+    #   TOKEN=$(./mdnest-server create-token open-claw)
+    NAME="$1"
+    if [ -z "$NAME" ]; then
+      echo "Usage: mdnest-server create-token <name>"
+      echo "  Generates an API token, prints it to stdout."
+      echo "  The raw token is shown ONCE — capture it now."
+      exit 1
+    fi
+    if [ ! -f ".env" ]; then
+      echo "Error: .env not found. Run './mdnest-server setup' first." >&2
+      exit 1
+    fi
+    AUTH_MODE=$(grep '^AUTH_MODE=' .env 2>/dev/null | cut -d= -f2)
+    if [ "$AUTH_MODE" = "multi" ]; then
+      compose up -d postgres >/dev/null
+    fi
+    # The Go binary writes meta to stderr and only the raw token to
+    # stdout, so a shell capture gets just the token.
+    compose run --rm -T backend ./mdnest -create-token "$NAME"
+    ;;
   dev-setup)
     echo "Setting up development environment..."
     git config core.hooksPath .githooks
@@ -733,6 +758,7 @@ Commands:
   update      Pull latest code, rebuild, and start
   migrate     Run database migrations (multi-user mode only)
   reset-password <email>   Reset a user's password (multi mode + local provider)
+  create-token <name>      Generate an API token (printed to stdout, only shown once)
   install-cli Install the mdnest CLI system-wide (/usr/local/bin)
   dev-setup   Configure git hooks (pre-push: build, audit, version check)
 
@@ -755,6 +781,7 @@ Examples:
   mdnest-server export-2fa user  # export TOTP secret for sharing
   mdnest-server import-2fa user SECRET  # import TOTP from another server
   mdnest-server reset-password user@example.com  # reset a forgotten password
+  TOKEN=$(mdnest-server create-token open-claw)  # generate API token for an agent
   mdnest-server logs             # all service logs
   mdnest-server logs backend     # backend only
   mdnest-server logs git-sync    # git sync only
