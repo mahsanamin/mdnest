@@ -4,7 +4,13 @@ All notable changes to mdnest are documented here.
 
 ---
 
-## v3.9.1 — Paste-handler priority + browser tab title + test scaffolding
+## v3.9.2 — Task-list checkboxes render in Live editor + paste-handler priority + browser tab title + test scaffolding
+
+### Bug fixes
+
+- **Top-level GFM task lists now render with clickable checkboxes in the Live editor.** Long-standing gap: `@milkdown/preset-gfm@7.20`'s schema parses `- [ ] foo` correctly and sets `node.attrs.checked` on the list_item, but its `toDOM` only emits `<li data-item-type="task" data-checked="false">` — no `<input>` element. mdnest's existing CSS expected a checkbox input that the schema never produces, so for the entire history of the Live editor, top-level task lists rendered as plain bulleted text (v3.8.0's fix preserved the data through paste but the visual was never wired). New `topLevelTaskCheckboxPlugin` in `LiveEditor.jsx` mirrors the existing `tableCellCheckboxPlugin` pattern: scans `list_item` nodes with `attrs.checked != null`, paints a widget decoration with a real `<input type="checkbox">` at the start, click flips the attribute via `setNodeMarkup`. Round-trip is invariant — the underlying markdown stays `- [ ] foo` / `- [x] foo`, so `toMarkdown` serializes it unchanged. Works for top-level lists, nested lists, lists inside blockquotes. (The previously-shipped `tableCellCheckboxPlugin` continues to handle the separate case of `[ ]`/`[x]` literal text *inside table cells*, where GFM's schema disallows list items.)
+
+
 
 ### Bug fixes
 

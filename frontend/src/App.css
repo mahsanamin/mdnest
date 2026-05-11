@@ -2805,9 +2805,28 @@ pre:hover .code-copy-btn {
   margin-left: -1.2rem;
 }
 
-.live-editor-content li[data-checked] input[type="checkbox"] {
+/* Checkbox widget rendered by topLevelTaskCheckboxPlugin. Replaces the
+   nothing-there state that Milkdown's GFM toDOM produces (data-attrs
+   only, no <input>). The wrap is contentEditable=false so ProseMirror
+   doesn't try to put the cursor inside it. */
+.live-editor-content .mdt-task-checkbox-wrap {
+  display: inline-block;
+  user-select: none;
   margin-right: 0.4rem;
+  vertical-align: middle;
+}
+
+.live-editor-content .mdt-task-checkbox {
   cursor: pointer;
+  margin: 0;
+  vertical-align: middle;
+}
+
+/* Strike-through completed task items (visual only — the underlying
+   markdown remains `- [x] text`, so toMarkdown round-trips cleanly). */
+.live-editor-content li[data-checked="true"] > p {
+  opacity: 0.6;
+  text-decoration: line-through;
 }
 
 .live-editor-content img {
