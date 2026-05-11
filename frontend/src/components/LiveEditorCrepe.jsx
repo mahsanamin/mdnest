@@ -486,8 +486,20 @@ export default function LiveEditorCrepe({
         }
       }
 
-      // 2. Table-row HTML splice
+      // 1b. ProseMirror-to-ProseMirror paste: if the clipboard HTML carries
+      // the `data-pm-slice` marker that ProseMirror's clipboard serializer
+      // writes, let Milkdown's native clipboard plugin handle the paste.
+      // Its parseDOM-based path preserves table cells with inline marks
+      // (bold-inside-cell), link attributes, fenced-code language tags,
+      // and other schema details that the htmlToMarkdown / markdownToSlice
+      // round trip flattens. This is what the legacy editor relied on for
+      // "copy from one mdnest tab, paste into another" fidelity.
       const html = cb.getData('text/html');
+      if (html && /data-pm-slice/i.test(html)) {
+        return;
+      }
+
+      // 2. Table-row HTML splice
       if (html && /<tr[\s>]/i.test(html)) {
         try {
           const handled = crepe.editor.action((ctx) => {
