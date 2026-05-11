@@ -4,6 +4,26 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v3.9.1 — Paste-handler priority + browser tab title + test scaffolding
+
+### Bug fixes
+
+- **Pasted GFM task lists (`- [ ] Foo`) survive their checkboxes** when the clipboard carries both `text/plain` and `text/html` (Obsidian, terminals, most modern apps populate both). The Live editor previously checked the HTML branch first; `htmlToMarkdown` is lossier than `markdownToSlice` for task lists because the HTML version typically doesn't carry GFM's `data-item-type="task"` data attribute, so the DOM round-trip dropped the checkbox semantics and the result landed as a plain bulleted list. Reordered: plain text that *looks like markdown* (any line starting with `#`, `-`, `*`, `>`, `|`, `` ` ``, `[`, `!`) now wins over rich HTML when both are present. HTML conversion remains the path for sources that don't ship markdown (Google Docs, Confluence, web pages). The basic textarea editor already had this priority; this aligns the Live editor with it. Extracted the markdown-detection regex into `frontend/src/markdown-utils.js` so the two paste handlers share one source of truth.
+
+### New features
+
+- **Browser tab title includes the server alias.** Multiple mdnest tabs (different servers) are now visually distinguishable: `mdnest (srv-ahsan-mini)` instead of plain `mdnest`. Falls back to `mdnest` when no `SERVER_ALIAS` is configured. Reads from the existing `/api/config` payload — no backend change needed.
+
+### Tests
+
+- **Vitest scaffolding for markdown roundtrips** (`frontend/src/__tests__/markdown-fixtures.test.js`). Targets the regression patterns that have actually shipped: paste-priority detection, task-list HTML conversion (the v3.8.0 fix verification), and `looksLikeMarkdown` edge cases. Runs under jsdom so the `htmlToMarkdown` path (uses browser `DOMParser`) is exercised. `npm test` in `frontend/` runs the suite; pre-push hook gates pushes on it passing. Eleven tests today; add a fixture before touching the editor next time so the next regression of this shape is impossible to ship.
+
+### Notes
+
+- The deeper consolidation work (unifying Live's `tableCellCheckboxPlugin` with Preview's DOM-walker checkbox path, memoizing the comment-highlight plugin, schema-level task-list cleanups) is documented in the plan file as Tier 3 future PRs — explicitly NOT in this release. The pattern of "small markdown things keep breaking" needs that work, but each piece is its own change with its own blast radius and should ship one at a time.
+
+---
+
 ## v3.9.0 — Tree auto-refresh in single mode + host-side token CLI + path-confusion guard
 
 ### New features

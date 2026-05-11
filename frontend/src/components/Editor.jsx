@@ -1,6 +1,7 @@
 import { useRef, useCallback, useState, useEffect } from 'react';
 import { uploadImage } from '../api.js';
 import { htmlToMarkdown, hasRichContent } from '../html-to-md.js';
+import { looksLikeMarkdown } from '../markdown-utils.js';
 import EditorToolbar from './EditorToolbar.jsx';
 
 function Editor({ content, onChange, currentPath, ns, readOnly, onCursorChange, onSelectionChange, remoteCursors }) {
@@ -151,10 +152,11 @@ function Editor({ content, onChange, currentPath, ns, readOnly, onCursorChange, 
     // But NOT if the plain text already looks like markdown — the user is
     // pasting raw .md content and the HTML version would mangle it
     // (e.g. wrapping everything in triple backticks from <pre><code>).
+    // Shares the markdown-detection heuristic with LiveEditor via
+    // markdown-utils.js so the two paste paths can't drift again.
     const html = clipboard.getData('text/html');
     const plain = clipboard.getData('text/plain');
-    const looksLikeMarkdown = plain && /^[\s]*[#\-*>|`\[!]/.test(plain);
-    if (html && hasRichContent(html) && !looksLikeMarkdown) {
+    if (html && hasRichContent(html) && !looksLikeMarkdown(plain)) {
       e.preventDefault();
       const md = htmlToMarkdown(html);
       insertAtCursor(md);

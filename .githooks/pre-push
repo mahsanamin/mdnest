@@ -16,6 +16,16 @@ else
   FAILED=1
 fi
 
+# 1b. Frontend: vitest unit tests
+echo -n "Frontend tests... "
+if (cd frontend && npm test --silent) > /dev/null 2>&1; then
+  echo "OK"
+else
+  echo "FAILED"
+  echo "  Run: cd frontend && npm test"
+  FAILED=1
+fi
+
 # 2. Backend: verify Go compiles
 echo -n "Backend build... "
 if (cd backend && go build -o /dev/null .) > /dev/null 2>&1; then
