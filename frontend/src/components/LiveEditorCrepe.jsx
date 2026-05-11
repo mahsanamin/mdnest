@@ -22,6 +22,10 @@ import { useEffect, useRef, useState } from 'react';
 import { Crepe } from '@milkdown/crepe';
 import { editorViewCtx } from '@milkdown/core';
 import { TextSelection } from '@milkdown/prose/state';
+import { insert, markdownToSlice, replaceAll } from '@milkdown/utils';
+import { uploadImage } from '../api.js';
+import { htmlToMarkdown, hasRichContent } from '../html-to-md.js';
+import { looksLikeMarkdown } from '../markdown-utils.js';
 import MermaidViewer from './MermaidViewer.jsx';
 import {
   commentHighlightKey,
@@ -53,6 +57,8 @@ export default function LiveEditorCrepe({
   comments,
   onHighlightClick,
   onGoToReady,
+  ns,
+  currentPath,
 }) {
   const rootRef = useRef(null);
   const crepeRef = useRef(null);
@@ -180,6 +186,119 @@ export default function LiveEditorCrepe({
       crepeRef.current.setReadonly(!!readOnly);
     }
   }, [readOnly]);
+
+  // Track the last content we know the editor is showing. Used by the
+  // collab-sync effect below to skip no-op replaceAll calls. Initialized
+  // to the mount content because Crepe parses it as defaultValue.
+  const lastSyncedContentRef = useRef(content);
+
+  // Content sync for live collab: when the `content` prop changes after
+  // initial mount AND the new value differs from what the editor is
+  // already showing, dispatch replaceAll to apply the remote edit.
+  // Note switches don't take this path — the key prop forces remount
+  // first, so this only fires for in-place content updates (collab
+  // 'content' broadcast, or App.jsx's setContent after a file-changed
+  // websocket event).
+  //
+  // suppressSave is set true around replaceAll so the resulting
+  // markdownUpdated event doesn't echo back as an autosave.
+  useEffect(() => {
+    const crepe = crepeRef.current;
+    if (!crepe) return;
+    if (content == null) return;
+    if (content === lastSyncedContentRef.current) return;
+    suppressSaveRef.current = true;
+    try {
+      crepe.editor.action((ctx) => {
+        // replaceAll uses markdownToSlice internally, preserving
+        // GFM task-list semantics through the DOM round-trip.
+        return replaceAll(content)(ctx);
+      });
+      lastSyncedContentRef.current = content;
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('LiveEditorCrepe: replaceAll failed:', err);
+    }
+  }, [content]);
+
+  // Paste handler — image upload + v3.9.1 markdown-priority logic.
+  // Listens at the wrapper level so the handler fires before Crepe's
+  // default clipboard plugin (capture phase). The priority:
+  //   1. Image → upload + insert `![image](filename)`
+  //   2. text/plain that looks like markdown → markdownToSlice (preserves
+  //      GFM task lists; the v3.9.1 fix that's the whole reason we put
+  //      plain text first when both clipboard formats are populated)
+  //   3. Rich HTML → htmlToMarkdown → markdownToSlice (Google Docs etc.)
+  //   4. Fall through to Crepe's default paste (plain prose)
+  //
+  // The table-row-paste special case from LiveEditor.jsx is NOT ported
+  // yet — Crepe's table feature may handle row-shaped clipboards
+  // natively. Verify during dogfood; if missing, port in a follow-up.
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el || readOnly) return;
+
+    const handlePaste = async (e) => {
+      const crepe = crepeRef.current;
+      if (!crepe) return;
+      const cb = e.clipboardData;
+      if (!cb) return;
+
+      // 1. Images first.
+      for (const item of cb.items) {
+        if (item.type.startsWith('image/')) {
+          e.preventDefault();
+          const file = item.getAsFile();
+          if (file && ns && currentPath) {
+            try {
+              const data = await uploadImage(ns, currentPath, file);
+              const filename = (data.url || file.name).split('/').pop();
+              crepe.editor.action(insert(`![image](${filename})`));
+            } catch (err) {
+              // eslint-disable-next-line no-console
+              console.error('Upload failed:', err);
+            }
+          }
+          return;
+        }
+      }
+
+      const html = cb.getData('text/html');
+      const text = cb.getData('text/plain');
+
+      const pasteMarkdown = (md) => {
+        if (!md) return false;
+        let inserted = false;
+        crepe.editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx);
+          const slice = markdownToSlice(md)(ctx);
+          if (!slice) return;
+          view.dispatch(view.state.tr.replaceSelection(slice).scrollIntoView());
+          inserted = true;
+        });
+        return inserted;
+      };
+
+      // 2. Plain text that looks like markdown wins (v3.9.1 priority).
+      if (text && looksLikeMarkdown(text)) {
+        e.preventDefault();
+        pasteMarkdown(text);
+        return;
+      }
+
+      // 3. Rich HTML (Google Docs, Confluence, web pages) → convert.
+      if (html && hasRichContent(html)) {
+        e.preventDefault();
+        pasteMarkdown(htmlToMarkdown(html));
+        return;
+      }
+
+      // 4. Otherwise: Crepe's default plain-text paste.
+    };
+
+    el.addEventListener('paste', handlePaste, true);
+    return () => el.removeEventListener('paste', handlePaste, true);
+  }, [readOnly, ns, currentPath]);
 
   // Comments → plugin meta dispatch. Same shape as LiveEditor.jsx's
   // useEffect that filters top-level unresolved comments with anchor

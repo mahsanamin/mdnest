@@ -1321,6 +1321,8 @@ function App() {
                             content={content}
                             onChange={canWriteCurrent ? handleContentChange : null}
                             readOnly={!canWriteCurrent}
+                            ns={selectedNs}
+                            currentPath={currentPath}
                             comments={commentsEnabled ? comments : []}
                             onGoToReady={(fn) => { goToCommentRef.current = fn; }}
                             onHighlightClick={!commentsEnabled ? null : (commentId) => {
