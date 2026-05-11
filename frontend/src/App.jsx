@@ -1321,6 +1321,16 @@ function App() {
                             content={content}
                             onChange={canWriteCurrent ? handleContentChange : null}
                             readOnly={!canWriteCurrent}
+                            comments={commentsEnabled ? comments : []}
+                            onGoToReady={(fn) => { goToCommentRef.current = fn; }}
+                            onHighlightClick={!commentsEnabled ? null : (commentId) => {
+                              setShowComments(true);
+                              setHighlightedCommentId(commentId);
+                              if (viewMode === 'preview') {
+                                setViewMode('editor');
+                                localStorage.setItem('mdnest_view_mode', 'editor');
+                              }
+                            }}
                           />
                         ) : (
                           <LiveEditor

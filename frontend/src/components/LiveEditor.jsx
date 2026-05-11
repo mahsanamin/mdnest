@@ -39,7 +39,12 @@ import {
 
 // Plugin: persistent inline highlights for commented text.
 // Built as ProseMirror Decorations (not DOM edits) so the editor state stays consistent.
-const commentHighlightKey = new PluginKey('comment-highlight');
+//
+// Exported (and the four custom plugins below) so the v3.10.0 Crepe-based
+// LiveEditorCrepe.jsx can wire the same plugins onto the Crepe editor via
+// `crepe.editor.use(plugin)` after `.create()`. When LiveEditor.jsx is
+// deleted in Phase 5, these definitions migrate into a shared module.
+export const commentHighlightKey = new PluginKey('comment-highlight');
 
 // Build a concatenation of every inline text node in the doc with a mapping
 // from string offsets back to ProseMirror positions. This lets us find anchor
@@ -67,7 +72,7 @@ function strIdxToDocPos(segs, idx) {
   return -1;
 }
 
-function findAnchorMatches(doc, anchorText) {
+export function findAnchorMatches(doc, anchorText) {
   const { combined, segs } = buildTextIndex(doc);
   const matches = [];
   if (!anchorText || anchorText.length < 2) return matches;
@@ -122,7 +127,7 @@ function buildCommentDecorations(doc, anchors) {
   return DecorationSet.create(doc, decorations);
 }
 
-const commentHighlightPlugin = $prose(() => {
+export const commentHighlightPlugin = $prose(() => {
   return new Plugin({
     key: commentHighlightKey,
     state: {
@@ -171,7 +176,7 @@ const commentHighlightPlugin = $prose(() => {
 });
 
 // Plugin: auto-convert empty block nodes (heading, blockquote) to paragraph on backspace
-const clearEmptyBlockPlugin = $prose((ctx) => {
+export const clearEmptyBlockPlugin = $prose((ctx) => {
   return new Plugin({
     key: new PluginKey('clear-empty-block'),
     props: {
@@ -333,7 +338,7 @@ function makeCheckboxWidget(viewRef, from, to, checked) {
   return wrap;
 }
 
-const tableCellCheckboxPlugin = $prose(() => {
+export const tableCellCheckboxPlugin = $prose(() => {
   const viewRef = { current: null };
   return new Plugin({
     key: tableCellCheckboxKey,
@@ -362,7 +367,7 @@ const tableCellCheckboxPlugin = $prose(() => {
 
 // ProseMirror node view for mermaid code blocks
 // Renders MermaidBlock React component in place of the <pre> element
-const mermaidNodeView = $view(codeBlockSchema.node, (ctx) => {
+export const mermaidNodeView = $view(codeBlockSchema.node, (ctx) => {
   return (node, view, getPos) => {
     const lang = node.attrs.language || '';
     if (lang !== 'mermaid') {
