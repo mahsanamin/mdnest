@@ -37,6 +37,7 @@ import { editorViewCtx, nodeViewCtx, SchemaReady } from '@milkdown/core';
 import { TextSelection } from '@milkdown/prose/state';
 import { insert, markdownToSlice, replaceAll } from '@milkdown/utils';
 import { blockConfig } from '@milkdown/plugin-block';
+import { uploadConfig } from '@milkdown/plugin-upload';
 import { findParent } from '@milkdown/prose';
 import { uploadImage } from '../api.js';
 import { htmlToMarkdown, hasRichContent } from '../html-to-md.js';
@@ -246,6 +247,27 @@ export default function LiveEditorCrepe({
         },
       },
     });
+
+    // Allow Crepe's upload plugin to handle pasted images even when the
+    // clipboard also has text/html (which it usually does — screenshot
+    // tools and browsers attach an <img> HTML representation alongside
+    // the binary). Default `enableHtmlFileUploader: false` short-circuits
+    // and skips the upload, which is why our previous custom paste path
+    // had to do the upload manually (and ended up creating inline
+    // images that bypassed proxyDomURL → broken src). With this enabled
+    // and our custom image branch removed below, pasted images go
+    // through Crepe's image-block schema → proxyDomURL → rendered img.
+    try {
+      crepe.editor.config((ctx) => {
+        ctx.update(uploadConfig.key, (cfg) => ({
+          ...cfg,
+          enableHtmlFileUploader: true,
+        }));
+      });
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[Crepe] failed to override uploadConfig:', err);
+    }
 
     // Override Crepe's block-edit filter so the drag handle anchors to the
     // table itself (not the row inside it). Crepe's default filterNodes
@@ -498,24 +520,12 @@ export default function LiveEditorCrepe({
       const cb = e.clipboardData;
       if (!cb) return;
 
-      // 1. Images
-      for (const item of cb.items) {
-        if (item.type.startsWith('image/')) {
-          e.preventDefault();
-          const file = item.getAsFile();
-          if (file && ns && currentPath) {
-            try {
-              const data = await uploadImage(ns, currentPath, file);
-              const filename = (data.url || file.name).split('/').pop();
-              crepe.editor.action(insert(`![image](${filename})`));
-            } catch (err) {
-              // eslint-disable-next-line no-console
-              console.error('Upload failed:', err);
-            }
-          }
-          return;
-        }
-      }
+      // 1. Image paste: handled by Crepe's `@milkdown/plugin-upload`
+      // (with `enableHtmlFileUploader: true` configured above). That plugin
+      // creates an image-block node whose nodeView calls proxyDomURL on
+      // the src so the rendered <img> resolves to /api/files/<ns>/<dir>/file.
+      // We deliberately DO NOT preventDefault for image pastes here — if
+      // we did, the upload plugin's `handlePaste` hook wouldn't fire.
 
       // 1b. ProseMirror-to-ProseMirror paste: if the clipboard HTML carries
       // the `data-pm-slice` marker that ProseMirror's clipboard serializer

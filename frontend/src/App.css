@@ -2856,6 +2856,17 @@ pre:hover .code-copy-btn {
   background: #1e1e2e;
 }
 
+/* Table NodeSelection feedback: Crepe's default .ProseMirror-selectednode
+   background is mixed at 40% opacity, which the table cells' own
+   backgrounds obscure — clicking the block-edit drag handle on a table
+   would select-it-but-look-unselected. Make it obvious with a solid blue
+   outline matching the rest of the accent palette. */
+.editor-wrapper .milkdown .ProseMirror .milkdown-table-block.ProseMirror-selectednode {
+  outline: 2px solid #89b4fa;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
 .live-editor-content:focus {
   outline: none;
 }
