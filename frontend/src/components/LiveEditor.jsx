@@ -201,122 +201,6 @@ const clearEmptyBlockPlugin = $prose((ctx) => {
   });
 });
 
-// Plugin: render a clickable checkbox for top-level GFM task list items.
-//
-// Why this exists: @milkdown/preset-gfm@7.20 parses `- [ ] foo` into a
-// list_item node with attrs.checked = false/true correctly, but its
-// toDOM emits only `<li data-item-type="task" data-checked="...">` —
-// no `<input>` element. Milkdown leaves checkbox rendering up to the
-// consumer. mdnest's CSS expected an input that never existed, so for
-// the entire history of the Live editor, top-level task lists looked
-// like bullet lists with no visual checkbox (v3.8.0 fixed data
-// preservation via markdownToSlice but the visual gap was untouched).
-//
-// Mirror of tableCellCheckboxPlugin's approach, but scoped to
-// list_item nodes that have attrs.checked != null (i.e. real task
-// list items, not plain bullets). Renders a widget decoration at the
-// start of each task list_item; clicking it dispatches a transaction
-// that flips attrs.checked via setNodeMarkup, which round-trips
-// through toMarkdown as `- [ ] ` / `- [x] ` correctly.
-const topLevelTaskKey = new PluginKey('top-level-task-checkbox');
-
-function buildTopLevelTaskDecorations(doc, viewRef) {
-  const decorations = [];
-  doc.descendants((node, pos) => {
-    if (node.type.name !== 'list_item') return true;
-    if (node.attrs.checked == null) return true;
-    // Place the widget just inside the list_item (pos + 1 is the first
-    // position inside the node). side: -1 keeps the cursor on the
-    // text side of the widget so typing/Backspace at the very start
-    // of the item works naturally.
-    decorations.push(
-      Decoration.widget(
-        pos + 1,
-        () => makeTopLevelTaskCheckboxWidget(viewRef, pos, !!node.attrs.checked, node.attrs),
-        { side: -1, ignoreSelection: true, key: `task-${pos}-${node.attrs.checked}` }
-      )
-    );
-    return true;
-  });
-  return DecorationSet.create(doc, decorations);
-}
-
-function makeTopLevelTaskCheckboxWidget(viewRef, itemPos, checked, attrs) {
-  const wrap = document.createElement('span');
-  wrap.className = 'mdt-task-checkbox-wrap';
-  wrap.contentEditable = 'false';
-
-  const input = document.createElement('input');
-  input.type = 'checkbox';
-  input.className = 'mdt-task-checkbox';
-  input.checked = checked;
-  input.contentEditable = 'false';
-  input.tabIndex = -1;
-
-  ['mousedown', 'pointerdown', 'touchstart'].forEach((evt) => {
-    wrap.addEventListener(evt, (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-    });
-  });
-
-  const toggle = (e) => {
-    if (e) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
-    const view = viewRef.current;
-    if (!view) return;
-    const { state } = view;
-    // The plugin rebuilds decorations on every doc change, so itemPos
-    // is the position at the time this widget was painted. Map through
-    // the current mapping in case a concurrent transaction shifted
-    // things, then flip the checked attribute via setNodeMarkup.
-    const mapped = state.tr.mapping.map(itemPos);
-    const node = state.doc.nodeAt(mapped);
-    if (!node || node.type.name !== 'list_item') return;
-    const tr = state.tr.setNodeMarkup(mapped, null, {
-      ...node.attrs,
-      checked: !checked,
-    });
-    view.dispatch(tr);
-  };
-  input.addEventListener('click', toggle);
-  input.addEventListener('keydown', (e) => {
-    if (e.key === ' ' || e.key === 'Enter') toggle(e);
-  });
-
-  wrap.appendChild(input);
-  return wrap;
-}
-
-const topLevelTaskCheckboxPlugin = $prose(() => {
-  const viewRef = { current: null };
-  return new Plugin({
-    key: topLevelTaskKey,
-    view(editorView) {
-      viewRef.current = editorView;
-      return {
-        destroy() { viewRef.current = null; },
-      };
-    },
-    state: {
-      init(_, state) {
-        return buildTopLevelTaskDecorations(state.doc, viewRef);
-      },
-      apply(tr, old) {
-        if (!tr.docChanged) return old.map(tr.mapping, tr.doc);
-        return buildTopLevelTaskDecorations(tr.doc, viewRef);
-      },
-    },
-    props: {
-      decorations(state) {
-        return this.getState(state);
-      },
-    },
-  });
-});
-
 // Plugin: render `[ ]` / `[x]` inside table cells as interactive checkboxes.
 //
 // Why a decoration plugin and not a schema extension? GFM's table_cell
@@ -588,8 +472,7 @@ function MilkdownEditor({ content, onChange, readOnly, onEditorReady }) {
       .use(mermaidNodeView)
       .use(clearEmptyBlockPlugin)
       .use(commentHighlightPlugin)
-      .use(tableCellCheckboxPlugin)
-      .use(topLevelTaskCheckboxPlugin);
+      .use(tableCellCheckboxPlugin);
   }, [readOnly]);
 
   // Unsuppress on real user interaction — keydown/mousedown in the editor area.
