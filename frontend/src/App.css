@@ -2781,9 +2781,13 @@ pre:hover .code-copy-btn {
 /* ProseMirror content area: bring padding and font sizes in line with the
    legacy LiveEditor so notes look the same regardless of which editor is
    active. Crepe's defaults are sized for a wider layout (60×120 padding,
-   42px H1) — too big for our split-view editor pane. */
+   42px H1) — too big for our split-view editor pane.
+   Left padding is wider than right to leave gutter space for Crepe's
+   block-edit drag/`+` handles, which absolute-position themselves to the
+   left of the cursor's block. With our previous 1rem padding the handles
+   landed in the negative-margin zone and weren't visually anchored. */
 .editor-wrapper .milkdown .ProseMirror {
-  padding: 1rem;
+  padding: 1rem 1rem 1rem 56px;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', sans-serif;
   font-size: 0.9rem;
   line-height: 1.7;
@@ -2797,12 +2801,41 @@ pre:hover .code-copy-btn {
   border-bottom: 1px solid #313244;
   padding-bottom: 0.3rem;
 }
-.editor-wrapper .milkdown .ProseMirror h2 { font-size: 1.4rem; font-weight: 700; margin: 1rem 0 0.5rem; }
+.editor-wrapper .milkdown .ProseMirror h2 {
+  font-size: 1.4rem;
+  font-weight: 700;
+  margin: 1rem 0 0.5rem;
+  border-bottom: 1px solid #313244;
+  padding-bottom: 0.25rem;
+}
 .editor-wrapper .milkdown .ProseMirror h3 { font-size: 1.15rem; font-weight: 600; margin: 0.8rem 0 0.4rem; }
 .editor-wrapper .milkdown .ProseMirror h4 { font-size: 1rem; font-weight: 600; margin: 0.6rem 0 0.3rem; }
 .editor-wrapper .milkdown .ProseMirror h5 { font-size: 0.95rem; font-weight: 600; margin: 0.5rem 0 0.25rem; }
 .editor-wrapper .milkdown .ProseMirror h6 { font-size: 0.9rem; font-weight: 600; margin: 0.4rem 0 0.2rem; color: #a6adc8; }
 .editor-wrapper .milkdown .ProseMirror p { margin: 0.4rem 0; }
+
+/* Bullets: Crepe's list-item feature replaces the default markers with
+   muted shapes. Brighten the disc so it reads as cleanly as the legacy
+   editor's bullets did. */
+.editor-wrapper .milkdown .ProseMirror ul > li::marker,
+.editor-wrapper .milkdown .ProseMirror ol > li::marker {
+  color: #cdd6f4;
+}
+
+/* Block-edit drag/`+` handles: Crepe's default icon fill is
+   var(--crepe-color-outline) which on Catppuccin Mocha is #45475a —
+   barely visible against #1e1e2e. Brighten to subtext1 so the handles
+   are actually findable on hover, matching the discoverability the
+   playground gets on its lighter theme. */
+.editor-wrapper .milkdown .milkdown-block-handle .operation-item svg {
+  fill: #a6adc8;
+}
+.editor-wrapper .milkdown .milkdown-block-handle .operation-item:hover {
+  background: #313244;
+}
+.editor-wrapper .milkdown .milkdown-block-handle .operation-item:hover svg {
+  fill: #cdd6f4;
+}
 
 /* Tables: Crepe's default border is `color-mix(--crepe-color-outline,
    transparent 80%)` — too faint against our dark background. Use solid
