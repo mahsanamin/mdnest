@@ -519,7 +519,7 @@ function MilkdownEditor({ content, onChange, readOnly, onEditorReady }) {
   return <Milkdown />;
 }
 
-function LiveToolbar({ editor }) {
+export function LiveToolbar({ editor }) {
   if (!editor) return null;
   const cmd = (command, payload) => {
     try { editor.action(callCommand(command.key, payload)); } catch (e) {}

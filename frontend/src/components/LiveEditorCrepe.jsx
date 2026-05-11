@@ -34,6 +34,7 @@ import {
   tableCellCheckboxPlugin,
   mermaidNodeView,
   findAnchorMatches,
+  LiveToolbar,
 } from './LiveEditor.jsx';
 
 // Common base CSS for each Crepe feature. We import layout/structure
@@ -62,6 +63,11 @@ export default function LiveEditorCrepe({
 }) {
   const rootRef = useRef(null);
   const crepeRef = useRef(null);
+  // Editor instance in React state so the LiveToolbar re-renders when
+  // the editor becomes available. The toolbar's callCommand paths need
+  // a real editor reference; null-checking via prop is cleaner than
+  // forwarding refs through React.memo.
+  const [editor, setEditor] = useState(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
@@ -122,6 +128,11 @@ export default function LiveEditorCrepe({
         // eslint-disable-next-line no-console
         console.error('LiveEditorCrepe: failed to attach custom plugins:', err);
       }
+
+      // Expose the editor to the LiveToolbar (Phase 3). The toolbar
+      // calls editor.action(callCommand(...)) for bold/italic/heading/
+      // list/table/etc. Same surface as the legacy editor's toolbar.
+      setEditor(crepe.editor);
     }).catch((err) => {
       // eslint-disable-next-line no-console
       console.error('Crepe init failed:', err);
@@ -367,6 +378,7 @@ export default function LiveEditorCrepe({
 
   return (
     <div className="live-editor-pane live-editor-crepe">
+      {!readOnly && editor && <LiveToolbar editor={editor} />}
       <div ref={rootRef} className="live-editor-content" />
       {fullscreenSvg && (
         <MermaidViewer svg={fullscreenSvg} onClose={() => setFullscreenSvg(null)} />
