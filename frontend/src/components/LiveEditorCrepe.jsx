@@ -36,6 +36,7 @@ import { Crepe } from '@milkdown/crepe';
 import { editorViewCtx, nodeViewCtx, SchemaReady } from '@milkdown/core';
 import { TextSelection } from '@milkdown/prose/state';
 import { insert, markdownToSlice, replaceAll } from '@milkdown/utils';
+import { blockConfig } from '@milkdown/plugin-block';
 import { uploadImage } from '../api.js';
 import { htmlToMarkdown, hasRichContent } from '../html-to-md.js';
 import { looksLikeMarkdown } from '../markdown-utils.js';
@@ -244,6 +245,30 @@ export default function LiveEditorCrepe({
         },
       },
     });
+
+    // Override Crepe's block-edit filter so the drag handle anchors to the
+    // table itself (not the row inside it). Crepe's default filterNodes
+    // rejects any node whose ancestor is a table, which made the handle
+    // skip tables entirely — visually it appeared next to the table but
+    // clicking it did nothing because the BlockService had no `active`
+    // node to drag. We reject the inner table_row / table_cell so the
+    // walk-up loop in select-node-by-dom resolves to the outer `table`
+    // (and the table itself becomes the drag target).
+    try {
+      crepe.editor.config((ctx) => {
+        ctx.update(blockConfig.key, (cfg) => ({
+          ...cfg,
+          filterNodes: (_pos, node) => {
+            const name = node?.type?.name;
+            if (name === 'table_cell' || name === 'table_header' || name === 'table_row') return false;
+            return true;
+          },
+        }));
+      });
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[Crepe] failed to override blockConfig.filterNodes:', err);
+    }
 
     // Custom plugins layered onto the underlying Milkdown editor. Wrap each
     // .use() in its own try/catch so a single misbehaving plugin doesn't
