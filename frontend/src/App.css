@@ -2739,12 +2739,15 @@ pre:hover .code-copy-btn {
    selector (`.editor-wrapper .milkdown`) so the override wins regardless
    of CSS import order (frame-dark is lazy-loaded with the editor chunk). */
 
-/* Crepe's root mounts as a direct child of `.live-editor-wrapper` (which
-   already handles scrolling + flex sizing for the legacy editor). Crepe
-   applies `.milkdown` to its outer wrapper inside our root div. */
-.live-editor-crepe-root,
+/* Crepe's root sits inside `.live-editor-pane` (a flex column) below the
+   LiveToolbar — make it grow to fill the remaining height. */
+.live-editor-crepe-root {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
 .live-editor-crepe-root .milkdown {
-  min-height: 100%;
+  height: 100%;
 }
 
 .editor-wrapper .milkdown {

@@ -170,14 +170,12 @@ export default function LiveEditorCrepe({
     });
 
     crepe.create().then(() => {
-      // eslint-disable-next-line no-console
-      console.log('[Crepe] editor created');
       crepeRef.current = crepe;
       setInnerEditor(crepe.editor);
       if (readOnly) crepe.setReadonly(true);
     }).catch((err) => {
       // eslint-disable-next-line no-console
-      console.error('[Crepe] init failed:', err);
+      console.error('Crepe init failed:', err);
     });
 
     const unsuppress = (e) => {
@@ -499,7 +497,7 @@ export default function LiveEditorCrepe({
     <div className="live-editor-pane">
       {readOnly && <div className="editor-readonly-bar">Read-only</div>}
       {!readOnly && <LiveToolbar editor={innerEditor} />}
-      <div className="live-editor-wrapper">
+      <div className="live-editor-wrapper" style={{ position: 'relative', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
         <div ref={rootRef} className="live-editor-crepe-root" />
         {selectionPopup && onComment && (
           <button
