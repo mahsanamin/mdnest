@@ -218,7 +218,15 @@ export default function LiveEditorCrepe({
       if (/^(https?:|data:|blob:|\/)/i.test(url)) return url;
       const dir = currentPath ? currentPath.split('/').slice(0, -1).join('/') : '';
       const prefix = dir ? `${ns}/${dir}` : ns;
-      return `/api/files/${prefix}/${url}`;
+      // Append the JWT as a query param so the browser's <img src=> GET
+      // (which can't set an Authorization header) authenticates against
+      // /api/files. The auth middleware accepts ?token= as a fallback.
+      let resolved = `/api/files/${prefix}/${url}`;
+      try {
+        const tok = localStorage.getItem('mdnest_token');
+        if (tok) resolved += `?token=${encodeURIComponent(tok)}`;
+      } catch { /* localStorage unavailable */ }
+      return resolved;
     };
 
     const crepe = new Crepe({

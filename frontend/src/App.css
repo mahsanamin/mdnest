@@ -2867,6 +2867,16 @@ pre:hover .code-copy-btn {
   border-radius: 4px;
 }
 
+/* Mermaid block NodeSelection feedback: same reason as tables — the
+   rendered SVG inside .mermaid-live-container paints its own
+   background, hiding Crepe's default selection mix. Same blue outline
+   so the user knows they can press Delete to remove the diagram. */
+.editor-wrapper .milkdown .ProseMirror .mermaid-live-container.ProseMirror-selectednode {
+  outline: 2px solid #89b4fa;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
 .live-editor-content:focus {
   outline: none;
 }

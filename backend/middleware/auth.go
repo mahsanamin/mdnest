@@ -40,21 +40,30 @@ func NewAuthMiddleware(secret string, multiMode bool, tv TokenValidator, tr APIT
 // Accepts either:
 //   - Bearer <JWT> (from browser login)
 //   - Bearer mdnest_<token> (API token for MCP/API)
+//   - ?token=<JWT> query parameter (for <img>/<a>/etc. that can't set
+//     custom request headers — used by the Live editor's pasted/uploaded
+//     image rendering, which sets src="/api/files/<ns>/<path>?token=…")
 func (a *AuthMiddleware) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
-		if authHeader == "" {
+		var tokenString string
+
+		if authHeader != "" {
+			parts := strings.SplitN(authHeader, " ", 2)
+			if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") {
+				http.Error(w, `{"error":"invalid authorization header"}`, http.StatusUnauthorized)
+				return
+			}
+			tokenString = parts[1]
+		} else if qt := r.URL.Query().Get("token"); qt != "" {
+			// Fallback for browser GETs that can't set Authorization
+			// (image src, anchor downloads). Same validation flow as
+			// Bearer below — both JWT and mdnest_ API tokens accepted.
+			tokenString = qt
+		} else {
 			http.Error(w, `{"error":"missing authorization header"}`, http.StatusUnauthorized)
 			return
 		}
-
-		parts := strings.SplitN(authHeader, " ", 2)
-		if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") {
-			http.Error(w, `{"error":"invalid authorization header"}`, http.StatusUnauthorized)
-			return
-		}
-
-		tokenString := parts[1]
 
 		// Check if it's an API token (starts with mdnest_)
 		if strings.HasPrefix(tokenString, "mdnest_") {
