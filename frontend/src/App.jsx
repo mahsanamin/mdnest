@@ -1324,6 +1324,10 @@ function App() {
                             ns={selectedNs}
                             currentPath={currentPath}
                             comments={commentsEnabled ? comments : []}
+                            onComment={!commentsEnabled ? null : (sel) => {
+                              setPendingCommentSelection(sel);
+                              setShowComments(true);
+                            }}
                             onGoToReady={(fn) => { goToCommentRef.current = fn; }}
                             onHighlightClick={!commentsEnabled ? null : (commentId) => {
                               setShowComments(true);

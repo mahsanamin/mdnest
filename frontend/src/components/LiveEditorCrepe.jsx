@@ -34,7 +34,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { Crepe } from '@milkdown/crepe';
 import { editorViewCtx } from '@milkdown/core';
 import { TextSelection } from '@milkdown/prose/state';
-import { insert, markdownToSlice } from '@milkdown/utils';
+import { insert, markdownToSlice, replaceAll } from '@milkdown/utils';
 import mermaid, { fixMermaidTextColors } from '../mermaid-config.js';
 import { uploadImage } from '../api.js';
 import { htmlToMarkdown, hasRichContent } from '../html-to-md.js';
@@ -83,6 +83,7 @@ export default function LiveEditorCrepe({
   ns,
   currentPath,
   comments,
+  onComment,
   onGoToReady,
   onHighlightClick,
 }) {
@@ -96,10 +97,39 @@ export default function LiveEditorCrepe({
   const [innerEditor, setInnerEditor] = useState(null);
 
   const suppressSaveRef = useRef(true);
+  // Last markdown we serialized OUT of the editor. Used to skip the
+  // content-prop sync effect for our own saves (avoid replaceAll loops).
+  const lastLocalContentRef = useRef(content);
+  // Floating "💬 Comment" button shown when the user selects text inside
+  // the editor. Position is in pixels relative to the wrapper.
+  const [selectionPopup, setSelectionPopup] = useState(null);
 
   useEffect(() => {
     if (!rootRef.current) return;
     if (content === null || content === undefined) return;
+
+    // Image upload — mdnest stores uploads next to the note. The markdown
+    // bytes hold just the filename (e.g. `![](photo.png)`); the rendered
+    // <img src=> is resolved to the absolute `/api/files/<ns>/<dir>/<file>`
+    // URL via proxyDomURL below.
+    const uploadHandler = async (file) => {
+      if (!ns || !currentPath) return '';
+      try {
+        const data = await uploadImage(ns, currentPath, file);
+        return (data.url || file.name).split('/').pop();
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('Image upload failed:', err);
+        return '';
+      }
+    };
+    const proxyDomURL = (url) => {
+      if (!url) return url;
+      if (/^(https?:|data:|blob:|\/)/i.test(url)) return url;
+      const dir = currentPath ? currentPath.split('/').slice(0, -1).join('/') : '';
+      const prefix = dir ? `${ns}/${dir}` : ns;
+      return `/api/files/${prefix}/${url}`;
+    };
 
     const crepe = new Crepe({
       root: rootRef.current,
@@ -123,6 +153,12 @@ export default function LiveEditorCrepe({
             return container;
           },
         },
+        'image-block': {
+          onUpload: uploadHandler,
+          blockOnUpload: uploadHandler,
+          inlineOnUpload: uploadHandler,
+          proxyDomURL,
+        },
       },
     });
 
@@ -142,6 +178,7 @@ export default function LiveEditorCrepe({
 
     crepe.on((listener) => {
       listener.markdownUpdated((_ctx, markdown, prev) => {
+        lastLocalContentRef.current = markdown;
         if (suppressSaveRef.current) return;
         if (markdown === prev) return;
         const cb = onChangeRef.current;
@@ -185,6 +222,22 @@ export default function LiveEditorCrepe({
       crepeRef.current.setReadonly(!!readOnly);
     }
   }, [readOnly]);
+
+  // External content sync (live-collab broadcast, history restore). When the
+  // `content` prop drifts from what we last serialized, replace the editor's
+  // doc — same pattern as the legacy MilkdownEditor. Suppress saves through
+  // the next user keystroke so the replaceAll → markdownUpdated round trip
+  // doesn't fire a redundant PUT that races the incoming update.
+  useEffect(() => {
+    if (!innerEditor || !crepeRef.current) return;
+    if (content == null) return;
+    if (content === lastLocalContentRef.current) return;
+    suppressSaveRef.current = true;
+    try {
+      crepeRef.current.editor.action(replaceAll(content));
+      lastLocalContentRef.current = content;
+    } catch { /* editor not ready or replaceAll failed */ }
+  }, [content, innerEditor]);
 
   // Push active comment anchors into the highlight plugin whenever comments
   // change. Same logic as the legacy LiveEditor — top-level threads only,
@@ -244,6 +297,44 @@ export default function LiveEditorCrepe({
   useEffect(() => {
     if (onGoToReady) onGoToReady(goToComment);
   }, [goToComment, onGoToReady]);
+
+  // Floating Comment button: appears when the user selects text inside the
+  // editor pane. Mirrors the legacy LiveEditor — only triggers on a
+  // selection gesture that originated inside the editor, otherwise a
+  // sidebar click that programmatically sets a selection would pop the
+  // button at random positions.
+  useEffect(() => {
+    if (!innerEditor || !onComment) return;
+    const checkSelection = (e) => {
+      const wrapper = rootRef.current;
+      if (!wrapper) return;
+      if (e && e.target && !wrapper.contains(e.target)) return;
+      try {
+        innerEditor.action((ctx) => {
+          const view = ctx.get(editorViewCtx);
+          const { from, to } = view.state.selection;
+          if (to - from < 3) { setSelectionPopup(null); return; }
+          const selectedText = view.state.doc.textBetween(from, to, ' ');
+          if (!selectedText.trim()) { setSelectionPopup(null); return; }
+          const coords = view.coordsAtPos(to);
+          const rect = wrapper.getBoundingClientRect();
+          setSelectionPopup({
+            top: coords.top - rect.top + wrapper.scrollTop + 20,
+            left: Math.min(coords.left - rect.left, rect.width - 120),
+            text: selectedText,
+            start: from,
+            end: to,
+          });
+        });
+      } catch { /* not ready */ }
+    };
+    document.addEventListener('mouseup', checkSelection);
+    document.addEventListener('keyup', checkSelection);
+    return () => {
+      document.removeEventListener('mouseup', checkSelection);
+      document.removeEventListener('keyup', checkSelection);
+    };
+  }, [innerEditor, onComment]);
 
   // Clicking a yellow .comment-highlight in the editor opens the sidebar
   // and flashes the relevant comment card.
@@ -413,7 +504,27 @@ export default function LiveEditorCrepe({
     <div className="live-editor-pane">
       {readOnly && <div className="editor-readonly-bar">Read-only</div>}
       {!readOnly && <LiveToolbar editor={innerEditor} />}
-      <div ref={rootRef} className="live-editor-crepe-root" />
+      <div className="live-editor-wrapper" style={{ position: 'relative', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+        <div ref={rootRef} className="live-editor-crepe-root" />
+        {selectionPopup && onComment && (
+          <button
+            className="comment-selection-btn"
+            style={{ top: selectionPopup.top, left: selectionPopup.left }}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onComment({
+                rangeStart: selectionPopup.start,
+                rangeEnd: selectionPopup.end,
+                anchorText: selectionPopup.text,
+              });
+              setSelectionPopup(null);
+            }}
+          >
+            💬 Comment
+          </button>
+        )}
+      </div>
     </div>
   );
 }
