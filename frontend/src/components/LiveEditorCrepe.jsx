@@ -51,28 +51,32 @@ import {
 import '@milkdown/crepe/theme/common/style.css';
 import '@milkdown/crepe/theme/frame-dark.css';
 
-// Render mermaid source into a DOM element. Used as Crepe's renderPreview
-// callback — returns the element so Crepe's code-block component can swap
-// it in for the CodeMirror view when "preview" mode is active.
-async function renderMermaidInto(el, source) {
+// Render mermaid source to an SVG-containing HTML string. Used by Crepe's
+// renderPreview hook — Crepe's preview-panel feeds whatever we return through
+// DOMPurify.sanitize() and sets innerHTML, so async rendering MUST go via
+// the applyPreview callback (returning a sync HTMLElement loses subsequent
+// DOM writes since Crepe snapshots it once and never re-reads it).
+async function renderMermaidString(source) {
   if (!source || !source.trim()) {
-    el.innerHTML = '<div class="crepe-mermaid-empty">Empty mermaid diagram</div>';
-    return;
+    return '<div class="crepe-mermaid-empty">Empty mermaid diagram</div>';
   }
   try {
     await mermaid.parse(source);
     const id = 'crepe-mermaid-' + Math.random().toString(36).slice(2, 9);
     const { svg } = await mermaid.render(id, source);
-    el.innerHTML = svg;
-    const svgEl = el.querySelector('svg');
+    // Pass the SVG through fixMermaidTextColors before serializing back to
+    // string — the contrast pass needs a real SVG element to walk.
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = svg;
+    const svgEl = wrapper.querySelector('svg');
     if (svgEl) fixMermaidTextColors(svgEl);
+    return `<div class="crepe-mermaid-preview">${wrapper.innerHTML}</div>`;
   } catch (err) {
     const msg = (err && err.message) || String(err);
-    const pre = document.createElement('pre');
-    pre.className = 'crepe-mermaid-error';
-    pre.textContent = msg;
-    el.innerHTML = '';
-    el.appendChild(pre);
+    const escaped = msg.replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[c]));
+    return `<pre class="crepe-mermaid-error">${escaped}</pre>`;
   }
 }
 
@@ -145,12 +149,17 @@ export default function LiveEditorCrepe({
           // stays null and Crepe falls back to showing CodeMirror anyway —
           // so this only affects mermaid (and any future renderable langs).
           previewOnlyByDefault: true,
-          renderPreview: (language, content) => {
+          previewLabel: 'Mermaid',
+          previewLoading: 'Rendering mermaid…',
+          renderPreview: (language, content, applyPreview) => {
             if (language !== 'mermaid') return null;
-            const container = document.createElement('div');
-            container.className = 'crepe-mermaid-preview';
-            renderMermaidInto(container, content);
-            return container;
+            // Async pattern: return undefined so Crepe shows the
+            // previewLoading placeholder, then call applyPreview with the
+            // rendered SVG string. Returning an Element synchronously would
+            // race against mermaid.render() — Crepe's PreviewPanel snapshots
+            // preview.value through DOMPurify and never re-reads it.
+            renderMermaidString(content).then((html) => applyPreview(html));
+            return undefined;
           },
         },
         'image-block': {
