@@ -53,15 +53,29 @@ import {
 import '@milkdown/crepe/theme/common/style.css';
 import '@milkdown/crepe/theme/frame-dark.css';
 
-// Detect plain text that looks like mermaid diagram source. The keyword list
-// covers the diagram-type prefixes mermaid ships in v10+. We deliberately
-// don't try to parse — a false positive (we wrap something that isn't mermaid
-// in a ```mermaid fence) is recoverable from the source toggle; a false
-// negative (user pastes mermaid source and it lands as a plain paragraph)
-// is the failure mode the legacy editor avoided.
-const MERMAID_RE = /^\s*(graph\s+(TD|LR|BT|RL|TB)\b|flowchart\s+(TD|LR|BT|RL|TB)\b|sequenceDiagram\b|classDiagram\b|stateDiagram(-v2)?\b|erDiagram\b|gantt\b|pie\b|journey\b|requirementDiagram\b|gitGraph\b|mindmap\b|timeline\b|quadrantChart\b|xychart-beta\b|sankey-beta\b|block-beta\b|C4(Context|Container|Component|Dynamic|Deployment)\b)/m;
+// Detect plain text that looks like mermaid diagram source. Strict on
+// purpose:
+//   - The WHOLE pasted text (after stripping leading blank lines) must
+//     start with a mermaid diagram-type declaration. No /m flag — a doc
+//     that just happens to contain words like "pie", "journey", "gantt",
+//     or "timeline" at a line start in the middle of prose should NOT
+//     be wrapped in a mermaid fence.
+//   - Diagram-type tokens that are also common English words ("pie",
+//     "journey", "gantt", "timeline", "mindmap") additionally require
+//     either end-of-line / end-of-string OR mermaid-specific syntax
+//     immediately after, so "pie chart shows…" or "user journey through
+//     the funnel" don't trigger.
+//   - Multi-block diagrams (anything with markdown-style headings) bail
+//     out — if the text also looks like markdown, treat it as markdown.
+const MERMAID_PREFIX_RE = /^[\s\n]*(graph\s+(TD|LR|BT|RL|TB)\b|flowchart\s+(TD|LR|BT|RL|TB)\b|sequenceDiagram\b|classDiagram\b|stateDiagram(-v2)?\b|erDiagram\b|requirementDiagram\b|gitGraph\b|quadrantChart\b|xychart-beta\b|sankey-beta\b|block-beta\b|C4(Context|Container|Component|Dynamic|Deployment)\b|(gantt|pie|journey|mindmap|timeline)(\s+title\b|\s*$|\s*\n))/;
+const MARKDOWN_HEADING_OR_TABLE_RE = /^\s*(#{1,6}\s|\|.*\|)/m;
 function looksLikeMermaid(text) {
-  return !!text && MERMAID_RE.test(text);
+  if (!text) return false;
+  // If the paste also contains markdown headings or table rows, it's not
+  // a mermaid source paste — it's a document that happens to have
+  // mermaid-keyword English words in it.
+  if (MARKDOWN_HEADING_OR_TABLE_RE.test(text)) return false;
+  return MERMAID_PREFIX_RE.test(text);
 }
 
 // Build the MermaidBlock-React node view for a single `code_block` node.
