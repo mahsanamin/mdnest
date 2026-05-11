@@ -2733,16 +2733,49 @@ pre:hover .code-copy-btn {
   color: #cdd6f4;
 }
 
-/* ===== Crepe baseline (v3.10.0 spike — behind VITE_USE_CREPE flag) =====
-   The minimal baseline uses Crepe's built-in frame-dark theme as-is.
-   Catppuccin variable overrides are layered back on in a later phase
-   once we've visually verified the pristine Crepe rendering matches
-   the Milkdown playground. */
+/* ===== Crepe (v3.10.0 spike — behind VITE_USE_CREPE flag) =====
+   Crepe ships frame-dark.css which sets generic dark color variables on
+   `.milkdown`. We layer Catppuccin Mocha on top with a higher-specificity
+   selector (`.editor-wrapper .milkdown`) so the override wins regardless
+   of CSS import order (frame-dark is lazy-loaded with the editor chunk). */
 
-/* Crepe's root needs to fill the editor pane. */
-.live-editor-crepe-root,
+/* Crepe's root sits inside `.live-editor-pane` (a flex column) below the
+   LiveToolbar — make it grow to fill the remaining height. */
+.live-editor-crepe-root {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
 .live-editor-crepe-root .milkdown {
   height: 100%;
+}
+
+.editor-wrapper .milkdown {
+  /* Catppuccin Mocha palette */
+  --crepe-color-background: #1e1e2e;       /* base */
+  --crepe-color-on-background: #cdd6f4;    /* text */
+  --crepe-color-surface: #181825;          /* surface */
+  --crepe-color-surface-low: #11111b;      /* deepest surface */
+  --crepe-color-on-surface: #cdd6f4;
+  --crepe-color-on-surface-variant: #a6adc8;
+  --crepe-color-outline: #45475a;
+  --crepe-color-primary: #89b4fa;          /* blue accent */
+  --crepe-color-secondary: #313244;
+  --crepe-color-on-secondary: #cdd6f4;
+  --crepe-color-inverse: #cdd6f4;
+  --crepe-color-on-inverse: #1e1e2e;
+  --crepe-color-inline-code: #f38ba8;
+  --crepe-color-error: #f38ba8;
+  --crepe-color-hover: #313244;
+  --crepe-color-selected: #45475a;
+  --crepe-color-inline-area: #313244;
+
+  --crepe-font-title: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', sans-serif;
+  --crepe-font-default: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', sans-serif;
+  --crepe-font-code: 'JetBrains Mono', 'Fira Code', ui-monospace, Menlo, Consolas, monospace;
+
+  --crepe-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --crepe-shadow-2: 0 2px 6px rgba(0, 0, 0, 0.4);
 }
 
 .live-editor-content:focus {
