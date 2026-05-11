@@ -37,6 +37,7 @@ import { editorViewCtx, nodeViewCtx, SchemaReady } from '@milkdown/core';
 import { TextSelection } from '@milkdown/prose/state';
 import { insert, markdownToSlice, replaceAll } from '@milkdown/utils';
 import { blockConfig } from '@milkdown/plugin-block';
+import { findParent } from '@milkdown/prose';
 import { uploadImage } from '../api.js';
 import { htmlToMarkdown, hasRichContent } from '../html-to-md.js';
 import { looksLikeMarkdown } from '../markdown-utils.js';
@@ -251,16 +252,21 @@ export default function LiveEditorCrepe({
     // rejects any node whose ancestor is a table, which made the handle
     // skip tables entirely — visually it appeared next to the table but
     // clicking it did nothing because the BlockService had no `active`
-    // node to drag. We reject the inner table_row / table_cell so the
-    // walk-up loop in select-node-by-dom resolves to the outer `table`
-    // (and the table itself becomes the drag target).
+    // node to drag. We accept the table itself and reject anything that's
+    // *inside* a table (paragraph-in-cell, cell, row), so the walk-up loop
+    // in select-node-by-dom climbs out of cells/rows and STOPS at the
+    // outer `table` — making the whole table the drag/selection target.
+    // (Previous version rejected only table_row/table_cell/table_header,
+    // which still let the walk stop on the paragraph inside the cell —
+    // so clicking the handle selected just the header content, not the
+    // table.)
     try {
       crepe.editor.config((ctx) => {
         ctx.update(blockConfig.key, (cfg) => ({
           ...cfg,
-          filterNodes: (_pos, node) => {
-            const name = node?.type?.name;
-            if (name === 'table_cell' || name === 'table_header' || name === 'table_row') return false;
+          filterNodes: ($pos, node) => {
+            if (node?.type?.name === 'table') return true;
+            if (findParent((n) => n.type.name === 'table')($pos)) return false;
             return true;
           },
         }));
