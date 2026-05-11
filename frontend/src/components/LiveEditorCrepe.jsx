@@ -2,15 +2,12 @@
 //
 // Layered on top of @milkdown/crepe (the editor that Milkdown's playground
 // uses) so we inherit the block-edit / slash menu / drag handle / native
-// task-list checkboxes / KaTeX math / image upload UI / table affordances.
+// task-list checkboxes / CodeMirror code blocks / KaTeX math / image upload UI.
 //
 // Customizations on top:
-//   - Mermaid: legacy `mermaidNodeView` $view renders code_block (language=
-//     mermaid) as the MermaidBlock React component (click-to-edit labels,
-//     source/preview toggle, fullscreen viewer modal). Crepe's `code-mirror`
-//     feature is DISABLED so our $view owns the code_block nodeView outright
-//     — non-mermaid code blocks fall back to plain <pre><code> in the editor
-//     (Preview mode still syntax-highlights them).
+//   - Mermaid: via Crepe's CodeMirror `renderPreview` hook (NOT a separate
+//     $view nodeView) — mermaid blocks toggle between source-in-CodeMirror
+//     and live-rendered SVG using the same affordance other code blocks get.
 //   - Catppuccin Mocha palette: variable overrides on `.editor-wrapper .milkdown`
 //     in App.css; we don't import any of Crepe's color themes (nord, frame, …).
 //   - Comments: ported `commentHighlightPlugin` for yellow highlights on
@@ -31,35 +28,57 @@
 //   - `topLevelTaskCheckboxPlugin` — Crepe's `list-item` feature renders
 //     native SVG task checkboxes for top-level task items, which is exactly
 //     what the hand-rolled plugin was trying (and visually failing) to do.
+//   - The standalone `mermaidNodeView` $view — replaced by `renderPreview`.
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Crepe } from '@milkdown/crepe';
 import { editorViewCtx } from '@milkdown/core';
 import { TextSelection } from '@milkdown/prose/state';
 import { insert, markdownToSlice, replaceAll } from '@milkdown/utils';
+import mermaid, { fixMermaidTextColors } from '../mermaid-config.js';
 import { uploadImage } from '../api.js';
 import { htmlToMarkdown, hasRichContent } from '../html-to-md.js';
 import { looksLikeMarkdown } from '../markdown-utils.js';
-import MermaidViewer from './MermaidViewer.jsx';
 import {
   commentHighlightPlugin,
   commentHighlightKey,
   findAnchorMatches,
   clearEmptyBlockPlugin,
   tableCellCheckboxPlugin,
-  mermaidNodeView,
   LiveToolbar,
 } from './LiveEditor.jsx';
 
 import '@milkdown/crepe/theme/common/style.css';
 import '@milkdown/crepe/theme/frame-dark.css';
 
-// Mermaid rendering is handled by the legacy `mermaidNodeView` $view —
-// it replaces the whole code_block DOM with the MermaidBlock React component
-// (with click-to-edit-labels and source/preview toggle). To avoid conflicts
-// we disable Crepe's `code-mirror` feature entirely, so non-mermaid code
-// blocks render via ProseMirror's default (plain <pre><code>). Users still
-// get syntax-highlighted code in the Preview pane.
+// Render mermaid source to an SVG-containing HTML string. Used by Crepe's
+// renderPreview hook — Crepe's preview-panel feeds whatever we return through
+// DOMPurify.sanitize() and sets innerHTML, so async rendering MUST go via
+// the applyPreview callback (returning a sync HTMLElement loses subsequent
+// DOM writes since Crepe snapshots it once and never re-reads it).
+async function renderMermaidString(source) {
+  if (!source || !source.trim()) {
+    return '<div class="crepe-mermaid-empty">Empty mermaid diagram</div>';
+  }
+  try {
+    await mermaid.parse(source);
+    const id = 'crepe-mermaid-' + Math.random().toString(36).slice(2, 9);
+    const { svg } = await mermaid.render(id, source);
+    // Pass the SVG through fixMermaidTextColors before serializing back to
+    // string — the contrast pass needs a real SVG element to walk.
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = svg;
+    const svgEl = wrapper.querySelector('svg');
+    if (svgEl) fixMermaidTextColors(svgEl);
+    return `<div class="crepe-mermaid-preview">${wrapper.innerHTML}</div>`;
+  } catch (err) {
+    const msg = (err && err.message) || String(err);
+    const escaped = msg.replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[c]));
+    return `<pre class="crepe-mermaid-error">${escaped}</pre>`;
+  }
+}
 
 export default function LiveEditorCrepe({
   content,
@@ -88,9 +107,6 @@ export default function LiveEditorCrepe({
   // Floating "💬 Comment" button shown when the user selects text inside
   // the editor. Position is in pixels relative to the wrapper.
   const [selectionPopup, setSelectionPopup] = useState(null);
-  // Fullscreen mermaid viewer modal — opened from MermaidBlock's expand button
-  // via the `mermaid-fullscreen` custom event the node view dispatches.
-  const [viewerSvg, setViewerSvg] = useState(null);
 
   useEffect(() => {
     if (!rootRef.current) return;
@@ -122,18 +138,30 @@ export default function LiveEditorCrepe({
     const crepe = new Crepe({
       root: rootRef.current,
       defaultValue: content,
-      features: {
-        // Crepe's floating selection toolbar: disabled because we render
-        // our own persistent <LiveToolbar> above the editor.
-        toolbar: false,
-        // Crepe's CodeMirror wrapper for code blocks: disabled so our
-        // `mermaidNodeView` $view can fully replace the code_block DOM
-        // for mermaid blocks. Non-mermaid code blocks fall back to
-        // ProseMirror's default <pre><code> rendering (same as the
-        // legacy LiveEditor) — Preview mode still syntax-highlights.
-        'code-mirror': false,
-      },
+      // Disable Crepe's floating selection toolbar. We render our own
+      // persistent <LiveToolbar> above the editor instead — it has Undo /
+      // Redo / table delete-row/col that Crepe's bar doesn't replicate.
+      features: { toolbar: false },
       featureConfigs: {
+        'code-mirror': {
+          // Default code blocks to preview-only mode. For non-renderable
+          // languages renderPreview returns null, which means preview.value
+          // stays null and Crepe falls back to showing CodeMirror anyway —
+          // so this only affects mermaid (and any future renderable langs).
+          previewOnlyByDefault: true,
+          previewLabel: 'Mermaid',
+          previewLoading: 'Rendering mermaid…',
+          renderPreview: (language, content, applyPreview) => {
+            if (language !== 'mermaid') return null;
+            // Async pattern: return undefined so Crepe shows the
+            // previewLoading placeholder, then call applyPreview with the
+            // rendered SVG string. Returning an Element synchronously would
+            // race against mermaid.render() — Crepe's PreviewPanel snapshots
+            // preview.value through DOMPurify and never re-reads it.
+            renderMermaidString(content).then((html) => applyPreview(html));
+            return undefined;
+          },
+        },
         'image-block': {
           onUpload: uploadHandler,
           blockOnUpload: uploadHandler,
@@ -147,17 +175,15 @@ export default function LiveEditorCrepe({
     // wraps. These must be registered BEFORE crepe.create() runs the editor
     // creation pipeline.
     //
-    // - mermaidNodeView: $view that replaces code_block (language=mermaid)
-    //   DOM with the MermaidBlock React component. With Crepe's code-mirror
-    //   feature disabled (above), our $view owns the code_block nodeView
-    //   without composition headaches.
-    // - topLevelTaskCheckboxPlugin: deliberately omitted — Crepe's list-item
-    //   feature renders native SVG task checkboxes for top-level task items.
+    // Skipped vs. legacy LiveEditor:
+    //   - mermaidNodeView: replaced by Crepe's CodeMirror `renderPreview` hook
+    //     (see featureConfigs above)
+    //   - topLevelTaskCheckboxPlugin: Crepe's `list-item` feature renders
+    //     native SVG task checkboxes — no longer needed
     crepe.editor
       .use(commentHighlightPlugin)
       .use(clearEmptyBlockPlugin)
-      .use(tableCellCheckboxPlugin)
-      .use(mermaidNodeView);
+      .use(tableCellCheckboxPlugin);
 
     crepe.on((listener) => {
       listener.markdownUpdated((_ctx, markdown, prev) => {
@@ -280,16 +306,6 @@ export default function LiveEditorCrepe({
   useEffect(() => {
     if (onGoToReady) onGoToReady(goToComment);
   }, [goToComment, onGoToReady]);
-
-  // Listen for mermaid fullscreen events dispatched by MermaidBlock's
-  // expand button — captured at the editor root, opens MermaidViewer modal.
-  useEffect(() => {
-    const el = rootRef.current;
-    if (!el) return;
-    const handler = (e) => setViewerSvg(e.detail);
-    el.addEventListener('mermaid-fullscreen', handler);
-    return () => el.removeEventListener('mermaid-fullscreen', handler);
-  }, []);
 
   // Floating Comment button: appears when the user selects text inside the
   // editor pane. Mirrors the legacy LiveEditor — only triggers on a
@@ -518,9 +534,6 @@ export default function LiveEditorCrepe({
           </button>
         )}
       </div>
-      {viewerSvg && (
-        <MermaidViewer svgContent={viewerSvg} onClose={() => setViewerSvg(null)} />
-      )}
     </div>
   );
 }
