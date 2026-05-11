@@ -33,10 +33,9 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Crepe } from '@milkdown/crepe';
-import { editorViewCtx } from '@milkdown/core';
+import { editorViewCtx, nodeViewCtx, SchemaReady } from '@milkdown/core';
 import { TextSelection } from '@milkdown/prose/state';
-import { insert, markdownToSlice, replaceAll, $view } from '@milkdown/utils';
-import { codeBlockSchema } from '@milkdown/preset-commonmark';
+import { insert, markdownToSlice, replaceAll } from '@milkdown/utils';
 import { uploadImage } from '../api.js';
 import { htmlToMarkdown, hasRichContent } from '../html-to-md.js';
 import { looksLikeMarkdown } from '../markdown-utils.js';
@@ -65,73 +64,87 @@ function looksLikeMermaid(text) {
   return !!text && MERMAID_RE.test(text);
 }
 
-// Mermaid node view — replaces the entire code_block (language=mermaid) DOM
-// with the MermaidBlock React component. Defined inline (not imported from
-// LiveEditor.jsx) so this module stays self-contained and we can wrap the
-// registration in defensive logging.
-const mermaidNodeView = $view(codeBlockSchema.node, () => {
-  return (node, view, getPos) => {
-    const lang = node.attrs.language || '';
-    if (lang !== 'mermaid') {
-      // Not mermaid: empty spec → ProseMirror falls back to its default
-      // <pre><code> rendering for this node.
-      return {};
-    }
+// Build the MermaidBlock-React node view for a single `code_block` node.
+function makeMermaidNodeView(node, view, getPos) {
+  const dom = document.createElement('div');
+  dom.className = 'mermaid-live-container';
+  dom.contentEditable = 'false';
 
-    const dom = document.createElement('div');
-    dom.className = 'mermaid-live-container';
-    dom.contentEditable = 'false';
+  const root = createRoot(dom);
+  let currentSource = node.textContent;
 
-    const root = createRoot(dom);
-    let currentSource = node.textContent;
-
-    const render = (source) => {
-      root.render(
-        <MermaidBlock
-          source={source}
-          readOnly={!view.editable}
-          onChange={(newSource) => {
-            const pos = getPos();
-            if (pos == null) return;
-            const tr = view.state.tr;
-            const nodeAt = view.state.doc.nodeAt(pos);
-            if (!nodeAt) return;
-            tr.replaceWith(
-              pos + 1,
-              pos + 1 + nodeAt.content.size,
-              newSource ? view.state.schema.text(newSource) : view.state.schema.text(''),
-            );
-            view.dispatch(tr);
-          }}
-          onFullscreen={(svg) => {
-            dom.dispatchEvent(new CustomEvent('mermaid-fullscreen', { detail: svg, bubbles: true }));
-          }}
-        />,
-      );
-    };
-
-    render(currentSource);
-
-    return {
-      dom,
-      stopEvent: () => true,
-      ignoreMutation: () => true,
-      update: (updatedNode) => {
-        if (updatedNode.type.name !== 'code_block') return false;
-        if ((updatedNode.attrs.language || '') !== 'mermaid') return false;
-        const newSource = updatedNode.textContent;
-        if (newSource !== currentSource) {
-          currentSource = newSource;
-          render(newSource);
-        }
-        return true;
-      },
-      destroy: () => {
-        try { root.unmount(); } catch { /* best-effort */ }
-      },
-    };
+  const render = (source) => {
+    root.render(
+      <MermaidBlock
+        source={source}
+        readOnly={!view.editable}
+        onChange={(newSource) => {
+          const pos = getPos();
+          if (pos == null) return;
+          const tr = view.state.tr;
+          const nodeAt = view.state.doc.nodeAt(pos);
+          if (!nodeAt) return;
+          tr.replaceWith(
+            pos + 1,
+            pos + 1 + nodeAt.content.size,
+            newSource ? view.state.schema.text(newSource) : view.state.schema.text(''),
+          );
+          view.dispatch(tr);
+        }}
+        onFullscreen={(svg) => {
+          dom.dispatchEvent(new CustomEvent('mermaid-fullscreen', { detail: svg, bubbles: true }));
+        }}
+      />,
+    );
   };
-});
+
+  render(currentSource);
+
+  return {
+    dom,
+    stopEvent: () => true,
+    ignoreMutation: () => true,
+    update: (updatedNode) => {
+      if (updatedNode.type.name !== 'code_block') return false;
+      if ((updatedNode.attrs.language || '') !== 'mermaid') return false;
+      const newSource = updatedNode.textContent;
+      if (newSource !== currentSource) {
+        currentSource = newSource;
+        render(newSource);
+      }
+      return true;
+    },
+    destroy: () => {
+      try { root.unmount(); } catch { /* best-effort */ }
+    },
+  };
+}
+
+// Composing plugin: replaces the existing `code_block` nodeView in
+// nodeViewCtx with one that delegates to MermaidBlock for language=mermaid
+// and falls through to whatever Crepe registered (the CodeMirror nodeView)
+// for everything else. Runs after SchemaReady so Crepe's $view has already
+// written its entry — we read it, wrap it, write a new entry that supersedes
+// it (Object.fromEntries uses last-wins for duplicate keys).
+const composedMermaidPlugin = (ctx) => async () => {
+  await ctx.wait(SchemaReady);
+  const entries = ctx.get(nodeViewCtx);
+  // Find the existing factory (Crepe's CodeMirror code-block view)
+  let crepeFactory = null;
+  for (const [id, factory] of entries) {
+    if (id === 'code_block') crepeFactory = factory;
+  }
+  const composedFactory = (node, view, getPos, decorations) => {
+    const lang = node.attrs.language || '';
+    if (lang === 'mermaid') return makeMermaidNodeView(node, view, getPos);
+    if (crepeFactory) return crepeFactory(node, view, getPos, decorations);
+    return {};
+  };
+  ctx.update(nodeViewCtx, (ps) => [...ps, ['code_block', composedFactory]]);
+  return () => {
+    ctx.update(nodeViewCtx, (ps) => ps.filter(([, f]) => f !== composedFactory));
+  };
+};
 
 export default function LiveEditorCrepe({
   content,
@@ -198,11 +211,15 @@ export default function LiveEditorCrepe({
         // Disable Crepe's floating selection toolbar — we render our own
         // persistent <LiveToolbar> above the editor.
         toolbar: false,
-        // Disable Crepe's CodeMirror wrapper for code blocks so our
-        // mermaidNodeView owns the code_block nodeView outright. Non-mermaid
-        // code blocks fall back to ProseMirror's default <pre><code>; the
-        // Preview pane still syntax-highlights via marked.
-        'code-mirror': false,
+        // KEEP `code-mirror` enabled: Crepe's `latex` feature hard-depends
+        // on it (throws "You need to enable CodeMirror to use LaTeX feature"
+        // at create() time otherwise). We instead override the code_block
+        // nodeView for mermaid blocks specifically — see mermaidNodeView
+        // below, which is registered AFTER Crepe so its $view writes the
+        // last entry to nodeViewCtx → Object.fromEntries() keeps OURS.
+        // Mermaid blocks render as MermaidBlock; other code blocks still
+        // use Crepe's CodeMirror UI (so we keep CodeMirror UX for code,
+        // and LaTeX continues to work).
       },
       featureConfigs: {
         'image-block': {
@@ -230,7 +247,7 @@ export default function LiveEditorCrepe({
     tryUse(commentHighlightPlugin, 'commentHighlightPlugin');
     tryUse(clearEmptyBlockPlugin, 'clearEmptyBlockPlugin');
     tryUse(tableCellCheckboxPlugin, 'tableCellCheckboxPlugin');
-    tryUse(mermaidNodeView, 'mermaidNodeView');
+    tryUse(composedMermaidPlugin, 'composedMermaidPlugin');
 
     crepe.on((listener) => {
       listener.markdownUpdated((_ctx, markdown, prev) => {
