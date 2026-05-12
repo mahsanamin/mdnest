@@ -528,6 +528,26 @@ export default function LiveEditorCrepe({
       const cb = e.clipboardData;
       if (!cb) return;
 
+      // 0. Inside a code block / code-mark: let the default paste win.
+      // Milkdown's own clipboard plugin makes the same check — markdown
+      // structure has no meaning inside a code fence, and routing a
+      // multi-line paste through markdownToSlice turns each line into a
+      // separate paragraph (so only the first line lands inside the
+      // code block and the rest break out below it, matching the bug
+      // the user hit pasting SQL into a `sql code block).
+      try {
+        const inCode = crepe.editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx);
+          const $from = view.state.selection.$from;
+          if ($from.parent.type.spec.code) return true;
+          // Inline code mark wraps the cursor too — be defensive.
+          const codeMark = view.state.schema.marks.code_inline || view.state.schema.marks.code;
+          if (codeMark && codeMark.isInSet($from.marks())) return true;
+          return false;
+        });
+        if (inCode) return; // don't preventDefault → browser pastes as text
+      } catch { /* editor not ready — fall through */ }
+
       // 1. Image paste: handled by Crepe's `@milkdown/plugin-upload`
       // (with `enableHtmlFileUploader: true` configured above). That plugin
       // creates an image-block node whose nodeView calls proxyDomURL on
