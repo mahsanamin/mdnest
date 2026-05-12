@@ -79,20 +79,10 @@ case "$CMD" in
       compose run --rm backend ./mdnest -migrate 2>&1 | grep -v "^$"
     fi
 
-    # Propagate frontend feature flags as docker build args when set in
-    # the environment. Lets `VITE_USE_CREPE=true ./mdnest-server rebuild`
-    # carry the flag into the image without editing the Dockerfile.
-    # Add more flags here as they show up.
-    BUILD_ARGS=""
-    if [ -n "$VITE_USE_CREPE" ]; then
-      BUILD_ARGS="$BUILD_ARGS --build-arg VITE_USE_CREPE=$VITE_USE_CREPE"
-    fi
-
     if [ "$1" = "--full" ]; then
       shift
       echo "Full rebuild: force recreate all containers..."
-      # shellcheck disable=SC2086  # we want BUILD_ARGS word-split
-      compose build --no-cache $BUILD_ARGS frontend backend
+      compose build --no-cache frontend backend
       compose up --force-recreate -d "$@"
     else
       # Use Docker layer cache for the build. The Dockerfile's BuildKit
@@ -101,8 +91,7 @@ case "$CMD" in
       # invalidated, so we get fast rebuilds (~10-30s) instead of cold
       # full compiles (~180-235s post-Firebase). If you suspect a stale
       # binary, use `rebuild --full` which forces --no-cache.
-      # shellcheck disable=SC2086  # we want BUILD_ARGS word-split
-      compose build $BUILD_ARGS backend frontend
+      compose build backend frontend
       # --force-recreate guarantees containers re-read .env even when the
       # image hash didn't change (e.g. conf-only edit triggering rebuild).
       # Postgres + git-sync are not in this list, so they keep running.

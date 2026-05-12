@@ -51,7 +51,7 @@ import {
   clearEmptyBlockPlugin,
   tableCellCheckboxPlugin,
   LiveToolbar,
-} from './LiveEditor.jsx';
+} from './live-editor-plugins.jsx';
 
 import '@milkdown/crepe/theme/common/style.css';
 import '@milkdown/crepe/theme/frame-dark.css';

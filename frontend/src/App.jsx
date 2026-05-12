@@ -8,14 +8,10 @@ import Toolbar from './components/Toolbar.jsx';
 import { lazy, Suspense } from 'react';
 import Editor from './components/Editor.jsx';
 import EditorErrorBoundary from './components/EditorErrorBoundary.jsx';
-const LiveEditor = lazy(() => import('./components/LiveEditor.jsx'));
-// v3.10.0 Crepe spike — alternative Live editor, mounted only when
-// VITE_USE_CREPE=true at build time. Default flag is off so production
-// users continue to see the existing <LiveEditor> untouched. See
-// `~/.claude/plans/let-s-do-more-changes-mighty-hellman.md` for the
-// migration plan; this is Phase 0 (visible-but-flagged).
-const LiveEditorCrepe = lazy(() => import('./components/LiveEditorCrepe.jsx'));
-const USE_CREPE = import.meta.env.VITE_USE_CREPE === 'true';
+// Live (rich) editor — Crepe-based since v3.10.0. Lazy-loaded so the
+// ~217 KB-gzipped chunk only downloads when the user actually opens
+// Live mode.
+const LiveEditor = lazy(() => import('./components/LiveEditorCrepe.jsx'));
 import Preview from './components/Preview.jsx';
 import ContextMenu from './components/ContextMenu.jsx';
 import Settings from './components/Settings.jsx';
@@ -1309,14 +1305,8 @@ function App() {
                         {/* key forces a fresh editor instance per note, so the
                             undo stack is per-note (no cross-note Cmd+Z) and never
                             contains the moment-the-prop-was-empty (because we only
-                            mount once content is a real string).
-
-                            v3.10.0 spike: VITE_USE_CREPE=true switches the Live
-                            editor implementation to the Crepe-based component
-                            (LiveEditorCrepe). Default false — production users
-                            see the existing LiveEditor untouched. */}
-                        {USE_CREPE ? (
-                          <LiveEditorCrepe
+                            mount once content is a real string). */}
+                        <LiveEditor
                             key={`${selectedNs}/${currentPath}`}
                             content={content}
                             onChange={canWriteCurrent ? handleContentChange : null}
@@ -1338,30 +1328,6 @@ function App() {
                               }
                             }}
                           />
-                        ) : (
-                          <LiveEditor
-                            key={`${selectedNs}/${currentPath}`}
-                            content={content}
-                            onChange={canWriteCurrent ? handleContentChange : null}
-                            currentPath={currentPath}
-                            ns={selectedNs}
-                            readOnly={!canWriteCurrent}
-                            comments={commentsEnabled ? comments : []}
-                            onComment={!commentsEnabled ? null : (sel) => {
-                              setPendingCommentSelection(sel);
-                              setShowComments(true);
-                            }}
-                            onGoToReady={(fn) => { goToCommentRef.current = fn; }}
-                            onHighlightClick={!commentsEnabled ? null : (commentId) => {
-                              setShowComments(true);
-                              setHighlightedCommentId(commentId);
-                              if (viewMode === 'preview') {
-                                setViewMode('editor');
-                                localStorage.setItem('mdnest_view_mode', 'editor');
-                              }
-                            }}
-                          />
-                        )}
                       </Suspense>
                     </EditorErrorBoundary>
                   ) : (
