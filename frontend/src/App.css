@@ -2824,31 +2824,44 @@ pre:hover .code-copy-btn {
   color: #cdd6f4;
 }
 
-/* Tighten task-list rows. Crepe's .label-wrapper has a fixed 32px height
-   which on its own is fine, but combined with our paragraph margins
-   (`p { margin: 0.4rem 0 }`) the gap between consecutive task items
-   ballooned. Also align the checkbox cap to the first line of text and
-   trim the horizontal gap so the text doesn't sit half an inch right of
-   the checkbox. */
+/* Tighten task-list rows. Crepe's defaults size the checkbox at 24×32 px
+   and the inner `.label` icon container at 24×32 with 4px vertical
+   padding — way oversized against our 0.9rem (14.4 px) body text and
+   1.7 line-height. Combined with our app-wide `p { margin: 0.4rem 0 }`
+   that leaked into the paragraph inside .children, consecutive items
+   had ~13 px of stacked paragraph margins on top of an already-tall row.
+
+   Shrink the checkbox to ~18×18, drop the inner label height to match
+   the line box, kill the inter-item paragraph margins, and tighten the
+   checkbox→text gap. The cap of the checkbox now lines up with the
+   text's first line instead of floating in a 32-px row. */
 .editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block {
   margin: 0;
 }
 .editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block > .list-item {
   gap: 6px;
-  align-items: baseline;
+  align-items: flex-start;
 }
 .editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block > .list-item > .label-wrapper {
-  height: auto;
-  /* Pull the checkbox icon up so its top edge lines up with the cap
-     of the first text line instead of floating below it. */
-  margin-top: 2px;
+  height: 1.7em;
+  width: 1.2em;
+  flex-shrink: 0;
+}
+.editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block > .list-item > .label-wrapper > .label {
+  height: 1.2em;
+  width: 1.2em;
+  padding: 0;
+}
+.editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block > .list-item > .label-wrapper svg {
+  height: 1.2em;
+  width: 1.2em;
 }
 .editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block > .list-item > .children > p {
   margin: 0;
 }
 .editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block > .list-item > .children > * + * {
-  /* Restore a small gap between paragraphs INSIDE a list item, just
-     not between consecutive list items. */
+  /* Restore a small gap between paragraphs INSIDE a single task item
+     (multi-paragraph tasks), just not between consecutive task rows. */
   margin-top: 0.3rem;
 }
 
