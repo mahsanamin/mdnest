@@ -3082,13 +3082,20 @@ pre:hover .code-copy-btn {
   margin: 0 4px;
 }
 
-/* Mermaid live block */
+/* Mermaid live block. width:fit-content lets a 3-node flowchart render
+   at ~600px instead of stretching to the full editor pane and leaving
+   a giant empty halo around the diagram. The toolbar's natural width
+   is the floor (so it never wraps), and max-width:100% keeps oversized
+   diagrams from punching out of the editor — the inner .mermaid-live-preview
+   has overflow:auto for those. */
 .mermaid-live-block {
   background: #11111b;
   border: 1px solid #313244;
   border-radius: 10px;
   margin: 1rem 0;
   overflow: hidden;
+  width: fit-content;
+  max-width: 100%;
 }
 
 .mermaid-live-toolbar {
