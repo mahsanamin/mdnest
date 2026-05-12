@@ -163,6 +163,56 @@ const composedMermaidPlugin = (ctx) => async () => {
   };
 };
 
+// Wrap Crepe's `table` nodeView to skip its "first-click selects the
+// cell" behavior. Crepe's TableNodeView.stopEvent calls handleClick
+// on every mousedown/pointerdown inside a th/td, which creates a
+// NodeSelection on the cell content the first time you click — so the
+// caret only appears on the SECOND click. We override stopEvent to let
+// plain text clicks (anywhere inside a cell that isn't a button) fall
+// through to ProseMirror's normal text-cursor placement, while keeping
+// the original behavior for buttons (column/row controls) and for the
+// drag/drop branch.
+const tableClickFixPlugin = (ctx) => async () => {
+  await ctx.wait(SchemaReady);
+  const entries = ctx.get(nodeViewCtx);
+  let crepeTableFactory = null;
+  for (const [id, factory] of entries) {
+    if (id === 'table') crepeTableFactory = factory;
+  }
+  if (!crepeTableFactory) return () => {};
+
+  const wrappedFactory = (node, view, getPos, decorations) => {
+    const desc = crepeTableFactory(node, view, getPos, decorations);
+    if (!desc) return desc;
+    const origStopEvent = typeof desc.stopEvent === 'function'
+      ? desc.stopEvent.bind(desc)
+      : null;
+    desc.stopEvent = (e) => {
+      if (e.type === 'mousedown' || e.type === 'pointerdown') {
+        const target = e.target;
+        // Buttons inside the table (column / row controls, drag handles)
+        // still need their click handlers — defer to the original.
+        if (target instanceof Element && target.closest('button')) {
+          return origStopEvent ? origStopEvent(e) : false;
+        }
+        // Plain click in a th/td: don't stop the event so ProseMirror
+        // places the text caret directly instead of node-selecting the
+        // whole cell content first.
+        if (target instanceof HTMLElement && (target.closest('th') || target.closest('td'))) {
+          return false;
+        }
+      }
+      return origStopEvent ? origStopEvent(e) : false;
+    };
+    return desc;
+  };
+
+  ctx.update(nodeViewCtx, (ps) => [...ps, ['table', wrappedFactory]]);
+  return () => {
+    ctx.update(nodeViewCtx, (ps) => ps.filter(([, f]) => f !== wrappedFactory));
+  };
+};
+
 export default function LiveEditorCrepe({
   content,
   onChange,
@@ -323,6 +373,7 @@ export default function LiveEditorCrepe({
     tryUse(clearEmptyBlockPlugin, 'clearEmptyBlockPlugin');
     tryUse(tableCellCheckboxPlugin, 'tableCellCheckboxPlugin');
     tryUse(composedMermaidPlugin, 'composedMermaidPlugin');
+    tryUse(tableClickFixPlugin, 'tableClickFixPlugin');
 
     crepe.on((listener) => {
       listener.markdownUpdated((_ctx, markdown, prev) => {
