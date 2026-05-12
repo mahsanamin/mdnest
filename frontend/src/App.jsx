@@ -190,6 +190,25 @@ function App() {
     const existing = getFilePrefs(ns, path) || {};
     localStorage.setItem(key, JSON.stringify({ ...existing, ...prefs }));
   }, [getFilePrefs]);
+
+  // Per-namespace "last opened file" memory. When the user switches
+  // namespaces and switches back, we restore whatever file they had open
+  // in that namespace (with scroll position via the per-file prefs above).
+  // A stale entry (file got deleted/moved on disk) is cleared by the
+  // note-loading effect's catch handler, so the worst case is one failed
+  // load instead of a permanent broken state.
+  const getLastPath = useCallback((ns) => {
+    if (!ns) return null;
+    try { return localStorage.getItem(`mdnest_last_path:${ns}`) || null; } catch { return null; }
+  }, []);
+
+  const setLastPath = useCallback((ns, path) => {
+    if (!ns) return;
+    try {
+      if (path) localStorage.setItem(`mdnest_last_path:${ns}`, path);
+      else localStorage.removeItem(`mdnest_last_path:${ns}`);
+    } catch { /* localStorage unavailable / quota exceeded */ }
+  }, []);
   const [splitRatio, setSplitRatio] = useState(50);
   const [ctxMenu, setCtxMenu] = useState({ visible: false, x: 0, y: 0, target: null });
   const [showChangePassword, setShowChangePassword] = useState(false);
@@ -499,7 +518,19 @@ function App() {
       if (targetNs) {
         setSelectedNs(targetNs);
         if (hashPath && hashNs === targetNs) {
+          // URL hash wins over saved last-path (it's the explicit choice
+          // when a user shares/bookmarks a URL).
           setCurrentPath(hashPath);
+        } else {
+          // No hash → restore the last file the user had open in this
+          // namespace, if any. The note-loading effect below will fetch
+          // its content and the file-prefs scroll restore kicks in via
+          // restoreScrollPosition.
+          const last = getLastPath(targetNs);
+          if (last) {
+            setCurrentPath(last);
+            setHash(targetNs, last);
+          }
         }
       }
       setInitialized(true);
@@ -518,11 +549,20 @@ function App() {
           setContent(text);
           setSavedContent(text);
           etagRef.current = etag;
+          // Scroll-restore the file the user had last open in this
+          // namespace. The per-file prefs (mdnest_file_prefs:<ns>/<path>)
+          // hold the scrollPct from when they were last reading.
+          restoreScrollPosition(selectedNs, currentPath);
         }).catch(() => {
+          // The saved/hash-pointed file is gone (deleted on disk, renamed
+          // by another client). Clear so the user gets a clean slate, and
+          // forget the stale last-path so the next ns switch doesn't try
+          // it again.
           setCurrentPath(null);
           setContent(null);
           setSavedContent('');
           setHash(selectedNs, null);
+          setLastPath(selectedNs, null);
         });
         if (commentsEnabled) {
           listComments(selectedNs, currentPath).then(setComments).catch(() => setComments([]));
@@ -718,13 +758,28 @@ function App() {
 
   const handleSelectNs = useCallback((ns) => {
     setSelectedNs(ns);
-    setCurrentPath(null);
-    setContent(null);
-    setSavedContent('');
+    // Restore the last file the user had open in the namespace they're
+    // switching TO. If they've never opened anything there (or whatever
+    // they had is gone), fall back to the previous behavior — empty
+    // selection, no hash. The note-loading effect picks up the new
+    // currentPath and fetches its content + comments + scroll position.
+    const last = getLastPath(ns);
+    if (last) {
+      setCurrentPath(last);
+      // Wipe stale content so the editor doesn't briefly show the
+      // previous namespace's note before the new content arrives.
+      setContent(null);
+      setSavedContent('');
+      setHash(ns, last);
+    } else {
+      setCurrentPath(null);
+      setContent(null);
+      setSavedContent('');
+      setHash(ns, null);
+    }
     setTree([]);
-    setHash(ns, null);
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
-  }, []);
+  }, [getLastPath]);
 
   const openNote = useCallback(async (path) => {
     if (!selectedNs) return;
@@ -739,6 +794,9 @@ function App() {
       setConflictBanner(null);
       setSidebarVisible(false);
       restoreScrollPosition(selectedNs, path);
+      // Record this as the last-opened file for the current namespace
+      // so a future namespace switch can come back to it.
+      setLastPath(selectedNs, path);
       // Load comments for this note (only when comments feature is enabled)
       if (commentsEnabled) {
         listComments(selectedNs, path).then(setComments).catch(() => setComments([]));
@@ -750,7 +808,7 @@ function App() {
         console.error('Failed to open note:', e);
       }
     }
-  }, [selectedNs]);
+  }, [selectedNs, restoreScrollPosition, commentsEnabled, setLastPath]);
 
   const refreshComments = useCallback(() => {
     if (selectedNs && currentPath) {
@@ -904,6 +962,10 @@ function App() {
         try {
           await deleteNote(selectedNs, target.path);
           if (currentPath === target.path) { setCurrentPath(null); setContent(null); setSavedContent(''); }
+          // Forget this as the namespace's last-opened file so a future
+          // ns switch doesn't try to reopen a now-deleted note.
+          const lastForNs = getLastPath(selectedNs);
+          if (lastForNs === target.path) setLastPath(selectedNs, null);
           await refreshTree();
         } catch (e) { alert('Failed to delete: ' + e.message); }
         break;
@@ -933,6 +995,9 @@ function App() {
         try {
           await deleteNote(selectedNs, target.path);
           if (currentPath && currentPath.startsWith(target.path)) { setCurrentPath(null); setContent(null); setSavedContent(''); }
+          // If the last-opened file lived inside this folder it's gone now.
+          const lastForNs = getLastPath(selectedNs);
+          if (lastForNs && lastForNs.startsWith(target.path)) setLastPath(selectedNs, null);
           await refreshTree();
         } catch (e) { alert('Failed to delete folder: ' + e.message); }
         break;
@@ -989,12 +1054,19 @@ function App() {
             setCurrentPath(updated);
             setHash(selectedNs, updated);
           }
+          // Update last-path pointer so it follows the rename.
+          const lastForNs = getLastPath(selectedNs);
+          if (lastForNs === target.path) {
+            setLastPath(selectedNs, newPath);
+          } else if (lastForNs && lastForNs.startsWith(target.path + '/')) {
+            setLastPath(selectedNs, newPath + lastForNs.substring(target.path.length));
+          }
           await refreshTree();
         } catch (e) { alert('Failed to rename: ' + e.message); }
         break;
       }
     }
-  }, [selectedNs, currentPath, refreshTree, doCreateNote, doCreateFolder]);
+  }, [selectedNs, currentPath, refreshTree, doCreateNote, doCreateFolder, getLastPath, setLastPath]);
 
   const handleTreeDrop = useCallback(async (fromPath, toFolderPath) => {
     if (!selectedNs) return;
@@ -1011,11 +1083,18 @@ function App() {
         setCurrentPath(updated);
         setHash(selectedNs, updated);
       }
+      // Update last-path pointer if it tracked the moved file/folder.
+      const lastForNs = getLastPath(selectedNs);
+      if (lastForNs === fromPath) {
+        setLastPath(selectedNs, newPath);
+      } else if (lastForNs && lastForNs.startsWith(fromPath + '/')) {
+        setLastPath(selectedNs, newPath + lastForNs.substring(fromPath.length));
+      }
       await refreshTree();
     } catch (e) {
       alert('Failed to move: ' + e.message);
     }
-  }, [selectedNs, currentPath, refreshTree]);
+  }, [selectedNs, currentPath, refreshTree, getLastPath, setLastPath]);
 
   // Scroll sync: editor scroll → preview scroll (proportional)
   useEffect(() => {
