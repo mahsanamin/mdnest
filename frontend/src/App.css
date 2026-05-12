@@ -2887,6 +2887,35 @@ pre:hover .code-copy-btn {
   background: #1e1e2e;
 }
 
+/* Inline code inside table cells used to overflow the cell (long URLs
+   and endpoint paths got clipped without a scrollbar). Wrap on any
+   character so the cell auto-sizes vertically instead — preferred over
+   the playground's per-cell horizontal scrollbar for a documentation
+   editor where users want to read the whole token at a glance. */
+.editor-wrapper .milkdown .milkdown-table-block code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Whole-table horizontal overflow fallback: when a table has many
+   columns or wide cells and STILL exceeds the editor pane after the
+   inline-code wrapping above, scroll the table itself rather than
+   pushing the page wider (which clips the rightmost column off-screen
+   as the user saw with the Status column). */
+.editor-wrapper .milkdown .milkdown-table-block {
+  overflow-x: auto;
+}
+
+/* Caret visibility: Crepe / browser default `caret-color: auto` was
+   picking a color too close to our Catppuccin Mocha cell backgrounds,
+   making the cursor invisible inside table cells. Force the accent
+   blue across the editor — it stays high-contrast against base
+   (#1e1e2e), surface1 (#313244), and surface (#181825) alike. */
+.editor-wrapper .milkdown .ProseMirror {
+  caret-color: #89b4fa;
+}
+
 /* Table NodeSelection feedback: Crepe's default .ProseMirror-selectednode
    background is mixed at 40% opacity, which the table cells' own
    backgrounds obscure — clicking the block-edit drag handle on a table
