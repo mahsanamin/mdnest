@@ -2824,44 +2824,34 @@ pre:hover .code-copy-btn {
   color: #cdd6f4;
 }
 
-/* Tighten task-list rows. Crepe's defaults size the checkbox at 24×32 px
-   and the inner `.label` icon container at 24×32 with 4px vertical
-   padding — way oversized against our 0.9rem (14.4 px) body text and
-   1.7 line-height. Combined with our app-wide `p { margin: 0.4rem 0 }`
-   that leaked into the paragraph inside .children, consecutive items
-   had ~13 px of stacked paragraph margins on top of an already-tall row.
-
-   Shrink the checkbox to ~18×18, drop the inner label height to match
-   the line box, kill the inter-item paragraph margins, and tighten the
-   checkbox→text gap. The cap of the checkbox now lines up with the
-   text's first line instead of floating in a 32-px row. */
+/* Task / bullet / ordered list rows.
+   Crepe gives all three list types the same .milkdown-list-item-block
+   shell with a fixed 24x32 px .label box. That box is sized to fit
+   Crepe's SVG bullet (a small dot inside a 24x24 viewBox), the SVG
+   checkbox icons, and the rendered ordered-number text. The previous
+   override shrunk that box to 1.2em, which scaled the bullet circle
+   and "1." text down to ~7px — they ended up looking tiny and floating
+   above the body text.
+   Don't force the box smaller. Keep Crepe's box dimensions and fix
+   just the parts that genuinely fought our scale:
+   - center-align the box vertically with the text line so the marker
+     sits on the same baseline as the text (instead of being top-pinned
+     in a 32px row, which made everything float above)
+   - drop the leaking app-wide `p { margin: 0.4rem 0 }` for list-item
+     paragraphs so consecutive rows aren't gappy
+   - keep a modest intra-item paragraph spacing for multi-paragraph tasks
+   - lightly tighten the marker→text gap from 10px to 6px */
 .editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block {
   margin: 0;
 }
 .editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block > .list-item {
   gap: 6px;
-  align-items: flex-start;
-}
-.editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block > .list-item > .label-wrapper {
-  height: 1.7em;
-  width: 1.2em;
-  flex-shrink: 0;
-}
-.editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block > .list-item > .label-wrapper > .label {
-  height: 1.2em;
-  width: 1.2em;
-  padding: 0;
-}
-.editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block > .list-item > .label-wrapper svg {
-  height: 1.2em;
-  width: 1.2em;
+  align-items: center;
 }
 .editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block > .list-item > .children > p {
   margin: 0;
 }
 .editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block > .list-item > .children > * + * {
-  /* Restore a small gap between paragraphs INSIDE a single task item
-     (multi-paragraph tasks), just not between consecutive task rows. */
   margin-top: 0.3rem;
 }
 
