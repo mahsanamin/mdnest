@@ -2824,6 +2824,34 @@ pre:hover .code-copy-btn {
   color: #cdd6f4;
 }
 
+/* Tighten task-list rows. Crepe's .label-wrapper has a fixed 32px height
+   which on its own is fine, but combined with our paragraph margins
+   (`p { margin: 0.4rem 0 }`) the gap between consecutive task items
+   ballooned. Also align the checkbox cap to the first line of text and
+   trim the horizontal gap so the text doesn't sit half an inch right of
+   the checkbox. */
+.editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block {
+  margin: 0;
+}
+.editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block > .list-item {
+  gap: 6px;
+  align-items: baseline;
+}
+.editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block > .list-item > .label-wrapper {
+  height: auto;
+  /* Pull the checkbox icon up so its top edge lines up with the cap
+     of the first text line instead of floating below it. */
+  margin-top: 2px;
+}
+.editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block > .list-item > .children > p {
+  margin: 0;
+}
+.editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block > .list-item > .children > * + * {
+  /* Restore a small gap between paragraphs INSIDE a list item, just
+     not between consecutive list items. */
+  margin-top: 0.3rem;
+}
+
 /* Block-edit drag/`+` handles: Crepe's default icon fill is
    var(--crepe-color-outline) which on Catppuccin Mocha is #45475a —
    barely visible against #1e1e2e. Brighten to subtext1 so the handles
