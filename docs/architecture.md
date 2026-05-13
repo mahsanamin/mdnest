@@ -149,7 +149,8 @@ mdnest/
         TreeNode.jsx           # Recursive tree node — expand, drag-drop, context menu.
         Editor.jsx             # Basic mode: textarea + paste/drop handlers.
         EditorToolbar.jsx      # Markdown formatting buttons (Basic mode).
-        LiveEditor.jsx         # Live mode: Milkdown rich editor. Lazy-loaded.
+        LiveEditorCrepe.jsx    # Live mode: @milkdown/crepe rich editor (v3.10.0+). Lazy-loaded.
+        live-editor-plugins.jsx# Shared Milkdown plugins (comments, table-cell checkboxes, clear-empty-block) + LiveToolbar.
         MermaidBlock.jsx       # Inline mermaid with click-to-edit labels.
         Preview.jsx            # Rendered markdown (marked + mermaid + KaTeX).
         Toolbar.jsx            # View + editor mode toggle, file actions, comment icon.
@@ -302,7 +303,7 @@ The `RequireNamespace` function validates that the `ns` query parameter is a sim
 ### Technology Stack
 
 - **React** with JSX, bundled by **Vite**
-- **Milkdown** (ProseMirror-based) for Live rich editing mode
+- **`@milkdown/crepe`** (ProseMirror + Vue runtime under the hood) for Live rich editing mode (v3.10.0+)
 - **marked** for markdown-to-HTML rendering in preview and Basic mode
 - **mermaid** for diagram rendering
 - Plain CSS (no CSS framework)
@@ -321,7 +322,8 @@ The `RequireNamespace` function validates that the `ns` query parameter is a sim
 | `Toolbar.jsx` | View mode toggle, Basic/Live toggle, file actions, comment icon |
 | `Editor.jsx` | Basic mode — textarea + paste/drop handlers |
 | `EditorToolbar.jsx` | Markdown formatting buttons (Basic mode only) |
-| `LiveEditor.jsx` | Live mode — Milkdown rich editor, lazy-loaded chunk |
+| `LiveEditorCrepe.jsx` | Live mode — `@milkdown/crepe`-based rich editor (v3.10.0+), lazy-loaded chunk. Composes Crepe's `code_block` and `table` nodeViews to plug in our React `MermaidBlock` and single-click cursor behavior. |
+| `live-editor-plugins.jsx` | Shared Milkdown plugins: `commentHighlightPlugin`, `clearEmptyBlockPlugin`, `tableCellCheckboxPlugin`, and the `LiveToolbar` component. Used to live inside the legacy `LiveEditor.jsx` before the Crepe cutover. |
 | `MermaidBlock.jsx` | Inline mermaid with Source/Preview toggle + click-to-edit labels |
 | `Preview.jsx` | Rendered markdown via marked + mermaid + KaTeX, collapsible headings |
 | `ContextMenu.jsx` | Right-click / long-press floating menu |
@@ -335,11 +337,16 @@ The `RequireNamespace` function validates that the `ns` query parameter is a sim
 mdnest supports two editing modes:
 
 - **Basic mode** uses a plain `<textarea>` with the `marked` library for preview. The textarea receives raw markdown and fires `onChange` on every keystroke.
-- **Live mode** uses Milkdown (ProseMirror) which renders markdown inline. The editor serializes to markdown via a listener plugin and fires the same `onChange` callback.
+- **Live mode** uses `@milkdown/crepe` (the same editor Milkdown's playground uses). Crepe wraps a ProseMirror editor with feature modules: block-edit (drag handle + slash menu), CodeMirror code blocks, KaTeX math, polished tables, image-block upload UI, link tooltip, native task-list checkboxes. The editor serializes to markdown via Milkdown's listener plugin and fires the same `onChange` callback as Basic mode.
 
 Both modes share identical props (`content`, `onChange`, `readOnly`, etc.). App.jsx doesn't know which editor is active — the content flow (auto-save, collaboration, ETag handling) is the same.
 
-Live mode is lazy-loaded via `React.lazy()`. The Milkdown chunk (~462KB) only downloads when the user first switches to Live mode.
+Live mode is lazy-loaded via `React.lazy()`. The Crepe chunk is ~1.1 MB (~340 KB gzipped) — includes Vue 3 runtime (~80 KB gzipped, used internally by Crepe for its UI components), CodeMirror, KaTeX, and Milkdown core. Only downloads when the user first switches to Live mode.
+
+Custom behavior is layered on top of Crepe via two composition patterns:
+
+1. **NodeView composition.** When we need to replace one of Crepe's nodeViews — `code_block` for mermaid, `table` for the single-click cursor fix — a plugin waits for `SchemaReady`, reads the existing factory from `nodeViewCtx`, and appends a new entry with the same node-type id. `Object.fromEntries(nodeViewCtx)` keeps the last entry for duplicate keys, so the wrapper wins; the captured original factory is called for the cases the wrapper doesn't override.
+2. **Standard `crepe.editor.use(plugin)` registration.** For purely additive behavior (comments, table-cell checkboxes, the clear-empty-block keymap), the plugins from `live-editor-plugins.jsx` register via this standard Milkdown plugin API.
 
 ### API Client
 

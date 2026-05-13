@@ -142,17 +142,21 @@ mdnest has two editing modes, switchable from the toolbar when in editor-only vi
 
 **Basic Mode** (default) -- a plain-text area where you write raw markdown. Simple, fast, no rendering overhead. Includes a formatting toolbar for bold, italic, headings, links, code, lists, and checkboxes. Press **Tab** to indent.
 
-**Live Mode** -- Obsidian-style rich editing powered by Milkdown. Markdown renders inline as you type:
+**Live Mode** -- Obsidian-style rich editing built on [Crepe](https://milkdown.dev/playground) (the same editor Milkdown's official playground uses). Markdown renders inline as you type:
 
 - Type `**bold**` and it renders **bold** immediately
 - Type `## Heading` and it renders as a heading
-- Tables are click-to-edit -- click any cell, tab between cells
-- Checkboxes are clickable
-- Mermaid diagrams render in-place with Source/Preview/Fullscreen/Copy/Zoom buttons
+- Tables are click-to-edit -- single click any cell to start typing, tab between cells
+- Checkboxes are clickable (native SVG icons)
+- Mermaid diagrams render in-place with Source/Preview/Fullscreen/Copy/Zoom buttons; pasting raw mermaid source auto-wraps it in a ```mermaid` fence
 - Click any mermaid node label to edit it directly on the diagram
 - Paste from Google Docs or Confluence -- auto-converts to markdown
 - Full formatting toolbar: Undo, Redo, Bold, Italic, Strikethrough, Code, Headings, Lists, Blockquote, Link, Code block, Table with row/column controls
 - **Undo / Redo** *(v3.6.1+)*: the curved-arrow buttons at the start of the toolbar. Same as `Cmd+Z` / `Cmd+Shift+Z` (or `Ctrl+Z` / `Ctrl+Shift+Z`) on the keyboard. macOS uses `Cmd+Shift+Z` for redo, not `Cmd+Y`.
+- **Block-edit menu** *(v3.10.0+)*: hover the left margin of any block for a drag-handle + `+` insert button. The `+` button (or typing `/` anywhere) opens a slash menu with Heading 1-6, Code block, Math, Image, Horizontal rule, Table, and more.
+- **Inline + block math** *(v3.10.0+)*: `$inline$` and `$$block$$` render via KaTeX.
+- **Image upload** *(v3.10.0+)*: insert an image block from the slash menu and click "Upload" — or just paste an image from the clipboard. Uploads land next to the current note.
+- **Last-opened file remembered per workspace** *(v3.10.0+)*: switching workspaces and switching back restores whichever file you had open in that workspace, with its scroll position. Bookmark a URL with `#namespace/path/to/note.md` to override.
 
 Live Mode is only available in editor-only view (the pen icon). Split view always uses Basic Mode with a separate preview pane.
 
