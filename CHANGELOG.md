@@ -4,12 +4,16 @@ All notable changes to mdnest are documented here.
 
 ---
 
-## v3.10.1 — Login form: proper password-manager hints + per-server scoping
+## v3.10.1 — Login form: proper password-manager hints + per-server scoping + "Keep me signed in"
+
+### New features
+
+- **"Keep me signed in" checkbox** on the login form. Default ON. When checked the backend issues a 1-year JWT instead of the default 30 days, so users on personal/trusted devices stop getting unexpectedly logged out. Unchecked = 30-day TTL (the previous default) — appropriate for shared / kiosk sessions. The flag threads through every multi-step path (initial login → TOTP verify → forced password change) so the final JWT gets the right TTL regardless of which path the user takes. SSO and Firebase login default to the long-lived TTL since they have no checkbox UI of their own (their IdPs own the "stay signed in" UX). Backend helper `jwtTTL(rememberMe)` in `backend/handlers/auth.go` is the single source of truth.
 
 ### Bug fixes
 
 - **Browser password-manager hints on the login form.** The username and password inputs were missing `name` + `autocomplete` attributes, so browsers couldn't reliably offer to save credentials and couldn't autofill them on return visits. Added `autoComplete="username"` / `autoComplete="current-password"` (and `"new-password"` on the forced-password-change step) so the "Save password?" prompt appears at the right time and re-visits get autofilled.
-- **Per-server credential scoping.** When the user runs multiple mdnest installs, browsers were lumping their saved credentials together — typing into one install's login form would try to autofill another install's password. The form's `name` and `id` now include the server's `SERVER_ALIAS` (read from `/api/config`) plus a hidden `server` input field. Together those make the form's identity distinct per install at the password-manager level. (Browsers still scope primarily by HTTP origin, so two installs sharing the same `host:port` can't be separated this way — use different ports or subdomains for each install if you need full isolation.)
+- **Per-server credential scoping (best-effort).** When the user runs multiple mdnest installs, browsers were lumping their saved credentials together — typing into one install's login form would try to autofill another install's password. The form's `name` and `id` now include the server's `SERVER_ALIAS` (read from `/api/config`) plus a hidden `server` input field. Together those make the form's identity distinct per install for password managers that fingerprint form structure (1Password, Bitwarden, KeePassXC). Browsers' built-in password managers (Chrome, Edge, Safari, Firefox) scope primarily by HTTP origin and use the Public Suffix List for autofill suggestions — they conflate sibling subdomains (`brain.example.com` and `wbrain.example.com` both autofill from the `example.com` record). For full per-install isolation, give each install a different parent domain, or in 1Password/Bitwarden set the saved entry's URL match to "Host" or "Exact".
 - **Post-login password forms don't trigger save-prompts at the wrong time.** Settings → Change Credentials, the Admin → Reset Password modal, and the Admin → Create User form all had bare `<input type="password">` with no `autocomplete` attribute. Browsers would see those after login and offer to save / autofill the wrong credentials (which is what the user was seeing as "weird dialogue prompts inside when logged in"). Added the correct `autocomplete="current-password"` on current-password fields, `"new-password"` on every new/confirm field, `"username"` where applicable, and `autoComplete="off"` on the wrapping forms — so password managers don't mistake these for login forms after sign-in.
 
 ---

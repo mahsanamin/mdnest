@@ -51,8 +51,15 @@ export async function fetchConfig() {
 // Accepts either (username, password) — classic local-mode form — or a
 // single object body like { idToken } for Firebase sign-in. The backend
 // picks the right branch based on which fields are present.
-export async function login(a, b) {
-  const body = typeof a === 'object' && a !== null ? a : { username: a, password: b };
+// `rememberMe`, when true, asks the backend to issue a 1-year JWT instead
+// of the default 30 days — keeps the user logged in across browser
+// restarts for a year. Passed through every step of the login flow
+// (initial login + TOTP verify + forced password change) so the final
+// token gets the right TTL regardless of which path the user took.
+export async function login(a, b, rememberMe) {
+  const body = typeof a === 'object' && a !== null
+    ? { ...a, rememberMe: a.rememberMe ?? rememberMe }
+    : { username: a, password: b, rememberMe };
   const res = await fetch(`${BASE}/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -68,11 +75,11 @@ export async function login(a, b) {
   return data;
 }
 
-export async function verifyTOTP(tempToken, code) {
+export async function verifyTOTP(tempToken, code, rememberMe) {
   const res = await fetch(`${BASE}/auth/verify-totp`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tempToken, code }),
+    body: JSON.stringify({ tempToken, code, rememberMe }),
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
@@ -83,11 +90,11 @@ export async function verifyTOTP(tempToken, code) {
   return data;
 }
 
-export async function setupTOTPWithTemp(tempToken, code) {
+export async function setupTOTPWithTemp(tempToken, code, rememberMe) {
   const res = await fetch(`${BASE}/auth/totp/setup-with-temp`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tempToken, code: code || '' }),
+    body: JSON.stringify({ tempToken, code: code || '', rememberMe }),
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
@@ -98,11 +105,11 @@ export async function setupTOTPWithTemp(tempToken, code) {
   return data;
 }
 
-export async function forcedPasswordChange(tempToken, newPassword) {
+export async function forcedPasswordChange(tempToken, newPassword, rememberMe) {
   const res = await fetch(`${BASE}/auth/change-password-forced`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tempToken, newPassword }),
+    body: JSON.stringify({ tempToken, newPassword, rememberMe }),
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));

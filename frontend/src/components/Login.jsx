@@ -17,6 +17,11 @@ function Login({ onLogin, serverAlias }) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [tempToken, setTempToken] = useState('');
+  // "Remember me" — default ON. Keeps the user logged in for 1 year
+  // (vs 30 days when unchecked). Sent on every step of the login flow
+  // (initial login, TOTP verify, forced password change) so whichever
+  // request issues the final JWT uses the right TTL.
+  const [rememberMe, setRememberMe] = useState(true);
 
   // TOTP verify state
   const [totpCode, setTotpCode] = useState('');
@@ -42,7 +47,7 @@ function Login({ onLogin, serverAlias }) {
     setError('');
     setLoading(true);
     try {
-      const data = await login(username, password);
+      const data = await login(username, password, rememberMe);
       if (data.status === 'change_password_required') {
         setTempToken(data.tempToken);
         setStep('change_password');
@@ -72,7 +77,7 @@ function Login({ onLogin, serverAlias }) {
     setError('');
     setLoading(true);
     try {
-      const data = await verifyTOTP(tempToken, totpCode);
+      const data = await verifyTOTP(tempToken, totpCode, rememberMe);
       if (data.token) onLogin();
     } catch (err) {
       setError(err.message || 'Invalid code');
@@ -86,7 +91,7 @@ function Login({ onLogin, serverAlias }) {
     setError('');
     setLoading(true);
     try {
-      const data = await setupTOTPWithTemp(tempToken, setupCode);
+      const data = await setupTOTPWithTemp(tempToken, setupCode, rememberMe);
       if (data.token) onLogin();
     } catch (err) {
       setError(err.message || 'Invalid code');
@@ -108,7 +113,7 @@ function Login({ onLogin, serverAlias }) {
     }
     setLoading(true);
     try {
-      const data = await forcedPasswordChange(tempToken, newPassword);
+      const data = await forcedPasswordChange(tempToken, newPassword, rememberMe);
       if (data.status === 'totp_required') {
         setTempToken(data.tempToken);
         setStep('totp');
@@ -171,6 +176,14 @@ function Login({ onLogin, serverAlias }) {
             onChange={(e) => setPassword(e.target.value)}
             autoComplete="current-password"
           />
+          <label className="login-remember">
+            <input
+              type="checkbox"
+              checked={rememberMe}
+              onChange={(e) => setRememberMe(e.target.checked)}
+            />
+            <span>Keep me signed in</span>
+          </label>
           <button type="submit" disabled={loading}>
             {loading ? 'Signing in...' : 'Sign in'}
           </button>
