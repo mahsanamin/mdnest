@@ -13,10 +13,10 @@ Both shapes share the same engine but their threat models differ. This doc expla
 
 ```mermaid
 flowchart LR
-    user[User / device] --> net[Network boundary<br/>(loopback, Tailscale,<br/>or HTTPS reverse proxy)]
-    net --> idp[Identity<br/>(local password / TOTP,<br/>OIDC SSO, or Firebase)]
-    idp --> authz[Authorization<br/>(role hierarchy +<br/>namespace_admins +<br/>access_grants)]
-    authz --> path[Path safety<br/>(SafePath traversal<br/>protection)]
+    user[User / device] --> net["Network boundary<br/>(loopback, Tailscale,<br/>or HTTPS reverse proxy)"]
+    net --> idp["Identity<br/>(local password / TOTP,<br/>OIDC SSO, or Firebase)"]
+    idp --> authz["Authorization<br/>(role hierarchy +<br/>namespace_admins +<br/>access_grants)"]
+    authz --> path["Path safety<br/>(SafePath traversal<br/>protection)"]
     path --> fs[Files on disk<br/>inside mounted dirs]
 ```
 
