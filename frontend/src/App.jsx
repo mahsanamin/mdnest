@@ -300,6 +300,15 @@ function App() {
       .catch(() => setAppConfig({ authMode: 'single' }));
   }, []);
 
+  // Browser tab title: include the server alias so multiple mdnest tabs
+  // (different servers) are visually distinguishable. Falls back to the
+  // plain "mdnest" title when no SERVER_ALIAS is configured on the
+  // server — same as the static <title> in index.html.
+  useEffect(() => {
+    const alias = appConfig?.serverAlias;
+    document.title = alias ? `mdnest (${alias})` : 'mdnest';
+  }, [appConfig?.serverAlias]);
+
   // Version check: poll /api/config every 60s, compare server version vs build version
   useEffect(() => {
     const buildVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : null;

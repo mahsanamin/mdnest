@@ -13,6 +13,7 @@ import { Decoration, DecorationSet } from '@milkdown/prose/view';
 import { deleteRow, deleteColumn, deleteTable } from '@milkdown/prose/tables';
 import { uploadImage } from '../api.js';
 import { htmlToMarkdown, hasRichContent } from '../html-to-md.js';
+import { looksLikeMarkdown } from '../markdown-utils.js';
 import MermaidBlock from './MermaidBlock.jsx';
 import MermaidViewer from './MermaidViewer.jsx';
 import {
@@ -761,7 +762,25 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly, onComment, c
         return inserted;
       };
 
-      // 3. Rich HTML → convert to markdown then insert as parsed nodes
+      // Order matters: prefer plain-text-that-looks-like-markdown over
+      // rich HTML when both are on the clipboard. Obsidian, terminals,
+      // and most modern apps populate both text/plain (the source
+      // markdown) and text/html (a rendered DOM version). The HTML
+      // version often loses GFM semantics during htmlToMarkdown's DOM
+      // round trip — task list `data-item-type="task"` attributes are
+      // the prime offender, which is why `- [ ] Foo` from Obsidian
+      // pasted as a plain bullet pre-v3.9.1. Plain markdown round-trips
+      // cleanly via markdownToSlice, so when both are available and
+      // the plain side parses as markdown, take it.
+      const text = cb.getData('text/plain');
+      if (text && editor && looksLikeMarkdown(text)) {
+        e.preventDefault();
+        pasteMarkdown(text);
+        return;
+      }
+
+      // Rich HTML (from sources that don't ship markdown — Google Docs,
+      // Confluence, web pages) → convert to markdown then insert.
       if (html && hasRichContent(html)) {
         e.preventDefault();
         const md = htmlToMarkdown(html);
@@ -769,14 +788,7 @@ function LiveEditor({ content, onChange, currentPath, ns, readOnly, onComment, c
         return;
       }
 
-      // 3. Plain text that contains markdown syntax → insert as parsed nodes
-      const text = cb.getData('text/plain');
-      if (text && editor && /^[\s]*[#\-*>|`\[]/.test(text)) {
-        e.preventDefault();
-        pasteMarkdown(text);
-        return;
-      }
-      // Otherwise: default Milkdown paste
+      // Otherwise: default Milkdown paste (plain prose, no structure)
     };
 
     el.addEventListener('paste', handlePaste, true);
