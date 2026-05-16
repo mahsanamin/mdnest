@@ -4,6 +4,66 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v3.10.0 — Live editor migrated to Crepe + per-workspace last-file memory
+
+The big one: the Live editor is now built on [`@milkdown/crepe`](https://milkdown.dev) — the same component the Milkdown playground uses. The pre-v3.10 hand-rolled `@milkdown/core` + commonmark + GFM stack is gone. Crepe brings a block-edit handle (drag + `+` button + slash menu), native SVG task-list checkboxes, KaTeX math, polished tables with column / row controls, link tooltip, and an image-block upload affordance. All four custom plugins from v3.9 (mermaid live edit, comments, in-cell `[ ]`/`[x]` checkboxes, clear-empty-block) port forward; the Catppuccin Mocha look is preserved.
+
+This release also rolls up the v3.9.1 changes (paste-handler priority, browser tab title, Vitest scaffolding) — they shipped on the migration branch as the first commit and never got their own tag.
+
+### New features
+
+- **Block-edit menu** — hover the left margin of any block to get a drag handle and `+` button. The `+` button opens Crepe's slash menu (Heading 1-6, code block, math, image, hr, table, …). Typing `/` anywhere in the doc opens the same menu inline.
+- **Native task-list checkboxes** — top-level `- [ ] foo` items now render as proper SVG checkboxes (clickable to toggle). Replaces the v3.9.2 hand-rolled `topLevelTaskCheckboxPlugin` which never looked right.
+- **KaTeX inline + block math** — `$inline$` and `$$block$$` render via KaTeX. Auto-detected as markdown; no special syntax needed beyond the dollar signs.
+- **Image upload UI** — slash-menu → Image inserts a placeholder block; click to upload or paste a URL. Pasting an image from clipboard works the same way (PNG screenshots, etc.). Uploads go to `/api/upload` and the rendered `<img>` resolves through a new `proxyDomURL` that rewrites the bare-filename markdown src into `/api/files/<ns>/<dir>/<file>?token=…`.
+- **Auth middleware accepts `?token=<JWT>`** — for browser GETs that can't set an `Authorization` header (`<img>` tags, future `<a>` downloads). Same validation flow as Bearer; both JWT and `mdnest_…` API tokens accepted. Without this, images upload-but-never-display because `/api/files/…` requires auth and the browser image fetch had no way to provide it.
+- **Per-namespace last-opened-file memory** — switching workspaces and switching back restores whichever file you had open in that workspace, with its scroll position. Stored in `localStorage` under `mdnest_last_path:<ns>`. URL hashes (`#ns/path`) still win for bookmarks. Stale entries (file deleted, moved, or renamed) are cleaned up automatically as the operations happen, and the note-loading effect's catch handler clears any that slip through.
+- **Mermaid auto-detect on paste** — pasting raw mermaid source (text that starts with `flowchart TD`, `sequenceDiagram`, `graph LR`, etc.) auto-wraps it in a ```mermaid` fence and renders. The detector is intentionally strict: pastes that ALSO look like markdown (contain `#` headings or `|` table rows) are routed to the markdown path instead, so a document that just happens to mention "user journey" or "pie chart" doesn't get swallowed into a mermaid block.
+
+### Mermaid rendering preserved
+
+The legacy `MermaidBlock` React component (Preview / Source toggle, zoom, Fit, Copy, fullscreen viewer, "click any label to edit") stays. Crepe's `code-mirror` feature is kept enabled (its LaTeX feature depends on it) and a composing plugin wraps the `code_block` nodeView so `language=mermaid` blocks render via the React component while everything else falls through to Crepe's CodeMirror block. The fallback was important: without it disabling code-mirror crashed the editor on any `$…$` math because LaTeX's editor uses CodeMirror internally.
+
+### Paste-fidelity contracts (v3.9.1 priority + new ProseMirror bypass)
+
+- **`data-pm-slice` bypass** — when the clipboard HTML carries ProseMirror's slice marker (you copied from another mdnest tab / another Milkdown), the custom paste handler returns early without `preventDefault()`. Milkdown's native `parseSlice` then reconstructs the doc with full schema fidelity — table cells keep their inline marks (e.g. `**Enigma**` in the first column), fenced code blocks keep their language tag, link attributes survive. The previous behavior routed everything through `htmlToMarkdown → markdownToSlice`, which flattens GFM-specific structure.
+- **v3.9.1 priority preserved** for external clipboards — plain-text-that-looks-like-markdown wins over rich HTML, so Obsidian's `- [ ] Foo` task lists stay task lists.
+- **Code-block paste fix** — when the cursor is inside a code fence, the custom paste handler returns early so multi-line SQL / JS / etc. pastes as plain text into the block instead of being broken into one paragraph per line.
+
+### Table-editing polish
+
+- **Single-click cursor placement** — Crepe's default behavior turned the first click on a cell into a node-selection over the cell content (caret only appeared on the second click). Wrapped Crepe's table nodeView to let plain mousedowns fall through to ProseMirror's normal cursor placement.
+- **Visible caret in cells** — set `caret-color: #89b4fa` on the editor; browser's `auto` was being swallowed by the dark cell backgrounds.
+- **Inline code wraps inside cells** — `white-space: pre-wrap; overflow-wrap: anywhere` on `code` inside `.milkdown-table-block`, so long URLs / endpoint paths break instead of clipping.
+- **Table-level horizontal scroll fallback** — `overflow-x: auto` on `.milkdown-table-block` so tables wider than the editor pane scroll horizontally instead of pushing the rightmost columns off-screen.
+- **Drag handle anchors to the table** — Crepe's default block-edit filter explicitly rejects tables, so the drag handle skipped past them. Overrode `blockConfig.filterNodes` to reject nodes whose `$pos` is inside a table while accepting the table itself, so clicking the 6-dot handle selects (and lets you drag) the whole table. Selected-state outline (`2px #89b4fa`) added so the selection is visible against the table's own cell backgrounds.
+- **Mermaid block selection outline** — same fix as tables, on `.mermaid-live-container.ProseMirror-selectednode`, so Delete-from-handle works discoverably.
+
+### From v3.9.1 (subsumed into this release)
+
+- **Pasted GFM task lists survive their checkboxes** when the clipboard carries both `text/plain` and `text/html` — the plain-text-that-looks-like-markdown path beats the HTML path.
+- **Browser tab title includes the server alias** — `mdnest (srv-ahsan-mini)` so multi-tab users can tell servers apart.
+- **Vitest scaffolding** — `frontend/src/__tests__/markdown-fixtures.test.js` exercises the paste-priority detection. `npm test` in `frontend/` runs the suite; the pre-push hook gates on it.
+
+### Bug fixes
+
+- **Mermaid container right-sizes for small diagrams** — a 3-node flowchart used to stretch a full editor-width container with ~1300px of empty halo on each side. `.mermaid-live-block` now uses `width: fit-content; max-width: 100%` so the block hugs the diagram (with the toolbar's natural width as a floor so its buttons never wrap).
+- **Task-list spacing** — Crepe's default flex gap of 10px + the app-wide `p { margin: 0.4rem 0 }` were leaking ~13px of stacked margin between rows. Reset paragraph margin inside `.children`, tightened the gap to 6px, center-aligned the marker box on the text line so bullets / `1.` / checkboxes sit on the text baseline.
+- **Heading hierarchy underline** — H1 *and* H2 keep their `#313244` bottom border (previous override only added it to H1).
+
+### Internal cleanup
+
+- **Legacy `LiveEditor.jsx` deleted.** The four shared plugins (`commentHighlightPlugin`, `clearEmptyBlockPlugin`, `tableCellCheckboxPlugin`, `LiveToolbar`, plus `findAnchorMatches` and `commentHighlightKey`) live in `frontend/src/components/live-editor-plugins.jsx`. `LiveEditorCrepe.jsx` imports from there.
+- **`VITE_USE_CREPE` build flag removed.** Crepe is now the only Live editor; `./mdnest-server rebuild` (no env var) ships it. Dockerfile ARG and `mdnest-server` BUILD_ARGS propagation deleted.
+- **Bundle size** — the Live editor chunk is now ~1.1 MB / ~340 KB gzipped (Crepe + Vue runtime + CodeMirror + KaTeX). Lazy-loaded; the main app bundle is unchanged in size for the initial page load.
+
+### Notes
+
+- Crepe brings a Vue 3 runtime (~340 KB raw, ~80 KB gzipped) into the lazy chunk. It is contained — no Vue components are mounted in the React tree; Crepe creates its own Vue app inside the editor's contenteditable root. mdnest as a whole remains a React app.
+- The plain textarea ("Basic") editor stays. Some users prefer raw markdown editing, and Basic is also the auto-fallback when the Live editor crashes on a specific file (the existing `EditorErrorBoundary` catches Live-editor exceptions and flips to Basic).
+
+---
+
 ## v3.9.1 — Paste-handler priority + browser tab title + test scaffolding
 
 ### Bug fixes

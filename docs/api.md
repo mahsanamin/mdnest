@@ -2,6 +2,8 @@
 
 All endpoints are served under the `/api` prefix. Unless noted otherwise, every endpoint requires an `Authorization: Bearer <token>` header obtained from the login endpoint.
 
+As of **v3.10.0**, the auth middleware also accepts the token via a `?token=<JWT>` query parameter on GET requests. This is intended for browser elements that can't set a custom request header — `<img src=…>` for uploaded images, future `<a href=…>` for downloads — and accepts both JWT and `mdnest_…` API tokens. The Authorization header still takes precedence when both are present.
+
 All error responses return JSON with an `error` field:
 
 ```json

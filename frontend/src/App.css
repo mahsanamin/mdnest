@@ -2733,6 +2733,210 @@ pre:hover .code-copy-btn {
   color: #cdd6f4;
 }
 
+/* ===== Crepe (v3.10.0 spike — behind VITE_USE_CREPE flag) =====
+   Crepe ships frame-dark.css which sets generic dark color variables on
+   `.milkdown`. We layer Catppuccin Mocha on top with a higher-specificity
+   selector (`.editor-wrapper .milkdown`) so the override wins regardless
+   of CSS import order (frame-dark is lazy-loaded with the editor chunk). */
+
+/* Crepe's root sits inside `.live-editor-pane` (a flex column) below the
+   LiveToolbar — make it grow to fill the remaining height. */
+.live-editor-crepe-root {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.live-editor-crepe-root .milkdown {
+  height: 100%;
+}
+
+.editor-wrapper .milkdown {
+  /* Catppuccin Mocha palette */
+  --crepe-color-background: #1e1e2e;       /* base */
+  --crepe-color-on-background: #cdd6f4;    /* text */
+  --crepe-color-surface: #181825;          /* surface */
+  --crepe-color-surface-low: #11111b;      /* deepest surface */
+  --crepe-color-on-surface: #cdd6f4;
+  --crepe-color-on-surface-variant: #a6adc8;
+  --crepe-color-outline: #45475a;
+  --crepe-color-primary: #89b4fa;          /* blue accent */
+  --crepe-color-secondary: #313244;
+  --crepe-color-on-secondary: #cdd6f4;
+  --crepe-color-inverse: #cdd6f4;
+  --crepe-color-on-inverse: #1e1e2e;
+  --crepe-color-inline-code: #f38ba8;
+  --crepe-color-error: #f38ba8;
+  --crepe-color-hover: #313244;
+  --crepe-color-selected: #45475a;
+  --crepe-color-inline-area: #313244;
+
+  --crepe-font-title: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', sans-serif;
+  --crepe-font-default: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', sans-serif;
+  --crepe-font-code: 'JetBrains Mono', 'Fira Code', ui-monospace, Menlo, Consolas, monospace;
+
+  --crepe-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --crepe-shadow-2: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+/* ProseMirror content area: bring padding and font sizes in line with the
+   legacy LiveEditor so notes look the same regardless of which editor is
+   active. Crepe's defaults are sized for a wider layout (60×120 padding,
+   42px H1) — too big for our split-view editor pane.
+   Left padding is wider than right to leave gutter space for Crepe's
+   block-edit handle row, which is two operation-items (drag dots + `+`
+   button) totalling ~66px, positioned with a 16-px offset from the block
+   start. Anything narrower than ~82px clips the `+` button off the left
+   edge while leaving the drag handle visible — which is exactly the
+   regression the user saw. */
+.editor-wrapper .milkdown .ProseMirror {
+  padding: 1rem 1rem 1rem 88px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', sans-serif;
+  font-size: 0.9rem;
+  line-height: 1.7;
+  color: #cdd6f4;
+}
+
+.editor-wrapper .milkdown .ProseMirror h1 {
+  font-size: 1.8rem;
+  font-weight: 700;
+  margin: 1.2rem 0 0.6rem;
+  border-bottom: 1px solid #313244;
+  padding-bottom: 0.3rem;
+}
+.editor-wrapper .milkdown .ProseMirror h2 {
+  font-size: 1.4rem;
+  font-weight: 700;
+  margin: 1rem 0 0.5rem;
+  border-bottom: 1px solid #313244;
+  padding-bottom: 0.25rem;
+}
+.editor-wrapper .milkdown .ProseMirror h3 { font-size: 1.15rem; font-weight: 600; margin: 0.8rem 0 0.4rem; }
+.editor-wrapper .milkdown .ProseMirror h4 { font-size: 1rem; font-weight: 600; margin: 0.6rem 0 0.3rem; }
+.editor-wrapper .milkdown .ProseMirror h5 { font-size: 0.95rem; font-weight: 600; margin: 0.5rem 0 0.25rem; }
+.editor-wrapper .milkdown .ProseMirror h6 { font-size: 0.9rem; font-weight: 600; margin: 0.4rem 0 0.2rem; color: #a6adc8; }
+.editor-wrapper .milkdown .ProseMirror p { margin: 0.4rem 0; }
+
+/* Bullets: Crepe's list-item feature replaces the default markers with
+   muted shapes. Brighten the disc so it reads as cleanly as the legacy
+   editor's bullets did. */
+.editor-wrapper .milkdown .ProseMirror ul > li::marker,
+.editor-wrapper .milkdown .ProseMirror ol > li::marker {
+  color: #cdd6f4;
+}
+
+/* Task / bullet / ordered list rows.
+   Crepe gives all three list types the same .milkdown-list-item-block
+   shell with a fixed 24x32 px .label box. That box is sized to fit
+   Crepe's SVG bullet (a small dot inside a 24x24 viewBox), the SVG
+   checkbox icons, and the rendered ordered-number text. The previous
+   override shrunk that box to 1.2em, which scaled the bullet circle
+   and "1." text down to ~7px — they ended up looking tiny and floating
+   above the body text.
+   Don't force the box smaller. Keep Crepe's box dimensions and fix
+   just the parts that genuinely fought our scale:
+   - center-align the box vertically with the text line so the marker
+     sits on the same baseline as the text (instead of being top-pinned
+     in a 32px row, which made everything float above)
+   - drop the leaking app-wide `p { margin: 0.4rem 0 }` for list-item
+     paragraphs so consecutive rows aren't gappy
+   - keep a modest intra-item paragraph spacing for multi-paragraph tasks
+   - lightly tighten the marker→text gap from 10px to 6px */
+.editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block {
+  margin: 0;
+}
+.editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block > .list-item {
+  gap: 6px;
+  align-items: center;
+}
+.editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block > .list-item > .children > p {
+  margin: 0;
+}
+.editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block > .list-item > .children > * + * {
+  margin-top: 0.3rem;
+}
+
+/* Block-edit drag/`+` handles: Crepe's default icon fill is
+   var(--crepe-color-outline) which on Catppuccin Mocha is #45475a —
+   barely visible against #1e1e2e. Brighten to subtext1 so the handles
+   are actually findable on hover, matching the discoverability the
+   playground gets on its lighter theme. */
+.editor-wrapper .milkdown .milkdown-block-handle .operation-item svg {
+  fill: #a6adc8;
+}
+.editor-wrapper .milkdown .milkdown-block-handle .operation-item:hover {
+  background: #313244;
+}
+.editor-wrapper .milkdown .milkdown-block-handle .operation-item:hover svg {
+  fill: #cdd6f4;
+}
+
+/* Tables: Crepe's default border is `color-mix(--crepe-color-outline,
+   transparent 80%)` — too faint against our dark background. Use solid
+   overlay0 borders + the legacy header / body row colors so tables look
+   the same as the legacy editor. */
+.editor-wrapper .milkdown .milkdown-table-block th,
+.editor-wrapper .milkdown .milkdown-table-block td {
+  border: 1px solid #45475a;
+  padding: 0.4rem 0.7rem;
+}
+.editor-wrapper .milkdown .milkdown-table-block th {
+  background: #313244;
+  font-weight: 600;
+}
+.editor-wrapper .milkdown .milkdown-table-block td {
+  background: #1e1e2e;
+}
+
+/* Inline code inside table cells used to overflow the cell (long URLs
+   and endpoint paths got clipped without a scrollbar). Wrap on any
+   character so the cell auto-sizes vertically instead — preferred over
+   the playground's per-cell horizontal scrollbar for a documentation
+   editor where users want to read the whole token at a glance. */
+.editor-wrapper .milkdown .milkdown-table-block code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Whole-table horizontal overflow fallback: when a table has many
+   columns or wide cells and STILL exceeds the editor pane after the
+   inline-code wrapping above, scroll the table itself rather than
+   pushing the page wider (which clips the rightmost column off-screen
+   as the user saw with the Status column). */
+.editor-wrapper .milkdown .milkdown-table-block {
+  overflow-x: auto;
+}
+
+/* Caret visibility: Crepe / browser default `caret-color: auto` was
+   picking a color too close to our Catppuccin Mocha cell backgrounds,
+   making the cursor invisible inside table cells. Force the accent
+   blue across the editor — it stays high-contrast against base
+   (#1e1e2e), surface1 (#313244), and surface (#181825) alike. */
+.editor-wrapper .milkdown .ProseMirror {
+  caret-color: #89b4fa;
+}
+
+/* Table NodeSelection feedback: Crepe's default .ProseMirror-selectednode
+   background is mixed at 40% opacity, which the table cells' own
+   backgrounds obscure — clicking the block-edit drag handle on a table
+   would select-it-but-look-unselected. Make it obvious with a solid blue
+   outline matching the rest of the accent palette. */
+.editor-wrapper .milkdown .ProseMirror .milkdown-table-block.ProseMirror-selectednode {
+  outline: 2px solid #89b4fa;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Mermaid block NodeSelection feedback: same reason as tables — the
+   rendered SVG inside .mermaid-live-container paints its own
+   background, hiding Crepe's default selection mix. Same blue outline
+   so the user knows they can press Delete to remove the diagram. */
+.editor-wrapper .milkdown .ProseMirror .mermaid-live-container.ProseMirror-selectednode {
+  outline: 2px solid #89b4fa;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
 .live-editor-content:focus {
   outline: none;
 }
@@ -2938,13 +3142,20 @@ pre:hover .code-copy-btn {
   margin: 0 4px;
 }
 
-/* Mermaid live block */
+/* Mermaid live block. width:fit-content lets a 3-node flowchart render
+   at ~600px instead of stretching to the full editor pane and leaving
+   a giant empty halo around the diagram. The toolbar's natural width
+   is the floor (so it never wraps), and max-width:100% keeps oversized
+   diagrams from punching out of the editor — the inner .mermaid-live-preview
+   has overflow:auto for those. */
 .mermaid-live-block {
   background: #11111b;
   border: 1px solid #313244;
   border-radius: 10px;
   margin: 1rem 0;
   overflow: hidden;
+  width: fit-content;
+  max-width: 100%;
 }
 
 .mermaid-live-toolbar {

@@ -62,7 +62,8 @@ frontend/
       Toolbar.jsx            # Top bar: hamburger, +Note, +Folder, path display
       Editor.jsx             # Basic mode: textarea with tab/paste/drop support
       EditorToolbar.jsx      # Markdown formatting buttons (basic mode)
-      LiveEditor.jsx         # Live mode: Milkdown rich editor with inline rendering
+      LiveEditorCrepe.jsx    # Live mode: @milkdown/crepe-based rich editor (v3.10.0+)
+      live-editor-plugins.jsx# Shared Milkdown plugins (comments, table-cell checkboxes, clearEmptyBlock) + LiveToolbar component
       MermaidBlock.jsx       # Inline mermaid with Source/Preview toggle + click-to-edit labels
       Preview.jsx            # Rendered markdown (marked + mermaid)
       ContextMenu.jsx        # Right-click / long-press floating menu
@@ -110,12 +111,15 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 - API calls: all go through api.js which handles JWT and 401 redirects
 - marked v15: use plain renderer object (NOT `new marked.Renderer()`), method signature is `({ text, lang })` for code blocks. **Register the renderer via `new Marked().use({renderer: {...}})`, NOT via the per-call `marked(src, {renderer})` option** — the per-call form replaces the default renderer entirely (no fallback), so any token type you don't override crashes with `this.renderer.X is not a function`. Also: never call `this.parser.parseInline(token.tokens)` from a custom `listitem`; task items with nested blocks will blow up with `Token with "list" type was not found`. Rely on marked's built-in GFM task rendering and re-wire the checkboxes in the DOM post-pass.
 - Mermaid: rendered post-DOM-insert by querying `.mermaid-source` divs
-- Two editor modes: Basic (textarea, Editor.jsx) and Live (Milkdown, LiveEditor.jsx)
-- Live editor: lazy-loaded via React.lazy(), only downloads when user switches to Live mode
-- Milkdown: ProseMirror-based, markdown-native. Uses commonmark + GFM presets
-- Milkdown useEditor creates listeners ONCE — callbacks captured in closure are stale. Use refs (e.g. `onChangeRef`) for any prop that changes over time.
-- Mermaid in Live mode: ProseMirror $view node view renders MermaidBlock.jsx in-place
-- Both editors share the same onChange/content props — App.jsx doesn't know which is active
+- Two editor modes: Basic (textarea, Editor.jsx) and Live (Crepe, LiveEditorCrepe.jsx)
+- Live editor: lazy-loaded via React.lazy(), only downloads when user switches to Live mode. The chunk is ~1.1 MB (~340 KB gzipped) — Crepe + Vue runtime + CodeMirror + KaTeX.
+- Crepe (v3.10.0+): `@milkdown/crepe` is the same editor Milkdown's playground uses. Provides block-edit (drag handle + slash menu), native task-list checkboxes, KaTeX math, polished tables, image-block upload UI, link tooltip. Built on `@milkdown/kit/preset/{commonmark,gfm}` under the hood — same schema as pre-v3.10's hand-rolled Milkdown stack.
+- Custom plugins (in `live-editor-plugins.jsx`): `commentHighlightPlugin` (yellow highlight on commented text, anchor disambiguation via `rangeStart`), `clearEmptyBlockPlugin` (backspace empty heading → paragraph), `tableCellCheckboxPlugin` (literal `[ ]`/`[x]` in cells render as interactive checkboxes via decorations; markdown bytes unchanged on serialize), `LiveToolbar` (Undo / Redo / format / insert / table commands).
+- Mermaid: `LiveEditorCrepe.jsx` defines an inline `mermaidNodeView` that renders the `MermaidBlock` React component for `code_block` nodes where `language === 'mermaid'`. The compose-mermaid plugin runs after `SchemaReady`, reads Crepe's existing `code_block` factory from `nodeViewCtx`, and writes a wrapper that delegates to it for non-mermaid blocks — so Crepe's CodeMirror UI still works for other code languages AND mermaid renders via our React component.
+- Image upload: Crepe's `image-block` `onUpload` calls `uploadImage()` in `api.js`. `proxyDomURL` resolves the bare-filename markdown src (e.g. `![](photo.png)`) into `/api/files/<ns>/<dir>/<file>?token=<jwt>` for rendering — the `?token=` query param is the auth-fallback the middleware accepts for `<img>` GETs that can't carry an `Authorization` header.
+- Per-namespace last-file memory: `localStorage` key `mdnest_last_path:<ns>` records the path of whichever note was last opened in each namespace. Restored on namespace switch and on initial load when there's no URL hash. URL hashes still win for explicit navigation. Per-file scroll position lives in `mdnest_file_prefs:<ns>/<path>.scrollPct` (existing pre-v3.10 mechanism).
+- Crepe nodeView composition: when overriding a node view that Crepe registers (e.g. `code_block` for mermaid, `table` for the click-to-cursor fix), the pattern is to wait for `SchemaReady`, read the existing entry from `nodeViewCtx`, then append a new entry with the same node-type id. `Object.fromEntries(nodeViewCtx)` keeps the last entry for duplicate keys, so ours wins; we keep a reference to the original factory and delegate to it for cases we don't want to override.
+- Both editor implementations share the same onChange/content props — Crepe is now the only Live editor, but `App.jsx` keeps its lazy import named `LiveEditor` so the JSX call site stays editor-agnostic.
 
 ### Namespace Model
 - Namespaces are NOT created at runtime — they are host directories mounted via Docker volumes
@@ -143,6 +147,7 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 
 ## Release Process
 
+- **One PR per release.** Bundle all the work for a release into a single branch (`feat/<name>` or `release/v3.X.Y`) and open **one** PR against `main`. Don't open intermediate / sibling PRs for sub-features during the same release cycle — they cause merge conflicts on shared files (`CHANGELOG.md`, the three version files, `App.jsx`, docs) when one lands while another is still open. Hotfix exception: a true emergency (security CVE, prod crash) can ship as its own PR ahead of the release, but flag it before opening. v3.10.0 hit exactly this — PR #10 (v3.9.1) merged while PR #11 (v3.10.0) was open and produced six-file conflicts; resolve by merging `main` into the release branch and keeping the higher version + the deletion of any files the cutover removed.
 - Every release branch (`release/v3.X.Y`) MUST bump version as the first commit. Three files:
   - `backend/handlers/config.go` — `"version": "3.X.Y"`
   - `frontend/package.json` — `"version": "3.X.Y"`
