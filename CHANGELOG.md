@@ -4,6 +4,15 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v3.10.1 — Login form: proper password-manager hints + per-server scoping
+
+### Bug fixes
+
+- **Browser password-manager hints on the login form.** The username and password inputs were missing `name` + `autocomplete` attributes, so browsers couldn't reliably offer to save credentials and couldn't autofill them on return visits. Added `autoComplete="username"` / `autoComplete="current-password"` (and `"new-password"` on the forced-password-change step) so the "Save password?" prompt appears at the right time and re-visits get autofilled.
+- **Per-server credential scoping.** When the user runs multiple mdnest installs, browsers were lumping their saved credentials together — typing into one install's login form would try to autofill another install's password. The form's `name` and `id` now include the server's `SERVER_ALIAS` (read from `/api/config`) plus a hidden `server` input field. Together those make the form's identity distinct per install at the password-manager level. (Browsers still scope primarily by HTTP origin, so two installs sharing the same `host:port` can't be separated this way — use different ports or subdomains for each install if you need full isolation.)
+
+---
+
 ## v3.10.0 — Live editor migrated to Crepe + per-workspace last-file memory
 
 The big one: the Live editor is now built on [`@milkdown/crepe`](https://milkdown.dev) — the same component the Milkdown playground uses. The pre-v3.10 hand-rolled `@milkdown/core` + commonmark + GFM stack is gone. Crepe brings a block-edit handle (drag + `+` button + slash menu), native SVG task-list checkboxes, KaTeX math, polished tables with column / row controls, link tooltip, and an image-block upload affordance. All four custom plugins from v3.9 (mermaid live edit, comments, in-cell `[ ]`/`[x]` checkboxes, clear-empty-block) port forward; the Catppuccin Mocha look is preserved.
