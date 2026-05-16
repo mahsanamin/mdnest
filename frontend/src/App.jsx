@@ -1199,7 +1199,7 @@ function App() {
     if (appConfig.userProvider === 'sso') {
       return <LoginSSO providerLabel={appConfig.ssoProvider} errorCode={ssoError} />;
     }
-    return <Login onLogin={() => window.location.reload()} />;
+    return <Login onLogin={() => window.location.reload()} serverAlias={appConfig.serverAlias} />;
   }
 
   if (showAdminPanel && isAdmin && isMulti) {

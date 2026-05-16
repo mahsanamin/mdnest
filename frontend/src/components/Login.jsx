@@ -10,7 +10,7 @@ function useAutoFocus(deps) {
   return ref;
 }
 
-function Login({ onLogin }) {
+function Login({ onLogin, serverAlias }) {
   const [step, setStep] = useState('login'); // login, change_password, totp, totp_setup
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -130,24 +130,46 @@ function Login({ onLogin }) {
   };
 
   // --- Login form ---
+  // Form name/id include the server alias so browser password managers
+  // can keep credentials for separate mdnest installs apart. Chrome /
+  // Firefox / Safari fingerprint forms partly by their structure and
+  // identifiers — a hidden `server` field plus distinct form-id is the
+  // strongest hint we can give from the client side. (Browsers still
+  // scope primarily by origin, so two installs sharing the same host:port
+  // can't be separated this way; use different ports or subdomains for
+  // each install if you need full isolation.)
   if (step === 'login') {
+    const formSuffix = serverAlias ? `-${serverAlias}` : '';
     return (
       <div className="login-screen">
-        <form className="login-box" onSubmit={handleLogin}>
+        <form
+          className="login-box"
+          onSubmit={handleLogin}
+          autoComplete="on"
+          name={`mdnest-login${formSuffix}`}
+          id={`mdnest-login${formSuffix}`}
+        >
           <h1>mdnest</h1>
           {error && <div className="login-error">{error}</div>}
+          {serverAlias && (
+            <input type="hidden" name="server" value={serverAlias} readOnly />
+          )}
           <input
             type="text"
+            name="username"
             placeholder="Username"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
+            autoComplete="username"
             autoFocus
           />
           <input
             type="password"
+            name="password"
             placeholder="Password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
+            autoComplete="current-password"
           />
           <button type="submit" disabled={loading}>
             {loading ? 'Signing in...' : 'Sign in'}
@@ -168,15 +190,19 @@ function Login({ onLogin }) {
           <input
             ref={passwordInputRef}
             type="password"
+            name="new-password"
             placeholder="New password"
             value={newPassword}
             onChange={(e) => setNewPassword(e.target.value)}
+            autoComplete="new-password"
           />
           <input
             type="password"
+            name="confirm-password"
             placeholder="Confirm new password"
             value={confirmPassword}
             onChange={(e) => setConfirmPassword(e.target.value)}
+            autoComplete="new-password"
           />
           <button type="submit" disabled={loading}>
             {loading ? 'Updating...' : 'Set new password'}
