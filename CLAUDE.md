@@ -147,6 +147,7 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 
 ## Release Process
 
+- **One PR per release.** Bundle all the work for a release into a single branch (`feat/<name>` or `release/v3.X.Y`) and open **one** PR against `main`. Don't open intermediate / sibling PRs for sub-features during the same release cycle — they cause merge conflicts on shared files (`CHANGELOG.md`, the three version files, `App.jsx`, docs) when one lands while another is still open. Hotfix exception: a true emergency (security CVE, prod crash) can ship as its own PR ahead of the release, but flag it before opening. v3.10.0 hit exactly this — PR #10 (v3.9.1) merged while PR #11 (v3.10.0) was open and produced six-file conflicts; resolve by merging `main` into the release branch and keeping the higher version + the deletion of any files the cutover removed.
 - Every release branch (`release/v3.X.Y`) MUST bump version as the first commit. Three files:
   - `backend/handlers/config.go` — `"version": "3.X.Y"`
   - `frontend/package.json` — `"version": "3.X.Y"`
