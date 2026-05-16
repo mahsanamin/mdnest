@@ -97,6 +97,23 @@ Build the new images and recreate the running containers so the change is testab
 ### 10. Commit mdnest
 Stage and commit all changed files in this repo. Branch protection on `main` may require this to land via a PR — use `git push origin main:refs/heads/release/vX.Y.Z` + `gh pr create` if so. Tag with `v<X.Y.Z>` after the PR merges.
 
+### 11. Publish a GitHub Release for the tag
+**This step is required and easy to forget.** `git push --tags` only creates the git ref; a GitHub Release is a separate object. Without a Release, `https://api.github.com/repos/<owner>/<repo>/releases/latest` returns **404**, the backend's update-availability poller silently skips, and no running mdnest install ever sees the "update available" banner in the sidebar footer. The in-app banner is designed around Release metadata (name + notes preview), not bare tag names — so even a hand-rolled tag-fallback wouldn't carry the changelog text the UI shows.
+
+Extract the CHANGELOG section as the release notes and create the Release:
+
+```bash
+# After PR merge + `git tag vX.Y.Z && git push --tags`:
+REPO="$(git rev-parse --show-toplevel)"
+awk '/^## v3\.X\.Y —/{found=1} found{print} /^## v[0-9]/ && NR>1 && !/^## v3\.X\.Y —/{exit}' "$REPO/CHANGELOG.md" \
+  | sed '$d' | sed '$d' > /tmp/rel-notes.md
+gh release create vX.Y.Z \
+  --title "vX.Y.Z — <headline same as CHANGELOG>" \
+  --notes-file /tmp/rel-notes.md
+```
+
+Verify: hit `/api/config` on any install — `latestRelease.version` should match the tag you just pushed within ~30s of the next poll cycle.
+
 ## Key Paths
 
 | Reference | Resolution |
@@ -112,3 +129,4 @@ Stage and commit all changed files in this repo. Branch protection on `main` may
 - Adding entries to a CHANGELOG section that's already been tagged + pushed. Always create a new section for new fixes after a release ships.
 - Skipping the version-consistency check across the three files; the pre-push hook will reject the push if they drift.
 - Pushing directly to `main` when branch protection is on. Push to a release branch and open a PR — the PR body should track the CHANGELOG entry.
+- Pushing a tag without also publishing a GitHub Release (Step 11). Tags ≠ Releases; the in-app update banner needs Releases to fire. This was the gap that hid the banner feature for the entire pre-v3.10.0 history of the repo.
