@@ -319,7 +319,7 @@ function InviteForm({ isSuperAdmin, manageableNs, isFederated, onDone }) {
       </div>
       {!isFederated && (
         <div className="admin-form-row">
-          <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+          <input type="password" name="new-user-password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" required />
         </div>
       )}
       <div className="admin-form-row">

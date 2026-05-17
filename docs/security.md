@@ -13,10 +13,10 @@ Both shapes share the same engine but their threat models differ. This doc expla
 
 ```mermaid
 flowchart LR
-    user[User / device] --> net[Network boundary<br/>(loopback, Tailscale,<br/>or HTTPS reverse proxy)]
-    net --> idp[Identity<br/>(local password / TOTP,<br/>OIDC SSO, or Firebase)]
-    idp --> authz[Authorization<br/>(role hierarchy +<br/>namespace_admins +<br/>access_grants)]
-    authz --> path[Path safety<br/>(SafePath traversal<br/>protection)]
+    user[User / device] --> net["Network boundary<br/>(loopback, Tailscale,<br/>or HTTPS reverse proxy)"]
+    net --> idp["Identity<br/>(local password / TOTP,<br/>OIDC SSO, or Firebase)"]
+    idp --> authz["Authorization<br/>(role hierarchy +<br/>namespace_admins +<br/>access_grants)"]
+    authz --> path["Path safety<br/>(SafePath traversal<br/>protection)"]
     path --> fs[Files on disk<br/>inside mounted dirs]
 ```
 
@@ -234,9 +234,9 @@ This whole feature only applies in `USER_PROVIDER=local`. In Firebase / SSO mode
 
 ### Outbound GitHub poll *(v3.8.0+)*
 
-mdnest's backend reaches out to `api.github.com` once every 24 hours to check whether a newer release is available, so the sidebar can surface release notes when one drops. This is the only outbound network call the backend itself makes; everything else stays inside your install.
+mdnest's backend reaches out to `api.github.com` once per hour to check whether a newer release is available, so the sidebar can surface release notes when one drops (was once every 24 hours pre-v3.10.1 — the longer cadence meant operators sometimes waited a full day to see the banner after a release shipped). This is the only outbound network call the backend itself makes; everything else stays inside your install.
 
-- **What gets sent.** A single unauthenticated GET to `https://api.github.com/repos/<UPDATE_CHECK_REPO>/releases/latest`. No headers identify your install — GitHub sees one request from your server's egress IP per day.
+- **What gets sent.** A single unauthenticated GET to `https://api.github.com/repos/<UPDATE_CHECK_REPO>/releases/latest`. No headers identify your install — GitHub sees ~24 requests per day from your server's egress IP, well inside the 60 requests/hour unauthenticated rate limit even with multiple installs sharing one IP.
 - **What gets stored.** The latest release's `tag_name`, `name`, `published_at`, and the markdown `body` (truncated to 8 KB), held in memory only. Nothing is persisted server-side. Frontend dismissals (per-version "don't remind me") live in browser localStorage.
 - **Failure mode.** Network errors are logged at info level and never block startup or any user-facing path.
 - **Opt-out.** Set `DISABLE_UPDATE_CHECK=true` in `mdnest.conf` for air-gapped or privacy-sensitive installs. The badge disappears and the goroutine never starts. Set `UPDATE_CHECK_REPO=<owner>/<repo>` to point at a fork instead of upstream.

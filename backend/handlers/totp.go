@@ -239,8 +239,9 @@ func (h *TOTPHandler) HandleSetupTOTPWithTemp(w http.ResponseWriter, r *http.Req
 	}
 
 	var req struct {
-		TempToken string `json:"tempToken"`
-		Code      string `json:"code"` // empty for setup, filled for verify
+		TempToken  string `json:"tempToken"`
+		Code       string `json:"code"` // empty for setup, filled for verify
+		RememberMe bool   `json:"rememberMe,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
@@ -288,7 +289,7 @@ func (h *TOTPHandler) HandleSetupTOTPWithTemp(w http.ResponseWriter, r *http.Req
 			"role":         user.Role,
 			"totp_enabled": true,
 			"iat":          time.Now().Unix(),
-			"exp":          time.Now().Add(30 * 24 * time.Hour).Unix(),
+			"exp":          time.Now().Add(jwtTTL(req.RememberMe)).Unix(),
 		})
 		tokenString, err := token.SignedString(h.secret)
 		if err != nil {
@@ -351,8 +352,9 @@ func (h *TOTPHandler) HandleVerifyLoginTOTP(w http.ResponseWriter, r *http.Reque
 	}
 
 	var req struct {
-		TempToken string `json:"tempToken"`
-		Code      string `json:"code"`
+		TempToken  string `json:"tempToken"`
+		Code       string `json:"code"`
+		RememberMe bool   `json:"rememberMe,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
@@ -403,7 +405,7 @@ func (h *TOTPHandler) HandleVerifyLoginTOTP(w http.ResponseWriter, r *http.Reque
 		"role":         user.Role,
 		"totp_enabled": true,
 		"iat":          time.Now().Unix(),
-		"exp":          time.Now().Add(30 * 24 * time.Hour).Unix(),
+		"exp":          time.Now().Add(jwtTTL(req.RememberMe)).Unix(),
 	})
 
 	tokenString, err := token.SignedString(h.secret)

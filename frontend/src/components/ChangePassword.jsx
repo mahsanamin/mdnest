@@ -68,37 +68,45 @@ function ChangePassword({ onClose }) {
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h3>Change Credentials</h3>
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} autoComplete="off">
           {error && <div className="modal-error">{error}</div>}
           <label className="modal-label">Current Password</label>
           <input
             type="password"
+            name="current-password"
             className="modal-input"
             value={currentPassword}
             onChange={(e) => setCurrentPassword(e.target.value)}
+            autoComplete="current-password"
             autoFocus
           />
           <label className="modal-label">New Username (leave blank to keep current)</label>
           <input
             type="text"
+            name="new-username"
             className="modal-input"
             value={newUsername}
             onChange={(e) => setNewUsername(e.target.value)}
+            autoComplete="username"
             placeholder="Optional"
           />
           <label className="modal-label">New Password</label>
           <input
             type="password"
+            name="new-password"
             className="modal-input"
             value={newPassword}
             onChange={(e) => setNewPassword(e.target.value)}
+            autoComplete="new-password"
           />
           <label className="modal-label">Confirm New Password</label>
           <input
             type="password"
+            name="confirm-password"
             className="modal-input"
             value={confirmPassword}
             onChange={(e) => setConfirmPassword(e.target.value)}
+            autoComplete="new-password"
           />
           <div className="modal-actions">
             <button type="button" className="modal-btn" onClick={onClose}>Cancel</button>

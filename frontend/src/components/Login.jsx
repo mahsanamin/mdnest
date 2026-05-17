@@ -10,13 +10,18 @@ function useAutoFocus(deps) {
   return ref;
 }
 
-function Login({ onLogin }) {
+function Login({ onLogin, serverAlias }) {
   const [step, setStep] = useState('login'); // login, change_password, totp, totp_setup
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [tempToken, setTempToken] = useState('');
+  // "Remember me" — default ON. Keeps the user logged in for 1 year
+  // (vs 30 days when unchecked). Sent on every step of the login flow
+  // (initial login, TOTP verify, forced password change) so whichever
+  // request issues the final JWT uses the right TTL.
+  const [rememberMe, setRememberMe] = useState(true);
 
   // TOTP verify state
   const [totpCode, setTotpCode] = useState('');
@@ -42,7 +47,7 @@ function Login({ onLogin }) {
     setError('');
     setLoading(true);
     try {
-      const data = await login(username, password);
+      const data = await login(username, password, rememberMe);
       if (data.status === 'change_password_required') {
         setTempToken(data.tempToken);
         setStep('change_password');
@@ -72,7 +77,7 @@ function Login({ onLogin }) {
     setError('');
     setLoading(true);
     try {
-      const data = await verifyTOTP(tempToken, totpCode);
+      const data = await verifyTOTP(tempToken, totpCode, rememberMe);
       if (data.token) onLogin();
     } catch (err) {
       setError(err.message || 'Invalid code');
@@ -86,7 +91,7 @@ function Login({ onLogin }) {
     setError('');
     setLoading(true);
     try {
-      const data = await setupTOTPWithTemp(tempToken, setupCode);
+      const data = await setupTOTPWithTemp(tempToken, setupCode, rememberMe);
       if (data.token) onLogin();
     } catch (err) {
       setError(err.message || 'Invalid code');
@@ -108,7 +113,7 @@ function Login({ onLogin }) {
     }
     setLoading(true);
     try {
-      const data = await forcedPasswordChange(tempToken, newPassword);
+      const data = await forcedPasswordChange(tempToken, newPassword, rememberMe);
       if (data.status === 'totp_required') {
         setTempToken(data.tempToken);
         setStep('totp');
@@ -130,25 +135,55 @@ function Login({ onLogin }) {
   };
 
   // --- Login form ---
+  // Form name/id include the server alias so browser password managers
+  // can keep credentials for separate mdnest installs apart. Chrome /
+  // Firefox / Safari fingerprint forms partly by their structure and
+  // identifiers — a hidden `server` field plus distinct form-id is the
+  // strongest hint we can give from the client side. (Browsers still
+  // scope primarily by origin, so two installs sharing the same host:port
+  // can't be separated this way; use different ports or subdomains for
+  // each install if you need full isolation.)
   if (step === 'login') {
+    const formSuffix = serverAlias ? `-${serverAlias}` : '';
     return (
       <div className="login-screen">
-        <form className="login-box" onSubmit={handleLogin}>
+        <form
+          className="login-box"
+          onSubmit={handleLogin}
+          autoComplete="on"
+          name={`mdnest-login${formSuffix}`}
+          id={`mdnest-login${formSuffix}`}
+        >
           <h1>mdnest</h1>
           {error && <div className="login-error">{error}</div>}
+          {serverAlias && (
+            <input type="hidden" name="server" value={serverAlias} readOnly />
+          )}
           <input
             type="text"
+            name="username"
             placeholder="Username"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
+            autoComplete="username"
             autoFocus
           />
           <input
             type="password"
+            name="password"
             placeholder="Password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
+            autoComplete="current-password"
           />
+          <label className="login-remember">
+            <input
+              type="checkbox"
+              checked={rememberMe}
+              onChange={(e) => setRememberMe(e.target.checked)}
+            />
+            <span>Keep me signed in</span>
+          </label>
           <button type="submit" disabled={loading}>
             {loading ? 'Signing in...' : 'Sign in'}
           </button>
@@ -168,15 +203,19 @@ function Login({ onLogin }) {
           <input
             ref={passwordInputRef}
             type="password"
+            name="new-password"
             placeholder="New password"
             value={newPassword}
             onChange={(e) => setNewPassword(e.target.value)}
+            autoComplete="new-password"
           />
           <input
             type="password"
+            name="confirm-password"
             placeholder="Confirm new password"
             value={confirmPassword}
             onChange={(e) => setConfirmPassword(e.target.value)}
+            autoComplete="new-password"
           />
           <button type="submit" disabled={loading}>
             {loading ? 'Updating...' : 'Set new password'}

@@ -154,6 +154,12 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
   - `mdnest` CLI script — `MDNEST_CLI_VERSION="3.X.Y"`
 - Update `CHANGELOG.md` with the new version section
 - Merge to `main`, tag as `v3.X.Y`, push with `--tags`
+- **Publish a GitHub Release for the tag** — `gh release create vX.Y.Z --title "..." --notes-file <file>` with the CHANGELOG entry as the notes. Tags ≠ Releases on GitHub: `git push --tags` only creates the git ref, but the in-app "update available" banner polls `https://api.github.com/repos/<owner>/<repo>/releases/latest` which returns **404** when zero Releases have been published — so without this step, no running mdnest install will ever notice a new version. The frontend's banner (`appConfig.latestRelease.name` + `.notes` preview) is also designed around Release metadata, not bare tag names. The clean recipe:
+  ```bash
+  # after tag + push --tags
+  awk '/^## v3.X.Y —/{found=1} found{print} /^## v[0-9]/ && NR>1 && !/^## v3.X.Y —/{exit}' CHANGELOG.md > /tmp/rel-notes.md
+  gh release create vX.Y.Z --title "vX.Y.Z — <headline>" --notes-file /tmp/rel-notes.md
+  ```
 - Run `/mdnest-ship` skill after code changes to update docs, website, and test instance
 - Pre-push hook (`.githooks/pre-push`) verifies builds, security, lock files, version consistency
 - New developers run `./mdnest-server dev-setup` to activate hooks

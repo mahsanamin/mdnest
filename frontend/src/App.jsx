@@ -331,7 +331,14 @@ function App() {
     document.title = alias ? `mdnest (${alias})` : 'mdnest';
   }, [appConfig?.serverAlias]);
 
-  // Version check: poll /api/config every 60s, compare server version vs build version
+  // Version check: poll /api/config every 60s, compare server version vs build version.
+  // Same poll keeps `appConfig.latestRelease` fresh — without this update,
+  // long-running tabs would never see the "new GitHub release available"
+  // banner (the backend's poller refreshes its cache every hour, but the
+  // frontend only ever fetched appConfig once on mount). To avoid useless
+  // re-renders we only call setAppConfig when latestRelease.version
+  // actually changed; the other fields (authMode, liveCollab, …) are
+  // immutable at runtime.
   useEffect(() => {
     const buildVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : null;
     if (!buildVersion) return;
@@ -341,6 +348,10 @@ function App() {
         if (cfg.version && cfg.version !== buildVersion) {
           setUpdateAvailable({ current: buildVersion, latest: cfg.version });
         }
+        setAppConfig((prev) => {
+          if (prev?.latestRelease?.version === cfg?.latestRelease?.version) return prev;
+          return cfg;
+        });
       } catch {}
     };
     const interval = setInterval(check, 60000);
@@ -1199,7 +1210,7 @@ function App() {
     if (appConfig.userProvider === 'sso') {
       return <LoginSSO providerLabel={appConfig.ssoProvider} errorCode={ssoError} />;
     }
-    return <Login onLogin={() => window.location.reload()} />;
+    return <Login onLogin={() => window.location.reload()} serverAlias={appConfig.serverAlias} />;
   }
 
   if (showAdminPanel && isAdmin && isMulti) {

@@ -381,16 +381,16 @@ function PasswordTab() {
 
   return (
     <div className="settings-content">
-      <form onSubmit={handleSubmit}>
+      <form onSubmit={handleSubmit} autoComplete="off">
         {error && <div className="modal-error">{error}</div>}
         <label className="modal-label">Current Password</label>
-        <input type="password" className="modal-input" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} autoFocus />
+        <input type="password" name="current-password" className="modal-input" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} autoComplete="current-password" autoFocus />
         <label className="modal-label">New Username (leave blank to keep current)</label>
-        <input type="text" className="modal-input" value={newUsername} onChange={(e) => setNewUsername(e.target.value)} placeholder="Optional" />
+        <input type="text" name="new-username" className="modal-input" value={newUsername} onChange={(e) => setNewUsername(e.target.value)} autoComplete="username" placeholder="Optional" />
         <label className="modal-label">New Password</label>
-        <input type="password" className="modal-input" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
+        <input type="password" name="new-password" className="modal-input" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} autoComplete="new-password" />
         <label className="modal-label">Confirm New Password</label>
-        <input type="password" className="modal-input" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
+        <input type="password" name="confirm-password" className="modal-input" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} autoComplete="new-password" />
         <div className="modal-actions">
           <button type="submit" className="modal-btn-primary" disabled={loading}>
             {loading ? 'Saving...' : 'Update Credentials'}

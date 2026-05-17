@@ -124,6 +124,23 @@
   margin-bottom: 0.5rem;
 }
 
+.login-remember {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: #a6adc8;
+  margin: 0.25rem 0 0.5rem;
+  cursor: pointer;
+  user-select: none;
+}
+.login-remember input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+  accent-color: #89b4fa;
+  cursor: pointer;
+}
+
 .login-subtitle {
   color: #a6adc8;
   font-size: 0.85rem;

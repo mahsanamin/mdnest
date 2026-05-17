@@ -154,7 +154,10 @@ func (h *SSOHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		"role":         user.Role,
 		"totp_enabled": false,
 		"iat":          time.Now().Unix(),
-		"exp":          time.Now().Add(30 * 24 * time.Hour).Unix(),
+		// SSO has no per-flow "Remember me" checkbox (the IdP owns the
+		// session UX), so default to the long-lived TTL — matches the
+		// "stay signed in" expectation users get from other corporate apps.
+		"exp": time.Now().Add(jwtTTL(true)).Unix(),
 	})
 	signed, err := token.SignedString(h.secret)
 	if err != nil {

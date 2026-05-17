@@ -21,7 +21,7 @@ Accessible from a browser on any device, from a CLI in any terminal, and from AI
 - **Private by default.** Binds to localhost. No cloud, no third-party services, no telemetry. Add Tailscale for solo remote access, or a TLS reverse proxy (Caddy / nginx / Cloudflare Tunnel) for a team install.
 - **Git backup on your terms.** Optional sidecar auto-commits and pushes to a private GitHub repo on a schedule you control.
 - **In-app version history.** When git-sync is enabled, right-click any note → **History** to browse past versions, **compare any two of them as a diff**, and one-click restore. Restoration is itself versioned — undoable through the same modal. No leaving the app to find an old version.
-- **Update-aware.** The backend polls GitHub for newer releases once a day; when one drops, a small badge in the sidebar footer surfaces the release notes inline so you can read what actually changed before deciding to update. Opt-out via `DISABLE_UPDATE_CHECK=true` for air-gapped installs.
+- **Update-aware.** The backend polls GitHub for newer releases hourly; when one drops, a small badge in the sidebar footer surfaces the release notes inline so you can read what actually changed before deciding to update. Opt-out via `DISABLE_UPDATE_CHECK=true` for air-gapped installs.
 
 ### Who is this for?
 

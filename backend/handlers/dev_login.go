@@ -90,7 +90,10 @@ func (h *DevLoginHandler) HandleDevLogin(w http.ResponseWriter, r *http.Request)
 		"role":         user.Role,
 		"totp_enabled": false,
 		"iat":          time.Now().Unix(),
-		"exp":          time.Now().Add(30 * 24 * time.Hour).Unix(),
+		// Dev-login has no UI for "Remember me" (it's a hidden URL trigger
+		// gated by INSECURE_DEV_LOGIN). Use the same 30-day default the
+		// regular login form uses when the box is unchecked.
+		"exp": time.Now().Add(jwtTTL(false)).Unix(),
 	})
 	signed, err := token.SignedString(h.secret)
 	if err != nil {

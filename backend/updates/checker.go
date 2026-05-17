@@ -1,7 +1,9 @@
 // Package updates polls the GitHub releases API for mdnest's latest tag and
 // caches the result so /api/config can include an "update available" hint
-// without making the frontend talk to GitHub on every page load. One HTTP
-// request per server per 24h is the entire footprint.
+// without making the frontend talk to GitHub on every page load. ~24 HTTP
+// requests per server per day is the entire footprint — well inside the
+// 60/hour unauthenticated rate limit, and tight enough that operators see
+// a new release in the sidebar footer within an hour of it being published.
 package updates
 
 import (
@@ -17,8 +19,15 @@ import (
 )
 
 const (
-	defaultRepo    = "mahsanamin/mdnest"
-	checkInterval  = 24 * time.Hour
+	defaultRepo = "mahsanamin/mdnest"
+	// Was 24h pre-v3.10.1 — operators were waiting up to a day to see the
+	// in-app banner after a new release shipped. 1h is the sweet spot: short
+	// enough to feel responsive, comfortable inside GitHub's 60 req/hour
+	// unauthenticated rate limit (we use 1/60th of the budget per install).
+	// Note: the frontend reads appConfig from /api/config once per page
+	// load, so even with a 1h backend cadence a long-running tab won't
+	// notice a new release until refreshed or the tab is reactivated.
+	checkInterval  = 1 * time.Hour
 	requestTimeout = 10 * time.Second
 	// Wait this long before the first check so a transient network blip at
 	// boot doesn't show up in the logs as the first thing the operator sees.

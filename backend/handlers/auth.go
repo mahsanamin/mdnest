@@ -49,9 +49,26 @@ type AuthHandler struct {
 }
 
 type loginRequest struct {
-	Username string `json:"username,omitempty"`
-	Password string `json:"password,omitempty"`
-	IDToken  string `json:"idToken,omitempty"` // Firebase ID token (USER_PROVIDER=firebase)
+	Username   string `json:"username,omitempty"`
+	Password   string `json:"password,omitempty"`
+	IDToken    string `json:"idToken,omitempty"`    // Firebase ID token (USER_PROVIDER=firebase)
+	RememberMe bool   `json:"rememberMe,omitempty"` // when true, issue a long-lived JWT (1y) instead of the default 30d
+}
+
+// jwtTTL returns the access-token lifetime based on the rememberMe flag.
+// Default is 30 days; "remember me" bumps it to 1 year. We keep the same
+// signing key and claim shape — the only thing that changes is the `exp`.
+// Refresh-token / rotation isn't needed for mdnest's threat model (private
+// self-hosted, small-team); long-lived tokens are an acceptable trade-off
+// for the "never log me out" UX users explicitly asked for. If the device
+// is compromised the user can rotate by changing their password (in
+// multi-mode the password change does invalidate other sessions — see
+// loginMulti).
+func jwtTTL(rememberMe bool) time.Duration {
+	if rememberMe {
+		return 365 * 24 * time.Hour
+	}
+	return 30 * 24 * time.Hour
 }
 
 type loginResponse struct {
@@ -185,7 +202,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	// not per-server — but in practice the frontend in Firebase mode never
 	// sends the username form.
 	if req.IDToken != "" && h.firebaseClient != nil {
-		h.loginFirebase(w, r, req.IDToken)
+		h.loginFirebase(w, r, req.IDToken, req.RememberMe)
 		return
 	}
 
@@ -199,7 +216,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 // loginFirebase verifies a Firebase ID token, upserts the matching local
 // users row, and proceeds through the same TOTP / blocked / token flow as
 // loginMulti. Everything past the identity check is shared.
-func (h *AuthHandler) loginFirebase(w http.ResponseWriter, r *http.Request, idToken string) {
+func (h *AuthHandler) loginFirebase(w http.ResponseWriter, r *http.Request, idToken string, rememberMe bool) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
@@ -263,7 +280,7 @@ func (h *AuthHandler) loginFirebase(w http.ResponseWriter, r *http.Request, idTo
 		return
 	}
 
-	h.issueFullToken(w, user, false)
+	h.issueFullToken(w, user, false, rememberMe)
 }
 
 func (h *AuthHandler) loginSingle(w http.ResponseWriter, req loginRequest) {
@@ -275,7 +292,7 @@ func (h *AuthHandler) loginSingle(w http.ResponseWriter, req loginRequest) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"sub": req.Username,
 		"iat": time.Now().Unix(),
-		"exp": time.Now().Add(30 * 24 * time.Hour).Unix(),
+		"exp": time.Now().Add(jwtTTL(req.RememberMe)).Unix(),
 	})
 
 	tokenString, err := token.SignedString(h.secret)
@@ -359,21 +376,21 @@ func (h *AuthHandler) loginMulti(w http.ResponseWriter, req loginRequest) {
 	}
 
 	// No extra steps — issue full JWT
-	h.issueFullToken(w, user, totpEnabled)
+	h.issueFullToken(w, user, totpEnabled, req.RememberMe)
 }
 
 // issueFullToken mints the long-lived mdnest JWT. totpEnabled is embedded as a
 // claim so the frontend/middleware can tell whether the user has 2FA set up
 // without hitting the TOTP store on every request. It's informational only —
 // real 2FA enforcement happens at login time, not on claim inspection.
-func (h *AuthHandler) issueFullToken(w http.ResponseWriter, user *store.User, totpEnabled bool) {
+func (h *AuthHandler) issueFullToken(w http.ResponseWriter, user *store.User, totpEnabled, rememberMe bool) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"sub":          user.Username,
 		"user_id":      user.ID,
 		"role":         user.Role,
 		"totp_enabled": totpEnabled,
 		"iat":          time.Now().Unix(),
-		"exp":          time.Now().Add(30 * 24 * time.Hour).Unix(),
+		"exp":          time.Now().Add(jwtTTL(rememberMe)).Unix(),
 	})
 
 	tokenString, err := token.SignedString(h.secret)
@@ -397,6 +414,7 @@ func (h *AuthHandler) HandleForcedPasswordChange(w http.ResponseWriter, r *http.
 	var req struct {
 		TempToken   string `json:"tempToken"`
 		NewPassword string `json:"newPassword"`
+		RememberMe  bool   `json:"rememberMe,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
@@ -451,7 +469,7 @@ func (h *AuthHandler) HandleForcedPasswordChange(w http.ResponseWriter, r *http.
 	}
 
 	// No 2FA — issue full JWT
-	h.issueFullToken(w, user, false)
+	h.issueFullToken(w, user, false, req.RememberMe)
 }
 
 // ChangePassword handles POST /api/auth/change-password (authenticated).
