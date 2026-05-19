@@ -271,6 +271,11 @@ function App() {
   // desktop as a more accessible alternative to dragging.
   const [moveModal, setMoveModal] = useState(null);
   const [updateAvailable, setUpdateAvailable] = useState(null); // {current, latest}
+  // Click feedback for the "Refresh Now" button — without this, clicking
+  // can feel like nothing happened because the new bundle download +
+  // parse takes a few seconds and the button stays visually idle the
+  // entire time, leading users to re-click or kill the tab.
+  const [refreshing, setRefreshing] = useState(false);
   // Server-side update notice — surfaces a newer mdnest GitHub release.
   // Distinct from `updateAvailable` (that one means "your browser bundle is
   // older than the running server, refresh the tab"). dismissedReleaseVer
@@ -1336,7 +1341,22 @@ function App() {
         {updateAvailable && (
           <div className="update-banner">
             New version available: <strong>v{updateAvailable.current}</strong> → <strong>v{updateAvailable.latest}</strong>
-            <button onClick={() => window.location.reload(true)}>Refresh Now</button>
+            <button
+              onClick={() => {
+                // Immediate visual feedback — the new build is heavy
+                // (Crepe + Vue + CodeMirror + KaTeX ≈ 340 KB gzipped) and
+                // a slow connection / low-memory device can spend several
+                // seconds parsing it. Without the disabled + "Refreshing…"
+                // state the tab looks frozen and users hit-and-kill it.
+                setRefreshing(true);
+                // Modern browsers ignore the deprecated `true` arg; call
+                // the standard no-arg form.
+                window.location.reload();
+              }}
+              disabled={refreshing}
+            >
+              {refreshing ? 'Refreshing…' : 'Refresh Now'}
+            </button>
           </div>
         )}
         {conflictBanner && (
