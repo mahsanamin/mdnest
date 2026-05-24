@@ -6,6 +6,10 @@ All notable changes to mdnest are documented here.
 
 ## v3.10.2 — Live editor list alignment + "Refresh Now" feedback
 
+### Security
+
+- **Bump `golang.org/x/net` v0.53.0 → v0.55.0** to clear `GO-2026-5026` (IDNA `idna.ToASCII` fails to reject ASCII-only Punycode-encoded labels — reachable from the in-app update poller's outbound `https://api.github.com/...` request via `http.Client.Do`). Transitive bumps: `x/crypto` 0.50→0.51, `x/sys` 0.43→0.45, `x/text` 0.36→0.37. `govulncheck ./...` now reports zero vulnerabilities.
+
 ### Bug fixes
 
 - **Live editor: nested bullets / task items no longer appear as floating orphans between sub-rows.** Symptom (most visible at depth ≥ 2): a parent item's bullet drifted down to sit halfway through its own nested children, looking like a stray dot sandwiched between two unrelated sub-bullets. Root cause: the v3.10.0 Crepe migration added speculative CSS overrides on the list-item layout — most damagingly `align-items: center` on `.list-item`. Crepe's DOM for a list row is `[label-wrapper | children]`, and `.children` contains the parent's paragraph **plus** every nested `.milkdown-list-item-block`. Centering the bullet vertically against that whole stack pushed the parent's bullet to the visual midpoint of all its descendants. The fix strips every speculative list-item override and trusts Crepe's playground defaults for sizing / gap / alignment — the only override left is a single `.milkdown-list-item-block p { margin: 0 }` rule to neutralise the app-wide `p { margin: 0.4rem 0 }` that leaked into list rows (Crepe inserts a `<div class="content-dom">` between `.children` and `<p>`, so the previous `.children > p` selector was silently missing the paragraph and the leaked margin offset the bullet from the text's optical centre).
