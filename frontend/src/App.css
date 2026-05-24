@@ -2842,34 +2842,20 @@ pre:hover .code-copy-btn {
 }
 
 /* Task / bullet / ordered list rows.
-   Crepe gives all three list types the same .milkdown-list-item-block
-   shell with a fixed 24x32 px .label box. That box is sized to fit
-   Crepe's SVG bullet (a small dot inside a 24x24 viewBox), the SVG
-   checkbox icons, and the rendered ordered-number text. The previous
-   override shrunk that box to 1.2em, which scaled the bullet circle
-   and "1." text down to ~7px — they ended up looking tiny and floating
-   above the body text.
-   Don't force the box smaller. Keep Crepe's box dimensions and fix
-   just the parts that genuinely fought our scale:
-   - center-align the box vertically with the text line so the marker
-     sits on the same baseline as the text (instead of being top-pinned
-     in a 32px row, which made everything float above)
-   - drop the leaking app-wide `p { margin: 0.4rem 0 }` for list-item
-     paragraphs so consecutive rows aren't gappy
-   - keep a modest intra-item paragraph spacing for multi-paragraph tasks
-   - lightly tighten the marker→text gap from 10px to 6px */
-.editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block {
+   Trust Crepe's playground defaults for sizing, gap, and alignment —
+   the playground proves the unmodified rules already produce a clean
+   bullet/checkbox-to-text alignment. The ONLY rule that genuinely
+   fights our scale is the app-wide `p { margin: 0.4rem 0 }` from
+   above: Crepe wraps the list-item paragraph in an intermediate
+   `<div class="content-dom" data-content-dom="true">` inside .children,
+   so the `<p>` lives at .children > .content-dom > p. The app-wide
+   margin pushes that paragraph's text down inside the .list-item row
+   and offsets the bullet from the text's optical center. Strip the
+   margin off paragraphs ANYWHERE inside a list-item-block (covers the
+   content-dom wrapper plus any future restructuring Crepe might
+   introduce). Everything else here we deliberately don't override. */
+.editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block p {
   margin: 0;
-}
-.editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block > .list-item {
-  gap: 6px;
-  align-items: center;
-}
-.editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block > .list-item > .children > p {
-  margin: 0;
-}
-.editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block > .list-item > .children > * + * {
-  margin-top: 0.3rem;
 }
 
 /* Block-edit drag/`+` handles: Crepe's default icon fill is
