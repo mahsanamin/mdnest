@@ -4,6 +4,19 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v3.10.2 — Live editor list alignment + "Refresh Now" feedback
+
+### Security
+
+- **Bump `golang.org/x/net` v0.53.0 → v0.55.0** to clear `GO-2026-5026` (IDNA `idna.ToASCII` fails to reject ASCII-only Punycode-encoded labels — reachable from the in-app update poller's outbound `https://api.github.com/...` request via `http.Client.Do`). Transitive bumps: `x/crypto` 0.50→0.51, `x/sys` 0.43→0.45, `x/text` 0.36→0.37. `govulncheck ./...` now reports zero vulnerabilities.
+
+### Bug fixes
+
+- **Live editor: nested bullets / task items no longer appear as floating orphans between sub-rows.** Symptom (most visible at depth ≥ 2): a parent item's bullet drifted down to sit halfway through its own nested children, looking like a stray dot sandwiched between two unrelated sub-bullets. Root cause: the v3.10.0 Crepe migration added speculative CSS overrides on the list-item layout — most damagingly `align-items: center` on `.list-item`. Crepe's DOM for a list row is `[label-wrapper | children]`, and `.children` contains the parent's paragraph **plus** every nested `.milkdown-list-item-block`. Centering the bullet vertically against that whole stack pushed the parent's bullet to the visual midpoint of all its descendants. The fix strips every speculative list-item override and trusts Crepe's playground defaults for sizing / gap / alignment — the only override left is a single `.milkdown-list-item-block p { margin: 0 }` rule to neutralise the app-wide `p { margin: 0.4rem 0 }` that leaked into list rows (Crepe inserts a `<div class="content-dom">` between `.children` and `<p>`, so the previous `.children > p` selector was silently missing the paragraph and the leaked margin offset the bullet from the text's optical centre).
+- **"New version available" banner's Refresh Now button now shows `Refreshing…` immediately on click.** Symptom: a user clicked the button after upgrading their server from v3.9.1 to v3.10.1, "nothing happened" visibly, then the tab appeared frozen and they had to kill the browser. Diagnosed: the click was actually triggering `window.location.reload()`, but the v3.10+ bundle is heavier than v3.9 (Crepe + Vue + CodeMirror + KaTeX ≈ 340 KB gzipped) and parsing it during the reload can take several seconds on a slow connection or low-memory device — during which the OLD tab stays visually idle because the click handler didn't update any UI before calling reload. Two changes: (a) set a `refreshing` state immediately on click so the button reads `Refreshing…` and goes `disabled` before the reload starts, giving the user an instant signal that the click registered; (b) drop the deprecated `true` argument from `window.location.reload(true)` — it was Firefox's non-standard "forceGet" flag that no other browser ever implemented and Firefox itself dropped years ago, so it was already a no-op everywhere but spec-incorrect.
+
+---
+
 ## v3.10.1 — Login form: proper password-manager hints + per-server scoping + "Keep me signed in"
 
 ### New features
