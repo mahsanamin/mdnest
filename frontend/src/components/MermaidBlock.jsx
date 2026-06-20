@@ -63,7 +63,6 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
   const [editSource, setEditSource] = useState(source);
   const [editingLabel, setEditingLabel] = useState(null);
   const [zoom, setZoom] = useState(100);
-  const [naturalWidth, setNaturalWidth] = useState(null);
   const [originalSvg, setOriginalSvg] = useState('');
   const previewRef = useRef(null);
   const currentSource = useRef(source);
@@ -86,20 +85,22 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
           const wMatch = svg.match(/width="([\d.]+)/);
           // viewBox width (3rd value) is the real diagram width
           const natW = vbMatch ? parseFloat(vbMatch[3]) : (wMatch ? parseFloat(wMatch[1]) : 500);
-          setNaturalWidth(natW);
 
           // Keep unmodified SVG for fullscreen viewer
           setOriginalSvg(svg);
 
-          // Remove hardcoded width/height, set to fill container
-          svg = svg.replace(/(<svg[^>]*?)(\s+width="[^"]*")/, '$1');
-          svg = svg.replace(/(<svg[^>]*?)(\s+height="[^"]*")/, '$1');
-          svg = svg.replace(/(<svg)/, '$1 style="width:100%;height:auto;"');
+          // Size to the diagram's NATURAL width, capped at the container
+          // (max-width:100%). Big diagrams scale down to fit; small ones stay
+          // at natural size instead of being stretched to full width — which
+          // was the bug (wide diagrams ballooned, narrow ones shrank). Strip
+          // mermaid's own width/height/style first so ours is the only one.
+          svg = svg.replace(/(<svg[^>]*?)\s+width="[^"]*"/, '$1');
+          svg = svg.replace(/(<svg[^>]*?)\s+height="[^"]*"/, '$1');
+          svg = svg.replace(/(<svg[^>]*?)\s+style="[^"]*"/, '$1');
+          svg = svg.replace(/(<svg)/, `$1 style="width:${natW}px;max-width:100%;height:auto;"`);
 
           setSvgHtml(svg);
           setError('');
-          // Smart initial zoom: if natural width is very small (<300), scale up
-          // If very large (>1000), scale to fit
           setZoom(100);
         }
       } catch (e) {
@@ -297,23 +298,10 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
     setMode('preview');
   };
 
-  // Smart sizing: small diagrams use natural width, large ones fill container
-  // Zoom applies via transform on top of the base size
-  const isSmall = naturalWidth && naturalWidth < 400;
-  const svgContainerStyle = {
-    transformOrigin: 'top center',
-  };
-  if (isSmall) {
-    // Small diagram: use natural width, centered, zoom scales from there
-    svgContainerStyle.width = `${naturalWidth}px`;
-    svgContainerStyle.maxWidth = '100%';
-    svgContainerStyle.margin = '0 auto';
-    if (zoom !== 100) svgContainerStyle.transform = `scale(${zoom / 100})`;
-  } else {
-    // Large diagram: fill container, zoom scales from there
-    svgContainerStyle.width = '100%';
-    if (zoom !== 100) svgContainerStyle.transform = `scale(${zoom / 100})`;
-  }
+  // The SVG itself carries the sizing (natural width, capped at the
+  // container via max-width:100%). Zoom is a transform layered on top.
+  const svgContainerStyle = { transformOrigin: 'top center' };
+  if (zoom !== 100) svgContainerStyle.transform = `scale(${zoom / 100})`;
 
   return (
     <div className="mermaid-live-block" contentEditable={false}>

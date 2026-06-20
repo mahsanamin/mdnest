@@ -3297,11 +3297,10 @@ pre:hover .code-copy-btn {
 }
 
 .mermaid-live-preview {
-  padding: 2rem 3rem;
+  padding: 1rem 1.25rem;
   display: flex;
   justify-content: center;
   align-items: center;
-  min-height: 200px;
   background: #1e1e2e;
 }
 
@@ -3312,6 +3311,7 @@ pre:hover .code-copy-btn {
 }
 
 .mermaid-live-preview svg {
+  max-width: 100%;
   height: auto;
 }
 
