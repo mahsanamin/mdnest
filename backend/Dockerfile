@@ -19,10 +19,12 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 COPY . .
 
-# Short git commit, passed by docker-compose (setup.sh computes it on the
-# host since .git isn't in the build context). Baked into the binary via
-# -ldflags below so /api/config reports the exact build that's running.
+# Short git commit + build timestamp, passed by docker-compose (setup.sh
+# computes them on the host since .git isn't in the build context). Baked into
+# the binary via -ldflags below so /api/config reports the exact build — which
+# commit and when it was built — that's running.
 ARG GIT_COMMIT=unknown
+ARG BUILD_TIME=unknown
 
 # Two cache mounts:
 #   /root/.cache/go-build — Go's incremental compile cache. Reusing this
@@ -36,7 +38,7 @@ ARG GIT_COMMIT=unknown
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=linux go build \
-      -ldflags "-X github.com/mdnest/mdnest/backend/handlers.Commit=${GIT_COMMIT}" \
+      -ldflags "-X github.com/mdnest/mdnest/backend/handlers.Commit=${GIT_COMMIT} -X github.com/mdnest/mdnest/backend/handlers.BuildTime=${BUILD_TIME}" \
       -o mdnest .
 
 # Stage 2: Run
