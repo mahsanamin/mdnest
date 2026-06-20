@@ -4,6 +4,14 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v3.11.1 — Live editor mermaid sizing
+
+### Bug fixes
+
+- **Mermaid diagrams now render at a sensible size in the Live editor.** Small diagrams ballooned to full width while large/tall ones shrank into a corner — because every rendered SVG had its real dimensions stripped and was forced to `width:100%`, then classified by width alone (`<400px` = "small"), so a wide `flowchart LR` filled the pane (stretched up) and a narrow `flowchart TB` rendered at its tiny natural width with empty space beside it. Now the SVG keeps its **natural width capped at the container** (`width:<natural>px; max-width:100%; height:auto`): small diagrams stay small (no stretching), large ones scale **down** to fit the editor width (no shrinking into a corner), and the zoom/Fit controls layer on top. The preview box also lost its oversized `200px` min-height and `2rem 3rem` padding, so a tiny inline diagram no longer sits in a giant empty frame.
+
+---
+
 ## v3.11.0 — CLI stdin fixes + smoke-test harness
 
 ### Added
