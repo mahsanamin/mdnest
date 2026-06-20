@@ -89,8 +89,13 @@ echo "piped" | mdnest write engineering/draft.md -
 
 ```bash
 mdnest create @work/engineering/new-doc.md "# Title"
-mdnest create engineering/new-doc.md
+echo "# Title" | mdnest create @work/engineering/new-doc.md -   # read from stdin
 ```
+
+`create` takes content the same way as `write`/`append`: an inline string, or
+`-` to read from stdin. It exits non-zero if no content is supplied (rather than
+silently creating an empty file), and fails if the note already exists — use
+`write` to overwrite an existing note.
 
 ### Append / Prepend
 
@@ -122,7 +127,7 @@ mdnest search engineering "meeting"
 ## Server management
 
 ```bash
-mdnest servers                   # list all configured servers + versions
+mdnest servers                   # list servers + version (and build commit, e.g. 3.11.0 (a1b2c3d))
 mdnest servers -v                # also list namespaces per server
 mdnest whoami                    # CLI version + all servers
 mdnest logout @work              # remove one server

@@ -154,6 +154,7 @@ mdnest has two editing modes, switchable from the toolbar when in editor-only vi
 - Full formatting toolbar: Undo, Redo, Bold, Italic, Strikethrough, Code, Headings, Lists, Blockquote, Link, Code block, Table with row/column controls
 - **Undo / Redo** *(v3.6.1+)*: the curved-arrow buttons at the start of the toolbar. Same as `Cmd+Z` / `Cmd+Shift+Z` (or `Ctrl+Z` / `Ctrl+Shift+Z`) on the keyboard. macOS uses `Cmd+Shift+Z` for redo, not `Cmd+Y`.
 - **Block-edit menu** *(v3.10.0+)*: hover the left margin of any block for a drag-handle + `+` insert button. The `+` button (or typing `/` anywhere) opens a slash menu with Heading 1-6, Code block, Math, Image, Horizontal rule, Table, and more.
+- **Block-handle toggle** *(v3.11.0+)*: the grip button at the start of the toolbar hides the left drag/`+` handle so content uses the full width — handy on mobile (where it's hidden by default). Typing `/` still opens the slash menu with the handle hidden. The choice is remembered per browser.
 - **Inline + block math** *(v3.10.0+)*: `$inline$` and `$$block$$` render via KaTeX.
 - **Image upload** *(v3.10.0+)*: insert an image block from the slash menu and click "Upload" — or just paste an image from the clipboard. Uploads land next to the current note.
 - **Last-opened file remembered per workspace** *(v3.10.0+)*: switching workspaces and switching back restores whichever file you had open in that workspace, with its scroll position. Bookmark a URL with `#namespace/path/to/note.md` to override.
