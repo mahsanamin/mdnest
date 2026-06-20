@@ -1268,6 +1268,8 @@ function App() {
         onRefreshTree={handleRefresh}
         isAdmin={isAdmin}
         serverVersion={appConfig?.version}
+        serverCommit={appConfig?.commit}
+        serverBuildTime={appConfig?.buildTime}
         updateAvailableVersion={
           appConfig?.latestRelease &&
           isVersionNewer(appConfig.latestRelease.version, appConfig.version) &&

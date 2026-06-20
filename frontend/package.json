@@ -1,7 +1,7 @@
 {
   "name": "mdnest-frontend",
   "private": true,
-  "version": "3.10.2",
+  "version": "3.11.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -30,6 +30,6 @@
     "@vitejs/plugin-react": "^4.3.0",
     "jsdom": "^29.1.1",
     "vite": "^6.0.0",
-    "vitest": "^2.1.9"
+    "vitest": "^4.1.9"
   }
 }

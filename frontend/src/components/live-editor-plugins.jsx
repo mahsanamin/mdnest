@@ -344,63 +344,93 @@ export const tableCellCheckboxPlugin = $prose(() => {
 
 // ===== LiveToolbar — persistent top toolbar =====
 
-export function LiveToolbar({ editor }) {
+export function LiveToolbar({ editor, handlesHidden, onToggleHandles }) {
   if (!editor) return null;
   const cmd = (command, payload) => {
-    try { editor.action(callCommand(command.key, payload)); } catch { /* not ready */ }
+    try {
+      editor.action(callCommand(command.key, payload));
+      // Re-focus the editor so the change is visible and typing continues
+      // where the command left the selection (toolbar buttons use
+      // pointerdown + preventDefault to keep the selection, but focus can
+      // still sit on the button on some touch browsers).
+      editor.action((ctx) => ctx.get(editorViewCtx).focus());
+    } catch { /* not ready */ }
   };
   const proseCmd = (pmCommand) => {
     try {
       editor.action((ctx) => {
         const view = ctx.get(editorViewCtx);
         pmCommand(view.state, view.dispatch);
+        view.focus();
       });
     } catch { /* not ready */ }
   };
+  // Link needs a destination — toggling the mark with no href makes a
+  // dead link. Prompt for the URL (works on mobile too) and pass it through.
+  const insertLink = () => {
+    const href = (window.prompt('Link URL') || '').trim();
+    if (href) cmd(toggleLinkCommand, { href });
+  };
   return (
     <div className="live-toolbar">
+      {onToggleHandles && (
+        <>
+          <div className="live-toolbar-group">
+            <button
+              className={handlesHidden ? '' : 'active'}
+              onPointerDown={(e) => { e.preventDefault(); onToggleHandles(); }}
+              title={handlesHidden ? 'Show block handles (drag / + controls)' : 'Hide block handles to use full width (slash “/” still works)'}
+              aria-label="Toggle block handles"
+              aria-pressed={!handlesHidden}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>
+            </button>
+          </div>
+          <span className="live-toolbar-sep" />
+        </>
+      )}
       <div className="live-toolbar-group">
-        <button onMouseDown={(e) => { e.preventDefault(); cmd(undoCommand); }} title="Undo (Cmd/Ctrl+Z)" aria-label="Undo">
+        <button onPointerDown={(e) => { e.preventDefault(); cmd(undoCommand); }} title="Undo (Cmd/Ctrl+Z)" aria-label="Undo">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-15-6.7L3 13"/></svg>
         </button>
-        <button onMouseDown={(e) => { e.preventDefault(); cmd(redoCommand); }} title="Redo (Cmd/Ctrl+Shift+Z)" aria-label="Redo">
+        <button onPointerDown={(e) => { e.preventDefault(); cmd(redoCommand); }} title="Redo (Cmd/Ctrl+Shift+Z)" aria-label="Redo">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 7v6h-6"/><path d="M3 17a9 9 0 0 1 15-6.7L21 13"/></svg>
         </button>
       </div>
       <span className="live-toolbar-sep" />
       <div className="live-toolbar-group">
-        <button onMouseDown={(e) => { e.preventDefault(); cmd(toggleStrongCommand); }} title="Bold"><b>B</b></button>
-        <button onMouseDown={(e) => { e.preventDefault(); cmd(toggleEmphasisCommand); }} title="Italic"><i>I</i></button>
-        <button onMouseDown={(e) => { e.preventDefault(); cmd(toggleStrikethroughCommand); }} title="Strikethrough"><s>S</s></button>
-        <button onMouseDown={(e) => { e.preventDefault(); cmd(toggleInlineCodeCommand); }} title="Inline code">`</button>
+        <button onPointerDown={(e) => { e.preventDefault(); cmd(toggleStrongCommand); }} title="Bold"><b>B</b></button>
+        <button onPointerDown={(e) => { e.preventDefault(); cmd(toggleEmphasisCommand); }} title="Italic"><i>I</i></button>
+        <button onPointerDown={(e) => { e.preventDefault(); cmd(toggleStrikethroughCommand); }} title="Strikethrough"><s>S</s></button>
+        <button onPointerDown={(e) => { e.preventDefault(); cmd(toggleInlineCodeCommand); }} title="Inline code">`</button>
       </div>
       <span className="live-toolbar-sep" />
       <div className="live-toolbar-group">
-        <button onMouseDown={(e) => { e.preventDefault(); cmd(wrapInHeadingCommand, 1); }} title="Heading 1">H1</button>
-        <button onMouseDown={(e) => { e.preventDefault(); cmd(wrapInHeadingCommand, 2); }} title="Heading 2">H2</button>
-        <button onMouseDown={(e) => { e.preventDefault(); cmd(wrapInHeadingCommand, 3); }} title="Heading 3">H3</button>
+        <button onPointerDown={(e) => { e.preventDefault(); cmd(wrapInHeadingCommand, 1); }} title="Heading 1">H1</button>
+        <button onPointerDown={(e) => { e.preventDefault(); cmd(wrapInHeadingCommand, 2); }} title="Heading 2">H2</button>
+        <button onPointerDown={(e) => { e.preventDefault(); cmd(wrapInHeadingCommand, 3); }} title="Heading 3">H3</button>
       </div>
       <span className="live-toolbar-sep" />
       <div className="live-toolbar-group">
-        <button onMouseDown={(e) => { e.preventDefault(); cmd(wrapInBulletListCommand); }} title="Bullet list">&#8226;</button>
-        <button onMouseDown={(e) => { e.preventDefault(); cmd(wrapInOrderedListCommand); }} title="Numbered list">1.</button>
-        <button onMouseDown={(e) => { e.preventDefault(); cmd(wrapInBlockquoteCommand); }} title="Blockquote">&gt;</button>
-        <button onMouseDown={(e) => { e.preventDefault(); cmd(insertHrCommand); }} title="Horizontal rule">―</button>
+        <button onPointerDown={(e) => { e.preventDefault(); cmd(wrapInBulletListCommand); }} title="Bullet list">&#8226;</button>
+        <button onPointerDown={(e) => { e.preventDefault(); cmd(wrapInOrderedListCommand); }} title="Numbered list">1.</button>
+        <button onPointerDown={(e) => { e.preventDefault(); cmd(wrapInBlockquoteCommand); }} title="Blockquote">&gt;</button>
+        <button onPointerDown={(e) => { e.preventDefault(); cmd(insertHrCommand); }} title="Horizontal rule">―</button>
       </div>
       <span className="live-toolbar-sep" />
       <div className="live-toolbar-group">
-        <button onMouseDown={(e) => { e.preventDefault(); cmd(toggleLinkCommand); }} title="Link">&#128279;</button>
-        <button onMouseDown={(e) => { e.preventDefault(); cmd(createCodeBlockCommand); }} title="Code block">{ }</button>
-        <button onMouseDown={(e) => { e.preventDefault(); cmd(insertTableCommand, { row: 3, col: 3 }); }} title="Insert table">
+        <button onPointerDown={(e) => { e.preventDefault(); insertLink(); }} title="Link">&#128279;</button>
+        <button onPointerDown={(e) => { e.preventDefault(); cmd(createCodeBlockCommand); }} title="Code block">{ }</button>
+        <button onPointerDown={(e) => { e.preventDefault(); cmd(insertTableCommand, { row: 3, col: 3 }); }} title="Insert table">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
         </button>
       </div>
       <span className="live-toolbar-sep" />
       <div className="live-toolbar-group live-toolbar-table">
-        <button onMouseDown={(e) => { e.preventDefault(); cmd(addRowAfterCommand); }} title="Add row">+Row</button>
-        <button onMouseDown={(e) => { e.preventDefault(); cmd(addColAfterCommand); }} title="Add column">+Col</button>
-        <button className="danger" onMouseDown={(e) => { e.preventDefault(); proseCmd(deleteRow); }} title="Delete row">-Row</button>
-        <button className="danger" onMouseDown={(e) => { e.preventDefault(); proseCmd(deleteColumn); }} title="Delete column">-Col</button>
+        <button onPointerDown={(e) => { e.preventDefault(); cmd(addRowAfterCommand); }} title="Add row">+Row</button>
+        <button onPointerDown={(e) => { e.preventDefault(); cmd(addColAfterCommand); }} title="Add column">+Col</button>
+        <button className="danger" onPointerDown={(e) => { e.preventDefault(); proseCmd(deleteRow); }} title="Delete row">-Row</button>
+        <button className="danger" onPointerDown={(e) => { e.preventDefault(); proseCmd(deleteColumn); }} title="Delete column">-Col</button>
       </div>
     </div>
   );

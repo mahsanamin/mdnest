@@ -6,7 +6,7 @@
 # (GO-2026-4865/4866/4870/4946/4947 — all crypto/x509, crypto/tls,
 # html/template). The 1.26-alpine moving tag pulls the latest 1.26.x
 # patch so we keep up with future fixes without manual bumps.
-FROM golang:1.26.3-alpine AS builder
+FROM golang:1.26.4-alpine AS builder
 
 WORKDIR /app
 
@@ -19,6 +19,13 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 COPY . .
 
+# Short git commit + build timestamp, passed by docker-compose (setup.sh
+# computes them on the host since .git isn't in the build context). Baked into
+# the binary via -ldflags below so /api/config reports the exact build — which
+# commit and when it was built — that's running.
+ARG GIT_COMMIT=unknown
+ARG BUILD_TIME=unknown
+
 # Two cache mounts:
 #   /root/.cache/go-build — Go's incremental compile cache. Reusing this
 #     across builds is the biggest win for our codebase post-v3.4.0
@@ -30,7 +37,9 @@ COPY . .
 # the image layers; only the layer hashes get invalidated.
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
-    CGO_ENABLED=0 GOOS=linux go build -o mdnest .
+    CGO_ENABLED=0 GOOS=linux go build \
+      -ldflags "-X github.com/mdnest/mdnest/backend/handlers.Commit=${GIT_COMMIT} -X github.com/mdnest/mdnest/backend/handlers.BuildTime=${BUILD_TIME}" \
+      -o mdnest .
 
 # Stage 2: Run
 FROM alpine:latest

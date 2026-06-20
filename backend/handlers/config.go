@@ -7,6 +7,19 @@ import (
 	"github.com/mdnest/mdnest/backend/updates"
 )
 
+// Commit is the short git commit the backend binary was built from. It is
+// injected at build time via -ldflags "-X .../handlers.Commit=<sha>" (see
+// backend/Dockerfile) so /api/config can report exactly which build is
+// running — the version string alone can't distinguish a stale container.
+// Defaults to "dev" for local `go run`/`go build` without the ldflag.
+var Commit = "dev"
+
+// BuildTime is the UTC timestamp the backend binary was built, injected the
+// same way as Commit (-ldflags "-X .../handlers.BuildTime=<iso8601>"). Lets
+// /api/config report *when* the running build was produced, not just which
+// commit — so "which version is live" is unambiguous. Empty/"dev" locally.
+var BuildTime = "dev"
+
 // ConfigHandler returns public configuration (no auth required).
 type ConfigHandler struct {
 	authMode        string
@@ -84,7 +97,9 @@ func (h *ConfigHandler) HandleConfig(w http.ResponseWriter, r *http.Request) {
 		"liveCollab":   h.liveCollab,
 		"require2FA":   h.require2FA,
 		"userProvider": h.userProvider,
-		"version":      "3.10.2",
+		"version":      "3.11.0",
+		"commit":       Commit,
+		"buildTime":    BuildTime,
 	}
 	if h.serverAlias != "" {
 		resp["serverAlias"] = h.serverAlias

@@ -36,6 +36,15 @@ function formatSyncTime(dateStr) {
   } catch { return dateStr; }
 }
 
+// Build timestamp (ISO-8601 UTC from /api/config) → readable local datetime.
+function formatBuildTime(iso) {
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  } catch { return iso; }
+}
+
 function Sidebar({
   tree,
   treeLoading,
@@ -58,10 +67,13 @@ function Sidebar({
   width,
   onResize,
   serverVersion,
+  serverCommit,
+  serverBuildTime,
   updateAvailableVersion,
   onShowReleaseNotes,
 }) {
   const [syncing, setSyncing] = useState(false);
+  const [showVersionInfo, setShowVersionInfo] = useState(false);
   const [syncInfo, setSyncInfo] = useState(null); // {isGitRepo, hasRemote, lastCommit, ...}
   const [refreshing, setRefreshing] = useState(false);
 
@@ -391,7 +403,36 @@ function Sidebar({
         )}
         <div className="sidebar-server-info">
           <span>{window.location.host}</span>
-          {serverVersion && <span>v{serverVersion}</span>}
+          {serverVersion && (
+            <span className="sidebar-version">
+              v{serverVersion}
+              {serverCommit ? ` · ${serverCommit}` : ''}
+              <button
+                type="button"
+                className="version-info-btn"
+                onClick={() => setShowVersionInfo((v) => !v)}
+                title="Build details"
+                aria-label="Build details"
+                aria-expanded={showVersionInfo}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+              </button>
+            </span>
+          )}
+          {showVersionInfo && (
+            <div className="version-info-popover" role="dialog" aria-label="Build details">
+              <div className="version-info-row"><span>Version</span><strong>v{serverVersion}</strong></div>
+              {serverCommit && serverCommit !== 'dev' && (
+                <div className="version-info-row">
+                  <span>Commit</span>
+                  <a href={`https://github.com/mahsanamin/mdnest/commit/${serverCommit}`} target="_blank" rel="noreferrer"><code>{serverCommit}</code></a>
+                </div>
+              )}
+              {serverBuildTime && serverBuildTime !== 'dev' && serverBuildTime !== 'unknown' && (
+                <div className="version-info-row"><span>Built</span><strong title={serverBuildTime}>{formatBuildTime(serverBuildTime)}</strong></div>
+              )}
+            </div>
+          )}
           {updateAvailableVersion && onShowReleaseNotes && (
             <button
               type="button"

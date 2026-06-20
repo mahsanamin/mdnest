@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-MDNEST_CLI_VERSION="3.10.2"
+MDNEST_CLI_VERSION="3.11.0"
 CONFIG_DIR="${HOME}/.config/mdnest"
 SERVERS_DIR="${CONFIG_DIR}/servers"
 DEFAULT_FILE="${CONFIG_DIR}/default"
@@ -323,17 +323,31 @@ cmd_servers() {
   [ -f "$DEFAULT_FILE" ] && def=$(cat "$DEFAULT_FILE")
 
   if [ -d "$SERVERS_DIR" ] && [ -n "$(ls "$SERVERS_DIR" 2>/dev/null)" ]; then
-    printf "  %-12s  %-35s  %-12s  %s\n" "ALIAS" "URL" "VERSION" "DEFAULT"
-    printf "  %-12s  %-35s  %-12s  %s\n" "────────────" "───────────────────────────────────" "────────────" "───────"
+    printf "  %-12s  %-35s  %-22s  %s\n" "ALIAS" "URL" "VERSION" "DEFAULT"
+    printf "  %-12s  %-35s  %-22s  %s\n" "────────────" "───────────────────────────────────" "──────────────────────" "───────"
     for f in "$SERVERS_DIR"/*; do
       local name=$(basename "$f")
       local url=$(grep '^url=' "$f" 2>/dev/null | cut -d= -f2-)
       local marker=""
       [ "$name" = "$def" ] && marker="*"
-      local ver=""
-      ver=$(curl -s --max-time 3 "${url}/api/config" 2>/dev/null | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
+      local ver="" commit="" cfg=""
+      cfg=$(curl -s --max-time 3 "${url}/api/config" 2>/dev/null)
+      # Parse the TOP-LEVEL version + commit with python3. A bare grep for
+      # "version" would also match latestRelease.version (the newest GitHub
+      # release), printing two values per row — so go through a JSON parser.
+      if [ -n "$cfg" ]; then
+        ver=$(printf '%s' "$cfg" | python3 -c "import sys,json
+try: print(json.load(sys.stdin).get('version',''))
+except Exception: pass" 2>/dev/null)
+        commit=$(printf '%s' "$cfg" | python3 -c "import sys,json
+try: print(json.load(sys.stdin).get('commit',''))
+except Exception: pass" 2>/dev/null)
+      fi
       [ -n "$ver" ] || ver="unreachable"
-      printf "  %-12s  %-35s  %-12s  %s\n" "@${name}" "$url" "$ver" "$marker"
+      # Show the build commit next to the version so a stale container is
+      # obvious even when the version string hasn't changed.
+      [ -n "$commit" ] && [ "$commit" != "dev" ] && ver="$ver ($commit)"
+      printf "  %-12s  %-35s  %-22s  %s\n" "@${name}" "$url" "$ver" "$marker"
 
       # Verbose: list namespaces for this server
       if $verbose && [ "$ver" != "unreachable" ]; then
@@ -416,30 +430,63 @@ cmd_read() {
   api GET "/note?ns=$(urlencode "$PARSED_NS")&path=$(urlencode "$PARSED_PATH")"
 }
 
+# Resolve note content from a positional arg and/or stdin.
+#   "-"          → read stdin; error if stdin is a TTY (nothing was piped)
+#   "" (omitted) → read stdin if piped; otherwise leave empty (never block a TTY)
+#   anything else→ use the literal arg
+# Prints content to stdout; on error prints to stderr and returns non-zero.
+# Call as: content=$(read_content "$2") || exit 1
+read_content() {
+  local arg="$1"
+  if [ "$arg" = "-" ]; then
+    if [ -t 0 ]; then
+      echo "Error: '-' given but nothing was piped to stdin" >&2
+      return 1
+    fi
+    cat
+    return 0
+  fi
+  if [ -z "$arg" ] && [ ! -t 0 ]; then
+    cat
+    return 0
+  fi
+  printf '%s' "$arg"
+}
+
+# Refuse to proceed when no content was actually supplied, instead of issuing
+# the API call and reporting a false success on an empty/garbage body.
+require_content() {
+  if [ -z "$1" ]; then
+    echo "Error: no content provided; pass <content> or pipe via stdin with -" >&2
+    exit 1
+  fi
+  return 0
+}
+
 cmd_write() {
   parse_path "$1"
   require_server
   [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] && { echo "Usage: mdnest write @alias/namespace/path.md <content|->" >&2; exit 1; }
-  local content="$2"
-  [ "$content" = "-" ] && content=$(cat)
-  [ -z "$content" ] && content=$(cat)
+  local content; content=$(read_content "$2") || exit 1
+  require_content "$content"
   api PUT "/note?ns=$(urlencode "$PARSED_NS")&path=$(urlencode "$PARSED_PATH")" "$content"
 }
 
 cmd_create() {
   parse_path "$1"
   require_server
-  [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] && { echo "Usage: mdnest create @alias/namespace/path.md [content]" >&2; exit 1; }
-  api POST "/note?ns=$(urlencode "$PARSED_NS")&path=$(urlencode "$PARSED_PATH")" "${2:-}"
+  [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] && { echo "Usage: mdnest create @alias/namespace/path.md <content|->" >&2; exit 1; }
+  local content; content=$(read_content "$2") || exit 1
+  require_content "$content"
+  api POST "/note?ns=$(urlencode "$PARSED_NS")&path=$(urlencode "$PARSED_PATH")" "$content"
 }
 
 cmd_append() {
   parse_path "$1"
   require_server
   [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] && { echo "Usage: mdnest append @alias/namespace/path.md <content|->" >&2; exit 1; }
-  local content="$2"
-  [ "$content" = "-" ] && content=$(cat)
-  [ -z "$content" ] && content=$(cat)
+  local content; content=$(read_content "$2") || exit 1
+  require_content "$content"
   api PATCH "/note?ns=$(urlencode "$PARSED_NS")&path=$(urlencode "$PARSED_PATH")&position=bottom" "$content"
 }
 
@@ -447,9 +494,8 @@ cmd_prepend() {
   parse_path "$1"
   require_server
   [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] && { echo "Usage: mdnest prepend @alias/namespace/path.md <content|->" >&2; exit 1; }
-  local content="$2"
-  [ "$content" = "-" ] && content=$(cat)
-  [ -z "$content" ] && content=$(cat)
+  local content; content=$(read_content "$2") || exit 1
+  require_content "$content"
   api PATCH "/note?ns=$(urlencode "$PARSED_NS")&path=$(urlencode "$PARSED_PATH")&position=top" "$content"
 }
 
@@ -486,10 +532,10 @@ cmd_note_legacy() {
   case "$subcmd" in
     list)     cmd_list "$1" ;;
     read)     cmd_list "${1}/${2}" 2>/dev/null || api GET "/note?ns=$(urlencode "$1")&path=$(urlencode "$2")" ;;
-    write)    local ns="$1" p="$2" c="$3"; [ "$c" = "-" ] && c=$(cat); [ -z "$c" ] && c=$(cat); api PUT "/note?ns=$(urlencode "$ns")&path=$(urlencode "$p")" "$c" ;;
-    create)   api POST "/note?ns=$(urlencode "$1")&path=$(urlencode "$2")" "${3:-}" ;;
-    append)   local ns="$1" p="$2" c="$3"; [ "$c" = "-" ] && c=$(cat); [ -z "$c" ] && c=$(cat); api PATCH "/note?ns=$(urlencode "$ns")&path=$(urlencode "$p")&position=bottom" "$c" ;;
-    prepend)  local ns="$1" p="$2" c="$3"; [ "$c" = "-" ] && c=$(cat); [ -z "$c" ] && c=$(cat); api PATCH "/note?ns=$(urlencode "$ns")&path=$(urlencode "$p")&position=top" "$c" ;;
+    write)    local ns="$1" p="$2" c; c=$(read_content "$3") || exit 1; require_content "$c"; api PUT "/note?ns=$(urlencode "$ns")&path=$(urlencode "$p")" "$c" ;;
+    create)   local ns="$1" p="$2" c; c=$(read_content "$3") || exit 1; require_content "$c"; api POST "/note?ns=$(urlencode "$ns")&path=$(urlencode "$p")" "$c" ;;
+    append)   local ns="$1" p="$2" c; c=$(read_content "$3") || exit 1; require_content "$c"; api PATCH "/note?ns=$(urlencode "$ns")&path=$(urlencode "$p")&position=bottom" "$c" ;;
+    prepend)  local ns="$1" p="$2" c; c=$(read_content "$3") || exit 1; require_content "$c"; api PATCH "/note?ns=$(urlencode "$ns")&path=$(urlencode "$p")&position=top" "$c" ;;
     delete)   api DELETE "/note?ns=$(urlencode "$1")&path=$(urlencode "$2")" ;;
     move)     api POST "/move?ns=$(urlencode "$1")&from=$(urlencode "$2")&to=$(urlencode "$3")" ;;
     search)   api GET "/search?ns=$(urlencode "$1")&q=$(urlencode "$2")" ;;
@@ -543,7 +589,7 @@ SERVER MANAGEMENT
   update   [--force]              Self-update to the latest release of this CLI
 
 NOTE OPERATIONS
-  create   <path> [content]       Create a NEW file (fails if already exists)
+  create   <path> <content|->     Create a NEW file (fails if already exists; use - for stdin)
   write    <path> <content|->     Overwrite an EXISTING file (fails 404 if not found)
   read     <path>                 Read a note (outputs markdown to stdout)
   append   <path> <content|->     Append text to end (creates file if not found)
@@ -572,6 +618,9 @@ EXAMPLES
 
   # Create a new file (use "create", NOT "write")
   mdnest create @work/engineering/notes/meeting.md "# Meeting Notes"
+
+  # Create a new file from stdin (pipe content, pass -)
+  echo "# Meeting Notes" | mdnest create @work/engineering/notes/meeting.md -
 
   # Update an existing file (use "write")
   mdnest write @work/engineering/notes/meeting.md "# Updated content"

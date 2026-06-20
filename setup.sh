@@ -18,6 +18,15 @@ fi
 
 echo "Reading $CONF..."
 
+# Short git commit of the current checkout. Baked into the backend binary at
+# build time (via docker-compose build arg → Dockerfile ldflags) so /api/config
+# can report exactly which build is running. Falls back to "unknown" outside a
+# git checkout (e.g. a tarball install).
+GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
+# UTC build timestamp (ISO-8601), baked in alongside the commit so /api/config
+# can report when the running build was produced.
+BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
 # Parse config
 MDNEST_USER=""
 MDNEST_PASSWORD=""
@@ -214,6 +223,8 @@ SERVER_ALIAS=${SERVER_ALIAS:-}
 USER_PROVIDER=${USER_PROVIDER:-local}
 INSECURE_DEV_LOGIN=${INSECURE_DEV_LOGIN:-false}
 GRANT_MAX_DEPTH=${GRANT_MAX_DEPTH:-3}
+GIT_COMMIT=${GIT_COMMIT}
+BUILD_TIME=${BUILD_TIME}
 EOF
 
 # Optional COMPOSE_PROJECT_NAME — pinned only when the operator sets one
@@ -412,7 +423,11 @@ fi
 cat > docker-compose.yml <<EOF
 services:
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        GIT_COMMIT: \${GIT_COMMIT:-unknown}
+        BUILD_TIME: \${BUILD_TIME:-unknown}
 ${BACKEND_PORT_LINE}
     env_file:
       - .env

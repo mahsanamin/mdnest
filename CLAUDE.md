@@ -186,6 +186,19 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 - Do not add heavy editor libraries (CodeMirror, Monaco) — plain textarea
 - Do not break single-mode behavior — multi-user features must be fully conditional
 
+## Testing
+
+- **CLI smoke test**: `tests/cli-smoke-test.sh` exercises every `mdnest` note
+  operation (create/write/append/prepend/read/move/delete/search/list) plus the
+  stdin edge cases (`-` parity, dash-guard, empty-content rejection) end-to-end
+  against a disposable namespace. Run it after any change to the `mdnest` CLI.
+- It targets the `testing_workspace` namespace by default — add
+  `MOUNT_testing_workspace=<host_path>` to `mdnest.conf` and `./mdnest-server
+  reload` to mount it. Override with `MDNEST_TEST_NS` / `MDNEST_TEST_ALIAS`, and
+  `MDNEST_BIN` to point at a specific CLI build (defaults to the repo's `./mdnest`).
+- The harness creates everything under a unique `__clitest_*` folder and deletes
+  it on exit; it returns non-zero if any check fails.
+
 ## Documentation
 
 See `docs/` for:

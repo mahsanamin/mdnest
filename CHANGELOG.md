@@ -4,6 +4,34 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v3.11.0 — CLI stdin fixes + smoke-test harness
+
+### Added
+
+- **Build commit shown next to the version.** `/api/config` now reports a `commit` field — the short git SHA the backend binary was built from, injected at build time via `-ldflags` (computed by `setup.sh`, passed through docker-compose as a build arg, baked into the binary). The sidebar footer renders it as `v3.11.0 · <sha>`, and `mdnest servers` shows it as `3.11.0 (<sha>)`. Because the SHA is compiled into the binary rather than read from config, it can't drift from the running code — so a stale container is now obvious even when the version string hasn't changed (the exact situation where a rebuilt `develop` still displayed an old version). Falls back to `dev` for local `go build` without the ldflag.
+- **Build-details popover (ⓘ) with build time.** A short SHA alone isn't very legible, so the sidebar version now has an info button that opens a small popover showing the version, the commit (linked to its GitHub commit page), and **when the running build was produced** — a `buildTime` field newly added to `/api/config`, baked in via `-ldflags` alongside the commit (UTC timestamp computed by `setup.sh`, rendered in local time). Answers "is this the build I just deployed, and when?" at a glance.
+- **Live editor: reclaimed the left space.** Crepe reserved an ~88px left gutter for its hover drag/`+` block handles, wasting ~20% of the width on mobile. The handle is now a compact **vertical grip** sitting flush in a **28px** gutter (no empty lane beside it), list indentation is tightened (marker column 24px→20px, marker→text gap 10px→4px) so bullets hug the left, and a Live-toolbar **toggle** hides the handle entirely for full-width content (**16px** margin). The slash `/` menu keeps working with the handle hidden. The state persists per browser and defaults to hidden on **touch devices** (`hover: none` / `pointer: coarse`), shown on pointer devices.
+- **Live editor: toolbar buttons work reliably on touch + a real Link prompt.** Toolbar formatting buttons used `mousedown`, which doesn't preserve the editor selection on touch devices, so most icons did nothing on mobile; they now use `pointerdown` (covering touch) and refocus the editor after running, so bold/heading/list/etc. apply to the selection. The Link button now prompts for a URL and applies it as the link `href` (previously it toggled a link mark with no destination — a dead link).
+
+### Bug fixes
+
+- **`mdnest create` now accepts piped stdin via `-`, like its sibling verbs.** Previously `create` forwarded its positional argument straight to the API, so `echo "# Note" | mdnest create @ns/file.md -` wrote the literal one-byte string `-` as the file body — and the API still returned `{"status":"created"}`. The result was a silently corrupted (near-empty) file reported as a success, which is the most common way automated tooling (scripts, AI agents) corrupted notes: the command "succeeded", nothing retried, and the bad file surfaced much later. `create` now reads stdin on `-` (or an omitted arg) exactly like `write`/`append`/`prepend`.
+- **Robust, TTY-aware stdin handling with a literal-dash guard.** All content verbs now route through a shared `read_content()` helper: `-` reads stdin and errors with a non-zero exit if nothing was piped (instead of writing a literal `-`); an omitted arg auto-reads stdin only when piped and never blocks on an interactive terminal. This removes both the TTY-hang footgun and the literal-`-` corruption path.
+- **Empty content now fails loudly instead of reporting false success.** `create`/`write`/`append`/`prepend` refuse to issue the API call when no content was supplied, printing a clear message and exiting non-zero rather than creating an empty file and returning `ok`. (The guard returns success explicitly on the happy path so it is safe under the script's `set -e`.)
+
+### Testing
+
+- **New CLI smoke-test harness — `tests/cli-smoke-test.sh`.** 18 end-to-end checks covering every note operation (create/write/append/prepend/read/move/delete/search/list) plus the stdin edge cases above, run against a disposable namespace. It tests the working-tree CLI, creates everything under a unique self-cleaning folder, and exits non-zero on any failure. Run it after any change to the `mdnest` CLI. A new optional `MOUNT_testing_workspace` mount (documented in `mdnest.conf.sample`) gives it a dedicated namespace.
+
+### Security / CI
+
+- **MCP server: bump `hono` to clear a high-severity advisory** (transitive via `@modelcontextprotocol/sdk`). `npm audit` now reports zero vulnerabilities.
+- **Frontend: bump `vitest` 2.x → 4.x** to clear the vulnerable `vite`/`vite-node`/`@vitest/mocker`/`esbuild` dev-toolchain chain (a high + a critical). The production build's direct `vite` was already on a fixed version; only the test runner's pinned `vite@5` was affected. Tests still pass (11/11) and `vite build` is unchanged.
+- **Backend: run `govulncheck` in binary mode.** `govulncheck@latest` (v1.4.0) segfaults in source mode (nil pointer deref in `vulncheck.vulnFuncs`) when analysing code built with the Go 1.26.x toolchain that `go.mod` pins. Building the binary and scanning it with `-mode=binary` avoids the crashing source-SSA path while still detecting reachable vulnerable symbols; the local pre-push hook does the same. Also points setup-go's module cache at `backend/go.sum` to clear a warning.
+- **Backend: bump Go 1.26.3 → 1.26.4** (`go.mod` + Dockerfile builder image) to clear two called standard-library advisories surfaced by the now-working govulncheck scan: `GO-2026-5039` (`net/textproto` error escaping) and `GO-2026-5037` (`crypto/x509` candidate-hostname parsing), both fixed in go1.26.4.
+
+---
+
 ## v3.10.2 — Live editor list alignment + "Refresh Now" feedback
 
 ### Security

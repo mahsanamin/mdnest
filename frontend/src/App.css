@@ -322,11 +322,64 @@
 .sidebar-server-info {
   display: flex;
   justify-content: space-between;
+  align-items: center;
+  position: relative;
   padding: 3px 12px;
   font-size: 0.6rem;
   color: #45475a;
   border-top: 1px solid #232334;
   flex-shrink: 0;
+}
+
+/* Version + clickable (i) build-details popover. */
+.sidebar-version {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.version-info-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: none;
+  color: #6c7086;
+  cursor: pointer;
+  line-height: 0;
+}
+.version-info-btn:hover {
+  color: #89b4fa;
+}
+.version-info-popover {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 12px;
+  z-index: 30;
+  min-width: 180px;
+  padding: 8px 10px;
+  background: #181825;
+  border: 1px solid #313244;
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  font-size: 0.7rem;
+  color: #cdd6f4;
+}
+.version-info-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 2px 0;
+}
+.version-info-row > span {
+  color: #6c7086;
+}
+.version-info-row a {
+  color: #89b4fa;
+  text-decoration: none;
+}
+.version-info-row a:hover {
+  text-decoration: underline;
 }
 
 .sidebar-resize-handle {
@@ -2799,18 +2852,30 @@ pre:hover .code-copy-btn {
    legacy LiveEditor so notes look the same regardless of which editor is
    active. Crepe's defaults are sized for a wider layout (60×120 padding,
    42px H1) — too big for our split-view editor pane.
-   Left padding is wider than right to leave gutter space for Crepe's
-   block-edit handle row, which is two operation-items (drag dots + `+`
-   button) totalling ~66px, positioned with a 16-px offset from the block
-   start. Anything narrower than ~82px clips the `+` button off the left
-   edge while leaving the drag handle visible — which is exactly the
-   regression the user saw. */
+   Left padding leaves just enough room for the compact vertical block
+   handle (a ~26px grip — see the `.milkdown-block-handle` rules below) to
+   sit flush at the left with no empty lane beside it. 28px holds it without
+   clipping the `+`/drag controls. The `.handles-hidden` toggle drops this to
+   a normal text margin (and on touch devices that's the default). */
 .editor-wrapper .milkdown .ProseMirror {
-  padding: 1rem 1rem 1rem 88px;
+  padding: 1rem 1rem 1rem 28px;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', sans-serif;
   font-size: 0.9rem;
   line-height: 1.7;
   color: #cdd6f4;
+}
+
+/* Block-handle toggle (see LiveToolbar). When hidden we drop Crepe's hover
+   drag/`+` handle widget and collapse the reserved left gutter to a normal
+   text margin, so the content uses the full width — the big win on mobile,
+   where the 88px gutter eats ~20% of the screen. The slash `/` menu is a
+   separate widget (typed trigger, not the hover handle), so it keeps working
+   with the handles hidden. */
+.live-editor-pane.handles-hidden .milkdown .milkdown-block-handle {
+  display: none !important;
+}
+.live-editor-pane.handles-hidden .milkdown .ProseMirror {
+  padding-left: 1rem;
 }
 
 .editor-wrapper .milkdown .ProseMirror h1 {
@@ -2856,6 +2921,39 @@ pre:hover .code-copy-btn {
    introduce). Everything else here we deliberately don't override. */
 .editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block p {
   margin: 0;
+}
+
+/* Tighten list indentation. Crepe's list `ul`/`ol` carry no padding, so the
+   indent is entirely the marker column (24px) + the marker→text gap (10px).
+   Narrow both so bullets/checkboxes hug the left and text sits right after
+   the marker (worst-felt on mobile). The checkbox svg (~18px) still fits the
+   20px column. */
+.editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block li {
+  gap: 4px;
+}
+.editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block li .label-wrapper,
+.editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block li .label-wrapper .label {
+  width: 20px;
+}
+
+/* Compact vertical block handle. Crepe's default is a horizontal row of two
+   32×32 operation-items (~66px wide) which forced a wide left gutter. Stack
+   them vertically and shrink to 26×26 so the handle is only ~26px wide —
+   letting the ProseMirror left padding above drop from 88px to 48px while
+   keeping MORE clearance than before. floating-ui measures the handle, so it
+   repositions automatically for the new size. */
+.editor-wrapper .milkdown .milkdown-block-handle {
+  flex-direction: column;
+  gap: 0;
+}
+.editor-wrapper .milkdown .milkdown-block-handle .operation-item {
+  width: 26px;
+  height: 26px;
+  padding: 3px;
+}
+.editor-wrapper .milkdown .milkdown-block-handle .operation-item svg {
+  width: 18px;
+  height: 18px;
 }
 
 /* Block-edit drag/`+` handles: Crepe's default icon fill is
@@ -3119,6 +3217,12 @@ pre:hover .code-copy-btn {
 .live-toolbar button.danger:hover {
   color: #f38ba8;
   background: #f38ba822;
+}
+/* Toggle in the "on" state (e.g. block handles currently shown). */
+.live-toolbar button.active {
+  background: #313244;
+  color: #89b4fa;
+  border-color: #45475a;
 }
 
 .live-toolbar-sep {

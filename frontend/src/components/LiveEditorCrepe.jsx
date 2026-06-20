@@ -244,6 +244,28 @@ export default function LiveEditorCrepe({
   // button dispatches the `mermaid-fullscreen` custom event from the node view.
   const [viewerSvg, setViewerSvg] = useState(null);
 
+  // Block-handle gutter toggle. Crepe reserves an ~88px left gutter for the
+  // hover drag/`+` handles, which wastes a lot of width on mobile. When
+  // hidden we collapse the gutter to full width via the `.handles-hidden`
+  // class (the slash `/` menu is a separate widget, so it keeps working).
+  // Persisted per-browser; defaults to hidden on touch devices.
+  const [handlesHidden, setHandlesHidden] = useState(() => {
+    try {
+      const saved = localStorage.getItem('mdnest_live_handles_hidden');
+      if (saved !== null) return saved === '1';
+    } catch { /* ignore */ }
+    // Default by capability, not width: touch devices can't hover the drag
+    // handle and benefit most from full width, so hide it there by default.
+    try { return window.matchMedia('(hover: none), (pointer: coarse)').matches; } catch { return false; }
+  });
+  const toggleHandles = useCallback(() => {
+    setHandlesHidden((prev) => {
+      const next = !prev;
+      try { localStorage.setItem('mdnest_live_handles_hidden', next ? '1' : '0'); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
     if (!rootRef.current) return;
     if (content === null || content === undefined) return;
@@ -743,9 +765,9 @@ export default function LiveEditorCrepe({
   }, [ns, currentPath, readOnly]);
 
   return (
-    <div className="live-editor-pane">
+    <div className={`live-editor-pane${handlesHidden ? ' handles-hidden' : ''}`}>
       {readOnly && <div className="editor-readonly-bar">Read-only</div>}
-      {!readOnly && <LiveToolbar editor={innerEditor} />}
+      {!readOnly && <LiveToolbar editor={innerEditor} handlesHidden={handlesHidden} onToggleHandles={toggleHandles} />}
       <div className="live-editor-wrapper" style={{ position: 'relative', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
         <div ref={rootRef} className="live-editor-crepe-root" />
         {selectionPopup && onComment && (
