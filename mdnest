@@ -538,6 +538,27 @@ cmd_move() {
   require_server
   local to="$2"
   [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] || [ -z "$to" ] && { echo "Usage: mdnest move @alias/namespace/old-path new-path" >&2; exit 1; }
+
+  # Normalize the destination to a namespace-relative path. Users naturally
+  # paste the full "@alias/namespace/path" (same style as the source); passing
+  # that through raw made the server treat "@alias/namespace/" as folder names
+  # and relocate the file to a bogus "<ns>/@alias/namespace/..." path — the
+  # destination then read empty and write/delete 404'd (apparent data loss).
+  # Reject cross-namespace moves (move is within one namespace).
+  if [[ "$to" == @* ]]; then
+    local r="${to#@}"; r="${r#*/}"            # drop "@alias/"
+    local to_ns="${r%%/*}" to_path=""
+    [[ "$r" == */* ]] && to_path="${r#*/}"
+    if [ "$to_ns" != "$PARSED_NS" ]; then
+      echo "Error: move stays within one namespace (source: $PARSED_NS, destination: $to_ns)" >&2
+      exit 1
+    fi
+    to="$to_path"
+  elif [[ "$to" == "$PARSED_NS"/* ]]; then
+    to="${to#"$PARSED_NS"/}"                  # strip a leading "<namespace>/"
+  fi
+  [ -z "$to" ] && { echo "Error: destination path is empty" >&2; exit 1; }
+
   api POST "/move?ns=$(urlencode "$PARSED_NS")&from=$(urlencode "$PARSED_PATH")&to=$(urlencode "$to")"
 }
 
