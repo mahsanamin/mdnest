@@ -191,3 +191,9 @@ GIT_AUTHOR_EMAIL=you@example.com
 # Example:
 # MOUNT_personal=/home/you/notes/personal
 # MOUNT_work=/home/you/notes/work
+#
+# Optional: a disposable namespace for the CLI smoke-test harness
+# (tests/cli-smoke-test.sh). It creates and deletes throwaway notes under a
+# unique prefixed folder, so keep it separate from real notes. After adding
+# this line run `./mdnest-server reload` to mount it, then run the harness.
+# MOUNT_testing_workspace=/home/you/notes/testing_workspace
