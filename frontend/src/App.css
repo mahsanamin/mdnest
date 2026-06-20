@@ -322,11 +322,64 @@
 .sidebar-server-info {
   display: flex;
   justify-content: space-between;
+  align-items: center;
+  position: relative;
   padding: 3px 12px;
   font-size: 0.6rem;
   color: #45475a;
   border-top: 1px solid #232334;
   flex-shrink: 0;
+}
+
+/* Version + clickable (i) build-details popover. */
+.sidebar-version {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.version-info-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: none;
+  color: #6c7086;
+  cursor: pointer;
+  line-height: 0;
+}
+.version-info-btn:hover {
+  color: #89b4fa;
+}
+.version-info-popover {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 12px;
+  z-index: 30;
+  min-width: 180px;
+  padding: 8px 10px;
+  background: #181825;
+  border: 1px solid #313244;
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  font-size: 0.7rem;
+  color: #cdd6f4;
+}
+.version-info-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 2px 0;
+}
+.version-info-row > span {
+  color: #6c7086;
+}
+.version-info-row a {
+  color: #89b4fa;
+  text-decoration: none;
+}
+.version-info-row a:hover {
+  text-decoration: underline;
 }
 
 .sidebar-resize-handle {
