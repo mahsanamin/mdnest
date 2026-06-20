@@ -2859,7 +2859,7 @@ pre:hover .code-copy-btn {
    with more clearance than the old 88px row had, so the `+`/drag controls
    never clip. The `.handles-hidden` toggle drops this to a normal margin. */
 .editor-wrapper .milkdown .ProseMirror {
-  padding: 1rem 1rem 1rem 48px;
+  padding: 1rem 1rem 1rem 36px;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', sans-serif;
   font-size: 0.9rem;
   line-height: 1.7;
@@ -2922,6 +2922,20 @@ pre:hover .code-copy-btn {
    introduce). Everything else here we deliberately don't override. */
 .editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block p {
   margin: 0;
+}
+
+/* Tighten list indentation. Crepe's default puts the bullet/checkbox in a
+   24px column with a 10px gap to the text, which — stacked on the handle
+   gutter — pushed list text uncomfortably far right (worst on mobile).
+   Narrow the marker column and gap so bullets hug the left and text sits
+   right after the marker. Touch targets stay adequate (checkbox svg ~18px
+   fits the 20px column). */
+.editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block li {
+  gap: 4px;
+}
+.editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block li .label-wrapper,
+.editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block li .label-wrapper .label {
+  width: 20px;
 }
 
 /* Compact vertical block handle. Crepe's default is a horizontal row of two

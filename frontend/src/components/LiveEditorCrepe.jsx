@@ -254,7 +254,10 @@ export default function LiveEditorCrepe({
       const saved = localStorage.getItem('mdnest_live_handles_hidden');
       if (saved !== null) return saved === '1';
     } catch { /* ignore */ }
-    try { return window.matchMedia('(max-width: 768px)').matches; } catch { return false; }
+    // Default by device capability rather than width: touch devices (no
+    // hover / coarse pointer) can't use the hover handle and benefit most
+    // from full width, so default to hidden there; pointer devices keep it.
+    try { return window.matchMedia('(hover: none), (pointer: coarse)').matches; } catch { return false; }
   });
   const toggleHandles = useCallback(() => {
     setHandlesHidden((prev) => {
