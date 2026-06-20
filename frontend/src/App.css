@@ -2813,6 +2813,19 @@ pre:hover .code-copy-btn {
   color: #cdd6f4;
 }
 
+/* Block-handle toggle (see LiveToolbar). When hidden we drop Crepe's hover
+   drag/`+` handle widget and collapse the reserved left gutter to a normal
+   text margin, so the content uses the full width — the big win on mobile,
+   where the 88px gutter eats ~20% of the screen. The slash `/` menu is a
+   separate widget (typed trigger, not the hover handle), so it keeps working
+   with the handles hidden. */
+.live-editor-pane.handles-hidden .milkdown .milkdown-block-handle {
+  display: none !important;
+}
+.live-editor-pane.handles-hidden .milkdown .ProseMirror {
+  padding-left: 1rem;
+}
+
 .editor-wrapper .milkdown .ProseMirror h1 {
   font-size: 1.8rem;
   font-weight: 700;
@@ -3119,6 +3132,12 @@ pre:hover .code-copy-btn {
 .live-toolbar button.danger:hover {
   color: #f38ba8;
   background: #f38ba822;
+}
+/* Toggle in the "on" state (e.g. block handles currently shown). */
+.live-toolbar button.active {
+  background: #313244;
+  color: #89b4fa;
+  border-color: #45475a;
 }
 
 .live-toolbar-sep {
