@@ -2852,14 +2852,13 @@ pre:hover .code-copy-btn {
    legacy LiveEditor so notes look the same regardless of which editor is
    active. Crepe's defaults are sized for a wider layout (60×120 padding,
    42px H1) — too big for our split-view editor pane.
-   Left padding leaves gutter space for Crepe's block-edit handle. We stack
-   the handle's two operation-items into a compact vertical grip (see the
-   `.milkdown-block-handle` rules below) so the gutter is ~half what Crepe's
-   default horizontal row needs — 48px holds the ~26px-wide vertical handle
-   with more clearance than the old 88px row had, so the `+`/drag controls
-   never clip. The `.handles-hidden` toggle drops this to a normal margin. */
+   Left padding leaves just enough room for the compact vertical block
+   handle (a ~26px grip — see the `.milkdown-block-handle` rules below) to
+   sit flush at the left with no empty lane beside it. 28px holds it without
+   clipping the `+`/drag controls. The `.handles-hidden` toggle drops this to
+   a normal text margin (and on touch devices that's the default). */
 .editor-wrapper .milkdown .ProseMirror {
-  padding: 1rem 1rem 1rem 48px;
+  padding: 1rem 1rem 1rem 28px;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', sans-serif;
   font-size: 0.9rem;
   line-height: 1.7;
@@ -2922,6 +2921,19 @@ pre:hover .code-copy-btn {
    introduce). Everything else here we deliberately don't override. */
 .editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block p {
   margin: 0;
+}
+
+/* Tighten list indentation. Crepe's list `ul`/`ol` carry no padding, so the
+   indent is entirely the marker column (24px) + the marker→text gap (10px).
+   Narrow both so bullets/checkboxes hug the left and text sits right after
+   the marker (worst-felt on mobile). The checkbox svg (~18px) still fits the
+   20px column. */
+.editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block li {
+  gap: 4px;
+}
+.editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block li .label-wrapper,
+.editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block li .label-wrapper .label {
+  width: 20px;
 }
 
 /* Compact vertical block handle. Crepe's default is a horizontal row of two

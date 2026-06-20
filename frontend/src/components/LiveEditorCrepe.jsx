@@ -248,13 +248,15 @@ export default function LiveEditorCrepe({
   // hover drag/`+` handles, which wastes a lot of width on mobile. When
   // hidden we collapse the gutter to full width via the `.handles-hidden`
   // class (the slash `/` menu is a separate widget, so it keeps working).
-  // Persisted per-browser; defaults to hidden on small screens.
+  // Persisted per-browser; defaults to hidden on touch devices.
   const [handlesHidden, setHandlesHidden] = useState(() => {
     try {
       const saved = localStorage.getItem('mdnest_live_handles_hidden');
       if (saved !== null) return saved === '1';
     } catch { /* ignore */ }
-    try { return window.matchMedia('(max-width: 768px)').matches; } catch { return false; }
+    // Default by capability, not width: touch devices can't hover the drag
+    // handle and benefit most from full width, so hide it there by default.
+    try { return window.matchMedia('(hover: none), (pointer: coarse)').matches; } catch { return false; }
   });
   const toggleHandles = useCallback(() => {
     setHandlesHidden((prev) => {
