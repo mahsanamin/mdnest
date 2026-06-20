@@ -4,6 +4,14 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v3.11.2 — Prettier "update available" indicator
+
+### Bug fixes
+
+- **The "new version available" indicator no longer renders as an oversized cream blob.** On a narrow sidebar the old badge wrapped its `↑` and version onto two lines inside a pill, which looked broken. The alert is now folded into the build-details **ⓘ**: when an update is available the icon turns accent-blue and gently pulses (respecting `prefers-reduced-motion`), and clicking it opens the popover with the build details plus a tidy "↑ vX.Y.Z available — see what's new" action. Removed the standalone badge.
+
+---
+
 ## v3.11.1 — Live editor mermaid sizing + contrast
 
 ### Bug fixes

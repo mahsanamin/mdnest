@@ -409,10 +409,10 @@ function Sidebar({
               {serverCommit ? ` · ${serverCommit}` : ''}
               <button
                 type="button"
-                className="version-info-btn"
+                className={`version-info-btn${updateAvailableVersion ? ' has-update' : ''}`}
                 onClick={() => setShowVersionInfo((v) => !v)}
-                title="Build details"
-                aria-label="Build details"
+                title={updateAvailableVersion ? `Update available: v${updateAvailableVersion}` : 'Build details'}
+                aria-label={updateAvailableVersion ? `Update available: v${updateAvailableVersion}. Show build details` : 'Build details'}
                 aria-expanded={showVersionInfo}
               >
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
@@ -431,17 +431,16 @@ function Sidebar({
               {serverBuildTime && serverBuildTime !== 'dev' && serverBuildTime !== 'unknown' && (
                 <div className="version-info-row"><span>Built</span><strong title={serverBuildTime}>{formatBuildTime(serverBuildTime)}</strong></div>
               )}
+              {updateAvailableVersion && onShowReleaseNotes && (
+                <button
+                  type="button"
+                  className="version-info-update"
+                  onClick={() => { setShowVersionInfo(false); onShowReleaseNotes(); }}
+                >
+                  ↑ v{updateAvailableVersion} available — see what’s new
+                </button>
+              )}
             </div>
-          )}
-          {updateAvailableVersion && onShowReleaseNotes && (
-            <button
-              type="button"
-              className="sidebar-update-badge"
-              onClick={onShowReleaseNotes}
-              title={`mdnest v${updateAvailableVersion} is available — click to see what's new`}
-            >
-              ↑ v{updateAvailableVersion}
-            </button>
           )}
         </div>
         {onResize && (

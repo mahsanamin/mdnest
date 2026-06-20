@@ -323,6 +323,8 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 2px 8px;
   position: relative;
   padding: 3px 12px;
   font-size: 0.6rem;
@@ -350,6 +352,40 @@
 }
 .version-info-btn:hover {
   color: #89b4fa;
+}
+/* When an update is available the ⓘ turns accent and gently pulses to draw
+   the eye — the alert is folded into the icon instead of a separate badge. */
+.version-info-btn.has-update {
+  color: #89b4fa;
+  animation: version-info-pulse 1.8s ease-in-out infinite;
+}
+@keyframes version-info-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .version-info-btn.has-update { animation: none; }
+}
+
+/* "New version available" action inside the popover. */
+.version-info-update {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 5px 8px;
+  background: rgba(137, 180, 250, 0.16);
+  color: #89b4fa;
+  border: 1px solid rgba(137, 180, 250, 0.45);
+  border-radius: 5px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-align: center;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.version-info-update:hover {
+  background: rgba(137, 180, 250, 0.3);
+  border-color: #89b4fa;
 }
 .version-info-popover {
   position: absolute;
@@ -3959,21 +3995,8 @@ pre:hover .code-copy-btn {
 /* ===== Sidebar update-available badge =====
    Shown next to the version in the sidebar footer when /api/config reports
    a newer mdnest release on GitHub. Click → opens ReleaseNotesModal. */
-.sidebar-update-badge {
-  background: #f9e2af;
-  color: #1e1e2e;
-  border: none;
-  border-radius: 999px;
-  padding: 1px 8px;
-  margin-left: 4px;
-  font-size: 0.7rem;
-  font-weight: 600;
-  cursor: pointer;
-  line-height: 1.5;
-}
-.sidebar-update-badge:hover {
-  background: #fab387;
-}
+/* (The standalone .sidebar-update-badge was replaced by the pulsing ⓘ +
+   the "see what's new" action inside the build-details popover.) */
 
 /* ===== Release notes modal ===== */
 .release-notes-modal {
