@@ -19,6 +19,11 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 COPY . .
 
+# Short git commit, passed by docker-compose (setup.sh computes it on the
+# host since .git isn't in the build context). Baked into the binary via
+# -ldflags below so /api/config reports the exact build that's running.
+ARG GIT_COMMIT=unknown
+
 # Two cache mounts:
 #   /root/.cache/go-build — Go's incremental compile cache. Reusing this
 #     across builds is the biggest win for our codebase post-v3.4.0
@@ -30,7 +35,9 @@ COPY . .
 # the image layers; only the layer hashes get invalidated.
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
-    CGO_ENABLED=0 GOOS=linux go build -o mdnest .
+    CGO_ENABLED=0 GOOS=linux go build \
+      -ldflags "-X github.com/mdnest/mdnest/backend/handlers.Commit=${GIT_COMMIT}" \
+      -o mdnest .
 
 # Stage 2: Run
 FROM alpine:latest
