@@ -4,6 +4,16 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v3.11.1 — Live editor mermaid sizing + contrast
+
+### Bug fixes
+
+- **Mermaid text is now always readable, whatever fill the source specifies.** Author/AI-written diagrams that set a light node fill (`style X fill:#fff8e1`, a light `classDef`, …) rendered as light-text-on-light-fill — invisible. The Live editor was injecting a blanket `.nodeLabel { color:#cdd6f4 !important }` override that forced *every* label light, fighting the per-node brightness logic that's supposed to pick contrast. Removed the blanket override so `fixMermaidTextColors()` is the single authority: each label's color is computed from its own node's fill brightness (dark text on light fills, light text on dark), so contrast holds regardless of the colors the author chose. (Print/export keeps its own light-page palette.)
+
+- **Mermaid diagrams now render at a sensible size in the Live editor.** Small diagrams ballooned to full width while large/tall ones shrank into a corner — because every rendered SVG had its real dimensions stripped and was forced to `width:100%`, then classified by width alone (`<400px` = "small"), so a wide `flowchart LR` filled the pane (stretched up) and a narrow `flowchart TB` rendered at its tiny natural width with empty space beside it. Now the SVG keeps its **natural width, capped at the container and at a 820px max** (`width:<natural>px; max-width:min(100%, 820px); height:auto`): small diagrams stay small (no stretching), large ones scale **down** to fit (no shrinking into a corner) and don't sprawl past 820px on wide screens, and the zoom/Fit controls layer on top. The preview box also lost its oversized `200px` min-height and `2rem 3rem` padding, so a tiny inline diagram no longer sits in a giant empty frame.
+
+---
+
 ## v3.11.0 — CLI stdin fixes + smoke-test harness
 
 ### Added
