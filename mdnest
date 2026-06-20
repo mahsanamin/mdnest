@@ -439,11 +439,22 @@ read_content() {
   printf '%s' "$arg"
 }
 
+# Refuse to proceed when no content was actually supplied, instead of issuing
+# the API call and reporting a false success on an empty/garbage body.
+require_content() {
+  if [ -z "$1" ]; then
+    echo "Error: no content provided; pass <content> or pipe via stdin with -" >&2
+    exit 1
+  fi
+  return 0
+}
+
 cmd_write() {
   parse_path "$1"
   require_server
   [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] && { echo "Usage: mdnest write @alias/namespace/path.md <content|->" >&2; exit 1; }
   local content; content=$(read_content "$2") || exit 1
+  require_content "$content"
   api PUT "/note?ns=$(urlencode "$PARSED_NS")&path=$(urlencode "$PARSED_PATH")" "$content"
 }
 
@@ -452,6 +463,7 @@ cmd_create() {
   require_server
   [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] && { echo "Usage: mdnest create @alias/namespace/path.md <content|->" >&2; exit 1; }
   local content; content=$(read_content "$2") || exit 1
+  require_content "$content"
   api POST "/note?ns=$(urlencode "$PARSED_NS")&path=$(urlencode "$PARSED_PATH")" "$content"
 }
 
@@ -460,6 +472,7 @@ cmd_append() {
   require_server
   [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] && { echo "Usage: mdnest append @alias/namespace/path.md <content|->" >&2; exit 1; }
   local content; content=$(read_content "$2") || exit 1
+  require_content "$content"
   api PATCH "/note?ns=$(urlencode "$PARSED_NS")&path=$(urlencode "$PARSED_PATH")&position=bottom" "$content"
 }
 
@@ -468,6 +481,7 @@ cmd_prepend() {
   require_server
   [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] && { echo "Usage: mdnest prepend @alias/namespace/path.md <content|->" >&2; exit 1; }
   local content; content=$(read_content "$2") || exit 1
+  require_content "$content"
   api PATCH "/note?ns=$(urlencode "$PARSED_NS")&path=$(urlencode "$PARSED_PATH")&position=top" "$content"
 }
 
@@ -504,10 +518,10 @@ cmd_note_legacy() {
   case "$subcmd" in
     list)     cmd_list "$1" ;;
     read)     cmd_list "${1}/${2}" 2>/dev/null || api GET "/note?ns=$(urlencode "$1")&path=$(urlencode "$2")" ;;
-    write)    local ns="$1" p="$2" c; c=$(read_content "$3") || exit 1; api PUT "/note?ns=$(urlencode "$ns")&path=$(urlencode "$p")" "$c" ;;
-    create)   local ns="$1" p="$2" c; c=$(read_content "$3") || exit 1; api POST "/note?ns=$(urlencode "$ns")&path=$(urlencode "$p")" "$c" ;;
-    append)   local ns="$1" p="$2" c; c=$(read_content "$3") || exit 1; api PATCH "/note?ns=$(urlencode "$ns")&path=$(urlencode "$p")&position=bottom" "$c" ;;
-    prepend)  local ns="$1" p="$2" c; c=$(read_content "$3") || exit 1; api PATCH "/note?ns=$(urlencode "$ns")&path=$(urlencode "$p")&position=top" "$c" ;;
+    write)    local ns="$1" p="$2" c; c=$(read_content "$3") || exit 1; require_content "$c"; api PUT "/note?ns=$(urlencode "$ns")&path=$(urlencode "$p")" "$c" ;;
+    create)   local ns="$1" p="$2" c; c=$(read_content "$3") || exit 1; require_content "$c"; api POST "/note?ns=$(urlencode "$ns")&path=$(urlencode "$p")" "$c" ;;
+    append)   local ns="$1" p="$2" c; c=$(read_content "$3") || exit 1; require_content "$c"; api PATCH "/note?ns=$(urlencode "$ns")&path=$(urlencode "$p")&position=bottom" "$c" ;;
+    prepend)  local ns="$1" p="$2" c; c=$(read_content "$3") || exit 1; require_content "$c"; api PATCH "/note?ns=$(urlencode "$ns")&path=$(urlencode "$p")&position=top" "$c" ;;
     delete)   api DELETE "/note?ns=$(urlencode "$1")&path=$(urlencode "$2")" ;;
     move)     api POST "/move?ns=$(urlencode "$1")&from=$(urlencode "$2")&to=$(urlencode "$3")" ;;
     search)   api GET "/search?ns=$(urlencode "$1")&q=$(urlencode "$2")" ;;
