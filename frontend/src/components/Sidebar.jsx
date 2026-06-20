@@ -58,6 +58,7 @@ function Sidebar({
   width,
   onResize,
   serverVersion,
+  serverCommit,
   updateAvailableVersion,
   onShowReleaseNotes,
 }) {
@@ -391,7 +392,12 @@ function Sidebar({
         )}
         <div className="sidebar-server-info">
           <span>{window.location.host}</span>
-          {serverVersion && <span>v{serverVersion}</span>}
+          {serverVersion && (
+            <span>
+              v{serverVersion}
+              {serverCommit ? ` · ${serverCommit}` : ''}
+            </span>
+          )}
           {updateAvailableVersion && onShowReleaseNotes && (
             <button
               type="button"

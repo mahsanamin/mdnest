@@ -6,6 +6,10 @@ All notable changes to mdnest are documented here.
 
 ## v3.11.0 — CLI stdin fixes + smoke-test harness
 
+### Added
+
+- **Build commit shown next to the version.** `/api/config` now reports a `commit` field — the short git SHA the backend binary was built from, injected at build time via `-ldflags` (computed by `setup.sh`, passed through docker-compose as a build arg, baked into the binary). The sidebar footer renders it as `v3.11.0 · <sha>`, and `mdnest servers` shows it as `3.11.0 (<sha>)`. Because the SHA is compiled into the binary rather than read from config, it can't drift from the running code — so a stale container is now obvious even when the version string hasn't changed (the exact situation where a rebuilt `develop` still displayed an old version). Falls back to `dev` for local `go build` without the ldflag.
+
 ### Bug fixes
 
 - **`mdnest create` now accepts piped stdin via `-`, like its sibling verbs.** Previously `create` forwarded its positional argument straight to the API, so `echo "# Note" | mdnest create @ns/file.md -` wrote the literal one-byte string `-` as the file body — and the API still returned `{"status":"created"}`. The result was a silently corrupted (near-empty) file reported as a success, which is the most common way automated tooling (scripts, AI agents) corrupted notes: the command "succeeded", nothing retried, and the bad file surfaced much later. `create` now reads stdin on `-` (or an omitted arg) exactly like `write`/`append`/`prepend`.

@@ -323,17 +323,22 @@ cmd_servers() {
   [ -f "$DEFAULT_FILE" ] && def=$(cat "$DEFAULT_FILE")
 
   if [ -d "$SERVERS_DIR" ] && [ -n "$(ls "$SERVERS_DIR" 2>/dev/null)" ]; then
-    printf "  %-12s  %-35s  %-12s  %s\n" "ALIAS" "URL" "VERSION" "DEFAULT"
-    printf "  %-12s  %-35s  %-12s  %s\n" "────────────" "───────────────────────────────────" "────────────" "───────"
+    printf "  %-12s  %-35s  %-22s  %s\n" "ALIAS" "URL" "VERSION" "DEFAULT"
+    printf "  %-12s  %-35s  %-22s  %s\n" "────────────" "───────────────────────────────────" "──────────────────────" "───────"
     for f in "$SERVERS_DIR"/*; do
       local name=$(basename "$f")
       local url=$(grep '^url=' "$f" 2>/dev/null | cut -d= -f2-)
       local marker=""
       [ "$name" = "$def" ] && marker="*"
-      local ver=""
-      ver=$(curl -s --max-time 3 "${url}/api/config" 2>/dev/null | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
+      local ver="" commit="" cfg=""
+      cfg=$(curl -s --max-time 3 "${url}/api/config" 2>/dev/null)
+      ver=$(echo "$cfg" | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
+      commit=$(echo "$cfg" | grep -o '"commit":"[^"]*"' | cut -d'"' -f4)
       [ -n "$ver" ] || ver="unreachable"
-      printf "  %-12s  %-35s  %-12s  %s\n" "@${name}" "$url" "$ver" "$marker"
+      # Show the build commit next to the version so a stale container is
+      # obvious even when the version string hasn't changed.
+      [ -n "$commit" ] && [ "$commit" != "dev" ] && ver="$ver ($commit)"
+      printf "  %-12s  %-35s  %-22s  %s\n" "@${name}" "$url" "$ver" "$marker"
 
       # Verbose: list namespaces for this server
       if $verbose && [ "$ver" != "unreachable" ]; then
