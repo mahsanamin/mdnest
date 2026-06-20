@@ -66,17 +66,25 @@ fi
 GOVULNCHECK="$(go env GOPATH 2>/dev/null)/bin/govulncheck"
 if [ -x "$GOVULNCHECK" ]; then
   echo -n "Backend security (govulncheck)... "
-  VULN_OUT=$(cd backend && "$GOVULNCHECK" ./... 2>&1) || true
-  if echo "$VULN_OUT" | grep -q "No vulnerabilities found"; then
-    echo "OK"
-  elif echo "$VULN_OUT" | grep -qE "from the Go standard library" \
-       && ! echo "$VULN_OUT" | grep -qE "in (packages you import|modules you require)"; then
-    # Only stdlib hits — warn but don't block
-    echo "WARN (stdlib only — update Go to fix)"
+  # Binary mode, mirroring CI: govulncheck v1.4.0's source-mode call-graph
+  # analysis segfaults under the Go 1.26.x toolchain go.mod pins. Build the
+  # binary and scan it instead.
+  if (cd backend && go build -o /tmp/mdnest-govulncheck-target .) > /dev/null 2>&1; then
+    VULN_OUT=$(cd backend && "$GOVULNCHECK" -mode=binary /tmp/mdnest-govulncheck-target 2>&1) || true
+    rm -f /tmp/mdnest-govulncheck-target
+    if echo "$VULN_OUT" | grep -q "No vulnerabilities found"; then
+      echo "OK"
+    elif echo "$VULN_OUT" | grep -qE "from the Go standard library" \
+         && ! echo "$VULN_OUT" | grep -qE "in (packages you import|modules you require)"; then
+      # Only stdlib hits — warn but don't block
+      echo "WARN (stdlib only — update Go to fix)"
+    else
+      echo "VULNERABILITIES FOUND"
+      echo "  Run: cd backend && go build -o /tmp/t . && govulncheck -mode=binary /tmp/t"
+      FAILED=1
+    fi
   else
-    echo "VULNERABILITIES FOUND"
-    echo "  Run: cd backend && govulncheck ./..."
-    FAILED=1
+    echo "WARN (build failed — could not scan)"
   fi
 else
   echo "Backend security: skipped (govulncheck not installed)"

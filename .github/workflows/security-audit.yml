@@ -44,8 +44,18 @@ jobs:
           # Without go-version-file, we'd have to manually bump this
           # alongside every Go version change in the Dockerfile.
           go-version-file: 'backend/go.mod'
+          # go.sum lives under backend/, not the repo root — point the
+          # module cache at it so setup-go stops warning it can't find one.
+          cache-dependency-path: 'backend/go.sum'
       - run: go install golang.org/x/vuln/cmd/govulncheck@latest
-      - run: cd backend && govulncheck ./...
+      # Run in binary mode rather than source mode: govulncheck v1.4.0's
+      # source-mode call-graph analysis segfaults (nil deref in
+      # vulncheck.vulnFuncs) when analysing code built with the Go 1.26.x
+      # toolchain that go.mod pins. Binary mode uses the compiled binary's
+      # symbol table instead of source SSA, avoiding the crashing path while
+      # still detecting reachable vulnerable symbols.
+      - run: cd backend && go build -o mdnest .
+      - run: cd backend && govulncheck -mode=binary ./mdnest
 
   shell:
     name: Shell scripts (shellcheck)
