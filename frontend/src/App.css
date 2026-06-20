@@ -2799,14 +2799,14 @@ pre:hover .code-copy-btn {
    legacy LiveEditor so notes look the same regardless of which editor is
    active. Crepe's defaults are sized for a wider layout (60×120 padding,
    42px H1) — too big for our split-view editor pane.
-   Left padding is wider than right to leave gutter space for Crepe's
-   block-edit handle row, which is two operation-items (drag dots + `+`
-   button) totalling ~66px, positioned with a 16-px offset from the block
-   start. Anything narrower than ~82px clips the `+` button off the left
-   edge while leaving the drag handle visible — which is exactly the
-   regression the user saw. */
+   Left padding leaves gutter space for Crepe's block-edit handle. We stack
+   the handle's two operation-items into a compact vertical grip (see the
+   `.milkdown-block-handle` rules below) so the gutter is ~half what Crepe's
+   default horizontal row needs — 48px holds the ~26px-wide vertical handle
+   with more clearance than the old 88px row had, so the `+`/drag controls
+   never clip. The `.handles-hidden` toggle drops this to a normal margin. */
 .editor-wrapper .milkdown .ProseMirror {
-  padding: 1rem 1rem 1rem 88px;
+  padding: 1rem 1rem 1rem 48px;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', sans-serif;
   font-size: 0.9rem;
   line-height: 1.7;
@@ -2869,6 +2869,26 @@ pre:hover .code-copy-btn {
    introduce). Everything else here we deliberately don't override. */
 .editor-wrapper .milkdown .ProseMirror .milkdown-list-item-block p {
   margin: 0;
+}
+
+/* Compact vertical block handle. Crepe's default is a horizontal row of two
+   32×32 operation-items (~66px wide) which forced a wide left gutter. Stack
+   them vertically and shrink to 26×26 so the handle is only ~26px wide —
+   letting the ProseMirror left padding above drop from 88px to 48px while
+   keeping MORE clearance than before. floating-ui measures the handle, so it
+   repositions automatically for the new size. */
+.editor-wrapper .milkdown .milkdown-block-handle {
+  flex-direction: column;
+  gap: 0;
+}
+.editor-wrapper .milkdown .milkdown-block-handle .operation-item {
+  width: 26px;
+  height: 26px;
+  padding: 3px;
+}
+.editor-wrapper .milkdown .milkdown-block-handle .operation-item svg {
+  width: 18px;
+  height: 18px;
 }
 
 /* Block-edit drag/`+` handles: Crepe's default icon fill is
