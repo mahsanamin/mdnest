@@ -186,6 +186,10 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 - Do not add heavy editor libraries (CodeMirror, Monaco) — plain textarea
 - Do not break single-mode behavior — multi-user features must be fully conditional
 
+## Scope discipline
+
+- **Solve only the problem that's ours to solve; do our best but don't over-engineer.** Fix what mdnest itself produces (e.g. *guarantee* readable mermaid contrast in our render layer), but don't try to police or re-educate the world outside our box — don't edit users' `CLAUDE.md` at install, lecture authors about their color choices, or build elaborate guidance systems for mistakes that originate upstream. The render-layer guarantee is ours; the author's input is theirs. Prefer the smallest change that genuinely fixes the user-visible problem.
+
 ## Testing
 
 - **CLI smoke test**: `tests/cli-smoke-test.sh` exercises every `mdnest` note

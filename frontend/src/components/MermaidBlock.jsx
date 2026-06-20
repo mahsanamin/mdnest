@@ -116,10 +116,11 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
     return () => { cancelled = true; };
   }, [source, mode]);
 
-  // Fix text colors after SVG renders.
-  // Instead of modifying mermaid's <style> (too aggressive — breaks backgrounds),
-  // inject our own <style> at the END of the SVG that overrides text colors only.
-  // Also run fixMermaidTextColors for inline style attributes.
+  // Fix text colors after SVG renders. fixMermaidTextColors() is the single
+  // authority: it sets each label's color from its OWN node fill brightness
+  // (dark text on light fills, light on dark). We deliberately do NOT inject a
+  // blanket force-light override here — that's what made author-specified light
+  // fills render light-text-on-light-fill (invisible). Per-node wins.
   useEffect(() => {
     if (!svgHtml) return;
     const fix = () => {
@@ -127,25 +128,6 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
       if (!container) return;
       const svgEl = container.querySelector('svg');
       if (!svgEl) return;
-
-      // Inject override CSS once (check for existing)
-      if (!svgEl.querySelector('#mdnest-text-override')) {
-        const style = document.createElementNS('http://www.w3.org/2000/svg', 'style');
-        style.id = 'mdnest-text-override';
-        style.textContent = `
-          text.actor, .actor text { fill: #cdd6f4 !important; }
-          .messageText { fill: #cdd6f4 !important; }
-          .loopText, .loopText > tspan { fill: #cdd6f4 !important; }
-          .noteText > tspan { fill: #cdd6f4 !important; }
-          .labelText > tspan { fill: #cdd6f4 !important; }
-          .nodeLabel { color: #cdd6f4 !important; }
-          .edgeLabel { color: #cdd6f4 !important; }
-          .label text { fill: #cdd6f4 !important; }
-        `;
-        svgEl.appendChild(style);
-      }
-
-      // Also fix inline style attributes on individual elements
       fixMermaidTextColors(svgEl);
     };
     requestAnimationFrame(fix);
