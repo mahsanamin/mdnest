@@ -4,10 +4,12 @@ All notable changes to mdnest are documented here.
 
 ---
 
-## v3.11.2 — Prettier "update available" indicator
+## v3.11.2 — CLI list/move fixes + prettier update indicator
 
 ### Bug fixes
 
+- **`mdnest list <ns/subfolder>` now scopes to that subfolder.** It used to ignore the deeper path and return the entire namespace tree, so there was no way to enumerate a single folder. Now it returns just that folder (its children) or the file entry, and errors with a non-zero exit on a missing path.
+- **`mdnest move` no longer loses content when given a full destination path.** Passing a full `@alias/namespace/path` destination (the same style typed for the source) made the server treat `@alias/namespace/` as literal folder names and relocate the file to a bogus path — the intended destination then read empty and write/delete returned 404, looking like data loss. The CLI now normalizes the destination to a namespace-relative path and rejects cross-namespace moves. (The backend move was always correct; the CLI was passing the destination raw.)
 - **The "new version available" indicator no longer renders as an oversized cream blob.** On a narrow sidebar the old badge wrapped its `↑` and version onto two lines inside a pill, which looked broken. The alert is now folded into the build-details **ⓘ**: when an update is available the icon turns accent-blue and gently pulses (respecting `prefers-reduced-motion`), and clicking it opens the popover with the build details plus a tidy "↑ vX.Y.Z available — see what's new" action. Removed the standalone badge.
 
 ---
