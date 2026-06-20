@@ -418,8 +418,35 @@ cmd_list() {
   require_server
   if [ -z "$PARSED_NS" ]; then
     api GET "/namespaces"
-  else
+  elif [ -z "$PARSED_PATH" ]; then
     api GET "/tree?ns=$(urlencode "$PARSED_NS")"
+  else
+    # Scope to a subfolder. /tree returns the whole namespace, so fetch it and
+    # extract just the node at PARSED_PATH (the folder + its children, or the
+    # file entry). Previously the deeper path was ignored and the entire
+    # namespace tree came back, which was misleading.
+    local tree
+    tree=$(api GET "/tree?ns=$(urlencode "$PARSED_NS")")
+    printf '%s' "$tree" | TARGET="$PARSED_PATH" python3 -c '
+import sys, json, os
+target = os.environ["TARGET"].strip("/")
+try:
+    root = json.load(sys.stdin)
+except Exception:
+    sys.exit("Error: could not parse namespace tree")
+def find(node):
+    if node.get("path", "").strip("/") == target:
+        return node
+    for c in node.get("children", []):
+        r = find(c)
+        if r:
+            return r
+    return None
+node = find(root)
+if node is None:
+    sys.exit("Error: path not found in namespace: " + target)
+print(json.dumps(node, indent=2))
+'
   fi
 }
 
