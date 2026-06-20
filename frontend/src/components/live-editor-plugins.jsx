@@ -344,7 +344,7 @@ export const tableCellCheckboxPlugin = $prose(() => {
 
 // ===== LiveToolbar — persistent top toolbar =====
 
-export function LiveToolbar({ editor }) {
+export function LiveToolbar({ editor, handlesHidden, onToggleHandles }) {
   if (!editor) return null;
   const cmd = (command, payload) => {
     try { editor.action(callCommand(command.key, payload)); } catch { /* not ready */ }
@@ -359,6 +359,22 @@ export function LiveToolbar({ editor }) {
   };
   return (
     <div className="live-toolbar">
+      {onToggleHandles && (
+        <>
+          <div className="live-toolbar-group">
+            <button
+              className={handlesHidden ? '' : 'active'}
+              onMouseDown={(e) => { e.preventDefault(); onToggleHandles(); }}
+              title={handlesHidden ? 'Show block handles (drag / + controls)' : 'Hide block handles to use full width (slash “/” still works)'}
+              aria-label="Toggle block handles"
+              aria-pressed={!handlesHidden}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>
+            </button>
+          </div>
+          <span className="live-toolbar-sep" />
+        </>
+      )}
       <div className="live-toolbar-group">
         <button onMouseDown={(e) => { e.preventDefault(); cmd(undoCommand); }} title="Undo (Cmd/Ctrl+Z)" aria-label="Undo">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-15-6.7L3 13"/></svg>

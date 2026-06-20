@@ -9,6 +9,7 @@ All notable changes to mdnest are documented here.
 ### Added
 
 - **Build commit shown next to the version.** `/api/config` now reports a `commit` field — the short git SHA the backend binary was built from, injected at build time via `-ldflags` (computed by `setup.sh`, passed through docker-compose as a build arg, baked into the binary). The sidebar footer renders it as `v3.11.0 · <sha>`, and `mdnest servers` shows it as `3.11.0 (<sha>)`. Because the SHA is compiled into the binary rather than read from config, it can't drift from the running code — so a stale container is now obvious even when the version string hasn't changed (the exact situation where a rebuilt `develop` still displayed an old version). Falls back to `dev` for local `go build` without the ldflag.
+- **Live editor: block-handle toggle to reclaim the left gutter (mobile).** Crepe reserves an ~88px left gutter for its hover drag/`+` block handles, which wasted ~20% of the width on mobile and made the editor look half-empty. A new toggle in the Live toolbar hides the handles and collapses the gutter to a normal text margin so content uses the full width; the slash `/` menu is a separate widget and keeps working with handles hidden. The choice persists per browser (`localStorage`) and defaults to hidden on small screens (`≤768px`), shown on desktop. The shown-state gutter is unchanged (kept at the width that avoids clipping the `+` button).
 
 ### Bug fixes
 
