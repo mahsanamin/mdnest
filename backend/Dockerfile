@@ -6,7 +6,7 @@
 # (GO-2026-4865/4866/4870/4946/4947 — all crypto/x509, crypto/tls,
 # html/template). The 1.26-alpine moving tag pulls the latest 1.26.x
 # patch so we keep up with future fixes without manual bumps.
-FROM golang:1.26.3-alpine AS builder
+FROM golang:1.26.4-alpine AS builder
 
 WORKDIR /app
 
