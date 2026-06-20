@@ -1,19 +1,18 @@
 ---
-name: mdnest-bug-triage
-description: Weekly mdnest bug-triage run. Read the bug backlog from the mdnest brain, judge what's worth fixing, turn each into an executable TODO, then ship one PR per fix from develop (verified by the smoke-test harness), and finish with a single release PR develop→main. Say "/mdnest-bug-triage" to run the weekly cycle.
+name: md-fix-bugs
+description: Fix the mdnest bug backlog. Read the bugs from the mdnest brain (MyProjects/mdNest/Bugs), judge what's real, then fix them one by one — each on its own branch from develop, its own PR into develop, verified and merged — and finish with a single release PR develop→main. Say "/md-fix-bugs". (Part of the md-* mdnest skill family alongside md-add-improvement and md-ship.)
 ---
 
 ## Purpose
 
-A repeatable, weekly process for clearing the mdnest bug backlog. The bugs live
-in the user's mdnest "brain" (their private notes). This skill reads them,
-decides which are real and worth fixing, records executable TODOs back into the
-brain, then implements each fix as its own clean PR into `develop`, verifying
-with the CLI smoke-test harness, and finally opens one release PR from `develop`
-to `main`.
+A repeatable process for clearing the mdnest bug backlog. The bugs live in the
+user's mdnest "brain" (their private notes). This skill reads them, decides which
+are real and worth fixing, then fixes them **one by one** — each as its own clean
+PR into `develop`, verified with the CLI smoke-test harness and merged — and
+finally opens one release PR from `develop` to `main`.
 
-Run it on a cadence (e.g. weekly) or whenever the user points you at the bug
-folder.
+Run it whenever the user points you at the bug folder. (Sibling skill:
+`md-add-improvement` does the same for the `Features/` backlog.)
 
 ## mdnest brain locations (the backlog lives here, not in the repo)
 
@@ -23,11 +22,12 @@ folder.
 
 Use the `mdnest` CLI to read/write these (`mdnest read`, `mdnest list`,
 `mdnest search`). Run `mdnest servers -v` first if the alias/namespace has
-changed. **Gotcha:** when writing TODO files into the brain, use `mdnest append`
-(it creates if missing and supports stdin); historically `mdnest create` did not
-accept `-`/stdin — that was the very bug this workflow first fixed, so prefer
-`append` for piped content unless you've confirmed the installed CLI is new
-enough.
+changed. **Gotcha:** the *installed* `mdnest` CLI self-updates from `main`, so it
+can lag the fixes you just merged to `develop`. When writing TODO/notes into the
+brain, prefer `mdnest append … -` (creates if missing, supports stdin) — it's the
+safe path regardless of which CLI version is installed. Bugs are sometimes logged
+against the stale installed CLI; before re-fixing, check whether the current
+repo code already fixes it (then just verify + mark resolved).
 
 ## Critical conventions (read before committing anything)
 
@@ -99,13 +99,27 @@ enough.
 - Bump the version in all three files (`backend/handlers/config.go`,
   `frontend/package.json`, the `mdnest` CLI `MDNEST_CLI_VERSION`) and add a
   `CHANGELOG.md` section. Bug-fix-only cycle → patch bump; new CLI behavior →
-  minor bump.
-- Open one PR `develop` → `main` summarizing every fix in the cycle (clean body,
-  no attribution).
-- After merge, follow the project release process: tag `vX.Y.Z`,
-  `git push --tags`, and **publish a GitHub Release** (`gh release create`) using
-  the CHANGELOG entry — the in-app update banner only notices Releases, not bare
-  tags. See the "Release Process" section of `CLAUDE.md`.
+  minor bump. (Often the version was already bumped by the first fix of the cycle
+  — keep all three consistent; the pre-push hook enforces it.)
+- Create a `release/vX.Y.Z` branch from `develop` and open one PR → `main`
+  summarizing every fix (clean body, no attribution).
+- **`main` requires SQUASH merges** (its history is one "Release vX.Y.Z" commit
+  per release) — merge the release PR with `gh pr merge <n> --squash`, not a
+  merge commit.
+- **Squash-divergence gotcha:** because past releases were squash-merged, `main`
+  has commits not in `develop`'s history, so the release PR can show CONFLICTING.
+  Fix it on the release branch with `git merge -X ours origin/main` before/again
+  after opening the PR (`develop` is a content superset of `main`, so `-X ours`
+  is safe). CI only runs once the PR is mergeable.
+- After merge: `git tag vX.Y.Z && git push origin vX.Y.Z`, then **publish a GitHub
+  Release** (`gh release create vX.Y.Z --notes-file <changelog section>`) — the
+  in-app update banner only notices Releases, not bare tags.
+- **Then reconcile so the NEXT release is clean:** `git checkout develop &&
+  git merge -s ours origin/main && git push` — records `main`'s release commit as
+  an ancestor of `develop` (content-neutral) so the next release PR doesn't
+  conflict.
+- See the "Release Process" section of `CLAUDE.md`. Optionally run `/md-ship`
+  to sync docs + website as part of the release.
 
 ## Done criteria
 - Every actionable bug has a TODO, a merged PR into `develop`, and a green
