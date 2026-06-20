@@ -429,8 +429,11 @@ cmd_write() {
 cmd_create() {
   parse_path "$1"
   require_server
-  [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] && { echo "Usage: mdnest create @alias/namespace/path.md [content]" >&2; exit 1; }
-  api POST "/note?ns=$(urlencode "$PARSED_NS")&path=$(urlencode "$PARSED_PATH")" "${2:-}"
+  [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] && { echo "Usage: mdnest create @alias/namespace/path.md <content|->" >&2; exit 1; }
+  local content="$2"
+  [ "$content" = "-" ] && content=$(cat)
+  [ -z "$content" ] && content=$(cat)
+  api POST "/note?ns=$(urlencode "$PARSED_NS")&path=$(urlencode "$PARSED_PATH")" "$content"
 }
 
 cmd_append() {
@@ -487,7 +490,7 @@ cmd_note_legacy() {
     list)     cmd_list "$1" ;;
     read)     cmd_list "${1}/${2}" 2>/dev/null || api GET "/note?ns=$(urlencode "$1")&path=$(urlencode "$2")" ;;
     write)    local ns="$1" p="$2" c="$3"; [ "$c" = "-" ] && c=$(cat); [ -z "$c" ] && c=$(cat); api PUT "/note?ns=$(urlencode "$ns")&path=$(urlencode "$p")" "$c" ;;
-    create)   api POST "/note?ns=$(urlencode "$1")&path=$(urlencode "$2")" "${3:-}" ;;
+    create)   local ns="$1" p="$2" c="$3"; [ "$c" = "-" ] && c=$(cat); [ -z "$c" ] && c=$(cat); api POST "/note?ns=$(urlencode "$ns")&path=$(urlencode "$p")" "$c" ;;
     append)   local ns="$1" p="$2" c="$3"; [ "$c" = "-" ] && c=$(cat); [ -z "$c" ] && c=$(cat); api PATCH "/note?ns=$(urlencode "$ns")&path=$(urlencode "$p")&position=bottom" "$c" ;;
     prepend)  local ns="$1" p="$2" c="$3"; [ "$c" = "-" ] && c=$(cat); [ -z "$c" ] && c=$(cat); api PATCH "/note?ns=$(urlencode "$ns")&path=$(urlencode "$p")&position=top" "$c" ;;
     delete)   api DELETE "/note?ns=$(urlencode "$1")&path=$(urlencode "$2")" ;;
@@ -543,7 +546,7 @@ SERVER MANAGEMENT
   update   [--force]              Self-update to the latest release of this CLI
 
 NOTE OPERATIONS
-  create   <path> [content]       Create a NEW file (fails if already exists)
+  create   <path> <content|->     Create a NEW file (fails if already exists; use - for stdin)
   write    <path> <content|->     Overwrite an EXISTING file (fails 404 if not found)
   read     <path>                 Read a note (outputs markdown to stdout)
   append   <path> <content|->     Append text to end (creates file if not found)
@@ -572,6 +575,9 @@ EXAMPLES
 
   # Create a new file (use "create", NOT "write")
   mdnest create @work/engineering/notes/meeting.md "# Meeting Notes"
+
+  # Create a new file from stdin (pipe content, pass -)
+  echo "# Meeting Notes" | mdnest create @work/engineering/notes/meeting.md -
 
   # Update an existing file (use "write")
   mdnest write @work/engineering/notes/meeting.md "# Updated content"
