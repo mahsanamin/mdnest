@@ -97,7 +97,10 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
           svg = svg.replace(/(<svg[^>]*?)\s+width="[^"]*"/, '$1');
           svg = svg.replace(/(<svg[^>]*?)\s+height="[^"]*"/, '$1');
           svg = svg.replace(/(<svg[^>]*?)\s+style="[^"]*"/, '$1');
-          svg = svg.replace(/(<svg)/, `$1 style="width:${natW}px;max-width:100%;height:auto;"`);
+          // Cap at 820px so big diagrams stay readable on wide screens
+          // (they still scale down below the container width on narrow ones,
+          // and never exceed their own natural width).
+          svg = svg.replace(/(<svg)/, `$1 style="width:${natW}px;max-width:min(100%, 820px);height:auto;"`);
 
           setSvgHtml(svg);
           setError('');
