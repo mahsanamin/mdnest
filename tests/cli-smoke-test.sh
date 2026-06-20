@@ -133,6 +133,12 @@ assert_contains "search finds unique token" "$token" "$(m search "$BASE" "$token
 # ── 13. list shows the namespace tree ───────────────────────────────────────
 assert_contains "list namespace returns the run folder" "$RUN_DIR" "$(m list "$BASE" 2>/dev/null)"
 
+# ── 13b. list scopes to a subfolder (not the whole namespace) ────────────────
+sublist="$(m list "$ROOT" 2>/dev/null)"
+assert_contains "list subfolder is scoped to that folder" "\"name\": \"$RUN_DIR\"" "$sublist"
+assert_contains "list subfolder shows its own files" "order.md" "$sublist"
+assert_fails "list missing subfolder errors" -- m list "$ROOT/does-not-exist"
+
 # ── 14. delete removes a file ───────────────────────────────────────────────
 m delete "$ROOT/search.md" >/dev/null 2>&1
 assert_fails "delete removes the file" -- m read "$ROOT/search.md"
