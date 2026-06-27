@@ -31,7 +31,7 @@ mdnest is a self-hosted notes *server*. Your notes are plain `.md` files on a bo
 
 - [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/)
 - Git
-- [Tailscale](https://tailscale.com/download) (free, for remote access)
+- *Optional:* [Tailscale](https://tailscale.com/download) — free, **only** if you want encrypted remote access to your own devices later. Not needed to install or run mdnest.
 
 ## Quick Start
 
