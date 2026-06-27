@@ -4,7 +4,7 @@
 
 mdnest is a self-hosted notes *server*. Your notes are plain `.md` files on a box that's always on — a home server, a VPS, or the same machine your AI agents run on. Reach them from any device's browser, from the terminal, over a REST API, or directly from Claude / Cursor over the bundled MCP server. One brain, shared by you and everything you automate — the durable workspace your AI workflows consolidate knowledge into. No cloud, no SaaS subscription, no proprietary format — `cat`, `grep`, and `git` still work on every file.
 
-> *Just you, one laptop, no automation? Use [Obsidian](https://obsidian.md) — it's great. mdnest is for when your notes need to outlive any single machine: living on a server, reachable by API, writable by agents, shared across all your devices (and optionally your team).*
+> *Want a purely local, single-device vault? [Obsidian](https://obsidian.md) does that well. Reach for mdnest the moment more than one machine — or "never lose a note" — enters the picture: it's web-based (works from your MacBook, your phone, and your agents alike), every change auto-commits to your own Git repo, and any past version is one click from restore.*
 
 ![mdnest live editor — markdown rendering inline as you type, with an inline mermaid diagram](docs/images/hero-editor.jpg)
 
@@ -13,15 +13,16 @@ mdnest is a self-hosted notes *server*. Your notes are plain `.md` files on a bo
 - 🤖 **The memory layer for your AI workflows.** Agents are ephemeral; the knowledge they produce shouldn't be. The `mdnest` CLI and the built-in MCP server are the *bridge* that lets Claude, Cursor, and headless agents consolidate decisions, learnings, and references into one persistent second brain — and read them back on the next run. A live, two-way knowledge store, not a vault locked inside one GUI.
 - 💻 **Scriptable.** The `mdnest` CLI and a full REST API mean cron jobs, pipelines, and scripts can append logs, pull docs, and search from anywhere: `mdnest read @work/eng/spec.md`.
 - 🌐 **Every device, one source of truth.** Browser (desktop + mobile), terminal, API — all hitting the same always-on files. Your laptop can sleep; your brain doesn't.
+- 🛟 **Nothing is ever lost.** Opt-in git-sync auto-commits every change to *your* Git repo on a schedule you set. Browse a note's full history, diff any two versions, and one-click-restore — and the restore is itself versioned and undoable. Your notes are backed by Git, not by hope.
 - 📝 **A genuinely good editor on top.** Obsidian-style *live* editing where markdown renders as you type — tables, mermaid diagrams, and KaTeX math render in place, paste an image and it uploads. Built on the same component the [Milkdown playground](https://milkdown.dev/playground) uses. Prefer plain text? Flip to Basic mode.
 - 🗂️ **Plain files, zero lock-in.** Every note is a `.md` file in a directory on your disk. Your data outlives mdnest.
-- 👥 **Grows into a team.** Flip on multi-user mode for corporate SSO, a three-tier role hierarchy, per-namespace access grants, inline comments, and live multi-cursor collaboration — same engine, one config flag.
+- 👥 **A Confluence alternative your budget likes.** Flip on multi-user mode for corporate SSO, a three-tier role hierarchy, per-namespace access grants, threaded inline comments, and live multi-cursor collaboration — the shared-wiki essentials, without the per-seat Confluence/Notion bill, and with a plain Git repo (not a vendor) as the source of truth. Same engine, one config flag.
 
 ### Is this for you?
 
 - **You run AI agents / Claude / Cursor / automations** and need a persistent second brain they consolidate into across runs and projects — read *and* write, living on the server beside them, not trapped on your laptop.
 - **Your notes need to outlive any single machine** — laptop, phone, work box, and the server itself all reading and writing one source over the web, CLI, or API.
-- **You're a small team (1–50)** that needs a self-hosted shared wiki with SSO sign-in and per-team access — without licensing, lock-in, or a SaaS bill.
+- **You're a small team priced out of Confluence / Notion** — you want a self-hosted shared wiki with SSO, threaded comment discussions, and per-team access, where visual markdown (Mermaid diagrams, tables) keeps docs readable and a plain Git repo, not a vendor, is the source of truth.
 
 **Comfortable range: 1,000–5,000 notes out of the box.** For larger repositories (5,000–20,000+), tune the [search settings](#search) — just configuration, no architectural changes.
 
