@@ -1,36 +1,31 @@
 # mdnest
 
-Privately-hosted markdown notes — for one person or a small team.
+**Your markdown brain, hosted where your agents run.**
 
-Deploy on a spare machine, a home server, a cloud VM, or behind a corporate VPN. Run it as a personal knowledge base or as a small company's shared knowledge base where everyone signs in with their corporate SSO and access is scoped per namespace. Notes are plain `.md` files on disk; the engine adds editing, search, comments, AI integration, and team-level access control on top.
+mdnest is a self-hosted notes *server*. Your notes are plain `.md` files on a box that's always on — a home server, a VPS, or the same machine your AI agents run on. Reach them from any device's browser, from the terminal, over a REST API, or directly from Claude / Cursor over the bundled MCP server. One brain, shared by you and everything you automate — the durable workspace your AI workflows consolidate knowledge into. No cloud, no SaaS subscription, no proprietary format — `cat`, `grep`, and `git` still work on every file.
 
-Accessible from a browser on any device, from a CLI in any terminal, and from AI agents over the bundled MCP server. Everything stays on your hardware.
+> *Just you, one laptop, no automation? Use [Obsidian](https://obsidian.md) — it's great. mdnest is for when your notes need to outlive any single machine: living on a server, reachable by API, writable by agents, shared across all your devices (and optionally your team).*
 
-### Why mdnest?
+![mdnest live editor — markdown rendering inline as you type, with an inline mermaid diagram](docs/images/hero-editor.jpg)
 
-- **Live rich editor.** Obsidian-style editing where markdown renders inline as you type, built on the same component the [Milkdown playground](https://milkdown.dev/playground) uses. Hover the left margin of any block for a drag handle + `+` button that opens a slash menu (Heading 1-6, code block, math, image, table, …). Tables are single-click-to-edit with column / row controls, mermaid diagrams render in-place with a Source/Preview/zoom toolbar, `$inline$` and `$$block$$` math render via KaTeX, paste-an-image from the clipboard uploads automatically. Switch between Live and Basic (plain textarea) modes.
-- **Solo or team — same engine.** Run in single-user mode (default, no database) for a private knowledge base, or enable multi-user mode with a three-tier role hierarchy, per-namespace access grants, and corporate SSO.
-- **Corporate SSO with one setting.** Point mdnest at your OIDC provider (Google Workspace, Okta, Microsoft Entra, Keycloak, Auth0) and users sign in with their existing corporate accounts. The IdP handles MFA; mdnest still owns per-namespace authorization. Flip `USER_PROVIDER=sso` in `mdnest.conf` — no code changes required. See [docs/sso-setup.md](docs/sso-setup.md).
-- **Namespace-scoped admins.** A small company can have one or two SuperAdmins overall plus per-team Admins who manage just their own namespace — invite users into their team, manage grants, trigger git-sync — without seeing or touching other teams' data. See [docs/security.md](docs/security.md#layer-3--authorization).
-- **Inline comments with threads.** Highlight any text and leave a comment; commented passages stay visibly highlighted in yellow, and reviewers can reply in a thread. Click a highlight to jump to the conversation. Comments are anchored to invisible UUIDs, so moving or renaming files keeps them attached.
-- **Live collaboration.** Multiple people editing the same note see each other's cursors and changes in real time over WebSocket. Toggle with `ENABLE_LIVE_COLLAB=true`.
-- **Interactive diagrams.** Mermaid diagrams render in-place with click-to-edit labels. Edit node text directly on the diagram without touching code.
-- **AI-native.** Built-in MCP server lets Claude, Cursor, and other AI agents read, write, search, and organize your notes. Your knowledge base becomes context for your AI workflows.
-- **API-first.** Full REST API + CLI with multi-server support (`mdnest read @work/eng/spec.md`). Build scripts, automations, or integrations on top of your notes.
-- **Plain files, no lock-in.** Notes are `.md` files in directories on disk. No proprietary format. `cat`, `grep`, `git` — your notes work with every tool you already use.
-- **Private by default.** Binds to localhost. No cloud, no third-party services, no telemetry. Add Tailscale for solo remote access, or a TLS reverse proxy (Caddy / nginx / Cloudflare Tunnel) for a team install.
-- **Git backup on your terms.** Optional sidecar auto-commits and pushes to a private GitHub repo on a schedule you control.
-- **In-app version history.** When git-sync is enabled, right-click any note → **History** to browse past versions, **compare any two of them as a diff**, and one-click restore. Restoration is itself versioned — undoable through the same modal. No leaving the app to find an old version.
-- **Update-aware.** The backend polls GitHub for newer releases hourly; when one drops, a small badge in the sidebar footer surfaces the release notes inline so you can read what actually changed before deciding to update. Opt-out via `DISABLE_UPDATE_CHECK=true` for air-gapped installs.
+### Why a server, not an app
 
-### Who is this for?
+- 🤖 **The memory layer for your AI workflows.** Agents are ephemeral; the knowledge they produce shouldn't be. The `mdnest` CLI and the built-in MCP server are the *bridge* that lets Claude, Cursor, and headless agents consolidate decisions, learnings, and references into one persistent second brain — and read them back on the next run. A live, two-way knowledge store, not a vault locked inside one GUI.
+- 💻 **Scriptable.** The `mdnest` CLI and a full REST API mean cron jobs, pipelines, and scripts can append logs, pull docs, and search from anywhere: `mdnest read @work/eng/spec.md`.
+- 🌐 **Every device, one source of truth.** Browser (desktop + mobile), terminal, API — all hitting the same always-on files. Your laptop can sleep; your brain doesn't.
+- 📝 **A genuinely good editor on top.** Obsidian-style *live* editing where markdown renders as you type — tables, mermaid diagrams, and KaTeX math render in place, paste an image and it uploads. Built on the same component the [Milkdown playground](https://milkdown.dev/playground) uses. Prefer plain text? Flip to Basic mode.
+- 🗂️ **Plain files, zero lock-in.** Every note is a `.md` file in a directory on your disk. Your data outlives mdnest.
+- 👥 **Grows into a team.** Flip on multi-user mode for corporate SSO, a three-tier role hierarchy, per-namespace access grants, inline comments, and live multi-cursor collaboration — same engine, one config flag.
 
-- **Individual developers** who want a personal knowledge base on their own hardware.
-- **Small teams (1–50 people)** who need a self-hosted shared knowledge base with corporate-SSO sign-in and per-team access control — without licensing, vendor lock-in, or a SaaS subscription.
-- **AI tinkerers** who want their notes to be a first-class context source for Claude, Cursor, and other agents through MCP.
-- **People who think in markdown** — folders, code blocks, diagrams, plain text — and want their tools to leave the format alone.
+### Is this for you?
+
+- **You run AI agents / Claude / Cursor / automations** and need a persistent second brain they consolidate into across runs and projects — read *and* write, living on the server beside them, not trapped on your laptop.
+- **Your notes need to outlive any single machine** — laptop, phone, work box, and the server itself all reading and writing one source over the web, CLI, or API.
+- **You're a small team (1–50)** that needs a self-hosted shared wiki with SSO sign-in and per-team access — without licensing, lock-in, or a SaaS bill.
 
 **Comfortable range: 1,000–5,000 notes out of the box.** For larger repositories (5,000–20,000+), tune the [search settings](#search) — just configuration, no architectural changes.
+
+> **The full feature list** (inline comments, version history, git backup, namespace-scoped admins, update notifications, and more) is in [More features](#more-features) below — but you don't need any of it to get started.
 
 ## Prerequisites
 
@@ -333,6 +328,20 @@ tailscale serve off       # remove all rules
 
 - **Nginx + Certbot** -- traditional reverse proxy with free TLS. See [docs/setup.md](docs/setup.md).
 - **Cloudflare Tunnel** -- no open ports, works behind NAT. See [docs/setup.md](docs/setup.md).
+
+## More features
+
+Beyond the core editor and the three access interfaces, mdnest includes:
+
+- **Inline comments with threads.** Highlight any text and leave a comment; commented passages stay highlighted in yellow, and reviewers reply in a thread. Click a highlight to jump to the conversation. Comments are anchored to invisible UUIDs, so moving or renaming files keeps them attached.
+- **Live collaboration.** Multiple people editing the same note see each other's cursors and changes in real time over WebSocket. Toggle with `ENABLE_LIVE_COLLAB=true`.
+- **Interactive mermaid diagrams.** Diagrams render in-place with a Source/Preview/zoom toolbar and click-to-edit labels — edit node text directly on the diagram without touching the code.
+- **In-app version history.** With git-sync enabled, right-click any note → **History** to browse past versions, compare any two as a diff, and one-click restore. Restoration is itself versioned and undoable through the same modal.
+- **Namespace-scoped admins.** One or two SuperAdmins overall, plus per-team Admins who manage just their own namespace — invite users, manage grants, trigger git-sync — without touching other teams' data. See [docs/security.md](docs/security.md#layer-3--authorization).
+- **Corporate SSO + 2FA.** Point mdnest at any OIDC provider (Google Workspace, Okta, Microsoft Entra, Keycloak, Auth0); the IdP owns MFA, mdnest owns per-namespace authorization. Or use local username/password with TOTP. One `USER_PROVIDER` flag — no code changes. See [docs/sso-setup.md](docs/sso-setup.md).
+- **API-first.** Full REST API + CLI with multi-server support (`mdnest read @work/eng/spec.md`). Build scripts, automations, or integrations on top of your notes.
+- **Git backup on your terms.** Optional sidecar auto-commits and pushes to a private repo on a schedule you control. See [Git Sync](#git-sync-optional).
+- **Update-aware.** The backend polls GitHub for newer releases; when one drops, a badge in the sidebar footer surfaces the release notes inline. Opt out with `DISABLE_UPDATE_CHECK=true` for air-gapped installs.
 
 ## Documentation
 
