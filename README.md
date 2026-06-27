@@ -1,32 +1,31 @@
 # mdnest
 
-**Your markdown brain, hosted where your agents run.**
+**Your notes, on your own server. Open to every device — and your AI.**
 
-mdnest is a self-hosted notes *server*. Your notes are plain `.md` files on a box that's always on — a home server, a VPS, or the same machine your AI agents run on. Reach them from any device's browser, from the terminal, over a REST API, or directly from Claude / Cursor over the bundled MCP server. One brain, shared by you and everything you automate — the durable workspace your AI workflows consolidate knowledge into. No cloud, no SaaS subscription, no proprietary format — `cat`, `grep`, and `git` still work on every file.
+mdnest keeps your notes as plain Markdown files on a server you run. Open them in your browser, your terminal, or straight from Claude and Cursor. One place for everything you (and your AI) want to remember.
 
-> *Want a purely local, single-device vault? [Obsidian](https://obsidian.md) does that well. Reach for mdnest the moment more than one machine — or "never lose a note" — enters the picture: it's web-based (works from your MacBook, your phone, and your agents alike), every change auto-commits to your own Git repo, and any past version is one click from restore.*
+No cloud. No lock-in. Your files stay yours.
 
-![mdnest live editor — markdown rendering inline as you type, with an inline mermaid diagram](docs/images/hero-editor.jpg)
+![mdnest live editor — Markdown turning into rich text as you type, with a Mermaid diagram](docs/images/hero-editor.jpg)
 
-### Why a server, not an app
+### What you get
 
-- 🤖 **The memory layer for your AI workflows.** Agents are ephemeral; the knowledge they produce shouldn't be. The `mdnest` CLI and the built-in MCP server are the *bridge* that lets Claude, Cursor, and headless agents consolidate decisions, learnings, and references into one persistent second brain — and read them back on the next run. A live, two-way knowledge store, not a vault locked inside one GUI.
-- 💻 **Scriptable.** The `mdnest` CLI and a full REST API mean cron jobs, pipelines, and scripts can append logs, pull docs, and search from anywhere: `mdnest read @work/eng/spec.md`.
-- 🌐 **Every device, one source of truth.** Browser (desktop + mobile), terminal, API — all hitting the same always-on files. Your laptop can sleep; your brain doesn't.
-- 🛟 **Nothing is ever lost.** Opt-in git-sync auto-commits every change to *your* Git repo on a schedule you set. Browse a note's full history, diff any two versions, and one-click-restore — and the restore is itself versioned and undoable. Your notes are backed by Git, not by hope.
-- 📝 **A genuinely good editor on top.** Obsidian-style *live* editing where markdown renders as you type — tables, mermaid diagrams, and KaTeX math render in place, paste an image and it uploads. Built on the same component the [Milkdown playground](https://milkdown.dev/playground) uses. Prefer plain text? Flip to Basic mode.
-- 🗂️ **Plain files, zero lock-in.** Every note is a `.md` file in a directory on your disk. Your data outlives mdnest.
-- 👥 **A Confluence alternative your budget likes.** Flip on multi-user mode for corporate SSO, a three-tier role hierarchy, per-namespace access grants, threaded inline comments, and live multi-cursor collaboration — the shared-wiki essentials, without the per-seat Confluence/Notion bill, and with a plain Git repo (not a vendor) as the source of truth. Same engine, one config flag.
+- 🤖 **Made for AI.** Claude, Cursor, and your scripts read and write your notes over MCP and a CLI. Your AI finally has a memory that sticks between runs.
+- 🛟 **Never lose a note.** Every change auto-saves to your own Git repo. Browse the full history and restore any version in one click.
+- 🌐 **Everywhere at once.** Browser, phone, terminal, API — the same notes, always in sync. Your laptop sleeps; your notes don't.
+- 📝 **Nice to write in.** A live editor where Markdown becomes rich text as you type — tables, diagrams, math, and drag-and-drop images. Or switch to plain text.
+- 🗂️ **Just files.** Every note is a `.md` file on disk. `cat`, `grep`, and `git` still work. Walk away anytime.
+- 👥 **A wiki when you grow.** Add SSO, roles, and comment threads for your team — a Confluence you can actually afford.
 
-### Is this for you?
+### Is it for you?
 
-- **You run AI agents / Claude / Cursor / automations** and need a persistent second brain they consolidate into across runs and projects — read *and* write, living on the server beside them, not trapped on your laptop.
-- **Your notes need to outlive any single machine** — laptop, phone, work box, and the server itself all reading and writing one source over the web, CLI, or API.
-- **You're a small team priced out of Confluence / Notion** — you want a self-hosted shared wiki with SSO, threaded comment discussions, and per-team access, where visual markdown (Mermaid diagrams, tables) keeps docs readable and a plain Git repo, not a vendor, is the source of truth.
+- **You run AI agents** and want them to remember things across runs and projects.
+- **You use more than one device** and want one set of notes everywhere, never lost.
+- **You're a small team** that wants a shared wiki without the Confluence bill.
 
-**Comfortable range: 1,000–5,000 notes out of the box.** For larger repositories (5,000–20,000+), tune the [search settings](#search) — just configuration, no architectural changes.
+> Just want a local vault on one Mac? [Obsidian](https://obsidian.md) is great. Pick mdnest when you want your notes on every device, backed up, and open to your AI.
 
-> **The full feature list** (inline comments, version history, git backup, namespace-scoped admins, update notifications, and more) is in [More features](#more-features) below — but you don't need any of it to get started.
+<sub>Handles 1,000–5,000 notes out of the box. Bigger? Tune the [search settings](#search) — config only. Full feature list in [More features](#more-features).</sub>
 
 ## Prerequisites
 
