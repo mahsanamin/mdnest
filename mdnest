@@ -91,6 +91,16 @@ parse_path() {
   PARSED_NS=""
   PARSED_PATH=""
 
+  # Accept copy-path URIs from the web UI (e.g. mdnest://@alias/ns/19%20Jun.md):
+  # strip the scheme and percent-decode the namespace + path so the copied,
+  # escaped path is usable verbatim. Only decode for the mdnest:// form so raw
+  # CLI paths that legitimately contain '%' are left untouched.
+  local _decode=0
+  if [[ "$input" == mdnest://* ]]; then
+    input="${input#mdnest://}"
+    _decode=1
+  fi
+
   if [[ "$input" == @* ]]; then
     local rest="${input#@}"
     PARSED_ALIAS="${rest%%/*}"
@@ -120,6 +130,11 @@ parse_path() {
       PARSED_PATH="${input#*/}"
     fi
   fi
+
+  if [ "$_decode" = "1" ]; then
+    [ -n "$PARSED_NS" ] && PARSED_NS=$(urldecode "$PARSED_NS")
+    [ -n "$PARSED_PATH" ] && PARSED_PATH=$(urldecode "$PARSED_PATH")
+  fi
 }
 
 # ─── API helpers ────────────────────────────────────────────────────────────
@@ -142,6 +157,10 @@ api() {
 
 urlencode() {
   python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))" "$1"
+}
+
+urldecode() {
+  python3 -c "import urllib.parse, sys; print(urllib.parse.unquote(sys.argv[1]))" "$1"
 }
 
 # ─── Commands ───────────────────────────────────────────────────────────────

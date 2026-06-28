@@ -150,6 +150,11 @@ assert_fails "list missing subfolder errors" -- m list "$ROOT/does-not-exist"
 m delete "$ROOT/search.md" >/dev/null 2>&1
 assert_fails "delete removes the file" -- m read "$ROOT/search.md"
 
+# ── 15. mdnest:// copy-path URI with %-encoding decodes to the right file ────
+m create "$ROOT/sp ace.md" "spaced body" >/dev/null 2>&1
+assert_eq "mdnest:// URI percent-decodes to the spaced file" "spaced body" "$(m read "mdnest://${BASE}/${RUN_DIR}/sp%20ace.md" 2>/dev/null)"
+m delete "$ROOT/sp ace.md" >/dev/null 2>&1
+
 # ── Summary ─────────────────────────────────────────────────────────────────
 echo
 echo "=== $((PASS+FAIL)) checks: $(green "$PASS passed"), $([ "$FAIL" -gt 0 ] && red "$FAIL failed" || echo "0 failed") ==="
