@@ -45,6 +45,31 @@ function formatBuildTime(iso) {
   } catch { return iso; }
 }
 
+// Per-namespace expanded-folder memory. The tree's open folders are remembered
+// across refresh + namespace switches (so a reload doesn't re-expand the whole
+// tree). Stored as a JSON array of folder paths under mdnest_tree_expanded:<ns>.
+function loadExpandedPaths(key) {
+  if (!key) return new Set();
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw) return new Set(JSON.parse(raw));
+  } catch { /* ignore */ }
+  return new Set();
+}
+function collectFolderPaths(tree) {
+  const out = [];
+  const walk = (nodes) => {
+    for (const n of nodes || []) {
+      if ((n.type === 'folder' || n.type === 'directory') && n.path) {
+        out.push(n.path);
+        walk(n.children);
+      }
+    }
+  };
+  walk(Array.isArray(tree) ? tree : tree?.children);
+  return out;
+}
+
 function Sidebar({
   tree,
   treeLoading,
@@ -118,7 +143,8 @@ function Sidebar({
   const treeAreaRef = useRef(null);
   const longPressTimer = useRef(null);
   const touchMoved = useRef(false);
-  const [expandAll, setExpandAll] = useState(null);
+  const expandKey = selectedNs ? `mdnest_tree_expanded:${selectedNs}` : null;
+  const [expandedPaths, setExpandedPaths] = useState(() => loadExpandedPaths(expandKey));
   const [searchQuery, setSearchQuery] = useState('');
   const [contentResults, setContentResults] = useState(null);
   const [searching, setSearching] = useState(false);
@@ -141,9 +167,22 @@ function Sidebar({
     });
   }, []);
 
-  const handleExpandAll = () => setExpandAll(true);
-  const handleCollapseAll = () => setExpandAll(false);
-  const resetExpandAll = () => setTimeout(() => setExpandAll(null), 50);
+  // Reload remembered expansion when the namespace changes; persist on change.
+  useEffect(() => { setExpandedPaths(loadExpandedPaths(expandKey)); }, [expandKey]);
+  useEffect(() => {
+    if (!expandKey) return;
+    try { localStorage.setItem(expandKey, JSON.stringify([...expandedPaths])); } catch { /* ignore */ }
+  }, [expandKey, expandedPaths]);
+
+  const toggleExpand = useCallback((path) => {
+    setExpandedPaths((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path); else next.add(path);
+      return next;
+    });
+  }, []);
+  const handleExpandAll = () => setExpandedPaths(new Set(collectFolderPaths(tree)));
+  const handleCollapseAll = () => setExpandedPaths(new Set());
 
   // Content search with debounce — triggers after 400ms of typing
   useEffect(() => {
@@ -247,12 +286,12 @@ function Sidebar({
             ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
             <button
               className="tree-control-btn"
-              onClick={() => { handleExpandAll(); resetExpandAll(); }}
+              onClick={handleExpandAll}
               title="Expand all folders"
             ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9"/><line x1="6" y1="4" x2="18" y2="4"/></svg></button>
             <button
               className="tree-control-btn"
-              onClick={() => { handleCollapseAll(); resetExpandAll(); }}
+              onClick={handleCollapseAll}
               title="Collapse all folders"
             ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 15 12 9 18 15"/><line x1="6" y1="20" x2="18" y2="20"/></svg></button>
             {/* Toggle to wrap long folder/file names in the tree
@@ -370,7 +409,9 @@ function Sidebar({
               depth={0}
               onContextMenu={onContextMenu}
               onDrop={onDrop}
-              expandAll={searchQuery.trim() ? true : expandAll}
+              expandedPaths={expandedPaths}
+              onToggleExpand={toggleExpand}
+              forceExpand={!!searchQuery.trim()}
             />
           ))}
           {searchQuery.trim() && filteredTree.length === 0 && !showContentResults && !searching && (
