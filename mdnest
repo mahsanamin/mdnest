@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-MDNEST_CLI_VERSION="3.11.1"
+MDNEST_CLI_VERSION="3.11.2"
 CONFIG_DIR="${HOME}/.config/mdnest"
 SERVERS_DIR="${CONFIG_DIR}/servers"
 DEFAULT_FILE="${CONFIG_DIR}/default"
@@ -418,8 +418,35 @@ cmd_list() {
   require_server
   if [ -z "$PARSED_NS" ]; then
     api GET "/namespaces"
-  else
+  elif [ -z "$PARSED_PATH" ]; then
     api GET "/tree?ns=$(urlencode "$PARSED_NS")"
+  else
+    # Scope to a subfolder. /tree returns the whole namespace, so fetch it and
+    # extract just the node at PARSED_PATH (the folder + its children, or the
+    # file entry). Previously the deeper path was ignored and the entire
+    # namespace tree came back, which was misleading.
+    local tree
+    tree=$(api GET "/tree?ns=$(urlencode "$PARSED_NS")")
+    printf '%s' "$tree" | TARGET="$PARSED_PATH" python3 -c '
+import sys, json, os
+target = os.environ["TARGET"].strip("/")
+try:
+    root = json.load(sys.stdin)
+except Exception:
+    sys.exit("Error: could not parse namespace tree")
+def find(node):
+    if node.get("path", "").strip("/") == target:
+        return node
+    for c in node.get("children", []):
+        r = find(c)
+        if r:
+            return r
+    return None
+node = find(root)
+if node is None:
+    sys.exit("Error: path not found in namespace: " + target)
+print(json.dumps(node, indent=2))
+'
   fi
 }
 
@@ -511,6 +538,27 @@ cmd_move() {
   require_server
   local to="$2"
   [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] || [ -z "$to" ] && { echo "Usage: mdnest move @alias/namespace/old-path new-path" >&2; exit 1; }
+
+  # Normalize the destination to a namespace-relative path. Users naturally
+  # paste the full "@alias/namespace/path" (same style as the source); passing
+  # that through raw made the server treat "@alias/namespace/" as folder names
+  # and relocate the file to a bogus "<ns>/@alias/namespace/..." path — the
+  # destination then read empty and write/delete 404'd (apparent data loss).
+  # Reject cross-namespace moves (move is within one namespace).
+  if [[ "$to" == @* ]]; then
+    local r="${to#@}"; r="${r#*/}"            # drop "@alias/"
+    local to_ns="${r%%/*}" to_path=""
+    [[ "$r" == */* ]] && to_path="${r#*/}"
+    if [ "$to_ns" != "$PARSED_NS" ]; then
+      echo "Error: move stays within one namespace (source: $PARSED_NS, destination: $to_ns)" >&2
+      exit 1
+    fi
+    to="$to_path"
+  elif [[ "$to" == "$PARSED_NS"/* ]]; then
+    to="${to#"$PARSED_NS"/}"                  # strip a leading "<namespace>/"
+  fi
+  [ -z "$to" ] && { echo "Error: destination path is empty" >&2; exit 1; }
+
   api POST "/move?ns=$(urlencode "$PARSED_NS")&from=$(urlencode "$PARSED_PATH")&to=$(urlencode "$to")"
 }
 

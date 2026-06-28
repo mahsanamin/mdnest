@@ -1,6 +1,6 @@
 ---
-name: mdnest-ship
-description: After implementing a feature or fix in mdnest, run this to update CHANGELOG, docs, website, bump version, sync, and rebuild the local dev stack. Say "/mdnest-ship" after completing any code change.
+name: md-ship
+description: After implementing a feature or fix in mdnest, run this to update CHANGELOG, docs, website, bump version, sync, and rebuild the local dev stack. Say "/md-ship" after completing any code change. (Part of the md-* mdnest skill family alongside md-fix-bugs and md-add-improvement.)
 ---
 
 ## Purpose
