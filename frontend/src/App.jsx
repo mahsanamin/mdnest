@@ -1021,7 +1021,12 @@ function App() {
       case 'copy-path': {
         if (target && selectedNs) {
           const alias = appConfig?.serverAlias ? `@${appConfig.serverAlias}/` : '';
-          const fullPath = `mdnest://${alias}${selectedNs}/${target.path}`;
+          // Percent-encode each path segment so spaces and other special
+          // characters don't make the copied URI ambiguous (a raw space in
+          // "19 Jun 2026.md" looked like three tokens to an LLM/shell and broke
+          // the path). Slashes and the scheme/alias stay readable.
+          const encPath = String(target.path).split('/').map(encodeURIComponent).join('/');
+          const fullPath = `mdnest://${alias}${encodeURIComponent(selectedNs)}/${encPath}`;
           const textarea = document.createElement('textarea');
           textarea.value = fullPath;
           textarea.style.position = 'fixed';
