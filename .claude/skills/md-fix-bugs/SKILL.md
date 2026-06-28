@@ -86,8 +86,12 @@ repo code already fixes it (then just verify + mark resolved).
 - `git checkout develop && git pull --ff-only origin develop`
 - `git merge --no-ff fix/<slug> -m "Merge fix/<slug> into develop"`
 - `git push origin develop` and `git branch -d fix/<slug>`.
-- Mark the bug resolved in the brain (`mdnest append` a `✅ RESOLVED — <what/PR>`
-  line). Per-bug PRs are deliberately skipped — the only PR is the release.
+- **Delete the bug's file** from the brain `Bugs/` folder
+  (`mdnest delete @srv-ahsan-mini/mahsan_brain/MyProjects/mdNest/Bugs/<file>.md`)
+  once it's merged to develop — a fixed bug left in the folder gets re-read and
+  re-picked next cycle. The fix is recorded in git + the CHANGELOG; the backlog
+  file's job is done. (Same for a bug found to be already-fixed in step 1.)
+  Per-bug PRs are deliberately skipped — the only PR is the release.
 
 ### 5. Repeat for the next bug
 - Back to step 2 with the next one. Keep it strictly sequential.
@@ -117,11 +121,21 @@ git checkout -B release/vX.Y.Z origin/main
 git checkout _rel-tmp -- $FILES
 git branch -D _rel-tmp
 ```
-Then bump the version in all three files (`backend/handlers/config.go`,
-`frontend/package.json`, `mdnest`’s `MDNEST_CLI_VERSION`) — the new version is the
-next bump above **`main`'s** current version (main may be ahead of develop from
-parallel work; don't trust develop's number) — and add the `CHANGELOG.md`
-section. Commit it all as **one** `Release vX.Y.Z — <headline>` commit.
+Then set the version in all three files (`backend/handlers/config.go`,
+`frontend/package.json`, `mdnest`’s `MDNEST_CLI_VERSION`) to the **plain release
+number `X.Y.Z`** — the next bump above **`main`'s** current version (main may be
+ahead of develop from parallel work; don't trust develop's number). Note develop
+carries `X.Y.Z-dev`; the release branch **drops the `-dev` suffix**. Add the
+`CHANGELOG.md` section, and commit it all as **one** `Release vX.Y.Z` commit.
+
+> **Version scheme.** `develop` always carries the in-flight version with a
+> `-dev` suffix (e.g. `3.11.3-dev`) so a develop/staging box reads
+> `v3.11.3-dev` (clearly "candidate, still validating") while production reads
+> the plain `v3.11.3`. The release branch drops `-dev`. **After the release
+> merges**, bump develop to the *next* `-dev` (e.g. `3.11.4-dev`) so develop is
+> immediately ahead again. `isVersionNewer` is pre-release-aware, so a `-dev`
+> build shows no false "update available" against the last release but does see
+> the final release as newer once it ships.
 
 Verify (build/test/smoke), `git push -u origin release/vX.Y.Z`, and open ONE PR
 → `main`. Because the base IS `main`, it's a 1-commit, small-diff, conflict-free
@@ -132,9 +146,11 @@ PR (this is the fix for the "why so many commits" problem).
 - `git tag vX.Y.Z && git push origin vX.Y.Z`, then **publish a GitHub Release**
   (`gh release create vX.Y.Z --notes-file <changelog section>`) — the in-app
   update banner only notices Releases, not bare tags.
-- **Reconcile develop** so the next cycle is clean: `git checkout develop &&
-  git merge -s ours origin/main && git push` (records main's release commit as an
-  ancestor of develop, content-neutral).
+- **Reconcile develop + open the next `-dev`:** `git checkout develop &&
+  git merge -s ours origin/main` (records main's release commit as an ancestor of
+  develop, content-neutral), then bump develop's three version files to the next
+  pre-release (`X.Y.(Z+1)-dev`) and push. develop is now ahead of the release
+  again.
 - Optionally run `/md-ship` to sync docs + website.
 
 See the "Release Process" section of `CLAUDE.md`.
