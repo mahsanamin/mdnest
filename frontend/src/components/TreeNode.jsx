@@ -1,8 +1,8 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback } from 'react';
 
 const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 
-function TreeNode({ node, onSelect, currentPath, depth, onContextMenu, onDrop, expandAll }) {
+function TreeNode({ node, onSelect, currentPath, depth, onContextMenu, onDrop, expandedPaths, onToggleExpand, forceExpand }) {
   const isFolder = node.type === 'folder' || node.type === 'directory';
   const isActive = currentPath === node.path;
   const longPressTimer = useRef(null);
@@ -13,21 +13,14 @@ function TreeNode({ node, onSelect, currentPath, depth, onContextMenu, onDrop, e
   const containsActive = isFolder && currentPath && node.path &&
     currentPath.startsWith(node.path + '/');
 
-  const [expanded, setExpanded] = useState(depth < 1 || containsActive);
-
-  // Auto-expand when a file inside is opened
-  useEffect(() => {
-    if (containsActive && !expanded) setExpanded(true);
-  }, [containsActive]);
-
-  // Expand all / collapse all
-  useEffect(() => {
-    if (expandAll === true) setExpanded(true);
-    else if (expandAll === false) setExpanded(depth < 1 || containsActive);
-  }, [expandAll]);
+  // Expansion is controlled by the per-namespace `expandedPaths` set owned by
+  // Sidebar (so it survives refresh / namespace switches). A folder also shows
+  // open while it contains the active file, and while a search is running
+  // (forceExpand) so matches are visible — neither is persisted.
+  const expanded = isFolder && (forceExpand || containsActive || expandedPaths.has(node.path));
 
   const handleClick = () => {
-    if (isFolder) setExpanded(!expanded);
+    if (isFolder) onToggleExpand(node.path);
     else onSelect(node.path);
   };
 
@@ -149,7 +142,9 @@ function TreeNode({ node, onSelect, currentPath, depth, onContextMenu, onDrop, e
               depth={depth + 1}
               onContextMenu={onContextMenu}
               onDrop={onDrop}
-              expandAll={expandAll}
+              expandedPaths={expandedPaths}
+              onToggleExpand={onToggleExpand}
+              forceExpand={forceExpand}
             />
           ))}
         </div>
