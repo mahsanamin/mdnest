@@ -148,7 +148,8 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 ## Release Process
 
 - **One PR per release.** Bundle all the work for a release into a single branch (`feat/<name>` or `release/v3.X.Y`) and open **one** PR against `main`. Don't open intermediate / sibling PRs for sub-features during the same release cycle — they cause merge conflicts on shared files (`CHANGELOG.md`, the three version files, `App.jsx`, docs) when one lands while another is still open. Hotfix exception: a true emergency (security CVE, prod crash) can ship as its own PR ahead of the release, but flag it before opening. v3.10.0 hit exactly this — PR #10 (v3.9.1) merged while PR #11 (v3.10.0) was open and produced six-file conflicts; resolve by merging `main` into the release branch and keeping the higher version + the deletion of any files the cutover removed.
-- Every release branch (`release/v3.X.Y`) MUST bump version as the first commit. Three files:
+- **Version scheme — `develop` carries `X.Y.Z-dev`, releases drop the suffix.** `develop` always holds the in-flight version with a `-dev` pre-release suffix (e.g. `3.11.3-dev`), so a develop/staging box reads `v3.11.3-dev` ("candidate, still validating") and production reads the plain `v3.11.3`. The **release branch sets the plain `X.Y.Z`** (drops `-dev`); after the release merges, bump `develop` to the *next* `X.Y.(Z+1)-dev`. `isVersionNewer` (App.jsx) is pre-release-aware so a `-dev` build shows no false "update available" against the last release but does see the final release as newer once it ships.
+- Set the version in three files — on the release branch use the plain `X.Y.Z`; on `develop` use `X.Y.Z-dev`:
   - `backend/handlers/config.go` — `"version": "3.X.Y"`
   - `frontend/package.json` — `"version": "3.X.Y"`
   - `mdnest` CLI script — `MDNEST_CLI_VERSION="3.X.Y"`
