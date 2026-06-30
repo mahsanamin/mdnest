@@ -4,14 +4,30 @@ All notable changes to mdnest are documented here.
 
 ---
 
-## v3.11.2 — CLI list/move/copy-path fixes + tree memory + UI polish
+## v3.11.4 — git-sync self-healing
+
+### Bug fixes
+
+- **git-sync now converges instead of looping forever on a diverged, dirty tree.** When a notes repo was simultaneously ahead and behind its remote *and* had uncommitted live-editor edits, the old sidecar kept failing the same way every cycle: a `git pull --rebase` couldn't start against the dirty tree, so it never integrated the remote, the local commit never pushed, and the divergence only grew. The pull is now merge-only and self-healing — it autostashes the working tree (tracked + untracked) so the merge always starts, distinguishes a real content conflict (keep remote, save local copies as `.sync-conflict-*`) from a merge that simply couldn't begin (abort cleanly, retry next cycle), and re-applies the stashed edits on top of the merged result (saving a recoverable `.mdnest-sync-autostash-*.patch` if they collide). Push is now gated on HEAD actually containing the remote, so a non-fast-forward can never spin. Each cycle writes a git-excluded `.mdnest-sync-status.json` (`state`/`ahead`/`behind`/`message`) the backend can surface, and the bookkeeping files are added to `.git/info/exclude` so they're never committed.
+
+---
+
+## v3.11.3 — Tree expansion memory + copy-path escaping
+
+### Bug fixes
+
+- **Left tree remembers which folders are open, per namespace.** A refresh used to re-expand all top-level folders and forget whatever you'd collapsed, and the expand/collapse icons flickered. Expansion is now a per-namespace set persisted in `localStorage` (restored on load and namespace switch); the open file's ancestors still auto-reveal and search still force-expands matches.
+- **Folders containing the open file can be collapsed again.** A regression made any folder on the path to the currently-open note impossible to collapse — it sprang back open immediately. The tree used to force such folders expanded (`containsActive`); now the open file's ancestors are added to the persisted expansion set once (so they auto-reveal) but stay freely collapsible.
+- **Copy Path is now unambiguous, and `mdnest://` URIs work in the CLI.** Copy Path produced `mdnest://@alias/ns/<path>` with raw spaces, so a path like `19 Jun 2026.md` looked like three tokens to an LLM/shell. Path segments are now percent-encoded (`19%20Jun%202026.md`), and the CLI's `parse_path` strips a leading `mdnest://` and percent-decodes the namespace + path, so the copied URI is usable verbatim (raw CLI paths containing a literal `%` are left untouched).
+
+---
+
+## v3.11.2 — CLI list/move fixes + prettier update indicator
 
 ### Bug fixes
 
 - **`mdnest list <ns/subfolder>` now scopes to that subfolder.** It used to ignore the deeper path and return the entire namespace tree. Now it returns just that folder (its children) or the file entry, and errors with a non-zero exit on a missing path.
 - **`mdnest move` no longer loses content when given a full destination path.** A full `@alias/namespace/path` destination (the style typed for the source) made the server treat `@alias/namespace/` as literal folder names and relocate the file to a bogus path — the intended destination then read empty and write/delete returned 404. The CLI now normalizes the destination to a namespace-relative path and rejects cross-namespace moves.
-- **Copy Path is now unambiguous, and `mdnest://` URIs work in the CLI.** Copy Path produced `mdnest://@alias/ns/<path>` with raw spaces, so a path like `19 Jun 2026.md` looked like three tokens to an LLM/shell. Path segments are now percent-encoded (`19%20Jun%202026.md`), and the CLI's `parse_path` strips a leading `mdnest://` and percent-decodes the namespace + path, so the copied URI is usable verbatim (raw CLI paths containing a literal `%` are left untouched).
-- **Left tree remembers which folders are open, per namespace.** A refresh used to re-expand all top-level folders and forget whatever you'd collapsed, and the expand/collapse icons flickered. Expansion is now a per-namespace set persisted in `localStorage` (restored on load and namespace switch); the open file's ancestors still auto-reveal and search still force-expands matches.
 - **The "new version available" indicator no longer renders as an oversized cream blob.** On a narrow sidebar the old badge wrapped its `↑` and version onto two lines inside a pill, which looked broken. The alert is now folded into the build-details **ⓘ**: when an update is available the icon turns accent-blue and gently pulses (respecting `prefers-reduced-motion`), and clicking it opens the popover with the build details plus a tidy "↑ vX.Y.Z available — see what's new" action. Removed the standalone badge.
 
 ---
