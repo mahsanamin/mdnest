@@ -10,14 +10,13 @@ function TreeNode({ node, onSelect, currentPath, depth, onContextMenu, onDrop, e
   const longPressFired = useRef(false);
   const [dragOver, setDragOver] = useState(false);
 
-  const containsActive = isFolder && currentPath && node.path &&
-    currentPath.startsWith(node.path + '/');
-
-  // Expansion is controlled by the per-namespace `expandedPaths` set owned by
-  // Sidebar (so it survives refresh / namespace switches). A folder also shows
-  // open while it contains the active file, and while a search is running
-  // (forceExpand) so matches are visible — neither is persisted.
-  const expanded = isFolder && (forceExpand || containsActive || expandedPaths.has(node.path));
+  // Expansion is controlled purely by the per-namespace `expandedPaths` set
+  // owned by Sidebar (persisted, so it survives refresh / namespace switches),
+  // plus `forceExpand` while a search is running so matches are visible. We do
+  // NOT force a folder open just because it contains the active file — Sidebar
+  // auto-adds the open file's ancestors to the set instead, which keeps them
+  // collapsible (forcing it here made such folders impossible to collapse).
+  const expanded = isFolder && (forceExpand || expandedPaths.has(node.path));
 
   const handleClick = () => {
     if (isFolder) onToggleExpand(node.path);

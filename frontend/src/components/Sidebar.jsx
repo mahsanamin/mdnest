@@ -174,6 +174,23 @@ function Sidebar({
     try { localStorage.setItem(expandKey, JSON.stringify([...expandedPaths])); } catch { /* ignore */ }
   }, [expandKey, expandedPaths]);
 
+  // Auto-reveal the open file: add its ancestor folders to the expanded set
+  // once (so you can see where you are). Done here rather than force-expanding
+  // in TreeNode, so those folders stay collapsible afterwards.
+  useEffect(() => {
+    if (!currentPath) return;
+    const parts = currentPath.split('/');
+    if (parts.length < 2) return; // file at namespace root — no ancestor folders
+    const ancestors = [];
+    for (let i = 1; i < parts.length; i++) ancestors.push(parts.slice(0, i).join('/'));
+    setExpandedPaths((prev) => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const a of ancestors) if (!next.has(a)) { next.add(a); changed = true; }
+      return changed ? next : prev;
+    });
+  }, [currentPath]);
+
   const toggleExpand = useCallback((path) => {
     setExpandedPaths((prev) => {
       const next = new Set(prev);
