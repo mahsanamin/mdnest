@@ -78,22 +78,59 @@ pull_remote() {
     return 0
   fi
 
-  # Try rebase first (clean linear history)
-  if git pull --rebase 2>/dev/null; then
-    return 0
+  # Refresh remote refs so HEAD..@{u} is accurate.
+  if ! git fetch --quiet origin 2>/dev/null; then
+    echo "git-sync [$name]: fetch failed, will retry next cycle"
+    return 1
   fi
 
-  # Rebase failed — abort and try merge
-  git rebase --abort 2>/dev/null
-
-  echo "git-sync [$name]: rebase failed, trying merge..."
-
-  if git pull --no-rebase 2>/dev/null; then
-    return 0
+  BEHIND=$(git rev-list --count HEAD..@{u} 2>/dev/null || echo 0)
+  if [ "$BEHIND" = "0" ]; then
+    return 0   # nothing remote to integrate (may still be ahead → push)
   fi
 
-  # Merge has conflicts — resolve them
-  resolve_conflicts "$name"
+  # A live-collab autosave can re-dirty the working tree right after
+  # commit_changes ran, which makes `git merge` refuse to start ("would be
+  # overwritten"). Stash those changes (tracked + untracked) so the merge
+  # always proceeds, then re-apply them on top of the merged result.
+  STASHED=0
+  if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+    if git stash push -u -m "git-sync-autostash" >/dev/null 2>&1; then
+      STASHED=1
+    fi
+  fi
+
+  # Merge-only (no rebase): integrate the remote. Capture stderr so a failure
+  # to *start* the merge is distinguishable from a real content conflict.
+  MERGE_ERR=$(git merge --no-edit "@{u}" 2>&1)
+  MERGE_RC=$?
+  if [ "$MERGE_RC" != "0" ]; then
+    if [ -f .git/MERGE_HEAD ] || [ -n "$(git ls-files -u 2>/dev/null)" ]; then
+      # A genuine merge with content conflicts — keep remote, save local copies.
+      resolve_conflicts "$name"
+    else
+      # The merge never started (e.g. still-dirty tree). Don't fabricate a
+      # "resolved" commit — log the real reason, restore a clean state, bail.
+      echo "git-sync [$name]: merge could not start: $(echo "$MERGE_ERR" | head -1)"
+      git merge --abort 2>/dev/null
+      [ "$STASHED" = "1" ] && git stash pop >/dev/null 2>&1
+      return 1
+    fi
+  fi
+
+  # Re-apply the stashed live-collab edits.
+  if [ "$STASHED" = "1" ]; then
+    if ! git stash pop >/dev/null 2>&1; then
+      # The local edit collides with the freshly-merged remote. Keep the merged
+      # (remote) version, save the local edit as a recoverable patch, drop stash.
+      TAG=$(date -u '+%Y%m%d-%H%M%S')
+      git stash show -p stash@{0} > ".mdnest-sync-autostash-${TAG}.patch" 2>/dev/null
+      git checkout -- . 2>/dev/null
+      git reset --hard HEAD >/dev/null 2>&1
+      git stash drop >/dev/null 2>&1
+      echo "git-sync [$name]: live edit conflicted with remote — kept remote, saved local as .mdnest-sync-autostash-${TAG}.patch"
+    fi
+  fi
   return 0
 }
 
@@ -125,6 +162,28 @@ fix_remote_url() {
   echo "git-sync [$name]: (SSH host alias '$REMOTE_HOST' doesn't work inside Docker)"
 }
 
+# Per-namespace daemon health, written to a git-excluded file the backend can
+# read (so the UI can surface "sync broken"). state = ok | error.
+write_status() {
+  name="$1"; state="$2"; msg="$3"
+  ahead=$(git rev-list --count "@{u}"..HEAD 2>/dev/null || echo 0)
+  behind=$(git rev-list --count HEAD.."@{u}" 2>/dev/null || echo 0)
+  esc=$(printf '%s' "$msg" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  printf '{"state":"%s","ahead":%s,"behind":%s,"message":"%s","checkedAt":"%s"}\n' \
+    "$state" "$ahead" "$behind" "$esc" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+    > .mdnest-sync-status.json 2>/dev/null
+}
+
+# Keep sync bookkeeping files out of git so `git add -A` never commits/pushes
+# them. Local-only (.git/info/exclude), idempotent.
+ensure_excludes() {
+  EX=.git/info/exclude
+  [ -d .git ] || return
+  for pat in ".mdnest-sync-status.json" ".mdnest-sync-autostash-*.patch" "*.sync-conflict-*"; do
+    grep -qxF "$pat" "$EX" 2>/dev/null || echo "$pat" >> "$EX"
+  done
+}
+
 sync_repo() {
   dir="$1"
   name="$(basename "$dir")"
@@ -133,6 +192,8 @@ sync_repo() {
 
   # Clear SSH command from previous iteration
   unset GIT_SSH_COMMAND
+
+  ensure_excludes
 
   # Configure git identity per-repo
   git config user.name  "${GIT_AUTHOR_NAME:-mdnest}"
@@ -158,7 +219,23 @@ sync_repo() {
   fix_remote_url "$name"
 
   if pull_remote "$name"; then
-    git push 2>/dev/null || git push --set-upstream origin "$(git branch --show-current)" || echo "git-sync [$name]: push failed, will retry next cycle"
+    # Only push when HEAD actually contains the remote (fast-forward), so we
+    # never spin on non-fast-forward rejections. After a successful merge this
+    # holds; if it doesn't, the pull didn't converge — report and skip.
+    if [ -z "$(git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null)" ] \
+       || git merge-base --is-ancestor "@{u}" HEAD 2>/dev/null; then
+      if git push 2>/dev/null || git push --set-upstream origin "$(git branch --show-current)" 2>/dev/null; then
+        write_status "$name" ok ""
+      else
+        write_status "$name" error "push rejected"
+        echo "git-sync [$name]: push failed, will retry next cycle"
+      fi
+    else
+      write_status "$name" error "diverged from upstream (not fast-forward) — sync did not converge"
+      echo "git-sync [$name]: HEAD is not a descendant of upstream after pull; skipping push to avoid a non-fast-forward loop"
+    fi
+  else
+    write_status "$name" error "pull/merge failed"
   fi
 }
 
