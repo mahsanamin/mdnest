@@ -10,6 +10,28 @@ Privately-hosted Markdown notes app. Plain files on disk, Docker-based. Supports
 - **MCP Server**: Node.js, lives in `mcp-server/` — wraps REST API for AI assistants
 - **Config**: `mdnest.conf` -> `setup.sh` generates `docker-compose.yml` and `.env`
 
+## Skills — which to invoke, and when (read this first)
+
+This repo ships slash-command skills (in `.claude/skills/`, `md-*` prefix) that
+encode the *full, correct* multi-step process for the recurring workflows. **When
+a request matches one of these workflows, invoke the skill — whether the user
+typed the slash command or asked in their own words ("fix these bugs", "add this
+feature", "ship it").** The skill is the source of truth for the steps (branch
+strategy, verification gate, no-per-bug-PR rule, clean-commit / no-attribution
+rule, `-dev` version scheme, delete-the-bug-file-when-fixed, release recipe). Do
+not improvise an ad-hoc version that skips steps — an ad-hoc bug fix must still
+follow `md-fix-bugs`.
+
+| If the user wants to… | Invoke | It covers |
+|---|---|---|
+| Fix bug(s) — from the brain `Bugs/` folder **or** an ad-hoc bug they describe | **`md-fix-bugs`** | Read/triage the backlog, verify it's really a bug (some are already fixed), fix each on its own branch from `develop`, verify (smoke test + a regression check), merge **straight into `develop`** (no per-bug PR), **delete the bug's file from the brain** so it isn't re-picked, then one clean release PR on top of `main`. |
+| Add a feature / improvement — from the brain `Features/` folder or described ad-hoc | **`md-add-improvement`** | Same disciplined flow for the features backlog. |
+| Ship / release / "update the docs + website + rebuild" after code changes | **`md-ship`** | CHANGELOG, three-file version bump, docs, website sync, rebuild the dev stack, publish the GitHub Release (tags ≠ Releases — the in-app banner needs a Release). |
+
+If unsure which applies, prefer the skill over an ad-hoc approach and say which one
+you're running. The `md-*` family is authoritative; the summaries here are just a
+router. See also the **Release Process** section below (the skills implement it).
+
 ## Project Structure
 
 ```
