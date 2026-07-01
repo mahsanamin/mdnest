@@ -197,11 +197,21 @@ func main() {
 		}
 		if count == 0 {
 			email := user + "@mdnest.local"
-			_, err := userStore.CreateUser(email, user, password, "admin", nil)
+			// Seed the bootstrap account as superadmin (global role), NOT the
+			// literal "admin". Since v3.5.0 the role model is three-tier:
+			// superadmin (global), admin (scoped to namespace_admins rows),
+			// collaborator (per-grant). A seeded "admin" has no namespace_admins
+			// rows and no grants, so FilterNamespaces returns [] — a fresh
+			// multi-mode install would show zero namespaces and no way to grant
+			// access. Migration 007 only rewrites pre-existing admin rows, not
+			// ones the seed creates after it runs. The first account is the
+			// operator by definition; the count==0 guard keeps this to that one
+			// user, so later invitees are unaffected.
+			_, err := userStore.CreateUser(email, user, password, "superadmin", nil)
 			if err != nil {
 				log.Fatalf("failed to seed admin user: %v", err)
 			}
-			log.Printf("seeded admin user: %s (%s)", user, email)
+			log.Printf("seeded superadmin user: %s (%s)", user, email)
 		}
 
 	}
