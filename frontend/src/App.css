@@ -486,6 +486,21 @@
   margin-left: auto;
 }
 
+/* Broken background git-sync: red cross + red label so a wedged daemon
+   (diverged / push rejected) is visible instead of silent. */
+.sync-status-cross {
+  color: #f38ba8;
+  font-weight: 700;
+  font-size: 0.8rem;
+  line-height: 1;
+  cursor: help;
+}
+
+.sync-status-error-text {
+  color: #f38ba8;
+  font-weight: 600;
+}
+
 .sync-disabled {
   color: #585b70;
   font-size: 0.85rem;

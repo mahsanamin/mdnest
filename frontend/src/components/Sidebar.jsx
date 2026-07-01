@@ -119,10 +119,17 @@ function Sidebar({
     }
   }, [refreshing, onRefreshTree]);
 
-  // Fetch sync status when namespace changes
+  // Fetch sync status when the namespace changes, then poll so a background
+  // git-sync that breaks mid-session surfaces without needing a namespace switch.
   useEffect(() => {
     if (!selectedNs) { setSyncInfo(null); return; }
-    adminSyncStatus(selectedNs).then(setSyncInfo).catch(() => setSyncInfo(null));
+    let cancelled = false;
+    const load = () => adminSyncStatus(selectedNs)
+      .then((v) => { if (!cancelled) setSyncInfo(v); })
+      .catch(() => { if (!cancelled) setSyncInfo(null); });
+    load();
+    const id = setInterval(load, 60000);
+    return () => { cancelled = true; clearInterval(id); };
   }, [selectedNs]);
 
   const handleSync = useCallback(async () => {
@@ -324,8 +331,34 @@ function Sidebar({
           </div>
         </div>
         {syncInfo && (
-          <div className={`sync-status-bar ${syncInfo.isGitRepo && syncInfo.hasRemote ? 'connected' : 'disconnected'}`}>
-            {syncInfo.isGitRepo && syncInfo.hasRemote ? (
+          <div className={`sync-status-bar ${syncInfo.daemonState === 'error' ? 'disconnected' : (syncInfo.isGitRepo && syncInfo.hasRemote ? 'connected' : 'disconnected')}`}>
+            {syncInfo.daemonState === 'error' ? (
+              <>
+                {/* Background git-sync is broken (stuck / diverged / push rejected).
+                    The last-commit date alone would hide this, so surface a red
+                    cross with the daemon's own message and a Retry for admins. */}
+                <span
+                  className="sync-status-cross"
+                  title={`Git sync is broken — ${syncInfo.daemonMessage || 'cannot reach the remote'}.${syncInfo.behind ? ` ${syncInfo.behind} change(s) behind remote.` : ''}${syncInfo.daemonUpdated ? `\nLast checked: ${formatSyncTime(syncInfo.daemonUpdated)}` : ''}`}
+                  aria-label="Git sync broken"
+                >✕</span>
+                <span className="sync-status-text sync-status-error-text">
+                  Git sync broken{syncInfo.behind ? ` — ${syncInfo.behind} behind` : ''}
+                </span>
+                {isAdmin && (
+                  <button
+                    className={`sync-status-btn${syncing ? ' spinning' : ''}`}
+                    onClick={handleSync}
+                    disabled={syncing}
+                    title="Try to sync now (commit + pull + push)"
+                    aria-label="Retry git sync"
+                  >
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+                    <span>Retry</span>
+                  </button>
+                )}
+              </>
+            ) : syncInfo.isGitRepo && syncInfo.hasRemote ? (
               <>
                 <span className="sync-status-dot connected" />
                 <span className="sync-status-text">

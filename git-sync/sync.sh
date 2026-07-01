@@ -169,8 +169,10 @@ write_status() {
   ahead=$(git rev-list --count "@{u}"..HEAD 2>/dev/null || echo 0)
   behind=$(git rev-list --count HEAD.."@{u}" 2>/dev/null || echo 0)
   esc=$(printf '%s' "$msg" | sed 's/\\/\\\\/g; s/"/\\"/g')
-  printf '{"state":"%s","ahead":%s,"behind":%s,"message":"%s","checkedAt":"%s"}\n' \
-    "$state" "$ahead" "$behind" "$esc" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+  # Field names match backend/handlers/sync.go daemonSyncStatus (state, ahead,
+  # behind, message, updated) so /api/admin/sync-status can overlay it.
+  printf '{"namespace":"%s","state":"%s","ahead":%s,"behind":%s,"message":"%s","updated":"%s"}\n' \
+    "$name" "$state" "$ahead" "$behind" "$esc" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
     > .mdnest-sync-status.json 2>/dev/null
 }
 
