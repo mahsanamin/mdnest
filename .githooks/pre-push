@@ -186,6 +186,28 @@ if [ "$RUN_E2E" -eq 1 ] && [ "${MDNEST_SKIP_E2E:-0}" != "1" ]; then
     echo "  See /tmp/mdnest-e2e.log — reproduce with: bash tests/e2e-docker.sh"
     FAILED=1
   fi
+
+  # 9b. Browser end-to-end (Playwright): boot the FULL stack (nginx frontend +
+  # backend) and drive the important UI flows in a real browser — login, tree,
+  # open/render a note, Live + Basic editors, search, create. Needs node +
+  # Playwright's Chromium; exit 2 means prerequisites are missing → SKIP (not
+  # fail) so a machine without them can still push.
+  echo -n "Browser E2E (Playwright UI)... "
+  if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1 || ! command -v node >/dev/null 2>&1; then
+    echo "SKIPPED (docker+node needed — run 'bash tests/e2e-browser.sh' before merging)"
+  else
+    bash tests/e2e-browser.sh > /tmp/mdnest-e2e-browser.log 2>&1
+    rc=$?
+    if [ "$rc" -eq 0 ]; then
+      echo "OK"
+    elif [ "$rc" -eq 2 ]; then
+      echo "SKIPPED (Playwright prerequisites missing — see /tmp/mdnest-e2e-browser.log)"
+    else
+      echo "FAILED"
+      echo "  See /tmp/mdnest-e2e-browser.log — reproduce with: bash tests/e2e-browser.sh"
+      FAILED=1
+    fi
+  fi
 fi
 
 echo ""

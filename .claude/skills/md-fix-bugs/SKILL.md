@@ -73,13 +73,23 @@ repo code already fixes it (then just verify + mark resolved).
   `MyProjects/mdNest/ToDos` with `mdnest append … -`. Not required for small fixes.
 
 ### 3. Verify (gate — don't merge red)
-- `tests/cli-smoke-test.sh` (tests the working-tree `./mdnest` against the
-  disposable `testing_workspace`; mount it via `MOUNT_testing_workspace=<path>`
-  + `./mdnest-server reload` if missing). **Add a regression check** for the bug
-  you just fixed, then re-run.
-- Frontend changes: `npm run build` + `npm test`. UI/visual changes: rebuild
-  brain (`./mdnest-server rebuild`) or headless-screenshot a mock so the user can
-  eyeball before release. `bash -n mdnest` for CLI syntax.
+- **Add a regression test to the layer that would have caught the bug** — this is
+  part of the fix, not optional: a CLI-behaviour bug → a `tests/cli-smoke-test.sh`
+  assertion; a parser/fallback bug (e.g. anything that must work without
+  `python3`) → a `tests/cli-unit.sh` case; a UI bug → a `tests/browser` spec.
+- Run the tier that matches the change:
+  - CLI/pure helpers: `bash tests/cli-unit.sh` (instant; runs with AND without
+    python3) + `bash -n mdnest`.
+  - CLI end-to-end: `tests/cli-smoke-test.sh` against the disposable
+    `testing_workspace` (mount via `MOUNT_testing_workspace=<path>` +
+    `./mdnest-server reload` if missing), or the full `bash tests/e2e-docker.sh`
+    (builds the backend, boots a throwaway instance, runs the CLI on the host and
+    in a bare no-python3 container).
+  - Frontend/UI: `npm run build` + `npm test`, and `bash tests/e2e-browser.sh`
+    (full stack + Playwright) for user-facing flows.
+- The pre-push hook runs the fast tier on every push and the full Docker + browser
+  suites when pushing a `release/*` branch — so the release PR can't go up red.
+  Don't skip it (`MDNEST_SKIP_E2E=1`) except in a real emergency.
 
 ### 4. Merge straight into develop (NO per-bug PR)
 - `git commit` — clear subject + body, **no co-author / generated-by footer**.

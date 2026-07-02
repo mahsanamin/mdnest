@@ -11,3 +11,7 @@ git-sync/keys/
 .claude/settings.local.json
 .testing_workspace/
 sync.sh.bak-*
+tests/browser/node_modules/
+tests/browser/test-results/
+tests/browser/playwright-report/
+.playwright/
