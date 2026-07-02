@@ -38,9 +38,13 @@ else
   FAILED=1
 fi
 
-# 2. Backend: verify Go compiles
+# 2. Backend: verify Go compiles. On a Docker-only machine (no host Go
+# toolchain) this is skipped — the release-tier Docker E2E below builds the
+# backend image for real, so a broken build still can't reach main.
 echo -n "Backend build... "
-if (cd backend && go build -o /dev/null .) > /dev/null 2>&1; then
+if ! command -v go >/dev/null 2>&1; then
+  echo "SKIPPED (no host Go — the Docker E2E build covers this on release pushes)"
+elif (cd backend && go build -o /dev/null .) > /dev/null 2>&1; then
   echo "OK"
 else
   echo "FAILED"
