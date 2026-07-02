@@ -91,8 +91,18 @@ fi
 #     image's golang base often clears these even when the local
 #     `go` toolchain is older)
 #   anything else with vuln output → BLOCK (dependency vuln)
-GOVULNCHECK="$(go env GOPATH 2>/dev/null)/bin/govulncheck"
-if [ -x "$GOVULNCHECK" ]; then
+# Resolve the govulncheck path only if Go exists. Guarding on `command -v go`
+# first is essential under `set -e`: `X="$(go env ...)"` when go is missing
+# fails the command substitution (127) and a failing substitution in a
+# top-level assignment aborts the whole script — which previously killed the
+# hook here on any machine without Go, before the lock-file / version / E2E
+# steps below ever ran.
+if command -v go >/dev/null 2>&1; then
+  GOVULNCHECK="$(go env GOPATH 2>/dev/null)/bin/govulncheck"
+else
+  GOVULNCHECK=""
+fi
+if [ -n "$GOVULNCHECK" ] && [ -x "$GOVULNCHECK" ]; then
   echo -n "Backend security (govulncheck)... "
   # Binary mode, mirroring CI: govulncheck v1.4.0's source-mode call-graph
   # analysis segfaults under the Go 1.26.x toolchain go.mod pins. Build the
@@ -137,10 +147,16 @@ else
   FAILED=1
 fi
 
-# 7. Version consistency: all three version strings must match
-BE_VER=$(grep -o '"version":.*"[0-9.]*"' backend/handlers/config.go | grep -o '[0-9.]*')
-FE_VER=$(grep -o '"version": "[0-9.]*"' frontend/package.json | grep -o '[0-9.]*')
-CLI_VER=$(grep -o 'MDNEST_CLI_VERSION="[0-9.]*"' mdnest | grep -o '[0-9.]*')
+# 7. Version consistency: all three version strings must match.
+# Capture the FULL quoted version incl. any pre-release suffix (e.g.
+# "3.11.4-dev" on develop) — the old '[0-9.]*' pattern matched nothing on a
+# -dev version, which both broke the check and (under set -e) aborted the hook
+# at these assignments. Piping through sed keeps the substitution exit at 0
+# even if grep matches nothing, so a bad extraction reports a mismatch instead
+# of silently killing the hook.
+BE_VER=$(grep -oE '"version":[[:space:]]*"[^"]+"' backend/handlers/config.go | head -1 | sed -E 's/.*"([^"]+)"$/\1/')
+FE_VER=$(grep -oE '"version":[[:space:]]*"[^"]+"' frontend/package.json | head -1 | sed -E 's/.*"([^"]+)"$/\1/')
+CLI_VER=$(grep -oE 'MDNEST_CLI_VERSION="[^"]+"' mdnest | head -1 | sed -E 's/.*"([^"]+)"$/\1/')
 
 echo -n "Version consistency... "
 if [ "$BE_VER" = "$FE_VER" ] && [ "$FE_VER" = "$CLI_VER" ]; then
