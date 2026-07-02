@@ -1,0 +1,12 @@
+{
+  "name": "mdnest-browser-e2e",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Playwright browser end-to-end tests for mdnest — run against a disposable Docker stack via tests/e2e-browser.sh",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0"
+  }
+}

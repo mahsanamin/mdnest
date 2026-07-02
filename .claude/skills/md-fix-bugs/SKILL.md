@@ -1,15 +1,16 @@
 ---
 name: md-fix-bugs
-description: Fix the mdnest bug backlog. Read the bugs from the mdnest brain (MyProjects/mdNest/Bugs), judge what's real, then fix them one by one — each on its own branch from develop, its own PR into develop, verified and merged — and finish with a single release PR develop→main. Say "/md-fix-bugs". (Part of the md-* mdnest skill family alongside md-add-improvement and md-ship.)
+description: Fix the mdnest bug backlog. Read the bugs from the mdnest brain (MyProjects/mdNest/Bugs), judge what's actually a bug (some are already fixed), then fix them one by one — each on its own branch from develop, verified and merged STRAIGHT into develop (no per-bug PR) — and finish with one clean release PR built on top of main. Say "/md-fix-bugs". (Part of the md-* mdnest skill family alongside md-add-improvement and md-ship.)
 ---
 
 ## Purpose
 
 A repeatable process for clearing the mdnest bug backlog. The bugs live in the
 user's mdnest "brain" (their private notes). This skill reads them, decides which
-are real and worth fixing, then fixes them **one by one** — each as its own clean
-PR into `develop`, verified with the CLI smoke-test harness and merged — and
-finally opens one release PR from `develop` to `main`.
+are **really** bugs (some logged ones are already fixed — verify first), then
+fixes them **one by one** — each on its own branch, verified with the CLI
+smoke-test harness and merged **straight into `develop`** (no per-bug PR) — and
+finally opens **one** clean release PR, built on top of `main`.
 
 Run it whenever the user points you at the bug folder. (Sibling skill:
 `md-add-improvement` does the same for the `Features/` backlog.)
@@ -35,96 +36,140 @@ repo code already fixes it (then just verify + mark resolved).
   trailer or any "Generated with Claude Code" footer to commits or PR bodies for
   this project. The user wants the history clean. (This intentionally overrides
   the global default commit/PR footer.)
-- **One PR per fix into `develop`.** Each bug/fix gets its own short-lived branch
-  (`fix/<slug>` for bugs, `feat/<slug>` for additive work) cut from the latest
-  `develop`, its own PR into `develop`, then merge + delete the branch.
-- **Branch flow:** feature → `develop` (per fix), and a single final release PR
-  `develop` → `main` at the end. Never open the per-fix PRs against `main`.
-- **Verify every change** by running the smoke-test harness before opening the
-  PR (see step 4). Don't merge red.
+- **No per-bug PRs — merge each fix straight into `develop`.** Each bug gets its
+  own short-lived branch (`fix/<slug>`) cut from the latest `develop`; once it's
+  verified, merge it **directly into `develop`** (`git merge --no-ff` + push,
+  no PR) and delete the branch. The ONLY PR in the whole cycle is the final
+  release PR (`main` ← the release branch). Opening a PR per bug just adds noise.
+- **Verify every change before merging to develop** — run the smoke-test harness
+  (and `npm run build`/`npm test` for frontend changes). Don't merge red.
 - **Sequential, not parallel.** Branch each fix from `develop` only after the
-  previous one merged, so the shared `mdnest` file never conflicts.
+  previous one merged, so shared files (`mdnest`, `App.css`) never conflict.
 
 ## Steps
 
 ### 1. Read & triage the bug backlog
 - `mdnest list @srv-ahsan-mini/mahsan_brain/MyProjects/mdNest/Bugs` then
   `mdnest read` each bug file.
-- For each, judge: is it a real defect? Is it worth fixing now? State the verdict
-  and a one-line reason. Skip/park anything that isn't actionable and say why.
-- Confirm the branch flow with the user only if it's ambiguous; otherwise proceed
-  with feature→develop, final→main.
+- For each, judge: **is it really a bug**, and worth fixing now? State the verdict
+  and a one-line reason. Park anything that isn't actionable and say why.
+- **Check whether it's already fixed.** Bugs are often logged against the stale
+  *installed* CLI (which self-updates from `main`); the current repo code may
+  already fix it. If so, verify + mark it resolved — don't re-fix.
+- `git fetch origin` and note `main`'s current version — `main` may be **ahead**
+  of `develop` from parallel work (e.g. a docs PR), which affects the release
+  version number later.
 
-### 2. Decompose into executable TODOs
-- Break each accepted bug into one or more independently-shippable units (a unit
-  = one cohesive PR). A single bug report with several requirements usually maps
-  to several TODOs.
-- Write one TODO file per unit into the ToDos folder with a clear title and:
-  problem, goal, concrete changes (files + functions), acceptance criteria, and a
-  copy-pasteable test. Use `mdnest append … -` with the content piped in.
-
-### 3. Implement each unit (one branch / one PR)
+### 2. Fix each bug (one branch, no PR)
 - `git checkout develop && git pull --ff-only origin develop`
 - `git checkout -b fix/<slug>`
-- Make the change. Match surrounding code style. For the `mdnest` CLI: it runs
-  under `set -e`, so any helper used as a bare statement must `return 0` on its
-  success path or it will abort the script.
+- Make the change. Match surrounding code style. Gotchas:
+  - The `mdnest` CLI runs under `set -e` — any helper used as a bare statement
+    must `return 0` on its success path or it aborts the script.
+  - Reproduce the bug first (against the `testing_workspace` namespace) so you're
+    fixing the real thing, not the report's guess. Several past "bugs" were CLI
+    path-handling, not backend.
+- (Optional) For a multi-step fix, jot a quick TODO in the brain
+  `MyProjects/mdNest/ToDos` with `mdnest append … -`. Not required for small fixes.
 
-### 4. Verify with the smoke-test harness (gate)
-- Run `tests/cli-smoke-test.sh` (it tests the working-tree `./mdnest` against the
-  disposable `testing_workspace` namespace). If `testing_workspace` isn't
-  mounted: add `MOUNT_testing_workspace=<path>` to `mdnest.conf`, create the dir,
-  `./mdnest-server reload`, then run.
-- All checks must pass. Add new checks to the harness when a fix introduces
-  behavior the harness doesn't yet cover, and re-run.
-- `bash -n mdnest` for a quick syntax gate on CLI edits.
+### 3. Verify (gate — don't merge red)
+- **Add a regression test to the layer that would have caught the bug** — this is
+  part of the fix, not optional: a CLI-behaviour bug → a `tests/cli-smoke-test.sh`
+  assertion; a parser/fallback bug (e.g. anything that must work without
+  `python3`) → a `tests/cli-unit.sh` case; a UI bug → a `tests/browser` spec.
+- Run the tier that matches the change:
+  - CLI/pure helpers: `bash tests/cli-unit.sh` (instant; runs with AND without
+    python3) + `bash -n mdnest`.
+  - CLI end-to-end: `tests/cli-smoke-test.sh` against the disposable
+    `testing_workspace` (mount via `MOUNT_testing_workspace=<path>` +
+    `./mdnest-server reload` if missing), or the full `bash tests/e2e-docker.sh`
+    (builds the backend, boots a throwaway instance, runs the CLI on the host and
+    in a bare no-python3 container).
+  - Frontend/UI: `npm run build` + `npm test`, and `bash tests/e2e-browser.sh`
+    (full stack + Playwright) for user-facing flows.
+- The pre-push hook runs the fast tier on every push and the full Docker + browser
+  suites when pushing a `release/*` branch — so the release PR can't go up red.
+  Don't skip it (`MDNEST_SKIP_E2E=1`) except in a real emergency.
 
-### 5. Commit, push, PR, merge (clean)
-- `git commit` with a clear subject + body. **No co-author / no generated-by
-  footer.**
-- `git push -u origin fix/<slug>`
-- `gh pr create --base develop --head fix/<slug> --title "…" --body "…"` —
-  describe problem, fix, and the harness result.
-- `gh pr merge <n> --merge --delete-branch`
+### 4. Merge straight into develop (NO per-bug PR)
+- `git commit` — clear subject + body, **no co-author / generated-by footer**.
 - `git checkout develop && git pull --ff-only origin develop`
-- Mark the corresponding TODO done in the brain (`mdnest append` a `✅ DONE —
-  merged to develop` line, or move it to a Done area).
+- `git merge --no-ff fix/<slug> -m "Merge fix/<slug> into develop"`
+- `git push origin develop` and `git branch -d fix/<slug>`.
+- **Delete the bug's file** from the brain `Bugs/` folder
+  (`mdnest delete @srv-ahsan-mini/mahsan_brain/MyProjects/mdNest/Bugs/<file>.md`)
+  once it's merged to develop — a fixed bug left in the folder gets re-read and
+  re-picked next cycle. The fix is recorded in git + the CHANGELOG; the backlog
+  file's job is done. (Same for a bug found to be already-fixed in step 1.)
+  Per-bug PRs are deliberately skipped — the only PR is the release.
 
-### 6. Repeat for the next unit
-- Back to step 3 with the next TODO. Keep it strictly sequential.
+### 5. Repeat for the next bug
+- Back to step 2 with the next one. Keep it strictly sequential.
 
-### 7. Final release PR (develop → main)
-- Once every unit is merged into `develop`, run the full smoke test on `develop`
-  one more time.
-- Bump the version in all three files (`backend/handlers/config.go`,
-  `frontend/package.json`, the `mdnest` CLI `MDNEST_CLI_VERSION`) and add a
-  `CHANGELOG.md` section. Bug-fix-only cycle → patch bump; new CLI behavior →
-  minor bump. (Often the version was already bumped by the first fix of the cycle
-  — keep all three consistent; the pre-push hook enforces it.)
-- Create a `release/vX.Y.Z` branch from `develop` and open one PR → `main`
-  summarizing every fix (clean body, no attribution).
-- **`main` requires SQUASH merges** (its history is one "Release vX.Y.Z" commit
-  per release) — merge the release PR with `gh pr merge <n> --squash`, not a
-  merge commit.
-- **Squash-divergence gotcha:** because past releases were squash-merged, `main`
-  has commits not in `develop`'s history, so the release PR can show CONFLICTING.
-  Fix it on the release branch with `git merge -X ours origin/main` before/again
-  after opening the PR (`develop` is a content superset of `main`, so `-X ours`
-  is safe). CI only runs once the PR is mergeable.
-- After merge: `git tag vX.Y.Z && git push origin vX.Y.Z`, then **publish a GitHub
-  Release** (`gh release create vX.Y.Z --notes-file <changelog section>`) — the
-  in-app update banner only notices Releases, not bare tags.
-- **Then reconcile so the NEXT release is clean:** `git checkout develop &&
-  git merge -s ours origin/main && git push` — records `main`'s release commit as
-  an ancestor of `develop` (content-neutral) so the next release PR doesn't
-  conflict.
-- See the "Release Process" section of `CLAUDE.md`. Optionally run `/md-ship`
-  to sync docs + website as part of the release.
+### 6. Release: ONE clean PR on top of main
+Run the full smoke test on `develop` once more, then build the release as a
+**single commit on top of current `main`** — NOT a develop-based branch. A
+develop-based PR lists every individual commit that `main` only has as squashed
+releases (~50 of them), which looks alarming even though the file diff is tiny.
+Two phases:
+
+**A. Get the correct content (union of develop + main), in a throwaway branch:**
+```
+git fetch origin
+git checkout -b _rel-tmp develop
+git merge -X ours origin/main -m "merge main"
+```
+`develop` is a content superset of `main`, so `-X ours` keeps our fixes and
+pulls in any **main-only** work (e.g. a separate README/docs PR merged while you
+were fixing) without clobbering it. Sanity-check: `git diff _rel-tmp origin/main`
+for any main-only paths should be empty.
+
+**B. Collapse to one commit ON main so the PR is clean:**
+```
+FILES=$(git diff origin/main.._rel-tmp --name-only)        # only the net-new changes
+git checkout -B release/vX.Y.Z origin/main
+git checkout _rel-tmp -- $FILES
+git branch -D _rel-tmp
+```
+Then set the version in all three files (`backend/handlers/config.go`,
+`frontend/package.json`, `mdnest`’s `MDNEST_CLI_VERSION`) to the **plain release
+number `X.Y.Z`** — the next bump above **`main`'s** current version (main may be
+ahead of develop from parallel work; don't trust develop's number). Note develop
+carries `X.Y.Z-dev`; the release branch **drops the `-dev` suffix**. Add the
+`CHANGELOG.md` section, and commit it all as **one** `Release vX.Y.Z` commit.
+
+> **Version scheme.** `develop` always carries the in-flight version with a
+> `-dev` suffix (e.g. `3.11.3-dev`) so a develop/staging box reads
+> `v3.11.3-dev` (clearly "candidate, still validating") while production reads
+> the plain `v3.11.3`. The release branch drops `-dev`. **After the release
+> merges**, bump develop to the *next* `-dev` (e.g. `3.11.4-dev`) so develop is
+> immediately ahead again. `isVersionNewer` is pre-release-aware, so a `-dev`
+> build shows no false "update available" against the last release but does see
+> the final release as newer once it ships.
+
+Verify (build/test/smoke), `git push -u origin release/vX.Y.Z`, and open ONE PR
+→ `main`. Because the base IS `main`, it's a 1-commit, small-diff, conflict-free
+PR (this is the fix for the "why so many commits" problem).
+
+**After the user approves / merges:**
+- `gh pr merge <n> --squash` (main only allows squash merges).
+- `git tag vX.Y.Z && git push origin vX.Y.Z`, then **publish a GitHub Release**
+  (`gh release create vX.Y.Z --notes-file <changelog section>`) — the in-app
+  update banner only notices Releases, not bare tags.
+- **Reconcile develop + open the next `-dev`:** `git checkout develop &&
+  git merge -s ours origin/main` (records main's release commit as an ancestor of
+  develop, content-neutral), then bump develop's three version files to the next
+  pre-release (`X.Y.(Z+1)-dev`) and push. develop is now ahead of the release
+  again.
+- Optionally run `/md-ship` to sync docs + website.
+
+See the "Release Process" section of `CLAUDE.md`.
 
 ## Done criteria
-- Every actionable bug has a TODO, a merged PR into `develop`, and a green
-  harness run.
-- TODOs are marked done in the brain.
-- One release PR from `develop` → `main` is open/merged, version bumped,
-  CHANGELOG updated, tag + GitHub Release published.
-- Commit history is clean (no Claude attribution).
+- Every actionable bug is fixed, verified (green harness + a regression check),
+  and merged straight into `develop`; already-fixed ones are marked resolved.
+- The brain bug notes are marked ✅ RESOLVED.
+- **One** clean release PR (a single commit on top of `main`, small diff) is
+  open/merged, version bumped, CHANGELOG updated, tag + GitHub Release published,
+  and `develop` reconciled with `main`.
+- No per-bug PRs. Commit history clean (no Claude attribution).

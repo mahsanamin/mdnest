@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-MDNEST_CLI_VERSION="3.11.2"
+MDNEST_CLI_VERSION="3.11.4"
 CONFIG_DIR="${HOME}/.config/mdnest"
 SERVERS_DIR="${CONFIG_DIR}/servers"
 DEFAULT_FILE="${CONFIG_DIR}/default"
@@ -91,6 +91,16 @@ parse_path() {
   PARSED_NS=""
   PARSED_PATH=""
 
+  # Accept copy-path URIs from the web UI (e.g. mdnest://@alias/ns/19%20Jun.md):
+  # strip the scheme and percent-decode the namespace + path so the copied,
+  # escaped path is usable verbatim. Only decode for the mdnest:// form so raw
+  # CLI paths that legitimately contain '%' are left untouched.
+  local _decode=0
+  if [[ "$input" == mdnest://* ]]; then
+    input="${input#mdnest://}"
+    _decode=1
+  fi
+
   if [[ "$input" == @* ]]; then
     local rest="${input#@}"
     PARSED_ALIAS="${rest%%/*}"
@@ -120,16 +130,35 @@ parse_path() {
       PARSED_PATH="${input#*/}"
     fi
   fi
+
+  if [ "$_decode" = "1" ]; then
+    [ -n "$PARSED_NS" ] && PARSED_NS=$(urldecode "$PARSED_NS")
+    [ -n "$PARSED_PATH" ] && PARSED_PATH=$(urldecode "$PARSED_PATH")
+  fi
 }
 
 # ─── API helpers ────────────────────────────────────────────────────────────
 
 api() {
   local method="$1" path="$2" body="$3"
-  local args=(-s -w "\n%{http_code}" -H "Authorization: Bearer $MDNEST_TOKEN")
+  # --connect-timeout bounds a hanging/unreachable connection so a command
+  # fails fast with a clear message instead of blocking forever (MDNEST_TIMEOUT
+  # overrides for slow links). No --max-time: note bodies can be large and
+  # legitimately slow to transfer; only the connect phase is capped.
+  local args=(-s -w "\n%{http_code}" --connect-timeout "${MDNEST_TIMEOUT:-10}" -H "Authorization: Bearer $MDNEST_TOKEN")
   [ -n "$body" ] && args+=(-d "$body")
-  local response
+  local response curl_rc
   response=$(curl "${args[@]}" -X "$method" "${MDNEST_URL}/api${path}")
+  curl_rc=$?
+  if [ "$curl_rc" != "0" ]; then
+    case "$curl_rc" in
+      6)  echo "Error: can't resolve host for ${MDNEST_URL} (DNS)." >&2 ;;
+      7)  echo "Error: connection refused by ${MDNEST_URL}." >&2 ;;
+      28) echo "Error: timed out connecting to ${MDNEST_URL} (set MDNEST_TIMEOUT to raise the limit)." >&2 ;;
+      *)  echo "Error: couldn't reach ${MDNEST_URL} (curl exit $curl_rc)." >&2 ;;
+    esac
+    return 1
+  fi
   local http_code="${response##*$'\n'}"
   local resp_body="${response%$'\n'*}"
 
@@ -140,8 +169,124 @@ api() {
   echo "$resp_body"
 }
 
+# ─── Dependency-tolerant helpers ─────────────────────────────────────────────
+# The CLI must work on a fresh machine that may not have python3 (or jq). These
+# helpers prefer a real parser when present and fall back to pure-bash/awk so no
+# command silently breaks just because python3 is missing.
+
+have() { command -v "$1" >/dev/null 2>&1; }
+
+# Resolve this script's real path (following symlinks) WITHOUT depending on
+# `readlink -f` (unsupported on macOS/BSD) or python3 — both of which are absent
+# on a bare fresh machine, where the old fallback left the path empty and broke
+# `mdnest update` / `mdnest docs`.
+resolve_self() {
+  local src="$1" dir link
+  while [ -L "$src" ]; do
+    dir="$(cd -P "$(dirname "$src")" 2>/dev/null && pwd)"
+    link="$(readlink "$src")"
+    case "$link" in
+      /*) src="$link" ;;
+      *)  src="$dir/$link" ;;
+    esac
+  done
+  dir="$(cd -P "$(dirname "$src")" 2>/dev/null && pwd)"
+  printf '%s/%s\n' "$dir" "$(basename "$src")"
+}
+
+# Warn ONCE if we have no JSON parser at all, so the degraded-but-working state
+# is visible rather than mysterious. Fallbacks below still work without it.
+_dep_warned=0
+warn_no_parser() {
+  [ "$_dep_warned" = "1" ] && return 0
+  _dep_warned=1
+  if ! have python3 && ! have jq; then
+    echo "mdnest: note — neither python3 nor jq found; using a basic built-in parser." >&2
+    echo "mdnest: for best results install python3 (macOS: 'xcode-select --install')." >&2
+  fi
+  return 0
+}
+
 urlencode() {
-  python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))" "$1"
+  if have python3; then
+    python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))" "$1"
+    return
+  fi
+  # Pure-bash percent-encode. Reserved set matches urllib.parse.quote's DEFAULT
+  # (safe='/'), so '/' stays literal — urlencode is called on full note paths
+  # like ns/dir/file.md and the server expects the slashes intact. Kept unencoded:
+  # A-Z a-z 0-9 . ~ _ - and /. Multibyte UTF-8 is encoded byte-by-byte under the
+  # C locale so each byte becomes its own %XX (matches the server's decoding).
+  local s="$1" out="" i c
+  local LC_ALL=C
+  for (( i=0; i<${#s}; i++ )); do
+    c="${s:i:1}"
+    case "$c" in
+      [a-zA-Z0-9.~_/-]) out+="$c" ;;
+      *) out+=$(printf '%%%02X' "'$c") ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+
+urldecode() {
+  if have python3; then
+    python3 -c "import urllib.parse, sys; print(urllib.parse.unquote(sys.argv[1]))" "$1"
+    return
+  fi
+  # Turn '+' into space and %XX into the raw byte, then let printf %b emit the
+  # bytes (works for UTF-8 sequences too: %E2%80%A6 -> \xE2\x80\xA6 -> bytes).
+  local s="${1//+/ }"
+  printf '%b' "${s//%/\\x}"
+}
+
+# json_top_string <field>  — reads JSON on stdin, prints the value of a
+# TOP-LEVEL string field. Prefers python3, then jq; the bash fallback is
+# brace-depth aware so it never returns a value from a nested object (e.g. it
+# returns the top-level "version", not latestRelease.version — which is emitted
+# FIRST in /api/config, so a naive grep|head would pick the wrong one).
+json_top_string() {
+  local field="$1" data
+  data=$(cat)
+  if have python3; then
+    printf '%s' "$data" | python3 -c "import sys,json
+try: print(json.load(sys.stdin).get('$field',''))
+except Exception: pass" 2>/dev/null
+    return
+  fi
+  if have jq; then
+    printf '%s' "$data" | jq -r --arg f "$field" '.[$f] // empty' 2>/dev/null
+    return
+  fi
+  # Bash/awk fallback: scan for "field": at object depth 1 only. Accumulates all
+  # input into `buf` and processes it in END so it works whether the JSON is on
+  # one line or many, and portably across gawk / mawk / busybox awk (no reliance
+  # on a null RS to slurp — busybox awk handles that differently).
+  printf '%s' "$data" | awk -v want="$field" '
+    { buf = buf $0 "\n" }
+    END {
+      n=length(buf); depth=0; instr=0; esc=0; key=""; capkey=0
+      for (i=1;i<=n;i++) {
+        c=substr(buf,i,1)
+        if (esc) { if(capkey)key=key c; esc=0; continue }
+        if (c=="\\") { if(capkey)key=key c; esc=1; continue }
+        if (c=="\"") {
+          if (instr) { instr=0; if(capkey){capkey=0} }
+          else { instr=1; if(depth==1){capkey=1; key=""} }
+          continue
+        }
+        if (instr) { if(capkey)key=key c; continue }
+        if (c=="{"||c=="[") { depth++; continue }
+        if (c=="}"||c=="]") { depth--; continue }
+        if (c==":" && depth==1 && key==want) {
+          j=i+1
+          while (j<=n && substr(buf,j,1)!="\"") j++
+          j++; val=""
+          while (j<=n) { ch=substr(buf,j,1); if(ch=="\\"){val=val substr(buf,j,2); j+=2; continue}; if(ch=="\"")break; val=val ch; j++ }
+          print val; exit
+        }
+      }
+    }'
 }
 
 # ─── Commands ───────────────────────────────────────────────────────────────
@@ -325,44 +470,67 @@ cmd_servers() {
   if [ -d "$SERVERS_DIR" ] && [ -n "$(ls "$SERVERS_DIR" 2>/dev/null)" ]; then
     printf "  %-12s  %-35s  %-22s  %s\n" "ALIAS" "URL" "VERSION" "DEFAULT"
     printf "  %-12s  %-35s  %-22s  %s\n" "────────────" "───────────────────────────────────" "──────────────────────" "───────"
+    local any_unreachable=0
     for f in "$SERVERS_DIR"/*; do
       local name=$(basename "$f")
       local url=$(grep '^url=' "$f" 2>/dev/null | cut -d= -f2-)
       local marker=""
       [ "$name" = "$def" ] && marker="*"
-      local ver="" commit="" cfg=""
-      cfg=$(curl -s --max-time 3 "${url}/api/config" 2>/dev/null)
-      # Parse the TOP-LEVEL version + commit with python3. A bare grep for
-      # "version" would also match latestRelease.version (the newest GitHub
-      # release), printing two values per row — so go through a JSON parser.
-      if [ -n "$cfg" ]; then
-        ver=$(printf '%s' "$cfg" | python3 -c "import sys,json
-try: print(json.load(sys.stdin).get('version',''))
-except Exception: pass" 2>/dev/null)
-        commit=$(printf '%s' "$cfg" | python3 -c "import sys,json
-try: print(json.load(sys.stdin).get('commit',''))
-except Exception: pass" 2>/dev/null)
+      local ver="" commit="" cfg="" curl_rc=0 reachable=0
+
+      # Probe /api/config. --connect-timeout guards against a slow/hanging TCP
+      # or TLS handshake (e.g. an unreachable IPv6 address the browser skips via
+      # Happy Eyeballs but curl may sit on); --max-time bounds the whole call.
+      # Capture curl's EXIT CODE separately so we can tell "couldn't connect"
+      # apart from "connected fine but couldn't parse the body" — the old code
+      # conflated the two and labelled a perfectly healthy server "unreachable"
+      # whenever the JSON parser (python3) was missing.
+      cfg=$(curl -s --connect-timeout 5 --max-time 8 "${url}/api/config" 2>/dev/null)
+      curl_rc=$?
+      [ "$curl_rc" = "0" ] && [ -n "$cfg" ] && reachable=1
+
+      if [ "$reachable" = "1" ]; then
+        ver=$(printf '%s' "$cfg" | json_top_string version)
+        commit=$(printf '%s' "$cfg" | json_top_string commit)
+        [ -n "$ver" ] || ver="(reachable, version unknown)"
+        # Show the build commit next to the version so a stale container is
+        # obvious even when the version string hasn't changed.
+        [ -n "$commit" ] && [ "$commit" != "dev" ] && ver="$ver ($commit)"
+      else
+        any_unreachable=1
+        case "$curl_rc" in
+          6)      ver="unreachable (DNS)" ;;
+          7)      ver="unreachable (refused)" ;;
+          28)     ver="unreachable (timeout)" ;;
+          35|60)  ver="unreachable (TLS)" ;;
+          *)      ver="unreachable (curl $curl_rc)" ;;
+        esac
       fi
-      [ -n "$ver" ] || ver="unreachable"
-      # Show the build commit next to the version so a stale container is
-      # obvious even when the version string hasn't changed.
-      [ -n "$commit" ] && [ "$commit" != "dev" ] && ver="$ver ($commit)"
       printf "  %-12s  %-35s  %-22s  %s\n" "@${name}" "$url" "$ver" "$marker"
 
       # Verbose: list namespaces for this server
-      if $verbose && [ "$ver" != "unreachable" ]; then
+      if $verbose && [ "$reachable" = "1" ]; then
         local tok=$(grep '^token=' "$f" 2>/dev/null | cut -d= -f2-)
         local ns_json
-        ns_json=$(curl -s --max-time 3 -H "Authorization: Bearer $tok" "${url}/api/namespaces" 2>/dev/null)
+        ns_json=$(curl -s --connect-timeout 5 --max-time 8 -H "Authorization: Bearer $tok" "${url}/api/namespaces" 2>/dev/null)
         if [ -n "$ns_json" ] && [ "$ns_json" != "[]" ]; then
           local namespaces
-          namespaces=$(echo "$ns_json" | python3 -c "import sys,json; [print('    → @${name}/' + ns) for ns in json.load(sys.stdin)]" 2>/dev/null) || true
-          if [ -n "$namespaces" ]; then
-            echo "$namespaces"
+          if have python3; then
+            namespaces=$(echo "$ns_json" | python3 -c "import sys,json; [print('    → @${name}/' + ns) for ns in json.load(sys.stdin)]" 2>/dev/null) || true
+          else
+            # Fallback: extract the JSON string array elements without python3.
+            namespaces=$(echo "$ns_json" | grep -o '"[^"]*"' | sed 's/^"//; s/"$//' | sed "s#^#    → @${name}/#") || true
           fi
+          [ -n "$namespaces" ] && echo "$namespaces"
         fi
       fi
     done
+    if [ "$any_unreachable" = "1" ]; then
+      echo ""
+      echo "  A server marked 'unreachable' but working in your browser usually means the"
+      echo "  CLI can't reach that URL directly. Check: the stored URL ('mdnest servers -v'),"
+      echo "  VPN/network, or try 'curl -v ${url}/api/config'." >&2
+    fi
   elif [ -f "$LEGACY_CONFIG" ]; then
     local url=$(grep '^url=' "$LEGACY_CONFIG" 2>/dev/null | cut -d= -f2-)
     printf "  %-12s  %-35s  %s\n" "@default" "$url" "(legacy config)"
@@ -383,8 +551,11 @@ cmd_whoami() {
 # inode alive until the current process exits; the next invocation
 # picks up the new code. Uses the same source as install-cli.sh.
 cmd_update() {
-  REPO_URL="https://raw.githubusercontent.com/mahsanamin/mdnest/main"
-  REAL_PATH="$(readlink -f "$0" 2>/dev/null || python3 -c "import os,sys; print(os.path.realpath(sys.argv[1]))" "$0")"
+  # Update from the same branch the CLI was installed from — override with
+  # MDNEST_BRANCH=develop to track an unreleased build.
+  BRANCH="${MDNEST_BRANCH:-main}"
+  REPO_URL="https://raw.githubusercontent.com/mahsanamin/mdnest/${BRANCH}"
+  REAL_PATH="$(resolve_self "$0")"
   TARGET="$REAL_PATH"
 
   CURRENT="${MDNEST_CLI_VERSION}"
@@ -402,14 +573,26 @@ cmd_update() {
 
   echo "Updating mdnest CLI: v${CURRENT} -> v${LATEST}"
   echo "Target: $TARGET"
+
+  # Download to a temp file first, then install atomically — same reasoning as
+  # install-cli.sh: a direct 'curl -o "$TARGET"' can abort mid-write (curl 56)
+  # and leave a truncated, unrunnable binary in place. install(1) swaps it in.
+  local tmp
+  tmp="$(mktemp "${TMPDIR:-/tmp}/mdnest.XXXXXX")" || { echo "Error: couldn't create a temp file." >&2; exit 1; }
+  if ! curl -fsSL "$REPO_URL/mdnest" -o "$tmp"; then
+    rm -f "$tmp"; echo "Error: download failed — check your network." >&2; exit 1
+  fi
+  if ! head -1 "$tmp" | grep -q '^#!'; then
+    rm -f "$tmp"; echo "Error: downloaded file isn't the mdnest CLI (no shebang); aborting." >&2; exit 1
+  fi
+
   if [ -w "$TARGET" ] || [ -w "$(dirname "$TARGET")" ]; then
-    curl -fsSL "$REPO_URL/mdnest" -o "$TARGET"
-    chmod +x "$TARGET"
+    install -m 0755 "$tmp" "$TARGET"
   else
     echo "Target is not writable; using sudo..."
-    sudo curl -fsSL "$REPO_URL/mdnest" -o "$TARGET"
-    sudo chmod +x "$TARGET"
+    sudo install -m 0755 "$tmp" "$TARGET"
   fi
+  rm -f "$tmp"
   echo "Updated. Run 'mdnest version' to confirm."
 }
 
@@ -426,8 +609,11 @@ cmd_list() {
     # file entry). Previously the deeper path was ignored and the entire
     # namespace tree came back, which was misleading.
     local tree
-    tree=$(api GET "/tree?ns=$(urlencode "$PARSED_NS")")
-    printf '%s' "$tree" | TARGET="$PARSED_PATH" python3 -c '
+    tree=$(api GET "/tree?ns=$(urlencode "$PARSED_NS")") || return 1
+    local target="${PARSED_PATH#/}"; target="${target%/}"
+
+    if have python3; then
+      printf '%s' "$tree" | TARGET="$target" python3 -c '
 import sys, json, os
 target = os.environ["TARGET"].strip("/")
 try:
@@ -447,6 +633,58 @@ if node is None:
     sys.exit("Error: path not found in namespace: " + target)
 print(json.dumps(node, indent=2))
 '
+      return $?
+    fi
+
+    if have jq; then
+      local sub
+      sub=$(printf '%s' "$tree" | jq --arg t "$target" \
+        'first(.. | objects | select((.path // "" | sub("^/";"") | sub("/$";"")) == $t))' 2>/dev/null)
+      if [ -z "$sub" ] || [ "$sub" = "null" ]; then
+        echo "Error: path not found in namespace: $target" >&2; return 1
+      fi
+      printf '%s\n' "$sub"; return 0
+    fi
+
+    # Pure-awk fallback (no python3/jq): extract the balanced {...} object whose
+    # top-level "path" equals target. Output is compact but correctly SCOPED
+    # (the actual behaviour); install python3 for pretty-printed output.
+    local sub
+    sub=$(printf '%s' "$tree" | awk -v want="$target" '
+      { buf = buf $0 }
+      END {
+        n=length(buf)
+        # locate the literal key:value  "path":"want"  (server sends compact JSON)
+        needle = "\"path\":\"" want "\""
+        pos = index(buf, needle)
+        if (pos == 0) { exit 3 }
+        # walk buf[1..pos] tracking brace depth + strings; remember the start of
+        # each open object on a stack so the innermost open one is the enclosing node
+        depth=0; instr=0; esc=0; sp=0
+        for (i=1;i<pos;i++) {
+          c=substr(buf,i,1)
+          if (instr) { if(esc){esc=0} else if(c=="\\"){esc=1} else if(c=="\""){instr=0}; continue }
+          if (c=="\"") { instr=1; continue }
+          if (c=="{") { sp++; stack[sp]=i; continue }
+          if (c=="}") { sp--; continue }
+        }
+        if (sp < 1) { exit 3 }
+        start = stack[sp]
+        # from start, scan forward to the matching close brace
+        depth=0; instr=0; esc=0
+        for (i=start;i<=n;i++) {
+          c=substr(buf,i,1)
+          if (instr) { if(esc){esc=0} else if(c=="\\"){esc=1} else if(c=="\""){instr=0}; continue }
+          if (c=="\"") { instr=1; continue }
+          if (c=="{") { depth++; continue }
+          if (c=="}") { depth--; if(depth==0){ print substr(buf,start,i-start+1); exit 0 } }
+        }
+        exit 3
+      }')
+    if [ -z "$sub" ]; then
+      echo "Error: path not found in namespace: $target" >&2; return 1
+    fi
+    printf '%s\n' "$sub"
   fi
 }
 
@@ -688,8 +926,23 @@ EXAMPLES
 HELP
 }
 
+# Test hook: `MDNEST_LIB=1 source mdnest` loads the functions above WITHOUT
+# dispatching a command, so the unit tests can exercise urlencode/urldecode/
+# json_top_string directly. When executed normally (MDNEST_LIB unset) this is a
+# no-op and dispatch proceeds. When executed (not sourced) the bare `return`
+# can't run, so it's guarded to fall through.
+if [ -n "${MDNEST_LIB:-}" ]; then return 0 2>/dev/null || exit 0; fi
+
 CMD="${1:-help}"
 shift 2>/dev/null || true
+
+# Warn ONCE, up front, if there's no JSON parser — the fallbacks below run inside
+# $(...) subshells so a guard flag set there can't reach the parent. Skip for
+# commands that neither parse nor encode (help/version/docs/logout).
+case "$CMD" in
+  help|--help|-h|version|--version|docs|logout) ;;
+  *) warn_no_parser ;;
+esac
 
 case "$CMD" in
   login)    cmd_login "$@" ;;
@@ -710,7 +963,7 @@ case "$CMD" in
   note)     cmd_note_legacy "$@" ;;
   version|--version|-v) echo "mdnest CLI v${MDNEST_CLI_VERSION}" ;;
   docs)
-    REAL_PATH="$(readlink -f "$0" 2>/dev/null || python3 -c "import os,sys; print(os.path.realpath(sys.argv[1]))" "$0")"
+    REAL_PATH="$(resolve_self "$0")"
     DOCS_DIR="$(dirname "$REAL_PATH")/docs"
     [ -f "$DOCS_DIR/cli.md" ] && cat "$DOCS_DIR/cli.md" || echo "Docs not found at $DOCS_DIR/cli.md"
     ;;

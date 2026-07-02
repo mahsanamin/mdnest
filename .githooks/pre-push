@@ -7,6 +7,18 @@ echo "=== Pre-push checks ==="
 
 FAILED=0
 
+# Detect whether this push targets main or a release branch — the paths that
+# lead into main. The full Docker end-to-end suite runs only for those (it
+# builds an image and boots a container); every other push runs the fast checks
+# only, so day-to-day pushes stay quick. git feeds pushed refs on stdin as
+# "<local_ref> <local_oid> <remote_ref> <remote_oid>".
+RUN_E2E=0
+while read -r _lref _loid remote_ref _roid; do
+  case "$remote_ref" in
+    refs/heads/main|refs/heads/release/*) RUN_E2E=1 ;;
+  esac
+done
+
 # 1. Frontend: verify build compiles
 echo -n "Frontend build... "
 if (cd frontend && npx vite build --mode production) > /dev/null 2>&1; then
@@ -26,12 +38,28 @@ else
   FAILED=1
 fi
 
-# 2. Backend: verify Go compiles
+# 2. Backend: verify Go compiles. On a Docker-only machine (no host Go
+# toolchain) this is skipped — the release-tier Docker E2E below builds the
+# backend image for real, so a broken build still can't reach main.
 echo -n "Backend build... "
-if (cd backend && go build -o /dev/null .) > /dev/null 2>&1; then
+if ! command -v go >/dev/null 2>&1; then
+  echo "SKIPPED (no host Go — the Docker E2E build covers this on release pushes)"
+elif (cd backend && go build -o /dev/null .) > /dev/null 2>&1; then
   echo "OK"
 else
   echo "FAILED"
+  FAILED=1
+fi
+
+# 2b. CLI unit tests: pure helpers, run WITH python3 and with it force-disabled.
+# Fast (<1s), no network — the cheap guard against the class of bug that broke
+# the CLI on a fresh machine (a hard python3 dependency with no fallback).
+echo -n "CLI unit tests... "
+if bash tests/cli-unit.sh > /dev/null 2>&1; then
+  echo "OK"
+else
+  echo "FAILED"
+  echo "  Run: bash tests/cli-unit.sh"
   FAILED=1
 fi
 
@@ -63,8 +91,18 @@ fi
 #     image's golang base often clears these even when the local
 #     `go` toolchain is older)
 #   anything else with vuln output → BLOCK (dependency vuln)
-GOVULNCHECK="$(go env GOPATH 2>/dev/null)/bin/govulncheck"
-if [ -x "$GOVULNCHECK" ]; then
+# Resolve the govulncheck path only if Go exists. Guarding on `command -v go`
+# first is essential under `set -e`: `X="$(go env ...)"` when go is missing
+# fails the command substitution (127) and a failing substitution in a
+# top-level assignment aborts the whole script — which previously killed the
+# hook here on any machine without Go, before the lock-file / version / E2E
+# steps below ever ran.
+if command -v go >/dev/null 2>&1; then
+  GOVULNCHECK="$(go env GOPATH 2>/dev/null)/bin/govulncheck"
+else
+  GOVULNCHECK=""
+fi
+if [ -n "$GOVULNCHECK" ] && [ -x "$GOVULNCHECK" ]; then
   echo -n "Backend security (govulncheck)... "
   # Binary mode, mirroring CI: govulncheck v1.4.0's source-mode call-graph
   # analysis segfaults under the Go 1.26.x toolchain go.mod pins. Build the
@@ -109,10 +147,16 @@ else
   FAILED=1
 fi
 
-# 7. Version consistency: all three version strings must match
-BE_VER=$(grep -o '"version":.*"[0-9.]*"' backend/handlers/config.go | grep -o '[0-9.]*')
-FE_VER=$(grep -o '"version": "[0-9.]*"' frontend/package.json | grep -o '[0-9.]*')
-CLI_VER=$(grep -o 'MDNEST_CLI_VERSION="[0-9.]*"' mdnest | grep -o '[0-9.]*')
+# 7. Version consistency: all three version strings must match.
+# Capture the FULL quoted version incl. any pre-release suffix (e.g.
+# "3.11.4-dev" on develop) — the old '[0-9.]*' pattern matched nothing on a
+# -dev version, which both broke the check and (under set -e) aborted the hook
+# at these assignments. Piping through sed keeps the substitution exit at 0
+# even if grep matches nothing, so a bad extraction reports a mismatch instead
+# of silently killing the hook.
+BE_VER=$(grep -oE '"version":[[:space:]]*"[^"]+"' backend/handlers/config.go | head -1 | sed -E 's/.*"([^"]+)"$/\1/')
+FE_VER=$(grep -oE '"version":[[:space:]]*"[^"]+"' frontend/package.json | head -1 | sed -E 's/.*"([^"]+)"$/\1/')
+CLI_VER=$(grep -oE 'MDNEST_CLI_VERSION="[^"]+"' mdnest | head -1 | sed -E 's/.*"([^"]+)"$/\1/')
 
 echo -n "Version consistency... "
 if [ "$BE_VER" = "$FE_VER" ] && [ "$FE_VER" = "$CLI_VER" ]; then
@@ -143,6 +187,47 @@ if command -v shellcheck >/dev/null 2>&1; then
   fi
 else
   echo "Shell scripts: skipped (shellcheck not installed — brew install shellcheck)"
+fi
+
+# 9. End-to-end (Docker): build the backend from the working tree, boot a
+# throwaway instance, and drive the REAL CLI against it — on the host AND inside
+# a bare no-python3 container. Runs only when pushing toward main (release/* or
+# main), since it builds an image. Skippable in a true emergency with
+# MDNEST_SKIP_E2E=1. Requires a running Docker daemon; skipped (not failed) if
+# absent so a machine without Docker can still push non-release branches.
+if [ "$RUN_E2E" -eq 1 ] && [ "${MDNEST_SKIP_E2E:-0}" != "1" ]; then
+  echo -n "End-to-end (Docker CLI ↔ backend)... "
+  if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+    echo "SKIPPED (docker not available — run 'bash tests/e2e-docker.sh' before merging)"
+  elif bash tests/e2e-docker.sh > /tmp/mdnest-e2e.log 2>&1; then
+    echo "OK"
+  else
+    echo "FAILED"
+    echo "  See /tmp/mdnest-e2e.log — reproduce with: bash tests/e2e-docker.sh"
+    FAILED=1
+  fi
+
+  # 9b. Browser end-to-end (Playwright): boot the FULL stack (nginx frontend +
+  # backend) and drive the important UI flows in a real browser — login, tree,
+  # open/render a note, Live + Basic editors, search, create. Needs node +
+  # Playwright's Chromium; exit 2 means prerequisites are missing → SKIP (not
+  # fail) so a machine without them can still push.
+  echo -n "Browser E2E (Playwright UI)... "
+  if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1 || ! command -v node >/dev/null 2>&1; then
+    echo "SKIPPED (docker+node needed — run 'bash tests/e2e-browser.sh' before merging)"
+  else
+    bash tests/e2e-browser.sh > /tmp/mdnest-e2e-browser.log 2>&1
+    rc=$?
+    if [ "$rc" -eq 0 ]; then
+      echo "OK"
+    elif [ "$rc" -eq 2 ]; then
+      echo "SKIPPED (Playwright prerequisites missing — see /tmp/mdnest-e2e-browser.log)"
+    else
+      echo "FAILED"
+      echo "  See /tmp/mdnest-e2e-browser.log — reproduce with: bash tests/e2e-browser.sh"
+      FAILED=1
+    fi
+  fi
 fi
 
 echo ""
