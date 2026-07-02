@@ -4,7 +4,7 @@ All notable changes to mdnest are documented here.
 
 ---
 
-## v3.11.4 — git-sync self-healing + broken-sync indicator
+## v3.11.4 — git-sync self-healing, fresh-machine CLI, tree memory + local test gate
 
 ### Bug fixes
 
@@ -13,20 +13,13 @@ All notable changes to mdnest are documented here.
 - **A fresh multi-mode install is usable out of the box again.** The first-run bootstrap seeded its one account with the literal role `admin`, which since the v3.5.0 three-tier role split means "namespace-scoped admin with no namespaces assigned" — so the only account saw zero namespaces and had no way to grant itself access (the grant dropdowns are themselves role-filtered). Migration 007 only promotes pre-existing `admin` rows, not ones the seed creates after it runs. The bootstrap account is now seeded as `superadmin` (global); the existing `count == 0` guard keeps this to the very first user, so later invitees are unaffected.
 - **The `mdnest` CLI works on a fresh machine without `python3`.** The CLI hard-depended on `python3` for URL-encoding note paths, parsing the server version, and scoping `list <subfolder>` — with no fallback. On a machine without `python3`, note commands broke and `mdnest servers` labelled a perfectly reachable server "unreachable" because it conflated a failed *fetch* with a failed *parse*. Now `urlencode`/`urldecode` have pure-bash fallbacks, JSON fields are read via `python3` → `jq` → a brace-depth-aware `awk` (so the top-level `version` is returned, not `latestRelease.version`), and `list <subfolder>` scoping falls back to `jq` then an `awk` subtree extractor. `mdnest servers` now separates connectivity from parsing (using curl's exit code) and reports the real reason on failure (DNS/refused/timeout/TLS), with a `--connect-timeout` so it never hangs. A one-time note suggests installing `python3` for the best experience.
 - **The CLI installer no longer aborts mid-download on a fresh machine.** `install-cli.sh` wrote curl's output straight to `/usr/local/bin/mdnest`, which fails with `curl: (56) Failure writing output to destination` when that directory doesn't exist yet or isn't writable. It now downloads to a temp file, sanity-checks it, creates the target directory, and installs atomically — with a `~/.local/bin` fallback (plus a PATH hint) when `/usr/local/bin` can't be used. `mdnest update` uses the same safe temp-download + atomic-install path.
+- **Left tree remembers which folders are open, per namespace.** A refresh used to re-expand all top-level folders and forget whatever you'd collapsed, and the expand/collapse icons flickered. Expansion is now a per-namespace set persisted in `localStorage` (restored on load and namespace switch); the open file's ancestors still auto-reveal and search still force-expands matches.
+- **Folders containing the open file can be collapsed again.** A regression made any folder on the path to the currently-open note impossible to collapse — it sprang back open immediately. The tree used to force such folders expanded (`containsActive`); now the open file's ancestors are added to the persisted expansion set once (so they auto-reveal) but stay freely collapsible.
+- **Copy Path is now unambiguous, and `mdnest://` URIs work in the CLI.** Copy Path produced `mdnest://@alias/ns/<path>` with raw spaces, so a path like `19 Jun 2026.md` looked like three tokens to an LLM/shell. Path segments are now percent-encoded (`19%20Jun%202026.md`), and the CLI's `parse_path` strips a leading `mdnest://` and percent-decodes the namespace + path, so the copied URI is usable verbatim (raw CLI paths containing a literal `%` are left untouched).
 
 ### Testing
 
 - **Local, end-to-end pre-merge test gate — no CI/remote required.** A tiered harness runs before code reaches `main`: `tests/cli-unit.sh` (instant pure-function checks, run both with `python3` and with it force-disabled — the cheap guard for the fresh-machine regression class); `tests/e2e-docker.sh` (builds the backend from the working tree, boots a throwaway single-mode instance, and drives the real CLI against it on the host **and** inside a bare no-python3 container); and `tests/e2e-browser.sh` (boots the full frontend+backend stack and runs a Playwright browser suite covering login, tree, opening/rendering a note, the Live and Basic editors, search, and note creation). The pre-push hook runs the unit tests on every push and the full Docker + browser suites when pushing toward `main`. The Docker harness immediately caught the `list <subfolder>` no-python3 gap fixed above.
-
----
-
-## v3.11.3 — Tree expansion memory + copy-path escaping
-
-### Bug fixes
-
-- **Left tree remembers which folders are open, per namespace.** A refresh used to re-expand all top-level folders and forget whatever you'd collapsed, and the expand/collapse icons flickered. Expansion is now a per-namespace set persisted in `localStorage` (restored on load and namespace switch); the open file's ancestors still auto-reveal and search still force-expands matches.
-- **Folders containing the open file can be collapsed again.** A regression made any folder on the path to the currently-open note impossible to collapse — it sprang back open immediately. The tree used to force such folders expanded (`containsActive`); now the open file's ancestors are added to the persisted expansion set once (so they auto-reveal) but stay freely collapsible.
-- **Copy Path is now unambiguous, and `mdnest://` URIs work in the CLI.** Copy Path produced `mdnest://@alias/ns/<path>` with raw spaces, so a path like `19 Jun 2026.md` looked like three tokens to an LLM/shell. Path segments are now percent-encoded (`19%20Jun%202026.md`), and the CLI's `parse_path` strips a leading `mdnest://` and percent-decodes the namespace + path, so the copied URI is usable verbatim (raw CLI paths containing a literal `%` are left untouched).
 
 ---
 
