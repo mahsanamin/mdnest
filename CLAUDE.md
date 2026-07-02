@@ -215,16 +215,42 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 
 ## Testing
 
+**Tiered, fully-local test strategy — no CI/remote needed.** All of it runs on the
+host via Docker; the pre-push hook (`.githooks/pre-push`) wires it into the
+release flow so nothing broken reaches `main`. Fast checks run on every push; the
+heavier end-to-end suites run only when pushing toward `main` (a `release/*` or
+`main` ref — detected from the refs git feeds the hook on stdin). Emergency
+override: `MDNEST_SKIP_E2E=1`.
+
+- **Fast tier (every push):**
+  - `tests/cli-unit.sh` — instant pure-function checks of the CLI helpers
+    (`urlencode`/`urldecode`/`json_top_string`), run **twice**: with `python3`
+    and with `python3`/`jq` force-disabled. This is the cheap guard for the
+    class of bug where the CLI silently breaks on a machine without `python3`.
+    Uses the CLI's `MDNEST_LIB=1 source mdnest` hook to load the real functions.
+  - Plus the existing builds, `npm test`, audits, version consistency, shellcheck.
 - **CLI smoke test**: `tests/cli-smoke-test.sh` exercises every `mdnest` note
-  operation (create/write/append/prepend/read/move/delete/search/list) plus the
-  stdin edge cases (`-` parity, dash-guard, empty-content rejection) end-to-end
-  against a disposable namespace. Run it after any change to the `mdnest` CLI.
-- It targets the `testing_workspace` namespace by default — add
-  `MOUNT_testing_workspace=<host_path>` to `mdnest.conf` and `./mdnest-server
-  reload` to mount it. Override with `MDNEST_TEST_NS` / `MDNEST_TEST_ALIAS`, and
-  `MDNEST_BIN` to point at a specific CLI build (defaults to the repo's `./mdnest`).
-- The harness creates everything under a unique `__clitest_*` folder and deletes
-  it on exit; it returns non-zero if any check fails.
+  operation (create/write/append/prepend/read/move/delete/search/list, subfolder
+  scoping, `mdnest://` decode) plus the stdin edge cases end-to-end against a
+  disposable namespace. Targets `testing_workspace` by default (add
+  `MOUNT_testing_workspace=<host_path>` to `mdnest.conf` + `./mdnest-server
+  reload`). Override with `MDNEST_TEST_NS` / `MDNEST_TEST_ALIAS` / `MDNEST_BIN`.
+  Creates everything under a unique `__clitest_*` folder and deletes it on exit.
+- **End-to-end tier (pushing toward `main`):**
+  - `tests/e2e-docker.sh` — builds the **backend from the working tree**, boots a
+    throwaway single-mode instance, mints a token, and runs the CLI smoke test
+    against it **twice**: on the host (python3 present) and inside a **bare
+    `alpine` container with no python3/jq** (the truest fresh-machine repro).
+  - `tests/e2e-browser.sh` — builds **frontend + backend**, boots the full nginx
+    stack, seeds a note, then runs the **Playwright** suite in `tests/browser/`
+    (login, tree, open/render a note, Live [Crepe] + Basic editors, search,
+    create-via-UI). Installs Playwright + Chromium into `tests/browser/` on first
+    run. Exit code 2 = prerequisites (docker/node) missing → the hook SKIPs it.
+- **Adding a regression test is part of fixing a bug** (see `md-fix-bugs`): add a
+  check to the layer that would have caught it — a CLI-behaviour bug → a
+  `cli-smoke-test.sh` assertion; a parser/fallback bug → a `cli-unit.sh` case; a
+  UI bug → a `tests/browser` spec. The point of the harness is that the next
+  regression of the same shape fails loudly and locally before merge.
 
 ## Documentation
 

@@ -141,8 +141,11 @@ assert_contains "search finds unique token" "$token" "$(m search "$BASE" "$token
 assert_contains "list namespace returns the run folder" "$RUN_DIR" "$(m list "$BASE" 2>/dev/null)"
 
 # ── 13b. list scopes to a subfolder (not the whole namespace) ────────────────
+# Assert on the JSON *values* (name + a child file), not on colon spacing — the
+# output is pretty-printed with python3/jq and compact on a bare (no-parser)
+# machine, but both must be correctly scoped to the subfolder.
 sublist="$(m list "$ROOT" 2>/dev/null)"
-assert_contains "list subfolder is scoped to that folder" "\"name\": \"$RUN_DIR\"" "$sublist"
+assert_contains "list subfolder is scoped to that folder" "\"$RUN_DIR\"" "$sublist"
 assert_contains "list subfolder shows its own files" "order.md" "$sublist"
 assert_fails "list missing subfolder errors" -- m list "$ROOT/does-not-exist"
 
