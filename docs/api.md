@@ -600,6 +600,38 @@ Returns the current user's profile, role, access grants, and (v3.5.0+) the names
 
 ---
 
+### GET /api/admin/sync-status?ns=\<namespace\>
+
+Report git-sync state for a namespace. Works in single mode (no user context → allowed) and multi mode (superadmin, or an admin of that namespace). Returns the repo/remote facts plus — when the git-sync daemon is running — its self-reported health, read from a git-excluded `.mdnest-sync-status.json` the daemon writes each cycle.
+
+```json
+{
+  "isGitRepo": true,
+  "hasRemote": true,
+  "remoteUrl": "git@github.com:you/notes.git",
+  "branch": "main",
+  "lastCommit": "2026-07-02 16:53:09 +0000",
+  "hasSSHKey": true,
+  "daemonState": "ok",
+  "daemonMessage": "",
+  "daemonUpdated": "2026-07-02T16:53:00Z",
+  "ahead": 0,
+  "behind": 0
+}
+```
+
+- `daemonState` — `ok`, `error`, or `local-only` (committed locally, no remote/key). Absent if the daemon hasn't written a status yet.
+- `daemonMessage` — human-readable reason when `daemonState` is `error` (e.g. "diverged from upstream (not fast-forward)").
+- `ahead` / `behind` — commit counts vs the upstream at the daemon's last cycle.
+
+The sidebar polls this every 60s and shows a red ✕ + **Retry** when `daemonState` is `error`, so a wedged background sync is visible instead of silent (v3.11.4+).
+
+### POST /api/admin/sync?ns=\<namespace\>
+
+Trigger an immediate sync for a namespace (commit pending changes, pull `--ff-only`, push). Same auth as `sync-status`. This is what the sidebar **Retry** / **Sync** button calls.
+
+---
+
 ## Search
 
 ### GET /api/search

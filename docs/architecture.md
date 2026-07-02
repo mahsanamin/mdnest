@@ -167,7 +167,14 @@ mdnest/
     package.json
 
   git-sync/
-    sync.sh                    # commit + pull + push loop, runs every GIT_SYNC_INTERVAL.
+    sync.sh                    # commit + merge-only pull + push loop, every GIT_SYNC_INTERVAL.
+                               #   Self-healing (v3.11.4+): autostashes late live-collab writes so
+                               #   a merge can always start, resolves real conflicts by keeping the
+                               #   remote (local saved as .sync-conflict-*), aborts cleanly if the
+                               #   merge can't begin, and gates push on a fast-forward so it never
+                               #   loops on a diverged+dirty tree. Writes a git-excluded
+                               #   .mdnest-sync-status.json (state/ahead/behind/message) the backend
+                               #   overlays onto GET /api/admin/sync-status for the UI health indicator.
     keys/                      # Per-namespace SSH keys (gitignored).
 
   mdnest                       # Client CLI — multi-server, @alias-based path syntax.

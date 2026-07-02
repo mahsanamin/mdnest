@@ -44,6 +44,7 @@ Below the namespace selector, the folder tree shows all files and folders in the
 - Click a **folder** to expand or collapse it.
 - Click a **file** to open it in the editor.
 - Hidden files (those starting with `.`) are not shown. This keeps `.git` directories and other dotfiles out of the way.
+- **The tree remembers which folders you had open, per namespace** (v3.11.4+). A refresh or namespace switch restores your expanded folders instead of re-expanding everything; the folder holding the currently-open file auto-reveals but can still be collapsed.
 
 On mobile, tap the hamburger menu icon in the top-left corner to show or hide the sidebar.
 
@@ -212,6 +213,8 @@ If `git-sync/keys/` is empty, no remote backup exists. Recovery options narrow:
 **Strong recommendation:** if you keep anything important in mdnest, enable git-sync. It's the difference between "10 minutes of edits at risk" and "everything since the last good copy is gone."
 
 For the common case, the in-app History modal (v3.7.0+) handles it without leaving mdnest -- the manual paths above are still useful for renamed files, bulk recoveries, or restoring multiple files at once.
+
+**Sync health indicator (v3.11.4+).** When git-sync is enabled, the sidebar shows its status. If the background sync ever breaks (a diverged history it can't fast-forward, a rejected push, an unreachable remote), you'll see a red ✕ with "Git sync broken" and the reason on hover — instead of a stale "Synced X ago" that hides the problem. Admins get a **Retry** button that runs a commit + pull + push immediately. The daemon also self-heals most divergence on its own each cycle.
 
 ---
 
