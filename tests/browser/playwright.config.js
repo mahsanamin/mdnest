@@ -15,6 +15,9 @@ export default defineConfig({
   use: {
     baseURL: process.env.MDNEST_BASE_URL || 'http://127.0.0.1:8080',
     headless: true,
+    // Grant clipboard access so the Settings copy-button test can use the
+    // async Clipboard API (127.0.0.1 is a secure context) without a prompt.
+    permissions: ['clipboard-read', 'clipboard-write'],
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure',
     video: 'off',

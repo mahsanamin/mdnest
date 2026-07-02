@@ -72,3 +72,17 @@ test('creating a note via the UI opens it', async ({ page }) => {
   await page.click('button:has-text("+ Note")');
   await expect(page.locator('.toolbar-path')).toContainText(name, { timeout: 20_000 });
 });
+
+test('Settings → CLI tab has working copy buttons', async ({ page }) => {
+  await login(page);
+  await page.click('button[title="Settings"]');
+  await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
+  await page.click('.settings-tabs button:has-text("CLI")');
+  const copyBtns = page.locator('.settings-copy-btn');
+  await expect(copyBtns.first()).toBeVisible();
+  // Every command block should have one (install, login, start-using, multi-server).
+  expect(await copyBtns.count()).toBeGreaterThanOrEqual(4);
+  // Clicking copies and flips the button into its "Copied!" state.
+  await copyBtns.first().click();
+  await expect(copyBtns.first()).toHaveAttribute('title', 'Copied!');
+});

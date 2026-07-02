@@ -6,6 +6,51 @@ function getServerUrl() {
   return window.location.origin;
 }
 
+// A code snippet with a one-click copy button. Uses the async Clipboard API
+// when available (HTTPS / localhost) and falls back to execCommand for
+// non-secure contexts (a LAN install served over plain http), so copy works
+// everywhere mdnest runs.
+function CodeBlock({ code, label }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(code);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = code;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch { /* clipboard blocked — no-op */ }
+  };
+  return (
+    <div className="settings-code">
+      {label && <div className="code-label">{label}</div>}
+      <button
+        type="button"
+        className={`settings-copy-btn${copied ? ' copied' : ''}`}
+        onClick={copy}
+        title={copied ? 'Copied!' : 'Copy'}
+        aria-label={copied ? 'Copied' : 'Copy to clipboard'}
+      >
+        {copied ? (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+        ) : (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+        )}
+      </button>
+      <pre>{code}</pre>
+    </div>
+  );
+}
+
 function Settings({ onClose, userProvider }) {
   const [tab, setTab] = useState('tokens');
   // Hide Credentials + 2FA in any federated mode — identity lives with the
@@ -170,9 +215,7 @@ function CliTab() {
           <span>Install the CLI (one command):</span>
         </div>
       </div>
-      <div className="settings-code">
-        <pre>curl -fsSL https://raw.githubusercontent.com/mahsanamin/mdnest/main/install-cli.sh | bash</pre>
-      </div>
+      <CodeBlock code="curl -fsSL https://raw.githubusercontent.com/mahsanamin/mdnest/main/install-cli.sh | bash" />
 
       <div className="settings-steps">
         <div className="settings-step">
@@ -180,9 +223,7 @@ function CliTab() {
           <span>Create an API token in the <strong>API Tokens</strong> tab, then login:</span>
         </div>
       </div>
-      <div className="settings-code">
-        <pre>{`mdnest login ${serverUrl} <your-token>`}</pre>
-      </div>
+      <CodeBlock code={`mdnest login ${serverUrl} <your-token>`} />
 
       <div className="settings-steps">
         <div className="settings-step">
@@ -190,25 +231,21 @@ function CliTab() {
           <span>Start using it:</span>
         </div>
       </div>
-      <div className="settings-code">
-        <pre>{`mdnest list                              # list namespaces
+      <CodeBlock code={`mdnest list                              # list namespaces
 mdnest list <namespace>                  # list files
 mdnest read <namespace>/path/to/note.md  # read a note
 mdnest search <namespace> "query"        # search
 mdnest write <namespace>/path.md "text"  # write
-echo "text" | mdnest append <namespace>/log.md -  # pipe`}</pre>
-      </div>
+echo "text" | mdnest append <namespace>/log.md -  # pipe`} />
 
       <h4 className="settings-section-title">Multi-Server</h4>
       <p className="settings-description">
         Manage multiple mdnest servers with @alias paths:
       </p>
-      <div className="settings-code">
-        <pre>{`mdnest login @work ${serverUrl} <token>
+      <CodeBlock code={`mdnest login @work ${serverUrl} <token>
 mdnest login @personal https://home:3236 <token>
 mdnest read @work/<namespace>/path.md
-mdnest servers                           # list all servers`}</pre>
-      </div>
+mdnest servers                           # list all servers`} />
     </div>
   );
 }
@@ -237,9 +274,7 @@ function McpTab() {
           <span>Install dependencies:</span>
         </div>
       </div>
-      <div className="settings-code">
-        <pre>cd mcp-server && npm install</pre>
-      </div>
+      <CodeBlock code="cd mcp-server && npm install" />
 
       <div className="settings-steps">
         <div className="settings-step">
@@ -247,8 +282,7 @@ function McpTab() {
           <span>Add to your MCP client config (e.g. Claude Desktop):</span>
         </div>
       </div>
-      <div className="settings-code">
-        <pre>{`{
+      <CodeBlock code={`{
   "mcpServers": {
     "mdnest": {
       "command": "node",
@@ -259,8 +293,7 @@ function McpTab() {
       }
     }
   }
-}`}</pre>
-      </div>
+}`} />
 
       <h4 className="settings-section-title">Available Tools</h4>
       <div className="settings-tool-list">
@@ -293,44 +326,27 @@ function ApiTab() {
       </div>
 
       <h4 className="settings-section-title">Authentication</h4>
-      <div className="settings-code">
-        <pre>{`# Use your API token
+      <CodeBlock code={`# Use your API token
 curl -H "Authorization: Bearer mdnest_your_token_here" \\
-  ${serverUrl}/api/namespaces`}</pre>
-      </div>
+  ${serverUrl}/api/namespaces`} />
 
       <h4 className="settings-section-title">Examples</h4>
 
-      <div className="settings-code">
-        <div className="code-label">List namespaces</div>
-        <pre>{`curl -H "Authorization: Bearer $TOKEN" \\
-  ${serverUrl}/api/namespaces`}</pre>
-      </div>
+      <CodeBlock label="List namespaces" code={`curl -H "Authorization: Bearer $TOKEN" \\
+  ${serverUrl}/api/namespaces`} />
 
-      <div className="settings-code">
-        <div className="code-label">Get file tree</div>
-        <pre>{`curl -H "Authorization: Bearer $TOKEN" \\
-  "${serverUrl}/api/tree?ns=my_notes"`}</pre>
-      </div>
+      <CodeBlock label="Get file tree" code={`curl -H "Authorization: Bearer $TOKEN" \\
+  "${serverUrl}/api/tree?ns=my_notes"`} />
 
-      <div className="settings-code">
-        <div className="code-label">Read a note</div>
-        <pre>{`curl -H "Authorization: Bearer $TOKEN" \\
-  "${serverUrl}/api/note?ns=my_notes&path=ideas/project.md"`}</pre>
-      </div>
+      <CodeBlock label="Read a note" code={`curl -H "Authorization: Bearer $TOKEN" \\
+  "${serverUrl}/api/note?ns=my_notes&path=ideas/project.md"`} />
 
-      <div className="settings-code">
-        <div className="code-label">Create a note</div>
-        <pre>{`curl -X POST -H "Authorization: Bearer $TOKEN" \\
+      <CodeBlock label="Create a note" code={`curl -X POST -H "Authorization: Bearer $TOKEN" \\
   -d "# New Note" \\
-  "${serverUrl}/api/note?ns=my_notes&path=new-note.md"`}</pre>
-      </div>
+  "${serverUrl}/api/note?ns=my_notes&path=new-note.md"`} />
 
-      <div className="settings-code">
-        <div className="code-label">Search</div>
-        <pre>{`curl -H "Authorization: Bearer $TOKEN" \\
-  "${serverUrl}/api/search?ns=my_notes&q=kubernetes"`}</pre>
-      </div>
+      <CodeBlock label="Search" code={`curl -H "Authorization: Bearer $TOKEN" \\
+  "${serverUrl}/api/search?ns=my_notes&q=kubernetes"`} />
     </div>
   );
 }
