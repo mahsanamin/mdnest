@@ -176,6 +176,24 @@ api() {
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# Resolve this script's real path (following symlinks) WITHOUT depending on
+# `readlink -f` (unsupported on macOS/BSD) or python3 — both of which are absent
+# on a bare fresh machine, where the old fallback left the path empty and broke
+# `mdnest update` / `mdnest docs`.
+resolve_self() {
+  local src="$1" dir link
+  while [ -L "$src" ]; do
+    dir="$(cd -P "$(dirname "$src")" 2>/dev/null && pwd)"
+    link="$(readlink "$src")"
+    case "$link" in
+      /*) src="$link" ;;
+      *)  src="$dir/$link" ;;
+    esac
+  done
+  dir="$(cd -P "$(dirname "$src")" 2>/dev/null && pwd)"
+  printf '%s/%s\n' "$dir" "$(basename "$src")"
+}
+
 # Warn ONCE if we have no JSON parser at all, so the degraded-but-working state
 # is visible rather than mysterious. Fallbacks below still work without it.
 _dep_warned=0
@@ -533,8 +551,11 @@ cmd_whoami() {
 # inode alive until the current process exits; the next invocation
 # picks up the new code. Uses the same source as install-cli.sh.
 cmd_update() {
-  REPO_URL="https://raw.githubusercontent.com/mahsanamin/mdnest/main"
-  REAL_PATH="$(readlink -f "$0" 2>/dev/null || python3 -c "import os,sys; print(os.path.realpath(sys.argv[1]))" "$0")"
+  # Update from the same branch the CLI was installed from — override with
+  # MDNEST_BRANCH=develop to track an unreleased build.
+  BRANCH="${MDNEST_BRANCH:-main}"
+  REPO_URL="https://raw.githubusercontent.com/mahsanamin/mdnest/${BRANCH}"
+  REAL_PATH="$(resolve_self "$0")"
   TARGET="$REAL_PATH"
 
   CURRENT="${MDNEST_CLI_VERSION}"
@@ -942,7 +963,7 @@ case "$CMD" in
   note)     cmd_note_legacy "$@" ;;
   version|--version|-v) echo "mdnest CLI v${MDNEST_CLI_VERSION}" ;;
   docs)
-    REAL_PATH="$(readlink -f "$0" 2>/dev/null || python3 -c "import os,sys; print(os.path.realpath(sys.argv[1]))" "$0")"
+    REAL_PATH="$(resolve_self "$0")"
     DOCS_DIR="$(dirname "$REAL_PATH")/docs"
     [ -f "$DOCS_DIR/cli.md" ] && cat "$DOCS_DIR/cli.md" || echo "Docs not found at $DOCS_DIR/cli.md"
     ;;

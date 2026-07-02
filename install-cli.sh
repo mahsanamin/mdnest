@@ -1,13 +1,18 @@
 #!/bin/bash
 # mdnest CLI installer — run with:
 #   curl -fsSL https://raw.githubusercontent.com/mahsanamin/mdnest/main/install-cli.sh | bash
+#
+# Install from a different branch (e.g. to try an unreleased build):
+#   curl -fsSL https://raw.githubusercontent.com/mahsanamin/mdnest/develop/install-cli.sh | MDNEST_BRANCH=develop bash
 set -e
 
-REPO="https://raw.githubusercontent.com/mahsanamin/mdnest/main"
+# Which branch to pull the CLI from (default: main = the latest release).
+BRANCH="${MDNEST_BRANCH:-main}"
+REPO="https://raw.githubusercontent.com/mahsanamin/mdnest/${BRANCH}"
 BIN_DIR="/usr/local/bin"
 NAME="mdnest"
 
-echo "Installing mdnest CLI..."
+echo "Installing mdnest CLI (branch: ${BRANCH})..."
 
 # Download to a temp file FIRST, then install atomically. Writing curl's output
 # straight to /usr/local/bin/mdnest fails on a fresh machine when that directory
