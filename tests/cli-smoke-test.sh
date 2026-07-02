@@ -141,14 +141,22 @@ assert_contains "search finds unique token" "$token" "$(m search "$BASE" "$token
 assert_contains "list namespace returns the run folder" "$RUN_DIR" "$(m list "$BASE" 2>/dev/null)"
 
 # ── 13b. list scopes to a subfolder (not the whole namespace) ────────────────
+# Assert on the JSON *values* (name + a child file), not on colon spacing — the
+# output is pretty-printed with python3/jq and compact on a bare (no-parser)
+# machine, but both must be correctly scoped to the subfolder.
 sublist="$(m list "$ROOT" 2>/dev/null)"
-assert_contains "list subfolder is scoped to that folder" "\"name\": \"$RUN_DIR\"" "$sublist"
+assert_contains "list subfolder is scoped to that folder" "\"$RUN_DIR\"" "$sublist"
 assert_contains "list subfolder shows its own files" "order.md" "$sublist"
 assert_fails "list missing subfolder errors" -- m list "$ROOT/does-not-exist"
 
 # ── 14. delete removes a file ───────────────────────────────────────────────
 m delete "$ROOT/search.md" >/dev/null 2>&1
 assert_fails "delete removes the file" -- m read "$ROOT/search.md"
+
+# ── 15. mdnest:// copy-path URI with %-encoding decodes to the right file ────
+m create "$ROOT/sp ace.md" "spaced body" >/dev/null 2>&1
+assert_eq "mdnest:// URI percent-decodes to the spaced file" "spaced body" "$(m read "mdnest://${BASE}/${RUN_DIR}/sp%20ace.md" 2>/dev/null)"
+m delete "$ROOT/sp ace.md" >/dev/null 2>&1
 
 # ── Summary ─────────────────────────────────────────────────────────────────
 echo

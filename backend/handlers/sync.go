@@ -55,6 +55,24 @@ type syncStatusResponse struct {
 	Branch     string `json:"branch,omitempty"`
 	LastCommit string `json:"lastCommit,omitempty"` // date of last commit
 	HasSSHKey  bool   `json:"hasSSHKey"`
+	// Daemon health — read from the git-sync daemon's self-reported
+	// .mdnest-sync-status.json. Lets the UI surface a broken background sync
+	// (stuck / diverged / push rejected) that the last-commit date alone hides.
+	DaemonState   string `json:"daemonState,omitempty"` // "ok" | "error" | "local-only"
+	DaemonMessage string `json:"daemonMessage,omitempty"`
+	DaemonUpdated string `json:"daemonUpdated,omitempty"`
+	Behind        int    `json:"behind"`
+	Ahead         int    `json:"ahead"`
+}
+
+// daemonSyncStatus mirrors the JSON the git-sync daemon writes per namespace
+// to .mdnest-sync-status.json (git-excluded).
+type daemonSyncStatus struct {
+	State   string `json:"state"`
+	Message string `json:"message"`
+	Ahead   int    `json:"ahead"`
+	Behind  int    `json:"behind"`
+	Updated string `json:"updated"`
 }
 
 // HandleSyncStatus handles GET /api/admin/sync-status?ns=<namespace>.
@@ -112,6 +130,21 @@ func (h *SyncHandler) HandleSyncStatus(w http.ResponseWriter, r *http.Request) {
 			resp.HasSSHKey = true
 		} else if _, err := os.Stat("/root/.ssh/deploy_key"); err == nil {
 			resp.HasSSHKey = true
+		}
+	}
+
+	// Overlay the git-sync daemon's self-reported health, if it has written one.
+	// The file is git-excluded, so it reflects the live background sync (stuck /
+	// diverged / push rejected) rather than a commit — surfacing failures the
+	// last-commit date alone would hide.
+	if raw, err := os.ReadFile(filepath.Join(nsDir, ".mdnest-sync-status.json")); err == nil {
+		var ds daemonSyncStatus
+		if json.Unmarshal(raw, &ds) == nil {
+			resp.DaemonState = ds.State
+			resp.DaemonMessage = ds.Message
+			resp.DaemonUpdated = ds.Updated
+			resp.Ahead = ds.Ahead
+			resp.Behind = ds.Behind
 		}
 	}
 

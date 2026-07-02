@@ -486,6 +486,21 @@
   margin-left: auto;
 }
 
+/* Broken background git-sync: red cross + red label so a wedged daemon
+   (diverged / push rejected) is visible instead of silent. */
+.sync-status-cross {
+  color: #f38ba8;
+  font-weight: 700;
+  font-size: 0.8rem;
+  line-height: 1;
+  cursor: help;
+}
+
+.sync-status-error-text {
+  color: #f38ba8;
+  font-weight: 600;
+}
+
 .sync-disabled {
   color: #585b70;
   font-size: 0.85rem;
@@ -2295,11 +2310,40 @@ pre:hover .code-copy-btn {
 }
 
 .settings-code {
+  position: relative;
   background: #11111b;
   border: 1px solid #313244;
   border-radius: 6px;
   padding: 0.6rem 0.8rem;
+  padding-right: 2.4rem; /* room for the copy button so it never overlaps text */
   margin: 0.4rem 0 0.8rem;
+}
+
+/* One-click copy button on each settings code block (CLI / MCP / API tabs). */
+.settings-copy-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  background: #313244;
+  color: #a6adc8;
+  border: 1px solid #45475a;
+  border-radius: 5px;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.15s, background 0.15s, color 0.15s, border-color 0.15s;
+}
+.settings-code:hover .settings-copy-btn { opacity: 1; }
+.settings-copy-btn:hover { background: #45475a; color: #cdd6f4; }
+.settings-copy-btn.copied {
+  color: #a6e3a1;
+  border-color: #a6e3a1;
+  opacity: 1;
 }
 
 .settings-code pre {

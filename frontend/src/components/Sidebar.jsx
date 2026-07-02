@@ -45,6 +45,31 @@ function formatBuildTime(iso) {
   } catch { return iso; }
 }
 
+// Per-namespace expanded-folder memory. The tree's open folders are remembered
+// across refresh + namespace switches (so a reload doesn't re-expand the whole
+// tree). Stored as a JSON array of folder paths under mdnest_tree_expanded:<ns>.
+function loadExpandedPaths(key) {
+  if (!key) return new Set();
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw) return new Set(JSON.parse(raw));
+  } catch { /* ignore */ }
+  return new Set();
+}
+function collectFolderPaths(tree) {
+  const out = [];
+  const walk = (nodes) => {
+    for (const n of nodes || []) {
+      if ((n.type === 'folder' || n.type === 'directory') && n.path) {
+        out.push(n.path);
+        walk(n.children);
+      }
+    }
+  };
+  walk(Array.isArray(tree) ? tree : tree?.children);
+  return out;
+}
+
 function Sidebar({
   tree,
   treeLoading,
@@ -94,10 +119,17 @@ function Sidebar({
     }
   }, [refreshing, onRefreshTree]);
 
-  // Fetch sync status when namespace changes
+  // Fetch sync status when the namespace changes, then poll so a background
+  // git-sync that breaks mid-session surfaces without needing a namespace switch.
   useEffect(() => {
     if (!selectedNs) { setSyncInfo(null); return; }
-    adminSyncStatus(selectedNs).then(setSyncInfo).catch(() => setSyncInfo(null));
+    let cancelled = false;
+    const load = () => adminSyncStatus(selectedNs)
+      .then((v) => { if (!cancelled) setSyncInfo(v); })
+      .catch(() => { if (!cancelled) setSyncInfo(null); });
+    load();
+    const id = setInterval(load, 60000);
+    return () => { cancelled = true; clearInterval(id); };
   }, [selectedNs]);
 
   const handleSync = useCallback(async () => {
@@ -118,7 +150,8 @@ function Sidebar({
   const treeAreaRef = useRef(null);
   const longPressTimer = useRef(null);
   const touchMoved = useRef(false);
-  const [expandAll, setExpandAll] = useState(null);
+  const expandKey = selectedNs ? `mdnest_tree_expanded:${selectedNs}` : null;
+  const [expandedPaths, setExpandedPaths] = useState(() => loadExpandedPaths(expandKey));
   const [searchQuery, setSearchQuery] = useState('');
   const [contentResults, setContentResults] = useState(null);
   const [searching, setSearching] = useState(false);
@@ -141,9 +174,39 @@ function Sidebar({
     });
   }, []);
 
-  const handleExpandAll = () => setExpandAll(true);
-  const handleCollapseAll = () => setExpandAll(false);
-  const resetExpandAll = () => setTimeout(() => setExpandAll(null), 50);
+  // Reload remembered expansion when the namespace changes; persist on change.
+  useEffect(() => { setExpandedPaths(loadExpandedPaths(expandKey)); }, [expandKey]);
+  useEffect(() => {
+    if (!expandKey) return;
+    try { localStorage.setItem(expandKey, JSON.stringify([...expandedPaths])); } catch { /* ignore */ }
+  }, [expandKey, expandedPaths]);
+
+  // Auto-reveal the open file: add its ancestor folders to the expanded set
+  // once (so you can see where you are). Done here rather than force-expanding
+  // in TreeNode, so those folders stay collapsible afterwards.
+  useEffect(() => {
+    if (!currentPath) return;
+    const parts = currentPath.split('/');
+    if (parts.length < 2) return; // file at namespace root — no ancestor folders
+    const ancestors = [];
+    for (let i = 1; i < parts.length; i++) ancestors.push(parts.slice(0, i).join('/'));
+    setExpandedPaths((prev) => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const a of ancestors) if (!next.has(a)) { next.add(a); changed = true; }
+      return changed ? next : prev;
+    });
+  }, [currentPath]);
+
+  const toggleExpand = useCallback((path) => {
+    setExpandedPaths((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path); else next.add(path);
+      return next;
+    });
+  }, []);
+  const handleExpandAll = () => setExpandedPaths(new Set(collectFolderPaths(tree)));
+  const handleCollapseAll = () => setExpandedPaths(new Set());
 
   // Content search with debounce — triggers after 400ms of typing
   useEffect(() => {
@@ -247,12 +310,12 @@ function Sidebar({
             ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
             <button
               className="tree-control-btn"
-              onClick={() => { handleExpandAll(); resetExpandAll(); }}
+              onClick={handleExpandAll}
               title="Expand all folders"
             ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9"/><line x1="6" y1="4" x2="18" y2="4"/></svg></button>
             <button
               className="tree-control-btn"
-              onClick={() => { handleCollapseAll(); resetExpandAll(); }}
+              onClick={handleCollapseAll}
               title="Collapse all folders"
             ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 15 12 9 18 15"/><line x1="6" y1="20" x2="18" y2="20"/></svg></button>
             {/* Toggle to wrap long folder/file names in the tree
@@ -268,8 +331,34 @@ function Sidebar({
           </div>
         </div>
         {syncInfo && (
-          <div className={`sync-status-bar ${syncInfo.isGitRepo && syncInfo.hasRemote ? 'connected' : 'disconnected'}`}>
-            {syncInfo.isGitRepo && syncInfo.hasRemote ? (
+          <div className={`sync-status-bar ${syncInfo.daemonState === 'error' ? 'disconnected' : (syncInfo.isGitRepo && syncInfo.hasRemote ? 'connected' : 'disconnected')}`}>
+            {syncInfo.daemonState === 'error' ? (
+              <>
+                {/* Background git-sync is broken (stuck / diverged / push rejected).
+                    The last-commit date alone would hide this, so surface a red
+                    cross with the daemon's own message and a Retry for admins. */}
+                <span
+                  className="sync-status-cross"
+                  title={`Git sync is broken — ${syncInfo.daemonMessage || 'cannot reach the remote'}.${syncInfo.behind ? ` ${syncInfo.behind} change(s) behind remote.` : ''}${syncInfo.daemonUpdated ? `\nLast checked: ${formatSyncTime(syncInfo.daemonUpdated)}` : ''}`}
+                  aria-label="Git sync broken"
+                >✕</span>
+                <span className="sync-status-text sync-status-error-text">
+                  Git sync broken{syncInfo.behind ? ` — ${syncInfo.behind} behind` : ''}
+                </span>
+                {isAdmin && (
+                  <button
+                    className={`sync-status-btn${syncing ? ' spinning' : ''}`}
+                    onClick={handleSync}
+                    disabled={syncing}
+                    title="Try to sync now (commit + pull + push)"
+                    aria-label="Retry git sync"
+                  >
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+                    <span>Retry</span>
+                  </button>
+                )}
+              </>
+            ) : syncInfo.isGitRepo && syncInfo.hasRemote ? (
               <>
                 <span className="sync-status-dot connected" />
                 <span className="sync-status-text">
@@ -370,7 +459,9 @@ function Sidebar({
               depth={0}
               onContextMenu={onContextMenu}
               onDrop={onDrop}
-              expandAll={searchQuery.trim() ? true : expandAll}
+              expandedPaths={expandedPaths}
+              onToggleExpand={toggleExpand}
+              forceExpand={!!searchQuery.trim()}
             />
           ))}
           {searchQuery.trim() && filteredTree.length === 0 && !showContentResults && !searching && (

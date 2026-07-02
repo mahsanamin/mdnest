@@ -1021,7 +1021,12 @@ function App() {
       case 'copy-path': {
         if (target && selectedNs) {
           const alias = appConfig?.serverAlias ? `@${appConfig.serverAlias}/` : '';
-          const fullPath = `mdnest://${alias}${selectedNs}/${target.path}`;
+          // Percent-encode each path segment so spaces and other special
+          // characters don't make the copied URI ambiguous (a raw space in
+          // "19 Jun 2026.md" looked like three tokens to an LLM/shell and broke
+          // the path). Slashes and the scheme/alias stay readable.
+          const encPath = String(target.path).split('/').map(encodeURIComponent).join('/');
+          const fullPath = `mdnest://${alias}${encodeURIComponent(selectedNs)}/${encPath}`;
           const textarea = document.createElement('textarea');
           textarea.value = fullPath;
           textarea.style.position = 'fixed';
@@ -1590,27 +1595,27 @@ function App() {
 }
 
 // isVersionNewer returns true when `a` is a strictly higher semver than `b`.
-// Both are bare versions like "3.8.1" (no leading "v"). Missing components
-// default to 0, so "3.8" is treated as "3.8.0". Non-numeric components fall
-// back to a string compare on the suffix, which is good enough for the tag
-// formats mdnest actually publishes (semver, occasionally with a "-rc.N"
-// pre-release suffix that should sort before the final release).
+// Both are bare versions like "3.8.1" (no leading "v"). Missing numeric
+// components default to 0 ("3.8" == "3.8.0"). A pre-release suffix
+// ("3.11.3-dev", "3.11.3-rc.1") sorts BELOW the same plain release
+// ("3.11.3" > "3.11.3-dev"), per semver — so develop's `-dev` builds are
+// "ahead of" the last release (no false update banner) but correctly see the
+// final release as newer once it ships.
 function isVersionNewer(a, b) {
   if (!a || !b) return false;
-  const parse = (v) => String(v).split(/[.-]/).map((part) => {
-    const n = Number(part);
-    return Number.isFinite(n) ? n : part;
-  });
-  const pa = parse(a);
-  const pb = parse(b);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const x = pa[i] === undefined ? 0 : pa[i];
-    const y = pb[i] === undefined ? 0 : pb[i];
-    if (x === y) continue;
-    if (typeof x === 'number' && typeof y === 'number') return x > y;
-    return String(x) > String(y);
+  const split = (v) => {
+    const [rel, pre = ''] = String(v).split('-', 2);
+    return { nums: rel.split('.').map((n) => Number(n) || 0), pre };
+  };
+  const A = split(a), B = split(b);
+  for (let i = 0; i < Math.max(A.nums.length, B.nums.length); i++) {
+    const x = A.nums[i] || 0, y = B.nums[i] || 0;
+    if (x !== y) return x > y;
   }
-  return false;
+  if (A.pre === B.pre) return false;     // identical (incl. both plain releases)
+  if (!A.pre) return true;               // a is a release, b is a pre-release
+  if (!B.pre) return false;              // a is a pre-release, b is a release
+  return A.pre > B.pre;                  // both pre-release → lexical
 }
 
 export default App;

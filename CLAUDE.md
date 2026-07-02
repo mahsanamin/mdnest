@@ -10,6 +10,28 @@ Privately-hosted Markdown notes app. Plain files on disk, Docker-based. Supports
 - **MCP Server**: Node.js, lives in `mcp-server/` — wraps REST API for AI assistants
 - **Config**: `mdnest.conf` -> `setup.sh` generates `docker-compose.yml` and `.env`
 
+## Skills — which to invoke, and when (read this first)
+
+This repo ships slash-command skills (in `.claude/skills/`, `md-*` prefix) that
+encode the *full, correct* multi-step process for the recurring workflows. **When
+a request matches one of these workflows, invoke the skill — whether the user
+typed the slash command or asked in their own words ("fix these bugs", "add this
+feature", "ship it").** The skill is the source of truth for the steps (branch
+strategy, verification gate, no-per-bug-PR rule, clean-commit / no-attribution
+rule, `-dev` version scheme, delete-the-bug-file-when-fixed, release recipe). Do
+not improvise an ad-hoc version that skips steps — an ad-hoc bug fix must still
+follow `md-fix-bugs`.
+
+| If the user wants to… | Invoke | It covers |
+|---|---|---|
+| Fix bug(s) — from the brain `Bugs/` folder **or** an ad-hoc bug they describe | **`md-fix-bugs`** | Read/triage the backlog, verify it's really a bug (some are already fixed), fix each on its own branch from `develop`, verify (smoke test + a regression check), merge **straight into `develop`** (no per-bug PR), **delete the bug's file from the brain** so it isn't re-picked, then one clean release PR on top of `main`. |
+| Add a feature / improvement — from the brain `Features/` folder or described ad-hoc | **`md-add-improvement`** | Same disciplined flow for the features backlog. |
+| Ship / release / "update the docs + website + rebuild" after code changes | **`md-ship`** | CHANGELOG, three-file version bump, docs, website sync, rebuild the dev stack, publish the GitHub Release (tags ≠ Releases — the in-app banner needs a Release). |
+
+If unsure which applies, prefer the skill over an ad-hoc approach and say which one
+you're running. The `md-*` family is authoritative; the summaries here are just a
+router. See also the **Release Process** section below (the skills implement it).
+
 ## Project Structure
 
 ```
@@ -148,7 +170,8 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 ## Release Process
 
 - **One PR per release.** Bundle all the work for a release into a single branch (`feat/<name>` or `release/v3.X.Y`) and open **one** PR against `main`. Don't open intermediate / sibling PRs for sub-features during the same release cycle — they cause merge conflicts on shared files (`CHANGELOG.md`, the three version files, `App.jsx`, docs) when one lands while another is still open. Hotfix exception: a true emergency (security CVE, prod crash) can ship as its own PR ahead of the release, but flag it before opening. v3.10.0 hit exactly this — PR #10 (v3.9.1) merged while PR #11 (v3.10.0) was open and produced six-file conflicts; resolve by merging `main` into the release branch and keeping the higher version + the deletion of any files the cutover removed.
-- Every release branch (`release/v3.X.Y`) MUST bump version as the first commit. Three files:
+- **Version scheme — `develop` carries `X.Y.Z-dev`, releases drop the suffix.** `develop` always holds the in-flight version with a `-dev` pre-release suffix (e.g. `3.11.3-dev`), so a develop/staging box reads `v3.11.3-dev` ("candidate, still validating") and production reads the plain `v3.11.3`. The **release branch sets the plain `X.Y.Z`** (drops `-dev`); after the release merges, bump `develop` to the *next* `X.Y.(Z+1)-dev`. `isVersionNewer` (App.jsx) is pre-release-aware so a `-dev` build shows no false "update available" against the last release but does see the final release as newer once it ships.
+- Set the version in three files — on the release branch use the plain `X.Y.Z`; on `develop` use `X.Y.Z-dev`:
   - `backend/handlers/config.go` — `"version": "3.X.Y"`
   - `frontend/package.json` — `"version": "3.X.Y"`
   - `mdnest` CLI script — `MDNEST_CLI_VERSION="3.X.Y"`
@@ -192,16 +215,42 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 
 ## Testing
 
+**Tiered, fully-local test strategy — no CI/remote needed.** All of it runs on the
+host via Docker; the pre-push hook (`.githooks/pre-push`) wires it into the
+release flow so nothing broken reaches `main`. Fast checks run on every push; the
+heavier end-to-end suites run only when pushing toward `main` (a `release/*` or
+`main` ref — detected from the refs git feeds the hook on stdin). Emergency
+override: `MDNEST_SKIP_E2E=1`.
+
+- **Fast tier (every push):**
+  - `tests/cli-unit.sh` — instant pure-function checks of the CLI helpers
+    (`urlencode`/`urldecode`/`json_top_string`), run **twice**: with `python3`
+    and with `python3`/`jq` force-disabled. This is the cheap guard for the
+    class of bug where the CLI silently breaks on a machine without `python3`.
+    Uses the CLI's `MDNEST_LIB=1 source mdnest` hook to load the real functions.
+  - Plus the existing builds, `npm test`, audits, version consistency, shellcheck.
 - **CLI smoke test**: `tests/cli-smoke-test.sh` exercises every `mdnest` note
-  operation (create/write/append/prepend/read/move/delete/search/list) plus the
-  stdin edge cases (`-` parity, dash-guard, empty-content rejection) end-to-end
-  against a disposable namespace. Run it after any change to the `mdnest` CLI.
-- It targets the `testing_workspace` namespace by default — add
-  `MOUNT_testing_workspace=<host_path>` to `mdnest.conf` and `./mdnest-server
-  reload` to mount it. Override with `MDNEST_TEST_NS` / `MDNEST_TEST_ALIAS`, and
-  `MDNEST_BIN` to point at a specific CLI build (defaults to the repo's `./mdnest`).
-- The harness creates everything under a unique `__clitest_*` folder and deletes
-  it on exit; it returns non-zero if any check fails.
+  operation (create/write/append/prepend/read/move/delete/search/list, subfolder
+  scoping, `mdnest://` decode) plus the stdin edge cases end-to-end against a
+  disposable namespace. Targets `testing_workspace` by default (add
+  `MOUNT_testing_workspace=<host_path>` to `mdnest.conf` + `./mdnest-server
+  reload`). Override with `MDNEST_TEST_NS` / `MDNEST_TEST_ALIAS` / `MDNEST_BIN`.
+  Creates everything under a unique `__clitest_*` folder and deletes it on exit.
+- **End-to-end tier (pushing toward `main`):**
+  - `tests/e2e-docker.sh` — builds the **backend from the working tree**, boots a
+    throwaway single-mode instance, mints a token, and runs the CLI smoke test
+    against it **twice**: on the host (python3 present) and inside a **bare
+    `alpine` container with no python3/jq** (the truest fresh-machine repro).
+  - `tests/e2e-browser.sh` — builds **frontend + backend**, boots the full nginx
+    stack, seeds a note, then runs the **Playwright** suite in `tests/browser/`
+    (login, tree, open/render a note, Live [Crepe] + Basic editors, search,
+    create-via-UI). Installs Playwright + Chromium into `tests/browser/` on first
+    run. Exit code 2 = prerequisites (docker/node) missing → the hook SKIPs it.
+- **Adding a regression test is part of fixing a bug** (see `md-fix-bugs`): add a
+  check to the layer that would have caught it — a CLI-behaviour bug → a
+  `cli-smoke-test.sh` assertion; a parser/fallback bug → a `cli-unit.sh` case; a
+  UI bug → a `tests/browser` spec. The point of the harness is that the next
+  regression of the same shape fails loudly and locally before merge.
 
 ## Documentation
 
