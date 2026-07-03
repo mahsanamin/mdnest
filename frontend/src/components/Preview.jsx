@@ -2,6 +2,7 @@ import { Component, useEffect, useRef, useMemo, useCallback, useState } from 're
 import { Marked } from 'marked';
 import mermaid, { fixMermaidTextColors } from '../mermaid-config.js';
 import MermaidViewer from './MermaidViewer.jsx';
+import { resolveWikiLink, wikiLinkExtension, internalMdLinkHtml } from '../wikilink.js';
 
 // Safety net for any render-time exception inside Preview (mostly marked, but
 // also mermaid rendering, task-checkbox DOM work, etc.). Without this, a
@@ -59,9 +60,9 @@ function getBaseDir(ns, notePath) {
   return `/api/files/${nsPrefix}${dir}`;
 }
 
-function renderMarkdown(source, ns, notePath) {
+function renderMarkdown(source, ns, notePath, pathIndex) {
   try {
-    return renderMarkdownUnsafe(source, ns, notePath);
+    return renderMarkdownUnsafe(source, ns, notePath, pathIndex);
   } catch (err) {
     // Never let a malformed note take the whole app down. Log for devs,
     // show a readable placeholder so the user can switch modes or edit.
@@ -76,7 +77,7 @@ function renderMarkdown(source, ns, notePath) {
   }
 }
 
-function renderMarkdownUnsafe(source, ns, notePath) {
+function renderMarkdownUnsafe(source, ns, notePath, pathIndex) {
   const baseDir = getBaseDir(ns, notePath);
 
   // marked v15 notes:
@@ -93,9 +94,20 @@ function renderMarkdownUnsafe(source, ns, notePath) {
   // item contained a nested list ("Token with 'list' type was not found").
   // Task checkboxes are re-enabled + wired up in the DOM post-pass.
   const inst = new Marked({ breaks: true, gfm: true });
+  // Obsidian-style [[wikilinks]], resolved against the namespace tree.
+  // Registered as an inline extension so code spans and fenced blocks
+  // keep their normal precedence (no links inside code).
+  inst.use(wikiLinkExtension({
+    resolve: (page) => resolveWikiLink(page, pathIndex, notePath),
+    ns,
+  }));
   inst.use({
     renderer: {
       link({ href, title, text }) {
+        // Relative links to .md files navigate inside the app, like
+        // wikilinks. Everything else keeps the open-in-new-tab behavior.
+        const internal = internalMdLinkHtml({ href, title, text }, ns, notePath);
+        if (internal) return internal;
         const titleAttr = title ? ` title="${title}"` : '';
         return `<a href="${href}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`;
       },
@@ -122,13 +134,33 @@ function renderMarkdownUnsafe(source, ns, notePath) {
   return inst.parse(source);
 }
 
-function Preview({ content, currentPath, ns, onCheckboxToggle }) {
+// Scroll the preview to the heading whose visible text matches `heading`
+// (case-insensitive). Headings carry a prepended toggle glyph and an
+// appended copy button: strip both, same as the heading-copy handler.
+function scrollToHeading(el, heading) {
+  const want = heading.trim().toLowerCase();
+  if (!want) return false;
+  for (const h of el.querySelectorAll('h1, h2, h3, h4, h5, h6')) {
+    const text = h.textContent
+      .replace(/^[▸▾]\s*/, '')
+      .replace(/\u{1F4CB}$/u, '')
+      .trim()
+      .toLowerCase();
+    if (text === want) {
+      h.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return true;
+    }
+  }
+  return false;
+}
+
+function Preview({ content, currentPath, ns, onCheckboxToggle, pathIndex, onWikiLink }) {
   const containerRef = useRef(null);
   const [viewerSvg, setViewerSvg] = useState(null);
 
   const html = useMemo(
-    () => renderMarkdown(content || '', ns, currentPath),
-    [content, ns, currentPath]
+    () => renderMarkdown(content || '', ns, currentPath, pathIndex),
+    [content, ns, currentPath, pathIndex]
   );
 
   useEffect(() => {
@@ -217,10 +249,30 @@ function Preview({ content, currentPath, ns, onCheckboxToggle }) {
       });
     }
 
-    // Force all links to open in new tab (safety net)
+    // Force all links to open in new tab (safety net). Internal wikilink
+    // anchors are excluded; they navigate inside the app.
     el.querySelectorAll('a[href]').forEach((a) => {
+      if (a.classList.contains('wikilink')) return;
       if (!a.getAttribute('target')) a.setAttribute('target', '_blank');
       if (!a.getAttribute('rel')) a.setAttribute('rel', 'noopener noreferrer');
+    });
+
+    // Internal navigation for wikilinks and relative .md links. Plain
+    // click opens the note in-app (no reload); modified clicks and
+    // middle-click fall through to the #ns/path href so open-in-new-tab
+    // still works. A same-note heading link just scrolls.
+    el.querySelectorAll('a.wikilink').forEach((a) => {
+      a.addEventListener('click', (e) => {
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+        e.preventDefault();
+        const path = a.dataset.path;
+        const heading = a.dataset.heading || '';
+        if (path && path !== currentPath) {
+          if (onWikiLink) onWikiLink(path);
+        } else if (heading) {
+          scrollToHeading(el, heading);
+        }
+      });
     });
 
     // Collapsible headings — only toggle icon triggers collapse
@@ -350,7 +402,7 @@ function Preview({ content, currentPath, ns, onCheckboxToggle }) {
       })();
       return () => { cancelled = true; };
     }
-  }, [html, content, onCheckboxToggle]);
+  }, [html, content, onCheckboxToggle, currentPath, onWikiLink]);
 
   const handleExportPdf = useCallback(() => {
     const el = containerRef.current;
