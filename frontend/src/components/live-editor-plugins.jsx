@@ -16,6 +16,9 @@
 //   - tableCellCheckboxPlugin — literal `[ ]` / `[x]` inside table cells
 //     render as interactive checkboxes (decoration-based; markdown bytes
 //     unchanged on serialize).
+//   - wikilinkDecorationPlugin: Obsidian-style [[wikilinks]] get a
+//     link-colored highlight and a Ctrl/Cmd+Click affordance
+//     (decoration-based; markdown bytes unchanged on serialize).
 //   - LiveToolbar — the persistent top toolbar shown above the editor
 //     (Undo, Redo, formatting, insert, table commands).
 
@@ -337,6 +340,80 @@ export const tableCellCheckboxPlugin = $prose(() => {
     props: {
       decorations(state) {
         return tableCellCheckboxKey.getState(state);
+      },
+    },
+  });
+});
+
+// ===== Wikilink decoration plugin =====
+//
+// Highlight Obsidian-style [[wikilinks]] in the Live editor. Same
+// decoration-only approach as tableCellCheckboxPlugin, and for the same
+// reason: no schema change means the underlying text stays literal
+// [[...]], so toMarkdown serializes it unchanged (round-trip fidelity is
+// the hard requirement here, see restoreWikilinks in ../wikilink.js for
+// the serializer-escaping half of that guarantee). Navigation is handled
+// by a Ctrl/Cmd+Click DOM listener in LiveEditorCrepe.jsx, which reads
+// the data-wikilink attribute written here.
+
+const wikilinkDecorationKey = new PluginKey('wikilink-decoration');
+const WIKILINK_SCAN_RE = /\[\[([^[\]\n]+)\]\]/g;
+
+export function findWikilinkRanges(doc) {
+  const ranges = [];
+  doc.descendants((node, pos) => {
+    if (node.isText) {
+      // Skip text carrying an inline-code mark: `[['x' => 'y']]` in a
+      // code span is data, not a link.
+      const isCode = node.marks.some(
+        (m) => m.type.name === 'code_inline' || m.type.spec.code
+      );
+      if (isCode) return false;
+      const text = node.text || '';
+      WIKILINK_SCAN_RE.lastIndex = 0;
+      let m;
+      while ((m = WIKILINK_SCAN_RE.exec(text)) !== null) {
+        ranges.push({
+          from: pos + m.index,
+          to: pos + m.index + m[0].length,
+          inner: m[1],
+        });
+      }
+      return false;
+    }
+    // Don't descend into code blocks (mermaid, fenced code).
+    if (node.type.spec.code) return false;
+    return true;
+  });
+  return ranges;
+}
+
+function buildWikilinkDecorations(doc) {
+  const decorations = findWikilinkRanges(doc).map(({ from, to, inner }) =>
+    Decoration.inline(from, to, {
+      class: 'wikilink-live',
+      'data-wikilink': inner,
+      title: 'Ctrl/Cmd+Click to open',
+    })
+  );
+  return DecorationSet.create(doc, decorations);
+}
+
+export const wikilinkDecorationPlugin = $prose(() => {
+  return new Plugin({
+    key: wikilinkDecorationKey,
+    state: {
+      init(_, state) {
+        return buildWikilinkDecorations(state.doc);
+      },
+      apply(tr, old) {
+        if (!tr.docChanged) return old.map(tr.mapping, tr.doc);
+        return buildWikilinkDecorations(tr.doc);
+      },
+    },
+    props: {
+      decorations(state) {
+        return wikilinkDecorationKey.getState(state);
       },
     },
   });
