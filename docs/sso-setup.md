@@ -67,7 +67,7 @@ SSO_CLIENT_ID=<from-step-1>
 SSO_CLIENT_SECRET=<from-step-1>
 
 # Optional: restrict to corporate email domains (comma-separated).
-SSO_ALLOWED_DOMAINS=wego.com
+SSO_ALLOWED_DOMAINS=yourorg.com
 
 # Optional: override the button label (default: "SSO").
 SSO_PROVIDER_LABEL=Google
@@ -80,7 +80,7 @@ Any email in `ADMIN_EMAILS` (if set) is still auto-promoted to admin role on sta
 
 ## 3. Make sure users exist (1 min)
 
-**Unlike Firebase mode, SSO does NOT auto-create users on first sign-in.** Only emails that already exist in the `users` table can log in — the IdP says "this is ahsan@wego.com", and mdnest looks that up; if there's no match, you get redirected back with `sso_not_invited` in the URL hash.
+**Unlike Firebase mode, SSO does NOT auto-create users on first sign-in.** Only emails that already exist in the `users` table can log in — the IdP says "this is alice@yourorg.com", and mdnest looks that up; if there's no match, you get redirected back with `sso_not_invited` in the URL hash.
 
 So before the first user signs in:
 
@@ -110,7 +110,7 @@ Each server is configured independently. Pointing two mdnest servers at the *sam
 
 **Switching back to `local` is destructive.** If you go `sso` → `local`, existing rows have no password (or a stale one) and you'll need to `AdminResetPassword` each user.
 
-**Email is matched case-insensitively** on the backend, but the allowlist comparison also lowercases, so `User@Wego.com` and `user@wego.com` both hit the same row and both pass the domain check for `wego.com`.
+**Email is matched case-insensitively** on the backend, but the allowlist comparison also lowercases, so `User@YourOrg.com` and `user@yourorg.com` both hit the same row and both pass the domain check for `yourorg.com`.
 
 **Open-redirect safety.** The `from=` query param on `/api/auth/sso/start` is sanitized to a plain absolute path on our origin — full URLs, protocol-relative URLs, and query strings are stripped. The JWT never leaves the top-level fragment (`#sso_token=…`), which never gets sent as a Referer to third parties.
 
