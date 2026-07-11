@@ -49,6 +49,35 @@ test('Live (Crepe) editor mounts and renders the note', async ({ page }) => {
   await expect(page.getByText(SEED_TOKEN, { exact: false }).first()).toBeVisible({ timeout: 20_000 });
 });
 
+test('Live editor block handle stays inside the pane (not clipped by the sidebar)', async ({ page }) => {
+  await login(page);
+  await openSeedNote(page);
+  await page.click('button:has-text("Live")');
+  const pm = page.locator('.ProseMirror').first();
+  await expect(pm).toBeVisible({ timeout: 30_000 });
+
+  // Regression: the block-edit handle floats to the LEFT of the hovered block
+  // (Crepe's 16px offset + a ~26px grip). With too little ProseMirror left
+  // padding it spilled past the pane's left edge and got clipped by
+  // `.live-editor-crepe-root { overflow:auto }`, looking hidden behind the tree
+  // sidebar. Hover a block, then assert the handle's left edge is not left of
+  // the editor pane's left edge.
+  const firstBlock = pm.locator('p, li, h1, h2, h3').first();
+  await firstBlock.hover();
+  const handle = page.locator('.milkdown-block-handle');
+  await expect(handle).toBeVisible({ timeout: 10_000 });
+  // Give floating-ui a tick to position it.
+  await page.waitForTimeout(300);
+
+  const hb = await handle.boundingBox();
+  const root = await page.locator('.live-editor-crepe-root').boundingBox();
+  expect(hb, 'block handle should have a bounding box').not.toBeNull();
+  expect(root, 'crepe root should have a bounding box').not.toBeNull();
+  // The handle must sit at or inside the pane's left edge (1px tolerance for
+  // sub-pixel rounding). Before the fix this was ~14px negative.
+  expect(hb.x).toBeGreaterThanOrEqual(root.x - 1);
+});
+
 test('Basic editor shows the note in a textarea', async ({ page }) => {
   await login(page);
   await openSeedNote(page);
