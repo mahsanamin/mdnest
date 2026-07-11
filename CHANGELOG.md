@@ -796,3 +796,4 @@ The initial release. A single-user, file-based markdown notes app.
 - **Docker deployment** — multi-stage builds, nginx proxy, alpine runtime
 - **Private by default** — binds to localhost, no cloud, no telemetry
 - **Tailscale ready** — one command for encrypted remote access
+
