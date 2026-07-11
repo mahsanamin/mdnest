@@ -236,6 +236,30 @@ On mobile, you toggle between editor and preview views since there is not enough
 
 ---
 
+## Wikilinks and internal links *(v3.11.5+)*
+
+mdnest understands Obsidian-style `[[wikilinks]]`, so vaults imported from Obsidian keep their internal links working.
+
+**Supported forms:**
+
+| You write | It links to |
+|---|---|
+| `[[Meeting Notes]]` | the note `Meeting Notes.md` |
+| `[[projects/Roadmap]]` | a note by path (the `.md` is optional) |
+| `[[Roadmap\|the plan]]` | the same note, shown as *the plan* |
+| `[[Setup#Install]]` | the *Install* heading inside `Setup.md` |
+| `[[#Install]]` | the *Install* heading in the **current** note |
+
+In the preview, a resolved wikilink is a highlighted internal link — clicking it opens the target note in place (no page reload), while middle-click and Ctrl/Cmd+Click open it in a new tab. A `[[#heading]]` link just scrolls to that heading. If the target note doesn't exist, the link renders muted and dashed so you can tell it's broken.
+
+**How targets resolve:** an exact path first (with or without `.md`), then a case-insensitive match on the note's name; if two notes share a name, the one with the shortest path wins — the same rules Obsidian uses.
+
+Ordinary relative markdown links to `.md` files — `[the roadmap](../projects/Roadmap.md)` — also navigate inside the app now, instead of opening a dead link in a new tab.
+
+**In the Live editor**, `[[...]]` spans are highlighted; **Ctrl/Cmd+Click** opens the target (a plain click just places the cursor so you can edit). The stored file is never rewritten — the markdown on disk stays exactly `[[...]]`. Wikilinks inside inline code (`` `[[x]]` ``) or fenced code blocks are left as literal text, not links.
+
+---
+
 ## Mermaid Diagrams
 
 mdnest renders [Mermaid](https://mermaid.js.org/) diagrams inside fenced code blocks tagged with `mermaid`.
