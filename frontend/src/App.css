@@ -3953,6 +3953,32 @@ pre:hover .code-copy-btn {
   color: #89b4fa;
 }
 
+/* "Reveal current file in the tree" button — matches the inline refresh. */
+.toolbar-inline-reveal {
+  background: none;
+  border: none;
+  color: #6c7086;
+  cursor: pointer;
+  padding: 0 4px;
+  margin-left: 4px;
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+}
+.toolbar-inline-reveal:hover {
+  color: #89b4fa;
+}
+
+/* Brief flash when a tree row is revealed via the toolbar button, so the eye
+   catches where it jumped to. */
+@keyframes reveal-flash {
+  0%, 100% { background: transparent; }
+  20%, 60% { background: rgba(137, 180, 250, 0.35); }
+}
+.tree-row.reveal-flash {
+  animation: reveal-flash 1.2s ease-in-out;
+}
+
 .toolbar-inline-action {
   background: none;
   border: none;

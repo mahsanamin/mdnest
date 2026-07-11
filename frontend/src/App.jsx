@@ -155,6 +155,13 @@ function App() {
   const [savedContent, setSavedContent] = useState('');
   const saveTimerRef = useRef(null);
   const [sidebarVisible, setSidebarVisible] = useState(false);
+  // Bumped by the toolbar "reveal in tree" button; Sidebar watches it to expand
+  // ancestors, scroll the active row into view, and flash it.
+  const [revealNonce, setRevealNonce] = useState(0);
+  const revealInTree = useCallback(() => {
+    setSidebarVisible(true); // ensure the tree is on-screen (mobile overlay)
+    setRevealNonce((n) => n + 1);
+  }, []);
   const [mobileView, setMobileView] = useState(() => {
     const saved = localStorage.getItem('mdnest_mobile_view');
     if (saved) return saved;
@@ -1332,6 +1339,7 @@ function App() {
             : null
         }
         onShowReleaseNotes={() => setShowReleaseNotes(true)}
+        revealNonce={revealNonce}
         width={sidebarWidth}
         onResize={setSidebarWidth}
       />
@@ -1339,6 +1347,7 @@ function App() {
         <Toolbar
           currentPath={currentPath}
           onToggleSidebar={() => setSidebarVisible((v) => !v)}
+          onRevealInTree={revealInTree}
           onChangePassword={() => setShowChangePassword(true)}
           onRename={canWriteCurrent ? handleToolbarRename : null}
           onDelete={canWriteCurrent ? handleToolbarDelete : null}
