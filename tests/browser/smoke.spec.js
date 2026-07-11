@@ -102,6 +102,35 @@ test('creating a note via the UI opens it', async ({ page }) => {
   await expect(page.locator('.toolbar-path')).toContainText(name, { timeout: 20_000 });
 });
 
+test('cross-tab: a note created in one tab appears in another without a manual refresh', async ({ context }) => {
+  // Two pages in the SAME browser context share a BroadcastChannel (same
+  // origin, same browser). Regression for the single-mode bug where a file
+  // created in one tab didn't show in another until the 60s poll or a manual
+  // Refresh. tab-sync.js broadcasts `tree-changed`; the other tab refreshes.
+  const a = await context.newPage();
+  await login(a);
+  // Tab B is a second page in the SAME context, so it shares localStorage (the
+  // JWT) — it's already authenticated, exactly like opening a second browser
+  // tab. Just load it; no second login.
+  const b = await context.newPage();
+  await b.goto('/');
+  // Make sure both tabs have loaded the tree before the create.
+  await expect(a.locator('.tree-label', { hasText: SEED_FILE })).toBeVisible({ timeout: 20_000 });
+  await expect(b.locator('.tree-label', { hasText: SEED_FILE })).toBeVisible({ timeout: 20_000 });
+
+  const name = `xtab-${Date.now()}.md`;
+  a.once('dialog', (d) => d.accept(name));
+  await a.click('button:has-text("+ Note")');
+  await expect(a.locator('.toolbar-path')).toContainText(name, { timeout: 20_000 });
+
+  // Tab B must reveal the new note WITHOUT anyone clicking Refresh — purely
+  // via the cross-tab broadcast. (The 60s poll would exceed this timeout.)
+  await expect(b.locator('.tree-label', { hasText: name })).toBeVisible({ timeout: 15_000 });
+
+  await a.close();
+  await b.close();
+});
+
 test('Settings → CLI tab has working copy buttons', async ({ page }) => {
   await login(page);
   await page.click('button[title="Settings"]');
