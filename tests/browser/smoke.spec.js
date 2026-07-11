@@ -131,6 +131,28 @@ test('cross-tab: a note created in one tab appears in another without a manual r
   await b.close();
 });
 
+test('build-details popover closes on an outside click', async ({ page }) => {
+  await login(page);
+  // Open the ⓘ build-details popover in the sidebar footer.
+  await page.click('.version-info-btn');
+  await expect(page.locator('.version-info-popover')).toBeVisible();
+  // Regression: clicking anywhere outside should close it (previously you had
+  // to click the ⓘ again). Click a neutral spot in the sidebar.
+  await page.locator('.sidebar-header, .sidebar-tree, .toolbar').first().click();
+  await expect(page.locator('.version-info-popover')).toBeHidden();
+});
+
+test('reveal-in-tree button keeps the active file visible', async ({ page }) => {
+  await login(page);
+  await openSeedNote(page);
+  // The toolbar "reveal in tree" button should exist for an open file and,
+  // when clicked, leave the active tree row on-screen (scrolled into view).
+  const reveal = page.locator('.toolbar-inline-reveal');
+  await expect(reveal).toBeVisible();
+  await reveal.click();
+  await expect(page.locator('.tree-row.active')).toBeVisible();
+});
+
 test('Settings → CLI tab has working copy buttons', async ({ page }) => {
   await login(page);
   await page.click('button[title="Settings"]');

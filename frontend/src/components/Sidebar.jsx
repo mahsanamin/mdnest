@@ -97,9 +97,30 @@ function Sidebar({
   serverBuildTime,
   updateAvailableVersion,
   onShowReleaseNotes,
+  revealNonce,
 }) {
   const [syncing, setSyncing] = useState(false);
   const [showVersionInfo, setShowVersionInfo] = useState(false);
+  const versionInfoRef = useRef(null);
+  // Dismiss the build-details popover on any outside click or Escape — before
+  // this you had to click the ⓘ again to close it.
+  useEffect(() => {
+    if (!showVersionInfo) return;
+    const onDown = (e) => {
+      if (versionInfoRef.current && !versionInfoRef.current.contains(e.target)) {
+        setShowVersionInfo(false);
+      }
+    };
+    const onKey = (e) => { if (e.key === 'Escape') setShowVersionInfo(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('touchstart', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('touchstart', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [showVersionInfo]);
   const [syncInfo, setSyncInfo] = useState(null); // {isGitRepo, hasRemote, lastCommit, ...}
   const [refreshing, setRefreshing] = useState(false);
 
@@ -204,6 +225,36 @@ function Sidebar({
       return changed ? next : prev;
     });
   }, [currentPath]);
+
+  // Reveal-in-tree: the toolbar's "locate" button bumps `revealNonce`. Expand
+  // the open file's ancestor folders (in case they were collapsed), then scroll
+  // its row into view and briefly flash it — so the user can jump straight to
+  // the current file when the tree is scrolled away or out of sync.
+  useEffect(() => {
+    if (!revealNonce || !currentPath) return;
+    const parts = currentPath.split('/');
+    if (parts.length >= 2) {
+      const ancestors = [];
+      for (let i = 1; i < parts.length; i++) ancestors.push(parts.slice(0, i).join('/'));
+      setExpandedPaths((prev) => {
+        const next = new Set(prev);
+        let changed = false;
+        for (const a of ancestors) if (!next.has(a)) { next.add(a); changed = true; }
+        return changed ? next : prev;
+      });
+    }
+    // Let the (possibly newly-expanded) rows render before scrolling to the active one.
+    const t = setTimeout(() => {
+      const el = treeAreaRef.current?.querySelector('.tree-row.active');
+      if (!el) return;
+      el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      el.classList.add('reveal-flash');
+      setTimeout(() => el.classList.remove('reveal-flash'), 1200);
+    }, 80);
+    return () => clearTimeout(t);
+    // Intentionally keyed only on revealNonce — each button press re-triggers.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revealNonce]);
 
   const toggleExpand = useCallback((path) => {
     setExpandedPaths((prev) => {
@@ -499,7 +550,7 @@ function Sidebar({
         {(userInfo || onLogout) && (
           <UserFooter userInfo={userInfo} onLogout={onLogout} onAdminPanel={onAdminPanel} />
         )}
-        <div className="sidebar-server-info">
+        <div className="sidebar-server-info" ref={versionInfoRef}>
           <span>{window.location.host}</span>
           {serverVersion && (
             <span className="sidebar-version">
