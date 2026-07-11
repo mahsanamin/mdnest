@@ -42,6 +42,7 @@ import { findParent } from '@milkdown/prose';
 import { uploadImage } from '../api.js';
 import { htmlToMarkdown, hasRichContent } from '../html-to-md.js';
 import { looksLikeMarkdown } from '../markdown-utils.js';
+import { parseWikiLink, resolveWikiLink, restoreWikilinks } from '../wikilink.js';
 import MermaidBlock from './MermaidBlock.jsx';
 import MermaidViewer from './MermaidViewer.jsx';
 import {
@@ -50,6 +51,7 @@ import {
   findAnchorMatches,
   clearEmptyBlockPlugin,
   tableCellCheckboxPlugin,
+  wikilinkDecorationPlugin,
   LiveToolbar,
 } from './live-editor-plugins.jsx';
 
@@ -223,11 +225,17 @@ export default function LiveEditorCrepe({
   onComment,
   onGoToReady,
   onHighlightClick,
+  onWikiLink,
+  wikiIndex,
 }) {
   const rootRef = useRef(null);
   const crepeRef = useRef(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const onWikiLinkRef = useRef(onWikiLink);
+  onWikiLinkRef.current = onWikiLink;
+  const wikiIndexRef = useRef(wikiIndex);
+  wikiIndexRef.current = wikiIndex;
   const flashTimerRef = useRef(null);
   // LiveToolbar needs the underlying Milkdown Editor instance. Track it in
   // state so the toolbar re-renders once crepe.create() resolves.
@@ -394,16 +402,21 @@ export default function LiveEditorCrepe({
     tryUse(commentHighlightPlugin, 'commentHighlightPlugin');
     tryUse(clearEmptyBlockPlugin, 'clearEmptyBlockPlugin');
     tryUse(tableCellCheckboxPlugin, 'tableCellCheckboxPlugin');
+    tryUse(wikilinkDecorationPlugin, 'wikilinkDecorationPlugin');
     tryUse(composedMermaidPlugin, 'composedMermaidPlugin');
     tryUse(tableClickFixPlugin, 'tableClickFixPlugin');
 
     crepe.on((listener) => {
       listener.markdownUpdated((_ctx, markdown, prev) => {
-        lastLocalContentRef.current = markdown;
+        // Milkdown's serializer escapes [[...]] to \[\[...]] in plain
+        // text. Restore wikilink spans so documents containing them
+        // round-trip byte-identical through the Live editor.
+        const restored = restoreWikilinks(markdown);
+        lastLocalContentRef.current = restored;
         if (suppressSaveRef.current) return;
         if (markdown === prev) return;
         const cb = onChangeRef.current;
-        if (cb) cb(markdown);
+        if (cb) cb(restored);
       });
     });
 
@@ -583,6 +596,30 @@ export default function LiveEditorCrepe({
     el.addEventListener('click', onClick);
     return () => el.removeEventListener('click', onClick);
   }, [onHighlightClick]);
+
+  // Ctrl/Cmd+Click on a decorated [[wikilink]] navigates to the target
+  // note. Plain click keeps its editing meaning (place the caret), so the
+  // modifier is the navigation affordance, mirroring how editors treat
+  // links in editable text.
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const onClick = (e) => {
+      if (!e.metaKey && !e.ctrlKey) return;
+      const target = e.target.closest && e.target.closest('.wikilink-live');
+      if (!target) return;
+      const inner = target.getAttribute('data-wikilink') || '';
+      const { page } = parseWikiLink(inner);
+      const path = resolveWikiLink(page, wikiIndexRef.current, currentPath);
+      if (!path || path === currentPath) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const cb = onWikiLinkRef.current;
+      if (cb) cb(path);
+    };
+    el.addEventListener('click', onClick);
+    return () => el.removeEventListener('click', onClick);
+  }, [currentPath]);
 
   // Paste handler — ported from legacy LiveEditor with the v3.9.1 priority:
   //   1. Images → upload, insert ![](url)

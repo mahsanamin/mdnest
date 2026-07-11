@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Login from './components/Login.jsx';
 import LoginFirebase from './components/LoginFirebase.jsx';
 import LoginSSO from './components/LoginSSO.jsx';
@@ -39,6 +39,7 @@ import {
   logout as apiLogout,
   PermissionError,
 } from './api.js';
+import { buildPathIndex } from './wikilink.js';
 import { initFirebase, signOutFirebase } from './firebase-config.js';
 import './App.css';
 
@@ -483,6 +484,10 @@ function App() {
       return [];
     }
   }, []);
+
+  // Path index for resolving [[wikilinks]] against the current tree,
+  // shared by the preview renderer and the Live editor click handler.
+  const wikiIndex = useMemo(() => buildPathIndex(tree), [tree]);
 
   const refreshTree = useCallback(async (ns) => {
     const target = ns || selectedNs;
@@ -1436,6 +1441,8 @@ function App() {
                               setShowComments(true);
                             }}
                             onGoToReady={(fn) => { goToCommentRef.current = fn; }}
+                            onWikiLink={openNote}
+                            wikiIndex={wikiIndex}
                             onHighlightClick={!commentsEnabled ? null : (commentId) => {
                               setShowComments(true);
                               setHighlightedCommentId(commentId);
@@ -1492,7 +1499,7 @@ function App() {
                   className={`preview-wrapper${mobileView === 'preview' ? ' mobile-active' : ''}`}
                   style={!isMobile && viewMode === 'split' ? { flex: `0 0 ${100 - splitRatio}%` } : undefined}
                 >
-                  <Preview content={content || ''} currentPath={currentPath} ns={selectedNs} onCheckboxToggle={canWriteCurrent ? handleCheckboxToggle : null} />
+                  <Preview content={content || ''} currentPath={currentPath} ns={selectedNs} onCheckboxToggle={canWriteCurrent ? handleCheckboxToggle : null} pathIndex={wikiIndex} onWikiLink={openNote} />
                 </div>
               )}
             </>
