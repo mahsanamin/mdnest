@@ -83,49 +83,73 @@ else
   FAILED=1
 fi
 
-# 5. Backend: govulncheck (if installed)
-# Output classification:
-#   "No vulnerabilities found." → clean
-#   contains "from the Go standard library" only → stdlib-only WARN
-#     (worth a Go bump but doesn't block; the production Docker
-#     image's golang base often clears these even when the local
-#     `go` toolchain is older)
-#   anything else with vuln output → BLOCK (dependency vuln)
-# Resolve the govulncheck path only if Go exists. Guarding on `command -v go`
-# first is essential under `set -e`: `X="$(go env ...)"` when go is missing
-# fails the command substitution (127) and a failing substitution in a
-# top-level assignment aborts the whole script — which previously killed the
-# hook here on any machine without Go, before the lock-file / version / E2E
-# steps below ever ran.
-if command -v go >/dev/null 2>&1; then
-  GOVULNCHECK="$(go env GOPATH 2>/dev/null)/bin/govulncheck"
-else
-  GOVULNCHECK=""
-fi
-if [ -n "$GOVULNCHECK" ] && [ -x "$GOVULNCHECK" ]; then
-  echo -n "Backend security (govulncheck)... "
-  # Binary mode, mirroring CI: govulncheck v1.4.0's source-mode call-graph
-  # analysis segfaults under the Go 1.26.x toolchain go.mod pins. Build the
-  # binary and scan it instead.
-  if (cd backend && go build -o /tmp/mdnest-govulncheck-target .) > /dev/null 2>&1; then
-    VULN_OUT=$(cd backend && "$GOVULNCHECK" -mode=binary /tmp/mdnest-govulncheck-target 2>&1) || true
-    rm -f /tmp/mdnest-govulncheck-target
-    if echo "$VULN_OUT" | grep -q "No vulnerabilities found"; then
+# 5. Backend: govulncheck — two tiers, mirroring the test strategy.
+#
+#   - Main / release-bound push (RUN_E2E=1): govulncheck is a REQUIRED,
+#     blocking status check on the main-branch ruleset in CI, so the hook must
+#     mirror that gate faithfully — scan with the go.mod-pinned `golang` Docker
+#     image (the same toolchain as CI and the prod build) and BLOCK on ANY
+#     reachable vulnerability, stdlib included. CI's govulncheck exits non-zero
+#     on stdlib vulns too; a green local push followed by a red CI is exactly
+#     how GO-2026-5856 slipped into the v3.11.5 release from a machine without
+#     host Go. Needs Docker; if absent, SKIP loudly (CI still enforces it).
+#   - Regular push: scan with the host `go` toolchain when present. stdlib-only
+#     hits WARN (the prod image's newer golang base often clears them);
+#     dependency hits BLOCK. Skipped when neither host Go nor a main-bound push
+#     applies.
+#
+# The `command -v go` guard matters under `set -e`: `X="$(go env ...)"` with go
+# absent fails the substitution (127) and would abort the whole hook.
+if [ "$RUN_E2E" -eq 1 ]; then
+  echo -n "Backend security (govulncheck, CI-mirror via Docker)... "
+  if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+    echo "SKIPPED (docker unavailable — CI enforces this before merge; or run 'bash tests/e2e-docker.sh')"
+  else
+    GO_VER=$(awk '/^go[[:space:]]/{print $2; exit}' backend/go.mod)
+    # sh -c stays a single line: a backslash-newline inside single quotes is
+    # literal, not a continuation, so it would corrupt the container command.
+    VULN_OUT=$(docker run --rm -v "$PWD/backend":/src -w /src "golang:${GO_VER}" \
+      sh -c 'go install golang.org/x/vuln/cmd/govulncheck@latest >/dev/null 2>&1 && go build -o /tmp/t . && "$(go env GOPATH)/bin/govulncheck" -mode=binary /tmp/t 2>&1') && VC_RC=0 || VC_RC=$?
+    if [ "${VC_RC:-1}" -eq 0 ] && echo "$VULN_OUT" | grep -q "No vulnerabilities found"; then
       echo "OK"
-    elif echo "$VULN_OUT" | grep -qE "from the Go standard library" \
-         && ! echo "$VULN_OUT" | grep -qE "in (packages you import|modules you require)"; then
-      # Only stdlib hits — warn but don't block
-      echo "WARN (stdlib only — update Go to fix)"
-    else
-      echo "VULNERABILITIES FOUND"
-      echo "  Run: cd backend && go build -o /tmp/t . && govulncheck -mode=binary /tmp/t"
+    elif echo "$VULN_OUT" | grep -q "Vulnerability #"; then
+      echo "VULNERABILITIES FOUND (blocks push to main/release)"
+      echo "$VULN_OUT" | grep -E "Vulnerability #|Found in:|Fixed in:|More info:" | sed 's/^/    /'
       FAILED=1
+    else
+      echo "WARN (could not scan — check Docker/build output; CI will still gate)"
+    fi
+  fi
+elif command -v go >/dev/null 2>&1; then
+  GOVULNCHECK="$(go env GOPATH 2>/dev/null)/bin/govulncheck"
+  if [ -x "$GOVULNCHECK" ]; then
+    echo -n "Backend security (govulncheck)... "
+    # Binary mode, mirroring CI: govulncheck v1.4.0's source-mode call-graph
+    # analysis segfaults under the Go 1.26.x toolchain go.mod pins. Build the
+    # binary and scan it instead.
+    if (cd backend && go build -o /tmp/mdnest-govulncheck-target .) > /dev/null 2>&1; then
+      VULN_OUT=$(cd backend && "$GOVULNCHECK" -mode=binary /tmp/mdnest-govulncheck-target 2>&1) || true
+      rm -f /tmp/mdnest-govulncheck-target
+      if echo "$VULN_OUT" | grep -q "No vulnerabilities found"; then
+        echo "OK"
+      elif echo "$VULN_OUT" | grep -qE "from the Go standard library" \
+           && ! echo "$VULN_OUT" | grep -qE "in (packages you import|modules you require)"; then
+        # Only stdlib hits — warn but don't block on a regular push (a
+        # main/release-bound push takes the strict CI-mirror path above).
+        echo "WARN (stdlib only — update Go to fix; blocks on main/release pushes)"
+      else
+        echo "VULNERABILITIES FOUND"
+        echo "  Run: cd backend && go build -o /tmp/t . && govulncheck -mode=binary /tmp/t"
+        FAILED=1
+      fi
+    else
+      echo "WARN (build failed — could not scan)"
     fi
   else
-    echo "WARN (build failed — could not scan)"
+    echo "Backend security: skipped (govulncheck not installed)"
   fi
 else
-  echo "Backend security: skipped (govulncheck not installed)"
+  echo "Backend security: skipped (no host Go; the CI-mirror runs on main/release pushes)"
 fi
 
 # 6. Lock file integrity: package-lock.json must be in sync with package.json
