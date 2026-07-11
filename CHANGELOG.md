@@ -4,6 +4,17 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v3.11.5 — Obsidian wikilinks
+
+### Features
+
+- **Obsidian-style `[[wikilinks]]` are now first-class links.** Vaults imported from Obsidian lean on `[[wikilinks]]`, which mdnest previously rendered as plain text. Now `[[target]]`, `[[target|alias]]`, `[[target#heading]]` and `[[#heading]]` render in the preview as internal links that open the note in-app with no page reload. The href still carries the `#ns/path` form, so middle-click and open-in-new-tab keep working, and a same-note `[[#heading]]` link just scrolls the preview to that heading. Targets resolve Obsidian-style against the namespace tree — an exact path first (with or without the `.md` suffix), then a case-insensitive basename match with a shortest-path tiebreak; an unresolved target renders as a muted, non-clickable broken-link span so you can see the note is missing. Relative markdown links to `.md` files (`[text](../notes/other.md)`) now navigate in-app too, instead of opening a dead file URL in a new tab.
+- **Wikilinks are visible and clickable in the Live editor.** `[[...]]` spans get a link-coloured highlight, and Ctrl/Cmd+Click opens the target (plain click still places the caret, so editing is unaffected). This is decoration-only — no schema change — so the stored markdown stays literal `[[...]]`. Round-trip fidelity is guaranteed: Milkdown's serializer escapes `[[` to `\[\[` in plain text, so every save is routed through a restore pass that keeps documents byte-identical. Code spans and fenced code blocks are excluded, so `[['field' => 'x']]` in a PHP snippet stays code, not a link.
+
+_Thanks to [@lglot](https://github.com/lglot) (Luigi Lotito) for contributing this feature._
+
+---
+
 ## v3.11.4 — git-sync self-healing, fresh-machine CLI, tree memory + local test gate
 
 ### Bug fixes
