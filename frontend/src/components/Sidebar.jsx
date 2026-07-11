@@ -1,6 +1,7 @@
 import { useRef, useCallback, useState, useEffect, useMemo } from 'react';
 import TreeNode from './TreeNode.jsx';
 import { searchNotes, adminSyncNamespace, adminSyncStatus } from '../api.js';
+import { onTabMessage } from '../tab-sync.js';
 
 // Filter tree nodes by filename match (case-insensitive)
 function filterTree(nodes, query) {
@@ -129,7 +130,13 @@ function Sidebar({
       .catch(() => { if (!cancelled) setSyncInfo(null); });
     load();
     const id = setInterval(load, 60000);
-    return () => { cancelled = true; clearInterval(id); };
+    // Refresh the "Synced x ago" label immediately when another tab of this
+    // browser reports a change (git-sync or a file op) for this namespace, so
+    // the label doesn't lag behind the other tab until the next 60s poll.
+    const offTab = onTabMessage((msg) => {
+      if (msg?.type === 'tree-changed' && msg.ns === selectedNs) load();
+    });
+    return () => { cancelled = true; clearInterval(id); offTab(); };
   }, [selectedNs]);
 
   const handleSync = useCallback(async () => {
