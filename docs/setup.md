@@ -323,8 +323,8 @@ Add the public key to your GitHub account (Settings > SSH Keys) or as a collabor
 
 ```bash
 mkdir -p git-sync/keys
-ssh-keygen -t ed25519 -f git-sync/keys/my_wego_brain -N "" -C "mdnest-sync"
-ssh-keygen -t ed25519 -f git-sync/keys/personal     -N "" -C "mdnest-sync"
+ssh-keygen -t ed25519 -f git-sync/keys/work_brain -N "" -C "mdnest-sync"
+ssh-keygen -t ed25519 -f git-sync/keys/personal   -N "" -C "mdnest-sync"
 ```
 
 Add each `.pub` key to the corresponding repo's deploy keys:
@@ -533,14 +533,14 @@ Add to `mdnest.conf`:
 
 ```
 REQUIRE_2FA=true
-TOTP_ISSUER=Wego mdnest    # Name shown in authenticator app (optional)
+TOTP_ISSUER=YourOrg mdnest    # Name shown in authenticator app (optional)
 ```
 
 Run `./mdnest-server rebuild`. All users will be required to set up 2FA on their next login.
 
 ### Sharing 2FA Across Multiple Servers
 
-If you run multiple mdnest instances (e.g. `growth.mdnest.wego.engineering`, `docs.mdnest.wego.engineering`), users can use the **same authenticator entry** for all servers.
+If you run multiple mdnest instances (e.g. `growth.mdnest.yourorg.com`, `docs.mdnest.yourorg.com`), users can use the **same authenticator entry** for all servers.
 
 Set up 2FA on the first server, then export and import the secret:
 
