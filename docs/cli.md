@@ -10,7 +10,21 @@ One command, works on macOS and Linux:
 curl -fsSL https://raw.githubusercontent.com/mahsanamin/mdnest/main/install-cli.sh | bash
 ```
 
-No dependencies — just bash and curl.
+**No dependencies — just bash and curl.** `python3`/`jq` are used when present (for prettier JSON), but the CLI falls back to pure-bash/awk so every command works without them. The installer downloads to a temp file and installs atomically (using `sudo` only if `/usr/local/bin` isn't writable, and falling back to `~/.local/bin` with a PATH hint if it can't) — so it never leaves a half-written binary or aborts mid-download on a fresh machine.
+
+### Install from a specific branch
+
+To try an unreleased build, point at that branch's installer and set `MDNEST_BRANCH`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mahsanamin/mdnest/develop/install-cli.sh | MDNEST_BRANCH=develop bash
+```
+
+`mdnest update` honours the same `MDNEST_BRANCH` (default `main`), so you can stay on a branch:
+
+```bash
+MDNEST_BRANCH=develop mdnest update --force
+```
 
 ## Login
 

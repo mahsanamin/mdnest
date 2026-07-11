@@ -44,6 +44,7 @@ Below the namespace selector, the folder tree shows all files and folders in the
 - Click a **folder** to expand or collapse it.
 - Click a **file** to open it in the editor.
 - Hidden files (those starting with `.`) are not shown. This keeps `.git` directories and other dotfiles out of the way.
+- **The tree remembers which folders you had open, per namespace** (v3.11.4+). A refresh or namespace switch restores your expanded folders instead of re-expanding everything; the folder holding the currently-open file auto-reveals but can still be collapsed.
 
 On mobile, tap the hamburger menu icon in the top-left corner to show or hide the sidebar.
 
@@ -213,6 +214,8 @@ If `git-sync/keys/` is empty, no remote backup exists. Recovery options narrow:
 
 For the common case, the in-app History modal (v3.7.0+) handles it without leaving mdnest -- the manual paths above are still useful for renamed files, bulk recoveries, or restoring multiple files at once.
 
+**Sync health indicator (v3.11.4+).** When git-sync is enabled, the sidebar shows its status. If the background sync ever breaks (a diverged history it can't fast-forward, a rejected push, an unreachable remote), you'll see a red ✕ with "Git sync broken" and the reason on hover — instead of a stale "Synced X ago" that hides the problem. Admins get a **Retry** button that runs a commit + pull + push immediately. The daemon also self-heals most divergence on its own each cycle.
+
 ---
 
 ## Live Preview
@@ -230,6 +233,30 @@ The preview pane renders your markdown in real time as you type. The following e
 On desktop, the editor and preview appear side by side.
 
 On mobile, you toggle between editor and preview views since there is not enough screen space for both.
+
+---
+
+## Wikilinks and internal links *(v3.11.5+)*
+
+mdnest understands Obsidian-style `[[wikilinks]]`, so vaults imported from Obsidian keep their internal links working.
+
+**Supported forms:**
+
+| You write | It links to |
+|---|---|
+| `[[Meeting Notes]]` | the note `Meeting Notes.md` |
+| `[[projects/Roadmap]]` | a note by path (the `.md` is optional) |
+| `[[Roadmap\|the plan]]` | the same note, shown as *the plan* |
+| `[[Setup#Install]]` | the *Install* heading inside `Setup.md` |
+| `[[#Install]]` | the *Install* heading in the **current** note |
+
+In the preview, a resolved wikilink is a highlighted internal link — clicking it opens the target note in place (no page reload), while middle-click and Ctrl/Cmd+Click open it in a new tab. A `[[#heading]]` link just scrolls to that heading. If the target note doesn't exist, the link renders muted and dashed so you can tell it's broken.
+
+**How targets resolve:** an exact path first (with or without `.md`), then a case-insensitive match on the note's name; if two notes share a name, the one with the shortest path wins — the same rules Obsidian uses.
+
+Ordinary relative markdown links to `.md` files — `[the roadmap](../projects/Roadmap.md)` — also navigate inside the app now, instead of opening a dead link in a new tab.
+
+**In the Live editor**, `[[...]]` spans are highlighted; **Ctrl/Cmd+Click** opens the target (a plain click just places the cursor so you can edit). The stored file is never rewritten — the markdown on disk stays exactly `[[...]]`. Wikilinks inside inline code (`` `[[x]]` ``) or fenced code blocks are left as literal text, not links.
 
 ---
 

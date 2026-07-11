@@ -1028,6 +1028,24 @@
   text-decoration: underline;
 }
 
+/* Obsidian-style [[wikilinks]] and relative .md links: internal
+   navigation, visually distinct from external links. */
+.preview-pane a.wikilink {
+  color: #89b4fa;
+  background: rgba(137, 180, 250, 0.1);
+  border-radius: 3px;
+  padding: 0 3px;
+  cursor: pointer;
+}
+
+/* Unresolved wikilink: target note not found in the namespace tree.
+   Muted, dashed, not clickable. */
+.preview-pane .wikilink-broken {
+  color: #7f849c;
+  border-bottom: 1px dashed #7f849c;
+  cursor: default;
+}
+
 .preview-pane code {
   background: #313244;
   padding: 0.15em 0.4em;
@@ -1830,6 +1848,20 @@ pre:hover .code-copy-btn {
 
 .comment-highlight * {
   color: #1e1e2e !important;
+}
+
+/* [[wikilink]] highlight in the Live editor (ProseMirror decoration:
+   the underlying markdown bytes stay literal [[...]]). Ctrl/Cmd+Click
+   navigates; plain click keeps placing the caret. */
+.milkdown .wikilink-live {
+  color: #89b4fa;
+  background: rgba(137, 180, 250, 0.12);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.milkdown .wikilink-live:hover {
+  text-decoration: underline;
 }
 
 @media print {

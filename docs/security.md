@@ -157,6 +157,8 @@ flowchart TD
 
 `ADMIN_EMAILS` in `mdnest.conf` auto-promotes the listed addresses to `superadmin` on every startup (idempotent). Removals are not auto-demoted — operators demote explicitly.
 
+**First-run bootstrap (v3.11.4+).** On a fresh multi-mode install (empty `users` table) the seeded account — from `MDNEST_USER` / `MDNEST_PASSWORD` — is created as `superadmin`. It's the operator by definition, so it must hold the global role; a namespace-scoped `admin` with no `namespace_admins` rows would see zero namespaces and have no way to grant itself access. The `count == 0` guard restricts this to the very first user, so later invitees are unaffected. (Set a strong `MDNEST_PASSWORD` before first boot — the seed uses it verbatim.)
+
 When mdnest is upgraded from a pre-v3.5.0 install, migration `007_namespace_admins` renames every existing `role='admin'` row to `role='superadmin'` so current operators retain full power. New admins post-upgrade are namespace-scoped — promoted via `POST /api/admin/namespace-admins` or the admin panel's "Namespace Admins" tab.
 
 ### Grant model
