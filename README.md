@@ -1,43 +1,37 @@
 # mdnest
 
-Privately-hosted markdown notes — for one person or a small team.
+**Your notes, on your own server. Open to every device — and your AI.**
 
-Deploy on a spare machine, a home server, a cloud VM, or behind a corporate VPN. Run it as a personal knowledge base or as a small company's shared knowledge base where everyone signs in with their corporate SSO and access is scoped per namespace. Notes are plain `.md` files on disk; the engine adds editing, search, comments, AI integration, and team-level access control on top.
+mdnest keeps your notes as plain Markdown files on a server you run. Open them in your browser, your terminal, or straight from Claude and Cursor. One place for everything you (and your AI) want to remember.
 
-Accessible from a browser on any device, from a CLI in any terminal, and from AI agents over the bundled MCP server. Everything stays on your hardware.
+No cloud. No lock-in. Your files stay yours.
 
-### Why mdnest?
+![mdnest live editor — Markdown turning into rich text as you type, with a Mermaid diagram](docs/images/hero-editor.jpg)
 
-- **Live rich editor.** Obsidian-style editing where markdown renders inline as you type, built on the same component the [Milkdown playground](https://milkdown.dev/playground) uses. Hover the left margin of any block for a drag handle + `+` button that opens a slash menu (Heading 1-6, code block, math, image, table, …). Tables are single-click-to-edit with column / row controls, mermaid diagrams render in-place with a Source/Preview/zoom toolbar, `$inline$` and `$$block$$` math render via KaTeX, paste-an-image from the clipboard uploads automatically. Switch between Live and Basic (plain textarea) modes.
-- **Obsidian-friendly `[[wikilinks]]`.** Bring an Obsidian vault over as-is: `[[note]]`, `[[note|alias]]`, `[[note#heading]]` and `[[#heading]]` resolve against your notes and open in-app, in both the preview and the Live editor. Broken links show up muted so you can spot missing notes. The markdown on disk stays literal `[[...]]` — nothing is rewritten.
-- **Solo or team — same engine.** Run in single-user mode (default, no database) for a private knowledge base, or enable multi-user mode with a three-tier role hierarchy, per-namespace access grants, and corporate SSO.
-- **Corporate SSO with one setting.** Point mdnest at your OIDC provider (Google Workspace, Okta, Microsoft Entra, Keycloak, Auth0) and users sign in with their existing corporate accounts. The IdP handles MFA; mdnest still owns per-namespace authorization. Flip `USER_PROVIDER=sso` in `mdnest.conf` — no code changes required. See [docs/sso-setup.md](docs/sso-setup.md).
-- **Namespace-scoped admins.** A small company can have one or two SuperAdmins overall plus per-team Admins who manage just their own namespace — invite users into their team, manage grants, trigger git-sync — without seeing or touching other teams' data. See [docs/security.md](docs/security.md#layer-3--authorization).
-- **Inline comments with threads.** Highlight any text and leave a comment; commented passages stay visibly highlighted in yellow, and reviewers can reply in a thread. Click a highlight to jump to the conversation. Comments are anchored to invisible UUIDs, so moving or renaming files keeps them attached.
-- **Live collaboration.** Multiple people editing the same note see each other's cursors and changes in real time over WebSocket. Toggle with `ENABLE_LIVE_COLLAB=true`.
-- **Interactive diagrams.** Mermaid diagrams render in-place with click-to-edit labels. Edit node text directly on the diagram without touching code.
-- **AI-native.** Built-in MCP server lets Claude, Cursor, and other AI agents read, write, search, and organize your notes. Your knowledge base becomes context for your AI workflows.
-- **API-first.** Full REST API + CLI with multi-server support (`mdnest read @work/eng/spec.md`). Build scripts, automations, or integrations on top of your notes.
-- **Plain files, no lock-in.** Notes are `.md` files in directories on disk. No proprietary format. `cat`, `grep`, `git` — your notes work with every tool you already use.
-- **Private by default.** Binds to localhost. No cloud, no third-party services, no telemetry. Add Tailscale for solo remote access, or a TLS reverse proxy (Caddy / nginx / Cloudflare Tunnel) for a team install.
-- **Git backup on your terms.** Optional sidecar auto-commits and pushes to a private GitHub repo on a schedule you control.
-- **In-app version history.** When git-sync is enabled, right-click any note → **History** to browse past versions, **compare any two of them as a diff**, and one-click restore. Restoration is itself versioned — undoable through the same modal. No leaving the app to find an old version.
-- **Update-aware.** The backend polls GitHub for newer releases hourly; when one drops, a small badge in the sidebar footer surfaces the release notes inline so you can read what actually changed before deciding to update. Opt-out via `DISABLE_UPDATE_CHECK=true` for air-gapped installs.
+### What you get
 
-### Who is this for?
+- 🤖 **Made for AI.** Claude, Cursor, and your scripts read and write your notes over MCP and a CLI. Your AI finally has a memory that sticks between runs.
+- 🛟 **Never lose a note.** Every change auto-saves to your own Git repo. Browse the full history and restore any version in one click.
+- 🌐 **Everywhere at once.** Browser, phone, terminal, API — the same notes, always in sync. Your laptop sleeps; your notes don't.
+- 📝 **Nice to write in.** A live editor where Markdown becomes rich text as you type — tables, diagrams, math, and drag-and-drop images. Or switch to plain text.
+- 🗂️ **Just files.** Every note is a `.md` file on disk. `cat`, `grep`, and `git` still work. Walk away anytime.
+- 👥 **A wiki when you grow.** Add SSO, roles, and comment threads for your team — a Confluence you can actually afford.
 
-- **Individual developers** who want a personal knowledge base on their own hardware.
-- **Small teams (1–50 people)** who need a self-hosted shared knowledge base with corporate-SSO sign-in and per-team access control — without licensing, vendor lock-in, or a SaaS subscription.
-- **AI tinkerers** who want their notes to be a first-class context source for Claude, Cursor, and other agents through MCP.
-- **People who think in markdown** — folders, code blocks, diagrams, plain text — and want their tools to leave the format alone.
+### Is it for you?
 
-**Comfortable range: 1,000–5,000 notes out of the box.** For larger repositories (5,000–20,000+), tune the [search settings](#search) — just configuration, no architectural changes.
+- **You run AI agents** and want them to remember things across runs and projects.
+- **You use more than one device** and want one set of notes everywhere, never lost.
+- **You're a small team** that wants a shared wiki without the Confluence bill.
+
+> Just want a local vault on one Mac? [Obsidian](https://obsidian.md) is great. Pick mdnest when you want your notes on every device, backed up, and open to your AI.
+
+<sub>Handles 1,000–5,000 notes out of the box. Bigger? Tune the [search settings](#search) — config only. Full feature list in [More features](#more-features).</sub>
 
 ## Prerequisites
 
 - [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/)
 - Git
-- [Tailscale](https://tailscale.com/download) (free, for remote access)
+- *Optional:* [Tailscale](https://tailscale.com/download) — free, **only** if you want encrypted remote access to your own devices later. Not needed to install or run mdnest.
 
 ## Quick Start
 
@@ -334,6 +328,21 @@ tailscale serve off       # remove all rules
 
 - **Nginx + Certbot** -- traditional reverse proxy with free TLS. See [docs/setup.md](docs/setup.md).
 - **Cloudflare Tunnel** -- no open ports, works behind NAT. See [docs/setup.md](docs/setup.md).
+
+## More features
+
+Beyond the core editor and the three access interfaces, mdnest includes:
+
+- **Obsidian `[[wikilinks]]`.** Bring an Obsidian vault over as-is: `[[note]]`, `[[note|alias]]`, `[[note#heading]]`, and `[[#heading]]` resolve against your notes and open in-app — in both the preview and the Live editor. Broken links show muted so you can spot missing notes, and the markdown on disk stays literal `[[...]]`.
+- **Inline comments with threads.** Highlight any text and leave a comment; commented passages stay highlighted in yellow, and reviewers reply in a thread. Click a highlight to jump to the conversation. Comments are anchored to invisible UUIDs, so moving or renaming files keeps them attached.
+- **Live collaboration.** Multiple people editing the same note see each other's cursors and changes in real time over WebSocket. Toggle with `ENABLE_LIVE_COLLAB=true`.
+- **Interactive mermaid diagrams.** Diagrams render in-place with a Source/Preview/zoom toolbar and click-to-edit labels — edit node text directly on the diagram without touching the code.
+- **In-app version history.** With git-sync enabled, right-click any note → **History** to browse past versions, compare any two as a diff, and one-click restore. Restoration is itself versioned and undoable through the same modal.
+- **Namespace-scoped admins.** One or two SuperAdmins overall, plus per-team Admins who manage just their own namespace — invite users, manage grants, trigger git-sync — without touching other teams' data. See [docs/security.md](docs/security.md#layer-3--authorization).
+- **Corporate SSO + 2FA.** Point mdnest at any OIDC provider (Google Workspace, Okta, Microsoft Entra, Keycloak, Auth0); the IdP owns MFA, mdnest owns per-namespace authorization. Or use local username/password with TOTP. One `USER_PROVIDER` flag — no code changes. See [docs/sso-setup.md](docs/sso-setup.md).
+- **API-first.** Full REST API + CLI with multi-server support (`mdnest read @work/eng/spec.md`). Build scripts, automations, or integrations on top of your notes.
+- **Git backup on your terms.** Optional sidecar auto-commits and pushes to a private repo on a schedule you control. See [Git Sync](#git-sync-optional).
+- **Update-aware.** The backend polls GitHub for newer releases; when one drops, a badge in the sidebar footer surfaces the release notes inline. Opt out with `DISABLE_UPDATE_CHECK=true` for air-gapped installs.
 
 ## Documentation
 

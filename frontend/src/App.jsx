@@ -40,6 +40,7 @@ import {
   PermissionError,
 } from './api.js';
 import { buildPathIndex } from './wikilink.js';
+import { broadcastTabMessage, onTabMessage } from './tab-sync.js';
 import { initFirebase, signOutFirebase } from './firebase-config.js';
 import './App.css';
 
@@ -154,6 +155,13 @@ function App() {
   const [savedContent, setSavedContent] = useState('');
   const saveTimerRef = useRef(null);
   const [sidebarVisible, setSidebarVisible] = useState(false);
+  // Bumped by the toolbar "reveal in tree" button; Sidebar watches it to expand
+  // ancestors, scroll the active row into view, and flash it.
+  const [revealNonce, setRevealNonce] = useState(0);
+  const revealInTree = useCallback(() => {
+    setSidebarVisible(true); // ensure the tree is on-screen (mobile overlay)
+    setRevealNonce((n) => n + 1);
+  }, []);
   const [mobileView, setMobileView] = useState(() => {
     const saved = localStorage.getItem('mdnest_mobile_view');
     if (saved) return saved;
@@ -489,13 +497,20 @@ function App() {
   // shared by the preview renderer and the Live editor click handler.
   const wikiIndex = useMemo(() => buildPathIndex(tree), [tree]);
 
-  const refreshTree = useCallback(async (ns) => {
+  // `opts.broadcast` — set by handlers that represent a change THIS tab made
+  // (create/delete/move/upload, git-sync, manual Refresh). It posts a
+  // BroadcastChannel message so other same-browser tabs refresh their tree
+  // instantly instead of waiting for the 60s poll. Background refreshes (poll,
+  // init, WebSocket, and the cross-tab listener below) omit it, so a received
+  // broadcast never triggers another broadcast — no echo loop.
+  const refreshTree = useCallback(async (ns, opts) => {
     const target = ns || selectedNs;
     if (!target) return;
     setTreeLoading(true);
     try {
       const data = await getTree(target);
       setTree(data.children || []);
+      if (opts?.broadcast) broadcastTabMessage({ type: 'tree-changed', ns: target });
     } catch (e) {
       console.error('Failed to load file tree:', e);
     } finally {
@@ -649,6 +664,40 @@ function App() {
     }, 60000);
     return () => clearInterval(interval);
   }, [authenticated, selectedNs, appConfig?.liveCollab, refreshTree]);
+
+  // Instant cross-tab sync: another tab of this browser broadcasts
+  // `tree-changed` after a create/delete/move/upload or a git-sync (see
+  // refreshTree's `broadcast` option). Refresh our tree right away so both tabs
+  // agree without the 60s poll or a manual Refresh — the single-mode fix for
+  // "added a file in one tab, the other didn't show it until I hit Refresh".
+  // We pass an explicit ns (no broadcast flag), so reacting never re-broadcasts.
+  useEffect(() => {
+    if (!authenticated) return;
+    return onTabMessage((msg) => {
+      if (msg?.type !== 'tree-changed') return;
+      if (msg.ns !== selectedNsRef.current) return;
+      if (treeRefreshTimer.current) clearTimeout(treeRefreshTimer.current);
+      treeRefreshTimer.current = setTimeout(() => {
+        const ns = selectedNsRef.current;
+        if (ns) refreshTree(ns).catch(() => {});
+      }, 250);
+    });
+  }, [authenticated, refreshTree]);
+
+  // Refresh the tree the moment a backgrounded tab becomes visible again,
+  // instead of waiting for the next 60s poll tick (the poll skips hidden tabs).
+  // Catches changes made while the tab was in the background — by another tab,
+  // the CLI/MCP, or git-sync. Explicit ns → no broadcast.
+  useEffect(() => {
+    if (!authenticated) return;
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      const ns = selectedNsRef.current;
+      if (ns) refreshTree(ns).catch(() => {});
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [authenticated, refreshTree]);
 
   // Update URL hash
   useEffect(() => {
@@ -952,7 +1001,7 @@ function App() {
     const path = dir + name.replace(/^\/+/, '');
     try {
       await createNote(selectedNs, path);
-      await refreshTree();
+      await refreshTree(undefined, { broadcast: true });
       openNote(path);
     } catch (e) {
       alert('Failed to create note: ' + e.message);
@@ -967,7 +1016,7 @@ function App() {
     const path = dir + name.replace(/^\/+/, '').replace(/\/+$/, '');
     try {
       await createFolder(selectedNs, path);
-      await refreshTree();
+      await refreshTree(undefined, { broadcast: true });
     } catch (e) {
       alert('Failed to create folder: ' + e.message);
     }
@@ -987,7 +1036,7 @@ function App() {
           // ns switch doesn't try to reopen a now-deleted note.
           const lastForNs = getLastPath(selectedNs);
           if (lastForNs === target.path) setLastPath(selectedNs, null);
-          await refreshTree();
+          await refreshTree(undefined, { broadcast: true });
         } catch (e) { alert('Failed to delete: ' + e.message); }
         break;
       }
@@ -1019,7 +1068,7 @@ function App() {
           // If the last-opened file lived inside this folder it's gone now.
           const lastForNs = getLastPath(selectedNs);
           if (lastForNs && lastForNs.startsWith(target.path)) setLastPath(selectedNs, null);
-          await refreshTree();
+          await refreshTree(undefined, { broadcast: true });
         } catch (e) { alert('Failed to delete folder: ' + e.message); }
         break;
       }
@@ -1087,7 +1136,7 @@ function App() {
           } else if (lastForNs && lastForNs.startsWith(target.path + '/')) {
             setLastPath(selectedNs, newPath + lastForNs.substring(target.path.length));
           }
-          await refreshTree();
+          await refreshTree(undefined, { broadcast: true });
         } catch (e) { alert('Failed to rename: ' + e.message); }
         break;
       }
@@ -1116,7 +1165,7 @@ function App() {
       } else if (lastForNs && lastForNs.startsWith(fromPath + '/')) {
         setLastPath(selectedNs, newPath + lastForNs.substring(fromPath.length));
       }
-      await refreshTree();
+      await refreshTree(undefined, { broadcast: true });
     } catch (e) {
       alert('Failed to move: ' + e.message);
     }
@@ -1165,7 +1214,9 @@ function App() {
 
   const handleRefresh = useCallback(async () => {
     if (!authenticated || !selectedNs) return;
-    await refreshTree(selectedNs);
+    // broadcast: this is the Sidebar's manual Refresh AND the git-sync button
+    // (both call onRefreshTree), so tell other tabs to refresh too.
+    await refreshTree(selectedNs, { broadcast: true });
     if (currentPath) {
       try {
         const { text, etag } = await getNote(selectedNs, currentPath);
@@ -1288,6 +1339,7 @@ function App() {
             : null
         }
         onShowReleaseNotes={() => setShowReleaseNotes(true)}
+        revealNonce={revealNonce}
         width={sidebarWidth}
         onResize={setSidebarWidth}
       />
@@ -1295,6 +1347,7 @@ function App() {
         <Toolbar
           currentPath={currentPath}
           onToggleSidebar={() => setSidebarVisible((v) => !v)}
+          onRevealInTree={revealInTree}
           onChangePassword={() => setShowChangePassword(true)}
           onRename={canWriteCurrent ? handleToolbarRename : null}
           onDelete={canWriteCurrent ? handleToolbarDelete : null}
@@ -1548,7 +1601,7 @@ function App() {
           onClose={() => setMoveModal(null)}
           onMoved={async (newPath) => {
             setMoveModal(null);
-            await refreshTree();
+            await refreshTree(undefined, { broadcast: true });
             // If the user moved the file that's currently open, follow
             // it to its new path so the editor stays in sync.
             if (moveModal.target.path === currentPath) {

@@ -1,0 +1,27 @@
+{
+  "name": "require-security-audit-main",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": ["~DEFAULT_BRANCH"],
+      "exclude": []
+    }
+  },
+  "rules": [
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": false,
+        "do_not_enforce_on_create": false,
+        "required_status_checks": [
+          { "context": "Backend (govulncheck)", "integration_id": 15368 },
+          { "context": "Frontend (npm audit)", "integration_id": 15368 },
+          { "context": "MCP Server (npm audit)", "integration_id": 15368 },
+          { "context": "Shell scripts (shellcheck)", "integration_id": 15368 }
+        ]
+      }
+    }
+  ],
+  "bypass_actors": []
+}
