@@ -4,6 +4,28 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v3.11.6 — Clearer pitch, reveal-in-tree, instant cross-tab sync, security gate
+
+### Docs
+
+- **The README and landing page now say what mdnest is in ten seconds.** The old README opened with deployment details and a flat wall of features, so a first-time reader couldn't tell what mdnest is or who it's for. It's rewritten in product-style copy: a one-line tagline (*"Your notes, on your own server. Open to every device — and your AI."*), a screenshot up top, a short **What you get** list, an **Is it for you?** self-check, and an honest one-line Obsidian comparison — with the full feature list preserved in a **More features** section below the fold. The `mdnest.dev` landing page (hero, meta/OG/Twitter/JSON-LD, and the AI-native/team/git-sync cards) is synced to the same framing.
+
+### Features
+
+- **Reveal-in-tree.** A button jumps the left tree to the currently-open note and highlights it — handy after following a wikilink or searching, when the file is open but not visible in the tree.
+- **Instant cross-tab tree + sync updates.** Creating, renaming, moving, or deleting a note in one browser tab now updates the tree in every other open tab immediately, and git-sync-driven changes land without a manual Refresh — no more stale tree until you reload.
+
+### Bug fixes
+
+- **The build-details popover closes on an outside click.** It previously stayed open until you clicked the ⓘ again; it now dismisses when you click anywhere else, like every other popover.
+- **The Live editor block handle is no longer clipped behind the tree sidebar.** The drag/`+` handle in the left margin could render underneath the sidebar on narrow layouts; it now stays fully visible.
+
+### Security / CI
+
+- **Security Audit is now a required status check before merge to `main`.** The audit (frontend/MCP `npm audit`, backend `govulncheck`, shellcheck) already ran on every PR, but wasn't *required* — so a PR could merge with a failing check (that's how a stdlib vuln once slipped onto `main`). It's now enforced server-side on the `main-branch` ruleset with no bypass. The pre-push hook mirrors the govulncheck gate locally, and the ruleset is captured as importable JSON so the gate is managed as code.
+
+---
+
 ## v3.11.5 — Obsidian wikilinks
 
 ### Features
