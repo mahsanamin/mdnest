@@ -1,0 +1,45 @@
+{{- if and .Values.persistence.notes.enabled (not .Values.persistence.notes.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "mdnest.notesClaimName" . }}
+  labels:
+    {{- include "mdnest.labels" . | nindent 4 }}
+    app.kubernetes.io/component: notes
+  {{- with (merge (dict) .Values.persistence.notes.annotations .Values.commonAnnotations) }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  accessModes:
+    - {{ .Values.persistence.notes.accessMode }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.notes.size | quote }}
+  {{- if .Values.persistence.notes.storageClass }}
+  storageClassName: {{ .Values.persistence.notes.storageClass | quote }}
+  {{- end }}
+{{- end }}
+{{- if and .Values.persistence.secrets.enabled (not .Values.persistence.secrets.existingClaim) }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "mdnest.secretsClaimName" . }}
+  labels:
+    {{- include "mdnest.labels" . | nindent 4 }}
+    app.kubernetes.io/component: secrets
+  {{- with (merge (dict) .Values.persistence.secrets.annotations .Values.commonAnnotations) }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  accessModes:
+    - {{ .Values.persistence.secrets.accessMode }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.secrets.size | quote }}
+  {{- if .Values.persistence.secrets.storageClass }}
+  storageClassName: {{ .Values.persistence.secrets.storageClass | quote }}
+  {{- end }}
+{{- end }}

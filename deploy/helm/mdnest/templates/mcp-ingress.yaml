@@ -1,0 +1,38 @@
+{{- if and .Values.mcp.enabled .Values.mcp.ingress.enabled -}}
+{{- $svc := include "mdnest.mcp.fullname" . -}}
+{{- $port := .Values.mcp.service.port -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "mdnest.mcp.fullname" . }}
+  labels:
+    {{- include "mdnest.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mcp
+  {{- with (merge (dict) .Values.mcp.ingress.annotations .Values.commonAnnotations) }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.mcp.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with .Values.mcp.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- range .Values.mcp.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType | default "Prefix" }}
+            backend:
+              service:
+                name: {{ $svc }}
+                port:
+                  number: {{ $port }}
+          {{- end }}
+    {{- end }}
+{{- end }}

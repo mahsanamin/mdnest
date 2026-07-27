@@ -1,0 +1,34 @@
+mdnest {{ .Chart.AppVersion }} has been deployed as release "{{ .Release.Name }}".
+
+Deployment mode: {{ if or (gt (int .Values.backend.replicaCount) 1) .Values.backend.autoscaling.enabled }}ACTIVE/ACTIVE ({{ if .Values.backend.autoscaling.enabled }}autoscaled {{ .Values.backend.autoscaling.minReplicas }}-{{ .Values.backend.autoscaling.maxReplicas }}{{ else }}{{ .Values.backend.replicaCount }} backend replicas{{ end }}){{ else }}single instance (active/passive){{ end }}
+Auth mode:       {{ .Values.auth.mode }}
+Live collab:     {{ if and (eq .Values.auth.mode "multi") .Values.collab.enabled }}enabled{{ else }}disabled{{ end }}
+Redis backplane: {{ if and .Values.collab.enabled (or .Values.collab.redis.url .Values.collab.redis.existingSecret) }}enabled{{ else }}disabled{{ end }}
+git-sync:        {{ if .Values.gitSync.enabled }}enabled (1 replica){{ else }}disabled{{ end }}
+
+Access the app:
+{{- if .Values.ingress.enabled }}
+{{- range .Values.ingress.hosts }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}
+{{- end }}
+{{- else }}
+  The frontend Service ({{ include "mdnest.frontend.fullname" . }}) is type {{ .Values.frontend.service.type }}.
+  Port-forward to try it locally:
+
+    kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "mdnest.frontend.fullname" . }} 8080:{{ .Values.frontend.service.port }}
+    # then open http://localhost:8080
+{{- end }}
+
+{{- if not .Values.auth.existingSecret }}
+{{- if not .Values.auth.password }}
+
+NOTE: no auth.password was provided — a random admin password was generated.
+Retrieve it with:
+
+  kubectl -n {{ .Release.Namespace }} get secret {{ include "mdnest.appSecretName" . }} -o jsonpath='{.data.MDNEST_PASSWORD}' | base64 -d; echo
+{{- end }}
+{{- end }}
+
+Reminder: PostgreSQL and Redis are NOT deployed by this chart. Point
+postgres.* / collab.redis.* at your external instances. See values.yaml
+("Deployment model") for the full active/active checklist.

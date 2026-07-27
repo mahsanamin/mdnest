@@ -1,0 +1,462 @@
+# Default values for the mdnest chart.
+# -----------------------------------------------------------------------------
+# Deployment model
+# -----------------------------------------------------------------------------
+# By DEFAULT this chart deploys mdnest as a SINGLE instance (active/passive):
+#   * backend.replicaCount = 1, Recreate strategy
+#   * notes/secrets PVCs use ReadWriteOnce
+#   * AUTH_MODE=single, live collaboration and Redis disabled
+# This matches mdnest's out-of-the-box behavior exactly.
+#
+# Horizontal scaling (active/active) is OPT-IN. To enable it you MUST:
+#   1. Set auth.mode=multi and provide an external PostgreSQL (postgres.*).
+#   2. Enable collaboration: collab.enabled=true.
+#   3. Provide an external Redis and set collab.redis.url (or redis secret).
+#   4. Use ReadWriteMany storage for notes AND secrets so every replica shares
+#      the same files (persistence.notes.accessMode / persistence.secrets.accessMode).
+#   5. Set backend.replicaCount > 1.
+# The chart validates these invariants and fails fast with a clear message if a
+# multi-replica deployment is missing Redis, collaboration, or RWX storage.
+# -----------------------------------------------------------------------------
+
+# -- Override the chart name portion of generated resource names.
+nameOverride: ""
+# -- Fully override the generated fullname used for all resources.
+fullnameOverride: ""
+
+# -- Labels added to every resource created by the chart.
+commonLabels: {}
+# -- Annotations added to every resource created by the chart.
+commonAnnotations: {}
+
+# -- Image pull secrets for private registries (list of `{name}`).
+imagePullSecrets: []
+
+serviceAccount:
+  # -- Create a ServiceAccount for the workloads.
+  create: true
+  # -- Name of the ServiceAccount; generated when empty and `create=true`.
+  name: ""
+  # -- Annotations to add to the ServiceAccount.
+  annotations: {}
+
+image:
+  # -- Image pull policy applied to all mdnest images.
+  pullPolicy: IfNotPresent
+  backend:
+    # -- Backend image repository.
+    repository: ghcr.io/forterro/mdnest-backend
+    # -- Backend image tag; defaults to `Chart.appVersion` when empty.
+    tag: ""
+  frontend:
+    # -- Frontend image repository.
+    repository: ghcr.io/forterro/mdnest-frontend
+    # -- Frontend image tag; defaults to `Chart.appVersion` when empty.
+    tag: ""
+  mcp:
+    # -- MCP server image repository (used only when `mcp.enabled=true`).
+    repository: ghcr.io/forterro/mdnest-mcp-server
+    # -- MCP server image tag; defaults to `Chart.appVersion` when empty.
+    tag: ""
+
+# -----------------------------------------------------------------------------
+# Backend (Go API + WebSocket collaboration server, port 8080)
+# -----------------------------------------------------------------------------
+backend:
+  # -- Number of backend replicas. Keep at `1` unless running active/active (see top-of-file notes).
+  replicaCount: 1
+  strategy:
+    # -- Deployment strategy. `Recreate` is required with ReadWriteOnce volumes; use `RollingUpdate` only with ReadWriteMany storage (active/active).
+    type: Recreate
+  # -- Public origin the browser uses to reach mdnest (CORS + SSO redirect URL). Set to your ingress URL in production.
+  frontendOrigin: "http://localhost"
+  # -- Optional display alias shown in the UI (`SERVER_ALIAS`).
+  serverAlias: ""
+  # -- Disable the periodic GitHub release update check (`DISABLE_UPDATE_CHECK`).
+  disableUpdateCheck: false
+  # -- Extra backend environment variables (list of `{name,value}` or `{name,valueFrom}`).
+  extraEnv: []
+  # -- Top-level namespaces to ensure exist under `/data/notes` on startup (idempotent init container). Empty disables it. Names must not contain `/` or `\` nor start with `.`.
+  namespaces: []
+  # -- Image used by the namespace-provisioning init container.
+  namespaceInitImage: busybox:1.36
+  # -- Extra pod annotations for the backend.
+  podAnnotations: {}
+  # -- Extra pod labels for the backend.
+  podLabels: {}
+  # -- Pod-level security context for the backend.
+  podSecurityContext:
+    runAsNonRoot: false
+  # -- Container-level security context for the backend.
+  securityContext: {}
+  # -- Backend resource requests/limits.
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 512Mi
+  # -- Node selector for the backend.
+  nodeSelector: {}
+  # -- Tolerations for the backend.
+  tolerations: []
+  # -- Affinity rules for the backend.
+  affinity: {}
+  # -- Liveness probe (hits the unauthenticated `GET /api/config`).
+  livenessProbe:
+    enabled: true
+    initialDelaySeconds: 10
+    periodSeconds: 20
+    timeoutSeconds: 3
+    failureThreshold: 3
+  # -- Readiness probe (hits the unauthenticated `GET /api/config`).
+  readinessProbe:
+    enabled: true
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+  service:
+    # -- Backend Service type.
+    type: ClusterIP
+    # -- Backend Service port.
+    port: 8080
+  # -- Optional HorizontalPodAutoscaler (active/active only — requires RWX storage + Redis).
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 75
+    targetMemoryUtilizationPercentage: ""
+
+# -----------------------------------------------------------------------------
+# Frontend (nginx static SPA that reverse-proxies /api and /api/ws to backend)
+# -----------------------------------------------------------------------------
+frontend:
+  # -- Number of frontend (nginx) replicas.
+  replicaCount: 1
+  # -- Extra pod annotations for the frontend.
+  podAnnotations: {}
+  # -- Extra pod labels for the frontend.
+  podLabels: {}
+  # -- Pod-level security context for the frontend.
+  podSecurityContext: {}
+  # -- Container-level security context for the frontend.
+  securityContext: {}
+  # -- Frontend resource requests/limits.
+  resources:
+    requests:
+      cpu: 10m
+      memory: 16Mi
+    limits:
+      memory: 128Mi
+  # -- Node selector for the frontend.
+  nodeSelector: {}
+  # -- Tolerations for the frontend.
+  tolerations: []
+  # -- Affinity rules for the frontend.
+  affinity: {}
+  service:
+    # -- Frontend Service type.
+    type: ClusterIP
+    # -- Frontend Service port.
+    port: 80
+  # -- WebSocket proxy read/send timeout (seconds); keep long for live collaboration.
+  wsTimeoutSeconds: 86400
+  # -- Extra nginx env vars. Set `NGINX_ENTRYPOINT_WORKER_PROCESSES_AUTOTUNE=1` with a CPU limit to avoid nginx spawning one worker per host CPU (OOM risk).
+  env: []
+
+# -----------------------------------------------------------------------------
+# Authentication mode
+#   single = file-based auth, no database (default, matches upstream default)
+#   multi  = multi-user mode backed by external PostgreSQL (required for HA)
+# -----------------------------------------------------------------------------
+auth:
+  # -- Authentication mode: `single` (file-based, no DB) or `multi` (PostgreSQL-backed, required for HA).
+  mode: single
+  # -- Bootstrap admin username for single mode (`MDNEST_USER`). Ignored in multi mode.
+  adminUser: admin
+  # -- Existing Secret holding credentials. When set, the chart-managed Secret is not created and inline values are ignored.
+  existingSecret: ""
+  # -- Keys expected inside `existingSecret`.
+  secretKeys:
+    password: MDNEST_PASSWORD
+    jwtSecret: MDNEST_JWT_SECRET
+  # -- Inline admin password (used only when `existingSecret` is empty). CHANGE THIS.
+  password: ""
+  # -- Inline JWT signing secret (used only when `existingSecret` is empty). CHANGE THIS.
+  jwtSecret: ""
+
+# -----------------------------------------------------------------------------
+# External PostgreSQL (required when auth.mode=multi). NOT bundled — point this
+# at a managed / external HA Postgres.
+# -----------------------------------------------------------------------------
+postgres:
+  # -- PostgreSQL host (required when `auth.mode=multi`).
+  host: ""
+  # -- PostgreSQL port.
+  port: 5432
+  # -- PostgreSQL database name.
+  database: mdnest
+  # -- PostgreSQL user.
+  user: mdnest
+  # -- Existing Secret holding the Postgres password (preferred over inline).
+  existingSecret: ""
+  # -- Key inside `existingSecret` holding the password.
+  secretKeys:
+    password: POSTGRES_PASSWORD
+  # -- Inline Postgres password (discouraged; used only when `existingSecret` is empty).
+  password: ""
+
+# -----------------------------------------------------------------------------
+# Live collaboration + optional Redis backplane (opt-in horizontal scaling).
+#   collab.enabled       -> ENABLE_LIVE_COLLAB=true (requires auth.mode=multi)
+#   collab.redis.url     -> REDIS_URL; when set, presence/events sync across
+#                           replicas (active/active). Empty = single instance.
+# -----------------------------------------------------------------------------
+collab:
+  # -- Enable live collaboration (`ENABLE_LIVE_COLLAB`; requires `auth.mode=multi`).
+  enabled: false
+  redis:
+    # -- Full Redis URL, e.g. `redis://:password@my-redis:6379/0` (or `rediss://` for TLS). Empty = single instance.
+    url: ""
+    # -- Existing Secret to source `REDIS_URL` from instead of inline `url`.
+    existingSecret: ""
+    # -- Key inside `existingSecret` holding the URL.
+    secretKeys:
+      url: REDIS_URL
+    # -- Compose mode: when set, the chart BUILDS `REDIS_URL` from discrete parts and reads the password from `passwordSecret`. Takes precedence over `url`/`existingSecret`. Use with managed Redis (KubeBlocks, ElastiCache).
+    host: ""
+    # -- Redis port (compose mode).
+    port: 6379
+    # -- Redis username (compose mode).
+    username: default
+    # -- Redis database index (compose mode).
+    database: 0
+    # -- Use TLS (`rediss://`) in compose mode.
+    tls: false
+    # -- Secret holding the Redis password in compose mode.
+    passwordSecret:
+      name: ""
+      key: password
+
+# -----------------------------------------------------------------------------
+# SSO / OIDC (optional). Only rendered when sso.enabled=true.
+# -----------------------------------------------------------------------------
+sso:
+  # -- Enable SSO/OIDC login (`USER_PROVIDER=sso`; otherwise `local`).
+  enabled: false
+  # -- OIDC issuer URL.
+  issuerUrl: ""
+  # -- OIDC client ID.
+  clientId: ""
+  # -- OAuth redirect URL; defaults to `<frontendOrigin>/api/auth/sso/callback`.
+  redirectUrl: ""
+  # -- Comma-separated list of allowed email domains.
+  allowedDomains: ""
+  # -- Label shown on the SSO login button.
+  providerLabel: "SSO"
+  # -- Comma-separated emails auto-promoted to superadmin.
+  adminEmails: ""
+  # -- Existing Secret holding the OIDC client secret (preferred over inline).
+  existingSecret: ""
+  # -- Key inside `existingSecret` holding the client secret.
+  secretKeys:
+    clientSecret: SSO_CLIENT_SECRET
+  # -- Inline OIDC client secret (used only when `existingSecret` is empty).
+  clientSecret: ""
+
+# -----------------------------------------------------------------------------
+# Storage backend for note data.
+#   local (default) = notes live on the `notes` PVC (filesystem). Behaviour is
+#                     byte-identical to upstream.
+#   s3              = notes live in an S3-compatible object store (Scaleway,
+#                     Ceph/RGW, MinIO, AWS S3). This lets multiple backend
+#                     replicas share notes WITHOUT ReadWriteMany storage, and
+#                     enables self-service namespace creation.
+# Note history (git) and the git-sync sidecar always use the local filesystem
+# and stay optional/orthogonal to this setting.
+# -----------------------------------------------------------------------------
+storage:
+  # -- Note storage backend: `local` (notes on the `notes` PVC, byte-identical to upstream) or `s3` (S3-compatible object store, enables multi-replica sharing without RWX and self-service namespaces).
+  backend: local
+  s3:
+    # -- S3 endpoint as `host[:port]` WITHOUT scheme, e.g. `s3.fr-par.scw.cloud`.
+    endpoint: ""
+    # -- S3 bucket name.
+    bucket: ""
+    # -- S3 region.
+    region: us-east-1
+    # -- Use TLS to reach the endpoint.
+    useSSL: true
+    # -- Path-style addressing (bucket in URL path). Required for MinIO / Ceph RGW; set `false` only if your endpoint requires virtual-hosted-style.
+    pathStyle: true
+    # -- Existing Secret holding S3 credentials (e.g. synced from Vault). When set, inline keys are ignored.
+    existingSecret: ""
+    # -- Keys inside `existingSecret` holding the credentials.
+    secretKeys:
+      accessKey: S3_ACCESS_KEY
+      secretKey: S3_SECRET_KEY
+    # -- Inline S3 access key (used only when `existingSecret` is empty).
+    accessKey: ""
+    # -- Inline S3 secret key (used only when `existingSecret` is empty).
+    secretKey: ""
+
+# -----------------------------------------------------------------------------
+# Persistence. notes = the Markdown repository (shared with git-sync); secrets =
+# API tokens / local secrets store. Both must be ReadWriteMany for active/active.
+# -----------------------------------------------------------------------------
+persistence:
+  notes:
+    # -- Provision a PVC for note data (ignored when `storage.backend=s3`).
+    enabled: true
+    # -- Use an existing PVC instead of creating one.
+    existingClaim: ""
+    # -- StorageClass for the notes PVC (empty = cluster default).
+    storageClass: ""
+    # -- Access mode; must be `ReadWriteMany` for active/active.
+    accessMode: ReadWriteOnce
+    # -- Notes PVC size.
+    size: 5Gi
+    # -- Annotations for the notes PVC.
+    annotations: {}
+  secrets:
+    # -- Provision a PVC for the API-token/secrets store.
+    enabled: true
+    # -- Use an existing PVC instead of creating one.
+    existingClaim: ""
+    # -- StorageClass for the secrets PVC (empty = cluster default).
+    storageClass: ""
+    # -- Access mode; must be `ReadWriteMany` for active/active.
+    accessMode: ReadWriteOnce
+    # -- Secrets PVC size.
+    size: 256Mi
+    # -- Annotations for the secrets PVC.
+    annotations: {}
+
+# -----------------------------------------------------------------------------
+# git-sync sidecar (optional). Periodically commits/pushes the notes repo to a
+# git remote, mirroring the upstream git-sync container. Runs as a SINGLE
+# replica (a git working tree has one writer) even in active/active.
+# -----------------------------------------------------------------------------
+gitSync:
+  # -- Enable the git-sync sidecar (mirrors the notes repo to a git remote).
+  enabled: false
+  # -- git-sync sidecar image.
+  image:
+    repository: alpine/git
+    tag: latest
+    pullPolicy: IfNotPresent
+  # -- Commit/push interval in seconds.
+  intervalSeconds: 600
+  # -- Git commit author identity.
+  author:
+    name: "mdnest"
+    email: "mdnest@example.com"
+  # -- Name of a Secret with SSH deploy key(s), mounted read-only at `/keys`. Create it yourself; keys must never live in values.
+  sshSecretName: ""
+  # -- git-sync resource requests/limits.
+  resources:
+    requests:
+      cpu: 10m
+      memory: 16Mi
+    limits:
+      memory: 64Mi
+  # -- Node selector for git-sync.
+  nodeSelector: {}
+  # -- Tolerations for git-sync.
+  tolerations: []
+  # -- Affinity rules for git-sync.
+  affinity: {}
+
+# -----------------------------------------------------------------------------
+# Ingress. Routes all traffic to the frontend service, which reverse-proxies
+# /api and /api/ws to the backend (same model as the upstream Caddy/compose
+# setup). WebSocket upgrades pass through nginx.
+# -----------------------------------------------------------------------------
+ingress:
+  # -- Enable an Ingress routing all traffic to the frontend Service.
+  enabled: false
+  # -- IngressClass name.
+  className: ""
+  # -- Ingress annotations.
+  annotations: {}
+  # -- Ingress hosts and paths.
+  hosts:
+    - host: mdnest.local
+      paths:
+        - path: /
+          pathType: Prefix
+  # -- Ingress TLS configuration.
+  tls: []
+
+# -- Optional PodDisruptionBudget (useful for active/active).
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+  maxUnavailable: ""
+
+# -----------------------------------------------------------------------------
+# MCP server (opt-in). Exposes mdnest over the Model Context Protocol using the
+# streamable-HTTP transport. DISABLED by default: when mcp.enabled is false no
+# extra resources are rendered and the deployment is unchanged. When enabled it
+# adds a Deployment + Service (and optional Ingress) running the mdnest-mcp-server
+# image, which talks to the backend API in-cluster with a service API token.
+# -----------------------------------------------------------------------------
+mcp:
+  # -- Enable the MCP server (Model Context Protocol over streamable-HTTP). Adds a Deployment + Service (and optional Ingress).
+  enabled: false
+  # -- Number of MCP server replicas.
+  replicaCount: 1
+  # -- URL the MCP server uses to reach the backend API; defaults to the in-cluster backend Service when empty.
+  mdnestUrl: ""
+  # -- Service-token auth (used when `oauth.enabled=false`). Provide inline via `auth.token` or reference an existing Secret.
+  auth:
+    token: ""
+    existingSecret: ""
+    existingSecretKey: token
+  # -- Per-user OAuth 2.1 mode. When enabled the MCP server is an OAuth AS/RS and delegates login to mdnest SSO, attributing actions to the signed-in user. When disabled (default) the shared service token is used.
+  oauth:
+    enabled: false
+    # -- Public HTTPS base URL clients reach the MCP server on (no trailing slash).
+    publicUrl: ""
+    # -- mdnest backend SSO start endpoint, e.g. `https://<host>/api/auth/sso/start`.
+    ssoAuthorizeUrl: ""
+    # -- HMAC secret signing OAuth cookies/codes. Provide inline via `secret.value` or reference an existing Secret.
+    secret:
+      value: ""
+      existingSecret: ""
+      existingSecretKey: oauth-secret
+  # -- MCP HTTP listen port and path.
+  http:
+    port: 3000
+    path: /mcp
+  # -- MCP Service type/port.
+  service:
+    type: ClusterIP
+    port: 3000
+  # -- Extra environment variables appended to the MCP container.
+  extraEnv: []
+  # -- MCP resource requests/limits.
+  resources: {}
+  # -- Extra pod annotations for the MCP server.
+  podAnnotations: {}
+  # -- Extra pod labels for the MCP server.
+  podLabels: {}
+  # -- Pod-level security context for the MCP server.
+  podSecurityContext: {}
+  # -- Container-level security context for the MCP server.
+  securityContext: {}
+  # -- Node selector for the MCP server.
+  nodeSelector: {}
+  # -- Tolerations for the MCP server.
+  tolerations: []
+  # -- Affinity rules for the MCP server.
+  affinity: {}
+  # -- Optional standard Ingress for the MCP endpoint (Forterro deployments may instead expose it via a Traefik IngressRoute at the umbrella level).
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts: []
+    tls: []
