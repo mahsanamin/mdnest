@@ -1,9 +1,11 @@
 package collab
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"sync"
+	"time"
 )
 
 // Hub manages WebSocket connections grouped by note (namespace + path).
@@ -24,13 +26,67 @@ import (
 type Hub struct {
 	mu    sync.RWMutex
 	notes map[string]map[*Conn]struct{} // noteKey -> set of connections
+
+	// id identifies this hub process; used to suppress self-echo of
+	// messages published to the backplane.
+	id string
+	// bp fans events out to peer instances. Defaults to nopBackplane
+	// (single-instance behavior); replaced by EnableRedis when REDIS_URL
+	// is configured.
+	bp Backplane
+
+	// rmu guards remote, the per-note presence contributed by peer
+	// instances (noteKey -> peer instance id -> that peer's user-set).
+	rmu    sync.Mutex
+	remote map[string]map[string]remotePresence
 }
+
+// remotePresence is a peer instance's advertised user-set for a note, with an
+// expiry so a peer that dies (missing its heartbeat) is dropped from merged
+// presence.
+type remotePresence struct {
+	users     []UserInfo
+	expiresAt time.Time
+}
+
+const (
+	// presenceTTL is how long a peer's advertised presence is trusted
+	// without a refresh; presenceHeartbeat must be comfortably shorter.
+	presenceTTL       = 30 * time.Second
+	presenceHeartbeat = 10 * time.Second
+)
 
 // NewHub creates a new collaboration hub.
 func NewHub() *Hub {
 	return &Hub{
-		notes: make(map[string]map[*Conn]struct{}),
+		notes:  make(map[string]map[*Conn]struct{}),
+		id:     newInstanceID(),
+		bp:     nopBackplane{},
+		remote: make(map[string]map[string]remotePresence),
 	}
+}
+
+// EnableRedis attaches a Redis pub/sub backplane so this hub shares live
+// events and presence with peer instances, enabling horizontal scaling
+// (opt-in). With no Redis configured the hub keeps its single-instance
+// behavior and this is never called.
+func (h *Hub) EnableRedis(ctx context.Context, url string) error {
+	bp, err := newRedisBackplane(ctx, url)
+	if err != nil {
+		return err
+	}
+	h.bp = bp
+	bp.Start(h.onRemote)
+	go h.presenceHeartbeatLoop(ctx)
+	log.Println("collab: redis backplane enabled (horizontal scaling)")
+	return nil
+}
+
+// publish stamps the message with this instance's id and hands it to the
+// backplane. A no-op with the default nopBackplane.
+func (h *Hub) publish(m wireMsg) {
+	m.Origin = h.id
+	h.bp.Publish(m)
 }
 
 // noteKey builds a unique key for a note.
@@ -241,9 +297,14 @@ func (h *Hub) BroadcastTreeChanged(ns string) {
 	if err != nil {
 		return
 	}
+	h.localNsPrefix(ns, data)
+	h.publish(wireMsg{Type: wireNsPrefix, Ns: ns, Payload: data})
+}
 
-	h.mu.RLock()
+// localNsPrefix delivers data to every local conn whose note belongs to ns.
+func (h *Hub) localNsPrefix(ns string, data []byte) {
 	prefix := ns + ":"
+	h.mu.RLock()
 	targets := make([]*Conn, 0)
 	for key, conns := range h.notes {
 		if len(key) >= len(prefix) && key[:len(prefix)] == prefix {
@@ -266,7 +327,12 @@ func (h *Hub) BroadcastAccessChanged() {
 	if err != nil {
 		return
 	}
+	h.localAll(data)
+	h.publish(wireMsg{Type: wireAll, Payload: data})
+}
 
+// localAll delivers data to every local conn on any note.
+func (h *Hub) localAll(data []byte) {
 	h.mu.RLock()
 	targets := make([]*Conn, 0)
 	for _, conns := range h.notes {
@@ -282,28 +348,35 @@ func (h *Hub) BroadcastAccessChanged() {
 }
 
 func (h *Hub) broadcastPresence(key string) {
+	localUsers := h.sendPresenceLocal(key)
+	// Advertise our local view (possibly empty — e.g. after the last local
+	// conn on this note left) so peers refresh or drop our contribution.
+	h.publish(wireMsg{Type: wirePresence, Key: key, Users: localUsers})
+}
+
+// sendPresenceLocal builds the merged participant list (this instance's users
+// plus every live peer's) and sends it to this instance's connections on key.
+// It returns the local-only user-set so callers can advertise it to peers.
+// It never publishes, so it is safe to call when handling a peer's presence
+// update (no echo storm).
+func (h *Hub) sendPresenceLocal(key string) []UserInfo {
 	h.mu.RLock()
 	conns := h.notes[key]
-	if conns == nil {
-		h.mu.RUnlock()
-		return
-	}
-
-	// Deduplicate by user ID — the presence list is a set of users,
-	// not connections, so two tabs from the same user surface as one
-	// participant.
+	// Deduplicate by user ID — the presence list is a set of users, not
+	// connections, so two tabs from the same user surface as one participant.
 	seen := make(map[int]bool, len(conns))
-	users := make([]UserInfo, 0, len(conns))
+	localUsers := make([]UserInfo, 0, len(conns))
 	targets := make([]*Conn, 0, len(conns))
 	for c := range conns {
 		targets = append(targets, c)
 		if !seen[c.User.ID] {
 			seen[c.User.ID] = true
-			users = append(users, c.User)
+			localUsers = append(localUsers, c.User)
 		}
 	}
 	h.mu.RUnlock()
 
+	users := h.mergedPresence(key, localUsers)
 	data, _ := json.Marshal(OutgoingMessage{
 		Type:  "presence",
 		Users: users,
@@ -311,6 +384,122 @@ func (h *Hub) broadcastPresence(key string) {
 
 	for _, c := range targets {
 		c.Send(data)
+	}
+	return localUsers
+}
+
+// mergedPresence returns the union (deduplicated by user ID) of localUsers and
+// every non-expired peer's advertised users for key. Expired peer entries are
+// pruned lazily here.
+func (h *Hub) mergedPresence(key string, localUsers []UserInfo) []UserInfo {
+	now := time.Now()
+	result := make([]UserInfo, 0, len(localUsers)+4)
+	seen := make(map[int]bool, len(localUsers)+4)
+	for _, u := range localUsers {
+		if !seen[u.ID] {
+			seen[u.ID] = true
+			result = append(result, u)
+		}
+	}
+
+	h.rmu.Lock()
+	origins := h.remote[key]
+	for origin, rp := range origins {
+		if now.After(rp.expiresAt) {
+			delete(origins, origin)
+			continue
+		}
+		for _, u := range rp.users {
+			if !seen[u.ID] {
+				seen[u.ID] = true
+				result = append(result, u)
+			}
+		}
+	}
+	if len(origins) == 0 {
+		delete(h.remote, key)
+	}
+	h.rmu.Unlock()
+
+	return result
+}
+
+// setRemotePresence records (or clears, when users is empty) a peer's
+// advertised user-set for a note.
+func (h *Hub) setRemotePresence(key, origin string, users []UserInfo) {
+	h.rmu.Lock()
+	if len(users) == 0 {
+		if origins, ok := h.remote[key]; ok {
+			delete(origins, origin)
+			if len(origins) == 0 {
+				delete(h.remote, key)
+			}
+		}
+		h.rmu.Unlock()
+		return
+	}
+	if h.remote[key] == nil {
+		h.remote[key] = make(map[string]remotePresence)
+	}
+	h.remote[key][origin] = remotePresence{
+		users:     users,
+		expiresAt: time.Now().Add(presenceTTL),
+	}
+	h.rmu.Unlock()
+}
+
+// onRemote handles an envelope received from a peer instance. It is the
+// delivery callback wired into the backplane. Messages this instance
+// published are ignored (they were already applied locally when sent).
+func (h *Hub) onRemote(m wireMsg) {
+	if m.Origin == h.id {
+		return
+	}
+	switch m.Type {
+	case wireNote:
+		h.localNote(m.Key, nil, m.Payload)
+	case wireNsPrefix:
+		h.localNsPrefix(m.Ns, m.Payload)
+	case wireAll:
+		h.localAll(m.Payload)
+	case wirePresence:
+		h.setRemotePresence(m.Key, m.Origin, m.Users)
+		// Re-emit the merged list to our local conns; do NOT publish here
+		// (that would bounce the presence update back and forth forever).
+		h.sendPresenceLocal(m.Key)
+	}
+}
+
+// presenceHeartbeatLoop periodically re-advertises this instance's local
+// presence for every active note so peers' TTLs are refreshed and a crashed
+// instance's users age out. Runs only when a backplane is enabled.
+func (h *Hub) presenceHeartbeatLoop(ctx context.Context) {
+	ticker := time.NewTicker(presenceHeartbeat)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			h.mu.RLock()
+			snapshot := make(map[string][]UserInfo, len(h.notes))
+			for key, conns := range h.notes {
+				seen := make(map[int]bool, len(conns))
+				us := make([]UserInfo, 0, len(conns))
+				for c := range conns {
+					if !seen[c.User.ID] {
+						seen[c.User.ID] = true
+						us = append(us, c.User)
+					}
+				}
+				snapshot[key] = us
+			}
+			h.mu.RUnlock()
+
+			for key, us := range snapshot {
+				h.publish(wireMsg{Type: wirePresence, Key: key, Users: us})
+			}
+		}
 	}
 }
 
@@ -324,7 +513,14 @@ func (h *Hub) broadcastToOthers(key string, exclude *Conn, msg OutgoingMessage) 
 	if err != nil {
 		return
 	}
+	h.localNote(key, exclude, data)
+	h.publish(wireMsg{Type: wireNote, Key: key, Payload: data})
+}
 
+// localNote delivers pre-marshaled data to every local conn on key except
+// exclude. Used both for locally-originated events (exclude = originating
+// conn) and for events relayed from a peer instance (exclude = nil).
+func (h *Hub) localNote(key string, exclude *Conn, data []byte) {
 	h.mu.RLock()
 	conns := h.notes[key]
 	targets := make([]*Conn, 0, len(conns))

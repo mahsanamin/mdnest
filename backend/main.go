@@ -297,6 +297,14 @@ func main() {
 	var collabHub *collab.Hub
 	if enableCollab {
 		collabHub = collab.NewHub()
+		// Opt-in horizontal scaling: when REDIS_URL is set, share live events
+		// and presence across replicas via a Redis pub/sub backplane. Empty =
+		// single-instance behavior, unchanged.
+		if redisURL := env("REDIS_URL", ""); redisURL != "" {
+			if err := collabHub.EnableRedis(context.Background(), redisURL); err != nil {
+				log.Fatalf("live collaboration: failed to enable Redis backplane: %v", err)
+			}
+		}
 		log.Println("live collaboration enabled (WebSocket)")
 	}
 
