@@ -1,0 +1,52 @@
+{{- include "mdnest.validateSupported" . -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "mdnest.envConfigName" . }}
+  labels:
+    {{- include "mdnest.labels" . | nindent 4 }}
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+data:
+  AUTH_MODE: {{ .Values.auth.mode | quote }}
+  MDNEST_USER: {{ .Values.auth.adminUser | quote }}
+  NOTES_DIR: "/data/notes"
+  SECRETS_DIR: "/data/secrets"
+  PORT: "8080"
+  STORAGE_BACKEND: {{ .Values.storage.backend | quote }}
+  {{- if eq .Values.storage.backend "s3" }}
+  S3_ENDPOINT: {{ required "storage.s3.endpoint is required when storage.backend=s3" .Values.storage.s3.endpoint | quote }}
+  S3_BUCKET: {{ required "storage.s3.bucket is required when storage.backend=s3" .Values.storage.s3.bucket | quote }}
+  S3_REGION: {{ .Values.storage.s3.region | quote }}
+  S3_USE_SSL: {{ .Values.storage.s3.useSSL | ternary "true" "false" | quote }}
+  S3_PATH_STYLE: {{ .Values.storage.s3.pathStyle | ternary "true" "false" | quote }}
+  {{- end }}
+  FRONTEND_ORIGIN: {{ .Values.backend.frontendOrigin | quote }}
+  {{- if .Values.backend.serverAlias }}
+  SERVER_ALIAS: {{ .Values.backend.serverAlias | quote }}
+  {{- end }}
+  DISABLE_UPDATE_CHECK: {{ .Values.backend.disableUpdateCheck | ternary "true" "false" | quote }}
+  {{- if eq .Values.auth.mode "multi" }}
+  ENABLE_LIVE_COLLAB: {{ .Values.collab.enabled | ternary "true" "false" | quote }}
+  POSTGRES_HOST: {{ required "postgres.host is required when auth.mode=multi" .Values.postgres.host | quote }}
+  POSTGRES_PORT: {{ .Values.postgres.port | quote }}
+  POSTGRES_DB: {{ .Values.postgres.database | quote }}
+  POSTGRES_USER: {{ .Values.postgres.user | quote }}
+  {{- end }}
+  USER_PROVIDER: {{ .Values.sso.enabled | ternary "sso" "local" | quote }}
+  {{- if .Values.sso.enabled }}
+  SSO_ISSUER_URL: {{ required "sso.issuerUrl is required when sso.enabled=true" .Values.sso.issuerUrl | quote }}
+  SSO_CLIENT_ID: {{ required "sso.clientId is required when sso.enabled=true" .Values.sso.clientId | quote }}
+  {{- if .Values.sso.redirectUrl }}
+  SSO_REDIRECT_URL: {{ .Values.sso.redirectUrl | quote }}
+  {{- end }}
+  {{- if .Values.sso.allowedDomains }}
+  SSO_ALLOWED_DOMAINS: {{ .Values.sso.allowedDomains | quote }}
+  {{- end }}
+  SSO_PROVIDER_LABEL: {{ .Values.sso.providerLabel | quote }}
+  {{- if .Values.sso.adminEmails }}
+  ADMIN_EMAILS: {{ .Values.sso.adminEmails | quote }}
+  {{- end }}
+  {{- end }}

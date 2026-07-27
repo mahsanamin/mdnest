@@ -4,6 +4,38 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v3.11.7 — XSS hardening, cross-namespace file leak fixed, Helm chart, build CI
+
+_First release with outside contributions. Thanks to [@ecthelion77](https://github.com/ecthelion77) (Olivier Gintrand) for the sanitization hardening, the `/api/files/` authorization fix, the Helm chart, and the CI workflows._
+
+### Security
+
+- **Rendered markdown, release notes, and mermaid SVG are now sanitized before they reach the DOM.** Note bodies are user-authored and shared between users in multi-user mode, and marked passes raw HTML through by design — so a note containing `<img src=x onerror=…>` or a `javascript:` link href executed when anyone previewed it. All three injection points now run through a single `frontend/src/sanitize.js` module (DOMPurify): event-handler attributes and dangerous URI schemes are stripped, and `<a target="_blank">` gets `rel="noopener noreferrer"` so external links can't reach back into the opener. The Preview's own post-passes are unaffected — `class`, `data-*`, and task-list checkboxes all survive sanitization.
+- **A signed-in user could read files from namespaces they had no grant for.** `GET /api/files/<ns>/<path>` — the endpoint that serves uploaded images and attachments — carried its namespace in the URL path rather than the `?ns=` query param, so it couldn't use the query-param permission middleware and was registered with authentication only. Any authenticated principal, including an API token, could fetch any file in any namespace by guessing the URL. It now enforces the same per-namespace read check as every other content endpoint. Single-user mode is unaffected.
+- **`google.golang.org/grpc` bumped to v1.82.1 for [GO-2026-6061](https://pkg.go.dev/vuln/GO-2026-6061)** — vulnerabilities in the xDS RBAC authorization engine and the HTTP/2 transport server. It arrives transitively through the Firebase/Google Cloud SDK, and `govulncheck` confirmed reachable symbols in the built binary, so it's a real exposure rather than an unused-code advisory. Caught by CI on the release PR — the local pre-push hook skips `govulncheck` when Go isn't installed on the host, which is precisely why the CI check is the authoritative gate.
+- **Four npm advisories cleared, two of them high severity.** `postcss` ≤8.5.17 ([GHSA-r28c-9q8g-f849](https://github.com/advisories/GHSA-r28c-9q8g-f849), arbitrary `.map` disclosure via source-map auto-loading) and `fast-uri` ([GHSA-4c8g-83qw-93j6](https://github.com/advisories/GHSA-4c8g-83qw-93j6), host confusion via failed IDN canonicalization) were both failing the Security Audit on `main` — and because that audit is a required check with no bypass, the red gate blocked every merge. Also picks up `dompurify` ([GHSA-c2j3-45gr-mqc4](https://github.com/advisories/GHSA-c2j3-45gr-mqc4)) and `protobufjs`. All transitive, so lockfile-only — no `package.json` change and no new packages.
+
+### Kubernetes
+
+- **An opt-in Helm chart for clusters, alongside the usual Docker Compose install.** `deploy/helm/mdnest` deploys the backend, the nginx frontend, and an optional git-sync sidecar as standard Kubernetes resources — no CRDs, no operator, PostgreSQL never bundled. Ingress, TLS, resource limits, probes, PVCs, and a ServiceAccount are all configurable; `helm lint`, both renders, and `kubeconform -strict` run in CI. Nothing about the Compose path changed: `setup.sh`, `mdnest.conf`, `docker-compose.yml`, and the Dockerfiles are untouched, and the chart is inert unless you use it. Supported today is single-replica `single` or `multi` mode with live collaboration, git-sync, ingress, and TLS. Three options are documented but **rejected at install time** because their code isn't in this release — `storage.backend=s3`, `collab.redis.*`, and `mcp.enabled` — so the chart fails loudly instead of coming up `Ready` while writing notes to the wrong place or splitting collaboration state across pods.
+
+### CI
+
+- **Build and test now run server-side on every push and PR, not just in a local pre-push hook.** `.github/workflows/ci.yml` runs the backend build, `go vet`, and `go test -race`; the frontend build and unit tests; the Helm chart lint/render/validate; and a build of the backend and frontend images. The pre-push hook still exists as fast local feedback, but it can be skipped with `--no-verify` and silently omits `govulncheck` on a host without Go — so the authoritative gate is CI.
+- **A release workflow publishes container images and the Helm chart on version tags.** `v*` pushes build and push `mdnest-backend`, `mdnest-frontend`, and `mdnest-mcp-server` to `ghcr.io/<owner>/`, then package and push the chart as an OCI artifact. Everything is parameterized by repository owner, so a fork publishes under its own namespace with no edits.
+- **The Security Audit now also runs on PRs into `develop`.** It was scoped to `main`, so a contribution integrated on `develop` wasn't scanned until the release PR — which is when the two advisories above were found, well after the code had landed. `main`'s required checks are unchanged; this only moves the signal earlier.
+
+### Bug fixes
+
+- **Mermaid diagrams rendered as blank boxes once SVG sanitization was added.** DOMPurify's SVG profile doesn't allow `<foreignObject>`, and mermaid renders every flowchart node label inside one — so sanitizing deleted the text of every label while the boxes and arrows still drew. Nothing threw and no console error appeared; the diagram simply looked empty. `foreignObject` is now allowed, which doesn't weaken the sanitizer: scripts, iframes, objects, embeds, forms, and every `on*` handler inside it are still stripped, and each of those is pinned by a test.
+- **The Helm chart shipped pointing at the contributor's fork.** Its default image repositories, `home`/`sources`, maintainer, and README install command all referenced a third party's registry and repo, so `helm install` from a checkout of this repo pulled someone else's images. Its `appVersion` was also frozen at the previous release, so a source install requested stale image tags.
+
+### Testing
+
+- **Regression coverage at the layer that would have caught each bug.** `backend/handlers/upload_test.go` is the repo's first Go test — it asserts a collaborator granted in one namespace gets `403` on another, that a superadmin reads both, and that single-user mode is unaffected; with the authorization check removed it reports the actual cross-namespace leak. `frontend/src/__tests__/sanitize.test.js` pins both directions of the sanitizer: `foreignObject` and its label text survive, six smuggled payloads and inline handlers don't. And the browser suite now seeds a note containing a mermaid flowchart and asserts the **label text** is visible in Preview — asserting only that shapes rendered would have passed while every label was missing. All three were confirmed to fail with their respective fix reverted.
+
+---
+
 ## v3.11.6 — Clearer pitch, reveal-in-tree, instant cross-tab sync, security gate
 
 ### Docs

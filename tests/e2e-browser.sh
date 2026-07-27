@@ -101,6 +101,22 @@ Unique token: $SEED_TOKEN
 " >/dev/null || { fail "could not seed note"; exit 1; }
 pass "seeded $SEED_FILE (token $SEED_TOKEN)"
 
+# A mermaid flowchart, so the suite can prove diagram labels actually render.
+# Mermaid draws flowchart labels inside <foreignObject>; a sanitizer that drops
+# that element leaves the boxes but silently deletes every label (v3.11.7).
+MERMAID_FILE="e2e-mermaid.md"
+MERMAID_LABEL="zzm${SFX}label"
+curl -fsS -X POST "$BASE_URL/api/note?ns=testing_workspace&path=$MERMAID_FILE" \
+  -H "Authorization: Bearer $TOKEN" \
+  --data "# Mermaid render check
+
+\`\`\`mermaid
+flowchart TD
+  A[$MERMAID_LABEL] --> B[Second Node]
+\`\`\`
+" >/dev/null || { fail "could not seed mermaid note"; exit 1; }
+pass "seeded $MERMAID_FILE (label $MERMAID_LABEL)"
+
 # ── Install Playwright + Chromium on demand ──────────────────────────────────
 log "Preparing Playwright (installs Chromium on first run)"
 (
@@ -117,6 +133,7 @@ if ( cd tests/browser && \
      MDNEST_BASE_URL="$BASE_URL" \
      MDNEST_USER=e2e MDNEST_PASSWORD=e2epass123 \
      MDNEST_SEED_FILE="$SEED_FILE" MDNEST_SEED_TOKEN="$SEED_TOKEN" \
+     MDNEST_MERMAID_FILE="$MERMAID_FILE" MDNEST_MERMAID_LABEL="$MERMAID_LABEL" \
      npx playwright test ); then
   pass "BROWSER E2E: all specs passed"
   exit 0

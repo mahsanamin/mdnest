@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "mdnest.frontend.fullname" . }}
+  labels:
+    {{- include "mdnest.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.frontend.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.frontend.service.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "mdnest.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend

@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "mdnest.fullname" . }}-test-connection"
+  labels:
+    {{- include "mdnest.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  containers:
+    - name: curl
+      image: curlimages/curl:8.11.0
+      command: ["/bin/sh", "-c"]
+      args:
+        - >-
+          curl -sfS
+          http://{{ include "mdnest.backend.fullname" . }}:{{ .Values.backend.service.port }}/api/config
+          && curl -sfS
+          http://{{ include "mdnest.frontend.fullname" . }}:{{ .Values.frontend.service.port }}/index.html
+          > /dev/null

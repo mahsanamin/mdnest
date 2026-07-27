@@ -45,7 +45,8 @@ backend/
     search.go                # GET /api/search?ns=&q= (concurrent search with caching)
     tokens.go                # GET/POST/DELETE /api/auth/tokens (API token management)
     totp.go                  # 2FA: TOTP setup, verify, disable, admin reset
-    upload.go                # POST /api/folder, /api/upload, GET /api/files/
+    upload.go                # POST /api/folder, /api/upload, GET /api/files/ (ns comes from the URL path, so the read check is IN the handler, not middleware)
+    upload_test.go           # First Go test in the repo (v3.11.7+) — pins the /api/files/ cross-namespace authz check
     move.go                  # POST /api/move?ns=&from=&to=
     path.go                  # SafePath(), RequireNamespace() — shared utils
     noteid.go                # ExtractNoteID / InjectNoteID / EnsureNoteID (UUID marker)
@@ -74,6 +75,8 @@ frontend/
     App.jsx                  # Root: auth, namespace/tree state, context menu, URL routing
     api.js                   # All API calls (fetch wrapper with JWT + 401 handling)
     wikilink.js              # Obsidian [[wikilink]] support (v3.11.5+) — pure module: parse/resolve, marked inline extension, relative-.md-link resolver, restoreWikilinks() serializer-unescape. No React imports (unit-tested standalone).
+    sanitize.js              # DOMPurify wrappers (v3.11.7+): sanitizeHtml for marked output + release notes, sanitizeSvg for mermaid. sanitizeSvg MUST keep ADD_TAGS:['foreignObject'] or every flowchart label renders blank.
+    __tests__/sanitize.test.js # Pins both directions — labels survive, payloads don't
     mermaid-config.js         # Shared mermaid init, theme, and fixMermaidTextColors()
     firebase-config.js       # Firebase SDK lazy init (USER_PROVIDER=firebase only)
     components/
@@ -98,6 +101,20 @@ frontend/
 mcp-server/
   index.js                   # MCP server entry — tools + resources wrapping REST API
   package.json
+
+deploy/
+  helm/mdnest/               # Optional Helm chart (v3.11.7+) — inert unless used; Compose path unchanged
+    Chart.yaml               # appVersion tracks the release — the FOURTH version-bump file
+    values.yaml              # Every knob; three options are gated off (see _helpers.tpl)
+    templates/_helpers.tpl   # mdnest.validateSupported (rejects unimplemented options) + mdnest.validateHA
+    templates/               # backend/frontend/gitsync/mcp Deployments, Services, PVCs, Ingress, HPA, PDB
+    files/sync.sh            # git-sync loop for the chart's sidecar (chart-local; Compose has its own)
+    README.md(.gotmpl)       # helm-docs generated reference — edit the .gotmpl, patch both
+
+.github/workflows/
+  security-audit.yml         # npm audit + govulncheck + shellcheck. REQUIRED checks on main; also runs on PRs into develop
+  ci.yml                     # (v3.11.7+) go build/vet/test -race, frontend build+test, helm lint/render/kubeconform, image builds
+  release.yml                # (v3.11.7+) on v* tags: push images + chart to ghcr.io/<owner>/
 
 mdnest                       # Client CLI (login, note read/write/append, works from any machine)
 mdnest-server                # Server management CLI (start, stop, rebuild, reset-password, runs from project dir)
@@ -138,6 +155,7 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 - Live editor: lazy-loaded via React.lazy(), only downloads when user switches to Live mode. The chunk is ~1.1 MB (~340 KB gzipped) — Crepe + Vue runtime + CodeMirror + KaTeX.
 - Crepe (v3.10.0+): `@milkdown/crepe` is the same editor Milkdown's playground uses. Provides block-edit (drag handle + slash menu), native task-list checkboxes, KaTeX math, polished tables, image-block upload UI, link tooltip. Built on `@milkdown/kit/preset/{commonmark,gfm}` under the hood — same schema as pre-v3.10's hand-rolled Milkdown stack.
 - Custom plugins (in `live-editor-plugins.jsx`): `commentHighlightPlugin` (yellow highlight on commented text, anchor disambiguation via `rangeStart`), `clearEmptyBlockPlugin` (backspace empty heading → paragraph), `tableCellCheckboxPlugin` (literal `[ ]`/`[x]` in cells render as interactive checkboxes via decorations; markdown bytes unchanged on serialize), `wikilinkDecorationPlugin` (v3.11.5+ — `[[wikilink]]` spans get a link-coloured highlight + `data-wikilink`; decoration-only so bytes stay literal `[[...]]`, Ctrl/Cmd+Click navigation wired in `LiveEditorCrepe.jsx`), `LiveToolbar` (Undo / Redo / format / insert / table commands).
+- **Sanitization (v3.11.7+, `sanitize.js`): every path that puts rendered markup into the DOM goes through it.** `innerHTML` / `dangerouslySetInnerHTML` with `marked()` output, GitHub release notes, or mermaid SVG must call `sanitizeHtml` / `sanitizeSvg` — note bodies are user-authored and shared between users, and marked passes raw HTML through by design. If you add a new render target, route it through the same module rather than sanitizing inline. Two traps, both load-bearing: `sanitizeSvg` needs `ADD_TAGS: ['foreignObject']` because mermaid puts flowchart labels inside one and DOMPurify's svg profile excludes it (without it, diagrams render as blank shapes — nothing throws); and do **not** additionally allow `div`/`span`, because once allowed they fail DOMPurify's namespace check instead of being unwrapped and the labels vanish again. `sanitizeHtml` deliberately keeps `class`, `data-*`, and task checkboxes — the Preview's post-passes depend on them.
 - Wikilinks (v3.11.5+, `wikilink.js`): resolution runs against the current namespace tree only (built via `buildPathIndex(tree)` and memoized in `App.jsx`, shared by `Preview.jsx` and the Live editor). Round-trip fidelity is the hard requirement — the Live editor stores literal `[[...]]`, but Milkdown's serializer escapes `[[`→`\[\[` in plain text, so `markdownUpdated` routes every serialized doc through `restoreWikilinks()` before `onChange`. Don't add a wikilink node to the schema — the decoration + serializer-unescape approach is deliberate so bytes never change.
 - Mermaid: `LiveEditorCrepe.jsx` defines an inline `mermaidNodeView` that renders the `MermaidBlock` React component for `code_block` nodes where `language === 'mermaid'`. The compose-mermaid plugin runs after `SchemaReady`, reads Crepe's existing `code_block` factory from `nodeViewCtx`, and writes a wrapper that delegates to it for non-mermaid blocks — so Crepe's CodeMirror UI still works for other code languages AND mermaid renders via our React component.
 - Image upload: Crepe's `image-block` `onUpload` calls `uploadImage()` in `api.js`. `proxyDomURL` resolves the bare-filename markdown src (e.g. `![](photo.png)`) into `/api/files/<ns>/<dir>/<file>?token=<jwt>` for rendering — the `?token=` query param is the auth-fallback the middleware accepts for `<img>` GETs that can't carry an `Authorization` header.
@@ -173,10 +191,11 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 
 - **One PR per release.** Bundle all the work for a release into a single branch (`feat/<name>` or `release/v3.X.Y`) and open **one** PR against `main`. Don't open intermediate / sibling PRs for sub-features during the same release cycle — they cause merge conflicts on shared files (`CHANGELOG.md`, the three version files, `App.jsx`, docs) when one lands while another is still open. Hotfix exception: a true emergency (security CVE, prod crash) can ship as its own PR ahead of the release, but flag it before opening. v3.10.0 hit exactly this — PR #10 (v3.9.1) merged while PR #11 (v3.10.0) was open and produced six-file conflicts; resolve by merging `main` into the release branch and keeping the higher version + the deletion of any files the cutover removed.
 - **Version scheme — `develop` carries `X.Y.Z-dev`, releases drop the suffix.** `develop` always holds the in-flight version with a `-dev` pre-release suffix (e.g. `3.11.3-dev`), so a develop/staging box reads `v3.11.3-dev` ("candidate, still validating") and production reads the plain `v3.11.3`. The **release branch sets the plain `X.Y.Z`** (drops `-dev`); after the release merges, bump `develop` to the *next* `X.Y.(Z+1)-dev`. `isVersionNewer` (App.jsx) is pre-release-aware so a `-dev` build shows no false "update available" against the last release but does see the final release as newer once it ships.
-- Set the version in three files — on the release branch use the plain `X.Y.Z`; on `develop` use `X.Y.Z-dev`:
+- Set the version in four files — on the release branch use the plain `X.Y.Z`; on `develop` use `X.Y.Z-dev`:
   - `backend/handlers/config.go` — `"version": "3.X.Y"`
   - `frontend/package.json` — `"version": "3.X.Y"`
   - `mdnest` CLI script — `MDNEST_CLI_VERSION="3.X.Y"`
+  - `deploy/helm/mdnest/Chart.yaml` — `appVersion: "3.X.Y"` (v3.11.7+, the Helm chart's default image tag). Note `version:` in the same file is the **chart's own** SemVer and moves independently — bump it when the chart's templates change, not on every app release. The release workflow passes `--app-version` when packaging, so a *published* chart is stamped from the tag either way; this file only governs `helm install ./deploy/helm/mdnest` from a source checkout.
 - Update `CHANGELOG.md` with the new version section
 - Merge to `main`, tag as `v3.X.Y`, push with `--tags`
 - **Publish a GitHub Release for the tag** — `gh release create vX.Y.Z --title "..." --notes-file <file>` with the CHANGELOG entry as the notes. Tags ≠ Releases on GitHub: `git push --tags` only creates the git ref, but the in-app "update available" banner polls `https://api.github.com/repos/<owner>/<repo>/releases/latest` which returns **404** when zero Releases have been published — so without this step, no running mdnest install will ever notice a new version. The frontend's banner (`appConfig.latestRelease.name` + `.notes` preview) is also designed around Release metadata, not bare tag names. The clean recipe:
@@ -222,6 +241,12 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 ## Scope discipline
 
 - **Solve only the problem that's ours to solve; do our best but don't over-engineer.** Fix what mdnest itself produces (e.g. *guarantee* readable mermaid contrast in our render layer), but don't try to police or re-educate the world outside our box — don't edit users' `CLAUDE.md` at install, lecture authors about their color choices, or build elaborate guidance systems for mistakes that originate upstream. The render-layer guarantee is ours; the author's input is theirs. Prefer the smallest change that genuinely fixes the user-visible problem.
+
+- **The core stays lean; new capability arrives off-by-default behind a flag.** mdnest's promise is a single-box deployment anyone can stand up with `setup.sh` and reason about end to end, with plain files as the source of truth. Features that add real value are welcome — but an operator who doesn't need one must carry none of its weight or risk: no extra dependency, no new env var to understand, no new failure mode. Measure this, don't assert it. When judging whether a change kept the promise, check the numbers that matter: new entries in `go.mod` / `package.json`, gzipped bundle delta, and whether `setup.sh`, `mdnest.conf.sample`, `docker-compose.yml`, the Dockerfiles, `mdnest-server` and `nginx.conf` moved at all. v3.11.7 added ~3,180 lines but only 100 of runtime code, zero Go deps, +368 B gzipped, and left every file in that list untouched — that shape is fine. A feature that grows the default install is not.
+
+- **A configuration surface must never outrun the code behind it.** The backend silently ignores env it doesn't read, so a knob whose implementation isn't merged doesn't fail — it lies. v3.11.7 shipped a Helm chart offering `storage.backend=s3`, `collab.redis.*` and `mcp.enabled` before any of that code existed: `s3` would have written notes to the PVC while looking configured for a bucket, and a multi-replica deploy would have split collaboration state per pod, both while reporting `Ready`. Guard the option (`mdnest.validateSupported` in `deploy/helm/mdnest/templates/_helpers.tpl`) so it fails at install time naming what's missing, assert both directions in CI (the supported config renders; the unsupported ones are rejected), and **delete a guard in the same change that lands the capability behind it.**
+
+- **Changing what mdnest *is* is a conversation, not a diff.** Adding an option is ordinary work. Trading away a founding property — files as the source of truth, namespaces from mounts, no DB in single mode — is a maintainer decision to make before the code is reviewed, however good the code is. When an incoming change does both, ask for it split so the mechanical part can land while the contentious part is decided.
 
 ## Testing
 
@@ -269,3 +294,7 @@ See `docs/` for:
 - `user-guide.md` — End-user guide
 - `setup.md` — Setup and configuration
 - `architecture.md` — Architecture overview
+- `security.md` — Threat model and the five defense layers (layer 5, rendered-content sanitization, is v3.11.7+)
+- `cli.md` — `mdnest` client CLI
+- `kubernetes.md` — Optional Helm chart (v3.11.7+); says which options are gated off and why
+- `sso-setup.md` / `firebase-setup.md` — Identity-provider setup

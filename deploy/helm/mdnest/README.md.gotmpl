@@ -1,0 +1,242 @@
+{{ template "chart.header" . }}
+
+{{ template "chart.deprecationWarning" . }}
+
+{{ template "chart.badgesSection" . }}
+
+{{ template "chart.description" . }}
+
+{{ template "chart.homepageLine" . }}
+
+A standard-Kubernetes Helm chart (no CRDs) that deploys [mdnest](https://github.com/mahsanamin/mdnest) — a self-hosted Markdown knowledge base with real-time collaboration.
+
+- **Backend** — Go API + WebSocket collaboration server (port `8080`).
+- **Frontend** — nginx serving the SPA and reverse-proxying `/api` and `/api/ws` to the backend (port `80`).
+- **MCP server** *(opt-in)* — exposes mdnest over the Model Context Protocol via streamable-HTTP.
+- **git-sync sidecar** *(opt-in)* — mirrors the notes repository to a git remote.
+
+PostgreSQL and Redis are **never bundled**: point the chart at external/managed instances.
+
+> [!IMPORTANT]
+> **Not every option below is available yet.** The chart is versioned with mdnest,
+> and three opt-in capabilities documented here are not implemented in this
+> release — the chart **refuses to install** rather than come up "healthy" while
+> doing the wrong thing:
+>
+> | Option | Why it is rejected |
+> |---|---|
+> | `storage.backend=s3` | The backend reads notes from the filesystem and ignores `S3_*`; notes would land on the PVC, not your bucket. |
+> | `collab.redis.*` | There is no presence/event backplane, so replicas would diverge instead of syncing. |
+> | `mcp.enabled=true` | The bundled MCP server speaks stdio only; the Service and Ingress would route to a port nothing listens on. |
+>
+> Consequently `backend.replicaCount > 1` is also rejected: active/active needs
+> the backplane. **Supported today:** single-replica `single` or `multi` mode,
+> live collaboration, git-sync, ingress, and TLS.
+
+## Deployment models
+
+Single instance is the default and matches upstream mdnest exactly. The horizontally-scaled column describes the target topology; it is gated off until the Redis backplane lands (see the note above).
+
+| | Single instance (default) | Horizontally scaled (opt-in) |
+|---|---|---|
+| `auth.mode` | `single` (file auth, no DB) | `multi` (external PostgreSQL) |
+| `backend.replicaCount` | `1` | `> 1` |
+| `backend.strategy.type` | `Recreate` | `RollingUpdate` |
+| Live collaboration | off | `collab.enabled=true` |
+| Cross-replica sync | n/a | Redis (`collab.redis.*`) |
+| Notes storage | `local` PVC (RWO) | RWX PVC **or** `storage.backend=s3` |
+
+The chart **validates these invariants and fails fast** with a clear message if a multi-replica deployment is missing PostgreSQL, Redis, collaboration, or shared (RWX/S3) storage.
+
+## TL;DR
+
+```bash
+# Single-instance, from the packaged OCI chart
+helm install mdnest oci://ghcr.io/mahsanamin/charts/mdnest \
+  --set auth.password='change-me' \
+  --set auth.jwtSecret='another-long-random-secret' \
+  --set ingress.enabled=true \
+  --set ingress.hosts[0].host=mdnest.example.com \
+  --set backend.frontendOrigin=https://mdnest.example.com
+```
+
+> Prefer a values file and Secrets over `--set` for anything sensitive (see below).
+
+## Installing
+
+```bash
+helm install mdnest oci://ghcr.io/mahsanamin/charts/mdnest -f my-values.yaml
+# or from a local checkout
+helm install mdnest ./deploy/helm/mdnest -f my-values.yaml
+```
+
+Uninstall:
+
+```bash
+helm uninstall mdnest
+```
+
+PVCs are retained on uninstall — delete them manually if you want to discard the notes/secrets data.
+
+## Configuration guide
+
+### Credentials & Secrets
+
+Never commit real credentials to a values file. For every secret the chart accepts **either** an inline value (fine for local testing) **or** a reference to an existing Secret (recommended for production, e.g. one synced from Vault by an ExternalSecret):
+
+| Concern | Inline | Existing Secret |
+|---|---|---|
+| Admin / JWT | `auth.password`, `auth.jwtSecret` | `auth.existingSecret` (+ `auth.secretKeys`) |
+| PostgreSQL | `postgres.password` | `postgres.existingSecret` |
+| Redis | `collab.redis.url` | `collab.redis.existingSecret` or `collab.redis.passwordSecret` |
+| SSO | `sso.clientSecret` | `sso.existingSecret` |
+| S3 | `storage.s3.accessKey/secretKey` | `storage.s3.existingSecret` |
+| MCP token | `mcp.auth.token` | `mcp.auth.existingSecret` |
+| MCP OAuth | `mcp.oauth.secret.value` | `mcp.oauth.secret.existingSecret` |
+
+When an `existingSecret` is set, the chart-managed Secret does not carry those keys and inline values are ignored.
+
+### Multi-user + PostgreSQL
+
+```yaml
+auth:
+  mode: multi
+  existingSecret: mdnest-auth          # provides MDNEST_JWT_SECRET
+postgres:
+  host: pg-primary.databases.svc
+  database: mdnest
+  user: mdnest
+  existingSecret: mdnest-postgres      # provides POSTGRES_PASSWORD
+```
+
+### Live collaboration + Redis (active/active)
+
+Enable collaboration and give every replica a shared Redis backplane so presence/edits sync across pods:
+
+```yaml
+backend:
+  replicaCount: 3
+  strategy:
+    type: RollingUpdate
+collab:
+  enabled: true
+  redis:
+    url: rediss://:password@redis.databases.svc:6379/0
+```
+
+For managed Redis that only exposes a password (KubeBlocks, ElastiCache), use *compose mode* — the chart builds `REDIS_URL` from parts:
+
+```yaml
+collab:
+  enabled: true
+  redis:
+    host: mdnest-redis-redis.databases.svc
+    tls: true
+    passwordSecret:
+      name: mdnest-redis-account-default
+      key: password
+```
+
+### Storage backend (local vs S3)
+
+`storage.backend=local` (default) keeps notes on the `notes` PVC — byte-identical to upstream. Set `storage.backend=s3` to store notes in an S3-compatible bucket, which lets multiple replicas share notes **without** ReadWriteMany storage and enables self-service namespace creation:
+
+```yaml
+storage:
+  backend: s3
+  s3:
+    endpoint: s3.fr-par.scw.cloud      # no scheme
+    bucket: mdnest-notes
+    region: fr-par
+    pathStyle: true                    # required for MinIO / Ceph RGW
+    existingSecret: mdnest-s3          # provides S3_ACCESS_KEY / S3_SECRET_KEY
+persistence:
+  notes:
+    enabled: false                     # no notes PVC needed with S3
+```
+
+> Note *history* (git) and the git-sync sidecar always use the local filesystem and are orthogonal to this setting.
+
+### Shared storage for active/active (local backend)
+
+If you stay on the `local` backend but scale out, both PVCs must be `ReadWriteMany`:
+
+```yaml
+persistence:
+  notes:
+    accessMode: ReadWriteMany
+    storageClass: nfs
+  secrets:
+    accessMode: ReadWriteMany
+    storageClass: nfs
+```
+
+### SSO / OIDC
+
+```yaml
+sso:
+  enabled: true
+  issuerUrl: https://idp.example.com
+  clientId: mdnest
+  allowedDomains: example.com
+  adminEmails: alice@example.com
+  existingSecret: mdnest-sso           # provides SSO_CLIENT_SECRET
+backend:
+  frontendOrigin: https://mdnest.example.com
+```
+
+`sso.redirectUrl` defaults to `<backend.frontendOrigin>/api/auth/sso/callback`.
+
+### MCP server
+
+Opt-in Model Context Protocol endpoint. See the dedicated MCP docs in the app repository for client configuration. Minimal service-token setup:
+
+```yaml
+mcp:
+  enabled: true
+  auth:
+    existingSecret: mdnest-mcp-token   # key: token (an mdnest_... API token)
+  ingress:
+    enabled: true
+    hosts:
+      - host: mcp.example.com
+        paths: [{ path: /, pathType: Prefix }]
+```
+
+For per-user attribution, enable `mcp.oauth.enabled=true` and set `mcp.oauth.publicUrl` + `mcp.oauth.ssoAuthorizeUrl` (requires SSO).
+
+### git-sync
+
+```yaml
+gitSync:
+  enabled: true
+  intervalSeconds: 600
+  author: { name: mdnest, email: mdnest@example.com }
+  sshSecretName: mdnest-gitsync-keys   # create yourself; SSH deploy key(s)
+```
+
+### Ingress
+
+```yaml
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: mdnest.example.com
+      paths: [{ path: /, pathType: Prefix }]
+  tls:
+    - secretName: mdnest-tls
+      hosts: [mdnest.example.com]
+```
+
+All traffic goes to the frontend Service, which proxies `/api` and `/api/ws` (WebSocket upgrades pass through nginx).
+
+{{ template "chart.requirementsSection" . }}
+
+{{ template "chart.valuesSection" . }}
+
+{{ template "chart.maintainersSection" . }}
+
+---
+
+_This README is generated with [helm-docs](https://github.com/norwoodj/helm-docs). Edit `README.md.gotmpl` and the annotated `values.yaml`, then regenerate — do not edit `README.md` by hand._

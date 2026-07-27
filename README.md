@@ -352,6 +352,7 @@ Beyond the core editor and the three access interfaces, mdnest includes:
 - [docs/architecture.md](docs/architecture.md) — Backend / frontend / database layout
 - [docs/api.md](docs/api.md) — Full REST API reference with curl examples
 - [docs/cli.md](docs/cli.md) — `mdnest` CLI for terminal access (multi-server)
+- [docs/kubernetes.md](docs/kubernetes.md) — Optional Helm chart, if you'd rather run it in a cluster
 - [docs/sso-setup.md](docs/sso-setup.md) — Corporate SSO (Google / Okta / Entra / Keycloak / Auth0)
 - [docs/firebase-setup.md](docs/firebase-setup.md) — Firebase Auth peer mode
 

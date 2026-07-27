@@ -3,6 +3,7 @@ import { Marked } from 'marked';
 import mermaid, { fixMermaidTextColors } from '../mermaid-config.js';
 import MermaidViewer from './MermaidViewer.jsx';
 import { resolveWikiLink, wikiLinkExtension, internalMdLinkHtml } from '../wikilink.js';
+import { sanitizeHtml, sanitizeSvg } from '../sanitize.js';
 
 // Safety net for any render-time exception inside Preview (mostly marked, but
 // also mermaid rendering, task-checkbox DOM work, etc.). Without this, a
@@ -62,7 +63,10 @@ function getBaseDir(ns, notePath) {
 
 function renderMarkdown(source, ns, notePath, pathIndex) {
   try {
-    return renderMarkdownUnsafe(source, ns, notePath, pathIndex);
+    // Note bodies are user-controlled and shared between users; scrub the
+    // rendered HTML (raw-HTML passthrough, javascript: hrefs, on* handlers)
+    // before it is injected via innerHTML below.
+    return sanitizeHtml(renderMarkdownUnsafe(source, ns, notePath, pathIndex));
   } catch (err) {
     // Never let a malformed note take the whole app down. Log for devs,
     // show a readable placeholder so the user can switch modes or edit.
@@ -366,11 +370,14 @@ function Preview({ content, currentPath, ns, onCheckboxToggle, pathIndex, onWiki
             const id = `mmd-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
             const { svg } = await mermaid.render(id, source);
             if (!cancelled && mEl.parentNode) {
-              // Keep original SVG for the fullscreen viewer
-              const originalSvg = svg;
+              // Scrub the rendered SVG (defense-in-depth over mermaid's strict
+              // mode) before injecting it or handing it to the fullscreen viewer.
+              const cleanSvg = sanitizeSvg(svg);
+              // Keep sanitized SVG for the fullscreen viewer
+              const originalSvg = cleanSvg;
               const wrapper = document.createElement('div');
               wrapper.className = 'mermaid-container';
-              wrapper.innerHTML = svg;
+              wrapper.innerHTML = cleanSvg;
               // Remove hardcoded width/height so inline SVG fits container
               const svgEl = wrapper.querySelector('svg');
               if (svgEl) {
@@ -395,7 +402,12 @@ function Preview({ content, currentPath, ns, onCheckboxToggle, pathIndex, onWiki
             }
           } catch (err) {
             if (!cancelled && mEl.parentNode) {
-              mEl.innerHTML = `<pre style="color:#f38ba8;">Mermaid error: ${err.message || String(err)}</pre>`;
+              // Render mermaid's error (which can echo the diagram source) as
+              // text, not HTML, to avoid a second injection path.
+              const pre = document.createElement('pre');
+              pre.style.color = '#f38ba8';
+              pre.textContent = `Mermaid error: ${err.message || String(err)}`;
+              mEl.replaceChildren(pre);
             }
           }
         }
