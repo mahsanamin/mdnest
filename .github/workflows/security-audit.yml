@@ -4,7 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    # `develop` is included so contributor PRs are audited on the way *in*,
+    # not first discovered on the release PR to `main`. The gate itself is
+    # still `main`'s required checks — this only moves the signal earlier.
+    branches: [main, develop]
   schedule:
     # Run weekly on Monday at 06:00 UTC
     - cron: '0 6 * * 1'
