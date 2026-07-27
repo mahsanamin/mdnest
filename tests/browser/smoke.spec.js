@@ -166,3 +166,34 @@ test('Settings → CLI tab has working copy buttons', async ({ page }) => {
   await copyBtns.first().click();
   await expect(copyBtns.first()).toHaveAttribute('title', 'Copied!');
 });
+
+// Regression guard for the sanitizer/mermaid interaction (v3.11.7). Mermaid
+// renders flowchart node labels inside <foreignObject>, which is absent from
+// DOMPurify's svg allow-list — sanitizing rendered SVG with the bare profile
+// kept the node boxes but silently deleted every label. The unit tests in
+// frontend/src/__tests__/sanitize.test.js pin the sanitizer config; this pins
+// the thing a user actually sees, against real mermaid output in a real browser.
+test('mermaid diagram renders its node labels (not empty boxes)', async ({ page }) => {
+  const file = process.env.MDNEST_MERMAID_FILE || 'e2e-mermaid.md';
+  const label = process.env.MDNEST_MERMAID_LABEL || 'zzmlabel';
+
+  await login(page);
+  const row = page.locator('.tree-label', { hasText: file });
+  await expect(row).toBeVisible({ timeout: 20_000 });
+  await row.click();
+  await expect(page.locator('.toolbar-path')).toContainText(file, { timeout: 20_000 });
+
+  // sanitizeSvg() runs on the Preview render path, so switch to Preview only.
+  await page.click('button[title="Preview only"]');
+
+  // Preview renders mermaid asynchronously, wrapping each SVG in .mermaid-container.
+  const svg = page.locator('.mermaid-container svg').first();
+  await expect(svg).toBeVisible({ timeout: 30_000 });
+
+  // The diagram drew shapes...
+  expect(await svg.locator('rect, polygon, path').count()).toBeGreaterThan(0);
+  // ...and the label text survived sanitization. Mermaid puts flowchart labels
+  // in <foreignObject>; if the sanitizer strips that, the shapes above still
+  // pass but every label is gone — which is exactly the regression this guards.
+  await expect(svg.getByText(label, { exact: false }).first()).toBeVisible({ timeout: 20_000 });
+});

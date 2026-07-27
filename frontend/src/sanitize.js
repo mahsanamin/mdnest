@@ -30,9 +30,24 @@ export function sanitizeHtml(dirty) {
 // Sanitize rendered mermaid SVG before injecting it. Even with mermaid's
 // default strict security level this is defense-in-depth: it strips any
 // event handlers or foreignObject-smuggled scripts from the SVG.
+//
+// `foreignObject` MUST be allowed. DOMPurify's svg profile does not include it,
+// and mermaid renders every flowchart node label inside one (htmlLabels
+// defaults to true, and we don't override it) — so the plain svg profile
+// silently deletes the text of every label and diagrams render as empty
+// boxes. Allowing the element does not re-open the hole the profile was
+// guarding: DOMPurify still walks into the subtree and strips <script>,
+// <iframe>, <object>, <embed>, <form> and every on* handler. Verified against
+// real mermaid output in Chromium — see tests/browser/smoke.spec.js and
+// __tests__/sanitize.test.js.
+//
+// Do NOT "fix" this by also allowing div/span/etc. Once those tags are on the
+// allow-list they fail DOMPurify's namespace check instead of being unwrapped,
+// and the whole subtree — label text included — is dropped again.
 export function sanitizeSvg(dirty) {
   if (!dirty) return '';
   return DOMPurify.sanitize(dirty, {
     USE_PROFILES: { svg: true, svgFilters: true },
+    ADD_TAGS: ['foreignObject'],
   });
 }
