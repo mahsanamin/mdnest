@@ -1,0 +1,112 @@
+name: Release
+
+# Publish container images and the Helm chart on version tags (e.g. v3.11.7).
+# Everything is parameterized by the repository OWNER so this workflow works
+# unchanged on the upstream repo and on any fork — images and chart are
+# published under ghcr.io/<owner>/ with no hardcoded organization.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (without leading v, e.g. 3.11.7). Defaults to the tag.'
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  images:
+    name: Build & push images
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: backend
+            context: backend
+          - name: frontend
+            context: frontend
+          - name: mcp-server
+            context: mcp-server
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compute build metadata
+        id: prep
+        run: |
+          {
+            echo "owner=${GITHUB_REPOSITORY_OWNER,,}"
+            echo "commit=${GITHUB_SHA::7}"
+            echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Derive image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ steps.prep.outputs.owner }}/mdnest-${{ matrix.name }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+      - name: Build & push ${{ matrix.name }}
+        uses: docker/build-push-action@v6
+        with:
+          context: ./${{ matrix.context }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Build args are consumed by the backend Dockerfile (ldflags) and
+          # harmlessly ignored by the frontend.
+          build-args: |
+            GIT_COMMIT=${{ steps.prep.outputs.commit }}
+            BUILD_TIME=${{ steps.prep.outputs.date }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  chart:
+    name: Package & push Helm chart
+    runs-on: ubuntu-latest
+    needs: images
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compute chart metadata
+        id: prep
+        run: |
+          owner=${GITHUB_REPOSITORY_OWNER,,}
+          version="${{ github.event.inputs.version }}"
+          if [ -z "$version" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          {
+            echo "owner=$owner"
+            echo "version=$version"
+          } >> "$GITHUB_OUTPUT"
+      - uses: azure/setup-helm@v4
+      - name: Point chart image repositories at this owner
+        run: |
+          sed -i \
+            -e "s#ghcr.io/forterro/mdnest-backend#ghcr.io/${{ steps.prep.outputs.owner }}/mdnest-backend#" \
+            -e "s#ghcr.io/forterro/mdnest-frontend#ghcr.io/${{ steps.prep.outputs.owner }}/mdnest-frontend#" \
+            deploy/helm/mdnest/values.yaml
+      - name: Package
+        run: |
+          helm package deploy/helm/mdnest \
+            --version "${{ steps.prep.outputs.version }}" \
+            --app-version "${{ steps.prep.outputs.version }}" \
+            --destination dist
+      - name: Log in to GHCR (OCI)
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
+      - name: Push chart
+        run: |
+          helm push \
+            "dist/mdnest-${{ steps.prep.outputs.version }}.tgz" \
+            "oci://ghcr.io/${{ steps.prep.outputs.owner }}/charts"
