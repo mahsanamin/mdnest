@@ -1,4 +1,5 @@
 import { useRef, useState, useEffect, useCallback } from 'react';
+import { sanitizeSvg } from '../sanitize.js';
 
 function MermaidViewer({ svgContent, onClose }) {
   const containerRef = useRef(null);
@@ -174,7 +175,7 @@ function MermaidViewer({ svgContent, onClose }) {
               transform: `translate(${translate.x}px, ${translate.y}px) scale(${scale})`,
               transformOrigin: 'center center',
             }}
-            dangerouslySetInnerHTML={{ __html: svgContent }}
+            dangerouslySetInnerHTML={{ __html: sanitizeSvg(svgContent) }}
           />
         </div>
       </div>

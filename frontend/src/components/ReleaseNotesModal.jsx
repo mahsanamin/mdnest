@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { Marked } from 'marked';
+import { sanitizeHtml } from '../sanitize.js';
 
 // ReleaseNotesModal — surfaces what's new in the latest GitHub release of
 // mdnest. The backend's updates checker fetches the release JSON once per
@@ -8,14 +9,14 @@ import { Marked } from 'marked';
 //
 // Markdown rendering uses a fresh Marked instance (gfm + breaks), separate
 // from the note Preview renderer so it can't be affected by future changes
-// to that pipeline. No raw HTML is rendered — release bodies always go
-// through marked first, and links are forced to open in a new tab.
+// to that pipeline. The rendered HTML is sanitized (DOMPurify) before it is
+// injected, since marked passes raw HTML through untouched.
 export default function ReleaseNotesModal({ release, runningVersion, onClose, onDismiss }) {
   const html = useMemo(() => {
     if (!release || !release.notes) return '';
     try {
       const inst = new Marked({ breaks: true, gfm: true });
-      return inst.parse(release.notes);
+      return sanitizeHtml(inst.parse(release.notes));
     } catch {
       return '';
     }
@@ -38,9 +39,8 @@ export default function ReleaseNotesModal({ release, runningVersion, onClose, on
         {html ? (
           <div
             className="release-notes-body"
-            // Render the markdown release body. marked output is the only
-            // HTML that ends up here; release.notes is GitHub's release
-            // body, which mdnest's release process controls.
+            // Sanitized marked output (see useMemo above). release.notes is
+            // GitHub's release body, rendered then scrubbed before injection.
             dangerouslySetInnerHTML={{ __html: html }}
           />
         ) : (
