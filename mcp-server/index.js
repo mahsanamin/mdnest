@@ -2,7 +2,11 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { createServer as createHttpServer } from "node:http";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { z } from "zod";
+import { buildOAuth } from "./oauth.js";
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -13,6 +17,11 @@ const USERNAME = process.env.MDNEST_USER;          // fallback: username/passwor
 const PASSWORD = process.env.MDNEST_PASSWORD;
 
 let token = null;
+
+// Per-request auth context. In OAuth mode each MCP request carries the calling
+// user's own mdnest JWT, which we forward to the backend so every action is
+// attributed to that user. Falls back to the process-wide service token.
+const authStore = new AsyncLocalStorage();
 
 // ---------------------------------------------------------------------------
 // Auth helpers
@@ -47,11 +56,16 @@ async function authenticate() {
 // ---------------------------------------------------------------------------
 async function api(path, options = {}, _retried = false) {
   const headers = { ...options.headers };
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
+  // Prefer the per-request user token (OAuth mode); fall back to the
+  // process-wide service token (service mode / stdio).
+  const reqToken = authStore.getStore()?.token || token;
+  if (reqToken) {
+    headers["Authorization"] = `Bearer ${reqToken}`;
   }
   const res = await fetch(`${BASE_URL}${path}`, { ...options, headers });
-  if (res.status === 401 && !_retried) {
+  // Only the process-wide service token can be silently re-minted on 401.
+  // A per-request user token that expired must surface the 401 to the caller.
+  if (res.status === 401 && !_retried && !authStore.getStore()?.token) {
     await authenticate();
     return api(path, options, true);
   }
@@ -98,10 +112,16 @@ function treeToText(node, indent = 0) {
 // ---------------------------------------------------------------------------
 // MCP Server setup
 // ---------------------------------------------------------------------------
-const server = new McpServer({
-  name: "mdnest",
-  version: "0.1.0",
-});
+// Build a fully-configured MCP server instance. Using a factory (instead of a
+// module-level singleton) lets the streamable-HTTP transport spin up an
+// isolated server per request, which avoids cross-client request-id
+// collisions. The stdio path builds a single instance, so its behaviour is
+// unchanged.
+function createServer() {
+  const server = new McpServer({
+    name: "mdnest",
+    version: "0.1.0",
+  });
 
 // ---------------------------------------------------------------------------
 // Tools
@@ -446,13 +466,146 @@ server.resource(
   }
 );
 
+  return server;
+}
+
+// ---------------------------------------------------------------------------
+// Transports
+// ---------------------------------------------------------------------------
+
+// Default: stdio (unchanged behaviour). Opt in to network mode by setting
+// MCP_TRANSPORT=http (a.k.a. "streamable-http").
+async function startStdio() {
+  const server = createServer();
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+}
+
+// Streamable-HTTP transport, stateless: each POST is served by a fresh
+// server + transport pair. GET (server-initiated SSE streams) and DELETE
+// (session teardown) are unused in stateless mode and return 405.
+async function startHttp() {
+  const port = parseInt(process.env.MCP_HTTP_PORT || "3000", 10);
+  const host = process.env.MCP_HTTP_HOST || "0.0.0.0";
+  const mcpPath = process.env.MCP_HTTP_PATH || "/mcp";
+
+  // Optional OAuth 2.1 mode: require a per-user mdnest JWT (obtained by the MCP
+  // client via the corporate SSO), forwarded to the backend per request so all
+  // actions are attributed to the real user. Default "service" mode keeps the
+  // previous behaviour (process-wide token, unauthenticated endpoint).
+  const authMode = (process.env.MCP_AUTH_MODE || "service").toLowerCase();
+  let oauth = null;
+  if (authMode === "oauth") {
+    const publicUrl = process.env.MCP_PUBLIC_URL;
+    const secret = process.env.MCP_OAUTH_SECRET;
+    const ssoAuthorizeUrl = process.env.MCP_SSO_AUTHORIZE_URL;
+    if (!publicUrl || !secret || !ssoAuthorizeUrl) {
+      console.error("MCP_AUTH_MODE=oauth requires MCP_PUBLIC_URL, MCP_OAUTH_SECRET and MCP_SSO_AUTHORIZE_URL");
+      process.exit(1);
+    }
+    oauth = buildOAuth({
+      publicUrl,
+      mcpPath,
+      secret,
+      ssoAuthorizeUrl,
+      validateUrl: BASE_URL,
+      secureCookie: publicUrl.startsWith("https://"),
+    });
+  }
+
+  const jsonError = (id, code, message) =>
+    JSON.stringify({ jsonrpc: "2.0", error: { code, message }, id: id ?? null });
+
+  const handlePost = async (req, res, userToken) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    let body;
+    try {
+      body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : undefined;
+    } catch {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(jsonError(null, -32700, "Parse error"));
+      return;
+    }
+
+    const server = createServer();
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    res.on("close", () => {
+      transport.close();
+      server.close();
+    });
+    await server.connect(transport);
+    // Run the request inside an auth context so api() forwards the caller's
+    // own token to the backend (OAuth mode). In service mode userToken is
+    // undefined and api() falls back to the process-wide token.
+    await authStore.run({ token: userToken }, () => transport.handleRequest(req, res, body));
+  };
+
+  const httpServer = createHttpServer((req, res) => {
+    const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+
+    if (req.method === "GET" && url.pathname === "/healthz") {
+      res.writeHead(200, { "Content-Type": "text/plain" });
+      res.end("ok");
+      return;
+    }
+
+    // OAuth 2.1 discovery + authorization endpoints (oauth mode only).
+    if (oauth && oauth.handle(req, res, url)) {
+      return;
+    }
+
+    if (url.pathname !== mcpPath) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(jsonError(null, -32601, "Not found"));
+      return;
+    }
+
+    if (req.method === "POST") {
+      let userToken;
+      if (oauth) {
+        userToken = oauth.bearer(req);
+        if (!userToken) {
+          oauth.challenge(res, jsonError(null, -32001, "Authentication required"));
+          return;
+        }
+      }
+      handlePost(req, res, userToken).catch((err) => {
+        console.error("MCP request error:", err);
+        if (!res.headersSent) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(jsonError(null, -32603, "Internal error"));
+        }
+      });
+      return;
+    }
+
+    res.writeHead(405, { "Content-Type": "application/json", Allow: "POST" });
+    res.end(jsonError(null, -32000, "Method not allowed (stateless streamable-http accepts POST only)"));
+  });
+
+  httpServer.listen(port, host, () => {
+    console.error(`mdnest MCP server (streamable-http) listening on http://${host}:${port}${mcpPath}` + (oauth ? " [oauth]" : ""));
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Start
 // ---------------------------------------------------------------------------
 async function main() {
-  await authenticate();
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
+  const mode = (process.env.MCP_TRANSPORT || "stdio").toLowerCase();
+  const httpMode = mode === "http" || mode === "streamable-http";
+  const oauthMode = httpMode && (process.env.MCP_AUTH_MODE || "service").toLowerCase() === "oauth";
+  // In OAuth mode the backend credential is supplied per request by each user,
+  // so no process-wide service token is needed. Otherwise authenticate now.
+  if (!oauthMode) {
+    await authenticate();
+  }
+  if (httpMode) {
+    await startHttp();
+  } else {
+    await startStdio();
+  }
 }
 
 main().catch((err) => {

@@ -8,7 +8,9 @@
     "mdnest-mcp": "./index.js"
   },
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "start:http": "MCP_TRANSPORT=http node index.js",
+    "test": "node test_oauth.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
