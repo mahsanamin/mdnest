@@ -347,6 +347,7 @@ Beyond the core editor and the three access interfaces, mdnest includes:
 ## Documentation
 
 - [docs/setup.md](docs/setup.md) — Setup, configuration, env vars
+- [docs/storage.md](docs/storage.md) — Storage backends (local filesystem or S3-compatible object store)
 - [docs/user-guide.md](docs/user-guide.md) — End-user walkthrough
 - [docs/security.md](docs/security.md) — Threat model, identity, authorization, role hierarchy
 - [docs/architecture.md](docs/architecture.md) — Backend / frontend / database layout

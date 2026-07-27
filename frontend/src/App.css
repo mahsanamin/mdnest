@@ -3861,6 +3861,47 @@ pre:hover .code-copy-btn {
   padding: 4px 0;
 }
 
+.admin-ns-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+}
+
+.admin-ns-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  background: #313244;
+  border: 1px solid #45475a;
+  border-radius: 4px;
+  margin-bottom: 6px;
+  font-size: 0.85rem;
+  color: #cdd6f4;
+}
+
+.admin-ns-delete {
+  background: transparent;
+  color: #f38ba8;
+  border: 1px solid #f38ba8;
+  padding: 3px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  flex-shrink: 0;
+}
+
+.admin-ns-delete:hover:not(:disabled) {
+  background: #f38ba8;
+  color: #1e1e2e;
+}
+
+.admin-ns-delete:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .admin-grant-selector {
   margin-bottom: 12px;
   display: flex;

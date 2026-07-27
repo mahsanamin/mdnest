@@ -55,6 +55,24 @@ GIT_AUTHOR_EMAIL=you@example.com
 # POSTGRES_USER=mdnest
 # POSTGRES_PASSWORD=changeme
 
+# Storage backend (optional)
+# Where notes are persisted. Default "local" = the host directories mounted
+# via MOUNT_* below (current behaviour, nothing changes).
+#
+# Set STORAGE_BACKEND=s3 to store notes in an S3-compatible object store
+# (AWS S3, MinIO, Ceph/RGW, NetApp ONTAP S3, ...). This lets the backend run
+# with multiple replicas without a ReadWriteMany volume and decouples data
+# from the pod/host filesystem. Note: git-backed history and git-sync are
+# unavailable in s3 mode (no local .git). See docs/storage.md.
+# STORAGE_BACKEND=s3
+# S3_ENDPOINT=s3.example.com          # host:port, no scheme (required)
+# S3_BUCKET=mdnest                    # bucket name (required)
+# S3_ACCESS_KEY=your-access-key       # (required)
+# S3_SECRET_KEY=your-secret-key       # (required)
+# S3_REGION=us-east-1                 # default us-east-1
+# S3_USE_SSL=true                     # default true
+# S3_PATH_STYLE=true                  # default true (needed for MinIO/Ceph)
+
 # SSH key for git pull (optional)
 # Path to an SSH private key on the host. Used by the sync button to pull
 # from git remotes. Must be unencrypted (no passphrase).

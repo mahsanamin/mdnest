@@ -3,18 +3,20 @@ package handlers
 import (
 	"encoding/json"
 	"io"
+	"mime"
 	"net/http"
-	"os"
-	"path/filepath"
+	"path"
 	"strings"
+
+	"github.com/mdnest/mdnest/backend/storage"
 )
 
 type UploadHandler struct {
-	notesDir string
+	store storage.Storage
 }
 
-func NewUploadHandler(notesDir string) *UploadHandler {
-	return &UploadHandler{notesDir: notesDir}
+func NewUploadHandler(store storage.Storage) *UploadHandler {
+	return &UploadHandler{store: store}
 }
 
 // HandleFolder handles POST /api/folder?ns=...&path=...
@@ -23,17 +25,17 @@ func (h *UploadHandler) HandleFolder(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 		return
 	}
-	nsDir := RequireNamespace(h.notesDir, w, r)
-	if nsDir == "" {
+	ctx := r.Context()
+	ns := RequireNamespaceStore(ctx, h.store, w, r)
+	if ns == "" {
 		return
 	}
-	reqPath := r.URL.Query().Get("path")
-	absPath := SafePath(nsDir, reqPath)
-	if absPath == "" {
+	relPath, ok := SafeRelPath(r.URL.Query().Get("path"))
+	if !ok {
 		http.Error(w, `{"error":"invalid path"}`, http.StatusBadRequest)
 		return
 	}
-	if err := os.MkdirAll(absPath, 0755); err != nil {
+	if err := h.store.MkdirAll(ctx, ns, relPath); err != nil {
 		http.Error(w, `{"error":"failed to create folder"}`, http.StatusInternalServerError)
 		return
 	}
@@ -48,13 +50,13 @@ func (h *UploadHandler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 		return
 	}
-	nsDir := RequireNamespace(h.notesDir, w, r)
-	if nsDir == "" {
+	ctx := r.Context()
+	ns := RequireNamespaceStore(ctx, h.store, w, r)
+	if ns == "" {
 		return
 	}
-	reqPath := r.URL.Query().Get("path")
-	notePath := SafePath(nsDir, reqPath)
-	if notePath == "" {
+	reqRel, ok := SafeRelPath(r.URL.Query().Get("path"))
+	if !ok {
 		http.Error(w, `{"error":"invalid path"}`, http.StatusBadRequest)
 		return
 	}
@@ -70,41 +72,21 @@ func (h *UploadHandler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	noteDir := filepath.Dir(notePath)
-	if err := os.MkdirAll(noteDir, 0755); err != nil {
-		http.Error(w, `{"error":"failed to create directory"}`, http.StatusInternalServerError)
-		return
-	}
-
-	filename := filepath.Base(header.Filename)
-	destPath := filepath.Join(noteDir, filename)
-
-	destSafe := SafePath(nsDir, filepath.Join(filepath.Dir(reqPath), filename))
-	if destSafe == "" {
+	// Destination is the uploaded filename inside the requested directory.
+	filename := path.Base(header.Filename)
+	destRel, ok := SafeRelPath(path.Join(path.Dir(reqRel), filename))
+	if !ok {
 		http.Error(w, `{"error":"invalid upload destination"}`, http.StatusBadRequest)
 		return
 	}
 
-	out, err := os.Create(destPath)
-	if err != nil {
-		http.Error(w, `{"error":"failed to create file"}`, http.StatusInternalServerError)
-		return
-	}
-	defer out.Close()
-
-	if _, err := io.Copy(out, file); err != nil {
+	if err := h.store.WriteFrom(ctx, ns, destRel, file, header.Size); err != nil {
 		http.Error(w, `{"error":"failed to save file"}`, http.StatusInternalServerError)
 		return
 	}
 
-	relPath, err := filepath.Rel(nsDir, destPath)
-	if err != nil {
-		http.Error(w, `{"error":"failed to compute relative path"}`, http.StatusInternalServerError)
-		return
-	}
-
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"url": relPath})
+	json.NewEncoder(w).Encode(map[string]string{"url": destRel})
 }
 
 // HandleServeFile serves files at /api/files/{namespace}/path/to/file
@@ -123,15 +105,13 @@ func (h *UploadHandler) HandleServeFile(w http.ResponseWriter, r *http.Request) 
 	// First segment is namespace, rest is file path
 	parts := strings.SplitN(fullPath, "/", 2)
 	ns := parts[0]
-
-	nsClean := filepath.Clean(ns)
-	if nsClean != ns || strings.Contains(ns, "/") || strings.HasPrefix(ns, ".") {
+	if !ValidNamespaceName(ns) {
 		http.Error(w, `{"error":"invalid namespace"}`, http.StatusBadRequest)
 		return
 	}
 
-	nsDir := filepath.Join(h.notesDir, ns)
-	if info, err := os.Stat(nsDir); err != nil || !info.IsDir() {
+	ctx := r.Context()
+	if ok, err := h.store.NamespaceExists(ctx, ns); err != nil || !ok {
 		http.Error(w, `{"error":"namespace not found"}`, http.StatusNotFound)
 		return
 	}
@@ -141,11 +121,21 @@ func (h *UploadHandler) HandleServeFile(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	absPath := SafePath(nsDir, parts[1])
-	if absPath == "" {
+	relPath, ok := SafeRelPath(parts[1])
+	if !ok {
 		http.Error(w, `{"error":"invalid path"}`, http.StatusBadRequest)
 		return
 	}
 
-	http.ServeFile(w, r, absPath)
+	rc, err := h.store.Open(ctx, ns, relPath)
+	if err != nil {
+		http.Error(w, `{"error":"file not found"}`, http.StatusNotFound)
+		return
+	}
+	defer rc.Close()
+
+	if ct := mime.TypeByExtension(path.Ext(relPath)); ct != "" {
+		w.Header().Set("Content-Type", ct)
+	}
+	io.Copy(w, rc)
 }
