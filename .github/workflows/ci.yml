@@ -56,19 +56,47 @@ jobs:
         run: helm lint deploy/helm/mdnest
       - name: Render defaults (single instance)
         run: helm template ci deploy/helm/mdnest > /dev/null
-      - name: Render active/active (HA)
+      - name: Render the full supported configuration
+        # Multi-mode + live collaboration + git-sync on a single backend replica
+        # is the largest configuration this release actually implements. The
+        # active/active variant is asserted to be REJECTED below, not rendered.
         run: |
           helm template ci deploy/helm/mdnest \
             --set auth.mode=multi \
             --set postgres.host=pg.example \
             --set postgres.password=x \
             --set collab.enabled=true \
-            --set collab.redis.url=redis://redis.example:6379/0 \
-            --set backend.replicaCount=3 \
-            --set persistence.notes.accessMode=ReadWriteMany \
-            --set persistence.secrets.accessMode=ReadWriteMany \
             --set gitSync.enabled=true \
             --set gitSync.sshSecretName=keys > rendered-ha.yaml
+      - name: Reject options the code does not implement
+        # The chart's values surface must not outrun the backend. Each option
+        # here would otherwise deploy "healthy" while doing the wrong thing, so
+        # the chart fails the install instead. When one of these capabilities
+        # lands, move it into the render step above in the same change.
+        run: |
+          set -u
+          fails=0
+          expect_reject() {
+            local desc="$1"; shift
+            if helm template ci deploy/helm/mdnest "$@" >/dev/null 2>&1; then
+              echo "::error::chart rendered '$desc', but this release cannot honour it"
+              fails=$((fails + 1))
+            else
+              echo "ok: rejected $desc"
+            fi
+          }
+          expect_reject "storage.backend=s3 (no object-store support)" \
+            --set storage.backend=s3
+          expect_reject "collab.redis.* (no presence/event backplane)" \
+            --set collab.redis.url=redis://redis.example:6379/0
+          expect_reject "mcp.enabled (MCP server is stdio-only)" \
+            --set mcp.enabled=true
+          expect_reject "backend.replicaCount=3 (active/active needs the backplane)" \
+            --set auth.mode=multi --set postgres.host=pg.example --set postgres.password=x \
+            --set collab.enabled=true --set backend.replicaCount=3 \
+            --set persistence.notes.accessMode=ReadWriteMany \
+            --set persistence.secrets.accessMode=ReadWriteMany
+          [ "$fails" -eq 0 ] || exit 1
       - name: Validate rendered manifests (kubeconform)
         # Pinned by digest, not :latest — an unpinned third-party image in CI
         # means an upstream push silently changes what runs in this repo.

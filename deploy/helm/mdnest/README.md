@@ -18,9 +18,25 @@ A standard-Kubernetes Helm chart (no CRDs) that deploys [mdnest](https://github.
 
 PostgreSQL and Redis are **never bundled**: point the chart at external/managed instances.
 
+> [!IMPORTANT]
+> **Not every option below is available yet.** The chart is versioned with mdnest,
+> and three opt-in capabilities documented here are not implemented in this
+> release — the chart **refuses to install** rather than come up "healthy" while
+> doing the wrong thing:
+>
+> | Option | Why it is rejected |
+> |---|---|
+> | `storage.backend=s3` | The backend reads notes from the filesystem and ignores `S3_*`; notes would land on the PVC, not your bucket. |
+> | `collab.redis.*` | There is no presence/event backplane, so replicas would diverge instead of syncing. |
+> | `mcp.enabled=true` | The bundled MCP server speaks stdio only; the Service and Ingress would route to a port nothing listens on. |
+>
+> Consequently `backend.replicaCount > 1` is also rejected: active/active needs
+> the backplane. **Supported today:** single-replica `single` or `multi` mode,
+> live collaboration, git-sync, ingress, and TLS.
+
 ## Deployment models
 
-The chart ships two supported topologies. **Single instance is the default** and matches upstream mdnest exactly.
+Single instance is the default and matches upstream mdnest exactly. The horizontally-scaled column describes the target topology; it is gated off until the Redis backplane lands (see the note above).
 
 | | Single instance (default) | Horizontally scaled (opt-in) |
 |---|---|---|

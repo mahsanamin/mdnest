@@ -1,3 +1,4 @@
+{{- include "mdnest.validateSupported" . -}}
 {{- include "mdnest.validateHA" . -}}
 apiVersion: apps/v1
 kind: Deployment

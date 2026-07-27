@@ -79,10 +79,41 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{/*
+Refuse to render options this release of mdnest cannot honour.
+
+The chart ships inside the application repo, so its values surface must not
+outrun the code. Where it does, the failure is silent and expensive: the
+backend simply ignores env it does not read, so the deployment comes up
+"healthy" while doing the wrong thing (notes written to the PVC instead of the
+object store; collaboration state diverging per pod; a Service routing to a
+port nothing listens on). These guards convert each of those into an install-
+time error naming what is missing.
+
+Delete a guard in the same change that lands the capability behind it.
+*/}}
+{{- define "mdnest.validateSupported" -}}
+{{- if eq .Values.storage.backend "s3" -}}
+  {{- fail "mdnest: storage.backend=s3 is not implemented in this release. The backend reads notes from the filesystem and ignores S3_*, so notes would be written to the notes PVC while appearing to be configured for your bucket. Use storage.backend=local." -}}
+{{- end -}}
+{{- $redis := or .Values.collab.redis.url .Values.collab.redis.existingSecret .Values.collab.redis.host -}}
+{{- if $redis -}}
+  {{- fail "mdnest: the Redis collaboration backplane is not implemented in this release. REDIS_URL would be injected and ignored, so collaboration state would diverge per pod instead of syncing. Leave collab.redis.* empty and run a single backend replica." -}}
+{{- end -}}
+{{- if .Values.mcp.enabled -}}
+  {{- fail "mdnest: mcp.enabled=true requires the MCP server's streamable-HTTP transport, which is not in this release — the bundled MCP server speaks stdio only, so the Service and Ingress would route to a port nothing listens on. Run the MCP server alongside your client over stdio instead." -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Validate the high-availability invariants. Any multi-replica (or autoscaled)
 backend deployment MUST have Redis-backed collaboration and ReadWriteMany
 storage, otherwise replicas would silently diverge (separate collab state,
 separate note files). Fail fast with an actionable message.
+
+Note: until the Redis backplane lands, validateSupported above rejects any
+Redis configuration, so a multi-replica deployment cannot be rendered at all.
+That is deliberate — active/active without a backplane is the silent-divergence
+case this chart exists to prevent.
 */}}
 {{- define "mdnest.validateHA" -}}
 {{- $ha := or (gt (int .Values.backend.replicaCount) 1) .Values.backend.autoscaling.enabled -}}
