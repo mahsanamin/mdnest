@@ -18,9 +18,11 @@ flowchart LR
     idp --> authz["Authorization<br/>(role hierarchy +<br/>namespace_admins +<br/>access_grants)"]
     authz --> path["Path safety<br/>(SafePath traversal<br/>protection)"]
     path --> fs[Files on disk<br/>inside mounted dirs]
+    fs --> render["Rendered content<br/>(DOMPurify sanitization<br/>of markdown + SVG)"]
+    render --> browser[Browser DOM]
 ```
 
-Each layer is independent — a flaw at one is contained by the next. A request has to pass **all four** to read or write a file.
+The first four layers are independent gates on the way *in* — a flaw at one is contained by the next, and a request has to pass **all four** to read or write a file. The fifth guards the way *out*: note content is user-authored and shared, so it's sanitized before it reaches the DOM.
 
 ---
 
@@ -202,6 +204,34 @@ This blocks:
 - A symlink in your notes pointing at `/etc/` (resolved and rejected)
 
 Path safety is enforced **before** authorization, so even if the role/grant logic had a bug, the filesystem boundary still holds.
+
+### `/api/files/` takes its namespace from the path *(v3.11.7+)*
+
+Every other content endpoint receives its namespace as `?ns=<name>`, which lets the permission middleware wrap the route generically. `GET /api/files/<ns>/<path>` — the endpoint serving uploaded images and attachments to `<img>` tags — carries the namespace in the URL path instead, so it can't use that middleware and enforces the read check inside the handler.
+
+Before v3.11.7 it enforced **nothing**: the route was registered with authentication only, so any authenticated principal — including an API token — could read any file in any namespace by guessing the URL. It now calls the same `CheckRead(ns, path)` used by `RequireRead`, and returns `403 {"error":"access denied"}` on a namespace the caller has no grant for. Single-user mode constructs the handler with a nil `PermissionChecker` and is unaffected.
+
+If you add a route whose namespace isn't in `?ns=`, the check must be explicit in the handler — the middleware cannot see it. `backend/handlers/upload_test.go` pins this behaviour.
+
+---
+
+## Layer 5 — Rendered content *(v3.11.7+)*
+
+Note bodies are user-authored, and in multi-user mode they're shared between users — so anything a note can put on screen is an injection surface. `marked` passes raw HTML through by design, which means a note containing `<img src=x onerror=…>` or `<a href="javascript:…">` executed in the browser of anyone who previewed it.
+
+All markup mdnest injects into the DOM now passes through `frontend/src/sanitize.js` (DOMPurify) first. Three call sites are covered:
+
+| Where | Function | What it renders |
+|---|---|---|
+| `Preview.jsx` | `sanitizeHtml` | `marked()` output for a note body |
+| `ReleaseNotesModal.jsx` | `sanitizeHtml` | release notes fetched from the GitHub API |
+| `Preview.jsx`, `MermaidViewer.jsx` | `sanitizeSvg` | mermaid-rendered SVG |
+
+Stripped: event-handler attributes (`onerror`, `onclick`, …), dangerous URI schemes (`javascript:`, `data:` in active contexts), `<script>`, `<iframe>`, `<object>`, `<embed>`, `<form>`. Preserved deliberately: `class`, `data-*` (the Preview's mermaid and task-checkbox post-passes depend on them), `<input type="checkbox">` task items, and `target` — with an `afterSanitizeAttributes` hook forcing `rel="noopener noreferrer"` on `target="_blank"` so external links can't reach back into the opener.
+
+**`sanitizeSvg` must keep `foreignObject`.** DOMPurify's SVG profile excludes it, but mermaid renders every flowchart node label inside one (`htmlLabels` defaults to true), so the bare profile silently deletes the text of every label while the shapes still draw. Allowing the element doesn't weaken anything — DOMPurify still descends into the subtree and strips scripts, iframes, and handlers. Don't "fix" it by also allowing `div`/`span`: once those are on the allow-list they fail DOMPurify's namespace check instead of being unwrapped, and the labels disappear again. `frontend/src/__tests__/sanitize.test.js` pins both directions.
+
+This is a second layer, not the only one — mermaid also runs at its default `securityLevel: 'strict'`.
 
 ---
 

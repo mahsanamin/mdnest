@@ -45,7 +45,8 @@ backend/
     search.go                # GET /api/search?ns=&q= (concurrent search with caching)
     tokens.go                # GET/POST/DELETE /api/auth/tokens (API token management)
     totp.go                  # 2FA: TOTP setup, verify, disable, admin reset
-    upload.go                # POST /api/folder, /api/upload, GET /api/files/
+    upload.go                # POST /api/folder, /api/upload, GET /api/files/ (ns comes from the URL path, so the read check is IN the handler, not middleware)
+    upload_test.go           # First Go test in the repo (v3.11.7+) — pins the /api/files/ cross-namespace authz check
     move.go                  # POST /api/move?ns=&from=&to=
     path.go                  # SafePath(), RequireNamespace() — shared utils
     noteid.go                # ExtractNoteID / InjectNoteID / EnsureNoteID (UUID marker)
@@ -74,6 +75,8 @@ frontend/
     App.jsx                  # Root: auth, namespace/tree state, context menu, URL routing
     api.js                   # All API calls (fetch wrapper with JWT + 401 handling)
     wikilink.js              # Obsidian [[wikilink]] support (v3.11.5+) — pure module: parse/resolve, marked inline extension, relative-.md-link resolver, restoreWikilinks() serializer-unescape. No React imports (unit-tested standalone).
+    sanitize.js              # DOMPurify wrappers (v3.11.7+): sanitizeHtml for marked output + release notes, sanitizeSvg for mermaid. sanitizeSvg MUST keep ADD_TAGS:['foreignObject'] or every flowchart label renders blank.
+    __tests__/sanitize.test.js # Pins both directions — labels survive, payloads don't
     mermaid-config.js         # Shared mermaid init, theme, and fixMermaidTextColors()
     firebase-config.js       # Firebase SDK lazy init (USER_PROVIDER=firebase only)
     components/
@@ -98,6 +101,20 @@ frontend/
 mcp-server/
   index.js                   # MCP server entry — tools + resources wrapping REST API
   package.json
+
+deploy/
+  helm/mdnest/               # Optional Helm chart (v3.11.7+) — inert unless used; Compose path unchanged
+    Chart.yaml               # appVersion tracks the release — the FOURTH version-bump file
+    values.yaml              # Every knob; three options are gated off (see _helpers.tpl)
+    templates/_helpers.tpl   # mdnest.validateSupported (rejects unimplemented options) + mdnest.validateHA
+    templates/               # backend/frontend/gitsync/mcp Deployments, Services, PVCs, Ingress, HPA, PDB
+    files/sync.sh            # git-sync loop for the chart's sidecar (chart-local; Compose has its own)
+    README.md(.gotmpl)       # helm-docs generated reference — edit the .gotmpl, patch both
+
+.github/workflows/
+  security-audit.yml         # npm audit + govulncheck + shellcheck. REQUIRED checks on main; also runs on PRs into develop
+  ci.yml                     # (v3.11.7+) go build/vet/test -race, frontend build+test, helm lint/render/kubeconform, image builds
+  release.yml                # (v3.11.7+) on v* tags: push images + chart to ghcr.io/<owner>/
 
 mdnest                       # Client CLI (login, note read/write/append, works from any machine)
 mdnest-server                # Server management CLI (start, stop, rebuild, reset-password, runs from project dir)
@@ -138,6 +155,7 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 - Live editor: lazy-loaded via React.lazy(), only downloads when user switches to Live mode. The chunk is ~1.1 MB (~340 KB gzipped) — Crepe + Vue runtime + CodeMirror + KaTeX.
 - Crepe (v3.10.0+): `@milkdown/crepe` is the same editor Milkdown's playground uses. Provides block-edit (drag handle + slash menu), native task-list checkboxes, KaTeX math, polished tables, image-block upload UI, link tooltip. Built on `@milkdown/kit/preset/{commonmark,gfm}` under the hood — same schema as pre-v3.10's hand-rolled Milkdown stack.
 - Custom plugins (in `live-editor-plugins.jsx`): `commentHighlightPlugin` (yellow highlight on commented text, anchor disambiguation via `rangeStart`), `clearEmptyBlockPlugin` (backspace empty heading → paragraph), `tableCellCheckboxPlugin` (literal `[ ]`/`[x]` in cells render as interactive checkboxes via decorations; markdown bytes unchanged on serialize), `wikilinkDecorationPlugin` (v3.11.5+ — `[[wikilink]]` spans get a link-coloured highlight + `data-wikilink`; decoration-only so bytes stay literal `[[...]]`, Ctrl/Cmd+Click navigation wired in `LiveEditorCrepe.jsx`), `LiveToolbar` (Undo / Redo / format / insert / table commands).
+- **Sanitization (v3.11.7+, `sanitize.js`): every path that puts rendered markup into the DOM goes through it.** `innerHTML` / `dangerouslySetInnerHTML` with `marked()` output, GitHub release notes, or mermaid SVG must call `sanitizeHtml` / `sanitizeSvg` — note bodies are user-authored and shared between users, and marked passes raw HTML through by design. If you add a new render target, route it through the same module rather than sanitizing inline. Two traps, both load-bearing: `sanitizeSvg` needs `ADD_TAGS: ['foreignObject']` because mermaid puts flowchart labels inside one and DOMPurify's svg profile excludes it (without it, diagrams render as blank shapes — nothing throws); and do **not** additionally allow `div`/`span`, because once allowed they fail DOMPurify's namespace check instead of being unwrapped and the labels vanish again. `sanitizeHtml` deliberately keeps `class`, `data-*`, and task checkboxes — the Preview's post-passes depend on them.
 - Wikilinks (v3.11.5+, `wikilink.js`): resolution runs against the current namespace tree only (built via `buildPathIndex(tree)` and memoized in `App.jsx`, shared by `Preview.jsx` and the Live editor). Round-trip fidelity is the hard requirement — the Live editor stores literal `[[...]]`, but Milkdown's serializer escapes `[[`→`\[\[` in plain text, so `markdownUpdated` routes every serialized doc through `restoreWikilinks()` before `onChange`. Don't add a wikilink node to the schema — the decoration + serializer-unescape approach is deliberate so bytes never change.
 - Mermaid: `LiveEditorCrepe.jsx` defines an inline `mermaidNodeView` that renders the `MermaidBlock` React component for `code_block` nodes where `language === 'mermaid'`. The compose-mermaid plugin runs after `SchemaReady`, reads Crepe's existing `code_block` factory from `nodeViewCtx`, and writes a wrapper that delegates to it for non-mermaid blocks — so Crepe's CodeMirror UI still works for other code languages AND mermaid renders via our React component.
 - Image upload: Crepe's `image-block` `onUpload` calls `uploadImage()` in `api.js`. `proxyDomURL` resolves the bare-filename markdown src (e.g. `![](photo.png)`) into `/api/files/<ns>/<dir>/<file>?token=<jwt>` for rendering — the `?token=` query param is the auth-fallback the middleware accepts for `<img>` GETs that can't carry an `Authorization` header.
@@ -276,3 +294,7 @@ See `docs/` for:
 - `user-guide.md` — End-user guide
 - `setup.md` — Setup and configuration
 - `architecture.md` — Architecture overview
+- `security.md` — Threat model and the five defense layers (layer 5, rendered-content sanitization, is v3.11.7+)
+- `cli.md` — `mdnest` client CLI
+- `kubernetes.md` — Optional Helm chart (v3.11.7+); says which options are gated off and why
+- `sso-setup.md` / `firebase-setup.md` — Identity-provider setup
