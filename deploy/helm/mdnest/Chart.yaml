@@ -11,14 +11,19 @@ type: application
 version: 0.1.0
 
 # Version of mdnest this chart deploys by default (image tag fallback).
-appVersion: "3.11.6"
+# Tracks the same version as backend/handlers/config.go, frontend/package.json
+# and the mdnest CLI — carries the -dev suffix on develop, plain X.Y.Z on a
+# release branch. The release workflow also passes --app-version at package
+# time, so a published chart is stamped from the tag regardless.
+appVersion: "3.11.7-dev"
 
-home: https://github.com/forterro/mdnest
+home: https://github.com/mahsanamin/mdnest
 sources:
-  - https://github.com/forterro/mdnest
+  - https://github.com/mahsanamin/mdnest
 
 maintainers:
-  - name: Forterro IT Operations
+  - name: mdnest
+    url: https://github.com/mahsanamin/mdnest
 
 keywords:
   - markdown

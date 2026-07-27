@@ -7,9 +7,9 @@ Standard-Kubernetes chart (no CRDs). PostgreSQL and Redis are expected to be
 provided externally. Defaults to a single-instance (active/passive)
 deployment; horizontal scaling (active/active) is strictly opt-in.
 
-**Homepage:** <https://github.com/forterro/mdnest>
+**Homepage:** <https://github.com/mahsanamin/mdnest>
 
-A standard-Kubernetes Helm chart (no CRDs) that deploys [mdnest](https://github.com/forterro/mdnest) — a self-hosted Markdown knowledge base with real-time collaboration.
+A standard-Kubernetes Helm chart (no CRDs) that deploys [mdnest](https://github.com/mahsanamin/mdnest) — a self-hosted Markdown knowledge base with real-time collaboration.
 
 - **Backend** — Go API + WebSocket collaboration server (port `8080`).
 - **Frontend** — nginx serving the SPA and reverse-proxying `/api` and `/api/ws` to the backend (port `80`).
@@ -37,7 +37,7 @@ The chart **validates these invariants and fails fast** with a clear message if 
 
 ```bash
 # Single-instance, from the packaged OCI chart
-helm install mdnest oci://ghcr.io/forterro/charts/mdnest \
+helm install mdnest oci://ghcr.io/mahsanamin/charts/mdnest \
   --set auth.password='change-me' \
   --set auth.jwtSecret='another-long-random-secret' \
   --set ingress.enabled=true \
@@ -50,7 +50,7 @@ helm install mdnest oci://ghcr.io/forterro/charts/mdnest \
 ## Installing
 
 ```bash
-helm install mdnest oci://ghcr.io/forterro/charts/mdnest -f my-values.yaml
+helm install mdnest oci://ghcr.io/mahsanamin/charts/mdnest -f my-values.yaml
 # or from a local checkout
 helm install mdnest ./deploy/helm/mdnest -f my-values.yaml
 ```
@@ -287,11 +287,11 @@ All traffic goes to the frontend Service, which proxies `/api` and `/api/ws` (We
 | gitSync.resources | object | `{"limits":{"memory":"64Mi"},"requests":{"cpu":"10m","memory":"16Mi"}}` | git-sync resource requests/limits. |
 | gitSync.sshSecretName | string | `""` | Name of a Secret with SSH deploy key(s), mounted read-only at `/keys`. Create it yourself; keys must never live in values. |
 | gitSync.tolerations | list | `[]` | Tolerations for git-sync. |
-| image.backend.repository | string | `"ghcr.io/forterro/mdnest-backend"` | Backend image repository. |
+| image.backend.repository | string | `"ghcr.io/mahsanamin/mdnest-backend"` | Backend image repository. |
 | image.backend.tag | string | `""` | Backend image tag; defaults to `Chart.appVersion` when empty. |
-| image.frontend.repository | string | `"ghcr.io/forterro/mdnest-frontend"` | Frontend image repository. |
+| image.frontend.repository | string | `"ghcr.io/mahsanamin/mdnest-frontend"` | Frontend image repository. |
 | image.frontend.tag | string | `""` | Frontend image tag; defaults to `Chart.appVersion` when empty. |
-| image.mcp.repository | string | `"ghcr.io/forterro/mdnest-mcp-server"` | MCP server image repository (used only when `mcp.enabled=true`). |
+| image.mcp.repository | string | `"ghcr.io/mahsanamin/mdnest-mcp-server"` | MCP server image repository (used only when `mcp.enabled=true`). |
 | image.mcp.tag | string | `""` | MCP server image tag; defaults to `Chart.appVersion` when empty. |
 | image.pullPolicy | string | `"IfNotPresent"` | Image pull policy applied to all mdnest images. |
 | imagePullSecrets | list | `[]` | Image pull secrets for private registries (list of `{name}`). |
@@ -307,7 +307,7 @@ All traffic goes to the frontend Service, which proxies `/api` and `/api/ws` (We
 | mcp.enabled | bool | `false` | Enable the MCP server (Model Context Protocol over streamable-HTTP). Adds a Deployment + Service (and optional Ingress). |
 | mcp.extraEnv | list | `[]` | Extra environment variables appended to the MCP container. |
 | mcp.http | object | `{"path":"/mcp","port":3000}` | MCP HTTP listen port and path. |
-| mcp.ingress | object | `{"annotations":{},"className":"","enabled":false,"hosts":[],"tls":[]}` | Optional standard Ingress for the MCP endpoint (Forterro deployments may instead expose it via a Traefik IngressRoute at the umbrella level). |
+| mcp.ingress | object | `{"annotations":{},"className":"","enabled":false,"hosts":[],"tls":[]}` | Optional standard Ingress for the MCP endpoint (leave disabled if your cluster exposes it through its own ingress controller, e.g. a Traefik IngressRoute defined at the umbrella-chart level). |
 | mcp.mdnestUrl | string | `""` | URL the MCP server uses to reach the backend API; defaults to the in-cluster backend Service when empty. |
 | mcp.nodeSelector | object | `{}` | Node selector for the MCP server. |
 | mcp.oauth | object | `{"enabled":false,"publicUrl":"","secret":{"existingSecret":"","existingSecretKey":"oauth-secret","value":""},"ssoAuthorizeUrl":""}` | Per-user OAuth 2.1 mode. When enabled the MCP server is an OAuth AS/RS and delegates login to mdnest SSO, attributing actions to the signed-in user. When disabled (default) the shared service token is used. |
@@ -375,7 +375,7 @@ All traffic goes to the frontend Service, which proxies `/api` and `/api/ws` (We
 
 | Name | Email | Url |
 | ---- | ------ | --- |
-| Forterro IT Operations |  |  |
+| mdnest | <https://github.com/mahsanamin/mdnest> |  |
 
 ---
 

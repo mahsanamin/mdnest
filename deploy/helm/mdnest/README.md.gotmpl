@@ -8,7 +8,7 @@
 
 {{ template "chart.homepageLine" . }}
 
-A standard-Kubernetes Helm chart (no CRDs) that deploys [mdnest](https://github.com/forterro/mdnest) — a self-hosted Markdown knowledge base with real-time collaboration.
+A standard-Kubernetes Helm chart (no CRDs) that deploys [mdnest](https://github.com/mahsanamin/mdnest) — a self-hosted Markdown knowledge base with real-time collaboration.
 
 - **Backend** — Go API + WebSocket collaboration server (port `8080`).
 - **Frontend** — nginx serving the SPA and reverse-proxying `/api` and `/api/ws` to the backend (port `80`).
@@ -36,7 +36,7 @@ The chart **validates these invariants and fails fast** with a clear message if 
 
 ```bash
 # Single-instance, from the packaged OCI chart
-helm install mdnest oci://ghcr.io/forterro/charts/mdnest \
+helm install mdnest oci://ghcr.io/mahsanamin/charts/mdnest \
   --set auth.password='change-me' \
   --set auth.jwtSecret='another-long-random-secret' \
   --set ingress.enabled=true \
@@ -49,7 +49,7 @@ helm install mdnest oci://ghcr.io/forterro/charts/mdnest \
 ## Installing
 
 ```bash
-helm install mdnest oci://ghcr.io/forterro/charts/mdnest -f my-values.yaml
+helm install mdnest oci://ghcr.io/mahsanamin/charts/mdnest -f my-values.yaml
 # or from a local checkout
 helm install mdnest ./deploy/helm/mdnest -f my-values.yaml
 ```

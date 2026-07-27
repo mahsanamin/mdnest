@@ -45,17 +45,17 @@ image:
   pullPolicy: IfNotPresent
   backend:
     # -- Backend image repository.
-    repository: ghcr.io/forterro/mdnest-backend
+    repository: ghcr.io/mahsanamin/mdnest-backend
     # -- Backend image tag; defaults to `Chart.appVersion` when empty.
     tag: ""
   frontend:
     # -- Frontend image repository.
-    repository: ghcr.io/forterro/mdnest-frontend
+    repository: ghcr.io/mahsanamin/mdnest-frontend
     # -- Frontend image tag; defaults to `Chart.appVersion` when empty.
     tag: ""
   mcp:
     # -- MCP server image repository (used only when `mcp.enabled=true`).
-    repository: ghcr.io/forterro/mdnest-mcp-server
+    repository: ghcr.io/mahsanamin/mdnest-mcp-server
     # -- MCP server image tag; defaults to `Chart.appVersion` when empty.
     tag: ""
 
@@ -453,7 +453,7 @@ mcp:
   tolerations: []
   # -- Affinity rules for the MCP server.
   affinity: {}
-  # -- Optional standard Ingress for the MCP endpoint (Forterro deployments may instead expose it via a Traefik IngressRoute at the umbrella level).
+  # -- Optional standard Ingress for the MCP endpoint (leave disabled if your cluster exposes it through its own ingress controller, e.g. a Traefik IngressRoute defined at the umbrella-chart level).
   ingress:
     enabled: false
     className: ""
