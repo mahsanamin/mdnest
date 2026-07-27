@@ -23,23 +23,47 @@ jobs:
     name: Build & push images
     runs-on: ubuntu-latest
     strategy:
+      # One image failing must not cancel the others mid-push, or a release ends
+      # up with a partial set in the registry.
+      fail-fast: false
       matrix:
         include:
           - name: backend
             context: backend
           - name: frontend
             context: frontend
-          - name: mcp-server
-            context: mcp-server
+          # mcp-server has no Dockerfile yet — it ships as a stdio process run
+          # next to the AI client, not a container. Add it back in the change
+          # that lands the streamable-HTTP transport and its Dockerfile.
     steps:
       - uses: actions/checkout@v4
       - name: Compute build metadata
         id: prep
+        # INPUT_VERSION is passed through env, never interpolated into the
+        # script body — a ${{ }} expansion inside run: is a command-injection
+        # sink, and this value reaches a shell and becomes an image tag.
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
         run: |
+          # Version comes from the tag on a tag push, or from the input on a
+          # manual dispatch. Deriving it here (rather than relying on
+          # metadata-action's type=semver, which only reads tag refs) is what
+          # makes workflow_dispatch produce correctly-tagged images too.
+          version="$INPUT_VERSION"
+          if [ -z "$version" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          # Validate before it becomes a registry tag; refuse anything that
+          # isn't a plain version so a malformed dispatch can't publish junk.
+          case "$version" in
+            *[!0-9.a-zA-Z+-]*|'') echo "::error::refusing to publish version '$version'"; exit 1 ;;
+          esac
           {
             echo "owner=${GITHUB_REPOSITORY_OWNER,,}"
             echo "commit=${GITHUB_SHA::7}"
             echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "version=$version"
+            echo "minor=$(echo "$version" | cut -d. -f1-2)"
           } >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@v3
       - name: Log in to GHCR
@@ -54,9 +78,9 @@ jobs:
         with:
           images: ghcr.io/${{ steps.prep.outputs.owner }}/mdnest-${{ matrix.name }}
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ steps.prep.outputs.version }}
+            type=raw,value=${{ steps.prep.outputs.minor }}
+            type=raw,value=latest
       - name: Build & push ${{ matrix.name }}
         uses: docker/build-push-action@v6
         with:
@@ -80,23 +104,35 @@ jobs:
       - uses: actions/checkout@v4
       - name: Compute chart metadata
         id: prep
+        # Same as the images job: the dispatch input arrives via env, not a
+        # ${{ }} expansion inside run:, and is validated before it becomes a
+        # chart version.
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
         run: |
           owner=${GITHUB_REPOSITORY_OWNER,,}
-          version="${{ github.event.inputs.version }}"
+          version="$INPUT_VERSION"
           if [ -z "$version" ]; then
             version="${GITHUB_REF_NAME#v}"
           fi
+          case "$version" in
+            *[!0-9.a-zA-Z+-]*|'') echo "::error::refusing to publish chart version '$version'"; exit 1 ;;
+          esac
           {
             echo "owner=$owner"
             echo "version=$version"
           } >> "$GITHUB_OUTPUT"
       - uses: azure/setup-helm@v4
       - name: Point chart image repositories at this owner
+        # Rewrites whatever owner values.yaml ships with, so a fork publishes its
+        # own images. The previous form matched one hardcoded owner and became a
+        # silent no-op once that default changed.
+        env:
+          OWNER: ${{ steps.prep.outputs.owner }}
         run: |
-          sed -i \
-            -e "s#ghcr.io/forterro/mdnest-backend#ghcr.io/${{ steps.prep.outputs.owner }}/mdnest-backend#" \
-            -e "s#ghcr.io/forterro/mdnest-frontend#ghcr.io/${{ steps.prep.outputs.owner }}/mdnest-frontend#" \
+          sed -i -E "s#ghcr\\.io/[^/]+/(mdnest-[a-z-]+)#ghcr.io/$OWNER/\\1#g" \
             deploy/helm/mdnest/values.yaml
+          grep -E 'repository: ghcr\.io' deploy/helm/mdnest/values.yaml
       - name: Package
         run: |
           helm package deploy/helm/mdnest \
