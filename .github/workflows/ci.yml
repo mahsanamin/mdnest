@@ -4,9 +4,11 @@ name: CI
 # security, HA, and Helm-chart work is continuously verified.
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
-    branches: [main]
+    # `develop` is the integration branch, so PRs land there first — auditing
+    # only `main` would mean CI never sees a change until the release PR.
+    branches: [main, develop]
 
 permissions:
   contents: read
@@ -68,7 +70,10 @@ jobs:
             --set gitSync.enabled=true \
             --set gitSync.sshSecretName=keys > rendered-ha.yaml
       - name: Validate rendered manifests (kubeconform)
-        uses: docker://ghcr.io/yannh/kubeconform:latest
+        # Pinned by digest, not :latest — an unpinned third-party image in CI
+        # means an upstream push silently changes what runs in this repo.
+        # Digest is kubeconform v0.8.0.
+        uses: docker://ghcr.io/yannh/kubeconform@sha256:faffaf43f95aa6425306e1ab8d6fcad72acb9049158f38e574c085ea1ec0f64e
         with:
           args: -strict -ignore-missing-schemas -summary rendered-ha.yaml
 
