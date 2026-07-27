@@ -1,0 +1,94 @@
+name: CI
+
+# Build and test everything on every push/PR to main so integration of the
+# security, HA, and Helm-chart work is continuously verified.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend (build + test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          # Stay in lockstep with the production Docker base image.
+          go-version-file: 'backend/go.mod'
+          cache-dependency-path: 'backend/go.sum'
+      - name: Build
+        run: cd backend && go build ./...
+      - name: Vet
+        run: cd backend && go vet ./...
+      - name: Test (race)
+        # ubuntu-latest ships gcc, so the race detector's cgo requirement is met.
+        run: cd backend && go test -race -count=1 ./...
+
+  frontend:
+    name: Frontend (build + test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: cd frontend && npm ci
+      - run: cd frontend && npm run build
+      - run: cd frontend && npm test
+
+  helm:
+    name: Helm chart (lint + render)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - name: Lint
+        run: helm lint deploy/helm/mdnest
+      - name: Render defaults (single instance)
+        run: helm template ci deploy/helm/mdnest > /dev/null
+      - name: Render active/active (HA)
+        run: |
+          helm template ci deploy/helm/mdnest \
+            --set auth.mode=multi \
+            --set postgres.host=pg.example \
+            --set postgres.password=x \
+            --set collab.enabled=true \
+            --set collab.redis.url=redis://redis.example:6379/0 \
+            --set backend.replicaCount=3 \
+            --set persistence.notes.accessMode=ReadWriteMany \
+            --set persistence.secrets.accessMode=ReadWriteMany \
+            --set gitSync.enabled=true \
+            --set gitSync.sshSecretName=keys > rendered-ha.yaml
+      - name: Validate rendered manifests (kubeconform)
+        uses: docker://ghcr.io/yannh/kubeconform:latest
+        with:
+          args: -strict -ignore-missing-schemas -summary rendered-ha.yaml
+
+  images:
+    name: Docker images (build only)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: backend
+            context: backend
+          - name: frontend
+            context: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build ${{ matrix.name }} image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./${{ matrix.context }}
+          push: false
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
