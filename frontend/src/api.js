@@ -178,6 +178,17 @@ export async function getNamespaces() {
   return res.json();
 }
 
+// getManageableNamespaces returns the namespaces the caller may administer
+// (every namespace for a superadmin, the caller's scoped namespaces for a
+// namespace admin). Unlike getNamespaces() this is not limited to the
+// namespaces the caller can access, so a superadmin — who has no implicit data
+// access — can still manage every namespace from the admin panel.
+export async function getManageableNamespaces() {
+  const res = await request('/namespaces?scope=manage');
+  if (!res.ok) throw new Error('Failed to load namespaces');
+  return res.json();
+}
+
 export async function getTree(ns) {
   const res = await request(`/tree?ns=${encodeURIComponent(ns)}`);
   if (!res.ok) throw new Error('Failed to load tree');

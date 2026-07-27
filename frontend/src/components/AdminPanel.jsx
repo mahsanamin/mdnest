@@ -12,15 +12,29 @@ import {
   adminListNamespaceAdmins,
   adminAddNamespaceAdmin,
   adminRemoveNamespaceAdmin,
+  getManageableNamespaces,
 } from '../api.js';
 import PathPicker from './PathPicker.jsx';
 
 function AdminPanel({ onClose, namespaces, isSuperAdmin, adminNamespaces, userProvider = 'local', grantMaxDepth = 0 }) {
   const [tab, setTab] = useState('users');
 
-  // Manageable namespaces: superadmin can manage all; namespace admins
-  // only their own.
-  const manageableNs = isSuperAdmin ? namespaces : (namespaces || []).filter((n) => adminNamespaces.includes(n));
+  // Management-plane namespace list. A superadmin no longer has implicit data
+  // access to namespaces, so the `namespaces` prop (which mirrors the sidebar /
+  // data-access list) can't drive namespace management. Fetch the administrable
+  // set from the management endpoint instead; it is already scoped per role
+  // (all for superadmin, own namespaces for a namespace admin). The prop seeds
+  // the initial render to avoid a flash before the fetch resolves.
+  const [manageableNs, setManageableNs] = useState(() =>
+    isSuperAdmin ? (namespaces || []) : (namespaces || []).filter((n) => adminNamespaces.includes(n)),
+  );
+  useEffect(() => {
+    let cancelled = false;
+    getManageableNamespaces()
+      .then((ns) => { if (!cancelled) setManageableNs(ns || []); })
+      .catch(() => { /* keep the seeded list on failure */ });
+    return () => { cancelled = true; };
+  }, []);
 
   // In federated modes (firebase, sso) the IdP owns identity, so the
   // invite form skips username + password (backfilled / unused).
@@ -360,7 +374,12 @@ function GrantsTab({ namespaces, grantMaxDepth }) {
 
   useEffect(() => { loadAll().finally(() => setLoading(false)); }, [loadAll]);
 
-  const collaborators = users.filter((u) => u.role === 'collaborator');
+  // Any user can be granted explicit collaborator-style access to note
+  // content, so all roles are listed here. Collaborators and superadmins have
+  // no implicit data access at all (since the manage/access split). Admins
+  // implicitly reach the namespaces they administer, but still need explicit
+  // grants to access *other* namespaces — hence they are grantable too.
+  const grantableUsers = users;
 
   // Group grants by user_id
   const grantsByUser = {};
@@ -392,11 +411,11 @@ function GrantsTab({ namespaces, grantMaxDepth }) {
         <h3>Access Grants</h3>
       </div>
 
-      {collaborators.length === 0 ? (
-        <div className="admin-hint">No collaborators yet. Invite a user first from the Users tab.</div>
+      {grantableUsers.length === 0 ? (
+        <div className="admin-hint">No users to grant yet. Invite a user first from the Users tab.</div>
       ) : (
         <div className="grants-user-list">
-          {collaborators.map((user) => {
+          {grantableUsers.map((user) => {
             const userGrants = grantsByUser[user.id] || [];
             const isExpanded = expandedUser === user.id;
             return (

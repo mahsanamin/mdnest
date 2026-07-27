@@ -21,13 +21,13 @@ func NewPermissionChecker(grantStore store.GrantStore, nsAdminStore store.Namesp
 }
 
 // hasAdminScope returns true if the user's role grants admin-level
-// access to the given namespace (superadmin bypasses everything;
-// namespace-admin must have a row in namespace_admins). Used as the
-// short-circuit before falling through to grant lookups.
+// *data* access to the given namespace. Only a namespace-scoped admin
+// (role "admin" with a row in namespace_admins) qualifies. Superadmins are
+// deliberately excluded: they administer every namespace (users, grants,
+// create/delete) but have no implicit read/write access to note content —
+// they must self-grant like anyone else. Used as the short-circuit before
+// falling through to grant lookups.
 func (pc *PermissionChecker) hasAdminScope(uc *UserContext, namespace string) bool {
-	if uc.Role == "superadmin" {
-		return true
-	}
 	if uc.Role == "admin" && pc.nsAdminStore != nil && namespace != "" {
 		ok, err := pc.nsAdminStore.IsAdminOf(uc.ID, namespace)
 		return err == nil && ok
@@ -57,13 +57,14 @@ func (pc *PermissionChecker) check(r *http.Request, namespace, path, permission 
 	return pc.grantStore.CheckAccess(uc.ID, namespace, path, permission)
 }
 
-// FilterNamespaces returns only the namespaces the user has access to.
-// Single-user mode and superadmins see everything; namespace-admins see
-// the union of (admin namespaces, granted namespaces); collaborators see
-// only their granted namespaces.
+// FilterNamespaces returns only the namespaces the user has (data) access to.
+// Single-user mode sees everything. Superadmins are filtered by their explicit
+// grants like everyone else — administering a namespace no longer implies data
+// access to it. Namespace-admins see the union of (admin namespaces, granted
+// namespaces); collaborators see only their granted namespaces.
 func (pc *PermissionChecker) FilterNamespaces(r *http.Request, namespaces []string) []string {
 	uc := UserFromContext(r.Context())
-	if uc == nil || uc.Role == "superadmin" {
+	if uc == nil {
 		return namespaces
 	}
 
@@ -84,6 +85,36 @@ func (pc *PermissionChecker) FilterNamespaces(r *http.Request, namespaces []stri
 	var filtered []string
 	for _, ns := range namespaces {
 		if accessSet[ns] {
+			filtered = append(filtered, ns)
+		}
+	}
+	return filtered
+}
+
+// FilterManageableNamespaces returns the namespaces the user may *administer*
+// (manage users/grants, create/delete), independent of whether they can access
+// the namespace's contents. Single-user mode and superadmins get the full
+// list; namespace-admins get their scoped namespaces; collaborators get none.
+// This is the management-plane counterpart to FilterNamespaces: the two diverge
+// for superadmins, who administer every namespace but have no implicit data
+// access to any of them.
+func (pc *PermissionChecker) FilterManageableNamespaces(r *http.Request, namespaces []string) []string {
+	uc := UserFromContext(r.Context())
+	if uc == nil || uc.Role == "superadmin" {
+		return namespaces
+	}
+	if uc.Role != "admin" || pc.nsAdminStore == nil {
+		return []string{}
+	}
+	adminSet := make(map[string]bool)
+	if adminOf, err := pc.nsAdminStore.ListByUser(uc.ID); err == nil {
+		for _, ns := range adminOf {
+			adminSet[ns] = true
+		}
+	}
+	var filtered []string
+	for _, ns := range namespaces {
+		if adminSet[ns] {
 			filtered = append(filtered, ns)
 		}
 	}
