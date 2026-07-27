@@ -1,0 +1,99 @@
+{{- if .Values.gitSync.enabled }}
+{{- if not .Values.persistence.notes.enabled }}
+{{- fail "mdnest: gitSync.enabled=true requires persistence.notes.enabled=true (git-sync operates on the notes volume)." }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mdnest.gitsync.fullname" . }}
+  labels:
+    {{- include "mdnest.labels" . | nindent 4 }}
+    app.kubernetes.io/component: git-sync
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  # git-sync is a single-writer daemon: exactly one replica, even in
+  # active/active, because a git working tree tolerates only one committer.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "mdnest.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: git-sync
+  template:
+    metadata:
+      annotations:
+        checksum/script: {{ include (print $.Template.BasePath "/gitsync-configmap.yaml") . | sha256sum }}
+      labels:
+        {{- include "mdnest.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: git-sync
+    spec:
+      serviceAccountName: {{ include "mdnest.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: git-sync
+          image: "{{ .Values.gitSync.image.repository }}:{{ .Values.gitSync.image.tag }}"
+          imagePullPolicy: {{ .Values.gitSync.image.pullPolicy }}
+          command: ["/bin/sh", "/sync.sh"]
+          workingDir: /data/notes
+          env:
+            - name: GIT_AUTHOR_NAME
+              value: {{ .Values.gitSync.author.name | quote }}
+            - name: GIT_AUTHOR_EMAIL
+              value: {{ .Values.gitSync.author.email | quote }}
+            - name: GIT_COMMITTER_NAME
+              value: {{ .Values.gitSync.author.name | quote }}
+            - name: GIT_COMMITTER_EMAIL
+              value: {{ .Values.gitSync.author.email | quote }}
+            - name: GIT_SYNC_INTERVAL
+              value: {{ .Values.gitSync.intervalSeconds | quote }}
+          {{- with .Values.gitSync.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: notes
+              mountPath: /data/notes
+            - name: script
+              mountPath: /sync.sh
+              subPath: sync.sh
+              readOnly: true
+            - name: keys
+              mountPath: /keys
+              readOnly: true
+            - name: ssh-home
+              mountPath: /root/.ssh
+      volumes:
+        - name: notes
+          persistentVolumeClaim:
+            claimName: {{ include "mdnest.notesClaimName" . }}
+        - name: script
+          configMap:
+            name: {{ include "mdnest.gitsync.fullname" . }}
+            defaultMode: 0755
+        - name: keys
+          secret:
+            secretName: {{ required "gitSync.sshSecretName is required when gitSync.enabled=true (SSH deploy key Secret, mounted read-only at /keys)" .Values.gitSync.sshSecretName }}
+            defaultMode: 0400
+        # Writable home so ssh can persist accepted host keys (known_hosts).
+        - name: ssh-home
+          emptyDir: {}
+      {{- with .Values.gitSync.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.gitSync.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.gitSync.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

@@ -1,0 +1,12 @@
+# Patterns to ignore when building Helm packages.
+.DS_Store
+.git/
+.gitignore
+*.tmpl.bak
+*.orig
+*.swp
+# CI / editor cruft
+.vscode/
+.idea/
+# helm-docs source template (README.md is the packaged artifact)
+README.md.gotmpl

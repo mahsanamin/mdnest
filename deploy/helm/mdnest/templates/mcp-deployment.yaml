@@ -1,0 +1,124 @@
+{{- if .Values.mcp.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mdnest.mcp.fullname" . }}
+  labels:
+    {{- include "mdnest.labels" . | nindent 4 }}
+    app.kubernetes.io/component: mcp
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: {{ .Values.mcp.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "mdnest.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: mcp
+  template:
+    metadata:
+      {{- with .Values.mcp.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "mdnest.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: mcp
+        {{- with .Values.mcp.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "mdnest.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.mcp.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: mcp
+          image: {{ include "mdnest.mcp.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.mcp.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.mcp.http.port }}
+          env:
+            - name: MCP_TRANSPORT
+              value: "http"
+            - name: MCP_HTTP_HOST
+              value: "0.0.0.0"
+            - name: MCP_HTTP_PORT
+              value: {{ .Values.mcp.http.port | quote }}
+            - name: MCP_HTTP_PATH
+              value: {{ .Values.mcp.http.path | quote }}
+            - name: MDNEST_URL
+              value: {{ .Values.mcp.mdnestUrl | default (printf "http://%s:%v" (include "mdnest.backend.fullname" .) .Values.backend.service.port) | quote }}
+            {{- if or (not .Values.mcp.oauth.enabled) .Values.mcp.auth.existingSecret .Values.mcp.auth.token }}
+            - name: MDNEST_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.mcp.auth.existingSecret }}
+                  name: {{ .Values.mcp.auth.existingSecret }}
+                  key: {{ .Values.mcp.auth.existingSecretKey }}
+                  {{- else }}
+                  name: {{ include "mdnest.mcp.secretName" . }}
+                  key: token
+                  {{- end }}
+            {{- end }}
+            {{- if .Values.mcp.oauth.enabled }}
+            - name: MCP_AUTH_MODE
+              value: "oauth"
+            - name: MCP_PUBLIC_URL
+              value: {{ required "mcp.oauth.publicUrl is required when mcp.oauth.enabled" .Values.mcp.oauth.publicUrl | quote }}
+            - name: MCP_SSO_AUTHORIZE_URL
+              value: {{ required "mcp.oauth.ssoAuthorizeUrl is required when mcp.oauth.enabled" .Values.mcp.oauth.ssoAuthorizeUrl | quote }}
+            - name: MCP_OAUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  {{- if .Values.mcp.oauth.secret.existingSecret }}
+                  name: {{ .Values.mcp.oauth.secret.existingSecret }}
+                  key: {{ .Values.mcp.oauth.secret.existingSecretKey }}
+                  {{- else }}
+                  name: {{ include "mdnest.mcp.secretName" . }}
+                  key: oauth-secret
+                  {{- end }}
+            {{- end }}
+            {{- with .Values.mcp.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          {{- with .Values.mcp.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with .Values.mcp.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.mcp.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.mcp.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
