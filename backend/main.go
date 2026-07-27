@@ -307,7 +307,7 @@ func main() {
 		noteHandler.SetCollabHub(collabHub)
 	}
 	treeHandler := handlers.NewTreeHandler(absNotesDir, grantStore)
-	uploadHandler := handlers.NewUploadHandler(absNotesDir)
+	uploadHandler := handlers.NewUploadHandler(absNotesDir, perms)
 	moveHandler := handlers.NewMoveHandler(absNotesDir)
 	searchHandler := handlers.NewSearchHandler(absNotesDir)
 	tokenHandler := handlers.NewTokenHandler(secretsDir)
