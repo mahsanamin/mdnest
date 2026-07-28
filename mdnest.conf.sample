@@ -122,6 +122,12 @@ GIT_AUTHOR_EMAIL=you@example.com
 #
 # Optional — only set if your redirect URI isn't FRONTEND_ORIGIN/api/auth/sso/callback:
 # SSO_REDIRECT_URL=https://notes.example.com/api/auth/sso/callback
+#
+# Optional (opt-in) — auto-create a least-privilege collaborator on first SSO
+# login for an unknown but IdP-authenticated email, instead of rejecting it, so
+# users need no superadmin invite. Off by default. Enable only when the IdP
+# gates who may obtain a token (pair with SSO_ALLOWED_DOMAINS).
+# SSO_AUTOPROVISION_USERS=true
 
 # ==========================================================================
 # INSECURE: dev-only login backdoor (for local SSO testing)

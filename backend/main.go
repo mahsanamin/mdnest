@@ -193,6 +193,14 @@ func main() {
 		log.Fatalf("USER_PROVIDER=%s requires AUTH_MODE=multi", userProvider)
 	}
 
+	// Opt-in: auto-create a least-privilege collaborator for an unknown but
+	// IdP-authenticated email on first SSO login, instead of rejecting it.
+	// Off by default; only meaningful when USER_PROVIDER=sso.
+	ssoAutoProvisionUsers := env("SSO_AUTOPROVISION_USERS", "false") == "true"
+	if ssoAutoProvisionUsers {
+		log.Println("SSO user auto-provisioning: enabled")
+	}
+
 	// Create auth handler based on mode
 	var authHandler *handlers.AuthHandler
 	var userStore store.UserStore
@@ -429,6 +437,7 @@ func main() {
 			ssoClient, userStore, jwtSecret,
 			strings.TrimRight(frontendOrigin, "/"),
 			strings.HasPrefix(frontendOrigin, "https://"),
+			ssoAutoProvisionUsers,
 		)
 		mux.HandleFunc("/api/auth/sso/start", ssoHandler.HandleStart)
 		mux.HandleFunc("/api/auth/sso/callback", ssoHandler.HandleCallback)

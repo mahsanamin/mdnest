@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"log"
 	"net/http"
 	"net/url"
@@ -21,9 +23,11 @@ import (
 //   2. IdP bounces the browser back to /api/auth/sso/callback with
 //      ?code=...&state=... — we verify the state cookie, exchange the code,
 //      verify the ID token, and extract the email.
-//   3. We look the email up in the local users table. NO auto-provisioning —
-//      if the email isn't already invited, we redirect back to the frontend
-//      with an error in the hash.
+//   3. We look the email up in the local users table. By default there is NO
+//      auto-provisioning — if the email isn't already invited, we redirect
+//      back to the frontend with an error in the hash. When the operator opts
+//      in (autoProvisionUsers), an unknown but IdP-authenticated email is
+//      instead created as a least-privilege collaborator on first login.
 //   4. On success we mint the normal mdnest JWT (same shape as password /
 //      Firebase flow) and redirect to the frontend with the token in the
 //      URL fragment (#token=...). The frontend bootstrap reads the fragment,
@@ -34,18 +38,24 @@ type SSOHandler struct {
 	secret       []byte
 	frontendURL  string // where to redirect the browser after login
 	secureCookie bool   // set Secure flag on state cookie (HTTPS deployments)
+	// autoProvisionUsers, when true, creates a least-privilege collaborator
+	// for an unknown but IdP-authenticated email instead of rejecting it.
+	// Off by default. The operator opts in only when they trust their IdP to
+	// gate who may obtain a token (e.g. a domain-restricted enterprise IdP).
+	autoProvisionUsers bool
 }
 
 // NewSSOHandler wires an SSO client to a user store. frontendURL is the
 // absolute origin of the web UI ("https://notes.example.com"), used to
 // redirect the browser back after a successful (or failed) login.
-func NewSSOHandler(client *sso.Client, userStore store.UserStore, jwtSecret, frontendURL string, secureCookie bool) *SSOHandler {
+func NewSSOHandler(client *sso.Client, userStore store.UserStore, jwtSecret, frontendURL string, secureCookie, autoProvisionUsers bool) *SSOHandler {
 	return &SSOHandler{
-		client:       client,
-		userStore:    userStore,
-		secret:       []byte(jwtSecret),
-		frontendURL:  strings.TrimRight(frontendURL, "/"),
-		secureCookie: secureCookie,
+		client:             client,
+		userStore:          userStore,
+		secret:             []byte(jwtSecret),
+		frontendURL:        strings.TrimRight(frontendURL, "/"),
+		secureCookie:       secureCookie,
+		autoProvisionUsers: autoProvisionUsers,
 	}
 }
 
@@ -108,9 +118,24 @@ func (h *SSOHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if user == nil {
-		log.Printf("sso rejected: %s has no mdnest account", claims.Email)
-		h.redirectWithError(w, r, "/", "sso_not_invited")
-		return
+		if !h.autoProvisionUsers {
+			log.Printf("sso rejected: %s has no mdnest account", claims.Email)
+			h.redirectWithError(w, r, "/", "sso_not_invited")
+			return
+		}
+		// Opt-in auto-provisioning: the IdP has already authenticated this
+		// identity, so create a least-privilege collaborator. It has no
+		// namespace access until granted (or until a personal namespace is
+		// auto-provisioned), so a fresh account can see nothing by default.
+		// The password is random and unusable — SSO users never password-auth.
+		provisioned, perr := h.provisionSSOUser(claims.Email, claims.Name)
+		if perr != nil {
+			log.Printf("sso auto-provision failed for %s: %v", claims.Email, perr)
+			h.redirectWithError(w, r, "/", "sso_internal")
+			return
+		}
+		log.Printf("sso auto-provisioned %s as collaborator (id %d)", claims.Email, provisioned.ID)
+		user = provisioned
 	}
 	if user.Blocked {
 		log.Printf("sso rejected: %s is blocked", claims.Email)
@@ -182,6 +207,27 @@ func (h *SSOHandler) safeFrom(from string) string {
 		return "/"
 	}
 	return p
+}
+
+// provisionSSOUser creates a least-privilege collaborator for an
+// IdP-authenticated email that has no local account yet. The username is
+// derived from the IdP display name (falling back to the email local part),
+// and the password is random and unusable — SSO users authenticate through
+// the IdP, never with a password.
+func (h *SSOHandler) provisionSSOUser(email, displayName string) (*store.User, error) {
+	username := strings.TrimSpace(displayName)
+	if username == "" {
+		if i := strings.IndexByte(email, '@'); i > 0 {
+			username = email[:i]
+		} else {
+			username = email
+		}
+	}
+	var buf [24]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return nil, err
+	}
+	return h.userStore.CreateUser(email, username, hex.EncodeToString(buf[:]), "collaborator", nil)
 }
 
 func (h *SSOHandler) redirectWithError(w http.ResponseWriter, r *http.Request, from, code string) {

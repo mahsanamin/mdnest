@@ -263,6 +263,11 @@ sso:
   providerLabel: "SSO"
   # -- Comma-separated emails auto-promoted to superadmin.
   adminEmails: ""
+  # -- Opt-in: auto-create a least-privilege collaborator for an unknown but
+  # IdP-authenticated email on first login, instead of rejecting it. Off by
+  # default. Enable only when the IdP itself gates who may obtain a token
+  # (e.g. a domain-restricted enterprise IdP); pair with `allowedDomains`.
+  autoProvisionUsers: false
   # -- Existing Secret holding the OIDC client secret (preferred over inline).
   existingSecret: ""
   # -- Key inside `existingSecret` holding the client secret.
