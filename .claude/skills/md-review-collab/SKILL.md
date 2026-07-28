@@ -216,7 +216,29 @@ costs the contributor real time and costs us credibility.
 Post with `gh pr review <n> --request-changes --body-file <file>` for blockers,
 `gh pr comment <n> --body-file <file>` when a decision or answer is owed.
 
-## Step 6 — merge
+## Step 6 — the contributor's decisions are theirs
+
+**Never close, retarget, force-push, or edit someone else's PR on their behalf.**
+Recommend, then let them act. Their name is on it.
+
+This applies even when the outcome is already agreed — including when they have
+said in the thread that they're abandoning the approach. "They said they'd drop
+it" is not the same as them dropping it, and closing it for them takes the
+decision out of their hands over a few seconds of convenience.
+
+- **Should be closed?** Say why, say you think it should close, and ask them to
+  close it. Leave it open until they do.
+- **Wrong base branch?** Ask them to retarget.
+- **Needs a rebase or a fix?** Ask, with a concrete description of the change.
+  Don't push to their branch unless they've invited it.
+
+What *is* ours: merging (once it passes the gates), approving, requesting
+changes, and saying plainly what we will and won't take.
+
+If a PR sits stale after a recommendation, ping the thread — don't reach for the
+close button.
+
+## Step 7 — merge
 
 - Merge into **`develop`**, never `main` outside a release. `main` is protected
   by required Security Audit checks with no bypass — that gate is authoritative,
@@ -233,5 +255,6 @@ Post with `gh pr review <n> --request-changes --body-file <file>` for blockers,
 - Every open contributor PR has been through all three gates.
 - Every blocking finding is backed by a reproduction, not a suspicion.
 - The merge order is decided and, if non-obvious, was simulated.
+- No contributor PR was closed, retargeted or pushed to on their behalf.
 - Direction questions are surfaced to the owner, not silently decided.
 - Contributors know what's expected of them next, and why.
