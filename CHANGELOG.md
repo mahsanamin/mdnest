@@ -4,6 +4,14 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## Unreleased
+
+### Security
+
+- **Superadmins no longer have implicit read access to note content.** A superadmin administers every namespace — users, grants, and namespace lifecycle — but that authority no longer doubles as ambient access to the notes themselves. Data access now flows through grants for every role, so a superadmin sees only the namespaces they hold a grant in (including ones they grant themselves), exactly like a collaborator. **This changes existing multi-user installs:** an operator who relied on a superadmin account seeing every namespace will find those namespaces absent from the sidebar, the tree, and the file APIs until they self-grant. The management surfaces are unchanged — the admin UI still lists every namespace to administer, via a dedicated management-scope query (`FilterManageableNamespaces`) that stays global for superadmins. Single-user mode is unaffected. `backend/middleware/permission_test.go` pins the split: a superadmin manages all namespaces but reads none without a grant, namespace-admins and collaborators are unchanged, and an API token confers no bypass.
+
+---
+
 ## v3.11.7 — XSS hardening, cross-namespace file leak fixed, Helm chart, build CI
 
 _First release with outside contributions. Thanks to [@ecthelion77](https://github.com/ecthelion77) (Olivier Gintrand) for the sanitization hardening, the `/api/files/` authorization fix, the Helm chart, and the CI workflows._
