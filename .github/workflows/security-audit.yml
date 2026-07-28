@@ -2,11 +2,17 @@ name: Security Audit
 
 on:
   push:
-    branches: [main]
+    # `develop` is included because the owner merges verified branches straight
+    # into develop locally and pushes — no PR, so the pull_request trigger below
+    # never fires for those. Without this, develop's tip is never scanned, and
+    # the local pre-push hook silently skips govulncheck on a host with no Go
+    # toolchain. That combination is how GO-2026-5856 reached a release.
+    branches: [main, develop]
   pull_request:
     # `develop` is included so contributor PRs are audited on the way *in*,
-    # not first discovered on the release PR to `main`. The gate itself is
-    # still `main`'s required checks — this only moves the signal earlier.
+    # not first discovered on the release PR to `main`. These four jobs are
+    # required status checks on both the `main-branch` and `develop-branch`
+    # rulesets — see scripts/apply-*-branch-protection.sh.
     branches: [main, develop]
   schedule:
     # Run weekly on Monday at 06:00 UTC
@@ -79,4 +85,6 @@ jobs:
             mdnest \
             git-sync/sync.sh \
             install-cli.sh \
-            .githooks/pre-push
+            .githooks/pre-push \
+            scripts/apply-main-branch-protection.sh \
+            scripts/apply-develop-branch-protection.sh
