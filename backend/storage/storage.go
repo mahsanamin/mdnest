@@ -10,6 +10,16 @@
 // directory for the local backend. Paths passed to this package are
 // namespace-relative and must already be validated for traversal by the
 // caller (see handlers.SafeRelPath).
+//
+// SafeRelPath is a *lexical* contract only: it rejects absolute paths and
+// ".." traversal without touching the filesystem, so it is valid for every
+// backend (including object stores, which have no symlinks). A backend that
+// resolves paths against a real filesystem therefore owes an *additional*
+// symlink-containment check, because a namespace directory is a first-class
+// authoring surface (git-sync writes into it, host-side restores preserve
+// symlinks) and a symlink placed inside it could otherwise redirect reads or
+// writes outside the namespace. The local backend does this in abs(); see
+// LocalStorage.
 package storage
 
 import (
@@ -55,8 +65,10 @@ type WalkFunc func(relPath string, info FileInfo) error
 // Storage is the persistence abstraction used by the note handlers.
 //
 // Implementations MUST be safe for concurrent use. Paths are
-// namespace-relative, slash-separated, and already traversal-checked by
-// the caller. Namespaces are validated by the implementation.
+// namespace-relative, slash-separated, and already lexically traversal-checked
+// by the caller (handlers.SafeRelPath). A filesystem-backed implementation
+// additionally owes a symlink-containment check (see the package doc).
+// Namespaces are validated by the implementation.
 type Storage interface {
 	// Kind returns the backend identifier ("local"). Handlers use it to gate
 	// behaviour that only makes sense on a real filesystem (e.g. git-backed
@@ -71,10 +83,6 @@ type Storage interface {
 
 	// NamespaceExists reports whether the namespace exists.
 	NamespaceExists(ctx context.Context, ns string) (bool, error)
-
-	// CreateNamespace creates an empty namespace. It returns ErrExist if
-	// the namespace already exists.
-	CreateNamespace(ctx context.Context, ns string) error
 
 	// --- File operations (relPath is namespace-relative) ---
 
@@ -120,4 +128,16 @@ type Storage interface {
 	// invoking fn for each. Hidden entries are still reported; callers
 	// filter them.
 	Walk(ctx context.Context, ns, root string, fn WalkFunc) error
+}
+
+// RangeReadable is an optional capability implemented by backends that can
+// hand out a seekable reader. Handlers use it to serve HTTP range requests
+// and conditional GETs via http.ServeContent (preserving Accept-Ranges/206
+// and Last-Modified/If-Modified-Since/304). Backends that can only stream
+// (e.g. object stores) do not implement it and are served with a plain copy.
+type RangeReadable interface {
+	// OpenSeek returns a seekable reader for a file together with its
+	// metadata. The caller must Close the reader. It returns ErrNotExist if
+	// the file is missing.
+	OpenSeek(ctx context.Context, ns, relPath string) (io.ReadSeekCloser, FileInfo, error)
 }

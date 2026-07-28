@@ -139,15 +139,30 @@ func (h *UploadHandler) HandleServeFile(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	if ct := mime.TypeByExtension(path.Ext(relPath)); ct != "" {
+		w.Header().Set("Content-Type", ct)
+	}
+
+	// Prefer range/conditional-GET support when the backend can hand out a
+	// seekable reader (local filesystem). This keeps browser image caching
+	// (304s) and media seeking working, which a plain stream would break.
+	// Backends that can only stream (object stores) fall back to a copy.
+	if rr, ok := h.store.(storage.RangeReadable); ok {
+		rs, info, err := rr.OpenSeek(ctx, ns, relPath)
+		if err != nil {
+			http.Error(w, `{"error":"file not found"}`, http.StatusNotFound)
+			return
+		}
+		defer rs.Close()
+		http.ServeContent(w, r, path.Base(relPath), info.ModTime, rs)
+		return
+	}
+
 	rc, err := h.store.Open(ctx, ns, relPath)
 	if err != nil {
 		http.Error(w, `{"error":"file not found"}`, http.StatusNotFound)
 		return
 	}
 	defer rc.Close()
-
-	if ct := mime.TypeByExtension(path.Ext(relPath)); ct != "" {
-		w.Header().Set("Content-Type", ct)
-	}
 	io.Copy(w, rc)
 }

@@ -28,9 +28,17 @@ func NewLocalStorage(root string) (*LocalStorage, error) {
 
 func (l *LocalStorage) Kind() string { return "local" }
 
-// abs joins root/ns/relPath and guards against escaping the namespace
-// root. relPath is expected to be already lexically validated by the
-// caller (handlers.SafeRelPath); this is defence in depth.
+// abs joins root/ns/relPath and guards against escaping the namespace root.
+// relPath is expected to be already lexically validated by the caller
+// (handlers.SafeRelPath); the lexical prefix check below is defence in depth.
+//
+// It additionally resolves symlinks and re-verifies containment, mirroring
+// what handlers.SafePath did before the storage abstraction existed. This is
+// the filesystem-specific half of the path contract (see the package doc):
+// a namespace directory can contain symlinks (git-sync writes into it, host
+// restores preserve them), and without this check a symlink inside the
+// namespace pointing outside it would be silently followed. abs returns ""
+// when the resolved target would escape the namespace.
 func (l *LocalStorage) abs(ns, relPath string) string {
 	nsDir := filepath.Join(l.root, ns)
 	if relPath == "" {
@@ -40,7 +48,43 @@ func (l *LocalStorage) abs(ns, relPath string) string {
 	if target != nsDir && !strings.HasPrefix(target, nsDir+string(filepath.Separator)) {
 		return ""
 	}
+	if !containedAfterSymlinks(nsDir, target) {
+		return ""
+	}
 	return target
+}
+
+// containedAfterSymlinks reports whether target stays within base once
+// symlinks are resolved. It mirrors handlers.SafePath: it resolves the parent
+// directory of target so an intermediate directory symlink that escapes the
+// namespace is caught, and when that parent does not fully exist yet it walks
+// up to the nearest existing ancestor. target itself need not exist, so
+// creating a new note in a new folder still works.
+func containedAfterSymlinks(base, target string) bool {
+	baseReal, err := filepath.EvalSymlinks(base)
+	if err != nil {
+		return false
+	}
+	within := func(p string) bool {
+		return p == baseReal ||
+			strings.HasPrefix(p+string(filepath.Separator), baseReal+string(filepath.Separator))
+	}
+	if resolved, err := filepath.EvalSymlinks(filepath.Dir(target)); err == nil {
+		return within(filepath.Join(resolved, filepath.Base(target)))
+	}
+	// Parent directory does not fully exist yet; find the nearest existing
+	// ancestor and verify it is within base.
+	check := target
+	for {
+		parent := filepath.Dir(check)
+		if parent == check {
+			return false
+		}
+		if real, err := filepath.EvalSymlinks(parent); err == nil {
+			return within(real)
+		}
+		check = parent
+	}
 }
 
 func translate(err error) error {
@@ -79,14 +123,6 @@ func (l *LocalStorage) NamespaceExists(ctx context.Context, ns string) (bool, er
 	return info.IsDir(), nil
 }
 
-func (l *LocalStorage) CreateNamespace(ctx context.Context, ns string) error {
-	err := os.Mkdir(filepath.Join(l.root, ns), 0755)
-	if os.IsExist(err) {
-		return ErrExist
-	}
-	return err
-}
-
 func (l *LocalStorage) ReadFile(ctx context.Context, ns, relPath string) ([]byte, error) {
 	abs := l.abs(ns, relPath)
 	if abs == "" {
@@ -103,6 +139,30 @@ func (l *LocalStorage) Open(ctx context.Context, ns, relPath string) (io.ReadClo
 	}
 	f, err := os.Open(abs)
 	return f, translate(err)
+}
+
+// OpenSeek implements RangeReadable: os.File is already an io.ReadSeekCloser,
+// so the local backend can serve range requests and conditional GETs.
+func (l *LocalStorage) OpenSeek(ctx context.Context, ns, relPath string) (io.ReadSeekCloser, FileInfo, error) {
+	abs := l.abs(ns, relPath)
+	if abs == "" {
+		return nil, FileInfo{}, ErrNotExist
+	}
+	f, err := os.Open(abs)
+	if err != nil {
+		return nil, FileInfo{}, translate(err)
+	}
+	info, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, FileInfo{}, translate(err)
+	}
+	return f, FileInfo{
+		Name:    info.Name(),
+		Size:    info.Size(),
+		IsDir:   info.IsDir(),
+		ModTime: info.ModTime(),
+	}, nil
 }
 
 func (l *LocalStorage) WriteFile(ctx context.Context, ns, relPath string, data []byte) error {

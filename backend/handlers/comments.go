@@ -77,10 +77,13 @@ func (h *CommentsHandler) resolveNoteID(ctx context.Context, ns, notePath string
 // listComments returns all non-deleted comments for a note.
 func (h *CommentsHandler) listComments(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	ns := r.URL.Query().Get("ns")
+	ns := RequireNamespaceStore(ctx, h.store, w, r)
+	if ns == "" {
+		return
+	}
 	notePath := r.URL.Query().Get("path")
-	if ns == "" || notePath == "" {
-		http.Error(w, `{"error":"ns and path are required"}`, http.StatusBadRequest)
+	if notePath == "" {
+		http.Error(w, `{"error":"path is required"}`, http.StatusBadRequest)
 		return
 	}
 
@@ -111,10 +114,13 @@ func (h *CommentsHandler) listComments(w http.ResponseWriter, r *http.Request) {
 // createComment appends a new comment to the JSONL file.
 func (h *CommentsHandler) createComment(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	ns := r.URL.Query().Get("ns")
+	ns := RequireNamespaceStore(ctx, h.store, w, r)
+	if ns == "" {
+		return
+	}
 	notePath := r.URL.Query().Get("path")
-	if ns == "" || notePath == "" {
-		http.Error(w, `{"error":"ns and path are required"}`, http.StatusBadRequest)
+	if notePath == "" {
+		http.Error(w, `{"error":"path is required"}`, http.StatusBadRequest)
 		return
 	}
 
@@ -174,11 +180,14 @@ func (h *CommentsHandler) createComment(w http.ResponseWriter, r *http.Request) 
 // updateComment marks a comment as resolved or updates its body.
 func (h *CommentsHandler) updateComment(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	ns := r.URL.Query().Get("ns")
+	ns := RequireNamespaceStore(ctx, h.store, w, r)
+	if ns == "" {
+		return
+	}
 	notePath := r.URL.Query().Get("path")
 	commentID := r.URL.Query().Get("id")
-	if ns == "" || notePath == "" || commentID == "" {
-		http.Error(w, `{"error":"ns, path, and id are required"}`, http.StatusBadRequest)
+	if notePath == "" || commentID == "" {
+		http.Error(w, `{"error":"path and id are required"}`, http.StatusBadRequest)
 		return
 	}
 
@@ -234,11 +243,14 @@ func (h *CommentsHandler) updateComment(w http.ResponseWriter, r *http.Request) 
 // deleteComment soft-deletes a comment.
 func (h *CommentsHandler) deleteComment(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	ns := r.URL.Query().Get("ns")
+	ns := RequireNamespaceStore(ctx, h.store, w, r)
+	if ns == "" {
+		return
+	}
 	notePath := r.URL.Query().Get("path")
 	commentID := r.URL.Query().Get("id")
-	if ns == "" || notePath == "" || commentID == "" {
-		http.Error(w, `{"error":"ns, path, and id are required"}`, http.StatusBadRequest)
+	if notePath == "" || commentID == "" {
+		http.Error(w, `{"error":"path and id are required"}`, http.StatusBadRequest)
 		return
 	}
 
