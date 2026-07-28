@@ -215,16 +215,15 @@ postgres:
 #                           replicas (active/active). Empty = single instance.
 # -----------------------------------------------------------------------------
 #
-# NOT AVAILABLE IN THIS RELEASE: the Redis backplane is not implemented, so any
-# collab.redis.* value is rejected at install time. Live collaboration itself
-# (collab.enabled) works on a single backend replica; it is only the
-# across-replicas sync that is missing, and without it replicas silently
-# diverge. Run one replica until the backplane lands.
+# Live collaboration (collab.enabled) works on a single backend replica. To run
+# multiple replicas (active/active), also set a Redis backplane below so presence
+# and edits sync across pods — validateHA enforces this, since without it
+# replicas would silently diverge.
 collab:
-  # -- Enable live collaboration (`ENABLE_LIVE_COLLAB`; requires `auth.mode=multi`). Single-replica only in this release.
+  # -- Enable live collaboration (`ENABLE_LIVE_COLLAB`; requires `auth.mode=multi`). For multiple replicas, also configure `redis` below.
   enabled: false
   redis:
-    # -- Full Redis URL. NOT IMPLEMENTED in this release — setting it fails the install rather than injecting an ignored REDIS_URL.
+    # -- Full Redis URL (`redis://` / `rediss://`) -> `REDIS_URL`. When set, presence/events sync across replicas (active/active); empty = single instance.
     url: ""
     # -- Existing Secret to source `REDIS_URL` from instead of inline `url`.
     existingSecret: ""
