@@ -450,7 +450,7 @@ func main() {
 
 	// Apply permission checks in multi mode, passthrough in single mode
 	if perms != nil {
-		mux.Handle("/api/namespaces", authMiddleware.Wrap(http.HandlerFunc(nsHandler.ListNamespaces)))
+		mux.Handle("/api/namespaces", authMiddleware.Wrap(http.HandlerFunc(nsHandler.Handle)))
 		mux.Handle("/api/tree", authMiddleware.Wrap(perms.RequireNsAccess(http.HandlerFunc(treeHandler.GetTree))))
 		mux.Handle("/api/note", authMiddleware.Wrap(perms.ReadWriteRouter(invalidateSearch(http.HandlerFunc(noteHandler.Handle)))))
 		// History endpoints — read-only, gate on read access (anyone who
@@ -466,7 +466,7 @@ func main() {
 		mux.Handle("/api/search", authMiddleware.Wrap(perms.RequireNsAccess(http.HandlerFunc(searchHandler.HandleSearch))))
 		mux.Handle("/api/files/", authMiddleware.Wrap(http.HandlerFunc(uploadHandler.HandleServeFile))) // files endpoint extracts ns from URL, handled differently
 	} else {
-		mux.Handle("/api/namespaces", authMiddleware.Wrap(http.HandlerFunc(nsHandler.ListNamespaces)))
+		mux.Handle("/api/namespaces", authMiddleware.Wrap(http.HandlerFunc(nsHandler.Handle)))
 		mux.Handle("/api/tree", authMiddleware.Wrap(http.HandlerFunc(treeHandler.GetTree)))
 		mux.Handle("/api/note", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(noteHandler.Handle))))
 		// History endpoints work in single mode too — git-sync runs
