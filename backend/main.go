@@ -93,6 +93,14 @@ func main() {
 	}
 	log.Printf("storage backend: %s", stg.Kind())
 
+	// Opt-in: auto-provision a per-user personal namespace on first load
+	// (off by default). Intended for object-store deployments where namespaces
+	// have no mount to come from. See MeHandler.ensurePersonalNamespace.
+	personalNsAutoprovision := env("PERSONAL_NAMESPACE_AUTOPROVISION", "false") == "true"
+	if personalNsAutoprovision {
+		log.Println("personal namespace auto-provisioning: enabled")
+	}
+
 	// Database setup (multi mode only)
 	var db *store.DB
 	if authMode == "multi" {
@@ -484,7 +492,7 @@ func main() {
 	// Multi-mode routes (require admin role for /admin/*, authenticated for /me)
 	if multiMode {
 		adminHandler := handlers.NewAdminHandler(userStore, grantStore, nsAdminStore, collabHub, userProvider, grantMaxDepth)
-		meHandler := handlers.NewMeHandler(userStore, grantStore, nsAdminStore)
+		meHandler := handlers.NewMeHandler(userStore, grantStore, nsAdminStore, stg, personalNsAutoprovision)
 
 		// Admin endpoints: outer gate is RequireAdmin (= any admin role).
 		// Per-namespace scoping is done inside each handler so namespace

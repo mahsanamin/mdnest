@@ -315,6 +315,16 @@ storage:
     secretKey: ""
 
 # -----------------------------------------------------------------------------
+# Personal namespaces (opt-in). Off by default.
+# -----------------------------------------------------------------------------
+personalNamespaces:
+  # -- Opt-in: auto-provision a per-user personal namespace (named after the
+  # user's email) with a write grant on first load. Off by default. Intended
+  # for object-store (`storage.backend=s3`) deployments where namespaces have
+  # no mount to come from. Applies to multi mode only.
+  autoProvision: false
+
+# -----------------------------------------------------------------------------
 # Persistence. notes = the Markdown repository (shared with git-sync); secrets =
 # API tokens / local secrets store. Both must be ReadWriteMany for active/active.
 # -----------------------------------------------------------------------------

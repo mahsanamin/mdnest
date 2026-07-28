@@ -1,11 +1,15 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"log"
 	"net/http"
 	"time"
 
 	"github.com/mdnest/mdnest/backend/middleware"
+	"github.com/mdnest/mdnest/backend/storage"
 	"github.com/mdnest/mdnest/backend/store"
 )
 
@@ -14,11 +18,17 @@ type MeHandler struct {
 	userStore    store.UserStore
 	grantStore   store.GrantStore
 	nsAdminStore store.NamespaceAdminStore
+	store        storage.Storage
+	// autoProvisionPersonalNs enables the opt-in creation of a per-user
+	// personal namespace on first load (off by default). It is intended for
+	// object-store deployments where namespaces have no mount to come from.
+	autoProvisionPersonalNs bool
 }
 
-// NewMeHandler creates a new MeHandler.
-func NewMeHandler(userStore store.UserStore, grantStore store.GrantStore, nsAdminStore store.NamespaceAdminStore) *MeHandler {
-	return &MeHandler{userStore: userStore, grantStore: grantStore, nsAdminStore: nsAdminStore}
+// NewMeHandler creates a new MeHandler. When autoProvisionPersonalNs is true a
+// per-user personal namespace is lazily provisioned via the storage backend.
+func NewMeHandler(userStore store.UserStore, grantStore store.GrantStore, nsAdminStore store.NamespaceAdminStore, stg storage.Storage, autoProvisionPersonalNs bool) *MeHandler {
+	return &MeHandler{userStore: userStore, grantStore: grantStore, nsAdminStore: nsAdminStore, store: stg, autoProvisionPersonalNs: autoProvisionPersonalNs}
 }
 
 type meResponse struct {
@@ -72,6 +82,18 @@ func (h *MeHandler) HandleMe(w http.ResponseWriter, r *http.Request) {
 		grants = nil
 	}
 
+	// Opt-in: lazily provision a per-user personal namespace. This is the
+	// single choke point common to every login mode (SSO, password), so it
+	// also back-fills existing users on their next load. Off by default; the
+	// operator turns it on only where namespaces have no mount to come from.
+	if h.autoProvisionPersonalNs && h.store != nil {
+		if h.ensurePersonalNamespace(r.Context(), user, grants) {
+			if refreshed, rerr := h.grantStore.GetGrantsForUser(uc.ID); rerr == nil {
+				grants = refreshed
+			}
+		}
+	}
+
 	meGrants := make([]meGrant, 0, len(grants))
 	for _, g := range grants {
 		meGrants = append(meGrants, meGrant{
@@ -109,4 +131,37 @@ func (h *MeHandler) HandleMe(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+// ensurePersonalNamespace lazily creates a per-user personal namespace and
+// grants the user write access to it. The namespace is named after the user's
+// email, which is unique in the users table, so two users can never collide on
+// the same storage prefix. It returns true when a new grant was created, so
+// the caller can refresh the grant list.
+//
+// A namespace is only visible to a collaborator through a grant
+// (PermissionChecker.FilterNamespaces), so both the storage prefix and the
+// write grant are required. Both steps are idempotent: we skip entirely once a
+// matching grant already exists, and CreateNamespace tolerates a pre-existing
+// prefix, which makes provisioning self-healing across logins.
+func (h *MeHandler) ensurePersonalNamespace(ctx context.Context, user *store.User, grants []store.Grant) bool {
+	ns := user.Email
+	if !ValidNamespaceName(ns) {
+		return false
+	}
+	for _, g := range grants {
+		if g.Namespace == ns {
+			return false // already provisioned
+		}
+	}
+	if err := h.store.CreateNamespace(ctx, ns); err != nil && !errors.Is(err, storage.ErrExist) {
+		log.Printf("personal namespace: create %q for user %d failed: %v", ns, user.ID, err)
+		return false
+	}
+	if _, err := h.grantStore.CreateGrant(user.ID, ns, "/", "write", nil); err != nil {
+		log.Printf("personal namespace: grant %q to user %d failed: %v", ns, user.ID, err)
+		return false
+	}
+	log.Printf("personal namespace: provisioned %q for user %d", ns, user.ID)
+	return true
 }

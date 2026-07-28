@@ -23,6 +23,9 @@ data:
   S3_USE_SSL: {{ .Values.storage.s3.useSSL | ternary "true" "false" | quote }}
   S3_PATH_STYLE: {{ .Values.storage.s3.pathStyle | ternary "true" "false" | quote }}
   {{- end }}
+  {{- if .Values.personalNamespaces.autoProvision }}
+  PERSONAL_NAMESPACE_AUTOPROVISION: "true"
+  {{- end }}
   FRONTEND_ORIGIN: {{ .Values.backend.frontendOrigin | quote }}
   {{- if .Values.backend.serverAlias }}
   SERVER_ALIAS: {{ .Values.backend.serverAlias | quote }}

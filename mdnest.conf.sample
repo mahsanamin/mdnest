@@ -73,6 +73,13 @@ GIT_AUTHOR_EMAIL=you@example.com
 # S3_USE_SSL=true                     # default true
 # S3_PATH_STYLE=true                  # default true (needed for MinIO/Ceph)
 
+# Personal namespace auto-provisioning (optional, opt-in)
+# When true, each user gets a personal namespace (named after their email)
+# created automatically on first load, with a write grant — no superadmin
+# invite to a namespace required. Off by default. Intended for STORAGE_BACKEND=s3
+# deployments where namespaces have no mount to come from. Multi mode only.
+# PERSONAL_NAMESPACE_AUTOPROVISION=true
+
 # SSH key for git pull (optional)
 # Path to an SSH private key on the host. Used by the sync button to pull
 # from git remotes. Must be unencrypted (no passphrase).
