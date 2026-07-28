@@ -46,6 +46,24 @@ jobs:
       - run: cd frontend && npm run build
       - run: cd frontend && npm test
 
+  mcp-server:
+    name: MCP server (OAuth smoke test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: mcp-server/package-lock.json
+      - run: cd mcp-server && npm ci
+      - name: OAuth bridge smoke test
+        # Spins a fake mdnest backend + the real mcp-server in oauth mode and
+        # drives the full OAuth 2.1 authorization-code + PKCE flow end to end
+        # (discovery, /authorize, SSO handoff, /finish, token exchange with
+        # PKCE, and an authenticated MCP call). Exits non-zero on any failure.
+        run: cd mcp-server && npm test
+
   helm:
     name: Helm chart (lint + render)
     runs-on: ubuntu-latest
