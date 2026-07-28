@@ -91,6 +91,14 @@ while IFS= read -r line; do
     SSO_PROVIDER_LABEL) SSO_PROVIDER_LABEL="$value" ;;
     INSECURE_DEV_LOGIN) INSECURE_DEV_LOGIN="$value" ;;
     GRANT_MAX_DEPTH) GRANT_MAX_DEPTH="$value" ;;
+    STORAGE_BACKEND) STORAGE_BACKEND="$value" ;;
+    S3_ENDPOINT) S3_ENDPOINT="$value" ;;
+    S3_BUCKET) S3_BUCKET="$value" ;;
+    S3_ACCESS_KEY) S3_ACCESS_KEY="$value" ;;
+    S3_SECRET_KEY) S3_SECRET_KEY="$value" ;;
+    S3_REGION) S3_REGION="$value" ;;
+    S3_USE_SSL) S3_USE_SSL="$value" ;;
+    S3_PATH_STYLE) S3_PATH_STYLE="$value" ;;
     COMPOSE_PROJECT_NAME) COMPOSE_PROJECT_NAME="$value" ;;
     MOUNT_*)
       name="${key#MOUNT_}"
@@ -265,6 +273,30 @@ POSTGRES_DB=${POSTGRES_DB}
 POSTGRES_USER=${POSTGRES_USER}
 POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 EOF
+fi
+
+# Storage backend — default "local" (filesystem, behaviour unchanged). Set
+# STORAGE_BACKEND=s3 to persist notes in an S3-compatible object store, which
+# lets the backend run with multiple replicas (no ReadWriteMany volume).
+STORAGE_BACKEND="${STORAGE_BACKEND:-local}"
+if [ "$STORAGE_BACKEND" = "s3" ]; then
+  if [ -z "$S3_ENDPOINT" ] || [ -z "$S3_BUCKET" ] || [ -z "$S3_ACCESS_KEY" ] || [ -z "$S3_SECRET_KEY" ]; then
+    echo "Error: STORAGE_BACKEND=s3 requires S3_ENDPOINT, S3_BUCKET, S3_ACCESS_KEY and S3_SECRET_KEY in $CONF."
+    exit 1
+  fi
+  echo "Storage backend: s3 (bucket ${S3_BUCKET} @ ${S3_ENDPOINT})"
+  cat >> .env <<EOF
+STORAGE_BACKEND=s3
+S3_ENDPOINT=${S3_ENDPOINT}
+S3_BUCKET=${S3_BUCKET}
+S3_ACCESS_KEY=${S3_ACCESS_KEY}
+S3_SECRET_KEY=${S3_SECRET_KEY}
+S3_REGION=${S3_REGION:-us-east-1}
+S3_USE_SSL=${S3_USE_SSL:-true}
+S3_PATH_STYLE=${S3_PATH_STYLE:-true}
+EOF
+else
+  echo "Storage backend: local (filesystem, default)"
 fi
 
 echo "Generated .env"

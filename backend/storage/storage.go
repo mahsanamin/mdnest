@@ -2,14 +2,15 @@
 //
 // The default backend ("local") is a thin, behaviour-preserving wrapper
 // around the os.* / filepath.* calls the handlers used before this package
-// existed, so enabling it changes nothing. The interface is deliberately
-// backend-agnostic so alternative backends (e.g. an object store) can be
-// added later behind the STORAGE_BACKEND flag without touching call sites.
+// existed, so enabling it changes nothing. An alternative "s3" backend
+// stores notes in any S3-compatible object store, which lets the backend
+// run with multiple replicas (no ReadWriteMany PVC) and decouples the data
+// from the pod filesystem.
 //
 // All operations are namespace-scoped. A namespace maps to a top-level
-// directory for the local backend. Paths passed to this package are
-// namespace-relative and must already be validated for traversal by the
-// caller (see handlers.SafeRelPath).
+// directory for the local backend and to a key prefix for the S3 backend.
+// Paths passed to this package are namespace-relative and must already be
+// validated for traversal by the caller (see handlers.SafeRelPath).
 package storage
 
 import (
@@ -58,9 +59,9 @@ type WalkFunc func(relPath string, info FileInfo) error
 // namespace-relative, slash-separated, and already traversal-checked by
 // the caller. Namespaces are validated by the implementation.
 type Storage interface {
-	// Kind returns the backend identifier ("local"). Handlers use it to gate
-	// behaviour that only makes sense on a real filesystem (e.g. git-backed
-	// history/sync).
+	// Kind returns the backend identifier ("local" or "s3"). Handlers use
+	// it to gate behaviour that only makes sense on a real filesystem
+	// (e.g. git-backed history/sync).
 	Kind() string
 
 	// --- Namespace operations ---

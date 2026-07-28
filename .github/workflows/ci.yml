@@ -68,6 +68,18 @@ jobs:
             --set collab.enabled=true \
             --set gitSync.enabled=true \
             --set gitSync.sshSecretName=keys > rendered-ha.yaml
+      - name: Render the S3 storage configuration
+        # storage.backend=s3 is now implemented by the backend, so the chart
+        # must render it (credentials via inline values or an existingSecret)
+        # rather than reject it. Git-sync is filesystem-only and orthogonal, so
+        # it is left off here.
+        run: |
+          helm template ci deploy/helm/mdnest \
+            --set storage.backend=s3 \
+            --set storage.s3.endpoint=s3.example.com \
+            --set storage.s3.bucket=mdnest \
+            --set storage.s3.accessKey=ak \
+            --set storage.s3.secretKey=sk > /dev/null
       - name: Reject options the code does not implement
         # The chart's values surface must not outrun the backend. Each option
         # here would otherwise deploy "healthy" while doing the wrong thing, so
@@ -85,8 +97,6 @@ jobs:
               echo "ok: rejected $desc"
             fi
           }
-          expect_reject "storage.backend=s3 (no object-store support)" \
-            --set storage.backend=s3
           expect_reject "collab.redis.* (no presence/event backplane)" \
             --set collab.redis.url=redis://redis.example:6379/0
           expect_reject "mcp.enabled (MCP server is stdio-only)" \

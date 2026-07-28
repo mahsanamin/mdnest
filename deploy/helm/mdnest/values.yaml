@@ -290,7 +290,7 @@ sso:
 # rather than deploy that silently. Keys below are kept so the option can be
 # enabled in the same change that lands object-store support.
 storage:
-  # -- Note storage backend. Only `local` is implemented in this release (notes on the `notes` PVC); `s3` is rejected at install time.
+  # -- Note storage backend: `local` (notes on the `notes` PVC, byte-identical to upstream) or `s3` (S3-compatible object store; lets multiple replicas share notes without ReadWriteMany storage). Git history/sync are filesystem-only and unavailable in `s3` mode.
   backend: local
   s3:
     # -- S3 endpoint as `host[:port]` WITHOUT scheme, e.g. `s3.fr-par.scw.cloud`.
