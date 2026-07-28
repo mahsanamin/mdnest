@@ -189,12 +189,13 @@ backend:
 
 ### MCP server
 
-Opt-in Model Context Protocol endpoint. See the dedicated MCP docs in the app repository for client configuration. Minimal service-token setup:
+Opt-in Model Context Protocol endpoint. See the dedicated MCP docs in the app repository for client configuration. Minimal bearer (static token) setup:
 
 ```yaml
 mcp:
   enabled: true
   auth:
+    mode: bearer
     existingSecret: mdnest-mcp-token   # key: token (an mdnest_... API token)
   ingress:
     enabled: true
@@ -203,7 +204,7 @@ mcp:
         paths: [{ path: /, pathType: Prefix }]
 ```
 
-For per-user attribution, enable `mcp.oauth.enabled=true` and set `mcp.oauth.publicUrl` + `mcp.oauth.ssoAuthorizeUrl` (requires SSO).
+For per-user attribution, set `mcp.auth.mode=oauth` and provide `mcp.oauth.publicUrl` + `mcp.oauth.ssoAuthorizeUrl` (requires SSO). `bearer` and `oauth` are mutually exclusive.
 
 ### git-sync
 
@@ -316,16 +317,16 @@ All traffic goes to the frontend Service, which proxies `/api` and `/api/ws` (We
 | ingress.enabled | bool | `false` | Enable an Ingress routing all traffic to the frontend Service. |
 | ingress.hosts | list | `[{"host":"mdnest.local","paths":[{"path":"/","pathType":"Prefix"}]}]` | Ingress hosts and paths. |
 | ingress.tls | list | `[]` | Ingress TLS configuration. |
-| mcp | object | `{"affinity":{},"auth":{"existingSecret":"","existingSecretKey":"token","token":""},"enabled":false,"extraEnv":[],"http":{"path":"/mcp","port":3000},"ingress":{"annotations":{},"className":"","enabled":false,"hosts":[],"tls":[]},"mdnestUrl":"","nodeSelector":{},"oauth":{"enabled":false,"publicUrl":"","secret":{"existingSecret":"","existingSecretKey":"oauth-secret","value":""},"ssoAuthorizeUrl":""},"podAnnotations":{},"podLabels":{},"podSecurityContext":{},"replicaCount":1,"resources":{},"securityContext":{},"service":{"port":3000,"type":"ClusterIP"},"tolerations":[]}` | --------------------------------------------------------------------------- |
+| mcp | object | `{"affinity":{},"auth":{"existingSecret":"","existingSecretKey":"token","mode":"bearer","token":""},"enabled":false,"extraEnv":[],"http":{"path":"/mcp","port":3000},"ingress":{"annotations":{},"className":"","enabled":false,"hosts":[],"tls":[]},"mdnestUrl":"","nodeSelector":{},"oauth":{"publicUrl":"","secret":{"existingSecret":"","existingSecretKey":"oauth-secret","value":""},"ssoAuthorizeUrl":""},"podAnnotations":{},"podLabels":{},"podSecurityContext":{},"replicaCount":1,"resources":{},"securityContext":{},"service":{"port":3000,"type":"ClusterIP"},"tolerations":[]}` | --------------------------------------------------------------------------- |
 | mcp.affinity | object | `{}` | Affinity rules for the MCP server. |
-| mcp.auth | object | `{"existingSecret":"","existingSecretKey":"token","token":""}` | Service-token auth (used when `oauth.enabled=false`). Provide inline via `auth.token` or reference an existing Secret. |
+| mcp.auth | object | `{"existingSecret":"","existingSecretKey":"token","mode":"bearer","token":""}` | Endpoint authentication. Mutually exclusive modes selected by `auth.mode`: `bearer` (clients present a static mdnest API token, forwarded to the backend) or `oauth` (per-user delegation via OAuth 2.1 authorization-code + PKCE). |
 | mcp.enabled | bool | `false` | Enable the MCP server (Model Context Protocol over streamable-HTTP). Adds a Deployment + Service (and optional Ingress). |
 | mcp.extraEnv | list | `[]` | Extra environment variables appended to the MCP container. |
 | mcp.http | object | `{"path":"/mcp","port":3000}` | MCP HTTP listen port and path. |
 | mcp.ingress | object | `{"annotations":{},"className":"","enabled":false,"hosts":[],"tls":[]}` | Optional standard Ingress for the MCP endpoint (leave disabled if your cluster exposes it through its own ingress controller, e.g. a Traefik IngressRoute defined at the umbrella-chart level). |
 | mcp.mdnestUrl | string | `""` | URL the MCP server uses to reach the backend API; defaults to the in-cluster backend Service when empty. |
 | mcp.nodeSelector | object | `{}` | Node selector for the MCP server. |
-| mcp.oauth | object | `{"enabled":false,"publicUrl":"","secret":{"existingSecret":"","existingSecretKey":"oauth-secret","value":""},"ssoAuthorizeUrl":""}` | Per-user OAuth 2.1 mode. When enabled the MCP server is an OAuth AS/RS and delegates login to mdnest SSO, attributing actions to the signed-in user. When disabled (default) the shared service token is used. |
+| mcp.oauth | object | `{"publicUrl":"","secret":{"existingSecret":"","existingSecretKey":"oauth-secret","value":""},"ssoAuthorizeUrl":""}` | oauth mode settings (used only when `auth.mode=oauth`). |
 | mcp.oauth.publicUrl | string | `""` | Public HTTPS base URL clients reach the MCP server on (no trailing slash). |
 | mcp.oauth.secret | object | `{"existingSecret":"","existingSecretKey":"oauth-secret","value":""}` | HMAC secret signing OAuth cookies/codes. Provide inline via `secret.value` or reference an existing Secret. |
 | mcp.oauth.ssoAuthorizeUrl | string | `""` | mdnest backend SSO start endpoint, e.g. `https://<host>/api/auth/sso/start`. |

@@ -421,14 +421,23 @@ mcp:
   replicaCount: 1
   # -- URL the MCP server uses to reach the backend API; defaults to the in-cluster backend Service when empty.
   mdnestUrl: ""
-  # -- Service-token auth (used when `oauth.enabled=false`). Provide inline via `auth.token` or reference an existing Secret.
+  # -- Endpoint authentication. Mutually exclusive modes selected by `auth.mode`:
+  #    `bearer` — clients present a static mdnest API token (service / gateway
+  #      integration). The token is required in the endpoint's `Authorization:
+  #      Bearer` header and forwarded to the backend. Provide it inline via
+  #      `auth.token` or reference an existing Secret (`auth.existingSecret`).
+  #    `oauth`  — per-user delegation via OAuth 2.1 authorization-code + PKCE;
+  #      login is delegated to mdnest SSO and every action is attributed to the
+  #      signed-in user. Requires the `oauth.*` settings below.
   auth:
+    mode: bearer
+    # -- bearer mode: static mdnest API token. Provide inline via `auth.token`
+    #    or reference an existing Secret.
     token: ""
     existingSecret: ""
     existingSecretKey: token
-  # -- Per-user OAuth 2.1 mode. When enabled the MCP server is an OAuth AS/RS and delegates login to mdnest SSO, attributing actions to the signed-in user. When disabled (default) the shared service token is used.
+  # -- oauth mode settings (used only when `auth.mode=oauth`).
   oauth:
-    enabled: false
     # -- Public HTTPS base URL clients reach the MCP server on (no trailing slash).
     publicUrl: ""
     # -- mdnest backend SSO start endpoint, e.g. `https://<host>/api/auth/sso/start`.

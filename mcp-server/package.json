@@ -10,7 +10,7 @@
   "scripts": {
     "start": "node index.js",
     "start:http": "MCP_TRANSPORT=http node index.js",
-    "test": "node test_oauth.mjs"
+    "test": "node test_oauth.mjs && node test_bearer.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",

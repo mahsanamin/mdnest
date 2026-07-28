@@ -5,6 +5,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createServer as createHttpServer } from "node:http";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { timingSafeEqual, createHash } from "node:crypto";
 import { z } from "zod";
 import { buildOAuth } from "./oauth.js";
 
@@ -56,8 +57,8 @@ async function authenticate() {
 // ---------------------------------------------------------------------------
 async function api(path, options = {}, _retried = false) {
   const headers = { ...options.headers };
-  // Prefer the per-request user token (OAuth mode); fall back to the
-  // process-wide service token (service mode / stdio).
+  // Prefer the per-request token (set in OAuth and bearer modes); fall back to
+  // the process-wide service token (stdio transport).
   const reqToken = authStore.getStore()?.token || token;
   if (reqToken) {
     headers["Authorization"] = `Bearer ${reqToken}`;
@@ -489,11 +490,21 @@ async function startHttp() {
   const host = process.env.MCP_HTTP_HOST || "0.0.0.0";
   const mcpPath = process.env.MCP_HTTP_PATH || "/mcp";
 
-  // Optional OAuth 2.1 mode: require a per-user mdnest JWT (obtained by the MCP
-  // client via the corporate SSO), forwarded to the backend per request so all
-  // actions are attributed to the real user. Default "service" mode keeps the
-  // previous behaviour (process-wide token, unauthenticated endpoint).
-  const authMode = (process.env.MCP_AUTH_MODE || "service").toLowerCase();
+  // Authentication mode for the HTTP endpoint. Mutually exclusive, selected by
+  // MCP_AUTH_MODE:
+  //   bearer — clients present a static mdnest API token (service / gateway
+  //            integration, e.g. an MCP gateway federating this server). The
+  //            presented token is constant-time compared against MDNEST_TOKEN
+  //            and forwarded to the backend.
+  //   oauth  — per-user delegation via OAuth 2.1 authorization-code + PKCE; each
+  //            request carries the calling user's own mdnest JWT, forwarded to
+  //            the backend so every action is attributed to that user.
+  const authMode = (process.env.MCP_AUTH_MODE || "bearer").toLowerCase();
+  if (authMode !== "bearer" && authMode !== "oauth") {
+    console.error(`MCP_AUTH_MODE must be "bearer" or "oauth" (got "${authMode}")`);
+    process.exit(1);
+  }
+
   let oauth = null;
   if (authMode === "oauth") {
     const publicUrl = process.env.MCP_PUBLIC_URL;
@@ -511,10 +522,27 @@ async function startHttp() {
       validateUrl: BASE_URL,
       secureCookie: publicUrl.startsWith("https://"),
     });
+  } else if (!API_TOKEN) {
+    console.error("MCP_AUTH_MODE=bearer requires MDNEST_TOKEN (a valid mdnest API token)");
+    process.exit(1);
   }
 
   const jsonError = (id, code, message) =>
     JSON.stringify({ jsonrpc: "2.0", error: { code, message }, id: id ?? null });
+
+  // bearer mode: extract the presented bearer and constant-time compare it
+  // against the configured static token.
+  const bearerFromReq = (req) => {
+    const h = req.headers["authorization"] || "";
+    const m = /^Bearer\s+(.+)$/i.exec(h);
+    return m ? m[1].trim() : null;
+  };
+  const tokenMatches = (presented) => {
+    if (!presented || !API_TOKEN) return false;
+    const a = createHash("sha256").update(presented).digest();
+    const b = createHash("sha256").update(API_TOKEN).digest();
+    return timingSafeEqual(a, b);
+  };
 
   const handlePost = async (req, res, userToken) => {
     const chunks = [];
@@ -536,8 +564,9 @@ async function startHttp() {
     });
     await server.connect(transport);
     // Run the request inside an auth context so api() forwards the caller's
-    // own token to the backend (OAuth mode). In service mode userToken is
-    // undefined and api() falls back to the process-wide token.
+    // own token to the backend. In OAuth mode this is the user's JWT; in bearer
+    // mode it is the configured static token. For stdio userToken is undefined
+    // and api() falls back to the process-wide token.
     await authStore.run({ token: userToken }, () => transport.handleRequest(req, res, body));
   };
 
@@ -569,6 +598,19 @@ async function startHttp() {
           oauth.challenge(res, jsonError(null, -32001, "Authentication required"));
           return;
         }
+      } else {
+        // bearer mode: require the configured static mdnest API token.
+        const presented = bearerFromReq(req);
+        if (!tokenMatches(presented)) {
+          res.writeHead(401, {
+            "Content-Type": "application/json",
+            "WWW-Authenticate": "Bearer",
+            "Cache-Control": "no-store",
+          });
+          res.end(jsonError(null, -32001, "Authentication required"));
+          return;
+        }
+        userToken = API_TOKEN;
       }
       handlePost(req, res, userToken).catch((err) => {
         console.error("MCP request error:", err);
@@ -585,7 +627,7 @@ async function startHttp() {
   });
 
   httpServer.listen(port, host, () => {
-    console.error(`mdnest MCP server (streamable-http) listening on http://${host}:${port}${mcpPath}` + (oauth ? " [oauth]" : ""));
+    console.error(`mdnest MCP server (streamable-http) listening on http://${host}:${port}${mcpPath} [${authMode}]`);
   });
 }
 
@@ -595,9 +637,10 @@ async function startHttp() {
 async function main() {
   const mode = (process.env.MCP_TRANSPORT || "stdio").toLowerCase();
   const httpMode = mode === "http" || mode === "streamable-http";
-  const oauthMode = httpMode && (process.env.MCP_AUTH_MODE || "service").toLowerCase() === "oauth";
+  const oauthMode = httpMode && (process.env.MCP_AUTH_MODE || "bearer").toLowerCase() === "oauth";
   // In OAuth mode the backend credential is supplied per request by each user,
-  // so no process-wide service token is needed. Otherwise authenticate now.
+  // so no process-wide service token is needed. Otherwise (bearer / stdio)
+  // authenticate now with the service token.
   if (!oauthMode) {
     await authenticate();
   }
