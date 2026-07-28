@@ -1,19 +1,20 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
-	"os"
-	"path/filepath"
+	"path"
 	"sort"
 	"strings"
 
 	"github.com/mdnest/mdnest/backend/middleware"
+	"github.com/mdnest/mdnest/backend/storage"
 	"github.com/mdnest/mdnest/backend/store"
 )
 
 type TreeHandler struct {
-	notesDir   string
+	store      storage.Storage
 	grantStore store.GrantStore // nil in single mode
 }
 
@@ -24,8 +25,8 @@ type TreeNode struct {
 	Children []*TreeNode `json:"children,omitempty"`
 }
 
-func NewTreeHandler(notesDir string, grantStore store.GrantStore) *TreeHandler {
-	return &TreeHandler{notesDir: notesDir, grantStore: grantStore}
+func NewTreeHandler(store storage.Storage, grantStore store.GrantStore) *TreeHandler {
+	return &TreeHandler{store: store, grantStore: grantStore}
 }
 
 // GetTree handles GET /api/tree?ns=...
@@ -35,12 +36,13 @@ func (h *TreeHandler) GetTree(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	nsDir := RequireNamespace(h.notesDir, w, r)
-	if nsDir == "" {
+	ctx := r.Context()
+	ns := RequireNamespaceStore(ctx, h.store, w, r)
+	if ns == "" {
 		return
 	}
 
-	root, err := buildTree(nsDir, "")
+	root, err := buildTree(ctx, h.store, ns, "")
 	if err != nil {
 		http.Error(w, `{"error":"failed to read directory tree"}`, http.StatusInternalServerError)
 		return
@@ -51,7 +53,6 @@ func (h *TreeHandler) GetTree(w http.ResponseWriter, r *http.Request) {
 	if h.grantStore != nil {
 		uc := middleware.UserFromContext(r.Context())
 		if uc != nil && uc.Role != "admin" && uc.Role != "superadmin" {
-			ns := r.URL.Query().Get("ns")
 			grants, _ := h.grantStore.GetGrantsForUser(uc.ID)
 			var nsGrants []store.Grant
 			for _, g := range grants {
@@ -162,53 +163,55 @@ func isTextFileExt(ext string) bool {
 	return textExtensions[ext]
 }
 
-func buildTree(dirPath, relativePath string) (*TreeNode, error) {
-	entries, err := os.ReadDir(dirPath)
+func buildTree(ctx context.Context, stg storage.Storage, ns, relPath string) (*TreeNode, error) {
+	entries, err := stg.ReadDir(ctx, ns, relPath)
 	if err != nil {
 		return nil, err
 	}
 
+	name := ""
+	if relPath != "" {
+		name = relPath[strings.LastIndex(relPath, "/")+1:]
+	}
 	node := &TreeNode{
-		Name:     filepath.Base(dirPath),
+		Name:     name,
 		Type:     "folder",
-		Path:     relativePath,
+		Path:     relPath,
 		Children: make([]*TreeNode, 0),
 	}
 
 	sort.Slice(entries, func(i, j int) bool {
-		iDir := entries[i].IsDir()
-		jDir := entries[j].IsDir()
-		if iDir != jDir {
-			return iDir
+		if entries[i].IsDir != entries[j].IsDir {
+			return entries[i].IsDir
 		}
-		return strings.ToLower(entries[i].Name()) < strings.ToLower(entries[j].Name())
+		return strings.ToLower(entries[i].Name) < strings.ToLower(entries[j].Name)
 	})
 
 	for _, entry := range entries {
-		name := entry.Name()
+		name := entry.Name
 		if strings.HasPrefix(name, ".") {
 			continue
 		}
 
 		childRelPath := name
-		if relativePath != "" {
-			childRelPath = relativePath + "/" + name
+		if relPath != "" {
+			childRelPath = relPath + "/" + name
 		}
 
-		if entry.IsDir() {
-			child, err := buildTree(filepath.Join(dirPath, name), childRelPath)
+		if entry.IsDir {
+			child, err := buildTree(ctx, stg, ns, childRelPath)
 			if err != nil {
 				continue
 			}
 			node.Children = append(node.Children, child)
 		} else {
 			// Show text-based files only — skip binaries, images, huge files
-			ext := strings.ToLower(filepath.Ext(name))
+			ext := strings.ToLower(path.Ext(name))
 			if !isTextFileExt(ext) {
 				continue
 			}
 			// Skip files > 5MB to prevent huge files from killing the server
-			if info, err := entry.Info(); err == nil && info.Size() > 5*1024*1024 {
+			if entry.Size > 5*1024*1024 {
 				continue
 			}
 			node.Children = append(node.Children, &TreeNode{
