@@ -95,10 +95,6 @@ Delete a guard in the same change that lands the capability behind it.
 {{- if eq .Values.storage.backend "s3" -}}
   {{- fail "mdnest: storage.backend=s3 is not implemented in this release. The backend reads notes from the filesystem and ignores S3_*, so notes would be written to the notes PVC while appearing to be configured for your bucket. Use storage.backend=local." -}}
 {{- end -}}
-{{- $redis := or .Values.collab.redis.url .Values.collab.redis.existingSecret .Values.collab.redis.host -}}
-{{- if $redis -}}
-  {{- fail "mdnest: the Redis collaboration backplane is not implemented in this release. REDIS_URL would be injected and ignored, so collaboration state would diverge per pod instead of syncing. Leave collab.redis.* empty and run a single backend replica." -}}
-{{- end -}}
 {{- if .Values.mcp.enabled -}}
   {{- fail "mdnest: mcp.enabled=true requires the MCP server's streamable-HTTP transport, which is not in this release — the bundled MCP server speaks stdio only, so the Service and Ingress would route to a port nothing listens on. Run the MCP server alongside your client over stdio instead." -}}
 {{- end -}}
@@ -110,10 +106,9 @@ backend deployment MUST have Redis-backed collaboration and ReadWriteMany
 storage, otherwise replicas would silently diverge (separate collab state,
 separate note files). Fail fast with an actionable message.
 
-Note: until the Redis backplane lands, validateSupported above rejects any
-Redis configuration, so a multi-replica deployment cannot be rendered at all.
-That is deliberate — active/active without a backplane is the silent-divergence
-case this chart exists to prevent.
+The Redis backplane is implemented: validateHA below requires it (and RWX
+storage) for any multi-replica deployment, so active/active is coordinated
+rather than silently diverging — the failure mode this check exists to prevent.
 */}}
 {{- define "mdnest.validateHA" -}}
 {{- $ha := or (gt (int .Values.backend.replicaCount) 1) .Values.backend.autoscaling.enabled -}}

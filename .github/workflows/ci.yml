@@ -57,15 +57,20 @@ jobs:
       - name: Render defaults (single instance)
         run: helm template ci deploy/helm/mdnest > /dev/null
       - name: Render the full supported configuration
-        # Multi-mode + live collaboration + git-sync on a single backend replica
-        # is the largest configuration this release actually implements. The
-        # active/active variant is asserted to be REJECTED below, not rendered.
+        # Multi-mode + live collaboration + git-sync + active/active: three
+        # backend replicas coordinated through the Redis backplane, on
+        # ReadWriteMany storage. This is the largest configuration the release
+        # implements, and CI proves it renders.
         run: |
           helm template ci deploy/helm/mdnest \
             --set auth.mode=multi \
             --set postgres.host=pg.example \
             --set postgres.password=x \
             --set collab.enabled=true \
+            --set collab.redis.url=redis://redis.example:6379/0 \
+            --set backend.replicaCount=3 \
+            --set persistence.notes.accessMode=ReadWriteMany \
+            --set persistence.secrets.accessMode=ReadWriteMany \
             --set gitSync.enabled=true \
             --set gitSync.sshSecretName=keys > rendered-ha.yaml
       - name: Reject options the code does not implement
@@ -87,15 +92,8 @@ jobs:
           }
           expect_reject "storage.backend=s3 (no object-store support)" \
             --set storage.backend=s3
-          expect_reject "collab.redis.* (no presence/event backplane)" \
-            --set collab.redis.url=redis://redis.example:6379/0
           expect_reject "mcp.enabled (MCP server is stdio-only)" \
             --set mcp.enabled=true
-          expect_reject "backend.replicaCount=3 (active/active needs the backplane)" \
-            --set auth.mode=multi --set postgres.host=pg.example --set postgres.password=x \
-            --set collab.enabled=true --set backend.replicaCount=3 \
-            --set persistence.notes.accessMode=ReadWriteMany \
-            --set persistence.secrets.accessMode=ReadWriteMany
           [ "$fails" -eq 0 ] || exit 1
       - name: Validate rendered manifests (kubeconform)
         # Pinned by digest, not :latest — an unpinned third-party image in CI
