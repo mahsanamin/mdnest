@@ -1,11 +1,14 @@
 package handlers
 
 import (
+	"context"
 	"crypto/rand"
 	"fmt"
 	"os"
 	"regexp"
 	"strings"
+
+	"github.com/mdnest/mdnest/backend/storage"
 )
 
 // mdnest note ID marker — embedded as an HTML comment at the bottom of each note.
@@ -86,4 +89,27 @@ func ResolveNoteID(notesDir, ns, path string) (string, error) {
 		return "", fmt.Errorf("invalid path")
 	}
 	return EnsureNoteID(absPath)
+}
+
+// EnsureNoteIDStore is the storage-backed equivalent of EnsureNoteID: it
+// reads a note through the storage backend, injects a UUID marker if one is
+// missing, writes it back, and returns the UUID (existing or new).
+func EnsureNoteIDStore(ctx context.Context, stg storage.Storage, ns, relPath string) (string, error) {
+	data, err := stg.ReadFile(ctx, ns, relPath)
+	if err != nil {
+		return "", err
+	}
+	uuid, _ := ExtractNoteID(string(data))
+	if uuid != "" {
+		return uuid, nil
+	}
+	uuid, err = GenerateNoteID()
+	if err != nil {
+		return "", fmt.Errorf("failed to generate note ID: %w", err)
+	}
+	newContent := InjectNoteID(string(data), uuid)
+	if err := stg.WriteFile(ctx, ns, relPath, []byte(newContent)); err != nil {
+		return "", fmt.Errorf("failed to write note ID: %w", err)
+	}
+	return uuid, nil
 }

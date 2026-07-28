@@ -1,11 +1,68 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/mdnest/mdnest/backend/storage"
 )
+
+// ValidNamespaceName reports whether ns is a syntactically valid namespace
+// name: a single path segment with no separators, no traversal and no
+// leading dot. It performs no filesystem access.
+func ValidNamespaceName(ns string) bool {
+	if ns == "" {
+		return false
+	}
+	cleaned := filepath.Clean(ns)
+	if cleaned != ns || strings.Contains(ns, "/") || strings.Contains(ns, "\\") || strings.HasPrefix(ns, ".") {
+		return false
+	}
+	return true
+}
+
+// SafeRelPath validates a namespace-relative request path lexically and
+// returns it cleaned with forward-slash separators. It returns ("", false)
+// if the path is empty, absolute or attempts traversal. Unlike SafePath it
+// does no filesystem access, so it is valid for object-store backends too.
+func SafeRelPath(reqPath string) (string, bool) {
+	if reqPath == "" {
+		return "", false
+	}
+	cleaned := filepath.ToSlash(filepath.Clean(reqPath))
+	if strings.HasPrefix(cleaned, "/") || strings.HasPrefix(cleaned, "..") || cleaned == "." {
+		return "", false
+	}
+	return cleaned, true
+}
+
+// RequireNamespaceStore extracts and validates the "ns" query parameter
+// and confirms the namespace exists in the storage backend. It returns the
+// namespace name, or "" after writing an error response.
+func RequireNamespaceStore(ctx context.Context, stg storage.Storage, w http.ResponseWriter, r *http.Request) string {
+	ns := r.URL.Query().Get("ns")
+	if ns == "" {
+		http.Error(w, `{"error":"ns parameter is required"}`, http.StatusBadRequest)
+		return ""
+	}
+	if !ValidNamespaceName(ns) {
+		http.Error(w, `{"error":"invalid namespace"}`, http.StatusBadRequest)
+		return ""
+	}
+	exists, err := stg.NamespaceExists(ctx, ns)
+	if err != nil {
+		http.Error(w, `{"error":"failed to check namespace"}`, http.StatusInternalServerError)
+		return ""
+	}
+	if !exists {
+		http.Error(w, `{"error":"namespace not found"}`, http.StatusNotFound)
+		return ""
+	}
+	return ns
+}
 
 // SafePath resolves and validates the requested path is inside baseDir.
 // Returns the resolved absolute path or an empty string if invalid.

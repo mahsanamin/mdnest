@@ -2,16 +2,18 @@ package handlers
 
 import (
 	"bufio"
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
-	"os"
-	"path/filepath"
+	"path"
 	"strings"
 	"time"
 
 	"github.com/mdnest/mdnest/backend/middleware"
+	"github.com/mdnest/mdnest/backend/storage"
 )
 
 // Comment represents a single comment on a note.
@@ -33,12 +35,12 @@ type Comment struct {
 
 // CommentsHandler handles CRUD for inline comments.
 type CommentsHandler struct {
-	notesDir string
+	store storage.Storage
 }
 
 // NewCommentsHandler creates a new comments handler.
-func NewCommentsHandler(notesDir string) *CommentsHandler {
-	return &CommentsHandler{notesDir: notesDir}
+func NewCommentsHandler(store storage.Storage) *CommentsHandler {
+	return &CommentsHandler{store: store}
 }
 
 // Handle routes /api/comments
@@ -57,28 +59,24 @@ func (h *CommentsHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// commentsDir returns the path to .mdnest/comments/ for a namespace.
-func (h *CommentsHandler) commentsDir(ns string) string {
-	return filepath.Join(h.notesDir, ns, ".mdnest", "comments")
-}
-
-// commentsFile returns the JSONL file for a note's UUID.
-func (h *CommentsHandler) commentsFile(ns, noteID string) string {
-	return filepath.Join(h.commentsDir(ns), noteID+".jsonl")
+// commentsFile returns the JSONL file (relative path within the namespace)
+// for a note's UUID.
+func (h *CommentsHandler) commentsFile(noteID string) string {
+	return path.Join(".mdnest", "comments", noteID+".jsonl")
 }
 
 // resolveNoteID gets the UUID for the given ns/path, generating one if needed.
-func (h *CommentsHandler) resolveNoteID(ns, notePath string) (string, error) {
-	nsDir := filepath.Join(h.notesDir, ns)
-	absPath := SafePath(nsDir, notePath)
-	if absPath == "" {
+func (h *CommentsHandler) resolveNoteID(ctx context.Context, ns, notePath string) (string, error) {
+	relPath, ok := SafeRelPath(notePath)
+	if !ok {
 		return "", fmt.Errorf("invalid path")
 	}
-	return EnsureNoteID(absPath)
+	return EnsureNoteIDStore(ctx, h.store, ns, relPath)
 }
 
 // listComments returns all non-deleted comments for a note.
 func (h *CommentsHandler) listComments(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	ns := r.URL.Query().Get("ns")
 	notePath := r.URL.Query().Get("path")
 	if ns == "" || notePath == "" {
@@ -86,13 +84,13 @@ func (h *CommentsHandler) listComments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	noteID, err := h.resolveNoteID(ns, notePath)
+	noteID, err := h.resolveNoteID(ctx, ns, notePath)
 	if err != nil {
 		http.Error(w, `{"error":"failed to resolve note"}`, http.StatusInternalServerError)
 		return
 	}
 
-	comments, err := h.readComments(ns, noteID)
+	comments, err := h.readComments(ctx, ns, noteID)
 	if err != nil {
 		// No comments file = empty list (not an error)
 		comments = []Comment{}
@@ -112,6 +110,7 @@ func (h *CommentsHandler) listComments(w http.ResponseWriter, r *http.Request) {
 
 // createComment appends a new comment to the JSONL file.
 func (h *CommentsHandler) createComment(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	ns := r.URL.Query().Get("ns")
 	notePath := r.URL.Query().Get("path")
 	if ns == "" || notePath == "" {
@@ -141,7 +140,7 @@ func (h *CommentsHandler) createComment(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	noteID, err := h.resolveNoteID(ns, notePath)
+	noteID, err := h.resolveNoteID(ctx, ns, notePath)
 	if err != nil {
 		http.Error(w, `{"error":"failed to resolve note"}`, http.StatusInternalServerError)
 		return
@@ -161,7 +160,7 @@ func (h *CommentsHandler) createComment(w http.ResponseWriter, r *http.Request) 
 		Resolved:   false,
 	}
 
-	if err := h.appendComment(ns, noteID, comment); err != nil {
+	if err := h.appendComment(ctx, ns, noteID, comment); err != nil {
 		log.Printf("failed to append comment: %v", err)
 		http.Error(w, `{"error":"failed to save comment"}`, http.StatusInternalServerError)
 		return
@@ -174,6 +173,7 @@ func (h *CommentsHandler) createComment(w http.ResponseWriter, r *http.Request) 
 
 // updateComment marks a comment as resolved or updates its body.
 func (h *CommentsHandler) updateComment(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	ns := r.URL.Query().Get("ns")
 	notePath := r.URL.Query().Get("path")
 	commentID := r.URL.Query().Get("id")
@@ -191,13 +191,13 @@ func (h *CommentsHandler) updateComment(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	noteID, err := h.resolveNoteID(ns, notePath)
+	noteID, err := h.resolveNoteID(ctx, ns, notePath)
 	if err != nil {
 		http.Error(w, `{"error":"failed to resolve note"}`, http.StatusInternalServerError)
 		return
 	}
 
-	comments, err := h.readComments(ns, noteID)
+	comments, err := h.readComments(ctx, ns, noteID)
 	if err != nil {
 		http.Error(w, `{"error":"comment not found"}`, http.StatusNotFound)
 		return
@@ -222,7 +222,7 @@ func (h *CommentsHandler) updateComment(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if err := h.writeComments(ns, noteID, comments); err != nil {
+	if err := h.writeComments(ctx, ns, noteID, comments); err != nil {
 		http.Error(w, `{"error":"failed to update comment"}`, http.StatusInternalServerError)
 		return
 	}
@@ -233,6 +233,7 @@ func (h *CommentsHandler) updateComment(w http.ResponseWriter, r *http.Request) 
 
 // deleteComment soft-deletes a comment.
 func (h *CommentsHandler) deleteComment(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	ns := r.URL.Query().Get("ns")
 	notePath := r.URL.Query().Get("path")
 	commentID := r.URL.Query().Get("id")
@@ -241,13 +242,13 @@ func (h *CommentsHandler) deleteComment(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	noteID, err := h.resolveNoteID(ns, notePath)
+	noteID, err := h.resolveNoteID(ctx, ns, notePath)
 	if err != nil {
 		http.Error(w, `{"error":"failed to resolve note"}`, http.StatusInternalServerError)
 		return
 	}
 
-	comments, err := h.readComments(ns, noteID)
+	comments, err := h.readComments(ctx, ns, noteID)
 	if err != nil {
 		http.Error(w, `{"error":"comment not found"}`, http.StatusNotFound)
 		return
@@ -268,7 +269,7 @@ func (h *CommentsHandler) deleteComment(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if err := h.writeComments(ns, noteID, comments); err != nil {
+	if err := h.writeComments(ctx, ns, noteID, comments); err != nil {
 		http.Error(w, `{"error":"failed to delete comment"}`, http.StatusInternalServerError)
 		return
 	}
@@ -278,15 +279,14 @@ func (h *CommentsHandler) deleteComment(w http.ResponseWriter, r *http.Request) 
 }
 
 // readComments reads all comments from the JSONL file.
-func (h *CommentsHandler) readComments(ns, noteID string) ([]Comment, error) {
-	file, err := os.Open(h.commentsFile(ns, noteID))
+func (h *CommentsHandler) readComments(ctx context.Context, ns, noteID string) ([]Comment, error) {
+	data, err := h.store.ReadFile(ctx, ns, h.commentsFile(noteID))
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
 
 	var comments []Comment
-	scanner := bufio.NewScanner(file)
+	scanner := bufio.NewScanner(bytes.NewReader(data))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
@@ -301,35 +301,17 @@ func (h *CommentsHandler) readComments(ns, noteID string) ([]Comment, error) {
 	return comments, scanner.Err()
 }
 
-// appendComment appends a single comment to the JSONL file (O_APPEND for concurrency safety).
-func (h *CommentsHandler) appendComment(ns, noteID string, comment Comment) error {
-	dir := h.commentsDir(ns)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
-	}
-
+// appendComment appends a single comment to the JSONL file.
+func (h *CommentsHandler) appendComment(ctx context.Context, ns, noteID string, comment Comment) error {
 	data, err := json.Marshal(comment)
 	if err != nil {
 		return err
 	}
-
-	f, err := os.OpenFile(h.commentsFile(ns, noteID), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	_, err = f.Write(append(data, '\n'))
-	return err
+	return h.store.Append(ctx, ns, h.commentsFile(noteID), append(data, '\n'))
 }
 
 // writeComments rewrites the entire JSONL file (used for updates/deletes).
-func (h *CommentsHandler) writeComments(ns, noteID string, comments []Comment) error {
-	dir := h.commentsDir(ns)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return err
-	}
-
+func (h *CommentsHandler) writeComments(ctx context.Context, ns, noteID string, comments []Comment) error {
 	var lines []byte
 	for _, c := range comments {
 		data, err := json.Marshal(c)
@@ -340,5 +322,5 @@ func (h *CommentsHandler) writeComments(ns, noteID string, comments []Comment) e
 		lines = append(lines, '\n')
 	}
 
-	return os.WriteFile(h.commentsFile(ns, noteID), lines, 0644)
+	return h.store.WriteFile(ctx, ns, h.commentsFile(noteID), lines)
 }

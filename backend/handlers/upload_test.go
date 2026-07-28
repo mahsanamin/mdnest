@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/mdnest/mdnest/backend/middleware"
+	"github.com/mdnest/mdnest/backend/storage"
 	"github.com/mdnest/mdnest/backend/store"
 )
 
@@ -79,6 +80,16 @@ func notesDirWithTwoNamespaces(t *testing.T) string {
 	return root
 }
 
+// localStore roots a local storage backend at the given notes directory.
+func localStore(t *testing.T, root string) storage.Storage {
+	t.Helper()
+	stg, err := storage.NewLocalStorage(root)
+	if err != nil {
+		t.Fatalf("new local storage: %v", err)
+	}
+	return stg
+}
+
 func serveFile(h *UploadHandler, uc *middleware.UserContext, ns string) *httptest.ResponseRecorder {
 	r := httptest.NewRequest(http.MethodGet, "/api/files/"+ns+"/secret.txt", nil)
 	if uc != nil {
@@ -92,7 +103,7 @@ func serveFile(h *UploadHandler, uc *middleware.UserContext, ns string) *httptes
 func TestServeFileEnforcesNamespaceReadAccess(t *testing.T) {
 	notesDir := notesDirWithTwoNamespaces(t)
 	perms := middleware.NewPermissionChecker(&fakeGrantStore{userID: 7, namespace: "alpha"}, fakeNsAdminStore{})
-	h := NewUploadHandler(notesDir, perms)
+	h := NewUploadHandler(localStore(t, notesDir), perms)
 
 	collaborator := &middleware.UserContext{ID: 7, Username: "carol", Role: "collaborator"}
 
@@ -131,7 +142,7 @@ func TestServeFileEnforcesNamespaceReadAccess(t *testing.T) {
 // note 403s on a single-user install.
 func TestServeFileSingleUserModeUnaffected(t *testing.T) {
 	notesDir := notesDirWithTwoNamespaces(t)
-	h := NewUploadHandler(notesDir, nil)
+	h := NewUploadHandler(localStore(t, notesDir), nil)
 
 	for _, ns := range []string{"alpha", "beta"} {
 		if w := serveFile(h, nil, ns); w.Code != http.StatusOK {
