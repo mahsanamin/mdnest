@@ -20,18 +20,18 @@ PostgreSQL and Redis are **never bundled**: point the chart at external/managed 
 
 > [!IMPORTANT]
 > **Not every option below is available yet.** The chart is versioned with mdnest,
-> and two opt-in capabilities documented here are not implemented in this
+> and one opt-in capability documented here is not implemented in this
 > release — the chart **refuses to install** rather than come up "healthy" while
 > doing the wrong thing:
 >
 > | Option | Why it is rejected |
 > |---|---|
 > | `storage.backend=s3` | The backend reads notes from the filesystem and ignores `S3_*`; notes would land on the PVC, not your bucket. |
-> | `mcp.enabled=true` | The bundled MCP server speaks stdio only; the Service and Ingress would route to a port nothing listens on. |
 >
 > **Supported today:** `single` or `multi` mode, live collaboration, git-sync,
-> ingress, TLS, and active/active (`backend.replicaCount > 1`) with a Redis
-> backplane and ReadWriteMany storage.
+> ingress, TLS, active/active (`backend.replicaCount > 1`) with a Redis
+> backplane and ReadWriteMany storage, and the MCP server with optional
+> per-user OAuth.
 
 ## Deployment models
 

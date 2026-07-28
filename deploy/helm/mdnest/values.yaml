@@ -414,13 +414,8 @@ podDisruptionBudget:
 # adds a Deployment + Service (and optional Ingress) running the mdnest-mcp-server
 # image, which talks to the backend API in-cluster with a service API token.
 # -----------------------------------------------------------------------------
-#
-# NOT AVAILABLE IN THIS RELEASE: the bundled MCP server speaks stdio only, so a
-# Deployment + Service + Ingress would route to a port nothing listens on.
-# mcp.enabled=true is rejected at install time. Run the MCP server next to your
-# AI client over stdio (see docs/mcp.md) until the HTTP transport lands.
 mcp:
-  # -- Enable the MCP server over streamable-HTTP. NOT IMPLEMENTED in this release — setting it fails the install.
+  # -- Enable the MCP server over streamable-HTTP.
   enabled: false
   # -- Number of MCP server replicas.
   replicaCount: 1
