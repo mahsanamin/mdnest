@@ -29,6 +29,13 @@ func NewUploadHandler(store storage.Storage, perms *middleware.PermissionChecker
 // Used on stateless app replicas, which hold no attachment bytes locally.
 func (h *UploadHandler) SetWriterProxy(p http.Handler) { h.writerProxy = p }
 
+// gitKeepFile is the empty placeholder written to materialise a folder. Git
+// cannot track an empty directory, and the HA app tier derives the tree from
+// the Redis working set (which lists files only), so a bare directory would be
+// invisible on the app replicas and never mirrored. The placeholder is a
+// dotfile, so buildTree hides it from the tree.
+const gitKeepFile = ".gitkeep"
+
 // HandleFolder handles POST /api/folder?ns=...&path=...
 func (h *UploadHandler) HandleFolder(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -41,11 +48,14 @@ func (h *UploadHandler) HandleFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	relPath, ok := SafeRelPath(r.URL.Query().Get("path"))
-	if !ok {
+	if !ok || relPath == "" {
 		http.Error(w, `{"error":"invalid path"}`, http.StatusBadRequest)
 		return
 	}
-	if err := h.store.MkdirAll(ctx, ns, relPath); err != nil {
+	// Materialise the folder with an empty .gitkeep placeholder so it is durable
+	// (committed + mirrored), visible on every app replica (it appears in the
+	// working set), and hidden from the tree (dotfiles are filtered).
+	if err := h.store.WriteFile(ctx, ns, path.Join(relPath, gitKeepFile), []byte{}); err != nil {
 		http.Error(w, `{"error":"failed to create folder"}`, http.StatusInternalServerError)
 		return
 	}
