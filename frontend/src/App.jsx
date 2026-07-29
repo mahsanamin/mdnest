@@ -427,6 +427,17 @@ function App() {
           }, 1000);
           break;
         case 'file-changed': {
+          // Ignore the echo of our own save. The backend fans file-changed out
+          // to every connection on the note, including the tab that just saved
+          // (an HTTP PUT has no *Conn to exclude). If the incoming etag matches
+          // the one we already hold, nothing changed for us: acting on it pops
+          // a spurious self-conflict banner while autosave is mid-flight
+          // (isClean=false), and on the clean path re-fetches and resets the
+          // editor selection (the cursor "jumps"). This makes the handler
+          // idempotent for our own save, as the backend broadcast assumes.
+          // A same-user write from another source (CLI, MCP) carries a
+          // different etag, so it still propagates.
+          if (msg.etag && msg.etag === etagRef.current) break;
           // Another user saved (or restored) — update etag and reload if
           // no local edits. Restores get a separate "info" banner instead
           // of the yellow conflict banner; same auto-reload-when-clean
