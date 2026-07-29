@@ -1,8 +1,12 @@
 package handlers
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/mdnest/mdnest/backend/middleware"
 	"github.com/mdnest/mdnest/backend/store"
 )
 
@@ -73,5 +77,93 @@ func TestTokenHandler_ValidateAndResolve(t *testing.T) {
 	}
 	if uc := h.ResolveAPITokenUser(rawLegacy); uc != nil {
 		t.Errorf("legacy token (UserID 0) resolved to %+v, want nil", uc)
+	}
+}
+
+// --- API token ownership scoping -------------------------------------------
+//
+// The store layer deliberately does not scope: DeleteByID deletes whatever id
+// it is given, and All() returns every token. The ONLY thing standing between
+// a collaborator and another user's tokens is the check inside listTokens /
+// revokeToken. Nothing pinned that before, so removing both checks left the
+// suite green. These tests fail if either check is weakened.
+
+func twoUsersTokens() *fakeTokenStore {
+	return &fakeTokenStore{tokens: []store.APIToken{
+		{ID: "tok-alice", Name: "alice-cli", TokenHash: "ha", TokenSuffix: "aaaa", UserID: 1},
+		{ID: "tok-bob", Name: "bob-cli", TokenHash: "hb", TokenSuffix: "bbbb", UserID: 2},
+	}}
+}
+
+func tokenReq(h *TokenHandler, method, id string, uc *middleware.UserContext) *httptest.ResponseRecorder {
+	target := "/api/auth/tokens"
+	if id != "" {
+		target += "?id=" + id
+	}
+	r := httptest.NewRequest(method, target, nil)
+	if uc != nil {
+		r = middleware.WithUser(r, uc)
+	}
+	w := httptest.NewRecorder()
+	h.HandleTokens(w, r)
+	return w
+}
+
+func TestTokenListIsScopedToOwner(t *testing.T) {
+	h := NewTokenHandler(twoUsersTokens())
+
+	// A collaborator sees only their own token.
+	w := tokenReq(h, http.MethodGet, "", &middleware.UserContext{ID: 1, Username: "alice", Role: "collaborator"})
+	body := w.Body.String()
+	if !strings.Contains(body, "tok-alice") {
+		t.Errorf("alice should see her own token, got %s", body)
+	}
+	if strings.Contains(body, "tok-bob") {
+		t.Errorf("alice must NOT see bob's token, got %s", body)
+	}
+
+	// A namespace admin is not privileged over tokens either.
+	w = tokenReq(h, http.MethodGet, "", &middleware.UserContext{ID: 1, Username: "alice", Role: "admin"})
+	if strings.Contains(w.Body.String(), "tok-bob") {
+		t.Errorf("a namespace admin must NOT see another user's token, got %s", w.Body.String())
+	}
+
+	// A superadmin sees all — the deliberate audit capability.
+	w = tokenReq(h, http.MethodGet, "", &middleware.UserContext{ID: 9, Username: "root", Role: "superadmin"})
+	if !strings.Contains(w.Body.String(), "tok-alice") || !strings.Contains(w.Body.String(), "tok-bob") {
+		t.Errorf("superadmin should see every token, got %s", w.Body.String())
+	}
+
+	// Single mode (nil user context) is unaffected.
+	w = tokenReq(h, http.MethodGet, "", nil)
+	if !strings.Contains(w.Body.String(), "tok-alice") || !strings.Contains(w.Body.String(), "tok-bob") {
+		t.Errorf("single mode should see every token, got %s", w.Body.String())
+	}
+}
+
+func TestTokenRevokeIsScopedToOwner(t *testing.T) {
+	// A collaborator cannot revoke someone else's token.
+	fs := twoUsersTokens()
+	h := NewTokenHandler(fs)
+	w := tokenReq(h, http.MethodDelete, "tok-bob", &middleware.UserContext{ID: 1, Username: "alice", Role: "collaborator"})
+	if w.Code != http.StatusForbidden {
+		t.Errorf("alice revoking bob's token: want 403, got %d (%s)", w.Code, w.Body.String())
+	}
+	if all, _ := fs.All(); len(all) != 2 {
+		t.Errorf("bob's token must survive a refused revoke, have %d tokens", len(all))
+	}
+
+	// Their own token revokes fine.
+	w = tokenReq(h, http.MethodDelete, "tok-alice", &middleware.UserContext{ID: 1, Username: "alice", Role: "collaborator"})
+	if w.Code != http.StatusOK {
+		t.Errorf("alice revoking her own token: want 200, got %d (%s)", w.Code, w.Body.String())
+	}
+
+	// A superadmin may revoke anyone's.
+	fs = twoUsersTokens()
+	h = NewTokenHandler(fs)
+	w = tokenReq(h, http.MethodDelete, "tok-bob", &middleware.UserContext{ID: 9, Username: "root", Role: "superadmin"})
+	if w.Code != http.StatusOK {
+		t.Errorf("superadmin revoking bob's token: want 200, got %d (%s)", w.Code, w.Body.String())
 	}
 }
