@@ -67,6 +67,8 @@ spec:
           env:
             - name: MDNEST_ROLE
               value: app
+            - name: WRITER_URL
+              value: http://{{ include "mdnest.writer.headlessName" . }}:{{ .Values.backend.service.port }}
             {{- include "mdnest.backend.secretEnv" . | nindent 12 }}
             {{- with .Values.backend.extraEnv }}
             {{- toYaml . | nindent 12 }}

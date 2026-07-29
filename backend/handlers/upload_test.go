@@ -54,11 +54,11 @@ func (f *fakeGrantStore) GetAccessibleNamespaces(int) ([]string, error) {
 // access here — every principal falls through to the grant check.
 type fakeNsAdminStore struct{}
 
-func (fakeNsAdminStore) Add(int, string, *int) error             { return nil }
-func (fakeNsAdminStore) Remove(int, string) error                { return nil }
-func (fakeNsAdminStore) IsAdminOf(int, string) (bool, error)     { return false, nil }
-func (fakeNsAdminStore) ListByUser(int) ([]string, error)        { return nil, nil }
-func (fakeNsAdminStore) CountByUser(int) (int, error)            { return 0, nil }
+func (fakeNsAdminStore) Add(int, string, *int) error         { return nil }
+func (fakeNsAdminStore) Remove(int, string) error            { return nil }
+func (fakeNsAdminStore) IsAdminOf(int, string) (bool, error) { return false, nil }
+func (fakeNsAdminStore) ListByUser(int) ([]string, error)    { return nil, nil }
+func (fakeNsAdminStore) CountByUser(int) (int, error)        { return 0, nil }
 func (fakeNsAdminStore) ListByNamespace(string) ([]store.NamespaceAdminWithUser, error) {
 	return nil, nil
 }
@@ -155,5 +155,25 @@ func TestServeFileSingleUserModeUnaffected(t *testing.T) {
 		if w := serveFile(h, nil, ns); w.Code != http.StatusOK {
 			t.Fatalf("single-user mode: want 200 for %s, got %d (%s)", ns, w.Code, w.Body.String())
 		}
+	}
+}
+
+// App replicas hold no attachment bytes: when an attachment proxy is set,
+// HandleServeFile must delegate the whole request to it (the writer) instead of
+// reading locally.
+func TestServeFileDelegatesToAttachmentProxy(t *testing.T) {
+	h := NewUploadHandler(nil, nil)
+	var gotPath string
+	h.SetAttachmentProxy(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.WriteHeader(http.StatusTeapot)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/files/alpha/img/a.png", nil)
+	rec := httptest.NewRecorder()
+	h.HandleServeFile(rec, req)
+
+	if rec.Code != http.StatusTeapot || gotPath != "/api/files/alpha/img/a.png" {
+		t.Fatalf("expected delegation to proxy, got code=%d path=%q", rec.Code, gotPath)
 	}
 }

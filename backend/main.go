@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -334,6 +336,20 @@ func main() {
 	}
 	treeHandler := handlers.NewTreeHandler(stg, grantStore)
 	uploadHandler := handlers.NewUploadHandler(stg, perms)
+	// Stateless app replicas own no attachment bytes: proxy /api/files/ to the
+	// writer (which holds the git tree) when WRITER_URL is configured.
+	if env("MDNEST_ROLE", "single") == "app" {
+		if writerURL := env("WRITER_URL", ""); writerURL != "" {
+			u, perr := url.Parse(writerURL)
+			if perr != nil {
+				log.Fatalf("invalid WRITER_URL %q: %v", writerURL, perr)
+			}
+			uploadHandler.SetAttachmentProxy(httputil.NewSingleHostReverseProxy(u))
+			log.Printf("attachments: proxying /api/files/ to writer at %s", writerURL)
+		} else {
+			log.Println("attachments: MDNEST_ROLE=app without WRITER_URL — attachment downloads will 404 until it is set")
+		}
+	}
 	moveHandler := handlers.NewMoveHandler(stg)
 	searchHandler := handlers.NewSearchHandler(stg)
 	// API tokens live in Postgres in multi mode (shared across replicas, no
@@ -491,7 +507,7 @@ func main() {
 		mux.Handle("/api/auth/totp/setup", authMiddleware.Wrap(http.HandlerFunc(totpHandler.HandleSetupTOTP)))
 		mux.Handle("/api/auth/totp/verify-setup", authMiddleware.Wrap(http.HandlerFunc(totpHandler.HandleVerifySetup)))
 		mux.Handle("/api/auth/totp/disable", authMiddleware.Wrap(http.HandlerFunc(totpHandler.HandleDisableTOTP)))
-		mux.HandleFunc("/api/auth/verify-totp", totpHandler.HandleVerifyLoginTOTP) // no auth — uses temp token
+		mux.HandleFunc("/api/auth/verify-totp", totpHandler.HandleVerifyLoginTOTP)            // no auth — uses temp token
 		mux.HandleFunc("/api/auth/totp/setup-with-temp", totpHandler.HandleSetupTOTPWithTemp) // no auth — uses temp token for forced setup
 	}
 
