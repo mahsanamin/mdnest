@@ -227,7 +227,27 @@ func (h *SSOHandler) provisionSSOUser(email, displayName string) (*store.User, e
 	if _, err := rand.Read(buf[:]); err != nil {
 		return nil, err
 	}
-	return h.userStore.CreateUser(email, username, hex.EncodeToString(buf[:]), "collaborator", nil)
+	pw := hex.EncodeToString(buf[:])
+
+	user, err := h.userStore.CreateUser(email, username, pw, "collaborator", nil)
+	if err != nil && store.IsUniqueViolation(err) {
+		// Display names are not unique (two "Alice Smith" in a directory), but
+		// users.username is. We only reach provisioning when the email has no
+		// account yet, so the email is a collision-free fallback username.
+		user, err = h.userStore.CreateUser(email, email, pw, "collaborator", nil)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// CreateUser hardcodes must_change_password = true, which is inert for SSO
+	// users (only the password-login path reads it) but diverges from the
+	// Firebase federated path, which sets it false. Clear it so both IdP paths
+	// behave the same.
+	if cerr := h.userStore.ClearMustChangePassword(user.ID); cerr != nil {
+		log.Printf("sso auto-provision: could not clear must_change_password for user %d: %v", user.ID, cerr)
+	}
+	return user, nil
 }
 
 func (h *SSOHandler) redirectWithError(w http.ResponseWriter, r *http.Request, from, code string) {
