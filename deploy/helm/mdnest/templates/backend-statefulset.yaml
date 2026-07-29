@@ -1,5 +1,6 @@
 {{- include "mdnest.validateSupported" . -}}
 {{- include "mdnest.validateHA" . -}}
+{{- include "mdnest.validateUpgrade" . -}}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
