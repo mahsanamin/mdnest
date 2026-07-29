@@ -297,7 +297,9 @@ sso:
 # rather than deploy that silently. Keys below are kept so the option can be
 # enabled in the same change that lands object-store support.
 storage:
-  # -- Note storage backend. Only `local` is implemented in this release (notes on the `notes` PVC); `s3` is rejected at install time.
+  # -- Note storage backend. `local` (notes on the volume) and `git` (same, plus
+  # mdnest maintains git history in-process — no git-sync sidecar needed for
+  # local history) are implemented; `s3` is rejected at install time.
   backend: local
   s3:
     # -- S3 endpoint as `host[:port]` WITHOUT scheme, e.g. `s3.fr-par.scw.cloud`.
@@ -320,6 +322,14 @@ storage:
     accessKey: ""
     # -- Inline S3 secret key (used only when `existingSecret` is empty).
     secretKey: ""
+  git:
+    # -- How often the git backend commits pending changes (Go duration, e.g.
+    # `10s`). Note bytes are durable on disk immediately; this only controls how
+    # often history is committed. Empty = backend default (10s).
+    commitInterval: ""
+    # -- Author name/email for mdnest's own commits. Empty = mdnest/mdnest@localhost.
+    authorName: ""
+    authorEmail: ""
 
 # -----------------------------------------------------------------------------
 # Persistence. The backend is a StatefulSet, so each volume has three modes:

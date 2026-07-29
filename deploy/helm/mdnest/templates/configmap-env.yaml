@@ -23,6 +23,17 @@ data:
   S3_USE_SSL: {{ .Values.storage.s3.useSSL | ternary "true" "false" | quote }}
   S3_PATH_STYLE: {{ .Values.storage.s3.pathStyle | ternary "true" "false" | quote }}
   {{- end }}
+  {{- if eq .Values.storage.backend "git" }}
+  {{- with .Values.storage.git.commitInterval }}
+  GIT_COMMIT_INTERVAL: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.storage.git.authorName }}
+  GIT_AUTHOR_NAME: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.storage.git.authorEmail }}
+  GIT_AUTHOR_EMAIL: {{ . | quote }}
+  {{- end }}
+  {{- end }}
   FRONTEND_ORIGIN: {{ .Values.backend.frontendOrigin | quote }}
   {{- if .Values.backend.serverAlias }}
   SERVER_ALIAS: {{ .Values.backend.serverAlias | quote }}
