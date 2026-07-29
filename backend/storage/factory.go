@@ -2,7 +2,9 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -11,22 +13,41 @@ import (
 
 // FromEnv constructs a Storage backend from environment variables.
 //
-//	STORAGE_BACKEND            local (default) | git
-//	REDIS_URL                  when set with the git backend, layers a Redis
-//	                           working set over it for cross-replica coherence
+//	MDNEST_ROLE                single (default) | app | writer
+//	STORAGE_BACKEND            local (default) | git   (single role only)
+//	REDIS_URL                  Redis coherence tier (required for app/writer;
+//	                           with the git backend in single role it layers a
+//	                           working set for cross-replica coherence)
 //	REDIS_WORKINGSET_MAX_BYTES max cached body size (default 1 MiB)
+//	MDNEST_WRITER_LOCK_TTL     writer leader lock TTL (default 15s, writer role)
 //
-// The "git" backend behaves like "local" for reads and durability (notes are
-// written synchronously to the filesystem) and additionally maintains git
-// history in-process via a background committer. localRoot is the absolute
-// NOTES_DIR used by both filesystem-backed backends.
+// Roles (git-native HA):
+//   - single: the standalone process. STORAGE_BACKEND picks local/git; with the
+//     git backend and REDIS_URL set it gains the working-set tier. No queue.
+//   - app: a stateless replica. Reads its local git-sync'd clone with the Redis
+//     working set layered on top; writes publish to the working set and enqueue
+//     on the durability queue. Owns no authoritative filesystem.
+//   - writer: the single elected writer. Owns the authoritative git tree, drains
+//     the durability queue in a background goroutine, and serves reads through
+//     the working set.
 //
-// When the git backend is selected and REDIS_URL is configured, the returned
-// Storage is wrapped in a CoherentStorage so note-body writes are immediately
-// visible to reads on every replica sharing that Redis (the git-native HA
-// working-set tier). With no REDIS_URL the git backend is returned as-is (the
-// single-box / local-fallback path).
+// localRoot is the absolute NOTES_DIR (the working tree for single/writer, the
+// git-sync'd clone for app).
 func FromEnv(ctx context.Context, localRoot string) (Storage, error) {
+	switch role := strings.ToLower(strings.TrimSpace(os.Getenv("MDNEST_ROLE"))); role {
+	case "", "single":
+		return fromEnvSingle(ctx, localRoot)
+	case "app":
+		return newAppStorage(ctx, localRoot)
+	case "writer":
+		return newWriterStorage(ctx, localRoot)
+	default:
+		return nil, fmt.Errorf("storage: unknown MDNEST_ROLE %q (want single, app or writer)", role)
+	}
+}
+
+// fromEnvSingle builds the standalone backend selected by STORAGE_BACKEND.
+func fromEnvSingle(ctx context.Context, localRoot string) (Storage, error) {
 	backend := strings.ToLower(strings.TrimSpace(os.Getenv("STORAGE_BACKEND")))
 	switch backend {
 	case "", "local":
@@ -43,12 +64,80 @@ func FromEnv(ctx context.Context, localRoot string) (Storage, error) {
 			if err != nil {
 				return nil, fmt.Errorf("storage: REDIS_URL is set but the working set is unavailable: %w", err)
 			}
-			return newCoherentStorage(gs, ws, int64Env("REDIS_WORKINGSET_MAX_BYTES", defaultWorkingSetMaxBytes)), nil
+			return newCoherentStorage(gs, ws, workingSetCap()), nil
 		}
 		return gs, nil
 	default:
 		return nil, fmt.Errorf("storage: unknown STORAGE_BACKEND %q (want local or git)", backend)
 	}
+}
+
+// newAppStorage builds a stateless app replica: reads from the local clone with
+// a Redis working set overlay, writes publish to the working set and enqueue.
+func newAppStorage(ctx context.Context, cloneRoot string) (Storage, error) {
+	url := strings.TrimSpace(os.Getenv("REDIS_URL"))
+	if url == "" {
+		return nil, errors.New("storage: MDNEST_ROLE=app requires REDIS_URL")
+	}
+	ws, err := NewRedisWorkingSet(ctx, url)
+	if err != nil {
+		return nil, fmt.Errorf("storage: app working set unavailable: %w", err)
+	}
+	queue, err := NewRedisStreamQueue(ctx, url, instanceID())
+	if err != nil {
+		return nil, fmt.Errorf("storage: app durability queue unavailable: %w", err)
+	}
+	return NewQueuedStorage(cloneRoot, ws, queue, workingSetCap())
+}
+
+// newWriterStorage builds the single writer: it owns the git tree, starts the
+// drain loop in a background goroutine, and serves reads through the working
+// set. The goroutine ends when ctx is cancelled or leadership is lost.
+func newWriterStorage(ctx context.Context, localRoot string) (Storage, error) {
+	url := strings.TrimSpace(os.Getenv("REDIS_URL"))
+	if url == "" {
+		return nil, errors.New("storage: MDNEST_ROLE=writer requires REDIS_URL")
+	}
+	ws, err := NewRedisWorkingSet(ctx, url)
+	if err != nil {
+		return nil, fmt.Errorf("storage: writer working set unavailable: %w", err)
+	}
+	id := instanceID()
+	queue, err := NewRedisStreamQueue(ctx, url, id)
+	if err != nil {
+		return nil, fmt.Errorf("storage: writer durability queue unavailable: %w", err)
+	}
+	leader, err := NewRedisLeader(ctx, url, id, durationEnv("MDNEST_WRITER_LOCK_TTL", 15*time.Second))
+	if err != nil {
+		return nil, fmt.Errorf("storage: writer leader election unavailable: %w", err)
+	}
+	interval := durationEnv("GIT_COMMIT_INTERVAL", 10*time.Second)
+	committer := NewIntervalCommitter(localRoot, interval, os.Getenv("GIT_AUTHOR_NAME"), os.Getenv("GIT_AUTHOR_EMAIL"))
+	gs, err := NewGitStorage(localRoot, committer)
+	if err != nil {
+		return nil, err
+	}
+	w := NewWriter(gs, ws, queue, leader, workingSetCap())
+	go func() {
+		if err := w.Run(ctx); err != nil && ctx.Err() == nil {
+			log.Printf("storage: durability writer stopped: %v", err)
+		}
+	}()
+	return newCoherentStorage(gs, ws, workingSetCap()), nil
+}
+
+// instanceID returns a per-instance identifier (the hostname / pod name) used
+// for the queue consumer name and the writer leader-lock owner.
+func instanceID() string {
+	if h, err := os.Hostname(); err == nil && h != "" {
+		return h
+	}
+	return "mdnest"
+}
+
+// workingSetCap resolves the working-set body cap from the environment.
+func workingSetCap() int64 {
+	return int64Env("REDIS_WORKINGSET_MAX_BYTES", defaultWorkingSetMaxBytes)
 }
 
 // durationEnv reads a Go duration (e.g. "10s") from the environment, falling

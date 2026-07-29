@@ -91,7 +91,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to initialize storage backend: %v", err)
 	}
-	log.Printf("storage backend: %s", stg.Kind())
+	log.Printf("storage backend: %s (role=%s)", stg.Kind(), env("MDNEST_ROLE", "single"))
 
 	// Database setup (multi mode only)
 	var db *store.DB
