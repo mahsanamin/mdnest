@@ -22,7 +22,7 @@ func TestGitStorage_CommitsHistory(t *testing.T) {
 	root := t.TempDir()
 
 	// Long interval so the background loop never fires; we flush manually.
-	c := NewIntervalCommitter(root, time.Hour, "ci", "ci@example.com")
+	c := NewIntervalCommitter(root, time.Hour, "ci", "ci@example.com", remoteConfig{})
 	defer c.Close()
 	g, err := NewGitStorage(root, c)
 	if err != nil {

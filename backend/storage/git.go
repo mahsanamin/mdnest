@@ -118,12 +118,15 @@ func (NoopCommitter) Close() error                { return nil }
 
 // intervalCommitter commits dirty namespaces to per-namespace git repos on a
 // fixed interval. Each namespace directory is its own repository (the layout
-// the git-sync sidecar already expects), initialised on first commit.
+// the git-sync sidecar already expects), initialised on first commit. When a
+// remote is configured each repo is also mirrored (pushed) to it — one remote
+// repository per namespace — which is the durability layer app replicas clone.
 type intervalCommitter struct {
 	root        string
 	interval    time.Duration
 	authorName  string
 	authorEmail string
+	remote      remoteConfig
 
 	mu    sync.Mutex
 	dirty map[string]struct{}
@@ -133,8 +136,9 @@ type intervalCommitter struct {
 }
 
 // NewIntervalCommitter starts a background committer. authorName/email default
-// to a generic mdnest identity when empty.
-func NewIntervalCommitter(root string, interval time.Duration, authorName, authorEmail string) *intervalCommitter {
+// to a generic mdnest identity when empty. A disabled remoteConfig (zero value)
+// keeps history local-only.
+func NewIntervalCommitter(root string, interval time.Duration, authorName, authorEmail string, remote remoteConfig) *intervalCommitter {
 	if interval <= 0 {
 		interval = 10 * time.Second
 	}
@@ -149,6 +153,7 @@ func NewIntervalCommitter(root string, interval time.Duration, authorName, autho
 		interval:    interval,
 		authorName:  authorName,
 		authorEmail: authorEmail,
+		remote:      remote,
 		dirty:       make(map[string]struct{}),
 		stop:        make(chan struct{}),
 		done:        make(chan struct{}),
@@ -249,12 +254,38 @@ func (c *intervalCommitter) commit(ctx context.Context, ns string) error {
 		return fmt.Errorf("git add %s: %w", ns, err)
 	}
 	// Commit only when the index has staged changes.
-	if c.git(ctx, dir, "diff", "--cached", "--quiet") == nil {
-		return nil // nothing staged
+	if c.git(ctx, dir, "diff", "--cached", "--quiet") != nil {
+		msg := "mdnest: " + time.Now().UTC().Format("2006-01-02 15:04:05 UTC")
+		if err := c.git(ctx, dir, "commit", "--quiet", "-m", msg); err != nil {
+			return fmt.Errorf("git commit %s: %w", ns, err)
+		}
 	}
-	msg := "mdnest: " + time.Now().UTC().Format("2006-01-02 15:04:05 UTC")
-	if err := c.git(ctx, dir, "commit", "--quiet", "-m", msg); err != nil {
-		return fmt.Errorf("git commit %s: %w", ns, err)
+	// Mirror to the remote (one repo per namespace). Pushing an unchanged repo
+	// is a cheap "up-to-date" no-op, so this also flushes any commit whose push
+	// failed on an earlier flush (the namespace stays marked dirty until it
+	// succeeds).
+	if c.remote.enabled() {
+		if err := c.push(ctx, dir, ns); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// push mirrors a namespace repo to its remote over HTTPS. Credentials are
+// supplied out-of-band via the askpass helper (see remoteConfig), never in argv.
+func (c *intervalCommitter) push(ctx context.Context, dir, ns string) error {
+	remoteURL, err := c.remote.remoteURL(ns)
+	if err != nil {
+		return fmt.Errorf("git remote url %s: %w", ns, err)
+	}
+	cmd := exec.CommandContext(ctx, "git", "push", remoteURL, "HEAD:refs/heads/"+c.remote.branch)
+	cmd.Dir = dir
+	cmd.Env = c.remote.pushEnv()
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("git push %s: %v: %s", ns, err, stderr.String())
 	}
 	return nil
 }

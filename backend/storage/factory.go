@@ -54,7 +54,11 @@ func fromEnvSingle(ctx context.Context, localRoot string) (Storage, error) {
 		return NewLocalStorage(localRoot)
 	case "git":
 		interval := durationEnv("GIT_COMMIT_INTERVAL", 10*time.Second)
-		committer := NewIntervalCommitter(localRoot, interval, os.Getenv("GIT_AUTHOR_NAME"), os.Getenv("GIT_AUTHOR_EMAIL"))
+		remote, err := remoteConfigFromEnv()
+		if err != nil {
+			return nil, err
+		}
+		committer := NewIntervalCommitter(localRoot, interval, os.Getenv("GIT_AUTHOR_NAME"), os.Getenv("GIT_AUTHOR_EMAIL"), remote)
 		gs, err := NewGitStorage(localRoot, committer)
 		if err != nil {
 			return nil, err
@@ -112,7 +116,11 @@ func newWriterStorage(ctx context.Context, localRoot string) (Storage, error) {
 		return nil, fmt.Errorf("storage: writer leader election unavailable: %w", err)
 	}
 	interval := durationEnv("GIT_COMMIT_INTERVAL", 10*time.Second)
-	committer := NewIntervalCommitter(localRoot, interval, os.Getenv("GIT_AUTHOR_NAME"), os.Getenv("GIT_AUTHOR_EMAIL"))
+	remote, err := remoteConfigFromEnv()
+	if err != nil {
+		return nil, err
+	}
+	committer := NewIntervalCommitter(localRoot, interval, os.Getenv("GIT_AUTHOR_NAME"), os.Getenv("GIT_AUTHOR_EMAIL"), remote)
 	gs, err := NewGitStorage(localRoot, committer)
 	if err != nil {
 		return nil, err
