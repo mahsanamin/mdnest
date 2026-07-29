@@ -78,10 +78,10 @@ jobs:
         run: helm template ci deploy/helm/mdnest > /dev/null
       - name: Render the full supported configuration
         # Multi-mode + live collaboration + git-sync + active/active (three
-        # backend replicas coordinated through the Redis backplane on
-        # ReadWriteMany storage) + the MCP server with per-user OAuth. This is
-        # the largest configuration the release implements, and CI proves it
-        # renders.
+        # backend replicas as a StatefulSet sharing operator-provided
+        # ReadWriteMany claims, coordinated by the Redis backplane) + the MCP
+        # server with per-user OAuth. This is the largest configuration the
+        # release implements, and CI proves it renders.
         run: |
           helm template ci deploy/helm/mdnest \
             --set auth.mode=multi \
@@ -90,8 +90,8 @@ jobs:
             --set collab.enabled=true \
             --set collab.redis.url=redis://redis.example:6379/0 \
             --set backend.replicaCount=3 \
-            --set persistence.notes.accessMode=ReadWriteMany \
-            --set persistence.secrets.accessMode=ReadWriteMany \
+            --set persistence.notes.existingClaim=shared-notes \
+            --set persistence.secrets.enabled=false \
             --set gitSync.enabled=true \
             --set gitSync.sshSecretName=keys \
             --set mcp.enabled=true \

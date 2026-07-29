@@ -39,6 +39,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 
 {{/* Component-scoped names. */}}
 {{- define "mdnest.backend.fullname" -}}{{ printf "%s-backend" (include "mdnest.fullname" .) }}{{- end -}}
+{{- define "mdnest.backend.headlessName" -}}{{ printf "%s-backend-headless" (include "mdnest.fullname" .) }}{{- end -}}
 {{- define "mdnest.frontend.fullname" -}}{{ printf "%s-frontend" (include "mdnest.fullname" .) }}{{- end -}}
 {{- define "mdnest.gitsync.fullname" -}}{{ printf "%s-git-sync" (include "mdnest.fullname" .) }}{{- end -}}
 {{- define "mdnest.mcp.fullname" -}}{{ printf "%s-mcp" (include "mdnest.fullname" .) }}{{- end -}}
@@ -107,6 +108,29 @@ The Redis backplane is implemented: validateHA below requires it (and RWX
 storage) for any multi-replica deployment, so active/active is coordinated
 rather than silently diverging — the failure mode this check exists to prevent.
 */}}
+{{/*
+Refuse a CLI upgrade that would silently discard a Deployment-era notes volume.
+
+Chart 0.1.0 managed a standalone `<release>-notes` PVC. This chart runs the
+backend as a StatefulSet with per-pod volumeClaimTemplates, so that PVC is no
+longer in the release manifest and `helm upgrade` deletes it — taking the notes
+with it — while the StatefulSet provisions a fresh empty volume.
+
+`lookup` only returns data on a live cluster call (`helm install`/`upgrade`), so
+this is a no-op under `helm template` and therefore for GitOps renderers. That
+is a deliberate belt-and-suspenders: it cannot cover every path, but it does
+cover the one path an existing 0.1.0 install upgrades through. The values.yaml
+note and NOTES.txt hint carry the same instruction for the render-only path.
+*/}}
+{{- define "mdnest.validateUpgrade" -}}
+{{- if not .Values.persistence.notes.existingClaim -}}
+  {{- $legacy := printf "%s-notes" (include "mdnest.fullname" .) -}}
+  {{- if (lookup "v1" "PersistentVolumeClaim" .Release.Namespace $legacy) -}}
+    {{- fail (printf "mdnest: PVC %q already exists in namespace %q — it is the Deployment-era (chart 0.1.0) notes volume. This chart runs the backend as a StatefulSet with per-pod volumes, so upgrading now would delete %q and start from an empty volume, losing those notes. To adopt it, set:\n\n    persistence.notes.existingClaim: %s\n\nIf you intend to start from empty storage instead, delete the PVC first." $legacy .Release.Namespace $legacy $legacy) -}}
+  {{- end -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "mdnest.validateHA" -}}
 {{- $ha := or (gt (int .Values.backend.replicaCount) 1) .Values.backend.autoscaling.enabled -}}
 {{- if $ha -}}
@@ -120,8 +144,8 @@ rather than silently diverging — the failure mode this check exists to prevent
   {{- if not $redisUrl -}}
     {{- fail "mdnest: running multiple backend replicas requires an external Redis (collab.redis.url, collab.redis.existingSecret, or collab.redis.host) for the presence/event backplane." -}}
   {{- end -}}
-  {{- if and (ne .Values.storage.backend "s3") (ne .Values.persistence.notes.accessMode "ReadWriteMany") -}}
-    {{- fail "mdnest: running multiple backend replicas requires persistence.notes.accessMode=ReadWriteMany so all pods share the notes repository (or set storage.backend=s3 to share notes via an object store)." -}}
+  {{- if and (ne .Values.storage.backend "s3") (not .Values.persistence.notes.existingClaim) -}}
+    {{- fail "mdnest: running multiple backend replicas requires a shared notes volume — set persistence.notes.existingClaim to a ReadWriteMany PVC all pods share (or storage.backend=s3). The per-pod volumeClaimTemplate would give each replica its own notes and they would diverge." -}}
   {{- end -}}
 {{- end -}}
 {{- end -}}

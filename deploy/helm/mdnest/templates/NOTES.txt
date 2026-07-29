@@ -32,3 +32,14 @@ Retrieve it with:
 Reminder: PostgreSQL and Redis are NOT deployed by this chart. Point
 postgres.* / collab.redis.* at your external instances. See values.yaml
 ("Deployment model") for the full active/active checklist.
+{{- if not .Values.persistence.notes.existingClaim }}
+
+Upgrading from chart 0.1.0 (Deployment-based)? This release runs the backend as
+a StatefulSet with per-pod volumeClaimTemplates, so Helm removes the old
+Deployment-era `{{ include "mdnest.fullname" . }}-notes` PVC and the StatefulSet
+provisions a fresh, empty one. To keep existing notes, adopt the old volume:
+
+  persistence.notes.existingClaim: {{ include "mdnest.fullname" . }}-notes
+
+Fresh installs need nothing.
+{{- end }}
