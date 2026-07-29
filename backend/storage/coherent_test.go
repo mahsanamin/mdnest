@@ -11,11 +11,12 @@ import (
 // without a real Redis — matching the project convention (the collab Redis
 // backplane is likewise exercised via a fake, not a live server).
 type fakeWorkingSet struct {
-	data map[string][]byte // key: ns + "\x00" + relPath
+	data map[string][]byte   // key: ns + "\x00" + relPath
+	nss  map[string]struct{} // registered namespaces
 }
 
 func newFakeWorkingSet() *fakeWorkingSet {
-	return &fakeWorkingSet{data: make(map[string][]byte)}
+	return &fakeWorkingSet{data: make(map[string][]byte), nss: make(map[string]struct{})}
 }
 
 func fwKey(ns, p string) string { return ns + "\x00" + p }
@@ -28,6 +29,7 @@ func (f *fakeWorkingSet) Set(_ context.Context, ns, p string, d []byte) error {
 	cp := make([]byte, len(d))
 	copy(cp, d)
 	f.data[fwKey(ns, p)] = cp
+	f.nss[ns] = struct{}{}
 	return nil
 }
 func (f *fakeWorkingSet) Delete(_ context.Context, ns, p string) error {
@@ -46,6 +48,32 @@ func (f *fakeWorkingSet) DeletePrefix(_ context.Context, ns, p string) error {
 		}
 	}
 	return nil
+}
+func (f *fakeWorkingSet) AddNamespace(_ context.Context, ns string) error {
+	f.nss[ns] = struct{}{}
+	return nil
+}
+func (f *fakeWorkingSet) RemoveNamespace(_ context.Context, ns string) error {
+	_ = f.DeletePrefix(context.Background(), ns, "")
+	delete(f.nss, ns)
+	return nil
+}
+func (f *fakeWorkingSet) Namespaces(_ context.Context) ([]string, error) {
+	out := make([]string, 0, len(f.nss))
+	for ns := range f.nss {
+		out = append(out, ns)
+	}
+	return out, nil
+}
+func (f *fakeWorkingSet) List(_ context.Context, ns string) ([]string, error) {
+	var out []string
+	for k := range f.data {
+		parts := strings.SplitN(k, "\x00", 2)
+		if parts[0] == ns {
+			out = append(out, parts[1])
+		}
+	}
+	return out, nil
 }
 func (f *fakeWorkingSet) Close() error { return nil }
 

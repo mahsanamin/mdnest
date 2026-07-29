@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -10,15 +11,8 @@ func newTestQueued(t *testing.T) (*QueuedStorage, *fakeQueue, *fakeWorkingSet) {
 	t.Helper()
 	ws := newFakeWorkingSet()
 	q := &fakeQueue{}
-	qs, err := NewQueuedStorage(t.TempDir(), ws, q, defaultWorkingSetMaxBytes)
-	if err != nil {
-		t.Fatalf("NewQueuedStorage: %v", err)
-	}
-	// The app role never creates namespaces on its own clone; seed one directly
-	// so the read-fallback paths have somewhere to read from.
-	if err := qs.LocalStorage.MkdirAll(context.Background(), "ns", ""); err != nil {
-		t.Fatalf("seed namespace: %v", err)
-	}
+	qs := NewQueuedStorage(ws, q, defaultWorkingSetMaxBytes)
+	_ = ws.AddNamespace(context.Background(), "ns")
 	return qs, q, ws
 }
 
@@ -46,47 +40,32 @@ func TestQueuedWritePublishesAndEnqueues(t *testing.T) {
 	}
 }
 
-func TestQueuedReadPrefersWorkingSetThenClone(t *testing.T) {
+func TestQueuedReadServesFromWorkingSetOnly(t *testing.T) {
 	ctx := context.Background()
 	qs, _, ws := newTestQueued(t)
 
-	// Only in the clone: a read must fall back and hydrate the working set.
-	if err := qs.LocalStorage.WriteFile(ctx, "ns", "cold.md", []byte("cold")); err != nil {
-		t.Fatalf("seed clone: %v", err)
+	if _, err := qs.ReadFile(ctx, "ns", "missing.md"); err != ErrNotExist {
+		t.Fatalf("miss should be ErrNotExist, got %v", err)
 	}
-	got, err := qs.ReadFile(ctx, "ns", "cold.md")
-	if err != nil || string(got) != "cold" {
-		t.Fatalf("clone fallback: got %q err %v", got, err)
-	}
-	if _, ok, _ := ws.Get(ctx, "ns", "cold.md"); !ok {
-		t.Fatal("clone read did not hydrate the working set")
-	}
-
-	// Working set wins over a diverging clone (fresh write not yet synced).
-	_ = ws.Set(ctx, "ns", "cold.md", []byte("hot"))
-	got, _ = qs.ReadFile(ctx, "ns", "cold.md")
-	if string(got) != "hot" {
-		t.Fatalf("working set did not take precedence: %q", got)
+	_ = ws.Set(ctx, "ns", "a.md", []byte("body"))
+	got, err := qs.ReadFile(ctx, "ns", "a.md")
+	if err != nil || string(got) != "body" {
+		t.Fatalf("read: got %q err %v", got, err)
 	}
 }
 
 func TestQueuedAppendUsesLatestBody(t *testing.T) {
 	ctx := context.Background()
 	qs, q, ws := newTestQueued(t)
+	_ = ws.Set(ctx, "ns", "log.md", []byte("a"))
 
-	// Current body lives only in the clone; append must read it (not treat the
-	// file as empty) and enqueue the full concatenated body.
-	if err := qs.LocalStorage.WriteFile(ctx, "ns", "log.md", []byte("a")); err != nil {
-		t.Fatalf("seed clone: %v", err)
-	}
 	if err := qs.Append(ctx, "ns", "log.md", []byte("b")); err != nil {
 		t.Fatalf("Append: %v", err)
 	}
 	if data, ok, _ := ws.Get(ctx, "ns", "log.md"); !ok || string(data) != "ab" {
 		t.Fatalf("append working-set body = %q ok=%v, want ab", data, ok)
 	}
-	op := lastOp(t, q)
-	if op.Kind != OpWrite || string(op.Data) != "ab" {
+	if op := lastOp(t, q); op.Kind != OpWrite || string(op.Data) != "ab" {
 		t.Fatalf("append enqueued %+v, want full-body OpWrite ab", op)
 	}
 }
@@ -121,8 +100,7 @@ func TestQueuedRenameMovesBodyAndEnqueues(t *testing.T) {
 	if data, ok, _ := ws.Get(ctx, "ns", "new.md"); !ok || string(data) != "v" {
 		t.Fatalf("Rename did not move body to dest: ok=%v data=%q", ok, data)
 	}
-	op := lastOp(t, q)
-	if op.Kind != OpRename || op.Path != "old.md" || op.To != "new.md" {
+	if op := lastOp(t, q); op.Kind != OpRename || op.Path != "old.md" || op.To != "new.md" {
 		t.Fatalf("bad rename op: %+v", op)
 	}
 }
@@ -144,11 +122,80 @@ func TestQueuedOversizeNotCachedButEnqueued(t *testing.T) {
 	}
 }
 
-// TestQueuedImplementsRangeReadable pins that attachment range serving keeps
-// working on an app replica (delegated to the clone).
-func TestQueuedImplementsRangeReadable(t *testing.T) {
-	qs, _, _ := newTestQueued(t)
-	if _, ok := interface{}(qs).(RangeReadable); !ok {
-		t.Fatal("QueuedStorage lost RangeReadable")
+// TestQueuedListingFromIndex checks namespaces, ReadDir, Stat and Walk are all
+// derived from the working-set index (no filesystem).
+func TestQueuedListingFromIndex(t *testing.T) {
+	ctx := context.Background()
+	qs, _, ws := newTestQueued(t)
+	_ = ws.AddNamespace(ctx, "empty") // empty workspace must still be listed
+	for _, p := range []string{"root.md", "dir/a.md", "dir/sub/b.md"} {
+		_ = ws.Set(ctx, "ns", p, []byte("x"))
+	}
+
+	nss, err := qs.ListNamespaces(ctx)
+	if err != nil || !reflect.DeepEqual(nss, []string{"empty", "ns"}) {
+		t.Fatalf("ListNamespaces = %v err %v, want [empty ns]", nss, err)
+	}
+
+	// ReadDir at root: root.md (file) + dir (directory).
+	entries, err := qs.ReadDir(ctx, "ns", "")
+	if err != nil {
+		t.Fatalf("ReadDir root: %v", err)
+	}
+	if len(entries) != 2 || entries[0].Name != "dir" || !entries[0].IsDir || entries[1].Name != "root.md" || entries[1].IsDir {
+		t.Fatalf("ReadDir root = %+v", entries)
+	}
+
+	// ReadDir of a nested dir.
+	sub, err := qs.ReadDir(ctx, "ns", "dir")
+	if err != nil {
+		t.Fatalf("ReadDir dir: %v", err)
+	}
+	if len(sub) != 2 || sub[0].Name != "a.md" || sub[1].Name != "sub" || !sub[1].IsDir {
+		t.Fatalf("ReadDir dir = %+v", sub)
+	}
+
+	// Stat: file, directory, namespace root, and a miss.
+	if fi, err := qs.Stat(ctx, "ns", "root.md"); err != nil || fi.IsDir || fi.Size != 1 {
+		t.Fatalf("Stat file = %+v err %v", fi, err)
+	}
+	if fi, err := qs.Stat(ctx, "ns", "dir"); err != nil || !fi.IsDir {
+		t.Fatalf("Stat dir = %+v err %v", fi, err)
+	}
+	if fi, err := qs.Stat(ctx, "ns", ""); err != nil || !fi.IsDir {
+		t.Fatalf("Stat ns root = %+v err %v", fi, err)
+	}
+	if _, err := qs.Stat(ctx, "ns", "nope.md"); err != ErrNotExist {
+		t.Fatalf("Stat miss = %v, want ErrNotExist", err)
+	}
+
+	// Walk collects the three files and visits directories (SkipDir honored).
+	var files []string
+	if err := qs.Walk(ctx, "ns", "", func(rel string, info FileInfo) error {
+		if !info.IsDir {
+			files = append(files, rel)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	want := []string{"dir/a.md", "dir/sub/b.md", "root.md"}
+	if !reflect.DeepEqual(files, want) {
+		t.Fatalf("Walk files = %v, want %v", files, want)
+	}
+
+	// SkipDir on "dir" prunes its subtree.
+	var kept []string
+	_ = qs.Walk(ctx, "ns", "", func(rel string, info FileInfo) error {
+		if info.IsDir && rel == "dir" {
+			return SkipDir
+		}
+		if !info.IsDir {
+			kept = append(kept, rel)
+		}
+		return nil
+	})
+	if !reflect.DeepEqual(kept, []string{"root.md"}) {
+		t.Fatalf("Walk with SkipDir kept = %v, want [root.md]", kept)
 	}
 }

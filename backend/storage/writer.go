@@ -56,6 +56,7 @@ func (w *Writer) hydrate(ctx context.Context) error {
 		return err
 	}
 	for _, ns := range namespaces {
+		_ = w.ws.AddNamespace(ctx, ns) // list even empty namespaces
 		err := w.dst.Walk(ctx, ns, "", func(relPath string, info FileInfo) error {
 			if info.IsDir || info.Size > w.maxBytes {
 				return nil
@@ -94,6 +95,7 @@ func (w *Writer) apply(ctx context.Context, op DurabilityOp) error {
 		if err := w.dst.MkdirAll(ctx, op.NS, op.Path); err != nil {
 			return err
 		}
+		_ = w.ws.AddNamespace(ctx, op.NS)
 	case OpRemove:
 		if err := w.dst.Remove(ctx, op.NS, op.Path); err != nil && err != ErrNotExist {
 			return err
@@ -103,7 +105,11 @@ func (w *Writer) apply(ctx context.Context, op DurabilityOp) error {
 		if err := w.dst.RemoveAll(ctx, op.NS, op.Path); err != nil {
 			return err
 		}
-		_ = w.ws.DeletePrefix(ctx, op.NS, op.Path)
+		if op.Path == "" {
+			_ = w.ws.RemoveNamespace(ctx, op.NS)
+		} else {
+			_ = w.ws.DeletePrefix(ctx, op.NS, op.Path)
+		}
 	case OpRename:
 		if err := w.dst.MkdirAll(ctx, op.NS, ""); err != nil {
 			return err

@@ -24,15 +24,15 @@ import (
 // Roles (git-native HA):
 //   - single: the standalone process. STORAGE_BACKEND picks local/git; with the
 //     git backend and REDIS_URL set it gains the working-set tier. No queue.
-//   - app: a stateless replica. Reads its local git-sync'd clone with the Redis
-//     working set layered on top; writes publish to the working set and enqueue
-//     on the durability queue. Owns no authoritative filesystem.
+//   - app: a stateless replica. Reads are served from the Redis working set
+//     (hydrated by the writer); writes publish to the working set and enqueue on
+//     the durability queue. Owns no filesystem.
 //   - writer: the single elected writer. Owns the authoritative git tree, drains
 //     the durability queue in a background goroutine, and serves reads through
 //     the working set.
 //
-// localRoot is the absolute NOTES_DIR (the working tree for single/writer, the
-// git-sync'd clone for app).
+// localRoot is the absolute NOTES_DIR (the working tree for single/writer;
+// unused for app, which is filesystem-less).
 func FromEnv(ctx context.Context, localRoot string) (Storage, error) {
 	switch role := strings.ToLower(strings.TrimSpace(os.Getenv("MDNEST_ROLE"))); role {
 	case "", "single":
@@ -76,9 +76,10 @@ func fromEnvSingle(ctx context.Context, localRoot string) (Storage, error) {
 	}
 }
 
-// newAppStorage builds a stateless app replica: reads from the local clone with
-// a Redis working set overlay, writes publish to the working set and enqueue.
-func newAppStorage(ctx context.Context, cloneRoot string) (Storage, error) {
+// newAppStorage builds a stateless app replica: reads are served from the Redis
+// working set (hydrated by the writer), writes publish to the working set and
+// enqueue a durability op. The replica owns no filesystem.
+func newAppStorage(ctx context.Context, _ string) (Storage, error) {
 	url := strings.TrimSpace(os.Getenv("REDIS_URL"))
 	if url == "" {
 		return nil, errors.New("storage: MDNEST_ROLE=app requires REDIS_URL")
@@ -91,7 +92,7 @@ func newAppStorage(ctx context.Context, cloneRoot string) (Storage, error) {
 	if err != nil {
 		return nil, fmt.Errorf("storage: app durability queue unavailable: %w", err)
 	}
-	return NewQueuedStorage(cloneRoot, ws, queue, workingSetCap())
+	return NewQueuedStorage(ws, queue, workingSetCap()), nil
 }
 
 // newWriterStorage builds the single writer: it owns the git tree, starts the

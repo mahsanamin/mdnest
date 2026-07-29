@@ -26,6 +26,18 @@ type WorkingSet interface {
 	// DeletePrefix drops every cached body at relPath and below (relPath == ""
 	// clears the whole namespace). Used for recursive removes and renames.
 	DeletePrefix(ctx context.Context, ns, relPath string) error
+
+	// AddNamespace registers a namespace so it is listed even while it holds no
+	// files (e.g. a freshly created, empty workspace).
+	AddNamespace(ctx context.Context, ns string) error
+	// RemoveNamespace drops a namespace and every body under it.
+	RemoveNamespace(ctx context.Context, ns string) error
+	// Namespaces returns the registered namespaces (unsorted).
+	Namespaces(ctx context.Context) ([]string, error)
+	// List returns every cached relPath in a namespace (unsorted). Stateless
+	// replicas derive directory listings and Stat from it.
+	List(ctx context.Context, ns string) ([]string, error)
+
 	// Close releases the underlying connection.
 	Close() error
 }
@@ -41,6 +53,10 @@ func (NoopWorkingSet) Get(context.Context, string, string) ([]byte, bool, error)
 func (NoopWorkingSet) Set(context.Context, string, string, []byte) error  { return nil }
 func (NoopWorkingSet) Delete(context.Context, string, string) error       { return nil }
 func (NoopWorkingSet) DeletePrefix(context.Context, string, string) error { return nil }
+func (NoopWorkingSet) AddNamespace(context.Context, string) error         { return nil }
+func (NoopWorkingSet) RemoveNamespace(context.Context, string) error      { return nil }
+func (NoopWorkingSet) Namespaces(context.Context) ([]string, error)       { return nil, nil }
+func (NoopWorkingSet) List(context.Context, string) ([]string, error)     { return nil, nil }
 func (NoopWorkingSet) Close() error                                       { return nil }
 
 // RedisWorkingSet implements WorkingSet over Redis. Bodies are stored under
@@ -71,6 +87,10 @@ func NewRedisWorkingSet(ctx context.Context, url string) (*RedisWorkingSet, erro
 func noteKey(ns, relPath string) string { return "note:" + ns + ":" + relPath }
 func nsIndexKey(ns string) string       { return "noteset:" + ns }
 
+// nsRegistryKey is the set of all known namespaces (workspaces), so stateless
+// replicas can list namespaces — including empty ones — without a filesystem.
+const nsRegistryKey = "mdnest:namespaces"
+
 func (r *RedisWorkingSet) Get(ctx context.Context, ns, relPath string) ([]byte, bool, error) {
 	data, err := r.client.Get(ctx, noteKey(ns, relPath)).Bytes()
 	if err == redis.Nil {
@@ -86,6 +106,7 @@ func (r *RedisWorkingSet) Set(ctx context.Context, ns, relPath string, data []by
 	pipe := r.client.TxPipeline()
 	pipe.Set(ctx, noteKey(ns, relPath), data, 0)
 	pipe.SAdd(ctx, nsIndexKey(ns), relPath)
+	pipe.SAdd(ctx, nsRegistryKey, ns)
 	_, err := pipe.Exec(ctx)
 	return err
 }
@@ -117,6 +138,29 @@ func (r *RedisWorkingSet) DeletePrefix(ctx context.Context, ns, relPath string) 
 	}
 	_, err = pipe.Exec(ctx)
 	return err
+}
+
+func (r *RedisWorkingSet) AddNamespace(ctx context.Context, ns string) error {
+	return r.client.SAdd(ctx, nsRegistryKey, ns).Err()
+}
+
+func (r *RedisWorkingSet) RemoveNamespace(ctx context.Context, ns string) error {
+	if err := r.DeletePrefix(ctx, ns, ""); err != nil {
+		return err
+	}
+	pipe := r.client.TxPipeline()
+	pipe.Del(ctx, nsIndexKey(ns))
+	pipe.SRem(ctx, nsRegistryKey, ns)
+	_, err := pipe.Exec(ctx)
+	return err
+}
+
+func (r *RedisWorkingSet) Namespaces(ctx context.Context) ([]string, error) {
+	return r.client.SMembers(ctx, nsRegistryKey).Result()
+}
+
+func (r *RedisWorkingSet) List(ctx context.Context, ns string) ([]string, error) {
+	return r.client.SMembers(ctx, nsIndexKey(ns)).Result()
 }
 
 func (r *RedisWorkingSet) Close() error { return r.client.Close() }
