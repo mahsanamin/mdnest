@@ -79,3 +79,37 @@ func run(t *testing.T, dir string, name string, args ...string) {
 		t.Fatalf("%s %v: %v\n%s", name, args, err, out)
 	}
 }
+
+// TestPushBackoffAfterFailure verifies a failed mirror push is not retried on
+// the very next flush: it backs off (so a missing/misconfigured remote does not
+// hammer the remote every interval).
+func TestPushBackoffAfterFailure(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	ctx := context.Background()
+	root := t.TempDir()
+	// Remote base points at a path with no repo → every push fails.
+	remote := remoteConfig{baseURL: filepath.Join(t.TempDir(), "missing"), branch: "main"}
+	c := NewIntervalCommitter(root, time.Hour, "ci", "ci@example.com", remote)
+	defer c.Close()
+	g, err := NewGitStorage(root, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "team"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.WriteFile(ctx, "team", "a.md", []byte("x")); err != nil {
+		t.Fatal(err)
+	}
+
+	_ = c.Flush(ctx) // commit ok, push fails
+	if c.pushFails["team"] != 1 {
+		t.Fatalf("first push failure not recorded: fails=%d", c.pushFails["team"])
+	}
+	_ = c.Flush(ctx) // immediate re-flush must back off, not push again
+	if c.pushFails["team"] != 1 {
+		t.Fatalf("push retried during backoff window: fails=%d (want 1)", c.pushFails["team"])
+	}
+}

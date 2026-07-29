@@ -164,7 +164,7 @@ func TestServeFileSingleUserModeUnaffected(t *testing.T) {
 func TestServeFileDelegatesToAttachmentProxy(t *testing.T) {
 	h := NewUploadHandler(nil, nil)
 	var gotPath string
-	h.SetAttachmentProxy(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h.SetWriterProxy(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		w.WriteHeader(http.StatusTeapot)
 	}))
@@ -175,5 +175,24 @@ func TestServeFileDelegatesToAttachmentProxy(t *testing.T) {
 
 	if rec.Code != http.StatusTeapot || gotPath != "/api/files/alpha/img/a.png" {
 		t.Fatalf("expected delegation to proxy, got code=%d path=%q", rec.Code, gotPath)
+	}
+}
+
+// Attachment uploads on an app replica must also be forwarded to the writer
+// (keeping binary bytes off the durability queue) rather than written locally.
+func TestUploadDelegatesToWriterProxy(t *testing.T) {
+	h := NewUploadHandler(nil, nil)
+	var gotPath string
+	h.SetWriterProxy(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.WriteHeader(http.StatusTeapot)
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/upload?ns=alpha&path=x", nil)
+	rec := httptest.NewRecorder()
+	h.HandleUpload(rec, req)
+
+	if rec.Code != http.StatusTeapot || gotPath != "/api/upload" {
+		t.Fatalf("expected upload delegation to proxy, got code=%d path=%q", rec.Code, gotPath)
 	}
 }

@@ -11,9 +11,12 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/mdnest/mdnest/backend/collab"
 	"github.com/mdnest/mdnest/backend/firebase"
@@ -89,7 +92,14 @@ func main() {
 	// Storage backend for note data (local filesystem by default). Note
 	// history and git-sync always operate on the local filesystem regardless
 	// of this setting — they are orthogonal, optional features.
-	stg, err := storage.FromEnv(context.Background(), absNotesDir)
+	//
+	// appCtx is cancelled on SIGINT/SIGTERM so the writer role releases its
+	// leader lock promptly (fast failover) and the HTTP server shuts down
+	// gracefully rather than being killed mid-request.
+	appCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+
+	stg, err := storage.FromEnv(appCtx, absNotesDir)
 	if err != nil {
 		log.Fatalf("failed to initialize storage backend: %v", err)
 	}
@@ -336,18 +346,19 @@ func main() {
 	}
 	treeHandler := handlers.NewTreeHandler(stg, grantStore)
 	uploadHandler := handlers.NewUploadHandler(stg, perms)
-	// Stateless app replicas own no attachment bytes: proxy /api/files/ to the
-	// writer (which holds the git tree) when WRITER_URL is configured.
+	// Stateless app replicas own no attachment bytes: proxy attachment traffic
+	// (upload + serve) to the writer, which owns the git tree, when WRITER_URL is
+	// configured.
 	if env("MDNEST_ROLE", "single") == "app" {
 		if writerURL := env("WRITER_URL", ""); writerURL != "" {
 			u, perr := url.Parse(writerURL)
 			if perr != nil {
 				log.Fatalf("invalid WRITER_URL %q: %v", writerURL, perr)
 			}
-			uploadHandler.SetAttachmentProxy(httputil.NewSingleHostReverseProxy(u))
-			log.Printf("attachments: proxying /api/files/ to writer at %s", writerURL)
+			uploadHandler.SetWriterProxy(httputil.NewSingleHostReverseProxy(u))
+			log.Printf("attachments: proxying /api/upload and /api/files/ to writer at %s", writerURL)
 		} else {
-			log.Println("attachments: MDNEST_ROLE=app without WRITER_URL — attachment downloads will 404 until it is set")
+			log.Println("attachments: MDNEST_ROLE=app without WRITER_URL — attachment upload/download will fail until it is set")
 		}
 	}
 	moveHandler := handlers.NewMoveHandler(stg)
@@ -598,9 +609,20 @@ func main() {
 
 	handler := corsMiddleware.Wrap(mux)
 
+	srv := &http.Server{Addr: ":" + port, Handler: handler}
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("server error: %v", err)
+		}
+	}()
 	log.Printf("mdnest backend listening on :%s (NOTES_DIR=%s)", port, absNotesDir)
-	if err := http.ListenAndServe(":"+port, handler); err != nil {
-		log.Fatal(err)
+
+	<-appCtx.Done()
+	log.Println("shutdown signal received, draining…")
+	shutCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutCtx); err != nil {
+		log.Printf("graceful shutdown error: %v", err)
 	}
 }
 

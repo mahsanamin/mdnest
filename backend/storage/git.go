@@ -3,8 +3,10 @@ package storage
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -131,9 +133,25 @@ type intervalCommitter struct {
 	mu    sync.Mutex
 	dirty map[string]struct{}
 
+	// Push backoff state, touched only from the (serialized) Flush path.
+	pushNext  map[string]time.Time // ns -> earliest next push attempt
+	pushFails map[string]int       // ns -> consecutive push failures
+
 	stop chan struct{}
 	done chan struct{}
 }
+
+// Push retry backoff bounds: after a failed mirror push a namespace waits
+// pushBackoffBase, doubling up to pushBackoffMax, instead of hammering the
+// remote every commit interval.
+const (
+	pushBackoffBase = 30 * time.Second
+	pushBackoffMax  = 15 * time.Minute
+)
+
+// errPushPending keeps a namespace queued for a later push without pushing (and
+// logging) now, while it is inside its backoff window.
+var errPushPending = errors.New("storage: push backing off")
 
 // NewIntervalCommitter starts a background committer. authorName/email default
 // to a generic mdnest identity when empty. A disabled remoteConfig (zero value)
@@ -155,6 +173,8 @@ func NewIntervalCommitter(root string, interval time.Duration, authorName, autho
 		authorEmail: authorEmail,
 		remote:      remote,
 		dirty:       make(map[string]struct{}),
+		pushNext:    make(map[string]time.Time),
+		pushFails:   make(map[string]int),
 		stop:        make(chan struct{}),
 		done:        make(chan struct{}),
 	}
@@ -265,10 +285,38 @@ func (c *intervalCommitter) commit(ctx context.Context, ns string) error {
 	// failed on an earlier flush (the namespace stays marked dirty until it
 	// succeeds).
 	if c.remote.enabled() {
-		if err := c.push(ctx, dir, ns); err != nil {
-			return err
-		}
+		return c.pushWithBackoff(ctx, dir, ns)
 	}
+	return nil
+}
+
+// pushWithBackoff mirrors a namespace, applying exponential backoff after a
+// failure so a missing/misconfigured remote does not trigger a failing push (and
+// a log line) on every commit interval. It returns a non-nil error while a push
+// is still owed, which keeps the namespace marked dirty for a later retry.
+func (c *intervalCommitter) pushWithBackoff(ctx context.Context, dir, ns string) error {
+	if t, ok := c.pushNext[ns]; ok && time.Now().Before(t) {
+		return errPushPending // inside the backoff window; retry later, no push/log
+	}
+	if err := c.push(ctx, dir, ns); err != nil {
+		n := c.pushFails[ns] + 1
+		c.pushFails[ns] = n
+		shift := n - 1
+		if shift > 5 {
+			shift = 5
+		}
+		backoff := pushBackoffBase << uint(shift)
+		if backoff > pushBackoffMax {
+			backoff = pushBackoffMax
+		}
+		c.pushNext[ns] = time.Now().Add(backoff)
+		if n == 1 || n%10 == 0 { // log the first failure and every 10th, not every retry
+			log.Printf("storage: git push %s failed (attempt %d, backing off %s): %v", ns, n, backoff, err)
+		}
+		return err
+	}
+	delete(c.pushFails, ns)
+	delete(c.pushNext, ns)
 	return nil
 }
 

@@ -15,18 +15,19 @@ import (
 type UploadHandler struct {
 	store storage.Storage
 	perms *middleware.PermissionChecker // nil in single mode
-	// attachmentProxy, when set (git-native HA app replicas), forwards
-	// /api/files/ downloads to the writer, which owns the attachment bytes.
-	attachmentProxy http.Handler
+	// writerProxy, when set (git-native HA app replicas), forwards attachment
+	// traffic (POST /api/upload, GET /api/files/) to the writer, which owns the
+	// git tree — keeping binary bytes off the durability queue.
+	writerProxy http.Handler
 }
 
 func NewUploadHandler(store storage.Storage, perms *middleware.PermissionChecker) *UploadHandler {
 	return &UploadHandler{store: store, perms: perms}
 }
 
-// SetAttachmentProxy makes /api/files/ downloads reverse-proxy to the writer.
+// SetWriterProxy makes attachment upload/serve reverse-proxy to the writer.
 // Used on stateless app replicas, which hold no attachment bytes locally.
-func (h *UploadHandler) SetAttachmentProxy(p http.Handler) { h.attachmentProxy = p }
+func (h *UploadHandler) SetWriterProxy(p http.Handler) { h.writerProxy = p }
 
 // HandleFolder handles POST /api/folder?ns=...&path=...
 func (h *UploadHandler) HandleFolder(w http.ResponseWriter, r *http.Request) {
@@ -57,6 +58,14 @@ func (h *UploadHandler) HandleFolder(w http.ResponseWriter, r *http.Request) {
 func (h *UploadHandler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	// App replicas don't persist attachment bytes: forward the upload to the
+	// writer (which owns the git tree) rather than routing megabytes through the
+	// durability queue. The writer re-checks write permission on the forwarded
+	// request.
+	if h.writerProxy != nil {
+		h.writerProxy.ServeHTTP(w, r)
 		return
 	}
 	ctx := r.Context()
@@ -109,8 +118,8 @@ func (h *UploadHandler) HandleServeFile(w http.ResponseWriter, r *http.Request) 
 	// writer's git tree. Forward the (already authenticated) request to the
 	// writer, which serves it with range/conditional-GET support and re-checks
 	// the per-namespace read permission with the same forwarded credentials.
-	if h.attachmentProxy != nil {
-		h.attachmentProxy.ServeHTTP(w, r)
+	if h.writerProxy != nil {
+		h.writerProxy.ServeHTTP(w, r)
 		return
 	}
 
