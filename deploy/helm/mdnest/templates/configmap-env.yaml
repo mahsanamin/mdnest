@@ -24,8 +24,11 @@ data:
   S3_PATH_STYLE: {{ .Values.storage.s3.pathStyle | ternary "true" "false" | quote }}
   {{- end }}
   {{- if eq .Values.storage.backend "git" }}
-  {{- with .Values.storage.git.commitInterval }}
-  GIT_COMMIT_INTERVAL: {{ . | quote }}
+  {{- with .Values.storage.git.commit.debounce }}
+  GIT_COMMIT_DEBOUNCE: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.storage.git.commit.maxWait }}
+  GIT_COMMIT_MAX_WAIT: {{ . | quote }}
   {{- end }}
   {{- with .Values.storage.git.authorName }}
   GIT_AUTHOR_NAME: {{ . | quote }}

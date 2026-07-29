@@ -328,10 +328,19 @@ storage:
     # -- Inline S3 secret key (used only when `existingSecret` is empty).
     secretKey: ""
   git:
-    # -- How often the git backend commits pending changes (Go duration, e.g.
-    # `10s`). Note bytes are durable on disk immediately; this only controls how
-    # often history is committed. Empty = backend default (10s).
-    commitInterval: ""
+    # -- Git history is committed per-namespace once the writer goes idle on it,
+    # not on a fixed timer: an editing session (many rapid saves) is coalesced
+    # into a single commit made after `commit.debounce` with no new write, so
+    # the git graph stays readable. Note bytes are durable on disk immediately;
+    # this only controls history commit cadence.
+    commit:
+      # -- Commit a namespace after this long with no new write (Go duration).
+      # Empty = backend default (2m).
+      debounce: ""
+      # -- Safety cap: force a commit once a namespace has been dirty this long
+      # even while still being edited (Go duration). Empty = backend default
+      # (10m).
+      maxWait: ""
     # -- Author name/email for mdnest's own commits. Empty = mdnest/mdnest@localhost.
     authorName: ""
     authorEmail: ""

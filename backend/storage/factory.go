@@ -127,12 +127,13 @@ func newWriterStorage(ctx context.Context, localRoot string) (Storage, error) {
 // optional per-namespace remote mirror) from the environment. Shared by the
 // single-git and writer roles.
 func newGitStorageFromEnv(localRoot string) (*GitStorage, error) {
-	interval := durationEnv("GIT_COMMIT_INTERVAL", 10*time.Second)
+	debounce := durationEnv("GIT_COMMIT_DEBOUNCE", 2*time.Minute)
+	maxWait := durationEnv("GIT_COMMIT_MAX_WAIT", 10*time.Minute)
 	remote, err := remoteConfigFromEnv()
 	if err != nil {
 		return nil, err
 	}
-	committer := NewIntervalCommitter(localRoot, interval, os.Getenv("GIT_AUTHOR_NAME"), os.Getenv("GIT_AUTHOR_EMAIL"), remote)
+	committer := NewIntervalCommitter(localRoot, debounce, maxWait, os.Getenv("GIT_AUTHOR_NAME"), os.Getenv("GIT_AUTHOR_EMAIL"), remote)
 	return NewGitStorage(localRoot, committer)
 }
 

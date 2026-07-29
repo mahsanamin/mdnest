@@ -43,7 +43,7 @@ func TestCommitterPushesToRemote(t *testing.T) {
 
 	root := t.TempDir()
 	remote := remoteConfig{baseURL: remoteBase, branch: "main"} // username empty → clean file path
-	c := NewIntervalCommitter(root, time.Hour, "ci", "ci@example.com", remote)
+	c := NewIntervalCommitter(root, time.Hour, time.Hour, "ci", "ci@example.com", remote)
 	defer c.Close()
 	g, err := NewGitStorage(root, c)
 	if err != nil {
@@ -91,7 +91,7 @@ func TestPushBackoffAfterFailure(t *testing.T) {
 	root := t.TempDir()
 	// Remote base points at a path with no repo → every push fails.
 	remote := remoteConfig{baseURL: filepath.Join(t.TempDir(), "missing"), branch: "main"}
-	c := NewIntervalCommitter(root, time.Hour, "ci", "ci@example.com", remote)
+	c := NewIntervalCommitter(root, time.Hour, time.Hour, "ci", "ci@example.com", remote)
 	defer c.Close()
 	g, err := NewGitStorage(root, c)
 	if err != nil {
