@@ -33,6 +33,14 @@ data:
   {{- with .Values.storage.git.authorEmail }}
   GIT_AUTHOR_EMAIL: {{ . | quote }}
   {{- end }}
+  {{- if .Values.storage.git.remote.url }}
+  GIT_REMOTE_URL: {{ .Values.storage.git.remote.url | quote }}
+  GIT_REMOTE_USERNAME: {{ .Values.storage.git.remote.username | quote }}
+  GIT_REMOTE_BRANCH: {{ .Values.storage.git.remote.branch | quote }}
+  {{- if .Values.storage.git.remote.existingTokenSecret }}
+  GIT_TOKEN_FILE: "/etc/mdnest/git/token"
+  {{- end }}
+  {{- end }}
   {{- end }}
   FRONTEND_ORIGIN: {{ .Values.backend.frontendOrigin | quote }}
   {{- if .Values.backend.serverAlias }}

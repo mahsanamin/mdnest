@@ -211,6 +211,11 @@ spec:
               mountPath: /data/notes
             - name: secrets
               mountPath: /data/secrets
+            {{- if and (eq .Values.storage.backend "git") .Values.storage.git.remote.url .Values.storage.git.remote.existingTokenSecret }}
+            - name: git-token
+              mountPath: /etc/mdnest/git
+              readOnly: true
+            {{- end }}
       volumes:
         # notes/secrets are provided by the volumeClaimTemplates below when
         # managed per-pod. They only appear here when shared (existingClaim) or
@@ -232,6 +237,14 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+        {{- end }}
+        {{- if and (eq .Values.storage.backend "git") .Values.storage.git.remote.url .Values.storage.git.remote.existingTokenSecret }}
+        - name: git-token
+          secret:
+            secretName: {{ .Values.storage.git.remote.existingTokenSecret }}
+            items:
+              - key: {{ .Values.storage.git.remote.tokenSecretKey }}
+                path: token
         {{- end }}
       {{- with .Values.backend.nodeSelector }}
       nodeSelector:

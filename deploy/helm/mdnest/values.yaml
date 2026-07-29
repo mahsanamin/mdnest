@@ -335,6 +335,22 @@ storage:
     # -- Author name/email for mdnest's own commits. Empty = mdnest/mdnest@localhost.
     authorName: ""
     authorEmail: ""
+    # -- Optional per-namespace remote mirror: one git repository per workspace,
+    # pushed over HTTPS. When `url` is set the git backend pushes each namespace
+    # repo to `<url>/<namespace>.git`. Opt-in; empty = local history only. This
+    # is the coarse global default; per-workspace remotes (multi mode) are a
+    # separate feature.
+    remote:
+      # -- Base URL for the per-namespace remotes, e.g. `https://gitlab.forterro.com/mdnest-workspaces`. Empty = mirroring disabled.
+      url: ""
+      # -- HTTPS username (GitLab PAT: `oauth2`; GitHub PAT: `x-access-token`).
+      username: oauth2
+      # -- Branch to push.
+      branch: main
+      # -- Existing Secret holding the Personal Access Token, mounted read-only as a file. Create it yourself; tokens must never live in values.
+      existingTokenSecret: ""
+      # -- Key inside `existingTokenSecret` holding the PAT.
+      tokenSecretKey: token
 
 # -----------------------------------------------------------------------------
 # Persistence. The backend is a StatefulSet, so each volume has three modes:
