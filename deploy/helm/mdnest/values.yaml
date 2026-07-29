@@ -335,6 +335,13 @@ storage:
 #   - disabled -> an emptyDir (ephemeral).
 # notes = the Markdown repository (shared with git-sync); secrets = the local
 # API-token store (unused in multi mode, where tokens live in PostgreSQL).
+#
+# UPGRADING chart 0.1.0 -> 0.2.0 (Deployment -> StatefulSet): the old
+# Helm-managed `<release>-notes` PVC is removed and the StatefulSet provisions a
+# fresh, empty per-pod volume. To keep existing notes, set
+# `persistence.notes.existingClaim: <release>-notes` so the volume is adopted.
+# Fresh installs need nothing. (This applies to any deploy path — the NOTES.txt
+# hint only shows on `helm install/upgrade`, not under `helm template`/GitOps.)
 # -----------------------------------------------------------------------------
 persistence:
   # -- Retention policy for volumeClaimTemplate PVCs (Kubernetes >= 1.27). Lets
