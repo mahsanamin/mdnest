@@ -390,7 +390,7 @@ All traffic goes to the frontend Service, which proxies `/api` and `/api/ws` (We
 | storage.git.remote.branch | string | `"main"` | Branch to push. |
 | storage.git.remote.existingTokenSecret | string | `""` | Existing Secret holding the Personal Access Token, mounted read-only as a file. Create it yourself; tokens must never live in values. |
 | storage.git.remote.tokenSecretKey | string | `"token"` | Key inside `existingTokenSecret` holding the PAT. |
-| storage.git.remote.url | string | `""` | Base URL for the per-namespace remotes, e.g. `https://gitlab.forterro.com/mdnest-workspaces`. Empty = mirroring disabled. |
+| storage.git.remote.url | string | `""` | Base URL for the per-namespace remotes, e.g. `https://gitlab.example.com/notes-workspaces`. Empty = mirroring disabled. |
 | storage.git.remote.username | string | `"oauth2"` | HTTPS username (GitLab PAT: `oauth2`; GitHub PAT: `x-access-token`). |
 | storage.s3.accessKey | string | `""` | Inline S3 access key (used only when `existingSecret` is empty). |
 | storage.s3.bucket | string | `""` | S3 bucket name. |

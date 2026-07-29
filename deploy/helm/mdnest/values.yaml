@@ -350,7 +350,7 @@ storage:
     # is the coarse global default; per-workspace remotes (multi mode) are a
     # separate feature.
     remote:
-      # -- Base URL for the per-namespace remotes, e.g. `https://gitlab.forterro.com/mdnest-workspaces`. Empty = mirroring disabled.
+      # -- Base URL for the per-namespace remotes, e.g. `https://gitlab.example.com/notes-workspaces`. Empty = mirroring disabled.
       url: ""
       # -- HTTPS username (GitLab PAT: `oauth2`; GitHub PAT: `x-access-token`).
       username: oauth2
