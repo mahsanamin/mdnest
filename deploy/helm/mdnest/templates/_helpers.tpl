@@ -39,6 +39,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 
 {{/* Component-scoped names. */}}
 {{- define "mdnest.backend.fullname" -}}{{ printf "%s-backend" (include "mdnest.fullname" .) }}{{- end -}}
+{{- define "mdnest.backend.headlessName" -}}{{ printf "%s-backend-headless" (include "mdnest.fullname" .) }}{{- end -}}
 {{- define "mdnest.frontend.fullname" -}}{{ printf "%s-frontend" (include "mdnest.fullname" .) }}{{- end -}}
 {{- define "mdnest.gitsync.fullname" -}}{{ printf "%s-git-sync" (include "mdnest.fullname" .) }}{{- end -}}
 {{- define "mdnest.mcp.fullname" -}}{{ printf "%s-mcp" (include "mdnest.fullname" .) }}{{- end -}}
@@ -120,8 +121,8 @@ rather than silently diverging — the failure mode this check exists to prevent
   {{- if not $redisUrl -}}
     {{- fail "mdnest: running multiple backend replicas requires an external Redis (collab.redis.url, collab.redis.existingSecret, or collab.redis.host) for the presence/event backplane." -}}
   {{- end -}}
-  {{- if and (ne .Values.storage.backend "s3") (ne .Values.persistence.notes.accessMode "ReadWriteMany") -}}
-    {{- fail "mdnest: running multiple backend replicas requires persistence.notes.accessMode=ReadWriteMany so all pods share the notes repository (or set storage.backend=s3 to share notes via an object store)." -}}
+  {{- if and (ne .Values.storage.backend "s3") (not .Values.persistence.notes.existingClaim) -}}
+    {{- fail "mdnest: running multiple backend replicas requires a shared notes volume — set persistence.notes.existingClaim to a ReadWriteMany PVC all pods share (or storage.backend=s3). The per-pod volumeClaimTemplate would give each replica its own notes and they would diverge." -}}
   {{- end -}}
 {{- end -}}
 {{- end -}}

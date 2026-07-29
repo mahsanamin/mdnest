@@ -1,7 +1,7 @@
 {{- include "mdnest.validateSupported" . -}}
 {{- include "mdnest.validateHA" . -}}
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: {{ include "mdnest.backend.fullname" . }}
   labels:
@@ -12,11 +12,13 @@ metadata:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
+  serviceName: {{ include "mdnest.backend.headlessName" . }}
+  podManagementPolicy: {{ .Values.backend.podManagementPolicy }}
   {{- if not .Values.backend.autoscaling.enabled }}
   replicas: {{ .Values.backend.replicaCount }}
   {{- end }}
-  strategy:
-    {{- toYaml .Values.backend.strategy | nindent 4 }}
+  updateStrategy:
+    {{- toYaml .Values.backend.updateStrategy | nindent 4 }}
   selector:
     matchLabels:
       {{- include "mdnest.selectorLabels" . | nindent 6 }}
@@ -209,20 +211,27 @@ spec:
             - name: secrets
               mountPath: /data/secrets
       volumes:
+        # notes/secrets are provided by the volumeClaimTemplates below when
+        # managed per-pod. They only appear here when shared (existingClaim) or
+        # ephemeral (persistence disabled -> emptyDir).
+        {{- if or .Values.persistence.notes.existingClaim (not .Values.persistence.notes.enabled) }}
         - name: notes
-          {{- if .Values.persistence.notes.enabled }}
+          {{- if .Values.persistence.notes.existingClaim }}
           persistentVolumeClaim:
-            claimName: {{ include "mdnest.notesClaimName" . }}
+            claimName: {{ .Values.persistence.notes.existingClaim }}
           {{- else }}
           emptyDir: {}
           {{- end }}
+        {{- end }}
+        {{- if or .Values.persistence.secrets.existingClaim (not .Values.persistence.secrets.enabled) }}
         - name: secrets
-          {{- if .Values.persistence.secrets.enabled }}
+          {{- if .Values.persistence.secrets.existingClaim }}
           persistentVolumeClaim:
-            claimName: {{ include "mdnest.secretsClaimName" . }}
+            claimName: {{ .Values.persistence.secrets.existingClaim }}
           {{- else }}
           emptyDir: {}
           {{- end }}
+        {{- end }}
       {{- with .Values.backend.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -235,3 +244,55 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+  {{- if or (and .Values.persistence.notes.enabled (not .Values.persistence.notes.existingClaim)) (and .Values.persistence.secrets.enabled (not .Values.persistence.secrets.existingClaim)) }}
+  # Per-pod volumes managed by the StatefulSet: their PVC lifecycle is owned by
+  # the workload (created/named/attached per replica), so there is no orphaned
+  # PVC referenced from outside its owner. Shared storage instead uses
+  # persistence.*.existingClaim (a claim you provision); a disabled volume uses
+  # an emptyDir.
+  volumeClaimTemplates:
+    {{- if and .Values.persistence.notes.enabled (not .Values.persistence.notes.existingClaim) }}
+    - metadata:
+        name: notes
+        labels:
+          {{- include "mdnest.labels" . | nindent 10 }}
+          app.kubernetes.io/component: notes
+        {{- with (merge (dict) .Values.persistence.notes.annotations .Values.commonAnnotations) }}
+        annotations:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+      spec:
+        accessModes:
+          - {{ .Values.persistence.notes.accessMode }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.notes.size | quote }}
+        {{- if .Values.persistence.notes.storageClass }}
+        storageClassName: {{ .Values.persistence.notes.storageClass | quote }}
+        {{- end }}
+    {{- end }}
+    {{- if and .Values.persistence.secrets.enabled (not .Values.persistence.secrets.existingClaim) }}
+    - metadata:
+        name: secrets
+        labels:
+          {{- include "mdnest.labels" . | nindent 10 }}
+          app.kubernetes.io/component: secrets
+        {{- with (merge (dict) .Values.persistence.secrets.annotations .Values.commonAnnotations) }}
+        annotations:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+      spec:
+        accessModes:
+          - {{ .Values.persistence.secrets.accessMode }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.secrets.size | quote }}
+        {{- if .Values.persistence.secrets.storageClass }}
+        storageClassName: {{ .Values.persistence.secrets.storageClass | quote }}
+        {{- end }}
+    {{- end }}
+  {{- with .Values.persistence.pvcRetentionPolicy }}
+  persistentVolumeClaimRetentionPolicy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- end }}
