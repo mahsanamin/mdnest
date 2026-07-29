@@ -49,4 +49,7 @@ data:
   {{- if .Values.sso.adminEmails }}
   ADMIN_EMAILS: {{ .Values.sso.adminEmails | quote }}
   {{- end }}
+  {{- if .Values.sso.autoProvisionUsers }}
+  SSO_AUTOPROVISION_USERS: "true"
+  {{- end }}
   {{- end }}

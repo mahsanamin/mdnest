@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"log"
 	"net/http"
 	"net/url"
@@ -21,9 +23,11 @@ import (
 //   2. IdP bounces the browser back to /api/auth/sso/callback with
 //      ?code=...&state=... — we verify the state cookie, exchange the code,
 //      verify the ID token, and extract the email.
-//   3. We look the email up in the local users table. NO auto-provisioning —
-//      if the email isn't already invited, we redirect back to the frontend
-//      with an error in the hash.
+//   3. We look the email up in the local users table. By default there is NO
+//      auto-provisioning — if the email isn't already invited, we redirect
+//      back to the frontend with an error in the hash. When the operator opts
+//      in (autoProvisionUsers), an unknown but IdP-authenticated email is
+//      instead created as a least-privilege collaborator on first login.
 //   4. On success we mint the normal mdnest JWT (same shape as password /
 //      Firebase flow) and redirect to the frontend with the token in the
 //      URL fragment (#token=...). The frontend bootstrap reads the fragment,
@@ -40,6 +44,11 @@ type SSOHandler struct {
 	// OAuth bridge so the minted JWT can be handed to the MCP server's callback
 	// instead of the web UI. Empty by default → only frontendURL is allowed.
 	returnOrigins map[string]bool
+	// autoProvisionUsers, when true, creates a least-privilege collaborator
+	// for an unknown but IdP-authenticated email instead of rejecting it.
+	// Off by default. The operator opts in only when they trust their IdP to
+	// gate who may obtain a token (e.g. a domain-restricted enterprise IdP).
+	autoProvisionUsers bool
 }
 
 // NewSSOHandler wires an SSO client to a user store. frontendURL is the
@@ -47,8 +56,10 @@ type SSOHandler struct {
 // redirect the browser back after a successful (or failed) login.
 // allowedReturnOrigins is an optional allowlist of extra absolute origins the
 // post-login handoff may target (for the MCP OAuth bridge); nil/empty keeps the
-// default behavior of only redirecting to frontendURL.
-func NewSSOHandler(client *sso.Client, userStore store.UserStore, jwtSecret, frontendURL string, secureCookie bool, allowedReturnOrigins []string) *SSOHandler {
+// default behavior of only redirecting to frontendURL. autoProvisionUsers
+// creates a least-privilege collaborator for an unknown IdP-authenticated
+// email instead of rejecting it; false keeps the invite-only default.
+func NewSSOHandler(client *sso.Client, userStore store.UserStore, jwtSecret, frontendURL string, secureCookie bool, allowedReturnOrigins []string, autoProvisionUsers bool) *SSOHandler {
 	origins := make(map[string]bool, len(allowedReturnOrigins))
 	for _, o := range allowedReturnOrigins {
 		if o = strings.TrimRight(strings.TrimSpace(o), "/"); o != "" {
@@ -56,12 +67,13 @@ func NewSSOHandler(client *sso.Client, userStore store.UserStore, jwtSecret, fro
 		}
 	}
 	return &SSOHandler{
-		client:        client,
-		userStore:     userStore,
-		secret:        []byte(jwtSecret),
-		frontendURL:   strings.TrimRight(frontendURL, "/"),
-		secureCookie:  secureCookie,
-		returnOrigins: origins,
+		client:             client,
+		userStore:          userStore,
+		secret:             []byte(jwtSecret),
+		frontendURL:        strings.TrimRight(frontendURL, "/"),
+		secureCookie:       secureCookie,
+		returnOrigins:      origins,
+		autoProvisionUsers: autoProvisionUsers,
 	}
 }
 
@@ -156,9 +168,24 @@ func (h *SSOHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if user == nil {
-		log.Printf("sso rejected: %s has no mdnest account", claims.Email)
-		h.redirectWithError(w, r, "/", "sso_not_invited")
-		return
+		if !h.autoProvisionUsers {
+			log.Printf("sso rejected: %s has no mdnest account", claims.Email)
+			h.redirectWithError(w, r, "/", "sso_not_invited")
+			return
+		}
+		// Opt-in auto-provisioning: the IdP has already authenticated this
+		// identity, so create a least-privilege collaborator. It has no
+		// namespace access until granted (or until a personal namespace is
+		// auto-provisioned), so a fresh account can see nothing by default.
+		// The password is random and unusable — SSO users never password-auth.
+		provisioned, perr := h.provisionSSOUser(claims.Email, claims.Name)
+		if perr != nil {
+			log.Printf("sso auto-provision failed for %s: %v", claims.Email, perr)
+			h.redirectWithError(w, r, "/", "sso_internal")
+			return
+		}
+		log.Printf("sso auto-provisioned %s as collaborator (id %d)", claims.Email, provisioned.ID)
+		user = provisioned
 	}
 	if user.Blocked {
 		log.Printf("sso rejected: %s is blocked", claims.Email)
@@ -235,6 +262,47 @@ func (h *SSOHandler) safeFrom(from string) string {
 		return "/"
 	}
 	return p
+}
+
+// provisionSSOUser creates a least-privilege collaborator for an
+// IdP-authenticated email that has no local account yet. The username is
+// derived from the IdP display name (falling back to the email local part),
+// and the password is random and unusable — SSO users authenticate through
+// the IdP, never with a password.
+func (h *SSOHandler) provisionSSOUser(email, displayName string) (*store.User, error) {
+	username := strings.TrimSpace(displayName)
+	if username == "" {
+		if i := strings.IndexByte(email, '@'); i > 0 {
+			username = email[:i]
+		} else {
+			username = email
+		}
+	}
+	var buf [24]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return nil, err
+	}
+	pw := hex.EncodeToString(buf[:])
+
+	user, err := h.userStore.CreateUser(email, username, pw, "collaborator", nil)
+	if err != nil && store.IsUniqueViolation(err) {
+		// Display names are not unique (two "Alice Smith" in a directory), but
+		// users.username is. We only reach provisioning when the email has no
+		// account yet, so the email is a collision-free fallback username.
+		user, err = h.userStore.CreateUser(email, email, pw, "collaborator", nil)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// CreateUser hardcodes must_change_password = true, which is inert for SSO
+	// users (only the password-login path reads it) but diverges from the
+	// Firebase federated path, which sets it false. Clear it so both IdP paths
+	// behave the same.
+	if cerr := h.userStore.ClearMustChangePassword(user.ID); cerr != nil {
+		log.Printf("sso auto-provision: could not clear must_change_password for user %d: %v", user.ID, cerr)
+	}
+	return user, nil
 }
 
 func (h *SSOHandler) redirectWithError(w http.ResponseWriter, r *http.Request, from, code string) {

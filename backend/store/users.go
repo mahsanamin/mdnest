@@ -2,9 +2,11 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/lib/pq"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -67,6 +69,16 @@ type PostgresUserStore struct {
 // NewPostgresUserStore creates a new PostgresUserStore.
 func NewPostgresUserStore(db *DB) *PostgresUserStore {
 	return &PostgresUserStore{db: db}
+}
+
+// IsUniqueViolation reports whether err is a Postgres unique-constraint
+// violation (SQLSTATE 23505), e.g. inserting a duplicate username or email.
+func IsUniqueViolation(err error) bool {
+	var pqErr *pq.Error
+	if errors.As(err, &pqErr) {
+		return pqErr.Code == "23505"
+	}
+	return false
 }
 
 const userColumns = `id, email, username, password_hash, firebase_uid, role, invited_by, created_at, must_change_password, totp_secret, totp_enabled, recovery_codes, blocked, avatar_url`
