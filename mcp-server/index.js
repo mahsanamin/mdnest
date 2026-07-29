@@ -2,12 +2,10 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createServer as createHttpServer } from "node:http";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { timingSafeEqual, createHash } from "node:crypto";
 import { z } from "zod";
-import { buildOAuth } from "./oauth.js";
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -490,6 +488,10 @@ async function startHttp() {
   const host = process.env.MCP_HTTP_HOST || "0.0.0.0";
   const mcpPath = process.env.MCP_HTTP_PATH || "/mcp";
 
+  // Loaded lazily so a stdio spawn never parses the HTTP/OAuth modules it will
+  // never run: MCP_TRANSPORT unset means stdio, and none of this initialises.
+  const { StreamableHTTPServerTransport } = await import("@modelcontextprotocol/sdk/server/streamableHttp.js");
+
   // Authentication mode for the HTTP endpoint. Mutually exclusive, selected by
   // MCP_AUTH_MODE:
   //   bearer — clients present a static mdnest API token (service / gateway
@@ -514,6 +516,7 @@ async function startHttp() {
       console.error("MCP_AUTH_MODE=oauth requires MCP_PUBLIC_URL, MCP_OAUTH_SECRET and MCP_SSO_AUTHORIZE_URL");
       process.exit(1);
     }
+    const { buildOAuth } = await import("./oauth.js");
     oauth = buildOAuth({
       publicUrl,
       mcpPath,

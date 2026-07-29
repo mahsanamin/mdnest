@@ -10,9 +10,11 @@
 //
 // The design is completely stateless: all transient state (the PKCE challenge,
 // the client redirect URI, and the minted mdnest JWT) is carried inside
-// short-lived HMAC-signed blobs (a cookie during the browser round-trip, and
-// the authorization "code" afterwards). This keeps the deployment horizontally
-// scalable with no shared session store.
+// short-lived blobs with no shared session store. The browser round-trip cookie
+// is HMAC-signed (it holds no credential), while the authorization "code" is
+// AES-256-GCM *encrypted* — it carries the live mdnest JWT and travels in a
+// redirect URL, so it must be opaque, not merely tamper-evident. This keeps the
+// deployment horizontally scalable with no shared session store.
 //
 // Flow:
 //   1. MCP client hits /mcp with no token -> 401 + WWW-Authenticate pointing at
@@ -27,13 +29,13 @@
 //      /oauth/idp-callback with the mdnest JWT in the URL fragment.
 //   5. /oauth/idp-callback runs a tiny script that reads the fragment and POSTs
 //      the token to /oauth/finish, which validates it against the backend,
-//      mints a signed authorization code, and bounces the browser back to the
-//      MCP client's redirect URI.
+//      mints an encrypted authorization code, and bounces the browser back to
+//      the MCP client's redirect URI.
 //   6. /oauth/token verifies the PKCE verifier and returns the mdnest JWT as the
 //      access token.
 // ---------------------------------------------------------------------------
 
-import { createHmac, timingSafeEqual, createHash } from "node:crypto";
+import { createHmac, timingSafeEqual, createHash, randomBytes, createCipheriv, createDecipheriv } from "node:crypto";
 
 const b64url = (buf) => Buffer.from(buf).toString("base64url");
 
@@ -54,6 +56,42 @@ function verify(str, secret) {
   let obj;
   try {
     obj = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+  } catch {
+    return null;
+  }
+  if (obj.exp && Date.now() / 1000 > obj.exp) return null;
+  return obj;
+}
+
+// deriveKey turns an arbitrary-length secret into a fixed 32-byte AES-256 key.
+const deriveKey = (secret) => createHash("sha256").update(secret).digest();
+
+// seal encrypts obj into an opaque, tamper-evident token (AES-256-GCM). Unlike
+// sign(), which only authenticates a *readable* payload, seal keeps the payload
+// confidential. It is used for the authorization code, which carries a live
+// mdnest JWT and travels in a redirect URL (browser history, client logs): a
+// signed-only code would let anyone who reads that URL base64-decode the token.
+function seal(obj, secret) {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", deriveKey(secret), iv);
+  const ct = Buffer.concat([cipher.update(JSON.stringify(obj), "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `${b64url(iv)}.${b64url(ct)}.${b64url(tag)}`;
+}
+
+// unseal reverses seal(). Returns null on any tampering, malformed input, or
+// expiry (mirroring verify()'s exp check).
+function unseal(str, secret) {
+  if (typeof str !== "string") return null;
+  const parts = str.split(".");
+  if (parts.length !== 3) return null;
+  let obj;
+  try {
+    const [iv, ct, tag] = parts.map((p) => Buffer.from(p, "base64url"));
+    const decipher = createDecipheriv("aes-256-gcm", deriveKey(secret), iv);
+    decipher.setAuthTag(tag);
+    const pt = Buffer.concat([decipher.update(ct), decipher.final()]);
+    obj = JSON.parse(pt.toString("utf8"));
   } catch {
     return null;
   }
@@ -250,7 +288,7 @@ export function buildOAuth({ publicUrl, mcpPath, secret, ssoAuthorizeUrl, valida
       return;
     }
     clearTxCookie(res);
-    const code = sign({ tok: token, cc: tx.cc, rd: tx.rd, exp: Math.floor(Date.now() / 1000) + 120 }, key);
+    const code = seal({ tok: token, cc: tx.cc, rd: tx.rd, exp: Math.floor(Date.now() / 1000) + 120 }, key);
     const sep = tx.rd.includes("?") ? "&" : "?";
     const redirect = `${tx.rd}${sep}code=${encodeURIComponent(code)}&state=${encodeURIComponent(tx.st || "")}`;
     json(res, 200, { redirect });
@@ -263,7 +301,7 @@ export function buildOAuth({ publicUrl, mcpPath, secret, ssoAuthorizeUrl, valida
       json(res, 400, { error: "unsupported_grant_type" });
       return;
     }
-    const code = verify(body.code, key);
+    const code = unseal(body.code, key);
     if (!code) {
       json(res, 400, { error: "invalid_grant", error_description: "invalid or expired code" });
       return;
