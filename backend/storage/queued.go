@@ -255,11 +255,7 @@ func (q *QueuedStorage) Rename(ctx context.Context, ns, from, to string) error {
 // cache publishes a body to the working set, dropping the key when it exceeds
 // the cap so oversize/binary payloads are not held in Redis.
 func (q *QueuedStorage) cache(ctx context.Context, ns, relPath string, data []byte) {
-	if int64(len(data)) <= q.maxBytes {
-		_ = q.ws.Set(ctx, ns, relPath, data)
-	} else {
-		_ = q.ws.Delete(ctx, ns, relPath)
-	}
+	cacheBody(ctx, q.ws, ns, relPath, data, q.maxBytes)
 }
 
 // pathBase returns the last slash-separated element of a namespace-relative path.

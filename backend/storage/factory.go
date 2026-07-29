@@ -53,13 +53,7 @@ func fromEnvSingle(ctx context.Context, localRoot string) (Storage, error) {
 	case "", "local":
 		return NewLocalStorage(localRoot)
 	case "git":
-		interval := durationEnv("GIT_COMMIT_INTERVAL", 10*time.Second)
-		remote, err := remoteConfigFromEnv()
-		if err != nil {
-			return nil, err
-		}
-		committer := NewIntervalCommitter(localRoot, interval, os.Getenv("GIT_AUTHOR_NAME"), os.Getenv("GIT_AUTHOR_EMAIL"), remote)
-		gs, err := NewGitStorage(localRoot, committer)
+		gs, err := newGitStorageFromEnv(localRoot)
 		if err != nil {
 			return nil, err
 		}
@@ -116,13 +110,7 @@ func newWriterStorage(ctx context.Context, localRoot string) (Storage, error) {
 	if err != nil {
 		return nil, fmt.Errorf("storage: writer leader election unavailable: %w", err)
 	}
-	interval := durationEnv("GIT_COMMIT_INTERVAL", 10*time.Second)
-	remote, err := remoteConfigFromEnv()
-	if err != nil {
-		return nil, err
-	}
-	committer := NewIntervalCommitter(localRoot, interval, os.Getenv("GIT_AUTHOR_NAME"), os.Getenv("GIT_AUTHOR_EMAIL"), remote)
-	gs, err := NewGitStorage(localRoot, committer)
+	gs, err := newGitStorageFromEnv(localRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -133,6 +121,19 @@ func newWriterStorage(ctx context.Context, localRoot string) (Storage, error) {
 		}
 	}()
 	return newCoherentStorage(gs, ws, workingSetCap()), nil
+}
+
+// newGitStorageFromEnv builds a git backend (its interval committer and the
+// optional per-namespace remote mirror) from the environment. Shared by the
+// single-git and writer roles.
+func newGitStorageFromEnv(localRoot string) (*GitStorage, error) {
+	interval := durationEnv("GIT_COMMIT_INTERVAL", 10*time.Second)
+	remote, err := remoteConfigFromEnv()
+	if err != nil {
+		return nil, err
+	}
+	committer := NewIntervalCommitter(localRoot, interval, os.Getenv("GIT_AUTHOR_NAME"), os.Getenv("GIT_AUTHOR_EMAIL"), remote)
+	return NewGitStorage(localRoot, committer)
 }
 
 // instanceID returns a per-instance identifier (the hostname / pod name) used

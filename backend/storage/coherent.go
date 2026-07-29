@@ -11,6 +11,17 @@ import (
 // to the inner Storage. Overridable via REDIS_WORKINGSET_MAX_BYTES.
 const defaultWorkingSetMaxBytes = 1 << 20 // 1 MiB
 
+// cacheBody publishes a note body to the working set, dropping the key when it
+// exceeds the cap so oversize/binary payloads are not held in Redis. Best-effort:
+// working-set failures never fail the durable write that preceded them.
+func cacheBody(ctx context.Context, ws WorkingSet, ns, relPath string, data []byte, maxBytes int64) {
+	if int64(len(data)) <= maxBytes {
+		_ = ws.Set(ctx, ns, relPath, data)
+	} else {
+		_ = ws.Delete(ctx, ns, relPath)
+	}
+}
+
 // CoherentStorage layers a shared WorkingSet (Redis) over an inner Storage to
 // give strong read-after-write of note bodies across replicas. Every mutation
 // is written through to the inner Storage first (that remains the durability
@@ -86,11 +97,7 @@ func (c *CoherentStorage) WriteFile(ctx context.Context, ns, relPath string, dat
 	if err := c.Storage.WriteFile(ctx, ns, relPath, data); err != nil {
 		return err
 	}
-	if int64(len(data)) <= c.maxBytes {
-		_ = c.ws.Set(ctx, ns, relPath, data)
-	} else {
-		_ = c.ws.Delete(ctx, ns, relPath)
-	}
+	cacheBody(ctx, c.ws, ns, relPath, data, c.maxBytes)
 	return nil
 }
 
@@ -146,11 +153,11 @@ func (c *CoherentStorage) Rename(ctx context.Context, ns, from, to string) error
 // dropping the key when the file is gone or too large to cache.
 func (c *CoherentStorage) publish(ctx context.Context, ns, relPath string) {
 	data, err := c.Storage.ReadFile(ctx, ns, relPath)
-	if err != nil || int64(len(data)) > c.maxBytes {
+	if err != nil {
 		_ = c.ws.Delete(ctx, ns, relPath)
 		return
 	}
-	_ = c.ws.Set(ctx, ns, relPath, data)
+	cacheBody(ctx, c.ws, ns, relPath, data, c.maxBytes)
 }
 
 // coherentRangeStorage adds RangeReadable back when the inner backend supports

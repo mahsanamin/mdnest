@@ -42,23 +42,6 @@ type WorkingSet interface {
 	Close() error
 }
 
-// NoopWorkingSet satisfies WorkingSet without storing anything. It is used when
-// no Redis is configured (the "local fallback": CoherentStorage is not even
-// constructed in that case, so this exists mainly for tests and completeness).
-type NoopWorkingSet struct{}
-
-func (NoopWorkingSet) Get(context.Context, string, string) ([]byte, bool, error) {
-	return nil, false, nil
-}
-func (NoopWorkingSet) Set(context.Context, string, string, []byte) error  { return nil }
-func (NoopWorkingSet) Delete(context.Context, string, string) error       { return nil }
-func (NoopWorkingSet) DeletePrefix(context.Context, string, string) error { return nil }
-func (NoopWorkingSet) AddNamespace(context.Context, string) error         { return nil }
-func (NoopWorkingSet) RemoveNamespace(context.Context, string) error      { return nil }
-func (NoopWorkingSet) Namespaces(context.Context) ([]string, error)       { return nil, nil }
-func (NoopWorkingSet) List(context.Context, string) ([]string, error)     { return nil, nil }
-func (NoopWorkingSet) Close() error                                       { return nil }
-
 // RedisWorkingSet implements WorkingSet over Redis. Bodies are stored under
 // note:{ns}:{relPath} and each namespace keeps a companion index set
 // noteset:{ns} listing its paths, so DeletePrefix can enumerate members without

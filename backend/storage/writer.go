@@ -86,11 +86,7 @@ func (w *Writer) apply(ctx context.Context, op DurabilityOp) error {
 		if err := w.dst.WriteFile(ctx, op.NS, op.Path, op.Data); err != nil {
 			return err
 		}
-		if int64(len(op.Data)) <= w.maxBytes {
-			_ = w.ws.Set(ctx, op.NS, op.Path, op.Data)
-		} else {
-			_ = w.ws.Delete(ctx, op.NS, op.Path)
-		}
+		cacheBody(ctx, w.ws, op.NS, op.Path, op.Data, w.maxBytes)
 	case OpMkdir:
 		if err := w.dst.MkdirAll(ctx, op.NS, op.Path); err != nil {
 			return err
