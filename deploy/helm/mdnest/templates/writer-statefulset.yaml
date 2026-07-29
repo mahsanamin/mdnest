@@ -1,30 +1,32 @@
 {{- include "mdnest.validateSupported" . -}}
-{{- include "mdnest.validateHA" . -}}
-{{- include "mdnest.validateUpgrade" . -}}
-{{- if ne (include "mdnest.gitNativeHA" .) "true" }}
+{{- if eq (include "mdnest.gitNativeHA" .) "true" }}
+{{/*
+Git-native HA durability writer: a single-replica StatefulSet (MDNEST_ROLE=
+writer). It owns the authoritative git tree on a per-pod PVC, wins the Redis
+leader lock, drains the durability queue, commits, and (opt-in) mirrors each
+namespace repo to its remote. Exactly one replica: a git working tree has one
+writer. Not fronted by the backend Service.
+*/}}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: {{ include "mdnest.backend.fullname" . }}
+  name: {{ include "mdnest.writer.fullname" . }}
   labels:
     {{- include "mdnest.labels" . | nindent 4 }}
-    app.kubernetes.io/component: backend
+    app.kubernetes.io/component: writer
   {{- with .Values.commonAnnotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
-  serviceName: {{ include "mdnest.backend.headlessName" . }}
-  podManagementPolicy: {{ .Values.backend.podManagementPolicy }}
-  {{- if not .Values.backend.autoscaling.enabled }}
-  replicas: {{ .Values.backend.replicaCount }}
-  {{- end }}
+  serviceName: {{ include "mdnest.writer.headlessName" . }}
+  replicas: 1
   updateStrategy:
-    {{- toYaml .Values.backend.updateStrategy | nindent 4 }}
+    type: RollingUpdate
   selector:
     matchLabels:
       {{- include "mdnest.selectorLabels" . | nindent 6 }}
-      app.kubernetes.io/component: backend
+      app.kubernetes.io/component: writer
   template:
     metadata:
       annotations:
@@ -35,7 +37,7 @@ spec:
         {{- end }}
       labels:
         {{- include "mdnest.selectorLabels" . | nindent 8 }}
-        app.kubernetes.io/component: backend
+        app.kubernetes.io/component: writer
         {{- with .Values.backend.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -51,10 +53,9 @@ spec:
       {{- end }}
       {{- with .Values.backend.namespaces }}
       initContainers:
-        # Ensure the configured top-level namespaces (note folders) exist under
-        # /data/notes. Idempotent and self-healing on every (re)start. When the
-        # list is empty (default) this init container is not rendered, so the
-        # existing behavior is unchanged.
+        # Provision the configured top-level namespaces on the writer's tree
+        # (idempotent). The writer owns the filesystem, so this runs here rather
+        # than on the stateless app replicas.
         - name: provision-namespaces
           image: {{ $.Values.backend.namespaceInitImage }}
           imagePullPolicy: {{ $.Values.image.pullPolicy }}
@@ -76,7 +77,7 @@ spec:
               mountPath: /data/notes
       {{- end }}
       containers:
-        - name: backend
+        - name: writer
           image: {{ include "mdnest.backend.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           {{- with .Values.backend.securityContext }}
@@ -90,6 +91,8 @@ spec:
             - configMapRef:
                 name: {{ include "mdnest.envConfigName" . }}
           env:
+            - name: MDNEST_ROLE
+              value: writer
             {{- include "mdnest.backend.secretEnv" . | nindent 12 }}
             {{- with .Values.backend.extraEnv }}
             {{- toYaml . | nindent 12 }}
@@ -114,7 +117,7 @@ spec:
             timeoutSeconds: {{ .Values.backend.readinessProbe.timeoutSeconds }}
             failureThreshold: {{ .Values.backend.readinessProbe.failureThreshold }}
           {{- end }}
-          {{- with .Values.backend.resources }}
+          {{- with .Values.writer.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
@@ -123,34 +126,15 @@ spec:
               mountPath: /data/notes
             - name: secrets
               mountPath: /data/secrets
-            {{- if and (eq .Values.storage.backend "git") .Values.storage.git.remote.url .Values.storage.git.remote.existingTokenSecret }}
+            {{- if and .Values.storage.git.remote.url .Values.storage.git.remote.existingTokenSecret }}
             - name: git-token
               mountPath: /etc/mdnest/git
               readOnly: true
             {{- end }}
       volumes:
-        # notes/secrets are provided by the volumeClaimTemplates below when
-        # managed per-pod. They only appear here when shared (existingClaim) or
-        # ephemeral (persistence disabled -> emptyDir).
-        {{- if or .Values.persistence.notes.existingClaim (not .Values.persistence.notes.enabled) }}
-        - name: notes
-          {{- if .Values.persistence.notes.existingClaim }}
-          persistentVolumeClaim:
-            claimName: {{ .Values.persistence.notes.existingClaim }}
-          {{- else }}
-          emptyDir: {}
-          {{- end }}
-        {{- end }}
-        {{- if or .Values.persistence.secrets.existingClaim (not .Values.persistence.secrets.enabled) }}
         - name: secrets
-          {{- if .Values.persistence.secrets.existingClaim }}
-          persistentVolumeClaim:
-            claimName: {{ .Values.persistence.secrets.existingClaim }}
-          {{- else }}
           emptyDir: {}
-          {{- end }}
-        {{- end }}
-        {{- if and (eq .Values.storage.backend "git") .Values.storage.git.remote.url .Values.storage.git.remote.existingTokenSecret }}
+        {{- if and .Values.storage.git.remote.url .Values.storage.git.remote.existingTokenSecret }}
         - name: git-token
           secret:
             secretName: {{ .Values.storage.git.remote.existingTokenSecret }}
@@ -158,31 +142,24 @@ spec:
               - key: {{ .Values.storage.git.remote.tokenSecretKey }}
                 path: token
         {{- end }}
-      {{- with .Values.backend.nodeSelector }}
+      {{- with .Values.writer.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.backend.affinity }}
+      {{- with .Values.writer.affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.backend.tolerations }}
+      {{- with .Values.writer.tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-  {{- if or (and .Values.persistence.notes.enabled (not .Values.persistence.notes.existingClaim)) (and .Values.persistence.secrets.enabled (not .Values.persistence.secrets.existingClaim)) }}
-  # Per-pod volumes managed by the StatefulSet: their PVC lifecycle is owned by
-  # the workload (created/named/attached per replica), so there is no orphaned
-  # PVC referenced from outside its owner. Shared storage instead uses
-  # persistence.*.existingClaim (a claim you provision); a disabled volume uses
-  # an emptyDir.
   volumeClaimTemplates:
-    {{- if and .Values.persistence.notes.enabled (not .Values.persistence.notes.existingClaim) }}
     - metadata:
         name: notes
         labels:
           {{- include "mdnest.labels" . | nindent 10 }}
-          app.kubernetes.io/component: notes
+          app.kubernetes.io/component: writer
         {{- with (merge (dict) .Values.persistence.notes.annotations .Values.commonAnnotations) }}
         annotations:
           {{- toYaml . | nindent 10 }}
@@ -196,30 +173,8 @@ spec:
         {{- if .Values.persistence.notes.storageClass }}
         storageClassName: {{ .Values.persistence.notes.storageClass | quote }}
         {{- end }}
-    {{- end }}
-    {{- if and .Values.persistence.secrets.enabled (not .Values.persistence.secrets.existingClaim) }}
-    - metadata:
-        name: secrets
-        labels:
-          {{- include "mdnest.labels" . | nindent 10 }}
-          app.kubernetes.io/component: secrets
-        {{- with (merge (dict) .Values.persistence.secrets.annotations .Values.commonAnnotations) }}
-        annotations:
-          {{- toYaml . | nindent 10 }}
-        {{- end }}
-      spec:
-        accessModes:
-          - {{ .Values.persistence.secrets.accessMode }}
-        resources:
-          requests:
-            storage: {{ .Values.persistence.secrets.size | quote }}
-        {{- if .Values.persistence.secrets.storageClass }}
-        storageClassName: {{ .Values.persistence.secrets.storageClass | quote }}
-        {{- end }}
-    {{- end }}
   {{- with .Values.persistence.pvcRetentionPolicy }}
   persistentVolumeClaimRetentionPolicy:
     {{- toYaml . | nindent 4 }}
-  {{- end }}
   {{- end }}
 {{- end }}

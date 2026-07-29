@@ -413,6 +413,23 @@ persistence:
     annotations: {}
 
 # -----------------------------------------------------------------------------
+# Durability writer (git-native HA only). Rendered when storage.backend=git and
+# the backend is scaled past one replica (or autoscaled): a single-replica
+# StatefulSet that owns the authoritative git tree, wins the Redis leader lock,
+# drains the durability queue, and mirrors to the remote. Its notes PVC reuses
+# persistence.notes (size/storageClass/accessMode); only sizing/scheduling here.
+# -----------------------------------------------------------------------------
+writer:
+  # -- Writer resource requests/limits.
+  resources: {}
+  # -- Node selector for the writer pod.
+  nodeSelector: {}
+  # -- Tolerations for the writer pod.
+  tolerations: []
+  # -- Affinity rules for the writer pod.
+  affinity: {}
+
+# -----------------------------------------------------------------------------
 # git-sync sidecar (optional). Periodically commits/pushes the notes repo to a
 # git remote, mirroring the upstream git-sync container. Runs as a SINGLE
 # replica (a git working tree has one writer) even in active/active.

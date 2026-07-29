@@ -399,6 +399,11 @@ All traffic goes to the frontend Service, which proxies `/api` and `/api/ws` (We
 | storage.s3.secretKey | string | `""` | Inline S3 secret key (used only when `existingSecret` is empty). |
 | storage.s3.secretKeys | object | `{"accessKey":"S3_ACCESS_KEY","secretKey":"S3_SECRET_KEY"}` | Keys inside `existingSecret` holding the credentials. |
 | storage.s3.useSSL | bool | `true` | Use TLS to reach the endpoint. |
+| writer | object | `{"affinity":{},"nodeSelector":{},"resources":{},"tolerations":[]}` | --------------------------------------------------------------------------- |
+| writer.affinity | object | `{}` | Affinity rules for the writer pod. |
+| writer.nodeSelector | object | `{}` | Node selector for the writer pod. |
+| writer.resources | object | `{}` | Writer resource requests/limits. |
+| writer.tolerations | list | `[]` | Tolerations for the writer pod. |
 
 ## Maintainers
 
