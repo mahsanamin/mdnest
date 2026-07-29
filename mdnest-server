@@ -21,8 +21,16 @@ if [ -d "git-sync/keys" ]; then
   fi
 fi
 
+# Auto-detect if the MCP server (AI agents) should be enabled:
+# setup.sh writes MCP_ENABLED=true to .env when ENABLE_MCP=true → include
+# --profile mcp so the opt-in service starts alongside the app.
+MCP_PROFILE=""
+if grep -q '^MCP_ENABLED=true$' .env 2>/dev/null; then
+  MCP_PROFILE="--profile mcp"
+fi
+
 compose() {
-  docker compose $SYNC_PROFILE "$@"
+  docker compose $SYNC_PROFILE $MCP_PROFILE "$@"
 }
 
 CMD="${1:-help}"
@@ -66,6 +74,9 @@ case "$CMD" in
     if [ -n "$SYNC_PROFILE" ]; then
       compose up --force-recreate --no-deps -d git-sync
     fi
+    if [ -n "$MCP_PROFILE" ]; then
+      compose up --force-recreate --no-deps -d mcp
+    fi
     echo "mdnest reloaded with new config"
     ;;
   rebuild)
@@ -98,6 +109,9 @@ case "$CMD" in
       compose up -d --force-recreate backend frontend "$@"
       if [ -n "$SYNC_PROFILE" ]; then
         compose up --force-recreate --no-deps -d git-sync
+      fi
+      if [ -n "$MCP_PROFILE" ]; then
+        compose up --build --force-recreate --no-deps -d mcp
       fi
     fi
     [ -n "$SYNC_PROFILE" ] && echo "git-sync: enabled" || echo "git-sync: disabled (no keys in git-sync/keys/)"

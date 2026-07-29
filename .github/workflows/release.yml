@@ -32,9 +32,8 @@ jobs:
             context: backend
           - name: frontend
             context: frontend
-          # mcp-server has no Dockerfile yet — it ships as a stdio process run
-          # next to the AI client, not a container. Add it back in the change
-          # that lands the streamable-HTTP transport and its Dockerfile.
+          - name: mcp-server
+            context: mcp-server
     steps:
       - uses: actions/checkout@v4
       - name: Compute build metadata

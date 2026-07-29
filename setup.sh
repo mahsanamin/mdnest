@@ -91,6 +91,13 @@ while IFS= read -r line; do
     SSO_PROVIDER_LABEL) SSO_PROVIDER_LABEL="$value" ;;
     INSECURE_DEV_LOGIN) INSECURE_DEV_LOGIN="$value" ;;
     GRANT_MAX_DEPTH) GRANT_MAX_DEPTH="$value" ;;
+    ENABLE_MCP) ENABLE_MCP="$value" ;;
+    MCP_TOKEN) MCP_TOKEN="$value" ;;
+    MCP_HTTP_PORT) MCP_HTTP_PORT="$value" ;;
+    MCP_AUTH_MODE) MCP_AUTH_MODE="$value" ;;
+    MCP_PUBLIC_URL) MCP_PUBLIC_URL="$value" ;;
+    MCP_OAUTH_SECRET) MCP_OAUTH_SECRET="$value" ;;
+    MCP_SSO_AUTHORIZE_URL) MCP_SSO_AUTHORIZE_URL="$value" ;;
     COMPOSE_PROJECT_NAME) COMPOSE_PROJECT_NAME="$value" ;;
     MOUNT_*)
       name="${key#MOUNT_}"
@@ -267,6 +274,20 @@ POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 EOF
 fi
 
+# Optional MCP server (AI agents) — opt-in, off by default. Emitted to .env so
+# both the compose service and mdnest-server (which adds --profile mcp) can see
+# it. Secrets live in .env; docker-compose.yml references them via ${...}.
+if [ "$ENABLE_MCP" = "true" ]; then
+  cat >> .env <<EOF
+MCP_ENABLED=true
+MCP_TOKEN=${MCP_TOKEN:-}
+MCP_AUTH_MODE=${MCP_AUTH_MODE:-service}
+MCP_PUBLIC_URL=${MCP_PUBLIC_URL:-}
+MCP_OAUTH_SECRET=${MCP_OAUTH_SECRET:-}
+MCP_SSO_AUTHORIZE_URL=${MCP_SSO_AUTHORIZE_URL:-}
+EOF
+fi
+
 echo "Generated .env"
 
 # Build volume mount lines for backend
@@ -419,6 +440,47 @@ else
   done
 fi
 
+# MCP server (AI agents) — optional, opt-in via ENABLE_MCP=true. Gated behind
+# the compose "mcp" profile so the service is only started when mdnest-server
+# detects MCP_ENABLED (adds --profile mcp). Reaches the backend over the
+# internal compose network; the /mcp endpoint is published on the host.
+MCP_SERVICE=""
+if [ "$ENABLE_MCP" = "true" ]; then
+  MCP_AUTH_MODE="${MCP_AUTH_MODE:-service}"
+  MCP_HTTP_PORT="${MCP_HTTP_PORT:-3000}"
+  echo "MCP server: enabled (auth mode: ${MCP_AUTH_MODE}, endpoint :${MCP_HTTP_PORT}/mcp)"
+  if [ "$MCP_AUTH_MODE" = "service" ] && [ -z "$MCP_TOKEN" ]; then
+    echo "  Warning: MCP_TOKEN is empty. Create an API token in Settings > API"
+    echo "           Tokens, set MCP_TOKEN in $CONF, then run ./mdnest-server rebuild."
+  fi
+  MCP_OAUTH_ENV=""
+  if [ "$MCP_AUTH_MODE" = "oauth" ]; then
+    MCP_OAUTH_ENV="      - MCP_PUBLIC_URL=\${MCP_PUBLIC_URL}
+      - MCP_OAUTH_SECRET=\${MCP_OAUTH_SECRET}
+      - MCP_SSO_AUTHORIZE_URL=\${MCP_SSO_AUTHORIZE_URL}
+"
+  fi
+  MCP_SERVICE="
+  mcp:
+    build: ./mcp-server
+    profiles:
+      - mcp
+    depends_on:
+      - backend
+    environment:
+      - MDNEST_URL=http://backend:8080
+      - MDNEST_TOKEN=\${MCP_TOKEN}
+      - MCP_TRANSPORT=http
+      - MCP_HTTP_HOST=0.0.0.0
+      - MCP_HTTP_PORT=3000
+      - MCP_HTTP_PATH=/mcp
+      - MCP_AUTH_MODE=${MCP_AUTH_MODE}
+${MCP_OAUTH_ENV}    ports:
+      - \"${MCP_HTTP_PORT}:3000\"
+    restart: unless-stopped
+"
+fi
+
 # Generate docker-compose.yml
 cat > docker-compose.yml <<EOF
 services:
@@ -462,7 +524,7 @@ ${GITSYNC_VOLUMES}      - ./git-sync/sync.sh:/sync.sh:ro
     entrypoint: /bin/sh
     command: ["/sync.sh"]
     restart: unless-stopped
-
+${MCP_SERVICE}
 volumes:
   mdnest-secrets:
 ${EXTRA_VOLUMES}

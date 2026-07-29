@@ -2,6 +2,9 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { createServer as createHttpServer } from "node:http";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { timingSafeEqual, createHash } from "node:crypto";
 import { z } from "zod";
 
 // ---------------------------------------------------------------------------
@@ -13,6 +16,11 @@ const USERNAME = process.env.MDNEST_USER;          // fallback: username/passwor
 const PASSWORD = process.env.MDNEST_PASSWORD;
 
 let token = null;
+
+// Per-request auth context. In OAuth mode each MCP request carries the calling
+// user's own mdnest JWT, which we forward to the backend so every action is
+// attributed to that user. Falls back to the process-wide service token.
+const authStore = new AsyncLocalStorage();
 
 // ---------------------------------------------------------------------------
 // Auth helpers
@@ -47,11 +55,16 @@ async function authenticate() {
 // ---------------------------------------------------------------------------
 async function api(path, options = {}, _retried = false) {
   const headers = { ...options.headers };
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
+  // Prefer the per-request token (set in OAuth and bearer modes); fall back to
+  // the process-wide service token (stdio transport).
+  const reqToken = authStore.getStore()?.token || token;
+  if (reqToken) {
+    headers["Authorization"] = `Bearer ${reqToken}`;
   }
   const res = await fetch(`${BASE_URL}${path}`, { ...options, headers });
-  if (res.status === 401 && !_retried) {
+  // Only the process-wide service token can be silently re-minted on 401.
+  // A per-request user token that expired must surface the 401 to the caller.
+  if (res.status === 401 && !_retried && !authStore.getStore()?.token) {
     await authenticate();
     return api(path, options, true);
   }
@@ -98,10 +111,16 @@ function treeToText(node, indent = 0) {
 // ---------------------------------------------------------------------------
 // MCP Server setup
 // ---------------------------------------------------------------------------
-const server = new McpServer({
-  name: "mdnest",
-  version: "0.1.0",
-});
+// Build a fully-configured MCP server instance. Using a factory (instead of a
+// module-level singleton) lets the streamable-HTTP transport spin up an
+// isolated server per request, which avoids cross-client request-id
+// collisions. The stdio path builds a single instance, so its behaviour is
+// unchanged.
+function createServer() {
+  const server = new McpServer({
+    name: "mdnest",
+    version: "0.1.0",
+  });
 
 // ---------------------------------------------------------------------------
 // Tools
@@ -446,13 +465,193 @@ server.resource(
   }
 );
 
+  return server;
+}
+
+// ---------------------------------------------------------------------------
+// Transports
+// ---------------------------------------------------------------------------
+
+// Default: stdio (unchanged behaviour). Opt in to network mode by setting
+// MCP_TRANSPORT=http (a.k.a. "streamable-http").
+async function startStdio() {
+  const server = createServer();
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+}
+
+// Streamable-HTTP transport, stateless: each POST is served by a fresh
+// server + transport pair. GET (server-initiated SSE streams) and DELETE
+// (session teardown) are unused in stateless mode and return 405.
+async function startHttp() {
+  const port = parseInt(process.env.MCP_HTTP_PORT || "3000", 10);
+  const host = process.env.MCP_HTTP_HOST || "0.0.0.0";
+  const mcpPath = process.env.MCP_HTTP_PATH || "/mcp";
+
+  // Loaded lazily so a stdio spawn never parses the HTTP/OAuth modules it will
+  // never run: MCP_TRANSPORT unset means stdio, and none of this initialises.
+  const { StreamableHTTPServerTransport } = await import("@modelcontextprotocol/sdk/server/streamableHttp.js");
+
+  // Authentication mode for the HTTP endpoint. Mutually exclusive, selected by
+  // MCP_AUTH_MODE:
+  //   bearer — clients present a static mdnest API token (service / gateway
+  //            integration, e.g. an MCP gateway federating this server). The
+  //            presented token is constant-time compared against MDNEST_TOKEN
+  //            and forwarded to the backend.
+  //   oauth  — per-user delegation via OAuth 2.1 authorization-code + PKCE; each
+  //            request carries the calling user's own mdnest JWT, forwarded to
+  //            the backend so every action is attributed to that user.
+  const authMode = (process.env.MCP_AUTH_MODE || "bearer").toLowerCase();
+  if (authMode !== "bearer" && authMode !== "oauth") {
+    console.error(`MCP_AUTH_MODE must be "bearer" or "oauth" (got "${authMode}")`);
+    process.exit(1);
+  }
+
+  let oauth = null;
+  if (authMode === "oauth") {
+    const publicUrl = process.env.MCP_PUBLIC_URL;
+    const secret = process.env.MCP_OAUTH_SECRET;
+    const ssoAuthorizeUrl = process.env.MCP_SSO_AUTHORIZE_URL;
+    if (!publicUrl || !secret || !ssoAuthorizeUrl) {
+      console.error("MCP_AUTH_MODE=oauth requires MCP_PUBLIC_URL, MCP_OAUTH_SECRET and MCP_SSO_AUTHORIZE_URL");
+      process.exit(1);
+    }
+    const { buildOAuth } = await import("./oauth.js");
+    oauth = buildOAuth({
+      publicUrl,
+      mcpPath,
+      secret,
+      ssoAuthorizeUrl,
+      validateUrl: BASE_URL,
+      secureCookie: publicUrl.startsWith("https://"),
+    });
+  } else if (!API_TOKEN) {
+    console.error("MCP_AUTH_MODE=bearer requires MDNEST_TOKEN (a valid mdnest API token)");
+    process.exit(1);
+  }
+
+  const jsonError = (id, code, message) =>
+    JSON.stringify({ jsonrpc: "2.0", error: { code, message }, id: id ?? null });
+
+  // bearer mode: extract the presented bearer and constant-time compare it
+  // against the configured static token.
+  const bearerFromReq = (req) => {
+    const h = req.headers["authorization"] || "";
+    const m = /^Bearer\s+(.+)$/i.exec(h);
+    return m ? m[1].trim() : null;
+  };
+  const tokenMatches = (presented) => {
+    if (!presented || !API_TOKEN) return false;
+    const a = createHash("sha256").update(presented).digest();
+    const b = createHash("sha256").update(API_TOKEN).digest();
+    return timingSafeEqual(a, b);
+  };
+
+  const handlePost = async (req, res, userToken) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    let body;
+    try {
+      body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : undefined;
+    } catch {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(jsonError(null, -32700, "Parse error"));
+      return;
+    }
+
+    const server = createServer();
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    res.on("close", () => {
+      transport.close();
+      server.close();
+    });
+    await server.connect(transport);
+    // Run the request inside an auth context so api() forwards the caller's
+    // own token to the backend. In OAuth mode this is the user's JWT; in bearer
+    // mode it is the configured static token. For stdio userToken is undefined
+    // and api() falls back to the process-wide token.
+    await authStore.run({ token: userToken }, () => transport.handleRequest(req, res, body));
+  };
+
+  const httpServer = createHttpServer((req, res) => {
+    const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+
+    if (req.method === "GET" && url.pathname === "/healthz") {
+      res.writeHead(200, { "Content-Type": "text/plain" });
+      res.end("ok");
+      return;
+    }
+
+    // OAuth 2.1 discovery + authorization endpoints (oauth mode only).
+    if (oauth && oauth.handle(req, res, url)) {
+      return;
+    }
+
+    if (url.pathname !== mcpPath) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(jsonError(null, -32601, "Not found"));
+      return;
+    }
+
+    if (req.method === "POST") {
+      let userToken;
+      if (oauth) {
+        userToken = oauth.bearer(req);
+        if (!userToken) {
+          oauth.challenge(res, jsonError(null, -32001, "Authentication required"));
+          return;
+        }
+      } else {
+        // bearer mode: require the configured static mdnest API token.
+        const presented = bearerFromReq(req);
+        if (!tokenMatches(presented)) {
+          res.writeHead(401, {
+            "Content-Type": "application/json",
+            "WWW-Authenticate": "Bearer",
+            "Cache-Control": "no-store",
+          });
+          res.end(jsonError(null, -32001, "Authentication required"));
+          return;
+        }
+        userToken = API_TOKEN;
+      }
+      handlePost(req, res, userToken).catch((err) => {
+        console.error("MCP request error:", err);
+        if (!res.headersSent) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(jsonError(null, -32603, "Internal error"));
+        }
+      });
+      return;
+    }
+
+    res.writeHead(405, { "Content-Type": "application/json", Allow: "POST" });
+    res.end(jsonError(null, -32000, "Method not allowed (stateless streamable-http accepts POST only)"));
+  });
+
+  httpServer.listen(port, host, () => {
+    console.error(`mdnest MCP server (streamable-http) listening on http://${host}:${port}${mcpPath} [${authMode}]`);
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Start
 // ---------------------------------------------------------------------------
 async function main() {
-  await authenticate();
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
+  const mode = (process.env.MCP_TRANSPORT || "stdio").toLowerCase();
+  const httpMode = mode === "http" || mode === "streamable-http";
+  const oauthMode = httpMode && (process.env.MCP_AUTH_MODE || "bearer").toLowerCase() === "oauth";
+  // In OAuth mode the backend credential is supplied per request by each user,
+  // so no process-wide service token is needed. Otherwise (bearer / stdio)
+  // authenticate now with the service token.
+  if (!oauthMode) {
+    await authenticate();
+  }
+  if (httpMode) {
+    await startHttp();
+  } else {
+    await startStdio();
+  }
 }
 
 main().catch((err) => {

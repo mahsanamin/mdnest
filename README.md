@@ -144,6 +144,11 @@ Create an API token in Settings (gear icon) > API Tokens, then configure your MC
 
 **Available tools:** `list_namespaces`, `list_tree`, `read_note`, `write_note`, `append_note`, `prepend_note`, `create_note`, `create_folder`, `delete_item`, `move_item`, `search_notes`
 
+For a **shared/hosted endpoint** the server also speaks the streamable-HTTP
+transport (`MCP_TRANSPORT=http`, `POST /mcp`), with an optional per-user OAuth
+2.1 mode and an opt-in Docker Compose service. See
+[docs/mcp.md](docs/mcp.md) for transports, auth modes, and deployment.
+
 ## Server Management
 
 All server commands use `mdnest-server` and must be run from the project directory:
@@ -353,6 +358,7 @@ Beyond the core editor and the three access interfaces, mdnest includes:
 - [docs/api.md](docs/api.md) — Full REST API reference with curl examples
 - [docs/cli.md](docs/cli.md) — `mdnest` CLI for terminal access (multi-server)
 - [docs/kubernetes.md](docs/kubernetes.md) — Optional Helm chart, if you'd rather run it in a cluster
+- [docs/mcp.md](docs/mcp.md) — MCP server for AI agents (stdio + streamable-HTTP, OAuth, Compose)
 - [docs/sso-setup.md](docs/sso-setup.md) — Corporate SSO (Google / Okta / Entra / Keycloak / Auth0)
 - [docs/firebase-setup.md](docs/firebase-setup.md) — Firebase Auth peer mode
 

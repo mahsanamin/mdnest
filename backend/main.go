@@ -425,10 +425,21 @@ func main() {
 	// state cookie + HMAC ensures we can't be tricked into minting tokens
 	// from a replayed callback.
 	if ssoClient != nil {
+		// Optional allowlist of extra origins the SSO handoff may target, in
+		// addition to the frontend. Used by the MCP OAuth bridge so the minted
+		// JWT can be handed to the MCP server's callback. Comma-separated
+		// absolute origins, e.g. "https://mdnest-mcp.example.com".
+		var ssoReturnOrigins []string
+		for _, o := range strings.Split(env("SSO_ALLOWED_RETURN_ORIGINS", ""), ",") {
+			if o = strings.TrimSpace(o); o != "" {
+				ssoReturnOrigins = append(ssoReturnOrigins, o)
+			}
+		}
 		ssoHandler := handlers.NewSSOHandler(
 			ssoClient, userStore, jwtSecret,
 			strings.TrimRight(frontendOrigin, "/"),
 			strings.HasPrefix(frontendOrigin, "https://"),
+			ssoReturnOrigins,
 		)
 		mux.HandleFunc("/api/auth/sso/start", ssoHandler.HandleStart)
 		mux.HandleFunc("/api/auth/sso/callback", ssoHandler.HandleCallback)

@@ -102,13 +102,24 @@ type stateCookie struct {
 	Nonce        string `json:"n"`
 	CodeVerifier string `json:"v"`
 	From         string `json:"f"`
+	// ReturnOrigin is an optional absolute origin (scheme://host[:port]) that
+	// the caller of /start requested the post-login handoff be sent to instead
+	// of the default frontend origin. It is only ever set when the origin was
+	// already validated against the server-side allowlist, and it travels
+	// inside this HMAC-signed cookie so a client cannot tamper with it. Used by
+	// the MCP OAuth bridge so the minted JWT can land on the MCP server's
+	// callback. Empty for the normal browser login.
+	ReturnOrigin string `json:"r,omitempty"`
 	ExpiresAt    int64  `json:"e"`
 }
 
 // BuildAuthURL returns the provider's authorization URL and the cookie value
 // that must be Set-Cookie'd back to the browser.
 // `from` is where to send the user after a successful login.
-func (c *Client) BuildAuthURL(from string) (authURL, cookieValue string, err error) {
+// `returnOrigin` is an optional, already-allowlisted absolute origin that the
+// post-login handoff should target instead of the default frontend origin
+// (used by the MCP OAuth bridge). Pass "" for the normal browser login.
+func (c *Client) BuildAuthURL(from, returnOrigin string) (authURL, cookieValue string, err error) {
 	state, err := randomToken(32)
 	if err != nil {
 		return "", "", err
@@ -127,6 +138,7 @@ func (c *Client) BuildAuthURL(from string) (authURL, cookieValue string, err err
 		Nonce:        nonce,
 		CodeVerifier: verifier,
 		From:         from,
+		ReturnOrigin: returnOrigin,
 		ExpiresAt:    time.Now().Add(10 * time.Minute).Unix(),
 	}
 	payload, err := json.Marshal(sc)
@@ -155,6 +167,7 @@ type VerifiedClaims struct {
 	Picture       string // OIDC `picture` claim (profile image URL); empty if the IdP doesn't provide one
 	Subject       string
 	From          string // where the original request wanted to land
+	ReturnOrigin  string // optional allowlisted origin for the handoff (MCP OAuth bridge); empty for normal login
 }
 
 // ExchangeCallback validates the callback query parameters, exchanges the
@@ -224,6 +237,7 @@ func (c *Client) ExchangeCallback(ctx context.Context, cookieValue, state, code 
 		Picture:       claims.Picture,
 		Subject:       idToken.Subject,
 		From:          sc.From,
+		ReturnOrigin:  sc.ReturnOrigin,
 	}, nil
 }
 

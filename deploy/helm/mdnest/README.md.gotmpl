@@ -19,7 +19,7 @@ PostgreSQL and Redis are **never bundled**: point the chart at external/managed 
 
 > [!IMPORTANT]
 > **Not every option below is available yet.** The chart is versioned with mdnest,
-> and three opt-in capabilities documented here are not implemented in this
+> and two opt-in capabilities documented here are not implemented in this
 > release — the chart **refuses to install** rather than come up "healthy" while
 > doing the wrong thing:
 >
@@ -27,7 +27,6 @@ PostgreSQL and Redis are **never bundled**: point the chart at external/managed 
 > |---|---|
 > | `storage.backend=s3` | The backend reads notes from the filesystem and ignores `S3_*`; notes would land on the PVC, not your bucket. |
 > | `collab.redis.*` | There is no presence/event backplane, so replicas would diverge instead of syncing. |
-> | `mcp.enabled=true` | The bundled MCP server speaks stdio only; the Service and Ingress would route to a port nothing listens on. |
 >
 > Consequently `backend.replicaCount > 1` is also rejected: active/active needs
 > the backplane. **Supported today:** single-replica `single` or `multi` mode,
@@ -189,12 +188,13 @@ backend:
 
 ### MCP server
 
-Opt-in Model Context Protocol endpoint. See the dedicated MCP docs in the app repository for client configuration. Minimal service-token setup:
+Opt-in Model Context Protocol endpoint. See the dedicated MCP docs in the app repository for client configuration. Minimal bearer (static token) setup:
 
 ```yaml
 mcp:
   enabled: true
   auth:
+    mode: bearer
     existingSecret: mdnest-mcp-token   # key: token (an mdnest_... API token)
   ingress:
     enabled: true
@@ -203,7 +203,7 @@ mcp:
         paths: [{ path: /, pathType: Prefix }]
 ```
 
-For per-user attribution, enable `mcp.oauth.enabled=true` and set `mcp.oauth.publicUrl` + `mcp.oauth.ssoAuthorizeUrl` (requires SSO).
+For per-user attribution, set `mcp.auth.mode=oauth` and provide `mcp.oauth.publicUrl` + `mcp.oauth.ssoAuthorizeUrl` (requires SSO). `bearer` and `oauth` are mutually exclusive.
 
 ### git-sync
 

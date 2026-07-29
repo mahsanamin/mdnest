@@ -46,6 +46,26 @@ jobs:
       - run: cd frontend && npm run build
       - run: cd frontend && npm test
 
+  mcp-server:
+    name: MCP server (auth smoke tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: mcp-server/package-lock.json
+      - run: cd mcp-server && npm ci
+      - name: Auth smoke tests (oauth + bearer)
+        # Runs both MCP auth modes end to end. oauth: spins a fake mdnest backend
+        # + the real mcp-server and drives the full OAuth 2.1 authorization-code
+        # + PKCE flow (discovery, /authorize, SSO handoff, /finish, token
+        # exchange, authenticated MCP call). bearer: asserts the static-token
+        # endpoint rejects missing/wrong tokens and accepts the configured one.
+        # Exits non-zero on any failure.
+        run: cd mcp-server && npm test
+
   helm:
     name: Helm chart (lint + render)
     runs-on: ubuntu-latest
@@ -57,10 +77,11 @@ jobs:
       - name: Render defaults (single instance)
         run: helm template ci deploy/helm/mdnest > /dev/null
       - name: Render the full supported configuration
-        # Multi-mode + live collaboration + git-sync + active/active: three
-        # backend replicas coordinated through the Redis backplane, on
-        # ReadWriteMany storage. This is the largest configuration the release
-        # implements, and CI proves it renders.
+        # Multi-mode + live collaboration + git-sync + active/active (three
+        # backend replicas coordinated through the Redis backplane on
+        # ReadWriteMany storage) + the MCP server with per-user OAuth. This is
+        # the largest configuration the release implements, and CI proves it
+        # renders.
         run: |
           helm template ci deploy/helm/mdnest \
             --set auth.mode=multi \
@@ -72,7 +93,12 @@ jobs:
             --set persistence.notes.accessMode=ReadWriteMany \
             --set persistence.secrets.accessMode=ReadWriteMany \
             --set gitSync.enabled=true \
-            --set gitSync.sshSecretName=keys > rendered-ha.yaml
+            --set gitSync.sshSecretName=keys \
+            --set mcp.enabled=true \
+            --set mcp.oauth.enabled=true \
+            --set mcp.oauth.publicUrl=https://mcp.example \
+            --set mcp.oauth.ssoAuthorizeUrl=https://notes.example/api/auth/sso/start \
+            --set mcp.oauth.secret.value=ci-oauth-secret > rendered-ha.yaml
       - name: Reject options the code does not implement
         # The chart's values surface must not outrun the backend. Each option
         # here would otherwise deploy "healthy" while doing the wrong thing, so
@@ -92,8 +118,6 @@ jobs:
           }
           expect_reject "storage.backend=s3 (no object-store support)" \
             --set storage.backend=s3
-          expect_reject "mcp.enabled (MCP server is stdio-only)" \
-            --set mcp.enabled=true
           [ "$fails" -eq 0 ] || exit 1
       - name: Validate rendered manifests (kubeconform)
         # Pinned by digest, not :latest — an unpinned third-party image in CI

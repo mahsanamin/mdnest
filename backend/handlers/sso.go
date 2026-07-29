@@ -34,19 +34,61 @@ type SSOHandler struct {
 	secret       []byte
 	frontendURL  string // where to redirect the browser after login
 	secureCookie bool   // set Secure flag on state cookie (HTTPS deployments)
+	// returnOrigins is the set of extra absolute origins (scheme://host[:port])
+	// that /start may target for the post-login handoff, in addition to
+	// frontendURL. Populated from SSO_ALLOWED_RETURN_ORIGINS. Used by the MCP
+	// OAuth bridge so the minted JWT can be handed to the MCP server's callback
+	// instead of the web UI. Empty by default → only frontendURL is allowed.
+	returnOrigins map[string]bool
 }
 
 // NewSSOHandler wires an SSO client to a user store. frontendURL is the
 // absolute origin of the web UI ("https://notes.example.com"), used to
 // redirect the browser back after a successful (or failed) login.
-func NewSSOHandler(client *sso.Client, userStore store.UserStore, jwtSecret, frontendURL string, secureCookie bool) *SSOHandler {
-	return &SSOHandler{
-		client:       client,
-		userStore:    userStore,
-		secret:       []byte(jwtSecret),
-		frontendURL:  strings.TrimRight(frontendURL, "/"),
-		secureCookie: secureCookie,
+// allowedReturnOrigins is an optional allowlist of extra absolute origins the
+// post-login handoff may target (for the MCP OAuth bridge); nil/empty keeps the
+// default behavior of only redirecting to frontendURL.
+func NewSSOHandler(client *sso.Client, userStore store.UserStore, jwtSecret, frontendURL string, secureCookie bool, allowedReturnOrigins []string) *SSOHandler {
+	origins := make(map[string]bool, len(allowedReturnOrigins))
+	for _, o := range allowedReturnOrigins {
+		if o = strings.TrimRight(strings.TrimSpace(o), "/"); o != "" {
+			origins[o] = true
+		}
 	}
+	return &SSOHandler{
+		client:        client,
+		userStore:     userStore,
+		secret:        []byte(jwtSecret),
+		frontendURL:   strings.TrimRight(frontendURL, "/"),
+		secureCookie:  secureCookie,
+		returnOrigins: origins,
+	}
+}
+
+// returnOriginAllowed reports whether an absolute origin is permitted as the
+// post-login handoff target. The frontend origin is always allowed; any extra
+// origin must be present in the configured allowlist.
+func (h *SSOHandler) returnOriginAllowed(origin string) bool {
+	origin = strings.TrimRight(strings.TrimSpace(origin), "/")
+	if origin == "" {
+		return false
+	}
+	if origin == h.frontendURL {
+		return true
+	}
+	return h.returnOrigins[origin]
+}
+
+// handoffBase returns the absolute origin the post-login redirect must target.
+// It defaults to the frontend origin and only switches to a caller-supplied
+// return origin when that origin is on the allowlist (the MCP OAuth bridge).
+// Centralizing the decision keeps /callback from drifting away from the gate
+// applied at /start, so a normal login can never be diverted off the frontend.
+func (h *SSOHandler) handoffBase(returnOrigin string) string {
+	if returnOrigin != "" && h.returnOriginAllowed(returnOrigin) {
+		return strings.TrimRight(returnOrigin, "/")
+	}
+	return h.frontendURL
 }
 
 // HandleStart redirects the browser to the IdP's authorize URL.
@@ -57,7 +99,13 @@ func (h *SSOHandler) HandleStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	from := sso.SanitizeFromPath(r.URL.Query().Get("from"))
-	authURL, cookieValue, err := h.client.BuildAuthURL(from)
+	// Optional, allowlisted handoff target (MCP OAuth bridge). Ignored unless
+	// the exact origin is permitted; otherwise we fall back to the frontend.
+	returnOrigin := ""
+	if ro := r.URL.Query().Get("return_origin"); ro != "" && h.returnOriginAllowed(ro) {
+		returnOrigin = strings.TrimRight(strings.TrimSpace(ro), "/")
+	}
+	authURL, cookieValue, err := h.client.BuildAuthURL(from, returnOrigin)
 	if err != nil {
 		log.Printf("sso start: %v", err)
 		http.Error(w, `{"error":"sso not configured"}`, http.StatusInternalServerError)
@@ -172,7 +220,12 @@ func (h *SSOHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	// fragment. Fragments aren't sent to the server on subsequent requests
 	// and won't leak into referer headers from third parties, which makes
 	// them a reasonable transport for a one-shot token handoff.
-	redirect := h.frontendURL + h.safeFrom(claims.From) + "#sso_token=" + url.QueryEscape(signed)
+	//
+	// When the flow was initiated by an allowlisted return origin (the MCP
+	// OAuth bridge), hand the token to that origin's callback instead of the
+	// web UI. The origin was validated at /start and is carried, signed,
+	// inside the state cookie — we re-check it here as defense in depth.
+	redirect := h.handoffBase(claims.ReturnOrigin) + h.safeFrom(claims.From) + "#sso_token=" + url.QueryEscape(signed)
 	http.Redirect(w, r, redirect, http.StatusFound)
 }
 

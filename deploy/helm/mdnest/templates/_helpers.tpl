@@ -95,9 +95,6 @@ Delete a guard in the same change that lands the capability behind it.
 {{- if eq .Values.storage.backend "s3" -}}
   {{- fail "mdnest: storage.backend=s3 is not implemented in this release. The backend reads notes from the filesystem and ignores S3_*, so notes would be written to the notes PVC while appearing to be configured for your bucket. Use storage.backend=local." -}}
 {{- end -}}
-{{- if .Values.mcp.enabled -}}
-  {{- fail "mdnest: mcp.enabled=true requires the MCP server's streamable-HTTP transport, which is not in this release — the bundled MCP server speaks stdio only, so the Service and Ingress would route to a port nothing listens on. Run the MCP server alongside your client over stdio instead." -}}
-{{- end -}}
 {{- end -}}
 
 {{/*

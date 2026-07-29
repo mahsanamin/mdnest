@@ -184,6 +184,28 @@ GIT_AUTHOR_EMAIL=you@example.com
 # The domain must have a DNS A record pointing to this server's public IP.
 # CADDY_DOMAIN=notes.example.com
 
+# MCP server for AI agents (optional)
+# Runs the bundled Model Context Protocol server as a streamable-HTTP service
+# so AI agents (Claude, Cursor, scripts) can read/write notes over the network.
+# Disabled by default and gated behind a compose profile — existing installs
+# are unaffected. See docs/mcp.md for the full guide.
+# ENABLE_MCP=true
+#
+# service mode (default): the server uses ONE mdnest API token for every call.
+# Create it in Settings > API Tokens after the first boot, then set it here and
+# run ./mdnest-server rebuild. Only expose the endpoint on a trusted network.
+# MCP_TOKEN=mdnest_your_token_here
+#
+# Host port for the /mcp endpoint (default 3000).
+# MCP_HTTP_PORT=3000
+#
+# oauth mode: each client brings its own user's JWT via corporate SSO, so every
+# action is attributed to the real user. Requires all three variables below.
+# MCP_AUTH_MODE=oauth
+# MCP_PUBLIC_URL=https://mcp.notes.example.com
+# MCP_OAUTH_SECRET=change-me-to-a-long-random-string
+# MCP_SSO_AUTHORIZE_URL=https://notes.example.com/api/sso/authorize
+
 # Namespace mounts
 # Each line maps a namespace name to a host directory.
 # Format: MOUNT_<name>=<host_path>
