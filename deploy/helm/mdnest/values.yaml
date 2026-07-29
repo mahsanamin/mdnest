@@ -337,13 +337,21 @@ persistence:
     # -- Annotations for the notes PVC.
     annotations: {}
   secrets:
-    # -- Provision a PVC for the API-token/secrets store.
+    # -- Provision a PVC for the API-token/secrets store. In multi mode API
+    # tokens live in PostgreSQL, so this PVC is unused and can be disabled
+    # (falls back to an emptyDir) — that is what removes the last
+    # ReadWriteMany requirement for active/active. Existing multi-mode installs
+    # keep their tokens: on first start the backend imports tokens.json into
+    # Postgres, so upgrade with this still enabled once, then disable it.
+    # Single mode still uses it for the file-based token store.
     enabled: true
     # -- Use an existing PVC instead of creating one.
     existingClaim: ""
     # -- StorageClass for the secrets PVC (empty = cluster default).
     storageClass: ""
-    # -- Access mode; must be `ReadWriteMany` for active/active.
+    # -- Access mode. No longer required to be ReadWriteMany for active/active
+    # (multi-mode tokens are in Postgres); set persistence.secrets.enabled=false
+    # instead of provisioning RWX.
     accessMode: ReadWriteOnce
     # -- Secrets PVC size.
     size: 256Mi

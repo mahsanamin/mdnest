@@ -153,7 +153,7 @@ func main() {
 		if err := os.MkdirAll(secretsDir, 0700); err != nil {
 			log.Fatalf("ERROR: failed to create secrets dir: %v", err)
 		}
-		th := handlers.NewTokenHandler(secretsDir)
+		th := handlers.NewTokenHandler(store.NewFileTokenStore(secretsDir))
 		// Single mode: bind the token to MDNEST_USER for clarity in
 		// logs/UI. UserID stays 0 because there's no DB user table —
 		// the auth middleware skips per-user resolution in single mode
@@ -336,7 +336,26 @@ func main() {
 	uploadHandler := handlers.NewUploadHandler(stg, perms)
 	moveHandler := handlers.NewMoveHandler(stg)
 	searchHandler := handlers.NewSearchHandler(stg)
-	tokenHandler := handlers.NewTokenHandler(secretsDir)
+	// API tokens live in Postgres in multi mode (shared across replicas, no
+	// ReadWriteMany secrets volume) and in the tokens.json file in single mode
+	// (no database dependency for a single-box install).
+	var tokenStore store.TokenStore
+	if multiMode {
+		tokenStore = store.NewPostgresTokenStore(db)
+		// One-time, idempotent import so an existing multi-mode install keeps
+		// its API tokens across the move from tokens.json to Postgres.
+		if n, err := store.ImportFileTokens(db, secretsDir); err != nil {
+			log.Printf("warning: could not import legacy tokens.json: %v", err)
+		} else if n > 0 {
+			log.Printf("imported %d API token(s) from tokens.json into Postgres", n)
+		}
+	} else {
+		if err := os.MkdirAll(secretsDir, 0700); err != nil {
+			log.Fatalf("failed to create secrets dir: %v", err)
+		}
+		tokenStore = store.NewFileTokenStore(secretsDir)
+	}
+	tokenHandler := handlers.NewTokenHandler(tokenStore)
 	// Comments require both a real user identity and the WebSocket hub for
 	// live refresh on other clients, so we gate on enableCollab (which
 	// itself implies multiMode). In single mode or collab-off deployments

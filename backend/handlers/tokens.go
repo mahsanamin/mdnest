@@ -7,66 +7,22 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"os"
-	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/mdnest/mdnest/backend/middleware"
+	"github.com/mdnest/mdnest/backend/store"
 )
 
-// APIToken represents a long-lived API token for MCP/API access.
-type APIToken struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Token       string `json:"token,omitempty"`  // only included on creation
-	TokenHash   string `json:"token_hash"`       // stored, not exposed after creation
-	TokenSuffix string `json:"token_suffix"`     // last 4 chars for identification
-	CreatedAt   string `json:"created_at"`
-	UserID    int    `json:"user_id,omitempty"`   // owner (multi mode only, 0 = legacy/single)
-	Username  string `json:"username,omitempty"`  // denormalized for resolution
-	UserRole  string `json:"user_role,omitempty"` // denormalized for resolution
-}
-
-// tokenStore holds all API tokens.
-type tokenStore struct {
-	Tokens []APIToken `json:"tokens"`
-}
-
+// TokenHandler serves API-token CRUD and validation, delegating persistence to
+// a store.TokenStore (the tokens.json file in single mode, Postgres in multi
+// mode).
 type TokenHandler struct {
-	secretsDir string
-	mu         sync.RWMutex
-	store      tokenStore
+	store store.TokenStore
 }
 
-func NewTokenHandler(secretsDir string) *TokenHandler {
-	h := &TokenHandler{secretsDir: secretsDir}
-	h.load()
-	return h
-}
-
-func (h *TokenHandler) filePath() string {
-	return filepath.Join(h.secretsDir, "tokens.json")
-}
-
-func (h *TokenHandler) load() {
-	data, err := os.ReadFile(h.filePath())
-	if err != nil {
-		h.store = tokenStore{Tokens: []APIToken{}}
-		return
-	}
-	if err := json.Unmarshal(data, &h.store); err != nil {
-		log.Printf("warning: failed to parse tokens.json, starting fresh")
-		h.store = tokenStore{Tokens: []APIToken{}}
-	}
-}
-
-func (h *TokenHandler) save() error {
-	data, err := json.MarshalIndent(h.store, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(h.filePath(), data, 0600)
+// NewTokenHandler wires a token handler to a token store.
+func NewTokenHandler(s store.TokenStore) *TokenHandler {
+	return &TokenHandler{store: s}
 }
 
 func generateToken() (string, error) {
@@ -83,75 +39,24 @@ func generateID() string {
 	return hex.EncodeToString(b)
 }
 
-// hashMatchesAny scans the in-memory store for a hash match. Caller is
-// responsible for holding h.mu (read lock is enough).
-func (h *TokenHandler) hashMatchesAny(hash string) bool {
-	for _, t := range h.store.Tokens {
-		if t.TokenHash == hash {
-			return true
-		}
-	}
-	return false
-}
-
-// ValidateAPIToken checks if a raw token matches any stored token.
-// Returns true if valid.
-//
-// Cache-miss reload: if the token isn't found in the in-memory store,
-// we reload tokens.json from disk and check again. This catches tokens
-// minted by the host-side `mdnest-server create-token` CLI, which runs
-// in a one-shot container that writes the file but can't update the
-// running server's in-memory state. Successful validations stay fast
-// (one read-lock + map walk); only misses pay the file-read cost.
+// ValidateAPIToken reports whether a raw token matches a stored token.
 func (h *TokenHandler) ValidateAPIToken(rawToken string) bool {
-	hash := hashToken(rawToken)
-	h.mu.RLock()
-	if h.hashMatchesAny(hash) {
-		h.mu.RUnlock()
-		return true
+	t, err := h.store.FindByHash(hashToken(rawToken))
+	if err != nil {
+		log.Printf("token validation error: %v", err)
+		return false
 	}
-	h.mu.RUnlock()
-
-	h.mu.Lock()
-	// Re-check after grabbing the write lock in case another goroutine
-	// reloaded between our read and write.
-	if h.hashMatchesAny(hash) {
-		h.mu.Unlock()
-		return true
-	}
-	h.load()
-	matched := h.hashMatchesAny(hash)
-	h.mu.Unlock()
-	return matched
+	return t != nil
 }
 
-// ResolveAPITokenUser returns the UserContext for an API token (multi mode).
-// Returns nil if the token has no associated user (single mode / legacy tokens).
+// ResolveAPITokenUser returns the UserContext for an API token bound to a user
+// (multi mode). Returns nil for single-mode / legacy tokens with no owner.
 func (h *TokenHandler) ResolveAPITokenUser(rawToken string) *middleware.UserContext {
-	hash := hashToken(rawToken)
-	h.mu.RLock()
-	for _, t := range h.store.Tokens {
-		if t.TokenHash == hash && t.UserID > 0 {
-			uc := &middleware.UserContext{ID: t.UserID, Username: t.Username, Role: t.UserRole}
-			h.mu.RUnlock()
-			return uc
-		}
+	t, err := h.store.FindByHash(hashToken(rawToken))
+	if err != nil || t == nil || t.UserID == 0 {
+		return nil
 	}
-	h.mu.RUnlock()
-	// ValidateAPIToken's cache-miss reload usually warmed our in-memory
-	// store already, but be defensive in case a CLI-minted multi-mode
-	// token (with a user binding) lands between Validate and Resolve.
-	h.mu.Lock()
-	h.load()
-	for _, t := range h.store.Tokens {
-		if t.TokenHash == hash && t.UserID > 0 {
-			uc := &middleware.UserContext{ID: t.UserID, Username: t.Username, Role: t.UserRole}
-			h.mu.Unlock()
-			return uc
-		}
-	}
-	h.mu.Unlock()
-	return nil
+	return &middleware.UserContext{ID: t.UserID, Username: t.Username, Role: t.UserRole}
 }
 
 func hashToken(token string) string {
@@ -174,8 +79,11 @@ func (h *TokenHandler) HandleTokens(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *TokenHandler) listTokens(w http.ResponseWriter, r *http.Request) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
+	tokens, err := h.store.All()
+	if err != nil {
+		http.Error(w, `{"error":"failed to read tokens"}`, http.StatusInternalServerError)
+		return
+	}
 
 	uc := middleware.UserFromContext(r.Context())
 
@@ -184,8 +92,8 @@ func (h *TokenHandler) listTokens(w http.ResponseWriter, r *http.Request) {
 	// (As of v3.5.0 the namespace-scoped admin role no longer gets
 	// system-wide visibility into other users' tokens — that's a
 	// superadmin-only audit capability.)
-	safe := make([]map[string]string, 0, len(h.store.Tokens))
-	for _, t := range h.store.Tokens {
+	safe := make([]map[string]string, 0, len(tokens))
+	for _, t := range tokens {
 		if uc != nil && uc.Role != "superadmin" && t.UserID != uc.ID {
 			continue
 		}
@@ -206,7 +114,7 @@ func (h *TokenHandler) listTokens(w http.ResponseWriter, r *http.Request) {
 // the caller can ever read this value — it isn't kept anywhere; only
 // its sha256 hash is stored. Used by both the HTTP handler and the
 // host-side `mdnest-server create-token` CLI.
-func (h *TokenHandler) CreateAPIToken(name string, userID int, username, role string) (string, *APIToken, error) {
+func (h *TokenHandler) CreateAPIToken(name string, userID int, username, role string) (string, *store.APIToken, error) {
 	token, err := generateToken()
 	if err != nil {
 		return "", nil, err
@@ -217,7 +125,7 @@ func (h *TokenHandler) CreateAPIToken(name string, userID int, username, role st
 		suffix = suffix[len(suffix)-4:]
 	}
 
-	entry := APIToken{
+	entry := store.APIToken{
 		ID:          generateID(),
 		Name:        name,
 		TokenHash:   hashToken(token),
@@ -228,13 +136,8 @@ func (h *TokenHandler) CreateAPIToken(name string, userID int, username, role st
 		UserRole:    role,
 	}
 
-	h.mu.Lock()
-	h.store.Tokens = append(h.store.Tokens, entry)
-	saveErr := h.save()
-	h.mu.Unlock()
-
-	if saveErr != nil {
-		return "", nil, saveErr
+	if err := h.store.Add(entry); err != nil {
+		return "", nil, err
 	}
 	log.Printf("API token created: %s (%s)", entry.Name, entry.ID)
 	return token, &entry, nil
@@ -282,38 +185,40 @@ func (h *TokenHandler) revokeToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	uc := middleware.UserFromContext(r.Context())
-
-	found := false
-	filtered := make([]APIToken, 0, len(h.store.Tokens))
-	for _, t := range h.store.Tokens {
-		if t.ID == id {
-			// Scope: superadmin can revoke any token; anyone else can
-			// only revoke tokens they own.
-			if uc != nil && uc.Role != "superadmin" && t.UserID != uc.ID {
-				http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
-				return
-			}
-			found = true
-			log.Printf("API token revoked: %s (%s)", t.Name, t.ID)
-			continue
-		}
-		filtered = append(filtered, t)
+	tokens, err := h.store.All()
+	if err != nil {
+		http.Error(w, `{"error":"failed to read tokens"}`, http.StatusInternalServerError)
+		return
 	}
 
-	if !found {
+	uc := middleware.UserFromContext(r.Context())
+	var target *store.APIToken
+	for i := range tokens {
+		if tokens[i].ID == id {
+			target = &tokens[i]
+			break
+		}
+	}
+	if target == nil {
 		http.Error(w, `{"error":"token not found"}`, http.StatusNotFound)
 		return
 	}
+	// Scope: superadmin can revoke any token; anyone else only their own.
+	if uc != nil && uc.Role != "superadmin" && target.UserID != uc.ID {
+		http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+		return
+	}
 
-	h.store.Tokens = filtered
-	if err := h.save(); err != nil {
+	removed, err := h.store.DeleteByID(id)
+	if err != nil {
 		http.Error(w, `{"error":"failed to save"}`, http.StatusInternalServerError)
 		return
 	}
+	if !removed {
+		http.Error(w, `{"error":"token not found"}`, http.StatusNotFound)
+		return
+	}
+	log.Printf("API token revoked: %s (%s)", target.Name, target.ID)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "revoked"})
