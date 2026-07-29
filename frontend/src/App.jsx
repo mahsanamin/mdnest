@@ -293,6 +293,21 @@ function App() {
   const [dismissedReleaseVer, setDismissedReleaseVer] = useState(() => localStorage.getItem('mdnest_dismissed_release_version') || '');
   const [wsStatus, setWsStatus] = useState('disconnected'); // 'connected' | 'connecting' | 'disconnected'
   const etagRef = useRef(null);
+  // Ring of etags this client produced via its own saves. The backend echoes
+  // file-changed (with the new etag) back to the saving tab; under HA latency
+  // an earlier save's echo can arrive after a later save already moved etagRef
+  // on, so a single-value compare misses it. Suppressing any etag we authored
+  // keeps our own saves from raising a self-conflict banner, while a same-user
+  // write from another source (CLI/MCP) carries an etag we never produced and
+  // still propagates.
+  const ownEtagsRef = useRef([]);
+  const rememberOwnEtag = useRef((etag) => {
+    if (!etag) return;
+    const buf = ownEtagsRef.current;
+    if (buf.includes(etag)) return;
+    buf.push(etag);
+    if (buf.length > 20) buf.shift();
+  }).current;
   const collabRef = useRef(null);
   const typingTimers = useRef({}); // {userId: timeoutId}
   const localTypingUntil = useRef(0); // timestamp — local user is "typing" until this time
@@ -437,7 +452,7 @@ function App() {
           // idempotent for our own save, as the backend broadcast assumes.
           // A same-user write from another source (CLI, MCP) carries a
           // different etag, so it still propagates.
-          if (msg.etag && msg.etag === etagRef.current) break;
+          if (msg.etag && (msg.etag === etagRef.current || ownEtagsRef.current.includes(msg.etag))) break;
           // Another user saved (or restored) — update etag and reload if
           // no local edits. Restores get a separate "info" banner instead
           // of the yellow conflict banner; same auto-reload-when-clean
@@ -924,7 +939,7 @@ function App() {
       try {
         const result = await saveNote(selectedNs, currentPath, newContent, etagRef.current);
         setSavedContent(newContent);
-        if (result.etag) etagRef.current = result.etag;
+        if (result.etag) { etagRef.current = result.etag; rememberOwnEtag(result.etag); }
       } catch (e) {
         if (e.status === 409) {
           setConflictBanner({ username: 'another user', etag: e.etag });
@@ -975,7 +990,8 @@ function App() {
     setSavedContent(newContent);
     if (currentPath && selectedNs) {
       try {
-        await saveNote(selectedNs, currentPath, newContent);
+        const result = await saveNote(selectedNs, currentPath, newContent);
+        if (result.etag) { etagRef.current = result.etag; rememberOwnEtag(result.etag); }
       } catch (e) {
         console.error('Checkbox save failed:', e);
       }
