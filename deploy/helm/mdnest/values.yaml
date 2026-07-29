@@ -3,8 +3,9 @@
 # Deployment model
 # -----------------------------------------------------------------------------
 # By DEFAULT this chart deploys mdnest as a SINGLE instance (active/passive):
-#   * backend.replicaCount = 1, Recreate strategy
-#   * notes/secrets PVCs use ReadWriteOnce
+#   * backend is a StatefulSet, backend.replicaCount = 1
+#   * notes/secrets use per-pod volumeClaimTemplates (ReadWriteOnce), whose PVC
+#     lifecycle is owned by the StatefulSet (no orphaned, out-of-band PVC)
 #   * AUTH_MODE=single, live collaboration and Redis disabled
 # This matches mdnest's out-of-the-box behavior exactly.
 #
@@ -12,11 +13,13 @@
 #   1. Set auth.mode=multi and provide an external PostgreSQL (postgres.*).
 #   2. Enable collaboration: collab.enabled=true.
 #   3. Provide an external Redis and set collab.redis.url (or redis secret).
-#   4. Use ReadWriteMany storage for notes AND secrets so every replica shares
-#      the same files (persistence.notes.accessMode / persistence.secrets.accessMode).
+#   4. Provide SHARED storage via persistence.notes.existingClaim AND
+#      persistence.secrets.existingClaim (ReadWriteMany PVCs every replica
+#      mounts) so all pods share the same files. A per-pod volumeClaimTemplate
+#      would diverge, so the chart rejects multi-replica without a shared claim.
 #   5. Set backend.replicaCount > 1.
 # The chart validates these invariants and fails fast with a clear message if a
-# multi-replica deployment is missing Redis, collaboration, or RWX storage.
+# multi-replica deployment is missing Redis, collaboration, or a shared claim.
 # -----------------------------------------------------------------------------
 
 # -- Override the chart name portion of generated resource names.
@@ -65,9 +68,14 @@ image:
 backend:
   # -- Number of backend replicas. Keep at `1` unless running active/active (see top-of-file notes).
   replicaCount: 1
-  strategy:
-    # -- Deployment strategy. `Recreate` is required with ReadWriteOnce volumes; use `RollingUpdate` only with ReadWriteMany storage (active/active).
-    type: Recreate
+  # -- StatefulSet pod management. `Parallel` starts/replaces pods together
+  # (better for a stateless web tier); use `OrderedReady` for strict ordering.
+  podManagementPolicy: Parallel
+  updateStrategy:
+    # -- StatefulSet update strategy. `RollingUpdate` is safe because each pod
+    # owns its own volume (volumeClaimTemplate) — no ReadWriteOnce hand-off
+    # deadlock, so the old Deployment `Recreate` workaround is gone.
+    type: RollingUpdate
   # -- Public origin the browser uses to reach mdnest (CORS + SSO redirect URL). Set to your ingress URL in production.
   frontendOrigin: "http://localhost"
   # -- Optional display alias shown in the UI (`SERVER_ALIAS`).
@@ -314,18 +322,31 @@ storage:
     secretKey: ""
 
 # -----------------------------------------------------------------------------
-# Persistence. notes = the Markdown repository (shared with git-sync); secrets =
-# API tokens / local secrets store. Both must be ReadWriteMany for active/active.
+# Persistence. The backend is a StatefulSet, so each volume has three modes:
+#   - existingClaim set  -> a shared PVC you provision (required for active/active
+#     and for git-sync, which both need all pods to see the same repository);
+#   - enabled, no existingClaim -> a per-pod volumeClaimTemplate the StatefulSet
+#     owns (clean PVC lifecycle, no orphan; the single-box default);
+#   - disabled -> an emptyDir (ephemeral).
+# notes = the Markdown repository (shared with git-sync); secrets = the local
+# API-token store (unused in multi mode, where tokens live in PostgreSQL).
 # -----------------------------------------------------------------------------
 persistence:
+  # -- Retention policy for volumeClaimTemplate PVCs (Kubernetes >= 1.27). Lets
+  # the StatefulSet delete or retain per-pod PVCs on scale-down/delete, so their
+  # lifecycle is controlled rather than orphaned. Leave empty for the cluster
+  # default (Retain). Example: {whenDeleted: Delete, whenScaled: Retain}.
+  pvcRetentionPolicy: {}
   notes:
     # -- Provision a PVC for note data (ignored when `storage.backend=s3`).
     enabled: true
-    # -- Use an existing PVC instead of creating one.
+    # -- Use an existing (shared) PVC instead of a per-pod volumeClaimTemplate.
+    # Required for active/active and for git-sync.
     existingClaim: ""
     # -- StorageClass for the notes PVC (empty = cluster default).
     storageClass: ""
-    # -- Access mode; must be `ReadWriteMany` for active/active.
+    # -- Access mode for the per-pod volumeClaimTemplate. ReadWriteOnce is fine
+    # (each pod owns its volume). Sharing across pods uses existingClaim instead.
     accessMode: ReadWriteOnce
     # -- Notes PVC size.
     size: 5Gi

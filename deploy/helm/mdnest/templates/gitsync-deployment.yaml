@@ -2,6 +2,9 @@
 {{- if not .Values.persistence.notes.enabled }}
 {{- fail "mdnest: gitSync.enabled=true requires persistence.notes.enabled=true (git-sync operates on the notes volume)." }}
 {{- end }}
+{{- if not .Values.persistence.notes.existingClaim }}
+{{- fail "mdnest: gitSync.enabled=true requires persistence.notes.existingClaim (a shared notes PVC). The standalone git-sync Deployment cannot mount the backend StatefulSet's per-pod volume; provide a shared claim. Per-pod git-sync as a sidecar arrives with the git-native model." }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
