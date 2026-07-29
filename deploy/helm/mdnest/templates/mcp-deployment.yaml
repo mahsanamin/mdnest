@@ -78,6 +78,10 @@ spec:
               value: {{ required "mcp.oauth.publicUrl is required when mcp.auth.mode=oauth" .Values.mcp.oauth.publicUrl | quote }}
             - name: MCP_SSO_AUTHORIZE_URL
               value: {{ required "mcp.oauth.ssoAuthorizeUrl is required when mcp.auth.mode=oauth" .Values.mcp.oauth.ssoAuthorizeUrl | quote }}
+            {{- with .Values.mcp.oauth.allowedRedirectOrigins }}
+            - name: MCP_ALLOWED_REDIRECT_ORIGINS
+              value: {{ join "," . | quote }}
+            {{- end }}
             - name: MCP_OAUTH_SECRET
               valueFrom:
                 secretKeyRef:

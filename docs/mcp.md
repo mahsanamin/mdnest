@@ -145,6 +145,7 @@ Requires all of:
 | `MCP_PUBLIC_URL` | The externally-reachable base URL of this MCP server (e.g. `https://mcp.notes.example.com`). |
 | `MCP_OAUTH_SECRET` | Secret used to sign the short-lived OAuth state/session. |
 | `MCP_SSO_AUTHORIZE_URL` | mdnest's SSO authorize endpoint that mints the user JWT. |
+| `MCP_ALLOWED_REDIRECT_ORIGINS` | Comma-separated extra origins allowed to receive an authorization code. Loopback is always allowed; see below. |
 
 In OAuth mode no process-wide `MDNEST_TOKEN` is needed. Cookies are marked
 `Secure` automatically when `MCP_PUBLIC_URL` is `https://`.
@@ -166,8 +167,26 @@ In OAuth mode no process-wide `MDNEST_TOKEN` is needed. Cookies are marked
 | `MCP_PUBLIC_URL` | — | Public base URL of the MCP server (OAuth mode). |
 | `MCP_OAUTH_SECRET` | — | Signing secret for OAuth sessions (OAuth mode). |
 | `MCP_SSO_AUTHORIZE_URL` | — | mdnest SSO authorize URL (OAuth mode). |
+| `MCP_ALLOWED_REDIRECT_ORIGINS` | *(empty)* | Extra origins allowed as an OAuth `redirect_uri` target, comma-separated. Loopback always allowed. |
 
 ---
+
+
+### Where an authorization code may be delivered
+
+An OAuth authorization code carries a live mdnest token, so the redirect target
+is restricted — a code sent to an attacker-chosen URL is a stolen session, and
+PKCE cannot prevent that (a malicious client that starts the flow holds its own
+verifier, and client registration is public).
+
+- **Loopback is always allowed** — `127.0.0.1`, `localhost`, `::1`. This is the
+  native MCP client case and needs no configuration.
+- **Any other origin is refused** unless you list it in
+  `MCP_ALLOWED_REDIRECT_ORIGINS` (exact `scheme://host[:port]` match, HTTPS
+  only). Set this only if a hosted client on a real domain must complete the
+  flow.
+
+`/oauth/authorize` returns `400 invalid_request` for anything else.
 
 ## 6. Kubernetes / Helm
 

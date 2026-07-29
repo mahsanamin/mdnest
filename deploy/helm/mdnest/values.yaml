@@ -447,6 +447,12 @@ mcp:
     publicUrl: ""
     # -- mdnest backend SSO start endpoint, e.g. `https://<host>/api/auth/sso/start`.
     ssoAuthorizeUrl: ""
+    # -- Origins allowed to receive an OAuth authorization code, in addition
+    # to loopback. Loopback (127.0.0.1 / localhost) is always permitted, which
+    # covers native MCP clients. An authorization code carries a live mdnest
+    # token, so any other origin must be listed here explicitly or it is
+    # refused. Leave empty unless a hosted client on a real domain needs it.
+    allowedRedirectOrigins: []
     # -- HMAC secret signing OAuth cookies/codes. Provide inline via `secret.value` or reference an existing Secret.
     secret:
       value: ""

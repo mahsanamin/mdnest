@@ -156,8 +156,16 @@ const TX_COOKIE = "mcp_oauth_tx";
 //   ssoAuthorizeUrl  public URL of the backend SSO start endpoint
 //   validateUrl      in-cluster backend URL used to validate a minted token
 //   secureCookie     set the Secure flag on the transaction cookie
-export function buildOAuth({ publicUrl, mcpPath, secret, ssoAuthorizeUrl, validateUrl, secureCookie }) {
+export function buildOAuth({ publicUrl, mcpPath, secret, ssoAuthorizeUrl, validateUrl, secureCookie, allowedRedirectOrigins }) {
   const base = publicUrl.replace(/\/+$/, "");
+  // Origins (scheme://host[:port]) allowed to receive an authorization code, in
+  // addition to loopback. Empty by default: only a native client on loopback
+  // may receive a code, so there is no way to exfiltrate one to a remote host.
+  const redirectOrigins = new Set(
+    (allowedRedirectOrigins || [])
+      .map((o) => String(o).trim().replace(/\/+$/, ""))
+      .filter(Boolean)
+  );
   const resource = base + mcpPath;
   const key = typeof secret === "string" ? Buffer.from(secret) : secret;
 
@@ -218,10 +226,30 @@ export function buildOAuth({ publicUrl, mcpPath, secret, ssoAuthorizeUrl, valida
       json(res, 400, { error: "invalid_request", error_description: "invalid redirect_uri" });
       return;
     }
-    const isLoopback = rd.hostname === "127.0.0.1" || rd.hostname === "localhost" || rd.hostname === "::1";
-    if (rd.protocol !== "https:" && !isLoopback) {
-      json(res, 400, { error: "invalid_request", error_description: "redirect_uri must be https or loopback" });
-      return;
+    // A code delivered to an attacker-chosen redirect_uri is a stolen mdnest
+    // JWT: PKCE does not help, because a malicious client that starts the flow
+    // holds its own verifier. Dynamic Client Registration is public, so the
+    // client cannot vouch for itself either. So the *operator* decides where a
+    // code may land: loopback (the native MCP client case) always, and any
+    // other origin only if explicitly allowlisted via
+    // MCP_ALLOWED_REDIRECT_ORIGINS. Fails closed.
+    const isLoopback =
+      (rd.hostname === "127.0.0.1" || rd.hostname === "localhost" || rd.hostname === "::1") &&
+      (rd.protocol === "http:" || rd.protocol === "https:");
+    if (!isLoopback) {
+      if (rd.protocol !== "https:") {
+        json(res, 400, { error: "invalid_request", error_description: "redirect_uri must be https or loopback" });
+        return;
+      }
+      if (!redirectOrigins.has(rd.origin)) {
+        json(res, 400, {
+          error: "invalid_request",
+          error_description:
+            "redirect_uri origin is not allowed. Native clients must use a loopback address; " +
+            "a hosted client's origin must be listed in MCP_ALLOWED_REDIRECT_ORIGINS.",
+        });
+        return;
+      }
     }
 
     const tx = sign({ rd: redirectUri, cc: codeChallenge, st: state, exp: Math.floor(Date.now() / 1000) + 600 }, key);

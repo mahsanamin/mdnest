@@ -524,6 +524,12 @@ async function startHttp() {
       ssoAuthorizeUrl,
       validateUrl: BASE_URL,
       secureCookie: publicUrl.startsWith("https://"),
+      // Extra origins allowed to receive an authorization code. Loopback is
+      // always allowed; anything else must be listed here by the operator.
+      allowedRedirectOrigins: (process.env.MCP_ALLOWED_REDIRECT_ORIGINS || "")
+        .split(",")
+        .map((o) => o.trim())
+        .filter(Boolean),
     });
   } else if (!API_TOKEN) {
     console.error("MCP_AUTH_MODE=bearer requires MDNEST_TOKEN (a valid mdnest API token)");

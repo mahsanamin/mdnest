@@ -102,6 +102,34 @@ async function run() {
   });
   ok("token rejects bad PKCE verifier", r.status === 400);
 
+  // --- redirect_uri must not be attacker-choosable -------------------------
+  // A code delivered to an attacker's origin is a stolen mdnest JWT, and PKCE
+  // cannot prevent it (a malicious client holds its own verifier). Loopback is
+  // always allowed; any other origin needs MCP_ALLOWED_REDIRECT_ORIGINS.
+  const authorizeWith = async (uri) => {
+    const resp = await fetch(
+      `${MCP_BASE}/oauth/authorize?response_type=code&code_challenge=${challenge}` +
+        `&code_challenge_method=S256&redirect_uri=${encodeURIComponent(uri)}`,
+      { redirect: "manual" }
+    );
+    // Drain the body: an unconsumed response keeps undici's connection busy and
+    // stalls the requests that follow.
+    await resp.arrayBuffer().catch(() => {});
+    return resp;
+  };
+
+  r = await authorizeWith("https://evil.example.com/callback");
+  ok("authorize rejects a non-allowlisted https redirect_uri", r.status === 400, `got ${r.status}`);
+
+  r = await authorizeWith("http://evil.example.com/callback");
+  ok("authorize rejects a plain-http remote redirect_uri", r.status === 400, `got ${r.status}`);
+
+  r = await authorizeWith("http://127.0.0.1:9999/callback");
+  ok("authorize still accepts a loopback redirect_uri", r.status === 302, `got ${r.status}`);
+
+  r = await authorizeWith("http://localhost:9999/callback");
+  ok("authorize still accepts localhost", r.status === 302, `got ${r.status}`);
+
   // 6. MCP call without bearer -> 401 + WWW-Authenticate
   r = await fetch(`${MCP_BASE}/mcp`, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "1" } } }) });
   ok("MCP without token -> 401", r.status === 401 && (r.headers.get("www-authenticate") || "").includes("resource_metadata"));

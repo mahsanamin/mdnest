@@ -211,6 +211,13 @@ GIT_AUTHOR_EMAIL=you@example.com
 # MCP_PUBLIC_URL=https://mcp.notes.example.com
 # MCP_OAUTH_SECRET=change-me-to-a-long-random-string
 # MCP_SSO_AUTHORIZE_URL=https://notes.example.com/api/sso/authorize
+# Origins allowed to receive an OAuth authorization code, comma-separated.
+# Loopback (127.0.0.1 / localhost) is ALWAYS allowed — that covers native MCP
+# clients and needs no configuration. Only set this if a hosted client on a
+# real domain must complete the flow. Leave it empty otherwise: an
+# authorization code carries a live mdnest token, so anything not listed here
+# is refused.
+# MCP_ALLOWED_REDIRECT_ORIGINS=https://agent.example.com
 
 # Namespace mounts
 # Each line maps a namespace name to a host directory.
