@@ -345,9 +345,9 @@ All traffic goes to the frontend Service, which proxies `/api` and `/api/ws` (We
 | persistence.notes.existingClaim | string | `""` | Use an existing PVC instead of creating one. |
 | persistence.notes.size | string | `"5Gi"` | Notes PVC size. |
 | persistence.notes.storageClass | string | `""` | StorageClass for the notes PVC (empty = cluster default). |
-| persistence.secrets.accessMode | string | `"ReadWriteOnce"` | Access mode; must be `ReadWriteMany` for active/active. |
+| persistence.secrets.accessMode | string | `"ReadWriteOnce"` | Access mode. No longer required to be `ReadWriteMany` for active/active — multi-mode tokens live in PostgreSQL; set `persistence.secrets.enabled=false` instead. |
 | persistence.secrets.annotations | object | `{}` | Annotations for the secrets PVC. |
-| persistence.secrets.enabled | bool | `true` | Provision a PVC for the API-token/secrets store. |
+| persistence.secrets.enabled | bool | `true` | Provision a PVC for the API-token/secrets store. In multi mode tokens live in PostgreSQL, so this can be disabled (falls back to an emptyDir); single mode uses it for the file-based token store. |
 | persistence.secrets.existingClaim | string | `""` | Use an existing PVC instead of creating one. |
 | persistence.secrets.size | string | `"256Mi"` | Secrets PVC size. |
 | persistence.secrets.storageClass | string | `""` | StorageClass for the secrets PVC (empty = cluster default). |

@@ -106,6 +106,27 @@ var migrations = []struct {
 			CREATE INDEX IF NOT EXISTS idx_namespace_admins_namespace ON namespace_admins(namespace);
 		`,
 	},
+	{
+		// API/MCP tokens move from the tokens.json file into Postgres in
+		// multi mode, so a multi-replica deployment shares them through the
+		// database instead of a ReadWriteMany secrets volume. Single mode is
+		// unaffected — it keeps the file backend. user_id is the owner (NULL
+		// for legacy/single-mode-style tokens); username/role are resolved by
+		// joining users at read time.
+		name: "008_api_tokens",
+		sql: `
+			CREATE TABLE IF NOT EXISTS api_tokens (
+				id           TEXT PRIMARY KEY,
+				name         TEXT NOT NULL,
+				token_hash   TEXT UNIQUE NOT NULL,
+				token_suffix TEXT NOT NULL,
+				user_id      INTEGER REFERENCES users(id) ON DELETE CASCADE,
+				created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+			);
+			CREATE INDEX IF NOT EXISTS idx_api_tokens_hash ON api_tokens(token_hash);
+			CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id ON api_tokens(user_id);
+		`,
+	},
 }
 
 // Migrate runs all pending migrations. Safe to call on every startup.

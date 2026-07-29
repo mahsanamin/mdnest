@@ -126,8 +126,5 @@ rather than silently diverging — the failure mode this check exists to prevent
   {{- if and (ne .Values.storage.backend "s3") (ne .Values.persistence.notes.accessMode "ReadWriteMany") -}}
     {{- fail "mdnest: running multiple backend replicas requires persistence.notes.accessMode=ReadWriteMany so all pods share the notes repository (or set storage.backend=s3 to share notes via an object store)." -}}
   {{- end -}}
-  {{- if and .Values.persistence.secrets.enabled (ne .Values.persistence.secrets.accessMode "ReadWriteMany") -}}
-    {{- fail "mdnest: running multiple backend replicas requires persistence.secrets.accessMode=ReadWriteMany so all pods share the token/secrets store." -}}
-  {{- end -}}
 {{- end -}}
 {{- end -}}
