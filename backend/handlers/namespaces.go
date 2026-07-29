@@ -32,9 +32,16 @@ func (h *NamespaceHandler) ListNamespaces(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// In multi mode, filter to namespaces the user has access to
+	// In multi mode, filter to namespaces the user has access to. The
+	// management plane (?scope=manage) instead lists the namespaces the
+	// caller may administer — a superadmin manages every namespace but no
+	// longer has implicit data access, so the admin UI needs this wider list.
 	if h.perms != nil {
-		names = h.perms.FilterNamespaces(r, names)
+		if r.URL.Query().Get("scope") == "manage" {
+			names = h.perms.FilterManageableNamespaces(r, names)
+		} else {
+			names = h.perms.FilterNamespaces(r, names)
+		}
 		if names == nil {
 			names = []string{}
 		}

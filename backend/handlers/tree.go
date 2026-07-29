@@ -52,7 +52,7 @@ func (h *TreeHandler) GetTree(w http.ResponseWriter, r *http.Request) {
 	// In multi mode, filter tree to only show paths the user has access to
 	if h.grantStore != nil {
 		uc := middleware.UserFromContext(r.Context())
-		if uc != nil && uc.Role != "admin" && uc.Role != "superadmin" {
+		if uc != nil && uc.Role != "admin" {
 			grants, _ := h.grantStore.GetGrantsForUser(uc.ID)
 			var nsGrants []store.Grant
 			for _, g := range grants {

@@ -50,8 +50,8 @@ func (f *fakeGrantStore) GetAccessibleNamespaces(int) ([]string, error) {
 	return []string{f.namespace}, nil
 }
 
-// fakeNsAdminStore makes nobody a namespace-admin; superadmin short-circuits
-// before this is consulted.
+// fakeNsAdminStore makes nobody a namespace-admin; no role short-circuits data
+// access here — every principal falls through to the grant check.
 type fakeNsAdminStore struct{}
 
 func (fakeNsAdminStore) Add(int, string, *int) error             { return nil }
@@ -129,10 +129,17 @@ func TestServeFileEnforcesNamespaceReadAccess(t *testing.T) {
 		}
 	})
 
-	t.Run("superadmin reads any namespace", func(t *testing.T) {
+	// Since v3.12.0 a superadmin administers every namespace but has no implicit
+	// read access to note content: an ungranted namespace is refused just as it is
+	// for anyone else. The full role matrix lives in middleware/permission_test.go.
+	t.Run("superadmin has no implicit read on an ungranted namespace", func(t *testing.T) {
 		root := &middleware.UserContext{ID: 1, Username: "root", Role: "superadmin"}
-		if w := serveFile(h, root, "beta"); w.Code != http.StatusOK {
-			t.Fatalf("want 200 for superadmin, got %d (%s)", w.Code, w.Body.String())
+		w := serveFile(h, root, "beta")
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("want 403 for an ungranted superadmin, got %d (%s)", w.Code, w.Body.String())
+		}
+		if body := w.Body.String(); body == "beta namespace file contents" {
+			t.Fatal("file contents leaked to an ungranted superadmin")
 		}
 	})
 }
