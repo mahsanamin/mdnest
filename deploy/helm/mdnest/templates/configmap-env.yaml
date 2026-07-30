@@ -16,13 +16,6 @@ data:
   SECRETS_DIR: "/data/secrets"
   PORT: "8080"
   STORAGE_BACKEND: {{ .Values.storage.backend | quote }}
-  {{- if eq .Values.storage.backend "s3" }}
-  S3_ENDPOINT: {{ required "storage.s3.endpoint is required when storage.backend=s3" .Values.storage.s3.endpoint | quote }}
-  S3_BUCKET: {{ required "storage.s3.bucket is required when storage.backend=s3" .Values.storage.s3.bucket | quote }}
-  S3_REGION: {{ .Values.storage.s3.region | quote }}
-  S3_USE_SSL: {{ .Values.storage.s3.useSSL | ternary "true" "false" | quote }}
-  S3_PATH_STYLE: {{ .Values.storage.s3.pathStyle | ternary "true" "false" | quote }}
-  {{- end }}
   {{- if eq .Values.storage.backend "git" }}
   {{- with .Values.storage.git.commit.debounce }}
   GIT_COMMIT_DEBOUNCE: {{ . | quote }}

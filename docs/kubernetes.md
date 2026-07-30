@@ -56,7 +56,7 @@ helm install mdnest oci://ghcr.io/mahsanamin/charts/mdnest \
 - **MCP server** over streamable-HTTP with optional per-user OAuth.
 - **git-sync** sidecar — mutually exclusive with `storage.backend=git` (both commit to the working tree, so the chart makes you pick one).
 
-One option is still guarded off: **`storage.backend=s3` is not implemented**. The backend reads notes from the filesystem and ignores `S3_*`, so the chart refuses it at install time rather than coming up `Ready` while writing notes to the PVC instead of your bucket — a setting the backend silently ignores doesn't fail, it lies, so the guard names what's missing instead. It's removed in the release that lands the backend behind it.
+`storage.backend` accepts `local` and `git`; any other value is refused at install time — the chart's values surface never outruns the code.
 
 ## Notes storage
 

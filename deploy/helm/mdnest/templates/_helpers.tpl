@@ -157,28 +157,6 @@ per-workload MDNEST_ROLE and extraEnv are added by the caller. */}}
       key: SSO_CLIENT_SECRET
       {{- end }}
 {{- end }}
-{{- if eq .Values.storage.backend "s3" }}
-- name: S3_ACCESS_KEY
-  valueFrom:
-    secretKeyRef:
-      {{- if .Values.storage.s3.existingSecret }}
-      name: {{ .Values.storage.s3.existingSecret }}
-      key: {{ .Values.storage.s3.secretKeys.accessKey }}
-      {{- else }}
-      name: {{ include "mdnest.appSecretName" . }}
-      key: S3_ACCESS_KEY
-      {{- end }}
-- name: S3_SECRET_KEY
-  valueFrom:
-    secretKeyRef:
-      {{- if .Values.storage.s3.existingSecret }}
-      name: {{ .Values.storage.s3.existingSecret }}
-      key: {{ .Values.storage.s3.secretKeys.secretKey }}
-      {{- else }}
-      name: {{ include "mdnest.appSecretName" . }}
-      key: S3_SECRET_KEY
-      {{- end }}
-{{- end }}
 {{- end -}}
 
 
@@ -188,16 +166,16 @@ Refuse to render options this release of mdnest cannot honour.
 The chart ships inside the application repo, so its values surface must not
 outrun the code. Where it does, the failure is silent and expensive: the
 backend simply ignores env it does not read, so the deployment comes up
-"healthy" while doing the wrong thing (notes written to the PVC instead of the
-object store; collaboration state diverging per pod; a Service routing to a
-port nothing listens on). These guards convert each of those into an install-
-time error naming what is missing.
+"healthy" while doing the wrong thing (notes written to a `storage.backend` the
+code doesn't implement; collaboration state diverging per pod; a Service routing
+to a port nothing listens on). These guards convert each of those into an
+install-time error naming what is missing.
 
 Delete a guard in the same change that lands the capability behind it.
 */}}
 {{- define "mdnest.validateSupported" -}}
-{{- if eq .Values.storage.backend "s3" -}}
-  {{- fail "mdnest: storage.backend=s3 is not implemented in this release. The backend reads notes from the filesystem and ignores S3_*, so notes would be written to the notes PVC while appearing to be configured for your bucket. Use storage.backend=local." -}}
+{{- if not (has .Values.storage.backend (list "local" "git")) -}}
+  {{- fail (printf "mdnest: storage.backend=%q is not a supported backend. Use `local` (notes on the PVC) or `git` (in-process git history; add REDIS_URL for the git-native HA topology)." .Values.storage.backend) -}}
 {{- end -}}
 {{- if and (eq .Values.storage.backend "git") .Values.gitSync.enabled -}}
   {{- fail "mdnest: storage.backend=git maintains git history in-process, and gitSync.enabled runs a sidecar that also commits — the two would fight over the same working tree. Pick one: storage.backend=git (mdnest owns commits) or storage.backend=local + gitSync.enabled (the sidecar owns commits/push)." -}}
@@ -250,8 +228,8 @@ note and NOTES.txt hint carry the same instruction for the render-only path.
   {{- if not $redisUrl -}}
     {{- fail "mdnest: running multiple backend replicas requires an external Redis (collab.redis.url, collab.redis.existingSecret, or collab.redis.host) for the presence/event backplane." -}}
   {{- end -}}
-  {{- if and (ne .Values.storage.backend "s3") (ne .Values.storage.backend "git") (not .Values.persistence.notes.existingClaim) -}}
-    {{- fail "mdnest: running multiple backend replicas requires a shared notes volume — set persistence.notes.existingClaim to a ReadWriteMany PVC all pods share (or storage.backend=s3, or storage.backend=git for the git-native topology). The per-pod volumeClaimTemplate would give each replica its own notes and they would diverge." -}}
+  {{- if and (ne .Values.storage.backend "git") (not .Values.persistence.notes.existingClaim) -}}
+    {{- fail "mdnest: running multiple backend replicas requires a shared notes volume — set persistence.notes.existingClaim to a ReadWriteMany PVC all pods share (or use storage.backend=git for the git-native topology). The per-pod volumeClaimTemplate would give each replica its own notes and they would diverge." -}}
   {{- end -}}
 {{- end -}}
 {{- end -}}

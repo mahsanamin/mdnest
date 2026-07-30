@@ -300,41 +300,15 @@ sso:
 #                     local history. Add REDIS_URL for the git-native HA
 #                     topology (stateless app replicas + a single durability
 #                     writer) — see docs/kubernetes.md.
-#   s3              = notes in an S3-compatible object store. NOT IMPLEMENTED:
-#                     the backend reads notes from the filesystem and ignores
-#                     S3_*, so the chart refuses `s3` at install time rather than
-#                     writing notes to the PVC while looking configured for a
-#                     bucket. The keys below are kept so the option can be
-#                     enabled in the same change that lands object-store support.
 # The git-sync sidecar (gitSync.*) is a separate, optional mirror and is
 # mutually exclusive with the `git` backend (both commit to the working tree).
 # -----------------------------------------------------------------------------
 storage:
-  # -- Note storage backend. `local` (notes on the volume) and `git` (same, plus
-  # mdnest maintains git history in-process — no git-sync sidecar needed for
-  # local history) are implemented; `s3` is rejected at install time.
+  # -- Note storage backend: `local` (notes on the volume) or `git` (same, plus
+  # mdnest maintains per-namespace git history in-process — no git-sync sidecar
+  # needed for local history; add REDIS_URL for the git-native HA topology). Any
+  # other value is rejected at install time.
   backend: local
-  s3:
-    # -- S3 endpoint as `host[:port]` WITHOUT scheme, e.g. `s3.fr-par.scw.cloud`.
-    endpoint: ""
-    # -- S3 bucket name.
-    bucket: ""
-    # -- S3 region.
-    region: us-east-1
-    # -- Use TLS to reach the endpoint.
-    useSSL: true
-    # -- Path-style addressing (bucket in URL path). Required for MinIO / Ceph RGW; set `false` only if your endpoint requires virtual-hosted-style.
-    pathStyle: true
-    # -- Existing Secret holding S3 credentials (e.g. synced from Vault). When set, inline keys are ignored.
-    existingSecret: ""
-    # -- Keys inside `existingSecret` holding the credentials.
-    secretKeys:
-      accessKey: S3_ACCESS_KEY
-      secretKey: S3_SECRET_KEY
-    # -- Inline S3 access key (used only when `existingSecret` is empty).
-    accessKey: ""
-    # -- Inline S3 secret key (used only when `existingSecret` is empty).
-    secretKey: ""
   git:
     # -- Git history is committed per-namespace once the writer goes idle on it,
     # not on a fixed timer: an editing session (many rapid saves) is coalesced
@@ -393,7 +367,7 @@ persistence:
   # default (Retain). Example: {whenDeleted: Delete, whenScaled: Retain}.
   pvcRetentionPolicy: {}
   notes:
-    # -- Provision a PVC for note data (ignored when `storage.backend=s3`).
+    # -- Provision a PVC for note data.
     enabled: true
     # -- Use an existing (shared) PVC instead of a per-pod volumeClaimTemplate.
     # Required for active/active and for git-sync.
