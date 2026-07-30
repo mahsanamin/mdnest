@@ -10,7 +10,7 @@ import (
 
 // remoteConfig describes how the committer mirrors each per-namespace git repo
 // to a remote — one git repository per workspace/namespace, e.g.
-// https://gitlab.forterro.com/mdnest-workspaces/<ns>.git — authenticated over
+// https://gitlab.example.com/mdnest-workspaces/<ns>.git — authenticated over
 // HTTPS with a Personal Access Token. Mirroring is the real durability in the
 // HA topology (app replicas git-sync a read-only clone from these remotes); it
 // is disabled when baseURL is empty (local-only history).
@@ -19,7 +19,7 @@ import (
 // (a mounted Kubernetes Secret) and git reads it through a generated GIT_ASKPASS
 // helper. The remote URL carries only the username.
 type remoteConfig struct {
-	baseURL   string // e.g. https://gitlab.forterro.com/mdnest-workspaces (no trailing slash)
+	baseURL   string // e.g. https://gitlab.example.com/mdnest-workspaces (no trailing slash)
 	username  string // HTTPS basic-auth username (GitLab PAT: "oauth2")
 	branch    string // branch to push (default "main")
 	tokenFile string // path to the file holding the PAT
@@ -29,7 +29,7 @@ type remoteConfig struct {
 func (c remoteConfig) enabled() bool { return c.baseURL != "" }
 
 // remoteURL returns the per-namespace remote URL with the username embedded
-// (never the token), e.g. https://oauth2@gitlab.forterro.com/group/<ns>.git.
+// (never the token), e.g. https://oauth2@gitlab.example.com/group/<ns>.git.
 func (c remoteConfig) remoteURL(ns string) (string, error) {
 	u, err := url.Parse(c.baseURL)
 	if err != nil {

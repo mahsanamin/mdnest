@@ -10,12 +10,12 @@ import (
 )
 
 func TestRemoteURLEmbedsUsernameNotToken(t *testing.T) {
-	c := remoteConfig{baseURL: "https://gitlab.forterro.com/mdnest-workspaces", username: "oauth2", branch: "main"}
+	c := remoteConfig{baseURL: "https://gitlab.example.com/mdnest-workspaces", username: "oauth2", branch: "main"}
 	got, err := c.remoteURL("team_a")
 	if err != nil {
 		t.Fatalf("remoteURL: %v", err)
 	}
-	const want = "https://oauth2@gitlab.forterro.com/mdnest-workspaces/team_a.git"
+	const want = "https://oauth2@gitlab.example.com/mdnest-workspaces/team_a.git"
 	if got != want {
 		t.Fatalf("remoteURL = %q, want %q", got, want)
 	}
