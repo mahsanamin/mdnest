@@ -295,19 +295,20 @@ sso:
 # Storage backend for note data.
 #   local (default) = notes live on the `notes` PVC (filesystem). Behaviour is
 #                     byte-identical to upstream.
-#   s3              = notes live in an S3-compatible object store (Scaleway,
-#                     Ceph/RGW, MinIO, AWS S3). This lets multiple backend
-#                     replicas share notes WITHOUT ReadWriteMany storage, and
-#                     enables self-service namespace creation.
-# Note history (git) and the git-sync sidecar always use the local filesystem
-# and stay optional/orthogonal to this setting.
+#   git             = same on-disk layout, but mdnest owns per-namespace git
+#                     history in-process, so no git-sync sidecar is needed for
+#                     local history. Add REDIS_URL for the git-native HA
+#                     topology (stateless app replicas + a single durability
+#                     writer) — see docs/kubernetes.md.
+#   s3              = notes in an S3-compatible object store. NOT IMPLEMENTED:
+#                     the backend reads notes from the filesystem and ignores
+#                     S3_*, so the chart refuses `s3` at install time rather than
+#                     writing notes to the PVC while looking configured for a
+#                     bucket. The keys below are kept so the option can be
+#                     enabled in the same change that lands object-store support.
+# The git-sync sidecar (gitSync.*) is a separate, optional mirror and is
+# mutually exclusive with the `git` backend (both commit to the working tree).
 # -----------------------------------------------------------------------------
-#
-# NOT AVAILABLE IN THIS RELEASE: only `local` is implemented. The backend reads
-# notes from the filesystem and ignores S3_*, so `s3` would write notes to the
-# PVC while looking configured for a bucket — the chart refuses to render it
-# rather than deploy that silently. Keys below are kept so the option can be
-# enabled in the same change that lands object-store support.
 storage:
   # -- Note storage backend. `local` (notes on the volume) and `git` (same, plus
   # mdnest maintains git history in-process — no git-sync sidecar needed for
