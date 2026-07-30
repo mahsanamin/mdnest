@@ -1,11 +1,12 @@
 # Security
 
-mdnest is a privately-hosted markdown notes platform that runs across two very different shapes:
+mdnest is a privately-hosted markdown notes platform that runs across shapes that differ widely in scale and threat model:
 
 - **Solo**: one person on a laptop or a home server, possibly reaching their notes from a phone over a private network.
 - **Small team**: a small company's shared knowledge base on a server (cloud VM or on-prem), users signing in through their corporate identity provider, role-based access to namespaces.
+- **Organization**: an active/active deployment on Kubernetes — the git-native HA topology (stateless app replicas + a single durability writer coordinated through Redis), an external managed PostgreSQL and Redis, OIDC SSO with domain gating and auto-provisioning, per-namespace RBAC, and per-user OAuth for MCP. It scales horizontally without ReadWriteMany storage, and note history stays plain git, mirrored off-cluster. It is **not** a multi-master or zero-RPO design: writes funnel through one writer, and the HA topology trades a bounded window in which an acknowledged save can be lost — see [kubernetes.md](kubernetes.md) before choosing it.
 
-Both shapes share the same engine but their threat models differ. This doc explains what's enforced, where the boundaries are, and how to harden each setup.
+All three share the same engine and the same authorization model; their threat models differ. This doc explains what's enforced, where the boundaries are, and how to harden each.
 
 ---
 
@@ -117,7 +118,7 @@ The JWT is **signed**, not encrypted. Anyone with the token can read its claims.
 For headless callers (CLI, MCP server, scripts):
 
 - Generated as 32 cryptographically random bytes encoded as `mdnest_<base64url>`.
-- Stored as **SHA-256 hashes** in the secrets volume — the raw token is shown once on creation and never again.
+- Stored as **SHA-256 hashes** — in Postgres (`api_tokens`) in multi mode, or the `tokens.json` secrets file in single mode. The raw token is shown once on creation and never again.
 - Last 4 chars are kept in plain text so they're recognizable in the UI ("ends in `…a3f9`").
 - Never expire. Revoke via Settings → API Tokens or `DELETE /api/auth/tokens?id=`.
 
