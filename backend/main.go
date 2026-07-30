@@ -358,7 +358,10 @@ func main() {
 			uploadHandler.SetWriterProxy(httputil.NewSingleHostReverseProxy(u))
 			log.Printf("attachments: proxying /api/upload and /api/files/ to writer at %s", writerURL)
 		} else {
-			log.Println("attachments: MDNEST_ROLE=app without WRITER_URL — attachment upload/download will fail until it is set")
+			// Fail loud rather than come up Ready with silently broken
+			// attachments: an app replica owns no attachment bytes, so upload
+			// and serve only work when proxied to the writer.
+			log.Fatalf("MDNEST_ROLE=app requires WRITER_URL — without it /api/upload and /api/files/ are broken while the pod still reports Ready")
 		}
 	}
 	moveHandler := handlers.NewMoveHandler(stg)
