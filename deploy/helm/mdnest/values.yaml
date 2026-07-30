@@ -227,6 +227,13 @@ postgres:
 # multiple replicas (active/active), also set a Redis backplane below so presence
 # and edits sync across pods — validateHA enforces this, since without it
 # replicas would silently diverge.
+#
+# DURABILITY NOTE: with the git-native HA backend (storage.backend=git +
+# REDIS_URL) this same Redis is NOT just a presence/event backplane — it also
+# carries the durability queue between the app replicas and the writer. Between
+# a save's ack and the writer committing it to git, the queue is the only copy,
+# so this Redis must run with AOF persistence (appendonly yes). See
+# docs/kubernetes.md "Git-native HA and durability (RPO)".
 collab:
   # -- Enable live collaboration (`ENABLE_LIVE_COLLAB`; requires `auth.mode=multi`). For multiple replicas, also configure `redis` below.
   enabled: false

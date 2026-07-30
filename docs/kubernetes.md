@@ -71,6 +71,18 @@ Notes are files, in Kubernetes as much as anywhere else. The chart provisions a 
 
 Namespaces still come from directories on that volume — there's no runtime namespace creation, matching the Compose install.
 
+## Git-native HA and durability (RPO)
+
+Setting `storage.backend=git` **with** `REDIS_URL` turns on the active/active topology: the notes tree lives in per-namespace git repos owned by a single **writer** replica (a StatefulSet with its own PVC), and the stateless **app** replicas (a Deployment, `MDNEST_ROLE=app`) serve reads from a Redis **working set** and hand writes to the writer over a Redis **durability queue**. `storage.backend=git` *without* `REDIS_URL` stays the single-box, in-process committer — synchronous, no queue.
+
+Understand the durability contract before choosing this topology, because it moves the boundary of "your save is safe":
+
+- **An acknowledged save can be lost.** On an app replica, `PUT /api/note` returns success once the write is on the Redis queue — *not* once the writer has committed it to git. If Redis loses that entry before the writer drains it, the user saw a successful save and the note is gone. The window is the queue-drain latency: sub-second in steady state, longer while the writer is down or failing over. That window is the RPO of this topology. A single-box install, or `storage.backend=git` without Redis, has an RPO of zero — the bytes are on disk before the response returns.
+
+- **Redis is a durability component here, not a cache.** Between the ack and the writer applying the op, the Redis queue is the *only* copy of that change. So **run Redis with AOF persistence** (`appendonly yes`, `appendfsync everysec` at least) for this topology: the working-set cache would survive a Redis rebuild by rehydrating from the git tree, but the *unflushed queue* would not — a Redis restart in that window is real data loss. This is a deliberate trade for horizontal scale without ReadWriteMany storage; make it knowingly. (Note this is a stronger requirement than the presence/event backplane role Redis plays for live collaboration, where a lost event only costs a reconnect.)
+
+The opt-in mirror (`storage.git.remote.url`) pushes each namespace repo to an external git host, so the durable tree also exists off-cluster — a copy independent of the writer's PVC.
+
 ## Upgrades
 
 `helm upgrade` with the new chart version. Image tags default to the chart's `appVersion`, which tracks the mdnest release, so upgrading the chart upgrades mdnest. Pin explicitly with `image.backend.tag` / `image.frontend.tag` if you'd rather control that yourself.
