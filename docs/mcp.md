@@ -190,7 +190,10 @@ verifier, and client registration is public).
 - **Any other origin is refused** unless you list it in
   `MCP_ALLOWED_REDIRECT_ORIGINS` (exact `scheme://host[:port]` match, HTTPS
   only). Set this only if a hosted client on a real domain must complete the
-  flow.
+  flow — for example a hosted **MCP gateway** that federates this server and
+  discovers its tools over an OAuth handshake: list the gateway's callback
+  origin (e.g. `https://gateway.example.com`), otherwise its tool discovery
+  fails with `400 invalid_request`.
 
 `/oauth/authorize` returns `400 invalid_request` for anything else.
 
@@ -226,3 +229,25 @@ two-step flow: bring mdnest up, create the token, set `MCP_TOKEN`, then rebuild.
 
 For OAuth mode set `MCP_AUTH_MODE=oauth` plus `MCP_PUBLIC_URL`,
 `MCP_OAUTH_SECRET`, and `MCP_SSO_AUTHORIZE_URL` in `mdnest.conf`.
+
+---
+
+## 8. Task tools
+
+The server exposes the [task board](tasks.md) so an agent can manage tasks, not
+just notes. Tasks are plain markdown checkboxes in the notes, so these tools read
+and rewrite that markdown.
+
+| Tool | Purpose | Key inputs |
+|------|---------|------------|
+| `list_tasks` | Board columns + every task in a namespace (or one note). Returns each task's `path`, `line` and `raw` — needed to mutate it. | `namespace`, `note?` |
+| `create_task` | Append a whole task to a note (the note, else the board's default note; created if missing). | `namespace`, `title`, `note?`, `column?`, `due?`, `priority?`, `workload?`, `tags?`, `notes?`, `steps?`, `defaultExpanded?` |
+| `move_task` | Move a task to a column (sets its status; checks the box for the Done column). | `namespace`, `path`, `line`, `raw`, `column` |
+| `edit_task` | Replace a task's whole definition (omitted fields are cleared). | `namespace`, `path`, `line`, `raw`, `title`, `column?`, `due?`, `priority?`, `workload?`, `tags?`, `notes?`, `steps?`, `defaultExpanded?` |
+
+**Workflow.** Call `list_tasks` first to read the column ids and each task's
+`path`/`line`/`raw`; pass those back to `move_task` / `edit_task`. The mutations
+are optimistically concurrent — a `409` means the note changed under you, so
+re-run `list_tasks` and retry. See the [task model](tasks.md) for the markdown a
+task compiles to and the [API reference](api.md#task-board) for the underlying
+endpoints.
