@@ -15,7 +15,13 @@ transports**:
 
 > **Available tools:** `list_namespaces`, `list_tree`, `read_note`,
 > `write_note`, `append_note`, `prepend_note`, `create_note`, `create_folder`,
-> `delete_item`, `move_item`, `search_notes`.
+> `delete_item`, `move_item`, `search_notes`, `list_tasks`, `create_task`,
+> `move_task`, `edit_task`.
+>
+> The `*_task` tools drive the [task board](tasks.md): `list_tasks` returns the
+> board columns and every task (with the `path`/`line`/`raw` needed to mutate
+> one); `create_task`/`edit_task` author a whole task (title, column, due,
+> priority, workload, tags, steps, notes); `move_task` changes a task's column.
 
 ---
 
