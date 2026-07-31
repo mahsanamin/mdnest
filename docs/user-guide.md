@@ -1,6 +1,6 @@
 # mdnest User Guide
 
-mdnest is a privately-hosted markdown notes app. Your notes are plain `.md` files on disk, and mdnest provides a clean web interface to browse, edit, and organize them. It works for personal use (single-user mode) or team collaboration (multi-user mode with role-based access, namespace-scoped admins, and corporate SSO).
+mdnest is a privately-hosted markdown notes app. Your notes are plain `.md` files on disk, and mdnest provides a clean web interface to browse, edit, and organize them. It works for personal use (single-user mode) or team collaboration (multi-user mode with role-based access, namespace-scoped admins, and corporate SSO), and scales up to an organization-wide, active/active deployment on Kubernetes (see [kubernetes.md](kubernetes.md)).
 
 If you're an end-user being added to your team's mdnest, read **Logging In** and **The Sidebar** below — that's enough to get going. The rest is reference. If you also have admin scope, see **Roles & administration** further down.
 

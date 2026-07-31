@@ -79,22 +79,106 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- if .Values.persistence.secrets.existingClaim -}}{{ .Values.persistence.secrets.existingClaim }}{{- else -}}{{ printf "%s-secrets" (include "mdnest.fullname" .) }}{{- end -}}
 {{- end -}}
 
+{{/* Git-native HA: the git backend scaled past one replica runs a stateless
+app tier (reads from Redis) plus a single durability writer, instead of a shared
+notes volume. Returns the string "true"/"false". */}}
+{{- define "mdnest.gitNativeHA" -}}
+{{- and (eq .Values.storage.backend "git") (or (gt (int .Values.backend.replicaCount) 1) .Values.backend.autoscaling.enabled) -}}
+{{- end -}}
+
+{{- define "mdnest.writer.fullname" -}}{{ printf "%s-writer" (include "mdnest.fullname" .) }}{{- end -}}
+{{- define "mdnest.writer.headlessName" -}}{{ printf "%s-writer-headless" (include "mdnest.fullname" .) }}{{- end -}}
+
+{{/* Shared secret/derived env for every backend workload (StatefulSet, app
+Deployment, writer). Emit as a YAML list; callers nindent it under `env:`. The
+per-workload MDNEST_ROLE and extraEnv are added by the caller. */}}
+{{- define "mdnest.backend.secretEnv" -}}
+- name: MDNEST_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      {{- if .Values.auth.existingSecret }}
+      name: {{ .Values.auth.existingSecret }}
+      key: {{ .Values.auth.secretKeys.password }}
+      {{- else }}
+      name: {{ include "mdnest.appSecretName" . }}
+      key: MDNEST_PASSWORD
+      {{- end }}
+- name: MDNEST_JWT_SECRET
+  valueFrom:
+    secretKeyRef:
+      {{- if .Values.auth.existingSecret }}
+      name: {{ .Values.auth.existingSecret }}
+      key: {{ .Values.auth.secretKeys.jwtSecret }}
+      {{- else }}
+      name: {{ include "mdnest.appSecretName" . }}
+      key: MDNEST_JWT_SECRET
+      {{- end }}
+{{- if eq .Values.auth.mode "multi" }}
+- name: POSTGRES_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      {{- if .Values.postgres.existingSecret }}
+      name: {{ .Values.postgres.existingSecret }}
+      key: {{ .Values.postgres.secretKeys.password }}
+      {{- else }}
+      name: {{ include "mdnest.appSecretName" . }}
+      key: POSTGRES_PASSWORD
+      {{- end }}
+{{- end }}
+{{- if and .Values.collab.enabled .Values.collab.redis.host }}
+- name: REDIS_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ required "collab.redis.passwordSecret.name is required when collab.redis.host is set" .Values.collab.redis.passwordSecret.name }}
+      key: {{ .Values.collab.redis.passwordSecret.key }}
+- name: REDIS_URL
+  value: {{ printf "%s://%s:$(REDIS_PASSWORD)@%s:%v/%v" (ternary "rediss" "redis" .Values.collab.redis.tls) .Values.collab.redis.username .Values.collab.redis.host .Values.collab.redis.port .Values.collab.redis.database | quote }}
+{{- else if and .Values.collab.enabled (or .Values.collab.redis.url .Values.collab.redis.existingSecret) }}
+- name: REDIS_URL
+  valueFrom:
+    secretKeyRef:
+      {{- if .Values.collab.redis.existingSecret }}
+      name: {{ .Values.collab.redis.existingSecret }}
+      key: {{ .Values.collab.redis.secretKeys.url }}
+      {{- else }}
+      name: {{ include "mdnest.appSecretName" . }}
+      key: REDIS_URL
+      {{- end }}
+{{- end }}
+{{- if .Values.sso.enabled }}
+- name: SSO_CLIENT_SECRET
+  valueFrom:
+    secretKeyRef:
+      {{- if .Values.sso.existingSecret }}
+      name: {{ .Values.sso.existingSecret }}
+      key: {{ .Values.sso.secretKeys.clientSecret }}
+      {{- else }}
+      name: {{ include "mdnest.appSecretName" . }}
+      key: SSO_CLIENT_SECRET
+      {{- end }}
+{{- end }}
+{{- end -}}
+
+
 {{/*
 Refuse to render options this release of mdnest cannot honour.
 
 The chart ships inside the application repo, so its values surface must not
 outrun the code. Where it does, the failure is silent and expensive: the
 backend simply ignores env it does not read, so the deployment comes up
-"healthy" while doing the wrong thing (notes written to the PVC instead of the
-object store; collaboration state diverging per pod; a Service routing to a
-port nothing listens on). These guards convert each of those into an install-
-time error naming what is missing.
+"healthy" while doing the wrong thing (notes written to a `storage.backend` the
+code doesn't implement; collaboration state diverging per pod; a Service routing
+to a port nothing listens on). These guards convert each of those into an
+install-time error naming what is missing.
 
 Delete a guard in the same change that lands the capability behind it.
 */}}
 {{- define "mdnest.validateSupported" -}}
-{{- if eq .Values.storage.backend "s3" -}}
-  {{- fail "mdnest: storage.backend=s3 is not implemented in this release. The backend reads notes from the filesystem and ignores S3_*, so notes would be written to the notes PVC while appearing to be configured for your bucket. Use storage.backend=local." -}}
+{{- if not (has .Values.storage.backend (list "local" "git")) -}}
+  {{- fail (printf "mdnest: storage.backend=%q is not a supported backend. Use `local` (notes on the PVC) or `git` (in-process git history; add REDIS_URL for the git-native HA topology)." .Values.storage.backend) -}}
+{{- end -}}
+{{- if and (eq .Values.storage.backend "git") .Values.gitSync.enabled -}}
+  {{- fail "mdnest: storage.backend=git maintains git history in-process, and gitSync.enabled runs a sidecar that also commits — the two would fight over the same working tree. Pick one: storage.backend=git (mdnest owns commits) or storage.backend=local + gitSync.enabled (the sidecar owns commits/push)." -}}
 {{- end -}}
 {{- end -}}
 
@@ -144,8 +228,8 @@ note and NOTES.txt hint carry the same instruction for the render-only path.
   {{- if not $redisUrl -}}
     {{- fail "mdnest: running multiple backend replicas requires an external Redis (collab.redis.url, collab.redis.existingSecret, or collab.redis.host) for the presence/event backplane." -}}
   {{- end -}}
-  {{- if and (ne .Values.storage.backend "s3") (not .Values.persistence.notes.existingClaim) -}}
-    {{- fail "mdnest: running multiple backend replicas requires a shared notes volume — set persistence.notes.existingClaim to a ReadWriteMany PVC all pods share (or storage.backend=s3). The per-pod volumeClaimTemplate would give each replica its own notes and they would diverge." -}}
+  {{- if and (ne .Values.storage.backend "git") (not .Values.persistence.notes.existingClaim) -}}
+    {{- fail "mdnest: running multiple backend replicas requires a shared notes volume — set persistence.notes.existingClaim to a ReadWriteMany PVC all pods share (or use storage.backend=git for the git-native topology). The per-pod volumeClaimTemplate would give each replica its own notes and they would diverge." -}}
   {{- end -}}
 {{- end -}}
 {{- end -}}

@@ -227,6 +227,13 @@ postgres:
 # multiple replicas (active/active), also set a Redis backplane below so presence
 # and edits sync across pods — validateHA enforces this, since without it
 # replicas would silently diverge.
+#
+# DURABILITY NOTE: with the git-native HA backend (storage.backend=git +
+# REDIS_URL) this same Redis is NOT just a presence/event backplane — it also
+# carries the durability queue between the app replicas and the writer. Between
+# a save's ack and the writer committing it to git, the queue is the only copy,
+# so this Redis must run with AOF persistence (appendonly yes). See
+# docs/kubernetes.md "Git-native HA and durability (RPO)".
 collab:
   # -- Enable live collaboration (`ENABLE_LIVE_COLLAB`; requires `auth.mode=multi`). For multiple replicas, also configure `redis` below.
   enabled: false
@@ -288,43 +295,53 @@ sso:
 # Storage backend for note data.
 #   local (default) = notes live on the `notes` PVC (filesystem). Behaviour is
 #                     byte-identical to upstream.
-#   s3              = notes live in an S3-compatible object store (Scaleway,
-#                     Ceph/RGW, MinIO, AWS S3). This lets multiple backend
-#                     replicas share notes WITHOUT ReadWriteMany storage, and
-#                     enables self-service namespace creation.
-# Note history (git) and the git-sync sidecar always use the local filesystem
-# and stay optional/orthogonal to this setting.
+#   git             = same on-disk layout, but mdnest owns per-namespace git
+#                     history in-process, so no git-sync sidecar is needed for
+#                     local history. Add REDIS_URL for the git-native HA
+#                     topology (stateless app replicas + a single durability
+#                     writer) — see docs/kubernetes.md.
+# The git-sync sidecar (gitSync.*) is a separate, optional mirror and is
+# mutually exclusive with the `git` backend (both commit to the working tree).
 # -----------------------------------------------------------------------------
-#
-# NOT AVAILABLE IN THIS RELEASE: only `local` is implemented. The backend reads
-# notes from the filesystem and ignores S3_*, so `s3` would write notes to the
-# PVC while looking configured for a bucket — the chart refuses to render it
-# rather than deploy that silently. Keys below are kept so the option can be
-# enabled in the same change that lands object-store support.
 storage:
-  # -- Note storage backend. Only `local` is implemented in this release (notes on the `notes` PVC); `s3` is rejected at install time.
+  # -- Note storage backend: `local` (notes on the volume) or `git` (same, plus
+  # mdnest maintains per-namespace git history in-process — no git-sync sidecar
+  # needed for local history; add REDIS_URL for the git-native HA topology). Any
+  # other value is rejected at install time.
   backend: local
-  s3:
-    # -- S3 endpoint as `host[:port]` WITHOUT scheme, e.g. `s3.fr-par.scw.cloud`.
-    endpoint: ""
-    # -- S3 bucket name.
-    bucket: ""
-    # -- S3 region.
-    region: us-east-1
-    # -- Use TLS to reach the endpoint.
-    useSSL: true
-    # -- Path-style addressing (bucket in URL path). Required for MinIO / Ceph RGW; set `false` only if your endpoint requires virtual-hosted-style.
-    pathStyle: true
-    # -- Existing Secret holding S3 credentials (e.g. synced from Vault). When set, inline keys are ignored.
-    existingSecret: ""
-    # -- Keys inside `existingSecret` holding the credentials.
-    secretKeys:
-      accessKey: S3_ACCESS_KEY
-      secretKey: S3_SECRET_KEY
-    # -- Inline S3 access key (used only when `existingSecret` is empty).
-    accessKey: ""
-    # -- Inline S3 secret key (used only when `existingSecret` is empty).
-    secretKey: ""
+  git:
+    # -- Git history is committed per-namespace once the writer goes idle on it,
+    # not on a fixed timer: an editing session (many rapid saves) is coalesced
+    # into a single commit made after `commit.debounce` with no new write, so
+    # the git graph stays readable. Note bytes are durable on disk immediately;
+    # this only controls history commit cadence.
+    commit:
+      # -- Commit a namespace after this long with no new write (Go duration).
+      # Empty = backend default (2m).
+      debounce: ""
+      # -- Safety cap: force a commit once a namespace has been dirty this long
+      # even while still being edited (Go duration). Empty = backend default
+      # (10m).
+      maxWait: ""
+    # -- Author name/email for mdnest's own commits. Empty = mdnest/mdnest@localhost.
+    authorName: ""
+    authorEmail: ""
+    # -- Optional per-namespace remote mirror: one git repository per workspace,
+    # pushed over HTTPS. When `url` is set the git backend pushes each namespace
+    # repo to `<url>/<namespace>.git`. Opt-in; empty = local history only. This
+    # is the coarse global default; per-workspace remotes (multi mode) are a
+    # separate feature.
+    remote:
+      # -- Base URL for the per-namespace remotes, e.g. `https://gitlab.example.com/notes-workspaces`. Empty = mirroring disabled.
+      url: ""
+      # -- HTTPS username (GitLab PAT: `oauth2`; GitHub PAT: `x-access-token`).
+      username: oauth2
+      # -- Branch to push.
+      branch: main
+      # -- Existing Secret holding the Personal Access Token, mounted read-only as a file. Create it yourself; tokens must never live in values.
+      existingTokenSecret: ""
+      # -- Key inside `existingTokenSecret` holding the PAT.
+      tokenSecretKey: token
 
 # -----------------------------------------------------------------------------
 # Persistence. The backend is a StatefulSet, so each volume has three modes:
@@ -350,7 +367,7 @@ persistence:
   # default (Retain). Example: {whenDeleted: Delete, whenScaled: Retain}.
   pvcRetentionPolicy: {}
   notes:
-    # -- Provision a PVC for note data (ignored when `storage.backend=s3`).
+    # -- Provision a PVC for note data.
     enabled: true
     # -- Use an existing (shared) PVC instead of a per-pod volumeClaimTemplate.
     # Required for active/active and for git-sync.
@@ -385,6 +402,23 @@ persistence:
     size: 256Mi
     # -- Annotations for the secrets PVC.
     annotations: {}
+
+# -----------------------------------------------------------------------------
+# Durability writer (git-native HA only). Rendered when storage.backend=git and
+# the backend is scaled past one replica (or autoscaled): a single-replica
+# StatefulSet that owns the authoritative git tree, wins the Redis leader lock,
+# drains the durability queue, and mirrors to the remote. Its notes PVC reuses
+# persistence.notes (size/storageClass/accessMode); only sizing/scheduling here.
+# -----------------------------------------------------------------------------
+writer:
+  # -- Writer resource requests/limits.
+  resources: {}
+  # -- Node selector for the writer pod.
+  nodeSelector: {}
+  # -- Tolerations for the writer pod.
+  tolerations: []
+  # -- Affinity rules for the writer pod.
+  affinity: {}
 
 # -----------------------------------------------------------------------------
 # git-sync sidecar (optional). Periodically commits/pushes the notes repo to a

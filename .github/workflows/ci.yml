@@ -116,7 +116,7 @@ jobs:
               echo "ok: rejected $desc"
             fi
           }
-          expect_reject "storage.backend=s3 (no object-store support)" \
+          expect_reject "storage.backend=s3 (unsupported backend)" \
             --set storage.backend=s3
           [ "$fails" -eq 0 ] || exit 1
       - name: Validate rendered manifests (kubeconform)

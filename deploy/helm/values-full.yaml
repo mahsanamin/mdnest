@@ -1,0 +1,111 @@
+# =============================================================================
+# values-full.yaml — git-native HA (active/active), all opt-ins
+# -----------------------------------------------------------------------------
+# Horizontally-scaled, active/active mdnest on the git-native storage backend:
+# N stateless app replicas + one durability writer, coordinated through Redis,
+# with a per-namespace git remote mirror, MCP over per-user OAuth, and SSO.
+#
+# READ FIRST: docs/kubernetes.md "Git-native HA and durability (RPO)". On an app
+# replica a save is acknowledged once it is on the Redis queue, not once the
+# writer has committed it to git — so this Redis is a DURABILITY component and
+# MUST run with AOF persistence (appendonly yes), not just a collab backplane.
+#
+# Prerequisites:
+#   - external PostgreSQL (multi mode)
+#   - external Redis WITH AOF persistence
+#   - a GitLab/GitHub group for per-namespace repos + a PAT Secret for the mirror
+#   - an OIDC identity provider
+# Secrets are referenced by name (create them yourself); nothing sensitive lives
+# in this file.
+# =============================================================================
+
+auth:
+  mode: multi
+  adminUser: admin
+  existingSecret: mdnest-auth          # provides MDNEST_PASSWORD + MDNEST_JWT_SECRET
+
+postgres:
+  host: postgresql.databases.svc.cluster.local
+  existingSecret: mdnest-postgres      # POSTGRES_PASSWORD
+
+# --- Note storage: git-native HA (git backend + Redis coherence tier) --------
+storage:
+  backend: git
+  git:
+    remote:
+      # One git repository per namespace under this group: <url>/<ns>.git.
+      url: https://gitlab.example.com/mdnest-workspaces
+      username: oauth2
+      branch: main
+      existingTokenSecret: mdnest-git-token   # PAT, mounted read-only as a file
+      tokenSecretKey: token
+
+collab:
+  enabled: true
+  redis:
+    # Durability queue + working set + leader lock live here — run Redis with
+    # AOF (appendonly yes). Not just the presence/event backplane.
+    existingSecret: mdnest-redis         # REDIS_URL
+
+backend:
+  # N stateless app replicas (Deployment, emptyDir); reads served from Redis.
+  replicaCount: 3
+  frontendOrigin: https://notes.example.com
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 75
+
+# App tier is stateless; only the single writer needs a PVC (ReadWriteOnce).
+persistence:
+  notes:
+    enabled: true
+    accessMode: ReadWriteOnce
+    size: 20Gi
+  secrets:
+    enabled: false                       # API tokens live in Postgres
+
+writer:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+# --- MCP server over per-user OAuth (every action attributed to the user) ----
+mcp:
+  enabled: true
+  auth:
+    mode: oauth
+  oauth:
+    publicUrl: https://mcp.example.com
+    ssoAuthorizeUrl: https://notes.example.com/api/auth/sso/start
+    secret:
+      existingSecret: mdnest-mcp-oauth
+      existingSecretKey: oauth-secret
+
+sso:
+  enabled: true
+  issuerUrl: https://login.example.com/realms/notes
+  clientId: mdnest
+  allowedDomains: example.com
+  adminEmails: admin@example.com
+  autoProvisionUsers: true
+  existingSecret: mdnest-sso             # SSO_CLIENT_SECRET
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: notes.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - hosts:
+        - notes.example.com
+      secretName: mdnest-tls
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2

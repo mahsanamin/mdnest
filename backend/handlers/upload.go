@@ -15,11 +15,26 @@ import (
 type UploadHandler struct {
 	store storage.Storage
 	perms *middleware.PermissionChecker // nil in single mode
+	// writerProxy, when set (git-native HA app replicas), forwards attachment
+	// traffic (POST /api/upload, GET /api/files/) to the writer, which owns the
+	// git tree — keeping binary bytes off the durability queue.
+	writerProxy http.Handler
 }
 
 func NewUploadHandler(store storage.Storage, perms *middleware.PermissionChecker) *UploadHandler {
 	return &UploadHandler{store: store, perms: perms}
 }
+
+// SetWriterProxy makes attachment upload/serve reverse-proxy to the writer.
+// Used on stateless app replicas, which hold no attachment bytes locally.
+func (h *UploadHandler) SetWriterProxy(p http.Handler) { h.writerProxy = p }
+
+// gitKeepFile is the empty placeholder written to materialise a folder. Git
+// cannot track an empty directory, and the HA app tier derives the tree from
+// the Redis working set (which lists files only), so a bare directory would be
+// invisible on the app replicas and never mirrored. The placeholder is a
+// dotfile, so buildTree hides it from the tree.
+const gitKeepFile = ".gitkeep"
 
 // HandleFolder handles POST /api/folder?ns=...&path=...
 func (h *UploadHandler) HandleFolder(w http.ResponseWriter, r *http.Request) {
@@ -33,11 +48,14 @@ func (h *UploadHandler) HandleFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	relPath, ok := SafeRelPath(r.URL.Query().Get("path"))
-	if !ok {
+	if !ok || relPath == "" {
 		http.Error(w, `{"error":"invalid path"}`, http.StatusBadRequest)
 		return
 	}
-	if err := h.store.MkdirAll(ctx, ns, relPath); err != nil {
+	// Materialise the folder with an empty .gitkeep placeholder so it is durable
+	// (committed + mirrored), visible on every app replica (it appears in the
+	// working set), and hidden from the tree (dotfiles are filtered).
+	if err := h.store.WriteFile(ctx, ns, path.Join(relPath, gitKeepFile), []byte{}); err != nil {
 		http.Error(w, `{"error":"failed to create folder"}`, http.StatusInternalServerError)
 		return
 	}
@@ -50,6 +68,14 @@ func (h *UploadHandler) HandleFolder(w http.ResponseWriter, r *http.Request) {
 func (h *UploadHandler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	// App replicas don't persist attachment bytes: forward the upload to the
+	// writer (which owns the git tree) rather than routing megabytes through the
+	// durability queue. The writer re-checks write permission on the forwarded
+	// request.
+	if h.writerProxy != nil {
+		h.writerProxy.ServeHTTP(w, r)
 		return
 	}
 	ctx := r.Context()
@@ -95,6 +121,15 @@ func (h *UploadHandler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 func (h *UploadHandler) HandleServeFile(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Stateless app replicas hold no attachment bytes — those live on the
+	// writer's git tree. Forward the (already authenticated) request to the
+	// writer, which serves it with range/conditional-GET support and re-checks
+	// the per-namespace read permission with the same forwarded credentials.
+	if h.writerProxy != nil {
+		h.writerProxy.ServeHTTP(w, r)
 		return
 	}
 
