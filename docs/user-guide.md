@@ -162,6 +162,8 @@ mdnest has two editing modes, switchable from the toolbar when in editor-only vi
 
 Live Mode is only available in editor-only view (the pen icon). Split view always uses Basic Mode with a separate preview pane.
 
+**Board** — the same toolbar switch has a third option, **Board**, which opens the namespace [task board](#task-board) in the editor pane (the sidebar and header stay put). It appears once a namespace is selected.
+
 Changes are saved automatically in both modes. There is no manual save button -- your edits are sent to the backend as you type. As of v3.6.1, autosave will refuse to truncate a non-empty note to empty (a defensive guard against editor bugs that could otherwise wipe content); to deliberately empty a file, delete it via right-click → Delete.
 
 ---
@@ -348,7 +350,32 @@ Standard markdown task list syntax is supported:
 - [x] Checked item
 ```
 
-In the preview pane, checkboxes are rendered as interactive elements. Clicking a checkbox toggles its state and updates the underlying markdown file automatically.
+In the preview pane and Live editor, checkboxes are interactive -- clicking one toggles its state and updates the underlying markdown file automatically.
+
+Checkboxes are also the atoms of the **[Task Board](#task-board)**: any checkbox is a task, and a task can be enriched with a due date, priority, tags, sub-steps and a description written as an indented block underneath it. The full on-disk format is specified in **[Task Model](tasks.md)**.
+
+---
+
+## Task Board
+
+The task board gathers every task-list item in a namespace and presents it as a kanban board or a flat list. Because tasks live in your notes, the board is just a view of them -- editing on the board edits the note, and editing the note updates the board.
+
+**Opening it.** With a note open, the editor toolbar shows a **Basic · Live · Board** switch; pick **Board** to replace the editor pane with the board (the sidebar and header stay put). The board is scoped to the current namespace.
+
+**Views.**
+
+- **Kanban / List** -- a toggle at the top left. Kanban shows one column per board column (drag a card between columns to change its status); List shows tasks grouped by note with quick checkboxes.
+- **Workspace / This note** -- when a note is open, scope the board to the whole namespace or just the current note.
+
+**Cards.** Each card shows the title, a priority badge, the due date (red when overdue), tags, workload and a step progress bar. **More** expands the steps (tick them off individually) and the description.
+
+**Creating a task.** Click **+ New task** to open the editor: title, target note (defaults to the board's default note), column, due date, priority, workload, tags, steps and a description. The task is appended to the chosen note (created if it doesn't exist).
+
+**Editing a task.** Click **✎ edit** on any card or list row to open the same editor pre-filled; saving rewrites the whole task in its note.
+
+**Columns & default note.** **Columns…** opens *Board settings*, where you name the columns, set the status value each one writes, mark the *Done* column, and choose the **default note** for new tasks. This is stored per namespace in `.mdnest/board.json`.
+
+See **[Task Model](tasks.md)** for the exact markdown a task compiles to, and the [API Reference](api.md#task-board) for the endpoints.
 
 ---
 

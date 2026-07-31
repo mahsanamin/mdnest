@@ -341,6 +341,7 @@ Beyond the core editor and the three access interfaces, mdnest includes:
 - **Obsidian `[[wikilinks]]`.** Bring an Obsidian vault over as-is: `[[note]]`, `[[note|alias]]`, `[[note#heading]]`, and `[[#heading]]` resolve against your notes and open in-app — in both the preview and the Live editor. Broken links show muted so you can spot missing notes, and the markdown on disk stays literal `[[...]]`.
 - **Inline comments with threads.** Highlight any text and leave a comment; commented passages stay highlighted in yellow, and reviewers reply in a thread. Click a highlight to jump to the conversation. Comments are anchored to invisible UUIDs, so moving or renaming files keeps them attached.
 - **Live collaboration.** Multiple people editing the same note see each other's cursors and changes in real time over WebSocket. Toggle with `ENABLE_LIVE_COLLAB=true`.
+- **Task board from your notes.** Every `- [ ]` checkbox becomes a card on a per-namespace kanban board — with due dates, priorities, tags, sub-steps and descriptions written as an indented block in the note itself. Drag between columns, create and edit whole tasks from the board, scope it to one note or the whole workspace — and it's still just markdown on disk. See [docs/tasks.md](docs/tasks.md).
 - **Interactive mermaid diagrams.** Diagrams render in-place with a Source/Preview/zoom toolbar and click-to-edit labels — edit node text directly on the diagram without touching the code.
 - **In-app version history.** With git-sync enabled, right-click any note → **History** to browse past versions, compare any two as a diff, and one-click restore. Restoration is itself versioned and undoable through the same modal.
 - **Namespace-scoped admins.** One or two SuperAdmins overall, plus per-team Admins who manage just their own namespace — invite users, manage grants, trigger git-sync — without touching other teams' data. See [docs/security.md](docs/security.md#layer-3--authorization).
@@ -353,6 +354,7 @@ Beyond the core editor and the three access interfaces, mdnest includes:
 
 - [docs/setup.md](docs/setup.md) — Setup, configuration, env vars
 - [docs/user-guide.md](docs/user-guide.md) — End-user walkthrough
+- [docs/tasks.md](docs/tasks.md) — Task model: how notes become a kanban task board
 - [docs/security.md](docs/security.md) — Threat model, identity, authorization, role hierarchy
 - [docs/architecture.md](docs/architecture.md) — Backend / frontend / database layout
 - [docs/api.md](docs/api.md) — Full REST API reference with curl examples
