@@ -9,13 +9,13 @@ import (
 
 // Grant represents a row in the access_grants table.
 type Grant struct {
-	ID        int
-	UserID    int
-	Namespace string
-	Path      string // "/" = full namespace, "/subdir" = scoped
+	ID         int
+	UserID     int
+	Namespace  string
+	Path       string // "/" = full namespace, "/subdir" = scoped
 	Permission string // "read" or "write"
-	GrantedBy *int
-	CreatedAt time.Time
+	GrantedBy  *int
+	CreatedAt  time.Time
 }
 
 // GrantWithUser is a grant with the associated username for display.
@@ -29,6 +29,7 @@ type GrantStore interface {
 	CreateGrant(userID int, namespace, path, permission string, grantedBy *int) (*Grant, error)
 	UpdateGrantPermission(id int, permission string) error
 	DeleteGrant(id int) error
+	DeleteGrantsForNamespace(namespace string) (int64, error)
 	GetGrant(id int) (*Grant, error)
 	GetGrantsForUser(userID int) ([]Grant, error)
 	GetGrantsForNamespace(namespace string) ([]Grant, error)
@@ -134,6 +135,18 @@ func (s *PostgresGrantStore) DeleteGrant(id int) error {
 		return fmt.Errorf("grant not found")
 	}
 	return nil
+}
+
+// DeleteGrantsForNamespace removes every access grant on a namespace, used when
+// a workspace/project is decommissioned so no orphaned grants linger. Returns
+// the number of grants removed.
+func (s *PostgresGrantStore) DeleteGrantsForNamespace(namespace string) (int64, error) {
+	result, err := s.db.Exec(`DELETE FROM access_grants WHERE namespace = $1`, namespace)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete grants for namespace: %w", err)
+	}
+	n, _ := result.RowsAffected()
+	return n, nil
 }
 
 func (s *PostgresGrantStore) GetGrantsForUser(userID int) ([]Grant, error) {
@@ -260,10 +273,11 @@ func (s *PostgresGrantStore) GetAccessibleNamespaces(userID int) ([]string, erro
 }
 
 // PathDepth returns the number of non-empty segments in a path:
-//   "/"            → 0
-//   "/foo"         → 1
-//   "/foo/bar"     → 2
-//   "/foo/bar/baz" → 3
+//
+//	"/"            → 0
+//	"/foo"         → 1
+//	"/foo/bar"     → 2
+//	"/foo/bar/baz" → 3
 //
 // Used by the GRANT_MAX_DEPTH check at grant-creation time. Leading
 // and trailing slashes are ignored; "//" collapses are treated as a

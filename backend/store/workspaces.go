@@ -85,6 +85,11 @@ type WorkspaceStore interface {
 	// namespace (syncErr == '' clears the error). A no-op for namespaces with no
 	// workspace row (e.g. the coarse env-default mirror).
 	SetSyncStatus(ns, syncErr string) error
+	// PersonalNamespaces returns the namespaces of all personal workspaces, so
+	// the management plane (admin grant / namespace-admin UIs) can exclude them:
+	// personal namespaces are self-managed by their owner and never administered
+	// by others.
+	PersonalNamespaces() ([]string, error)
 
 	// --- workspace groups: a shared git remote base (one repo per namespace),
 	// the DB/UI equivalent of the GIT_REMOTE_URL env provisioning. Workspaces
@@ -96,6 +101,9 @@ type WorkspaceStore interface {
 	CreateGroup(in WorkspaceGroupInput) (*WorkspaceGroup, error)
 	UpdateGroup(id int, in WorkspaceGroupInput) (*WorkspaceGroup, error)
 	DeleteGroup(id int) (bool, error)
+	// EnsureProvisionedGroup upserts an operator-declared group (source =
+	// 'provisioned'), reconciled on boot from environment config.
+	EnsureProvisionedGroup(spec ProvisionedGroupSpec) (*WorkspaceGroup, error)
 	// CreateInGroup adds a namespace to a group; it inherits the group's remote.
 	CreateInGroup(groupID int, namespace string, gitEnabled bool) (*Workspace, error)
 }
@@ -236,6 +244,24 @@ func (s *PostgresWorkspaceStore) Delete(id int) (bool, error) {
 	return n > 0, nil
 }
 
+// PersonalNamespaces returns the namespaces of all personal workspaces.
+func (s *PostgresWorkspaceStore) PersonalNamespaces() ([]string, error) {
+	rows, err := s.db.Query(`SELECT namespace FROM workspaces WHERE is_personal`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]string, 0)
+	for rows.Next() {
+		var ns string
+		if err := rows.Scan(&ns); err != nil {
+			return nil, err
+		}
+		out = append(out, ns)
+	}
+	return out, rows.Err()
+}
+
 // SetSyncStatus records the outcome of the writer's last mirror sync for a
 // namespace. syncErr is ” on success. It targets the standalone workspace row
 // by namespace; grouped members are keyed by their own namespace too, so both
@@ -311,18 +337,25 @@ func groupRepoURL(base, ns string) string {
 	return strings.TrimRight(strings.TrimSpace(base), "/") + "/" + ns + ".git"
 }
 
+// normalizeGitDefaults applies the shared git-field defaults: transport is
+// https unless explicitly ssh, username defaults to oauth2, branch to main.
+func normalizeGitDefaults(transport, username, branch string) (string, string, string) {
+	if transport = strings.ToLower(strings.TrimSpace(transport)); transport != "ssh" {
+		transport = "https"
+	}
+	if strings.TrimSpace(username) == "" {
+		username = "oauth2"
+	}
+	if strings.TrimSpace(branch) == "" {
+		branch = "main"
+	}
+	return transport, username, branch
+}
+
 // normalizeInput applies the column defaults so callers may leave transport /
 // username / branch blank.
 func normalizeInput(in WorkspaceInput) WorkspaceInput {
-	if in.Transport = strings.ToLower(strings.TrimSpace(in.Transport)); in.Transport != "ssh" {
-		in.Transport = "https"
-	}
-	if strings.TrimSpace(in.Username) == "" {
-		in.Username = "oauth2"
-	}
-	if strings.TrimSpace(in.Branch) == "" {
-		in.Branch = "main"
-	}
+	in.Transport, in.Username, in.Branch = normalizeGitDefaults(in.Transport, in.Username, in.Branch)
 	return in
 }
 

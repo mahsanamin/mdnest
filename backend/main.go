@@ -35,6 +35,19 @@ func env(key, fallback string) string {
 	return fallback
 }
 
+// readGitToken returns the coarse env-default git PAT used by the provisioned
+// group, from GIT_TOKEN_FILE (preferred: a mounted Secret) or GIT_TOKEN. It
+// returns "" when neither is set — the reconcile then keeps any previously
+// sealed credential rather than clearing it.
+func readGitToken() string {
+	if f := strings.TrimSpace(os.Getenv("GIT_TOKEN_FILE")); f != "" {
+		if b, err := os.ReadFile(f); err == nil {
+			return strings.TrimSpace(string(b))
+		}
+	}
+	return strings.TrimSpace(os.Getenv("GIT_TOKEN"))
+}
+
 // envInt reads an integer env var, falling back to the given default if
 // unset or unparseable.
 func envInt(key string, fallback int) int {
@@ -365,6 +378,30 @@ func main() {
 		}); ok {
 			r.SetSyncStatusSink(workspaceStore)
 		}
+
+		// Reconcile the operator-provisioned workspace group from env. When a
+		// coarse default remote is configured (GIT_REMOTE_URL — the same base the
+		// env provisioning mirrors every namespace under), surface it as a
+		// 'provisioned' group so a superadmin can see it and add sub-projects to
+		// it, without being able to edit or delete a group the deployment owns.
+		// Its credential is sealed into the DB row so grouped members resolve
+		// through the same path as UI groups; skipped when the server has no
+		// dedicated sealing secret (fail-closed, like the rest of mirroring).
+		if encryptionConfigured {
+			if base := strings.TrimRight(strings.TrimSpace(env("GIT_REMOTE_URL", "")), "/"); base != "" {
+				spec := store.ProvisionedGroupSpec{
+					Name:       env("GIT_PROVISIONED_GROUP_NAME", "Provisioned workspaces"),
+					Transport:  "https",
+					BaseURL:    base,
+					Username:   env("GIT_REMOTE_USERNAME", "oauth2"),
+					Branch:     env("GIT_REMOTE_BRANCH", "main"),
+					Credential: readGitToken(),
+				}
+				if _, err := workspaceStore.EnsureProvisionedGroup(spec); err != nil {
+					log.Printf("workspaces: could not reconcile provisioned group: %v", err)
+				}
+			}
+		}
 	}
 
 	// Task board (optional, off by default). When disabled the /api/tasks and
@@ -388,7 +425,7 @@ func main() {
 		log.Println("live collaboration enabled (WebSocket)")
 	}
 
-	nsHandler := handlers.NewNamespaceHandler(stg, perms)
+	nsHandler := handlers.NewNamespaceHandler(stg, perms, workspaceStore)
 	noteHandler := handlers.NewNoteHandler(stg)
 	historyHandler := handlers.NewHistoryHandler(absNotesDir)
 	if collabHub != nil {
@@ -631,6 +668,7 @@ func main() {
 		// SSRF; the primary control is the writer's egress NetworkPolicy).
 		workspaceHandler := handlers.NewWorkspaceHandler(workspaceStore, userStore, grantStore, stg,
 			strings.Split(env("GIT_REMOTE_ALLOWED_HOSTS", ""), ","), encryptionConfigured)
+		workspaceHandler.SetNamespaceAdminCleaner(nsAdminStore)
 		if !encryptionConfigured {
 			log.Println("WARNING: MDNEST_ENCRYPTION_KEY is unset and MDNEST_JWT_SECRET is default — per-workspace git mirroring is disabled (credentials cannot be sealed at rest). Set MDNEST_ENCRYPTION_KEY to enable it.")
 		}
