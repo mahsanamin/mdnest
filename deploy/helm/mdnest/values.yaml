@@ -261,6 +261,16 @@ collab:
       key: password
 
 # -----------------------------------------------------------------------------
+# Task board (opt-in). Projects the `- [ ]` checkboxes in your notes into a
+# per-namespace kanban board. Off by default and independent of `auth.mode`;
+# when off the `/api/tasks` and `/api/board` routes are not registered and the
+# UI chunk is never loaded.
+# -----------------------------------------------------------------------------
+taskBoard:
+  # -- Enable the task board (`ENABLE_TASK_BOARD`). Off by default; projects note checkboxes into a per-namespace kanban. Independent of `auth.mode`.
+  enabled: false
+
+# -----------------------------------------------------------------------------
 # SSO / OIDC (optional). Only rendered when sso.enabled=true.
 # -----------------------------------------------------------------------------
 sso:

@@ -1,6 +1,6 @@
 # mdnest
 
-![Version: 0.2.0](https://img.shields.io/badge/Version-0.2.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 3.12.0-dev](https://img.shields.io/badge/AppVersion-3.12.0--dev-informational?style=flat-square)
+![Version: 0.2.1](https://img.shields.io/badge/Version-0.2.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 3.12.0-dev](https://img.shields.io/badge/AppVersion-3.12.0--dev-informational?style=flat-square)
 
 mdnest — self-hosted Markdown knowledge base with live collaboration.
 Standard-Kubernetes chart (no CRDs). PostgreSQL and Redis are expected to be
@@ -376,6 +376,8 @@ All traffic goes to the frontend Service, which proxies `/api` and `/api/ws` (We
 | storage.git.remote.tokenSecretKey | string | `"token"` | Key inside `existingTokenSecret` holding the PAT. |
 | storage.git.remote.url | string | `""` | Base URL for the per-namespace remotes, e.g. `https://gitlab.example.com/notes-workspaces`. Empty = mirroring disabled. |
 | storage.git.remote.username | string | `"oauth2"` | HTTPS username (GitLab PAT: `oauth2`; GitHub PAT: `x-access-token`). |
+| taskBoard | object | `{"enabled":false}` | --------------------------------------------------------------------------- |
+| taskBoard.enabled | bool | `false` | Enable the task board (`ENABLE_TASK_BOARD`). Off by default; projects note checkboxes into a per-namespace kanban. Independent of `auth.mode`. |
 | writer | object | `{"affinity":{},"nodeSelector":{},"resources":{},"tolerations":[]}` | --------------------------------------------------------------------------- |
 | writer.affinity | object | `{}` | Affinity rules for the writer pod. |
 | writer.nodeSelector | object | `{}` | Node selector for the writer pod. |
