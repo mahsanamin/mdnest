@@ -332,24 +332,39 @@ func (h *WorkspaceHandler) adminDelete(w http.ResponseWriter, r *http.Request) {
 		wsError(w, http.StatusNotFound, "workspace not found")
 		return
 	}
-	// Decommissioning a project revokes its access metadata and removes the
-	// namespace from storage (so it leaves the working set / UI); the notes
-	// themselves survive on the git remote mirror, if any.
+	// Decommissioning a project always revokes its access metadata (grants +
+	// namespace-admins). It removes the namespace from storage only when a
+	// durable copy demonstrably exists (see decommissionNamespace) — otherwise
+	// the notes may be the only copy (a mount, or a mirror that never synced) and
+	// are left untouched.
 	if existing != nil {
-		h.decommissionNamespace(r.Context(), existing.Namespace)
+		h.decommissionNamespace(r.Context(), existing)
 	}
 	wsJSON(w, http.StatusOK, map[string]bool{"deleted": true})
 }
 
+// storageHasDurableCopy reports whether a namespace's notes demonstrably survive
+// outside local storage, so purging the local copy is safe. That is true only
+// when the workspace mirrors (git_enabled) AND its last sync succeeded
+// (last_sync_at set with no error) — i.e. the remote holds the current notes.
+// last_sync_at alone is not enough: it is stamped on failed syncs too, so a
+// mirror whose first push errored has a timestamp but no remote copy.
+func storageHasDurableCopy(ws *store.Workspace) bool {
+	return ws != nil && ws.GitEnabled && ws.LastSyncAt != nil && ws.LastSyncError == ""
+}
+
 // decommissionNamespace tears a namespace down when its project is deleted:
-// revoke access grants + namespace-admins and purge it from storage (removing it
-// from the working set / namespace registry so it leaves the UI). The remote git
-// mirror repository, if any, is left untouched as the durable archive.
+// revoke access grants + namespace-admins (always), and remove the namespace
+// from storage ONLY when a durable copy exists (storageHasDurableCopy). When it
+// does not — an unsynced mirror, or a namespace backed by a host mount — the
+// bytes are left in place rather than destroying the only copy; an operator who
+// really wants them gone deletes the contents themselves.
 // Best-effort: failures are logged, not fatal.
-func (h *WorkspaceHandler) decommissionNamespace(ctx context.Context, ns string) {
-	if ns == "" {
+func (h *WorkspaceHandler) decommissionNamespace(ctx context.Context, ws *store.Workspace) {
+	if ws == nil || ws.Namespace == "" {
 		return
 	}
+	ns := ws.Namespace
 	if h.grants != nil {
 		if n, err := h.grants.DeleteGrantsForNamespace(ns); err != nil {
 			log.Printf("workspaces: could not revoke grants for %q: %v", ns, err)
@@ -362,7 +377,7 @@ func (h *WorkspaceHandler) decommissionNamespace(ctx context.Context, ns string)
 			log.Printf("workspaces: could not remove namespace-admins for %q: %v", ns, err)
 		}
 	}
-	if h.stg != nil {
+	if h.stg != nil && storageHasDurableCopy(ws) {
 		if err := h.stg.RemoveAll(ctx, ns, ""); err != nil {
 			log.Printf("workspaces: could not remove namespace %q from storage: %v", ns, err)
 		}
@@ -548,10 +563,11 @@ func (h *WorkspaceHandler) groupsDelete(w http.ResponseWriter, r *http.Request) 
 		wsError(w, http.StatusForbidden, "this group is provisioned by the deployment (env config) and cannot be deleted; you can only manage its sub-projects")
 		return
 	}
-	// Collect the member namespaces before the group is deleted: DeleteGroup
-	// cascades the member workspace rows at the DB level, so we revoke their
-	// access metadata here rather than losing the chance once they are gone.
-	memberNamespaces := h.groupMemberNamespaces(id)
+	// Collect the member workspaces before the group is deleted: DeleteGroup
+	// cascades the member rows at the DB level, so we revoke their access
+	// metadata (and purge durable ones) here rather than losing the chance once
+	// they are gone.
+	members := h.groupMemberWorkspaces(id)
 	deleted, err := h.store.DeleteGroup(id)
 	if err != nil {
 		wsError(w, http.StatusInternalServerError, "failed to delete group")
@@ -561,22 +577,22 @@ func (h *WorkspaceHandler) groupsDelete(w http.ResponseWriter, r *http.Request) 
 		wsError(w, http.StatusNotFound, "group not found")
 		return
 	}
-	for _, ns := range memberNamespaces {
-		h.decommissionNamespace(r.Context(), ns)
+	for i := range members {
+		h.decommissionNamespace(r.Context(), &members[i])
 	}
 	wsJSON(w, http.StatusOK, map[string]bool{"deleted": true})
 }
 
-// groupMemberNamespaces returns the namespaces of a group's member workspaces.
-func (h *WorkspaceHandler) groupMemberNamespaces(groupID int) []string {
+// groupMemberWorkspaces returns the member workspace rows of a group.
+func (h *WorkspaceHandler) groupMemberWorkspaces(groupID int) []store.Workspace {
 	all, err := h.store.List()
 	if err != nil {
 		return nil
 	}
-	var out []string
+	var out []store.Workspace
 	for _, ws := range all {
 		if ws.GroupID != nil && *ws.GroupID == groupID {
-			out = append(out, ws.Namespace)
+			out = append(out, ws)
 		}
 	}
 	return out

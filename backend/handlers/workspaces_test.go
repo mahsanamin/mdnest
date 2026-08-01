@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mdnest/mdnest/backend/middleware"
 	"github.com/mdnest/mdnest/backend/store"
@@ -126,6 +127,29 @@ func TestAdminDeleteRevokesNamespaceAccess(t *testing.T) {
 	}
 	if nsa.deleted != "team-x" {
 		t.Fatalf("namespace-admins not revoked: %q", nsa.deleted)
+	}
+}
+
+// Storage is purged only when a durable copy demonstrably exists: git mirroring
+// enabled AND the last sync succeeded. A timestamp alone (stamped on failed
+// syncs too) or a mount-backed / unsynced namespace must NOT be purged — the
+// bytes could be the only copy.
+func TestStorageHasDurableCopy(t *testing.T) {
+	ts := time.Now()
+	for _, c := range []struct {
+		name string
+		ws   *store.Workspace
+		want bool
+	}{
+		{"nil", nil, false},
+		{"not git-enabled (e.g. a mount)", &store.Workspace{Namespace: "n", GitEnabled: false, LastSyncAt: &ts}, false},
+		{"git-enabled, never synced (pending)", &store.Workspace{Namespace: "n", GitEnabled: true, LastSyncAt: nil}, false},
+		{"git-enabled, last sync errored", &store.Workspace{Namespace: "n", GitEnabled: true, LastSyncAt: &ts, LastSyncError: "boom"}, false},
+		{"git-enabled, last sync ok", &store.Workspace{Namespace: "n", GitEnabled: true, LastSyncAt: &ts, LastSyncError: ""}, true},
+	} {
+		if got := storageHasDurableCopy(c.ws); got != c.want {
+			t.Errorf("%s: storageHasDurableCopy = %v, want %v", c.name, got, c.want)
+		}
 	}
 }
 

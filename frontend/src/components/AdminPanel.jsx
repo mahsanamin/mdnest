@@ -696,7 +696,7 @@ function WorkspacesTab() {
   };
 
   const del = async (w) => {
-    if (!confirm(`Delete "${w.namespace}"? This removes the namespace and its notes from mdnest and revokes all access grants + namespace admins. The git remote repository (if any) is kept as the archive.`)) return;
+    if (!confirm(deleteConfirmText(w, 'Delete'))) return;
     try {
       await adminDeleteWorkspace(w.id);
       if (editId === w.id) reset();
@@ -814,6 +814,23 @@ function WorkspacesTab() {
   );
 }
 
+// hasDurableCopy reports whether a workspace's notes survive being removed from
+// local storage — true only when it mirrors and its last sync succeeded, so the
+// remote holds the current notes (a timestamp alone is stamped on failed syncs
+// too, so it is not enough).
+function hasDurableCopy(w) {
+  return !!(w.git_enabled && w.last_sync_at && !w.last_sync_error);
+}
+
+// deleteConfirmText words the delete/remove confirmation honestly: only promise
+// that notes are kept when a synced mirror actually exists.
+function deleteConfirmText(w, verb) {
+  const base = `${verb} "${w.namespace}"? This revokes all access grants + namespace admins.`;
+  return hasDurableCopy(w)
+    ? `${base} The namespace is removed from mdnest — your notes are kept in the git mirror repository.`
+    : `${base} The notes are NOT deleted: there is no synced mirror to restore from, so the namespace and its contents stay. Remove them separately if you want them gone.`;
+}
+
 // syncBadge renders a workspace's honest mirror-sync state. "ok" (green) is
 // shown only after a confirmed successful sync (last_sync_at set with no error);
 // a git-enabled workspace that has never synced — or whose remote repo is not
@@ -867,7 +884,7 @@ function GroupsSection({ workspaces = [], onWorkspacesChanged }) {
   };
 
   const del = async (g) => {
-    if (!confirm(`Delete group "${g.name}" and its ${g.workspace_count} project(s)? Each project namespace and its notes are removed from mdnest and all access grants + namespace admins revoked. The git remote repositories (if any) are kept as archives.`)) return;
+    if (!confirm(`Delete group "${g.name}" and its ${g.workspace_count} project(s)? This revokes all access grants + namespace admins for each. Projects with a synced git mirror are removed from mdnest (notes kept in the mirror); the others keep their local notes.`)) return;
     try { await adminDeleteWorkspaceGroup(g.id); if (editId === g.id) reset(); load(); onWorkspacesChanged && onWorkspacesChanged(); }
     catch (e) { setErr(e.message); }
   };
@@ -895,7 +912,7 @@ function GroupsSection({ workspaces = [], onWorkspacesChanged }) {
     } catch (e) { setErr(e.message); }
   };
   const delMember = async (w) => {
-    if (!confirm(`Remove "${w.namespace}" from this group? This removes the namespace and its notes from mdnest and revokes all access grants + namespace admins. The git remote repository (if any) is kept as the archive.`)) return;
+    if (!confirm(deleteConfirmText(w, 'Remove'))) return;
     setErr('');
     try {
       await adminDeleteWorkspace(w.id);
