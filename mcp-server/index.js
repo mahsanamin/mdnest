@@ -424,6 +424,129 @@ server.tool(
   }
 );
 
+server.tool(
+  "list_tasks",
+  "List the task-board tasks of a namespace (optionally scoped to a single note). Returns the board columns and every task with its `path`, `line` and `raw` — you need those three to move or edit a task. A task may carry status, due, priority, workload, tags, steps and notes. Tasks are plain markdown checkboxes in the notes.",
+  {
+    namespace: z.string().describe("Namespace name"),
+    note: z.string().optional().describe("Optional note path to scope to a single note"),
+  },
+  async ({ namespace, note }) => {
+    try {
+      const q = note ? `&path=${encodeURIComponent(note)}` : "";
+      const res = await api(`/api/tasks?ns=${encodeURIComponent(namespace)}${q}`);
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        return { content: [{ type: "text", text: `Error ${res.status}: ${text}` }], isError: true };
+      }
+      const data = await res.json();
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  "create_task",
+  "Create a task by appending it to a note (the given note, else the board's default note; the note is created if missing). Column ids come from the board returned by list_tasks.",
+  {
+    namespace: z.string().describe("Namespace name"),
+    title: z.string().describe("Task title"),
+    note: z.string().optional().describe("Target note path (defaults to the board's default note)"),
+    column: z.string().optional().describe("Board column id; sets the status field / checkbox"),
+    due: z.string().optional().describe("Due date, YYYY-MM-DD"),
+    priority: z.string().optional().describe("high | medium | low"),
+    workload: z.string().optional().describe("Effort estimate (free text)"),
+    tags: z.array(z.string()).optional().describe("Tags"),
+    notes: z.string().optional().describe("Free-form markdown description"),
+    steps: z.array(z.object({ text: z.string(), checked: z.boolean().optional() })).optional().describe("Sub-tasks"),
+    defaultExpanded: z.boolean().optional().describe("Expand the card by default"),
+  },
+  async ({ namespace, title, note, column, due, priority, workload, tags, notes, steps, defaultExpanded }) => {
+    try {
+      const res = await api(`/api/tasks?ns=${encodeURIComponent(namespace)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, note, column, due, priority, workload, tags, notes, steps, defaultExpanded }),
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        return { content: [{ type: "text", text: `Error ${res.status}: ${text}` }], isError: true };
+      }
+      const data = await res.json();
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  "move_task",
+  "Move a task to a board column (updates its status and, for the Done column, checks the box). Take `path`, `line` and `raw` from list_tasks; a 409 means the note changed — re-run list_tasks and retry.",
+  {
+    namespace: z.string().describe("Namespace name"),
+    path: z.string().describe("Note path that owns the task"),
+    line: z.number().describe("1-based line of the task's checkbox (from list_tasks)"),
+    raw: z.string().describe("Exact source line (from list_tasks) for optimistic concurrency"),
+    column: z.string().describe("Target board column id"),
+  },
+  async ({ namespace, path, line, raw, column }) => {
+    try {
+      const res = await api(
+        `/api/tasks?ns=${encodeURIComponent(namespace)}&path=${encodeURIComponent(path)}`,
+        { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ line, raw, toColumn: column }) }
+      );
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        return { content: [{ type: "text", text: `Error ${res.status}: ${text}` }], isError: true };
+      }
+      const data = await res.json();
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+server.tool(
+  "edit_task",
+  "Replace a task's whole definition. Omitted fields are cleared, so pass the full desired state (read the current task with list_tasks first). Take `path`, `line` and `raw` from list_tasks; a 409 means re-list and retry.",
+  {
+    namespace: z.string().describe("Namespace name"),
+    path: z.string().describe("Note path that owns the task"),
+    line: z.number().describe("1-based line of the task's checkbox (from list_tasks)"),
+    raw: z.string().describe("Exact source line (from list_tasks) for optimistic concurrency"),
+    title: z.string().describe("Task title"),
+    column: z.string().optional().describe("Board column id"),
+    due: z.string().optional().describe("Due date, YYYY-MM-DD"),
+    priority: z.string().optional().describe("high | medium | low"),
+    workload: z.string().optional().describe("Effort estimate (free text)"),
+    tags: z.array(z.string()).optional().describe("Tags"),
+    notes: z.string().optional().describe("Free-form markdown description"),
+    steps: z.array(z.object({ text: z.string(), checked: z.boolean().optional() })).optional().describe("Sub-tasks"),
+    defaultExpanded: z.boolean().optional().describe("Expand the card by default"),
+  },
+  async ({ namespace, path, line, raw, title, column, due, priority, workload, tags, notes, steps, defaultExpanded }) => {
+    try {
+      const replace = { title, column, due, priority, workload, tags, notes, steps, defaultExpanded };
+      const res = await api(
+        `/api/tasks?ns=${encodeURIComponent(namespace)}&path=${encodeURIComponent(path)}`,
+        { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ line, raw, replace }) }
+      );
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        return { content: [{ type: "text", text: `Error ${res.status}: ${text}` }], isError: true };
+      }
+      const data = await res.json();
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+    }
+  }
+);
+
 // ---------------------------------------------------------------------------
 // Resources
 // ---------------------------------------------------------------------------

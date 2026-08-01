@@ -6,6 +6,10 @@ All notable changes to mdnest are documented here.
 
 ## Unreleased
 
+### Added
+
+- **Task board (opt-in, `ENABLE_TASK_BOARD=true`).** Projects the GitHub-flavoured `- [ ]` checkboxes already in your notes into a per-namespace kanban board, with an optional indented detail block (`status`, `due`, `priority`, `tags`, `steps`, `notes`) that stays readable markdown. **No new datastore** — a task is a line in a note and the note remains the source of truth, so every board action is a plain line-level edit and anything you type in a note appears on the board. The column layout lives in the namespace's `.mdnest/board.json` sidecar, the same convention as `.mdnest/comments`, and like it is hidden from the file tree and from search. Off by default: while it is off the `/api/tasks` and `/api/board` routes are not registered, the board button is hidden, and the UI chunk is never loaded, so an operator who just wants notes carries none of it. Adds four MCP tools (`list_tasks`, `create_task`, `edit_task`, `move_task`). See `docs/tasks.md`. Thanks to [@ecthelion77](https://github.com/ecthelion77).
+
 ### Security
 
 - **OAuth authorization codes can no longer be delivered to an attacker-chosen host.** In `MCP_AUTH_MODE=oauth`, `/oauth/authorize` accepted any HTTPS `redirect_uri` without checking it against a registered client. Dynamic Client Registration is public, and PKCE only defends against third-party interception — not against a malicious client that starts the flow holding its own verifier — so an attacker could craft an authorize link, have a user complete SSO, and receive a code that unseals to that user's mdnest JWT (valid 30 days). Delivery is now restricted to loopback (the native MCP client case, always allowed) plus any origin explicitly listed in the new `MCP_ALLOWED_REDIRECT_ORIGINS`; anything else is refused with `400 invalid_request`. Pinned by four cases in `mcp-server/test_oauth.mjs`, which runs in CI. Only reachable with `ENABLE_MCP=true` + `MCP_TRANSPORT=http` + `MCP_AUTH_MODE=oauth`, and never shipped — the OAuth transport lands in this same release.

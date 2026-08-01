@@ -12,6 +12,10 @@ import EditorErrorBoundary from './components/EditorErrorBoundary.jsx';
 // ~217 KB-gzipped chunk only downloads when the user actually opens
 // Live mode.
 const LiveEditor = lazy(() => import('./components/LiveEditorCrepe.jsx'));
+// Lazy like the Live editor: the board pulls in @dnd-kit and its own CSS, and
+// it is off by default (ENABLE_TASK_BOARD), so an install that doesn't use it
+// must not carry the chunk on first paint.
+const TaskBoard = lazy(() => import('./components/TaskBoard.jsx'));
 import Preview from './components/Preview.jsx';
 import ContextMenu from './components/ContextMenu.jsx';
 import Settings from './components/Settings.jsx';
@@ -224,7 +228,7 @@ function App() {
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [comments, setComments] = useState([]);
   const [showComments, setShowComments] = useState(false);
-  const [pendingCommentSelection, setPendingCommentSelection] = useState(null);
+  const [showTaskBoard, setShowTaskBoard] = useState(false);  const [pendingCommentSelection, setPendingCommentSelection] = useState(null);
   const [highlightedCommentId, setHighlightedCommentId] = useState(null);
   const goToCommentRef = useRef(null);
   const editorWrapperRef = useRef(null);
@@ -260,6 +264,9 @@ function App() {
   // see new/resolved comments without a manual refresh), so gate on liveCollab
   // — which itself is only true when multi mode is on.
   const commentsEnabled = !!appConfig?.liveCollab;
+  // ENABLE_TASK_BOARD on the backend. When off, /api/tasks and /api/board are
+  // not registered at all, so the button must not be offered.
+  const taskBoardEnabled = !!appConfig?.taskBoard;
 
   // Live collaboration state
   const [presenceUsers, setPresenceUsers] = useState([]);
@@ -836,6 +843,7 @@ function App() {
   }, [getScrollables, getFilePrefs]);
 
   const openNoteDirect = useCallback(async (ns, path) => {
+    setShowTaskBoard(false);
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
     try {
       const { text, etag } = await getNote(ns, path);
@@ -853,6 +861,7 @@ function App() {
   }, [restoreScrollPosition, commentsEnabled]);
 
   const handleSelectNs = useCallback((ns) => {
+    setShowTaskBoard(false);
     setSelectedNs(ns);
     // Restore the last file the user had open in the namespace they're
     // switching TO. If they've never opened anything there (or whatever
@@ -879,6 +888,7 @@ function App() {
 
   const openNote = useCallback(async (path) => {
     if (!selectedNs) return;
+    setShowTaskBoard(false);
     // Clear any pending save timer from the previous file
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
     try {
@@ -1392,7 +1402,9 @@ function App() {
             }
           }}
           editorMode={editorMode}
+          boardActive={showTaskBoard}
           onEditorModeChange={(mode) => {
+            setShowTaskBoard(false);
             setEditorMode(mode);
             localStorage.setItem('mdnest_editor_mode', mode);
             // User explicitly opted back into Live for this file — clear
@@ -1403,6 +1415,7 @@ function App() {
             }
           }}
           onRefresh={handleRefresh}
+          onOpenBoard={taskBoardEnabled && selectedNs ? () => setShowTaskBoard(true) : null}
           commentCount={commentsEnabled ? comments.filter(c => !c.parentId && !c.resolved).length : 0}
           onToggleComments={!commentsEnabled ? null : () => {
             const next = !showComments;
@@ -1475,7 +1488,17 @@ function App() {
           </div>
         )}
         <div className="split-view">
-          {currentPath ? (
+          {showTaskBoard && taskBoardEnabled && selectedNs ? (
+            <Suspense fallback={<div className="editor-loading">Loading task board...</div>}>
+              <TaskBoard
+                ns={selectedNs}
+                canWrite={canWrite('')}
+                currentPath={currentPath}
+                onOpenNote={(p) => { setShowTaskBoard(false); openNote(p); }}
+                onClose={() => setShowTaskBoard(false)}
+              />
+            </Suspense>
+          ) : currentPath ? (
             <>
               <div className="mobile-view-toggle">
                 <button className={mobileView === 'editor' ? 'active' : ''} onClick={() => { setMobileView('editor'); localStorage.setItem('mdnest_mobile_view', 'editor'); }}>Edit</button>

@@ -1570,6 +1570,21 @@ pre:hover .code-copy-btn {
   background: #313244 !important;
 }
 
+.toolbar-board-btn {
+  background: #313244;
+  border: 1px solid #45475a;
+  color: #cdd6f4;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  padding: 0.2rem 0.7rem;
+  cursor: pointer;
+  margin-right: 8px;
+}
+
+.toolbar-board-btn:hover {
+  background: #45475a;
+}
+
 .toolbar-file-actions {
   display: flex;
   gap: 4px;
