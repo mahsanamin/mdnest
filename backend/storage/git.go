@@ -539,7 +539,11 @@ func (c *intervalCommitter) sync(ctx context.Context, dir, ns string) error {
 	// Fetch. A missing remote branch (a fresh remote repo) is not an error: we
 	// have nothing to integrate and go straight to publishing ours.
 	fetched := true
-	if err := c.gitEnv(ctx, dir, plan.env, "fetch", "--no-tags", "--quiet", plan.url, plan.branch); err != nil {
+	// --end-of-options: plan.url and plan.branch are operator/user-supplied, so
+	// without it a value beginning with "-" is parsed by git as an option
+	// (e.g. --upload-pack=<cmd>, which executes <cmd>). The values are also
+	// rejected at the API boundary; this is the second layer.
+	if err := c.gitEnv(ctx, dir, plan.env, "fetch", "--no-tags", "--quiet", "--end-of-options", plan.url, plan.branch); err != nil {
 		if oldHEAD == "" {
 			return fmt.Errorf("git fetch %s: %w", ns, err)
 		}
@@ -563,7 +567,7 @@ func (c *intervalCommitter) sync(ctx context.Context, dir, ns string) error {
 	if newHEAD == "" {
 		return nil // empty namespace: nothing to push or reflect
 	}
-	if err := c.gitEnv(ctx, dir, plan.env, "push", "--quiet", plan.url, "HEAD:refs/heads/"+plan.branch); err != nil {
+	if err := c.gitEnv(ctx, dir, plan.env, "push", "--quiet", "--end-of-options", plan.url, "HEAD:refs/heads/"+plan.branch); err != nil {
 		return fmt.Errorf("git push %s: %w", ns, err)
 	}
 	if newHEAD != oldHEAD {
