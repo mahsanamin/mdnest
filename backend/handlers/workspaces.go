@@ -138,6 +138,10 @@ func (h *WorkspaceHandler) ensureNamespace(ctx context.Context, ns string) {
 // path separators, no traversal).
 var namespacePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 
+// branchPattern bounds a git branch name: it cannot begin with "-" (which git
+// would parse as an option) and holds no shell- or refspec-hostile characters.
+var branchPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$`)
+
 type workspaceRequest struct {
 	Namespace  string `json:"namespace"`          // admin create only
 	GroupID    *int   `json:"group_id,omitempty"` // admin create only: add to a group
@@ -459,11 +463,15 @@ func (h *WorkspaceHandler) groupInputFrom(req groupRequest) (store.WorkspaceGrou
 	if err := h.validateRemote(transport, baseURL); err != nil {
 		return store.WorkspaceGroupInput{}, err
 	}
+	branch := strings.TrimSpace(req.Branch)
+	if branch != "" && !branchPattern.MatchString(branch) {
+		return store.WorkspaceGroupInput{}, errors.New("branch must be a plain git branch name (letters, digits, . _ / -) and cannot start with '-'")
+	}
 	return store.WorkspaceGroupInput{
 		Transport:  transport,
 		BaseURL:    baseURL,
 		Username:   strings.TrimSpace(req.Username),
-		Branch:     strings.TrimSpace(req.Branch),
+		Branch:     branch,
 		KnownHosts: req.KnownHosts,
 		Credential: req.Credential,
 	}, nil
@@ -613,12 +621,18 @@ func (h *WorkspaceHandler) inputFrom(req workspaceRequest, gitEnabled bool) (sto
 			return store.WorkspaceInput{}, err
 		}
 	}
+	// The branch is a positional argument to git fetch, so it is subject to the
+	// same flag-smuggling problem as remote_url.
+	branch := strings.TrimSpace(req.Branch)
+	if branch != "" && !branchPattern.MatchString(branch) {
+		return store.WorkspaceInput{}, errors.New("branch must be a plain git branch name (letters, digits, . _ / -) and cannot start with '-'")
+	}
 	return store.WorkspaceInput{
 		GitEnabled: gitEnabled,
 		Transport:  transport,
 		RemoteURL:  remoteURL,
 		Username:   strings.TrimSpace(req.Username),
-		Branch:     strings.TrimSpace(req.Branch),
+		Branch:     branch,
 		KnownHosts: req.KnownHosts,
 		Credential: req.Credential,
 	}, nil
@@ -651,6 +665,14 @@ func requireCredentialForMirror(in store.WorkspaceInput, hasExistingCredential b
 func (h *WorkspaceHandler) validateRemote(transport, remoteURL string) error {
 	if remoteURL == "" {
 		return errors.New("remote_url is required when git is enabled")
+	}
+	// A remote_url is passed to git as a positional argument. One beginning
+	// with "-" is parsed as an option instead — --upload-pack=<cmd> executes
+	// <cmd> — so reject it here as well as passing --end-of-options at the
+	// exec site. The scp-like ssh form below would otherwise accept it, since
+	// it only looks for user@host:path anywhere in the string.
+	if strings.HasPrefix(remoteURL, "-") {
+		return errors.New("remote_url must not start with '-'")
 	}
 	var host string
 	if transport == "ssh" {

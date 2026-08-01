@@ -320,3 +320,50 @@ func TestGroupCreateValidatesBaseURL(t *testing.T) {
 		t.Fatalf("status=%d body=%s, want 201", w2.Code, w2.Body.String())
 	}
 }
+
+// remote_url and branch are passed to git as positional arguments, so a value
+// beginning with "-" is parsed as an option instead. `--upload-pack=<cmd>`
+// makes git execute <cmd>, which turns "configure my own workspace" — available
+// to any authenticated user via PUT /api/me/workspace — into command execution
+// on the writer. The scp-like ssh form is the way in: it only looks for
+// user@host:path anywhere in the string, so a leading "-" passed host checks.
+func TestValidateRemoteRejectsFlagSmuggling(t *testing.T) {
+	h := NewWorkspaceHandler(nil, nil, nil, nil, nil, true)
+	for _, tc := range []struct {
+		name, transport, url string
+	}{
+		{"ssh scp-like upload-pack payload", "ssh", "--upload-pack=touch /tmp/pwned;x@evil.com:notes.git"},
+		{"ssh scp-like bare dash", "ssh", "-x@evil.com:notes.git"},
+		{"ssh url form", "ssh", "--upload-pack=id@evil.com:x"},
+		{"https form", "https", "--upload-pack=id"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := h.validateRemote(tc.transport, tc.url); err == nil {
+				t.Errorf("accepted a flag-smuggling remote_url %q", tc.url)
+			}
+		})
+	}
+	// A legitimate scp-like remote must still work.
+	if err := h.validateRemote("ssh", "git@gitlab.example.com:team/notes.git"); err != nil {
+		t.Errorf("rejected a valid scp-like remote: %v", err)
+	}
+}
+
+func TestBranchRejectsFlagSmuggling(t *testing.T) {
+	h := NewWorkspaceHandler(nil, nil, nil, nil, nil, true)
+	for _, bad := range []string{"--upload-pack=touch /tmp/pwned", "-x", "main;rm -rf /", "main branch"} {
+		if _, err := h.inputFrom(workspaceRequest{Branch: bad}, false); err == nil {
+			t.Errorf("accepted branch %q", bad)
+		}
+		if _, err := h.groupInputFrom(groupRequest{
+			Transport: "https", BaseURL: "https://gitlab.example.com/notes", Branch: bad,
+		}); err == nil {
+			t.Errorf("group accepted branch %q", bad)
+		}
+	}
+	for _, ok := range []string{"", "main", "release/v1.2", "feature_x-1"} {
+		if _, err := h.inputFrom(workspaceRequest{Branch: ok}, false); err != nil {
+			t.Errorf("rejected valid branch %q: %v", ok, err)
+		}
+	}
+}
