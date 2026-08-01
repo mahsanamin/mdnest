@@ -133,6 +133,47 @@ jobs:
           sed -i -E "s#ghcr\\.io/[^/]+/(mdnest-[a-z-]+)#ghcr.io/$OWNER/\\1#g" \
             deploy/helm/mdnest/values.yaml
           grep -E 'repository: ghcr\.io' deploy/helm/mdnest/values.yaml
+      - name: Log in to GHCR (Docker)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify every chart-referenced image was published
+        # A release must never ship a chart that points at an image tag this
+        # workflow did not publish. That is exactly how v4.0.0 shipped broken:
+        # the tag was cut from a lineage whose build matrix still had mcp-server
+        # commented out, yet the chart already referenced
+        # mdnest-mcp-server:<version>, so mcp.enabled installs ImagePullBackOff
+        # on a tag that never existed. The image job's needs: dependency only
+        # catches build *failures* — a service silently dropped from the matrix
+        # leaves images green while the chart still points at nothing. Reconcile
+        # the chart against the registry here and fail loudly rather than publish
+        # a half-broken release.
+        env:
+          OWNER: ${{ steps.prep.outputs.owner }}
+          VERSION: ${{ steps.prep.outputs.version }}
+        run: |
+          missing=0
+          images=$(grep -oiE "ghcr\.io/${OWNER}/mdnest-[a-z-]+" \
+            deploy/helm/mdnest/values.yaml | sort -u)
+          if [ -z "$images" ]; then
+            echo "::error::no first-party mdnest-* images found in values.yaml — the owner rewrite may have failed"
+            exit 1
+          fi
+          for repo in $images; do
+            ref="$repo:$VERSION"
+            if docker manifest inspect "$ref" >/dev/null 2>&1; then
+              echo "ok: $ref"
+            else
+              echo "::error::chart references $ref but this release did not publish it"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "::error::release aborted: chart points at image(s) not published by this run (see errors above)"
+            exit 1
+          fi
       - name: Package
         run: |
           helm package deploy/helm/mdnest \
