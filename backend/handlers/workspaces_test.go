@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/mdnest/mdnest/backend/middleware"
+	"github.com/mdnest/mdnest/backend/storage"
 	"github.com/mdnest/mdnest/backend/store"
 )
 
@@ -440,5 +442,54 @@ func TestBranchRejectsFlagSmuggling(t *testing.T) {
 		if _, err := h.inputFrom(workspaceRequest{Branch: ok}, false); err != nil {
 			t.Errorf("rejected valid branch %q: %v", ok, err)
 		}
+	}
+}
+
+// recordingStorage notes whether the namespace's bytes were purged.
+type recordingStorage struct {
+	storage.Storage
+	removedAll []string
+}
+
+func (r *recordingStorage) RemoveAll(_ context.Context, ns, relPath string) error {
+	if relPath == "" {
+		r.removedAll = append(r.removedAll, ns)
+	}
+	return nil
+}
+func (r *recordingStorage) MkdirAll(context.Context, string, string) error { return nil }
+
+// TestStorageHasDurableCopy pins the predicate; this pins that decommission
+// actually *consults* it. Without this, deleting the condition from the call
+// site reinstates the original data-loss bug — purging a namespace whose notes
+// exist nowhere else — while every other test stays green.
+func TestDecommissionPurgesOnlyWithADurableCopy(t *testing.T) {
+	at := time.Now()
+	cases := []struct {
+		name       string
+		ws         store.Workspace
+		wantPurged bool
+	}{
+		{"mirrored and last sync ok", store.Workspace{Namespace: "ok-ns", GitEnabled: true, LastSyncAt: &at}, true},
+		{"never synced (pending)", store.Workspace{Namespace: "pending-ns", GitEnabled: true}, false},
+		{"last sync errored", store.Workspace{Namespace: "err-ns", GitEnabled: true, LastSyncAt: &at, LastSyncError: "boom"}, false},
+		{"not mirroring at all", store.Workspace{Namespace: "mount-ns"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := &recordingStorage{}
+			gr := &fakeGrants{}
+			h := NewWorkspaceHandler(&fakeWSStore{personal: map[int]*store.Workspace{}}, nil, gr, rec, nil, true)
+			ws := tc.ws
+			h.decommissionNamespace(context.Background(), &ws)
+
+			purged := len(rec.removedAll) > 0
+			if purged != tc.wantPurged {
+				t.Errorf("purged=%v, want %v (removedAll=%v)", purged, tc.wantPurged, rec.removedAll)
+			}
+			if !tc.wantPurged && purged {
+				t.Errorf("DATA LOSS: purged %q with no durable copy to restore from", ws.Namespace)
+			}
+		})
 	}
 }
