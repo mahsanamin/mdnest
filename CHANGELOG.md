@@ -12,7 +12,7 @@ All notable changes to mdnest are documented here.
 
 ### Fixed
 
-- **Helm chart can now enable the task board.** `ENABLE_TASK_BOARD` was plumbed through `setup.sh` and `mdnest.conf.sample` but not the Helm chart, so a Kubernetes deployment had no way to turn the board on. Adds a `taskBoard.enabled` value (default `false`) that maps to `ENABLE_TASK_BOARD` in the env ConfigMap, mirroring `collab.enabled` / `ENABLE_LIVE_COLLAB`.
+- **Helm chart can now enable the task board.** `ENABLE_TASK_BOARD` was plumbed through `setup.sh` and `mdnest.conf.sample` but not the Helm chart, so a Kubernetes deployment had no way to turn the board on. Adds a `taskBoard.enabled` value (default `false`) that maps to `ENABLE_TASK_BOARD` in the env ConfigMap, mirroring `collab.enabled` / `ENABLE_LIVE_COLLAB`, and documents it in `docs/kubernetes.md`.
 
 ### Security
 
