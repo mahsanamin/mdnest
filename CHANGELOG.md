@@ -4,6 +4,22 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## Unreleased
+
+### Added
+
+- **Per-note authorship attribution (multi mode).** A note now carries an
+  internal activity trail — who created it, who last edited it, and everyone
+  who has contributed — surfaced from the note's context menu as an
+  **Attribution** panel. Every save is recorded in a Postgres-backed
+  `note_activity` table (migration `013`), and contributors are cross-checked
+  against the note's git history (blame) so authorship is accurate even for
+  edits made outside the app. Multi mode only and fully nil-safe: single-mode
+  installs have no user identities to attribute, so nothing is recorded, the
+  `/api/note/attribution` route is not registered, and the UI entry is hidden.
+
+---
+
 ## v4.1.2 — `mdnest list` you can actually read
 
 Patch release fixing GitHub issue #87, reported from Fedora 44. Both halves of

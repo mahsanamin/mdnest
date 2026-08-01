@@ -212,6 +212,28 @@ var migrations = []struct {
 			ALTER TABLE workspace_groups ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'ui';
 		`,
 	},
+	{
+		// Per-note authorship trail. Every save appends a row here, so mdnest
+		// can answer "who created / last edited / contributed to this note"
+		// without leaning on git blame — which is lossy because commits are
+		// made by a bot identity and a single debounced commit can aggregate
+		// several files edited by several people. user_id is SET NULL (not
+		// CASCADE) on user deletion so the history survives the account.
+		name: "013_create_note_activity",
+		sql: `
+			CREATE TABLE IF NOT EXISTS note_activity (
+				id         BIGSERIAL PRIMARY KEY,
+				namespace  TEXT NOT NULL,
+				path       TEXT NOT NULL,
+				note_id    TEXT,
+				user_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+				action     TEXT NOT NULL,
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+			);
+			CREATE INDEX IF NOT EXISTS idx_note_activity_ns_path ON note_activity(namespace, path);
+			CREATE INDEX IF NOT EXISTS idx_note_activity_user ON note_activity(user_id);
+		`,
+	},
 }
 
 // Migrate runs all pending migrations. Safe to call on every startup.

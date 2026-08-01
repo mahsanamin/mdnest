@@ -4321,6 +4321,56 @@ pre:hover .code-copy-btn {
   opacity: 0.9;
 }
 
+/* ===== Authors / attribution modal ===== */
+.attribution-modal {
+  max-width: 520px;
+  width: 100%;
+}
+.attribution-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0;
+}
+.attribution-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.attribution-label {
+  color: var(--text-secondary, #9399b2);
+  font-size: 0.85em;
+  min-width: 92px;
+}
+.attribution-user {
+  font-weight: 600;
+}
+.attribution-when {
+  color: var(--text-secondary, #9399b2);
+  font-size: 0.85em;
+}
+.attribution-contributors {
+  margin: 12px 0;
+}
+.attribution-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.attribution-chip {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--bg-tertiary, #313244);
+  font-size: 0.85em;
+}
+.attribution-note {
+  margin-top: 12px;
+  font-style: italic;
+}
+
 /* ===== History modal (v3.7.0+) ===== */
 .history-modal {
   width: min(900px, 92vw);

@@ -91,6 +91,7 @@ function ContextMenu({ visible, x, y, target, onAction, onClose, canWrite, isAdm
   if (isFile) {
     items.push({ separator: true });
     items.push({ label: 'History', action: 'history' });
+    items.push({ label: 'Authors', action: 'authors' });
   }
 
   // Copy path — available for both files and folders

@@ -258,6 +258,19 @@ export async function getNoteAtCommit(ns, path, ref) {
   return res.text();
 }
 
+// --- Note authorship / attribution (multi mode) ---
+
+// Fetch who created, last edited, and contributed to a note. Returns
+// { created, last_edited, contributors } where each contributor is
+// { user_id, username, at }. Returns null when the endpoint isn't
+// available (single mode / not found), so callers degrade gracefully.
+export async function getNoteAttribution(ns, path) {
+  const res = await request(`/note/attribution?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}`);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error('Failed to load authorship');
+  return res.json();
+}
+
 // Restore a file to a previous version. Goes through the regular saveNote
 // path (so the empty-overwrite guard, ETag conflict detection, and
 // websocket file-changed broadcast all run as usual), with restore-from

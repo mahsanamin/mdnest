@@ -345,10 +345,12 @@ func main() {
 	var grantStore store.GrantStore
 	var nsAdminStore store.NamespaceAdminStore
 	var workspaceStore store.WorkspaceStore
+	var noteActivityStore store.NoteActivityStore
 	if multiMode {
 		grantStore = store.NewPostgresGrantStore(db)
 		nsAdminStore = store.NewPostgresNamespaceAdminStore(db)
 		perms = middleware.NewPermissionChecker(grantStore, nsAdminStore)
+		noteActivityStore = store.NewPostgresNoteActivityStore(db)
 
 		// Per-workspace git remote overrides: the store decrypts credentials and
 		// this adapter feeds the git committer, overriding the coarse
@@ -435,6 +437,15 @@ func main() {
 	historyHandler := handlers.NewHistoryHandler(absNotesDir)
 	if collabHub != nil {
 		noteHandler.SetCollabHub(collabHub)
+	}
+	// Per-note attribution (multi mode): trail every save and resolve git
+	// author identities for enriched, co-authored commits. The endpoint that
+	// reads the trail is registered in the multi-mode route block below.
+	var attributionHandler *handlers.AttributionHandler
+	if noteActivityStore != nil {
+		noteHandler.SetActivity(noteActivityStore)
+		noteHandler.SetIdentityResolver(handlers.NewCachedIdentityResolver(userStore))
+		attributionHandler = handlers.NewAttributionHandler(stg, noteActivityStore)
 	}
 	treeHandler := handlers.NewTreeHandler(stg, grantStore)
 	uploadHandler := handlers.NewUploadHandler(stg, perms)
@@ -635,6 +646,9 @@ func main() {
 		// can read the file can see its version history).
 		mux.Handle("/api/note/history", authMiddleware.Wrap(perms.RequireNsAccess(http.HandlerFunc(historyHandler.HandleHistory))))
 		mux.Handle("/api/note/at", authMiddleware.Wrap(perms.RequireNsAccess(http.HandlerFunc(historyHandler.HandleNoteAt))))
+		if attributionHandler != nil {
+			mux.Handle("/api/note/attribution", authMiddleware.Wrap(perms.RequireNsAccess(http.HandlerFunc(attributionHandler.HandleAttribution))))
+		}
 		if commentsHandler != nil {
 			mux.Handle("/api/comments", authMiddleware.Wrap(perms.RequireNsAccess(http.HandlerFunc(commentsHandler.Handle))))
 		}
