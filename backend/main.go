@@ -322,6 +322,11 @@ func main() {
 		perms = middleware.NewPermissionChecker(grantStore, nsAdminStore)
 	}
 
+	// Task board (optional, off by default). When disabled the /api/tasks and
+	// /api/board routes are never registered — a clean 404 rather than a
+	// half-present feature — and the frontend never loads the board chunk.
+	enableTaskBoard := env("ENABLE_TASK_BOARD", "false") == "true"
+
 	// Live collaboration hub (optional, multi mode only)
 	enableCollab := multiMode && env("ENABLE_LIVE_COLLAB", "false") == "true"
 	var collabHub *collab.Hub
@@ -366,6 +371,7 @@ func main() {
 	}
 	moveHandler := handlers.NewMoveHandler(stg)
 	searchHandler := handlers.NewSearchHandler(stg)
+	taskHandler := handlers.NewTaskHandler(stg)
 	// API tokens live in Postgres in multi mode (shared across replicas, no
 	// ReadWriteMany secrets volume) and in the tokens.json file in single mode
 	// (no database dependency for a single-box install).
@@ -441,6 +447,7 @@ func main() {
 
 	configHandler := handlers.NewConfigHandler(authMode, enableCollab, serverAlias, require2FA)
 	configHandler.SetGrantMaxDepth(grantMaxDepth)
+	configHandler.SetTaskBoard(enableTaskBoard)
 
 	// Update-availability check — opt out by setting DISABLE_UPDATE_CHECK=true.
 	// One HTTPS GET to api.github.com per server every hour; failures are
@@ -541,6 +548,13 @@ func main() {
 		mux.Handle("/api/upload", authMiddleware.Wrap(perms.RequireWrite(invalidateSearch(http.HandlerFunc(uploadHandler.HandleUpload)))))
 		mux.Handle("/api/move", authMiddleware.Wrap(perms.RequireMove(invalidateSearch(http.HandlerFunc(moveHandler.HandleMove)))))
 		mux.Handle("/api/search", authMiddleware.Wrap(perms.RequireNsAccess(http.HandlerFunc(searchHandler.HandleSearch))))
+		// Task aggregation: GET reads notes, PATCH rewrites a task line in a note,
+		// so route by method (read vs write) and invalidate the search cache on
+		// mutation just like /api/note.
+		if enableTaskBoard {
+			mux.Handle("/api/tasks", authMiddleware.Wrap(perms.ReadWriteRouter(invalidateSearch(http.HandlerFunc(taskHandler.HandleTasks)))))
+			mux.Handle("/api/board", authMiddleware.Wrap(perms.ReadWriteRouter(http.HandlerFunc(taskHandler.HandleBoard))))
+		}
 		mux.Handle("/api/files/", authMiddleware.Wrap(http.HandlerFunc(uploadHandler.HandleServeFile))) // files endpoint extracts ns from URL, handled differently
 	} else {
 		mux.Handle("/api/namespaces", authMiddleware.Wrap(http.HandlerFunc(nsHandler.ListNamespaces)))
@@ -555,6 +569,10 @@ func main() {
 		mux.Handle("/api/upload", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(uploadHandler.HandleUpload))))
 		mux.Handle("/api/move", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(moveHandler.HandleMove))))
 		mux.Handle("/api/search", authMiddleware.Wrap(http.HandlerFunc(searchHandler.HandleSearch)))
+		if enableTaskBoard {
+			mux.Handle("/api/tasks", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(taskHandler.HandleTasks))))
+			mux.Handle("/api/board", authMiddleware.Wrap(http.HandlerFunc(taskHandler.HandleBoard)))
+		}
 		mux.Handle("/api/files/", authMiddleware.Wrap(http.HandlerFunc(uploadHandler.HandleServeFile)))
 	}
 

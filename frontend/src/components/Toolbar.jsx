@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 
-function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePassword, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh, wsStatus, commentCount, onToggleComments }) {
+function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePassword, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh, wsStatus, commentCount, onToggleComments, onOpenBoard, boardActive }) {
   const [refreshing, setRefreshing] = useState(false);
   const handleRefresh = useCallback(() => {
     if (refreshing || !onRefresh) return;
@@ -19,18 +19,29 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
       <button className="toolbar-hamburger" onClick={onToggleSidebar} title="Toggle sidebar">
         &#9776;
       </button>
-      {showEditorToggle && (
+      {(showEditorToggle || onOpenBoard) && (
         <div className="editor-mode-toggle">
-          <button
-            className={editorMode === 'basic' ? 'active' : ''}
-            onClick={() => onEditorModeChange('basic')}
-            title="Plain text editor"
-          >Basic</button>
-          <button
-            className={editorMode === 'live' ? 'active' : ''}
-            onClick={() => onEditorModeChange('live')}
-            title="Live rich editor"
-          >Live</button>
+          {showEditorToggle && (
+            <>
+              <button
+                className={!boardActive && editorMode === 'basic' ? 'active' : ''}
+                onClick={() => onEditorModeChange('basic')}
+                title="Plain text editor"
+              >Basic</button>
+              <button
+                className={!boardActive && editorMode === 'live' ? 'active' : ''}
+                onClick={() => onEditorModeChange('live')}
+                title="Live rich editor"
+              >Live</button>
+            </>
+          )}
+          {onOpenBoard && (
+            <button
+              className={boardActive ? 'active' : ''}
+              onClick={onOpenBoard}
+              title="Namespace task board"
+            >Board</button>
+          )}
         </div>
       )}
       {/* Path display splits dir + basename so the filename never gets

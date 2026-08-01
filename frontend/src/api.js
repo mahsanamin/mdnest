@@ -309,6 +309,72 @@ export async function searchNotes(ns, query) {
   return res.json();
 }
 
+// --- Tasks & kanban board (namespace-scoped) ---
+
+// Aggregate every markdown task-list item in the namespace plus the board
+// column layout. Returns { board: {version, columns}, tasks: [...] }.
+export async function getTasks(ns, path) {
+  const q = path ? `&path=${encodeURIComponent(path)}` : '';
+  const res = await request(`/tasks?ns=${encodeURIComponent(ns)}${q}`);
+  if (!res.ok) throw new Error('Failed to load tasks');
+  return res.json();
+}
+
+// Create a task by appending it to a note. `body` is { text, note?, column? };
+// when note is omitted the board's default note is used.
+export async function createTask(ns, body) {
+  const res = await request(`/tasks?ns=${encodeURIComponent(ns)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to create task');
+  }
+  return res.json();
+}
+
+// Move a task to a column or toggle its checkbox. `mutation` is
+// { line, raw, toColumn } or { line, raw, checked }. `path` is the note that
+// owns the task. Throws a 409-tagged error when the source line has shifted.
+export async function patchTask(ns, path, mutation) {
+  const res = await request(`/tasks?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(mutation),
+  });
+  if (res.status === 409) {
+    const err = new Error('Task is out of date; refresh the board');
+    err.status = 409;
+    throw err;
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to update task');
+  }
+  return res.json();
+}
+
+export async function getBoard(ns) {
+  const res = await request(`/board?ns=${encodeURIComponent(ns)}`);
+  if (!res.ok) throw new Error('Failed to load board');
+  return res.json();
+}
+
+export async function saveBoard(ns, board) {
+  const res = await request(`/board?ns=${encodeURIComponent(ns)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(board),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to save board');
+  }
+  return res.json();
+}
+
 export async function moveItem(ns, fromPath, toPath) {
   const res = await request(`/move?ns=${encodeURIComponent(ns)}&from=${encodeURIComponent(fromPath)}&to=${encodeURIComponent(toPath)}`, {
     method: 'POST',
