@@ -74,9 +74,15 @@ func main() {
 	jwtSecret := env("MDNEST_JWT_SECRET", "changeme")
 	// Secret used to seal per-workspace git credentials at rest (AES-256-GCM,
 	// key derived via SHA-256). Falls back to the JWT secret so one existing
-	// secret suffices; set MDNEST_ENCRYPTION_KEY to rotate git credentials
-	// independently of session tokens.
+	// secret suffices. Rotating it makes previously-sealed credentials
+	// undecryptable (no key-versioned envelope): owners must re-enter their
+	// token / key — see docs/security.md.
 	encryptionSecret := env("MDNEST_ENCRYPTION_KEY", jwtSecret)
+	// A dedicated, non-default sealing secret is required to store per-workspace
+	// git credentials (the most sensitive data mdnest holds). Without it the
+	// workspace handler fails closed and refuses to enable mirroring, rather than
+	// sealing PATs / SSH keys under a guessable default key.
+	encryptionConfigured := strings.TrimSpace(encryptionSecret) != "" && encryptionSecret != "changeme"
 	notesDir := env("NOTES_DIR", "./notes")
 	frontendOrigin := env("FRONTEND_ORIGIN", "http://localhost:5173")
 	port := env("PORT", "8080")
@@ -606,7 +612,10 @@ func main() {
 		// GIT_REMOTE_ALLOWED_HOSTS restricts remote hosts (defence-in-depth for
 		// SSRF; the primary control is the writer's egress NetworkPolicy).
 		workspaceHandler := handlers.NewWorkspaceHandler(workspaceStore, userStore, grantStore, stg,
-			strings.Split(env("GIT_REMOTE_ALLOWED_HOSTS", ""), ","))
+			strings.Split(env("GIT_REMOTE_ALLOWED_HOSTS", ""), ","), encryptionConfigured)
+		if !encryptionConfigured {
+			log.Println("WARNING: MDNEST_ENCRYPTION_KEY is unset and MDNEST_JWT_SECRET is default — per-workspace git mirroring is disabled (credentials cannot be sealed at rest). Set MDNEST_ENCRYPTION_KEY to enable it.")
+		}
 
 		// Admin endpoints: outer gate is RequireAdmin (= any admin role).
 		// Per-namespace scoping is done inside each handler so namespace

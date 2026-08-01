@@ -48,18 +48,44 @@ type WorkspaceHandler struct {
 	// (defence-in-depth against SSRF; the primary control is the writer's
 	// egress NetworkPolicy). Empty = any host allowed.
 	allowedHosts []string
+	// encryptionConfigured reports that the server has a non-default secret to
+	// seal credentials at rest. When false the handler fails closed: it refuses
+	// to enable mirroring or store a credential, so the most sensitive data mdnest
+	// holds is never sealed under a default key.
+	encryptionConfigured bool
 }
 
 // NewWorkspaceHandler builds a workspace handler. stg may be nil (single mode);
-// allowedHosts may be nil.
-func NewWorkspaceHandler(ws store.WorkspaceStore, users userLookup, grants grantWriter, stg storage.Storage, allowedHosts []string) *WorkspaceHandler {
+// allowedHosts may be nil. encryptionConfigured must be true for the handler to
+// accept mirroring/credentials (fail-closed when the sealing secret is default).
+func NewWorkspaceHandler(ws store.WorkspaceStore, users userLookup, grants grantWriter, stg storage.Storage, allowedHosts []string, encryptionConfigured bool) *WorkspaceHandler {
 	lower := make([]string, 0, len(allowedHosts))
 	for _, h := range allowedHosts {
 		if h = strings.ToLower(strings.TrimSpace(h)); h != "" {
 			lower = append(lower, h)
 		}
 	}
-	return &WorkspaceHandler{store: ws, users: users, grants: grants, stg: stg, allowedHosts: lower}
+	return &WorkspaceHandler{store: ws, users: users, grants: grants, stg: stg, allowedHosts: lower, encryptionConfigured: encryptionConfigured}
+}
+
+// requireEncryptionForMirror fails closed when mirroring would seal a credential
+// but the server has no dedicated sealing secret (MDNEST_ENCRYPTION_KEY unset and
+// the JWT secret still the default). Refusing here means user-supplied PATs and
+// SSH keys are never encrypted under a default, guessable key.
+func (h *WorkspaceHandler) requireEncryptionForMirror(gitEnabled bool) error {
+	if !gitEnabled || h.encryptionConfigured {
+		return nil
+	}
+	return errors.New("git mirroring is disabled on this server: set MDNEST_ENCRYPTION_KEY (or a non-default MDNEST_JWT_SECRET) so credentials can be sealed at rest")
+}
+
+// requireEncryptionForCredential fails closed when a group would seal a shared
+// credential without a dedicated sealing secret.
+func (h *WorkspaceHandler) requireEncryptionForCredential(cred *string) error {
+	if cred == nil || strings.TrimSpace(*cred) == "" || h.encryptionConfigured {
+		return nil
+	}
+	return errors.New("cannot store a credential on this server: set MDNEST_ENCRYPTION_KEY (or a non-default MDNEST_JWT_SECRET) so credentials can be sealed at rest")
 }
 
 // personalNamespace resolves the caller's personal-workspace namespace: their
@@ -198,6 +224,10 @@ func (h *WorkspaceHandler) adminCreate(w http.ResponseWriter, r *http.Request) {
 		wsError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if err := h.requireEncryptionForMirror(in.GitEnabled); err != nil {
+		wsError(w, http.StatusForbidden, err.Error())
+		return
+	}
 	if err := requireCredentialForMirror(in, false); err != nil {
 		wsError(w, http.StatusBadRequest, err.Error())
 		return
@@ -246,6 +276,10 @@ func (h *WorkspaceHandler) adminUpdate(w http.ResponseWriter, r *http.Request) {
 		var err error
 		if in, err = h.inputFrom(req, req.GitEnabled); err != nil {
 			wsError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := h.requireEncryptionForMirror(in.GitEnabled); err != nil {
+			wsError(w, http.StatusForbidden, err.Error())
 			return
 		}
 		if err := requireCredentialForMirror(in, existing.HasCredential); err != nil {
@@ -337,6 +371,10 @@ func (h *WorkspaceHandler) groupsCreate(w http.ResponseWriter, r *http.Request) 
 		wsError(w, http.StatusConflict, "a group with this name already exists")
 		return
 	}
+	if err := h.requireEncryptionForCredential(req.Credential); err != nil {
+		wsError(w, http.StatusForbidden, err.Error())
+		return
+	}
 	in, err := h.groupInputFrom(req)
 	if err != nil {
 		wsError(w, http.StatusBadRequest, err.Error())
@@ -373,6 +411,10 @@ func (h *WorkspaceHandler) groupsUpdate(w http.ResponseWriter, r *http.Request) 
 	name := strings.TrimSpace(req.Name)
 	if !groupNamePattern.MatchString(name) {
 		wsError(w, http.StatusBadRequest, "invalid group name")
+		return
+	}
+	if err := h.requireEncryptionForCredential(req.Credential); err != nil {
+		wsError(w, http.StatusForbidden, err.Error())
 		return
 	}
 	in, err := h.groupInputFrom(req)
@@ -506,6 +548,10 @@ func (h *WorkspaceHandler) minePut(w http.ResponseWriter, r *http.Request, userI
 	if existing != nil && existing.Namespace != ns {
 		_, _ = h.store.Delete(existing.ID)
 		existing = nil
+	}
+	if err := h.requireEncryptionForMirror(in.GitEnabled); err != nil {
+		wsError(w, http.StatusForbidden, err.Error())
+		return
 	}
 	if err := requireCredentialForMirror(in, existing != nil && existing.HasCredential); err != nil {
 		wsError(w, http.StatusBadRequest, err.Error())

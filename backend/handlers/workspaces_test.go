@@ -93,7 +93,7 @@ func (f *fakeGrants) CreateGrant(userID int, ns, path, perm string, by *int) (*s
 // stores the caller's derived namespace, owned by the caller, is_personal.
 func TestMinePutForcesOwnerAndDerivedNamespace(t *testing.T) {
 	fs := &fakeWSStore{personal: map[int]*store.Workspace{}}
-	h := NewWorkspaceHandler(fs, fakeUsers{email: "me@forterro.com"}, &fakeGrants{}, nil, nil)
+	h := NewWorkspaceHandler(fs, fakeUsers{email: "me@forterro.com"}, &fakeGrants{}, nil, nil, true)
 
 	body := `{"namespace":"someone-elses","git_enabled":true,"transport":"https","remote_url":"https://gitlab.com/me/notes.git","credential":"glpat-x"}`
 	w := httptest.NewRecorder()
@@ -116,7 +116,7 @@ func TestMinePutForcesOwnerAndDerivedNamespace(t *testing.T) {
 // git_enabled with a bad remote is rejected before any store write.
 func TestMinePutRejectsBadRemote(t *testing.T) {
 	fs := &fakeWSStore{personal: map[int]*store.Workspace{}}
-	h := NewWorkspaceHandler(fs, nil, nil, nil, nil)
+	h := NewWorkspaceHandler(fs, nil, nil, nil, nil, true)
 	body := `{"git_enabled":true,"transport":"https","remote_url":"http://insecure.example/x.git"}`
 	w := httptest.NewRecorder()
 	h.HandleMine(w, mineReq(7, body))
@@ -132,7 +132,7 @@ func TestMinePutRejectsBadRemote(t *testing.T) {
 // rejected so it can't sit silently failing in the background.
 func TestMinePutRequiresCredentialForMirror(t *testing.T) {
 	fs := &fakeWSStore{personal: map[int]*store.Workspace{}}
-	h := NewWorkspaceHandler(fs, fakeUsers{email: "me@forterro.com"}, &fakeGrants{}, nil, nil)
+	h := NewWorkspaceHandler(fs, fakeUsers{email: "me@forterro.com"}, &fakeGrants{}, nil, nil, true)
 	body := `{"git_enabled":true,"transport":"https","remote_url":"https://gitlab.com/me/notes.git"}`
 	w := httptest.NewRecorder()
 	h.HandleMine(w, mineReq(7, body))
@@ -144,9 +144,37 @@ func TestMinePutRequiresCredentialForMirror(t *testing.T) {
 	}
 }
 
+// Fail-closed: when the server has no dedicated sealing secret, enabling
+// mirroring is refused so a PAT / SSH key is never sealed under a default key.
+func TestMinePutFailsClosedWithoutEncryption(t *testing.T) {
+	fs := &fakeWSStore{personal: map[int]*store.Workspace{}}
+	h := NewWorkspaceHandler(fs, fakeUsers{email: "me@forterro.com"}, &fakeGrants{}, nil, nil, false)
+	body := `{"git_enabled":true,"transport":"https","remote_url":"https://gitlab.com/me/notes.git","credential":"glpat-x"}`
+	w := httptest.NewRecorder()
+	h.HandleMine(w, mineReq(7, body))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 (encryption not configured)", w.Code)
+	}
+	if fs.created {
+		t.Fatal("stored a credential without a sealing secret")
+	}
+}
+
+// Fail-closed also covers groups, which seal a shared credential.
+func TestGroupCreateFailsClosedWithoutEncryption(t *testing.T) {
+	h := NewWorkspaceHandler(&fakeWSStore{groups: map[int]*store.WorkspaceGroup{}}, nil, nil, nil, nil, false)
+	body := `{"name":"dev","transport":"https","base_url":"https://gitlab.forterro.com/g","credential":"glpat-x"}`
+	r := httptest.NewRequest(http.MethodPost, "/api/admin/workspace-groups", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	h.HandleGroups(w, r)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 (encryption not configured)", w.Code)
+	}
+}
+
 func TestAdminCreateRejectsReservedPrefix(t *testing.T) {
 	fs := &fakeWSStore{byNS: map[string]*store.Workspace{}}
-	h := NewWorkspaceHandler(fs, nil, nil, nil, nil)
+	h := NewWorkspaceHandler(fs, nil, nil, nil, nil, true)
 	body := `{"namespace":"user-1","git_enabled":false}`
 	r := httptest.NewRequest(http.MethodPost, "/api/admin/workspaces", strings.NewReader(body))
 	w := httptest.NewRecorder()
@@ -157,7 +185,7 @@ func TestAdminCreateRejectsReservedPrefix(t *testing.T) {
 }
 
 func TestValidateRemote(t *testing.T) {
-	h := NewWorkspaceHandler(nil, nil, nil, nil, []string{"gitlab.forterro.com"})
+	h := NewWorkspaceHandler(nil, nil, nil, nil, []string{"gitlab.forterro.com"}, true)
 	cases := []struct {
 		transport, url string
 		ok             bool
@@ -179,7 +207,7 @@ func TestValidateRemote(t *testing.T) {
 }
 
 func TestHandleMineMethodNotAllowed(t *testing.T) {
-	h := NewWorkspaceHandler(&fakeWSStore{}, nil, nil, nil, nil)
+	h := NewWorkspaceHandler(&fakeWSStore{}, nil, nil, nil, nil, true)
 	r := httptest.NewRequest(http.MethodPatch, "/api/me/workspace", nil)
 	r = middleware.WithUser(r, &middleware.UserContext{ID: 1, Role: "collaborator"})
 	w := httptest.NewRecorder()
@@ -190,7 +218,7 @@ func TestHandleMineMethodNotAllowed(t *testing.T) {
 }
 
 func TestMineGetDefaultWhenNone(t *testing.T) {
-	h := NewWorkspaceHandler(&fakeWSStore{personal: map[int]*store.Workspace{}}, fakeUsers{email: "u5@forterro.com"}, &fakeGrants{}, nil, nil)
+	h := NewWorkspaceHandler(&fakeWSStore{personal: map[int]*store.Workspace{}}, fakeUsers{email: "u5@forterro.com"}, &fakeGrants{}, nil, nil, true)
 	r := httptest.NewRequest(http.MethodGet, "/api/me/workspace", nil)
 	r = middleware.WithUser(r, &middleware.UserContext{ID: 5, Role: "collaborator"})
 	w := httptest.NewRecorder()
@@ -208,7 +236,7 @@ func TestMineGetDefaultWhenNone(t *testing.T) {
 // Creating a workspace with a group_id routes to CreateInGroup with the namespace.
 func TestAdminCreateInGroup(t *testing.T) {
 	fs := &fakeWSStore{byNS: map[string]*store.Workspace{}, groups: map[int]*store.WorkspaceGroup{7: {ID: 7, Name: "dev", BaseURL: "https://gitlab.forterro.com/mdnest-workspaces/dev"}}}
-	h := NewWorkspaceHandler(fs, nil, nil, nil, nil)
+	h := NewWorkspaceHandler(fs, nil, nil, nil, nil, true)
 	r := httptest.NewRequest(http.MethodPost, "/api/admin/workspaces", strings.NewReader(`{"namespace":"team-a","group_id":7}`))
 	w := httptest.NewRecorder()
 	h.HandleAdmin(w, r)
@@ -226,7 +254,7 @@ func TestAdminCreateInGroup(t *testing.T) {
 // Creating in a nonexistent group is rejected before any write.
 func TestAdminCreateInMissingGroup(t *testing.T) {
 	fs := &fakeWSStore{byNS: map[string]*store.Workspace{}, groups: map[int]*store.WorkspaceGroup{}}
-	h := NewWorkspaceHandler(fs, nil, nil, nil, nil)
+	h := NewWorkspaceHandler(fs, nil, nil, nil, nil, true)
 	r := httptest.NewRequest(http.MethodPost, "/api/admin/workspaces", strings.NewReader(`{"namespace":"team-b","group_id":99}`))
 	w := httptest.NewRecorder()
 	h.HandleAdmin(w, r)
@@ -240,7 +268,7 @@ func TestAdminCreateInMissingGroup(t *testing.T) {
 
 // A group POST validates the base URL against the allow-list.
 func TestGroupCreateValidatesBaseURL(t *testing.T) {
-	h := NewWorkspaceHandler(&fakeWSStore{groups: map[int]*store.WorkspaceGroup{}}, nil, nil, nil, []string{"gitlab.forterro.com"})
+	h := NewWorkspaceHandler(&fakeWSStore{groups: map[int]*store.WorkspaceGroup{}}, nil, nil, nil, []string{"gitlab.forterro.com"}, true)
 	r := httptest.NewRequest(http.MethodPost, "/api/admin/workspace-groups", strings.NewReader(`{"name":"dev","transport":"https","base_url":"https://evil.example.com/g"}`))
 	w := httptest.NewRecorder()
 	h.HandleGroups(w, r)
