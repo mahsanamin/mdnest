@@ -136,6 +136,19 @@ nearly shipped.
   `INSERT` with no `ON CONFLICT`. Ask what happens to the *second* one: a hard
   failure is acceptable (and is what #62 does — it fails closed), but a silent
   merge onto an existing row would hand a stranger someone else's grants.
+- **User values as positional args to a subprocess.** Anything reaching
+  `exec.Command` as a positional can be read as a flag if it starts with `-`.
+  `git fetch <url>` with `url = --upload-pack=<cmd>` executes `<cmd>`. In #70
+  `remote_url` and `branch` were both exposed this way and the scp-like ssh
+  validator let a leading `-` through, because it only looked for
+  `user@host:path` *anywhere* in the string — giving any authenticated user
+  command execution in the writer. Check the boring, non-secret fields: the
+  credential handling in that PR was careful and correct, and these were not.
+  Want both a rejection at the API boundary and `--end-of-options` (or `--`)
+  at the exec site, and verify each blocks it alone.
+  ```bash
+  git grep -n "exec.Command" pr/<n> -- backend/
+  ```
 - **New render targets.** Any new `innerHTML` / `dangerouslySetInnerHTML` must
   go through `frontend/src/sanitize.js`. Never sanitize inline.
 - **New dependencies.** `git diff origin/develop...pr/<n> -- '*/go.mod' '*/package.json'`.
