@@ -11,3 +11,38 @@ export function isMarpDoc(content) {
   if (!m) return false;
   return /^[ \t]*marp[ \t]*:[ \t]*true[ \t]*$/im.test(m[1]);
 }
+
+// slideStarts returns, from Marp source, the 0-based source line at which each
+// slide begins, plus the total line count. It powers scroll-sync between the
+// editor and the (paginated) deck: mapping an even scrollPct → slide breaks the
+// moment content isn't evenly distributed — a large YAML frontmatter with a
+// `style:` block, or one long slide, throws the mapping off. Anchoring to where
+// slides *actually* begin fixes that:
+//   - the leading YAML frontmatter (--- … ---) is skipped, so the real first
+//     slide starts after it;
+//   - each standalone `---` marks the next slide, but only when preceded by a
+//     blank line (so a setext H2 underline — text directly above `---` — isn't
+//     mistaken for a page break) and outside fenced code blocks.
+// This mirrors Marpit's page splitting closely enough to keep the deck honest.
+export function slideStarts(content) {
+  const lines = (typeof content === 'string' ? content : '').split('\n');
+  const n = lines.length;
+  let i = 0;
+  if (n > 0 && /^---\s*$/.test(lines[0])) {
+    let j = 1;
+    while (j < n && !/^---\s*$/.test(lines[j])) j++;
+    i = Math.min(j + 1, n); // first line after the closing frontmatter ---
+  }
+  const starts = [i];
+  let inFence = false;
+  let prevBlank = true; // the first content line behaves as if preceded by a blank
+  for (let k = i; k < n; k++) {
+    const line = lines[k];
+    if (/^\s*(```|~~~)/.test(line)) { inFence = !inFence; prevBlank = false; continue; }
+    if (!inFence && prevBlank && /^---\s*$/.test(line)) {
+      starts.push(k + 1); // the next slide begins on the line after the separator
+    }
+    prevBlank = line.trim() === '';
+  }
+  return { starts, totalLines: n };
+}

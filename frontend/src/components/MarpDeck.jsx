@@ -10,6 +10,7 @@
 // lazy-loads this component).
 import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { Marp } from '@marp-team/marp-core';
+import { slideStarts } from '../marp.js';
 import './MarpDeck.css';
 
 // render turns the note into per-slide HTML fragments + the theme CSS.
@@ -22,6 +23,13 @@ function render(content) {
   const slides = Array.from(nodes).map((n) => n.outerHTML);
   return { slides: slides.length ? slides : [html], css };
 }
+
+// slideStarts returns, from Marp source, the 0-based source line at which each
+// slide begins, plus the total line count. It powers scroll-sync: an even
+// scrollPct → slide split breaks the moment content isn't evenly distributed —
+// a large YAML frontmatter with a `style:` block, or one long slide, throws the
+// mapping off. Instead we anchor to where slides *actually* begin;
+// see marp.js for the exact rules.
 
 export default function MarpDeck({ content, scrollPct }) {
   const { slides, css, error } = useMemo(() => {
@@ -37,15 +45,24 @@ export default function MarpDeck({ content, scrollPct }) {
   const clamp = useCallback((i) => Math.max(0, Math.min(total - 1, i)), [total]);
   useEffect(() => { setIdx((i) => clamp(i)); }, [total, clamp]);
 
+  // Source line where each slide begins, used to map the editor position to a
+  // slide by *where the breaks really are* rather than an even split.
+  const { starts, totalLines } = useMemo(() => slideStarts(content), [content]);
+
   // Follow the editor's position in split view: the deck isn't scrollable, so
-  // the parent hands us the editor's 0..1 scroll ratio and we map it to a
-  // slide. Manual navigation (arrows/keys/buttons) still works — the next
-  // editor scroll simply re-syncs. Ignored when the parent passes nothing
-  // (fullscreen, mobile, or preview-only where there is no editor to track).
+  // the parent hands us the editor's 0..1 scroll ratio. We turn that ratio into
+  // a source line and pick the slide whose range contains it — this keeps the
+  // deck aligned even with a huge frontmatter/style block or an uneven slide at
+  // the top. Manual navigation (arrows/keys/buttons) still works; the next
+  // editor scroll re-syncs. Ignored when the parent passes nothing (fullscreen,
+  // mobile, or preview-only where there is no editor to track).
   useEffect(() => {
     if (typeof scrollPct !== 'number' || total <= 1) return;
-    setIdx(clamp(Math.round(scrollPct * (total - 1))));
-  }, [scrollPct, total, clamp]);
+    const line = scrollPct * Math.max(0, totalLines - 1);
+    let s = 0;
+    while (s + 1 < starts.length && starts[s + 1] <= line) s++;
+    setIdx(clamp(s));
+  }, [scrollPct, total, clamp, starts, totalLines]);
 
   const rootRef = useRef(null);
   const go = useCallback((delta) => setIdx((i) => clamp(i + delta)), [clamp]);
