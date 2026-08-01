@@ -126,6 +126,81 @@ var migrations = []struct {
 			CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id ON api_tokens(user_id);
 		`,
 	},
+	{
+		// Per-workspace git remote config (multi mode, opt-in). A row overrides
+		// the coarse env-based mirror default (GIT_REMOTE_URL) for one
+		// namespace: notes in that workspace mirror to a specific repository
+		// over HTTPS (PAT) or SSH (deploy key), instead of the group default.
+		//
+		// owner_id NULL  = a shared/team workspace configured by an admin.
+		// is_personal    = a user's personal workspace (owner_id = that user),
+		//                  excluded from the grants model (the owner has
+		//                  implicit access; it is never listed in admin grant
+		//                  UIs). The partial unique index caps it at one per
+		//                  user. credential_encrypted holds the PAT or SSH
+		//                  private key sealed with AES-256-GCM (see
+		//                  backend/secrets); known_hosts is public host-key
+		//                  material for SSH StrictHostKeyChecking and stays
+		//                  plaintext.
+		name: "009_create_workspaces",
+		sql: `
+			CREATE TABLE IF NOT EXISTS workspaces (
+				id                   SERIAL PRIMARY KEY,
+				namespace            TEXT NOT NULL UNIQUE,
+				owner_id             INTEGER REFERENCES users(id) ON DELETE CASCADE,
+				is_personal          BOOLEAN NOT NULL DEFAULT false,
+				git_enabled          BOOLEAN NOT NULL DEFAULT false,
+				transport            TEXT NOT NULL DEFAULT 'https',
+				remote_url           TEXT NOT NULL DEFAULT '',
+				username             TEXT NOT NULL DEFAULT 'oauth2',
+				branch               TEXT NOT NULL DEFAULT 'main',
+				known_hosts          TEXT NOT NULL DEFAULT '',
+				credential_encrypted TEXT NOT NULL DEFAULT '',
+				created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+				updated_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+			);
+			CREATE INDEX IF NOT EXISTS idx_workspaces_owner_id ON workspaces(owner_id);
+			CREATE UNIQUE INDEX IF NOT EXISTS idx_workspaces_personal_owner
+				ON workspaces(owner_id) WHERE is_personal;
+		`,
+	},
+	{
+		// Workspace groups: a shared git remote base (the DB/UI equivalent of the
+		// GIT_REMOTE_URL env provisioning). Workspaces created in a group inherit
+		// its transport/base/credential and mirror to <base_url>/<namespace>.git,
+		// so an operator declares the base + token once and adds namespaces to it.
+		// workspaces.group_id links a namespace to its group; ON DELETE CASCADE so
+		// removing a group removes its members' mirror config (never the notes).
+		name: "010_create_workspace_groups",
+		sql: `
+			CREATE TABLE IF NOT EXISTS workspace_groups (
+				id                   SERIAL PRIMARY KEY,
+				name                 TEXT NOT NULL UNIQUE,
+				transport            TEXT NOT NULL DEFAULT 'https',
+				base_url             TEXT NOT NULL,
+				username             TEXT NOT NULL DEFAULT 'oauth2',
+				branch               TEXT NOT NULL DEFAULT 'main',
+				known_hosts          TEXT NOT NULL DEFAULT '',
+				credential_encrypted TEXT NOT NULL DEFAULT '',
+				created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+				updated_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+			);
+			ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS group_id INTEGER
+				REFERENCES workspace_groups(id) ON DELETE CASCADE;
+			CREATE INDEX IF NOT EXISTS idx_workspaces_group_id ON workspaces(group_id);
+		`,
+	},
+	{
+		// Per-namespace mirror sync status: the durability writer records the
+		// outcome of the last two-way sync on the workspace row so the owner sees
+		// why mirroring is failing (bad token, missing branch, unreachable remote)
+		// instead of a silently-empty namespace. last_sync_error is '' on success.
+		name: "011_workspace_sync_status",
+		sql: `
+			ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS last_sync_error TEXT NOT NULL DEFAULT '';
+			ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS last_sync_at TIMESTAMPTZ;
+		`,
+	},
 }
 
 // Migrate runs all pending migrations. Safe to call on every startup.
