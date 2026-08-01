@@ -358,6 +358,9 @@ Checkboxes are also the atoms of the **[Task Board](#task-board)**: any checkbox
 
 ## Task Board
 
+> Opt-in: the board appears only when the operator sets `ENABLE_TASK_BOARD=true`
+> (see [setup](setup.md)). If you don't see the board button, that's why.
+
 The task board gathers every task-list item in a namespace and presents it as a kanban board or a flat list. Because tasks live in your notes, the board is just a view of them -- editing on the board edits the note, and editing the note updates the board.
 
 **Opening it.** With a note open, the editor toolbar shows a **Basic · Live · Board** switch; pick **Board** to replace the editor pane with the board (the sidebar and header stay put). The board is scoped to the current namespace.

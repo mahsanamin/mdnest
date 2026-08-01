@@ -31,6 +31,7 @@ type ConfigHandler struct {
 	ssoProvider     string                 // human label for the SSO button (e.g. "Google")
 	devLoginEnabled bool                   // INSECURE_DEV_LOGIN is on (signals frontend to expose /?login=dev + warning bar)
 	grantMaxDepth   int                    // server-side ceiling on grant path depth (0 = no limit). PathPicker uses this to filter the dropdown.
+	taskBoard       bool                   // ENABLE_TASK_BOARD is on — the frontend may show the board button and load its chunk
 	updateChecker   *updates.Checker       // optional — polls GitHub releases so the frontend can hint when a newer mdnest is available
 }
 
@@ -79,6 +80,14 @@ func (h *ConfigHandler) SetGrantMaxDepth(depth int) {
 	h.grantMaxDepth = depth
 }
 
+// SetTaskBoard flips on the task-board signal. Off by default: when it is
+// false the /api/tasks and /api/board routes are not registered at all, so the
+// frontend must not offer the board (it would 404). The flag is what keeps an
+// operator who just wants notes from carrying the board's UI chunk.
+func (h *ConfigHandler) SetTaskBoard(enabled bool) {
+	h.taskBoard = enabled
+}
+
 // SetUpdateChecker wires in the GitHub-release poller. When set, /api/config
 // includes a latestRelease object (once the first poll has succeeded) so the
 // frontend can hint that a newer mdnest version is available.
@@ -115,6 +124,9 @@ func (h *ConfigHandler) HandleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.grantMaxDepth > 0 {
 		resp["grantMaxDepth"] = h.grantMaxDepth
+	}
+	if h.taskBoard {
+		resp["taskBoard"] = true
 	}
 	if h.updateChecker != nil {
 		s := h.updateChecker.Status()

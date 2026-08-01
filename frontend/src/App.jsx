@@ -12,6 +12,10 @@ import EditorErrorBoundary from './components/EditorErrorBoundary.jsx';
 // ~217 KB-gzipped chunk only downloads when the user actually opens
 // Live mode.
 const LiveEditor = lazy(() => import('./components/LiveEditorCrepe.jsx'));
+// Lazy like the Live editor: the board pulls in @dnd-kit and its own CSS, and
+// it is off by default (ENABLE_TASK_BOARD), so an install that doesn't use it
+// must not carry the chunk on first paint.
+const TaskBoard = lazy(() => import('./components/TaskBoard.jsx'));
 import Preview from './components/Preview.jsx';
 import ContextMenu from './components/ContextMenu.jsx';
 import Settings from './components/Settings.jsx';
@@ -22,7 +26,6 @@ import ShareDialog from './components/ShareDialog.jsx';
 import HistoryModal from './components/HistoryModal.jsx';
 import MoveToModal from './components/MoveToModal.jsx';
 import ReleaseNotesModal from './components/ReleaseNotesModal.jsx';
-import TaskBoard from './components/TaskBoard.jsx';
 import CollabClient from './collab.js';
 import {
   getToken,
@@ -261,6 +264,9 @@ function App() {
   // see new/resolved comments without a manual refresh), so gate on liveCollab
   // — which itself is only true when multi mode is on.
   const commentsEnabled = !!appConfig?.liveCollab;
+  // ENABLE_TASK_BOARD on the backend. When off, /api/tasks and /api/board are
+  // not registered at all, so the button must not be offered.
+  const taskBoardEnabled = !!appConfig?.taskBoard;
 
   // Live collaboration state
   const [presenceUsers, setPresenceUsers] = useState([]);
@@ -1409,7 +1415,7 @@ function App() {
             }
           }}
           onRefresh={handleRefresh}
-          onOpenBoard={selectedNs ? () => setShowTaskBoard(true) : null}
+          onOpenBoard={taskBoardEnabled && selectedNs ? () => setShowTaskBoard(true) : null}
           commentCount={commentsEnabled ? comments.filter(c => !c.parentId && !c.resolved).length : 0}
           onToggleComments={!commentsEnabled ? null : () => {
             const next = !showComments;
@@ -1482,14 +1488,16 @@ function App() {
           </div>
         )}
         <div className="split-view">
-          {showTaskBoard && selectedNs ? (
-            <TaskBoard
-              ns={selectedNs}
-              canWrite={canWrite('')}
-              currentPath={currentPath}
-              onOpenNote={(p) => { setShowTaskBoard(false); openNote(p); }}
-              onClose={() => setShowTaskBoard(false)}
-            />
+          {showTaskBoard && taskBoardEnabled && selectedNs ? (
+            <Suspense fallback={<div className="editor-loading">Loading task board...</div>}>
+              <TaskBoard
+                ns={selectedNs}
+                canWrite={canWrite('')}
+                currentPath={currentPath}
+                onOpenNote={(p) => { setShowTaskBoard(false); openNote(p); }}
+                onClose={() => setShowTaskBoard(false)}
+              />
+            </Suspense>
           ) : currentPath ? (
             <>
               <div className="mobile-view-toggle">

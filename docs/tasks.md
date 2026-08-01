@@ -7,6 +7,14 @@ lives as markdown inside a note, and the note is the single source of truth. The
 anything you do on the board is a plain edit to the underlying note (and anything
 you write in the note shows up on the board).
 
+> **Off by default.** The board is opt-in: set `ENABLE_TASK_BOARD=true` in
+> `mdnest.conf` (then `./mdnest-server reload`). While it is off, the
+> `/api/tasks` and `/api/board` routes are not registered, the board button is
+> hidden, and the frontend never loads the board's UI chunk — an install that
+> doesn't want a task tracker carries none of it. Turning it on changes nothing
+> about your notes: the checkboxes were already there, and turning it back off
+> just stops projecting them.
+
 This document specifies the on‑disk format. For how to *use* the board, see the
 [User Guide](user-guide.md#task-board); for the HTTP endpoints, see the
 [API Reference](api.md#task-board).
