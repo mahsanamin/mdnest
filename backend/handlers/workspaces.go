@@ -567,8 +567,17 @@ func (h *WorkspaceHandler) minePut(w http.ResponseWriter, r *http.Request, userI
 		wsError(w, http.StatusInternalServerError, "failed to save workspace")
 		return
 	}
-	h.ensureNamespace(r.Context(), ns)
-	h.ensurePersonalGrant(userID, ns)
+	// Only materialise the namespace once the workspace actually mirrors to a
+	// repo the owner controls — then it is durable by construction, which is
+	// what makes user-initiated creation defensible here at all. Creating it
+	// for a mirroring-disabled workspace would leave notes in a runtime-created
+	// namespace with no remote; on the local backend that is the container's
+	// writable layer, which `mdnest-server rebuild` discards and git-sync never
+	// sees. Namespaces otherwise come from mounts or operator config.
+	if in.GitEnabled {
+		h.ensureNamespace(r.Context(), ns)
+		h.ensurePersonalGrant(userID, ns)
+	}
 	wsJSON(w, http.StatusOK, ws)
 }
 

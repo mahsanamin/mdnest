@@ -289,7 +289,7 @@ When a namespace mirrors to its own repository (Admin → Git Workspaces / Setti
 
 | Secret | Where | When to rotate |
 |---|---|---|
-| `MDNEST_JWT_SECRET` | `mdnest.conf` | If you suspect compromise. Rotation invalidates every active session immediately. |
+| `MDNEST_JWT_SECRET` | `mdnest.conf` | If you suspect compromise. Rotation invalidates every active session immediately. **If `MDNEST_ENCRYPTION_KEY` is unset, git credentials are sealed under this secret, so rotating it also makes them undecryptable** — set a dedicated `MDNEST_ENCRYPTION_KEY` so the two can be rotated independently. |
 | `MDNEST_ENCRYPTION_KEY` | `mdnest.conf` | If you suspect the git-credential store is compromised. **Rotation makes stored per-workspace git credentials undecryptable** — owners must re-enter their token / key afterwards (see above). |
 | `POSTGRES_PASSWORD` | `mdnest.conf` | After any DBA hand-off. Update + `mdnest-server rebuild`. |
 | `SSO_CLIENT_SECRET` | `mdnest.conf` | If the IdP-issued secret leaks. Generate a new one in the IdP's admin console, swap in `mdnest.conf`, `./mdnest-server reload`. |

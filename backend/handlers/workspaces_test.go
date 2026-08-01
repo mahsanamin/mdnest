@@ -113,6 +113,44 @@ func TestMinePutForcesOwnerAndDerivedNamespace(t *testing.T) {
 	}
 }
 
+// A personal namespace is materialised only once the workspace actually
+// mirrors to a repo the owner controls, so it is durable by construction.
+// Namespaces otherwise come from mounts or operator config — a runtime-created
+// namespace with no remote lives in the container's writable layer on the local
+// backend, which `mdnest-server rebuild` discards.
+func TestMinePutOnlyCreatesNamespaceWhenMirroring(t *testing.T) {
+	t.Run("mirroring off: config saved, no namespace or grant", func(t *testing.T) {
+		fs := &fakeWSStore{personal: map[int]*store.Workspace{}}
+		gr := &fakeGrants{}
+		h := NewWorkspaceHandler(fs, fakeUsers{email: "me@example.com"}, gr, nil, nil, true)
+		w := httptest.NewRecorder()
+		h.HandleMine(w, mineReq(7, `{"git_enabled":false}`))
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+		}
+		if !fs.created {
+			t.Error("the workspace row should still be saved")
+		}
+		if gr.created {
+			t.Error("granted a namespace that was never materialised")
+		}
+	})
+
+	t.Run("mirroring on: namespace and grant created", func(t *testing.T) {
+		fs := &fakeWSStore{personal: map[int]*store.Workspace{}}
+		gr := &fakeGrants{}
+		h := NewWorkspaceHandler(fs, fakeUsers{email: "me@example.com"}, gr, nil, nil, true)
+		w := httptest.NewRecorder()
+		h.HandleMine(w, mineReq(7, `{"git_enabled":true,"transport":"https","remote_url":"https://gitlab.com/me/notes.git","credential":"glpat-x"}`))
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+		}
+		if !gr.created || gr.ns != "me@example.com" {
+			t.Errorf("expected a write grant on the personal namespace, got created=%v ns=%q", gr.created, gr.ns)
+		}
+	})
+}
+
 // git_enabled with a bad remote is rejected before any store write.
 func TestMinePutRejectsBadRemote(t *testing.T) {
 	fs := &fakeWSStore{personal: map[int]*store.Workspace{}}
