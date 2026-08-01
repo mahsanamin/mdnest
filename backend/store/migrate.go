@@ -123,7 +123,6 @@ var migrations = []struct {
 				user_id      INTEGER REFERENCES users(id) ON DELETE CASCADE,
 				created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 			);
-			CREATE INDEX IF NOT EXISTS idx_api_tokens_hash ON api_tokens(token_hash);
 			CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id ON api_tokens(user_id);
 		`,
 	},

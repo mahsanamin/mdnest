@@ -58,7 +58,7 @@ flowchart TD
 - **Backend** is a single Go binary using only `net/http` from the standard library. All routes are registered on a `ServeMux` in `main.go` and wrapped with an auth middleware + (in multi mode) a `PermissionChecker` that consults the role/grant model.
 - **Identity** in multi-mode is provided by one of three exclusive plugins: `local` (username + password + Postgres-backed TOTP), `sso` (generic OIDC relying party), or `firebase` (Firebase Auth + Firestore TOTP). Pick one with `USER_PROVIDER=` in `mdnest.conf`. Single-mode skips this layer entirely.
 - **PostgreSQL** is added by `setup.sh` automatically when `AUTH_MODE=multi`. It stores user accounts, access grants, and (v3.5.0+) namespace-admin assignments. **Note content is never in the database** — files on disk are the source of truth in every mode.
-- **Live collaboration** uses an in-process `collab.Hub` that fans WebSocket events between connected clients (presence, cursors, tree-changed events, comment broadcasts). Gated on `ENABLE_LIVE_COLLAB=true` in multi mode.
+- **Live collaboration** uses an in-process `collab.Hub` that fans WebSocket events between connected clients (presence, cursors, tree-changed events, comment broadcasts). Gated on `ENABLE_LIVE_COLLAB=true` in multi mode. For active/active (multiple backend replicas), set `REDIS_URL` — the Hub then fans events across replicas over a Redis backplane instead of only within one process, so presence and edits stay consistent cluster-wide.
 - **git-sync** is an optional sidecar that commits + pulls + pushes each namespace on a timer. Auto-enabled when SSH keys are present in `git-sync/keys/`.
 
 ---
@@ -289,6 +289,23 @@ Notes are always plain files on disk, regardless of auth mode. The filesystem is
 - Deletes use `os.Remove` (files) or `os.RemoveAll` (directories).
 
 In multi-user mode, PostgreSQL stores only user accounts and access grants -- never note content. See [Files as Source of Truth](#files-as-source-of-truth) below.
+
+### Storage backends
+
+The filesystem operations above sit behind a namespace-scoped `Storage` interface (`backend/storage`), selected at startup by `STORAGE_BACKEND` (default `local`). The backend never changes what a note *is* — always a plain file on disk — only how history and durability are handled:
+
+- **`local`** (default) — direct `os.*` filesystem operations; history, if any, comes from the optional external git-sync sidecar. This is the single-box path, unchanged from earlier releases.
+- **`git`** — wraps `local` (so reads, `Stat`, `Walk`, range serving and the symlink containment are inherited unchanged) and additionally records each mutation to an in-process committer that maintains per-namespace git history. Durability is still the synchronous filesystem write; commits happen asynchronously — they carry history, not primary durability — replacing the git-sync sidecar with no behavioural change.
+
+### Git-native HA (opt-in)
+
+`STORAGE_BACKEND=git` **with** `REDIS_URL` turns the single in-process committer into an out-of-process, horizontally-scalable topology. `MDNEST_ROLE` (resolved in `storage/factory.go`) selects a process's role:
+
+- **`app`** — N stateless replicas (a Deployment, no PVC). Reads are served from a Redis **working set** (`note:{ns}:{path}` + a per-namespace index + a namespace registry), so any replica answers any read without shared storage. Mutations publish to the working set and enqueue a `DurabilityOp` on a Redis **stream**; attachment upload/serve is reverse-proxied to the writer, which owns the bytes.
+- **`writer`** — a single replica (a StatefulSet with its own PVC) elected through a Redis **leader lock** (`SET NX PX`, CAS-renewed). It drains the durability stream (at-least-once, `XAUTOCLAIM` reclaim on failover), applies each op idempotently to the git tree, then commits. On start it rehydrates the working set from the git tree, so a Redis flush loses no committed data.
+- **`single`** (default) — the in-process committer above; no Redis, no queue.
+
+The durability boundary moves with the topology: on an `app` replica a write is acknowledged once it is on the Redis stream, **not** once the writer has committed it — the queue is the only copy in that window, so Redis must run with AOF persistence. That RPO trade is documented for operators in [`docs/kubernetes.md`](kubernetes.md). The opt-in per-namespace **remote mirror** (`GIT_REMOTE_URL`) pushes each namespace repo to an external git host over HTTPS, giving an off-cluster durable copy that `app` replicas can clone.
 
 ### Path Safety
 

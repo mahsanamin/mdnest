@@ -18,35 +18,25 @@ A standard-Kubernetes Helm chart (no CRDs) that deploys [mdnest](https://github.
 
 PostgreSQL and Redis are **never bundled**: point the chart at external/managed instances.
 
-> [!IMPORTANT]
-> **Not every option below is available yet.** The chart is versioned with mdnest,
-> and two opt-in capabilities documented here are not implemented in this
-> release — the chart **refuses to install** rather than come up "healthy" while
-> doing the wrong thing:
->
-> | Option | Why it is rejected |
-> |---|---|
-> | `storage.backend=s3` | The backend reads notes from the filesystem and ignores `S3_*`; notes would land on the PVC, not your bucket. |
-> | `collab.redis.*` | There is no presence/event backplane, so replicas would diverge instead of syncing. |
->
-> Consequently `backend.replicaCount > 1` is also rejected: active/active needs
-> the backplane. **Supported today:** single-replica `single` or `multi` mode,
-> live collaboration, git-sync, ingress, and TLS.
+> [!NOTE]
+> The chart is versioned with mdnest, and its values surface must not outrun the
+> code: `storage.backend` accepts `local` (default) and `git` — any other value
+> (there is no S3 backend) is refused at install time rather than coming up
+> "healthy" while writing notes somewhere the backend silently ignores.
 
 ## Deployment models
 
-Single instance is the default and matches upstream mdnest exactly. The horizontally-scaled column describes the target topology; it is gated off until the Redis backplane lands (see the note above).
+Single instance is the default and matches upstream mdnest exactly. Active/active is opt-in.
 
 | | Single instance (default) | Horizontally scaled (opt-in) |
 |---|---|---|
 | `auth.mode` | `single` (file auth, no DB) | `multi` (external PostgreSQL) |
 | `backend.replicaCount` | `1` | `> 1` |
-| `backend.strategy.type` | `Recreate` | `RollingUpdate` |
 | Live collaboration | off | `collab.enabled=true` |
 | Cross-replica sync | n/a | Redis (`collab.redis.*`) |
-| Notes storage | `local` PVC (RWO) | RWX PVC **or** `storage.backend=s3` |
+| Notes storage | `local` PVC (RWO) | `storage.backend=git` (per-pod, no RWX) **or** a shared RWX PVC |
 
-The chart **validates these invariants and fails fast** with a clear message if a multi-replica deployment is missing PostgreSQL, Redis, collaboration, or shared (RWX/S3) storage.
+The chart **validates these invariants and fails fast** with a clear message if a multi-replica deployment is missing PostgreSQL, Redis, collaboration, or shared storage. The `git` backend adds the git-native HA topology (a durability writer over Redis) — see [docs/kubernetes.md](https://github.com/mahsanamin/mdnest/blob/main/docs/kubernetes.md).
 
 ## TL;DR
 
@@ -90,7 +80,6 @@ Never commit real credentials to a values file. For every secret the chart accep
 | PostgreSQL | `postgres.password` | `postgres.existingSecret` |
 | Redis | `collab.redis.url` | `collab.redis.existingSecret` or `collab.redis.passwordSecret` |
 | SSO | `sso.clientSecret` | `sso.existingSecret` |
-| S3 | `storage.s3.accessKey/secretKey` | `storage.s3.existingSecret` |
 | MCP token | `mcp.auth.token` | `mcp.auth.existingSecret` |
 | MCP OAuth | `mcp.oauth.secret.value` | `mcp.oauth.secret.existingSecret` |
 
@@ -137,25 +126,20 @@ collab:
       key: password
 ```
 
-### Storage backend (local vs S3)
+### Storage backend (local vs git)
 
-`storage.backend=local` (default) keeps notes on the `notes` PVC — byte-identical to upstream. Set `storage.backend=s3` to store notes in an S3-compatible bucket, which lets multiple replicas share notes **without** ReadWriteMany storage and enables self-service namespace creation:
+`storage.backend=local` (default) keeps notes on the `notes` PVC — byte-identical to upstream. `storage.backend=git` keeps the same on-disk layout but has mdnest own per-namespace git history in-process (no git-sync sidecar needed for local history), and unlocks the git-native HA topology when you add `REDIS_URL` — N stateless replicas share notes **without** ReadWriteMany storage:
 
 ```yaml
 storage:
-  backend: s3
-  s3:
-    endpoint: s3.fr-par.scw.cloud      # no scheme
-    bucket: mdnest-notes
-    region: fr-par
-    pathStyle: true                    # required for MinIO / Ceph RGW
-    existingSecret: mdnest-s3          # provides S3_ACCESS_KEY / S3_SECRET_KEY
-persistence:
-  notes:
-    enabled: false                     # no notes PVC needed with S3
+  backend: git
+  git:
+    remote:                              # optional off-cluster mirror, one repo per namespace
+      url: https://gitlab.example.com/notes-workspaces
+      existingTokenSecret: mdnest-git-token
 ```
 
-> Note *history* (git) and the git-sync sidecar always use the local filesystem and are orthogonal to this setting.
+> The git-sync sidecar is a separate optional mirror, mutually exclusive with `storage.backend=git` (both commit to the working tree). See [docs/kubernetes.md](https://github.com/mahsanamin/mdnest/blob/main/docs/kubernetes.md) for the HA topology and its durability trade.
 
 ### Shared storage for active/active (local backend)
 
@@ -266,7 +250,7 @@ All traffic goes to the frontend Service, which proxies `/api` and `/api/ws` (We
 | backend.service.type | string | `"ClusterIP"` | Backend Service type. |
 | backend.tolerations | list | `[]` | Tolerations for the backend. |
 | backend.updateStrategy.type | string | `"RollingUpdate"` | StatefulSet update strategy. `RollingUpdate` is safe because each pod owns its own volume (volumeClaimTemplate) — no ReadWriteOnce hand-off deadlock, so the old Deployment `Recreate` workaround is gone. |
-| collab | object | `{"enabled":false,"redis":{"database":0,"existingSecret":"","host":"","passwordSecret":{"key":"password","name":""},"port":6379,"secretKeys":{"url":"REDIS_URL"},"tls":false,"url":"","username":"default"}}` | ---------------------------------------------------------------------------  Live collaboration (collab.enabled) works on a single backend replica. To run multiple replicas (active/active), also set a Redis backplane below so presence and edits sync across pods — validateHA enforces this, since without it replicas would silently diverge. |
+| collab | object | `{"enabled":false,"redis":{"database":0,"existingSecret":"","host":"","passwordSecret":{"key":"password","name":""},"port":6379,"secretKeys":{"url":"REDIS_URL"},"tls":false,"url":"","username":"default"}}` | ---------------------------------------------------------------------------  Live collaboration (collab.enabled) works on a single backend replica. To run multiple replicas (active/active), also set a Redis backplane below so presence and edits sync across pods — validateHA enforces this, since without it replicas would silently diverge.  DURABILITY NOTE: with the git-native HA backend (storage.backend=git + REDIS_URL) this same Redis is NOT just a presence/event backplane — it also carries the durability queue between the app replicas and the writer. Between a save's ack and the writer committing it to git, the queue is the only copy, so this Redis must run with AOF persistence (appendonly yes). See docs/kubernetes.md "Git-native HA and durability (RPO)". |
 | collab.enabled | bool | `false` | Enable live collaboration (`ENABLE_LIVE_COLLAB`; requires `auth.mode=multi`). For multiple replicas, also configure `redis` below. |
 | collab.redis.database | int | `0` | Redis database index (compose mode). |
 | collab.redis.existingSecret | string | `""` | Existing Secret to source `REDIS_URL` from instead of inline `url`. |
@@ -345,7 +329,7 @@ All traffic goes to the frontend Service, which proxies `/api` and `/api/ws` (We
 | persistence | object | `{"notes":{"accessMode":"ReadWriteOnce","annotations":{},"enabled":true,"existingClaim":"","size":"5Gi","storageClass":""},"pvcRetentionPolicy":{},"secrets":{"accessMode":"ReadWriteOnce","annotations":{},"enabled":true,"existingClaim":"","size":"256Mi","storageClass":""}}` | --------------------------------------------------------------------------- |
 | persistence.notes.accessMode | string | `"ReadWriteOnce"` | Access mode for the per-pod volumeClaimTemplate. ReadWriteOnce is fine (each pod owns its volume). Sharing across pods uses existingClaim instead. |
 | persistence.notes.annotations | object | `{}` | Annotations for the notes PVC. |
-| persistence.notes.enabled | bool | `true` | Provision a PVC for note data (ignored when `storage.backend=s3`). |
+| persistence.notes.enabled | bool | `true` | Provision a PVC for note data. |
 | persistence.notes.existingClaim | string | `""` | Use an existing (shared) PVC instead of a per-pod volumeClaimTemplate. Required for active/active and for git-sync. |
 | persistence.notes.size | string | `"5Gi"` | Notes PVC size. |
 | persistence.notes.storageClass | string | `""` | StorageClass for the notes PVC (empty = cluster default). |
@@ -380,17 +364,23 @@ All traffic goes to the frontend Service, which proxies `/api` and `/api/ws` (We
 | sso.providerLabel | string | `"SSO"` | Label shown on the SSO login button. |
 | sso.redirectUrl | string | `""` | OAuth redirect URL; defaults to `<frontendOrigin>/api/auth/sso/callback`. |
 | sso.secretKeys | object | `{"clientSecret":"SSO_CLIENT_SECRET"}` | Key inside `existingSecret` holding the client secret. |
-| storage | object | `{"backend":"local","s3":{"accessKey":"","bucket":"","endpoint":"","existingSecret":"","pathStyle":true,"region":"us-east-1","secretKey":"","secretKeys":{"accessKey":"S3_ACCESS_KEY","secretKey":"S3_SECRET_KEY"},"useSSL":true}}` | ---------------------------------------------------------------------------  NOT AVAILABLE IN THIS RELEASE: only `local` is implemented. The backend reads notes from the filesystem and ignores S3_*, so `s3` would write notes to the PVC while looking configured for a bucket — the chart refuses to render it rather than deploy that silently. Keys below are kept so the option can be enabled in the same change that lands object-store support. |
-| storage.backend | string | `"local"` | Note storage backend. Only `local` is implemented in this release (notes on the `notes` PVC); `s3` is rejected at install time. |
-| storage.s3.accessKey | string | `""` | Inline S3 access key (used only when `existingSecret` is empty). |
-| storage.s3.bucket | string | `""` | S3 bucket name. |
-| storage.s3.endpoint | string | `""` | S3 endpoint as `host[:port]` WITHOUT scheme, e.g. `s3.fr-par.scw.cloud`. |
-| storage.s3.existingSecret | string | `""` | Existing Secret holding S3 credentials (e.g. synced from Vault). When set, inline keys are ignored. |
-| storage.s3.pathStyle | bool | `true` | Path-style addressing (bucket in URL path). Required for MinIO / Ceph RGW; set `false` only if your endpoint requires virtual-hosted-style. |
-| storage.s3.region | string | `"us-east-1"` | S3 region. |
-| storage.s3.secretKey | string | `""` | Inline S3 secret key (used only when `existingSecret` is empty). |
-| storage.s3.secretKeys | object | `{"accessKey":"S3_ACCESS_KEY","secretKey":"S3_SECRET_KEY"}` | Keys inside `existingSecret` holding the credentials. |
-| storage.s3.useSSL | bool | `true` | Use TLS to reach the endpoint. |
+| storage | object | `{"backend":"local","git":{"authorEmail":"","authorName":"","commit":{"debounce":"","maxWait":""},"remote":{"branch":"main","existingTokenSecret":"","tokenSecretKey":"token","url":"","username":"oauth2"}}}` | --------------------------------------------------------------------------- |
+| storage.backend | string | `"local"` | Note storage backend: `local` (notes on the volume) or `git` (same, plus mdnest maintains per-namespace git history in-process — no git-sync sidecar needed for local history; add REDIS_URL for the git-native HA topology). Any other value is rejected at install time. |
+| storage.git.authorName | string | `""` | Author name/email for mdnest's own commits. Empty = mdnest/mdnest@localhost. |
+| storage.git.commit | object | `{"debounce":"","maxWait":""}` | Git history is committed per-namespace once the writer goes idle on it, not on a fixed timer: an editing session (many rapid saves) is coalesced into a single commit made after `commit.debounce` with no new write, so the git graph stays readable. Note bytes are durable on disk immediately; this only controls history commit cadence. |
+| storage.git.commit.debounce | string | `""` | Commit a namespace after this long with no new write (Go duration). Empty = backend default (2m). |
+| storage.git.commit.maxWait | string | `""` | Safety cap: force a commit once a namespace has been dirty this long even while still being edited (Go duration). Empty = backend default (10m). |
+| storage.git.remote | object | `{"branch":"main","existingTokenSecret":"","tokenSecretKey":"token","url":"","username":"oauth2"}` | Optional per-namespace remote mirror: one git repository per workspace, pushed over HTTPS. When `url` is set the git backend pushes each namespace repo to `<url>/<namespace>.git`. Opt-in; empty = local history only. This is the coarse global default; per-workspace remotes (multi mode) are a separate feature. |
+| storage.git.remote.branch | string | `"main"` | Branch to push. |
+| storage.git.remote.existingTokenSecret | string | `""` | Existing Secret holding the Personal Access Token, mounted read-only as a file. Create it yourself; tokens must never live in values. |
+| storage.git.remote.tokenSecretKey | string | `"token"` | Key inside `existingTokenSecret` holding the PAT. |
+| storage.git.remote.url | string | `""` | Base URL for the per-namespace remotes, e.g. `https://gitlab.example.com/notes-workspaces`. Empty = mirroring disabled. |
+| storage.git.remote.username | string | `"oauth2"` | HTTPS username (GitLab PAT: `oauth2`; GitHub PAT: `x-access-token`). |
+| writer | object | `{"affinity":{},"nodeSelector":{},"resources":{},"tolerations":[]}` | --------------------------------------------------------------------------- |
+| writer.affinity | object | `{}` | Affinity rules for the writer pod. |
+| writer.nodeSelector | object | `{}` | Node selector for the writer pod. |
+| writer.resources | object | `{}` | Writer resource requests/limits. |
+| writer.tolerations | list | `[]` | Tolerations for the writer pod. |
 
 ## Maintainers
 

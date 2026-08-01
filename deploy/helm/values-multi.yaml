@@ -1,0 +1,73 @@
+# =============================================================================
+# values-multi.yaml — multi-user team (single replica, no HA)
+# -----------------------------------------------------------------------------
+# Multi-user mode backed by an external PostgreSQL, one backend replica, live
+# collaboration, and SSO. Notes stay on a local PVC — no Redis, no active/active.
+# The common "one team, one instance" deployment.
+#
+# Prerequisites:
+#   - an external PostgreSQL reachable in-cluster
+#   - an OIDC identity provider (or drop the sso block for local password auth)
+#
+# Create the referenced Secrets first, e.g.:
+#   kubectl create secret generic mdnest-auth \
+#     --from-literal=MDNEST_PASSWORD='<seed-superadmin-password>' \
+#     --from-literal=MDNEST_JWT_SECRET='<long-random-string>'
+#   kubectl create secret generic mdnest-postgres --from-literal=POSTGRES_PASSWORD='<pg-password>'
+#   kubectl create secret generic mdnest-sso --from-literal=SSO_CLIENT_SECRET='<oidc-client-secret>'
+# then:
+#   helm install mdnest ./deploy/helm/mdnest -f deploy/helm/values-multi.yaml
+# =============================================================================
+
+auth:
+  mode: multi
+  # multi mode seeds the first superadmin from adminUser + MDNEST_PASSWORD.
+  adminUser: admin
+  existingSecret: mdnest-auth       # MDNEST_PASSWORD + MDNEST_JWT_SECRET
+
+postgres:
+  host: postgresql.databases.svc.cluster.local
+  port: 5432
+  database: mdnest
+  user: mdnest
+  existingSecret: mdnest-postgres   # POSTGRES_PASSWORD
+
+collab:
+  enabled: true         # live collaboration (single replica — no Redis needed)
+
+sso:
+  enabled: true
+  issuerUrl: https://login.example.com/realms/notes
+  clientId: mdnest
+  # redirectUrl defaults to <frontendOrigin>/api/auth/sso/callback
+  allowedDomains: example.com
+  adminEmails: admin@example.com
+  # Auto-create a least-privilege collaborator on first SSO login (safe because
+  # allowedDomains gates who the IdP will issue a token for).
+  autoProvisionUsers: true
+  existingSecret: mdnest-sso        # SSO_CLIENT_SECRET
+
+persistence:
+  notes:
+    enabled: true
+    size: 10Gi
+  # multi mode keeps API tokens in Postgres, so the secrets PVC is unused.
+  secrets:
+    enabled: false
+
+backend:
+  replicaCount: 1
+  frontendOrigin: https://notes.example.com
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: notes.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - hosts:
+        - notes.example.com
+      secretName: mdnest-tls

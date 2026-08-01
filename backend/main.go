@@ -7,11 +7,16 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/mdnest/mdnest/backend/collab"
 	"github.com/mdnest/mdnest/backend/firebase"
@@ -87,11 +92,18 @@ func main() {
 	// Storage backend for note data (local filesystem by default). Note
 	// history and git-sync always operate on the local filesystem regardless
 	// of this setting — they are orthogonal, optional features.
-	stg, err := storage.FromEnv(context.Background(), absNotesDir)
+	//
+	// appCtx is cancelled on SIGINT/SIGTERM so the writer role releases its
+	// leader lock promptly (fast failover) and the HTTP server shuts down
+	// gracefully rather than being killed mid-request.
+	appCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+
+	stg, err := storage.FromEnv(appCtx, absNotesDir)
 	if err != nil {
 		log.Fatalf("failed to initialize storage backend: %v", err)
 	}
-	log.Printf("storage backend: %s", stg.Kind())
+	log.Printf("storage backend: %s (role=%s)", stg.Kind(), env("MDNEST_ROLE", "single"))
 
 	// Database setup (multi mode only)
 	var db *store.DB
@@ -334,6 +346,24 @@ func main() {
 	}
 	treeHandler := handlers.NewTreeHandler(stg, grantStore)
 	uploadHandler := handlers.NewUploadHandler(stg, perms)
+	// Stateless app replicas own no attachment bytes: proxy attachment traffic
+	// (upload + serve) to the writer, which owns the git tree, when WRITER_URL is
+	// configured.
+	if env("MDNEST_ROLE", "single") == "app" {
+		if writerURL := env("WRITER_URL", ""); writerURL != "" {
+			u, perr := url.Parse(writerURL)
+			if perr != nil {
+				log.Fatalf("invalid WRITER_URL %q: %v", writerURL, perr)
+			}
+			uploadHandler.SetWriterProxy(httputil.NewSingleHostReverseProxy(u))
+			log.Printf("attachments: proxying /api/upload and /api/files/ to writer at %s", writerURL)
+		} else {
+			// Fail loud rather than come up Ready with silently broken
+			// attachments: an app replica owns no attachment bytes, so upload
+			// and serve only work when proxied to the writer.
+			log.Fatalf("MDNEST_ROLE=app requires WRITER_URL — without it /api/upload and /api/files/ are broken while the pod still reports Ready")
+		}
+	}
 	moveHandler := handlers.NewMoveHandler(stg)
 	searchHandler := handlers.NewSearchHandler(stg)
 	taskHandler := handlers.NewTaskHandler(stg)
@@ -492,7 +522,7 @@ func main() {
 		mux.Handle("/api/auth/totp/setup", authMiddleware.Wrap(http.HandlerFunc(totpHandler.HandleSetupTOTP)))
 		mux.Handle("/api/auth/totp/verify-setup", authMiddleware.Wrap(http.HandlerFunc(totpHandler.HandleVerifySetup)))
 		mux.Handle("/api/auth/totp/disable", authMiddleware.Wrap(http.HandlerFunc(totpHandler.HandleDisableTOTP)))
-		mux.HandleFunc("/api/auth/verify-totp", totpHandler.HandleVerifyLoginTOTP) // no auth — uses temp token
+		mux.HandleFunc("/api/auth/verify-totp", totpHandler.HandleVerifyLoginTOTP)            // no auth — uses temp token
 		mux.HandleFunc("/api/auth/totp/setup-with-temp", totpHandler.HandleSetupTOTPWithTemp) // no auth — uses temp token for forced setup
 	}
 
@@ -590,9 +620,20 @@ func main() {
 
 	handler := corsMiddleware.Wrap(mux)
 
+	srv := &http.Server{Addr: ":" + port, Handler: handler}
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("server error: %v", err)
+		}
+	}()
 	log.Printf("mdnest backend listening on :%s (NOTES_DIR=%s)", port, absNotesDir)
-	if err := http.ListenAndServe(":"+port, handler); err != nil {
-		log.Fatal(err)
+
+	<-appCtx.Done()
+	log.Println("shutdown signal received, draining…")
+	shutCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutCtx); err != nil {
+		log.Printf("graceful shutdown error: %v", err)
 	}
 }
 

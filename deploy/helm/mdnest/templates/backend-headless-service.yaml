@@ -1,6 +1,10 @@
 # Headless service governing the backend StatefulSet's stable pod network IDs.
 # /api traffic uses the regular ClusterIP service (backend-service.yaml); this
 # one only provides the per-pod DNS the StatefulSet requires.
+#
+# Not rendered in the git-native HA topology, where the backend is a stateless
+# Deployment (no per-pod identity) and the writer has its own headless service.
+{{- if ne (include "mdnest.gitNativeHA" .) "true" }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -23,3 +27,4 @@ spec:
   selector:
     {{- include "mdnest.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: backend
+{{- end }}
