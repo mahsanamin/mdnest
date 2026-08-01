@@ -15,7 +15,7 @@ version: 0.2.1
 # and the mdnest CLI — carries the -dev suffix on develop, plain X.Y.Z on a
 # release branch. The release workflow also passes --app-version at package
 # time, so a published chart is stamped from the tag regardless.
-appVersion: "3.12.0-dev"
+appVersion: "4.0.0"
 
 home: https://github.com/mahsanamin/mdnest
 sources:

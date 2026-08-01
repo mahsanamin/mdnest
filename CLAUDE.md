@@ -54,9 +54,23 @@ backend/
     comments.go              # GET/POST/PATCH/DELETE /api/comments?ns=&path=&id=
     history.go               # GET /api/note/history, /api/note/at — git-sync version history (v3.7.0+)
     sso.go                   # GET /api/auth/sso/{start,callback} (USER_PROVIDER=sso only)
+    tasks.go                 # GET/POST/PATCH /api/tasks, /api/board — task board (v4.0.0+, ENABLE_TASK_BOARD)
+    workspaces.go            # /api/admin/workspaces, /api/me/workspace — per-workspace git remotes (v4.0.0+, multi mode)
   firebase/                  # Firebase Auth + Firestore (USER_PROVIDER=firebase only)
     client.go                # Admin SDK wrapper (VerifyIDToken)
     totp_store.go            # Firestore-backed store.TOTPStore impl
+  secrets/                   # AES-256-GCM sealing for git credentials at rest (v4.0.0+)
+    secrets.go               # DeriveKey/Encrypt/Decrypt — same construction as the MCP OAuth sealing
+  storage/                   # Pluggable note persistence behind STORAGE_BACKEND (v4.0.0+)
+    storage.go               # Storage interface — namespace-scoped, backend-agnostic
+    local.go                 # Default filesystem backend; owns the symlink-containment check
+    git.go                   # STORAGE_BACKEND=git — in-process git history, idle-debounced commits
+    gitremote.go             # Per-namespace remote resolution + push plan (askpass / GIT_SSH_COMMAND)
+    queued.go                # MDNEST_ROLE=app — writes go to the working set + durability queue
+    writer.go                # MDNEST_ROLE=writer — drains the queue, owns the git tree
+    workingset.go            # Redis-backed coherence tier (the shared read path)
+    leader.go                # Writer leader election
+    factory.go               # FromEnv — local (default) | git [+ REDIS_URL -> coherent]
   sso/                       # Generic OIDC relying-party (USER_PROVIDER=sso)
     client.go                # coreos/go-oidc + oauth2 with PKCE, signed state cookie
   middleware/
@@ -96,6 +110,9 @@ frontend/
       ContextMenu.jsx        # Right-click / long-press floating menu
       CommentSidebar.jsx     # Inline comments: slide-out panel, threads, replies, Go To
       HistoryModal.jsx       # Per-file git-sync history viewer + restore (v3.7.0+)
+      TaskBoard.jsx          # Kanban board over note checkboxes (v4.0.0+); lazy-loaded
+      TaskEditor.jsx         # Rich task create/edit form used by the board
+      BoardColumnsEditor.jsx # Per-namespace column layout (.mdnest/board.json)
       MoveToModal.jsx        # Touch-friendly destination picker for "Move to…" context action (v3.8.0+)
       EditorErrorBoundary.jsx # React error boundary around Live editor — catches Milkdown crashes and flips to Basic (v3.8.0+)
 
