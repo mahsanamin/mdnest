@@ -23,6 +23,9 @@ Run them in this order. A PR must pass all three.
 
 Gates 1 and 2 are ours to judge on the evidence. **Gate 3 is the owner's call**
 whenever a founding property is in play — surface it, don't decide it alone.
+When running unattended, see *Deciding Gate 3 without the owner* below: most
+Gate 3 questions have an answer you can derive, and only a genuine first-of-its-kind
+trade needs to wait.
 
 ## Step 0 — map the batch before reading any code
 
@@ -215,6 +218,49 @@ ordered so the part that stands alone lands first — moving the token store to
 Postgres removes an RWX requirement whatever happens to the rest, so it goes
 first and gets reviewed on its own.
 
+### Deciding Gate 3 without the owner
+
+Running as a routine, you will not get an answer in time. Blocking every
+direction question on the owner turns the routine into a queue of unanswered
+questions, which is worse than deciding carefully. Most Gate 3 questions are
+already answered — by a precedent, or by a fix that removes the objection.
+
+Work down this list and stop at the first that applies:
+
+1. **Has this exact mechanism been ruled on before?** Search the closed PRs.
+   A previous decline binds — the same mechanism arriving inside a different
+   PR is still declined, and the author usually hasn't noticed the connection.
+   Say which PR, and say what would change the answer.
+2. **Is there a smaller change that removes the objection and keeps the
+   feature?** Prefer this over declining. #70 created a namespace per user at
+   runtime — the mechanism declined in #61 — but only the *undurable* case was
+   the problem, so gating creation on mirroring-configured kept the feature and
+   removed the objection. When you find one of these, make the change, pin it
+   with a test that fails without it, and say plainly in the review that you
+   made it and why.
+3. **Does an existing flag pattern make it harmless?** New capability off by
+   default, routes unregistered when off, UI lazy-loaded, nothing in the
+   default install. Then it isn't a Gate 3 question, it's a Gate 3 *shape*
+   question, and the answer is "yes, in that shape". Apply the shape yourself
+   (see #69: `ENABLE_TASK_BOARD` + `lazy()`), then merge and report.
+4. **Only now: is this a founding property being traded for the first time,
+   with no precedent and no smaller version?** That is a real decision. Post
+   the argument, name the invariant, and leave it open for the owner.
+
+Two standing answers, so they don't get re-litigated every time:
+
+- **Complexity we haven't needed yet is declined by default.** A key-ring for
+  a rotation nobody has performed, eviction for a corpus nobody has, failover
+  for an outage nobody has hit — document the limitation honestly and wait for
+  the complaint. "Not now, and here's the signal that would change it" is a
+  complete answer.
+- **Anything storing user secrets fails closed or doesn't ship.** No default
+  key, no best-effort sealing, no "we'll add the guard later". This one never
+  needs asking.
+
+Whatever you decide, the report to the author carries the reasoning, not just
+the verdict — they are the ones who have to live with the rule next time.
+
 ## Step 4 — decide the merge order
 
 - **Widest blast radius first.** The PR that touches the most shared files
@@ -347,5 +393,8 @@ close button.
 - Every finding was checked against the base branch before being blamed on the PR.
 - The merge order is decided and, if non-obvious, was simulated.
 - No contributor PR was closed, retargeted or pushed to on their behalf.
-- Direction questions are surfaced to the owner, not silently decided.
+- Direction questions are either resolved against a precedent / a smaller fix /
+  an existing flag shape, or surfaced to the owner — never silently decided.
+- Anything you changed on a contributor's branch is stated plainly in the review,
+  with the reasoning, not just the verdict.
 - Contributors know what's expected of them next, and why — and it's a short list.
