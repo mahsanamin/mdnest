@@ -31,6 +31,7 @@ type NamespaceAdminWithUser struct {
 type NamespaceAdminStore interface {
 	Add(userID int, namespace string, grantedBy *int) error
 	Remove(userID int, namespace string) error
+	DeleteAllForNamespace(namespace string) (int64, error)
 	IsAdminOf(userID int, namespace string) (bool, error)
 	ListByUser(userID int) ([]string, error)
 	ListByNamespace(namespace string) ([]NamespaceAdminWithUser, error)
@@ -76,6 +77,17 @@ func (s *PostgresNamespaceAdminStore) Remove(userID int, namespace string) error
 		return fmt.Errorf("failed to remove namespace admin: %w", err)
 	}
 	return nil
+}
+
+// DeleteAllForNamespace removes every namespace-admin row for a namespace, used
+// when a workspace/project is decommissioned. Returns the number removed.
+func (s *PostgresNamespaceAdminStore) DeleteAllForNamespace(namespace string) (int64, error) {
+	result, err := s.db.Exec(`DELETE FROM namespace_admins WHERE namespace = $1`, namespace)
+	if err != nil {
+		return 0, fmt.Errorf("failed to remove namespace admins for namespace: %w", err)
+	}
+	n, _ := result.RowsAffected()
+	return n, nil
 }
 
 // IsAdminOf returns true if the user has a namespace_admins row for the

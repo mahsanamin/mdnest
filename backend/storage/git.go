@@ -456,6 +456,30 @@ func (c *intervalCommitter) commit(ctx context.Context, ns string) error {
 // no-op (not a failure).
 var errNoRemote = errors.New("storage: no remote for namespace")
 
+// errRemoteNotCreated signals that an empty namespace's remote repository does
+// not exist yet: there is nothing local to push, so this is not a failure — the
+// repository is created on the first push once the namespace has content. It is
+// surfaced as a benign "pending" status, never a scary error.
+var errRemoteNotCreated = errors.New("storage: remote repository not created yet")
+
+// syncPendingRemote is the status recorded for errRemoteNotCreated. The
+// "pending:" prefix is the contract the UI reads to render a neutral state
+// instead of a red error.
+const syncPendingRemote = "pending: repository is created on first push (nothing to mirror yet)"
+
+// isRemoteAbsent reports whether a git fetch/push error means the remote
+// repository does not exist (as opposed to an auth or network failure). GitLab
+// and GitHub both phrase a missing/inaccessible repo as "not found".
+func isRemoteAbsent(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "not found") ||
+		strings.Contains(s, "could not be found") ||
+		strings.Contains(s, "does not exist")
+}
+
 // syncWithBackoff runs a full two-way sync, applying exponential backoff after a
 // failure so a missing/misconfigured/unreachable remote does not fail (and log)
 // on every interval. It returns a non-nil error while a sync is still owed, which
@@ -467,6 +491,14 @@ func (c *intervalCommitter) syncWithBackoff(ctx context.Context, dir, ns string)
 	err := c.sync(ctx, dir, ns)
 	if err == errNoRemote {
 		return nil // nothing configured for this namespace: local-only history
+	}
+	if err == errRemoteNotCreated {
+		// Benign: an empty namespace whose remote does not exist yet. Record a
+		// "pending" status (the UI shows a neutral state, not a red error) and
+		// retry later — the repo appears once the namespace gets content pushed.
+		c.pushNext[ns] = time.Now().Add(pushBackoffMax)
+		c.reportStatus(ns, syncPendingRemote)
+		return errPushPending
 	}
 	if err != nil {
 		n := c.pushFails[ns] + 1
@@ -545,6 +577,13 @@ func (c *intervalCommitter) sync(ctx context.Context, dir, ns string) error {
 	// rejected at the API boundary; this is the second layer.
 	if err := c.gitEnv(ctx, dir, plan.env, "fetch", "--no-tags", "--quiet", "--end-of-options", plan.url, plan.branch); err != nil {
 		if oldHEAD == "" {
+			// Empty local repo: if the remote does not exist yet there is nothing
+			// to seed or push — the repo is created on the first push once the
+			// namespace has content, so this is pending, not a failure. Any other
+			// fetch failure (auth, network) is a real error worth surfacing.
+			if isRemoteAbsent(err) {
+				return errRemoteNotCreated
+			}
 			return fmt.Errorf("git fetch %s: %w", ns, err)
 		}
 		fetched = false

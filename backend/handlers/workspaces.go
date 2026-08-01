@@ -31,16 +31,27 @@ type userLookup interface {
 }
 
 // grantWriter ensures a user has an access grant on their personal namespace so
-// the standard grant-based authorization covers it (no special-casing).
+// the standard grant-based authorization covers it (no special-casing). It also
+// revokes every grant on a namespace when a workspace/project is decommissioned.
 type grantWriter interface {
 	GetGrantsForUser(userID int) ([]store.Grant, error)
 	CreateGrant(userID int, namespace, path, permission string, grantedBy *int) (*store.Grant, error)
+	DeleteGrantsForNamespace(namespace string) (int64, error)
+}
+
+// namespaceAdminCleaner removes every namespace-admin row for a namespace when a
+// workspace/project is decommissioned, so no orphaned admin rows linger.
+type namespaceAdminCleaner interface {
+	DeleteAllForNamespace(namespace string) (int64, error)
 }
 
 type WorkspaceHandler struct {
 	store  store.WorkspaceStore
 	users  userLookup
 	grants grantWriter
+	// nsAdmins removes namespace-admin rows when a workspace is decommissioned.
+	// nil in single mode.
+	nsAdmins namespaceAdminCleaner
 	// stg materialises a namespace (MkdirAll) when a workspace is configured so
 	// it is listed and writable even before it holds a note. nil in single mode.
 	stg storage.Storage
@@ -68,6 +79,13 @@ func NewWorkspaceHandler(ws store.WorkspaceStore, users userLookup, grants grant
 	return &WorkspaceHandler{store: ws, users: users, grants: grants, stg: stg, allowedHosts: lower, encryptionConfigured: encryptionConfigured}
 }
 
+// SetNamespaceAdminCleaner wires the namespace-admin cleanup used when a
+// workspace is decommissioned (multi mode only). Optional: nil leaves
+// namespace-admin rows untouched on delete.
+func (h *WorkspaceHandler) SetNamespaceAdminCleaner(c namespaceAdminCleaner) {
+	h.nsAdmins = c
+}
+
 // requireEncryptionForMirror fails closed when mirroring would seal a credential
 // but the server has no dedicated sealing secret (MDNEST_ENCRYPTION_KEY unset and
 // the JWT secret still the default). Refusing here means user-supplied PATs and
@@ -89,7 +107,7 @@ func (h *WorkspaceHandler) requireEncryptionForCredential(cred *string) error {
 }
 
 // personalNamespace resolves the caller's personal-workspace namespace: their
-// email address, so it is recognisable (not an opaque user-<id>).
+// email address, so it is recognisable.
 func (h *WorkspaceHandler) personalNamespace(userID int) (string, error) {
 	if h.users == nil {
 		return "", errors.New("user lookup unavailable")
@@ -192,10 +210,6 @@ func (h *WorkspaceHandler) adminCreate(w http.ResponseWriter, r *http.Request) {
 	ns := strings.TrimSpace(req.Namespace)
 	if !namespacePattern.MatchString(ns) {
 		wsError(w, http.StatusBadRequest, "invalid namespace (allowed: letters, digits, . _ -)")
-		return
-	}
-	if strings.HasPrefix(ns, "user-") {
-		wsError(w, http.StatusBadRequest, "the user- prefix is reserved for personal workspaces")
 		return
 	}
 	if existing, _ := h.store.GetByNamespace(ns); existing != nil {
@@ -318,7 +332,56 @@ func (h *WorkspaceHandler) adminDelete(w http.ResponseWriter, r *http.Request) {
 		wsError(w, http.StatusNotFound, "workspace not found")
 		return
 	}
+	// Decommissioning a project always revokes its access metadata (grants +
+	// namespace-admins). It removes the namespace from storage only when a
+	// durable copy demonstrably exists (see decommissionNamespace) — otherwise
+	// the notes may be the only copy (a mount, or a mirror that never synced) and
+	// are left untouched.
+	if existing != nil {
+		h.decommissionNamespace(r.Context(), existing)
+	}
 	wsJSON(w, http.StatusOK, map[string]bool{"deleted": true})
+}
+
+// storageHasDurableCopy reports whether a namespace's notes demonstrably survive
+// outside local storage, so purging the local copy is safe. That is true only
+// when the workspace mirrors (git_enabled) AND its last sync succeeded
+// (last_sync_at set with no error) — i.e. the remote holds the current notes.
+// last_sync_at alone is not enough: it is stamped on failed syncs too, so a
+// mirror whose first push errored has a timestamp but no remote copy.
+func storageHasDurableCopy(ws *store.Workspace) bool {
+	return ws != nil && ws.GitEnabled && ws.LastSyncAt != nil && ws.LastSyncError == ""
+}
+
+// decommissionNamespace tears a namespace down when its project is deleted:
+// revoke access grants + namespace-admins (always), and remove the namespace
+// from storage ONLY when a durable copy exists (storageHasDurableCopy). When it
+// does not — an unsynced mirror, or a namespace backed by a host mount — the
+// bytes are left in place rather than destroying the only copy; an operator who
+// really wants them gone deletes the contents themselves.
+// Best-effort: failures are logged, not fatal.
+func (h *WorkspaceHandler) decommissionNamespace(ctx context.Context, ws *store.Workspace) {
+	if ws == nil || ws.Namespace == "" {
+		return
+	}
+	ns := ws.Namespace
+	if h.grants != nil {
+		if n, err := h.grants.DeleteGrantsForNamespace(ns); err != nil {
+			log.Printf("workspaces: could not revoke grants for %q: %v", ns, err)
+		} else if n > 0 {
+			log.Printf("workspaces: revoked %d grant(s) on decommissioned namespace %q", n, ns)
+		}
+	}
+	if h.nsAdmins != nil {
+		if _, err := h.nsAdmins.DeleteAllForNamespace(ns); err != nil {
+			log.Printf("workspaces: could not remove namespace-admins for %q: %v", ns, err)
+		}
+	}
+	if h.stg != nil && storageHasDurableCopy(ws) {
+		if err := h.stg.RemoveAll(ctx, ns, ""); err != nil {
+			log.Printf("workspaces: could not remove namespace %q from storage: %v", ns, err)
+		}
+	}
 }
 
 // --- workspace groups: /api/admin/workspace-groups (superadmin) ------------
@@ -339,7 +402,7 @@ type groupRequest struct {
 func (h *WorkspaceHandler) HandleGroups(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		h.groupsList(w)
+		h.groupsList(w, r)
 	case http.MethodPost:
 		h.groupsCreate(w, r)
 	case http.MethodPut:
@@ -351,13 +414,65 @@ func (h *WorkspaceHandler) HandleGroups(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-func (h *WorkspaceHandler) groupsList(w http.ResponseWriter) {
+func (h *WorkspaceHandler) groupsList(w http.ResponseWriter, r *http.Request) {
 	list, err := h.store.ListGroups()
 	if err != nil {
 		wsError(w, http.StatusInternalServerError, "failed to list groups")
 		return
 	}
+	// A provisioned group represents the env-default mirror (GIT_REMOTE_URL):
+	// every existing namespace with no explicit workspace row mirrors under its
+	// base as <base>/<ns>.git, so surface those as its (read-only) projects.
+	var implicit []string
+	computed := false
+	for i := range list {
+		if !list[i].IsProvisioned() {
+			continue
+		}
+		if !computed {
+			implicit = h.provisionedImplicitNamespaces(r.Context())
+			computed = true
+		}
+		list[i].ImplicitNamespaces = implicit
+	}
 	wsJSON(w, http.StatusOK, list)
+}
+
+// provisionedImplicitNamespaces lists the existing namespaces that mirror under
+// the env-default base (the provisioned group) but have no explicit workspace
+// row. Personal namespaces are excluded — they are self-managed by their owner
+// and never administered here — matching the management-plane namespace list.
+// Best-effort: returns nil on any lookup error.
+func (h *WorkspaceHandler) provisionedImplicitNamespaces(ctx context.Context) []string {
+	if h.stg == nil {
+		return nil
+	}
+	names, err := h.stg.ListNamespaces(ctx)
+	if err != nil {
+		return nil
+	}
+	rows, err := h.store.List()
+	if err != nil {
+		return nil
+	}
+	excluded := make(map[string]bool, len(rows))
+	for _, ws := range rows {
+		excluded[ws.Namespace] = true
+	}
+	if personal, err := h.store.PersonalNamespaces(); err == nil {
+		for _, p := range personal {
+			excluded[p] = true
+		}
+	}
+	implicit := make([]string, 0)
+	for _, ns := range names {
+		if excluded[ns] {
+			continue
+		}
+		implicit = append(implicit, ns)
+	}
+	slices.Sort(implicit)
+	return implicit
 }
 
 func (h *WorkspaceHandler) groupsCreate(w http.ResponseWriter, r *http.Request) {
@@ -407,6 +522,10 @@ func (h *WorkspaceHandler) groupsUpdate(w http.ResponseWriter, r *http.Request) 
 		wsError(w, http.StatusNotFound, "group not found")
 		return
 	}
+	if existing.IsProvisioned() {
+		wsError(w, http.StatusForbidden, "this group is provisioned by the deployment (env config); you can only manage its sub-projects, not edit the group")
+		return
+	}
 	var req groupRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		wsError(w, http.StatusBadRequest, "invalid JSON")
@@ -440,6 +559,15 @@ func (h *WorkspaceHandler) groupsDelete(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
+	if existing, _ := h.store.GetGroup(id); existing != nil && existing.IsProvisioned() {
+		wsError(w, http.StatusForbidden, "this group is provisioned by the deployment (env config) and cannot be deleted; you can only manage its sub-projects")
+		return
+	}
+	// Collect the member workspaces before the group is deleted: DeleteGroup
+	// cascades the member rows at the DB level, so we revoke their access
+	// metadata (and purge durable ones) here rather than losing the chance once
+	// they are gone.
+	members := h.groupMemberWorkspaces(id)
 	deleted, err := h.store.DeleteGroup(id)
 	if err != nil {
 		wsError(w, http.StatusInternalServerError, "failed to delete group")
@@ -449,7 +577,25 @@ func (h *WorkspaceHandler) groupsDelete(w http.ResponseWriter, r *http.Request) 
 		wsError(w, http.StatusNotFound, "group not found")
 		return
 	}
+	for i := range members {
+		h.decommissionNamespace(r.Context(), &members[i])
+	}
 	wsJSON(w, http.StatusOK, map[string]bool{"deleted": true})
+}
+
+// groupMemberWorkspaces returns the member workspace rows of a group.
+func (h *WorkspaceHandler) groupMemberWorkspaces(groupID int) []store.Workspace {
+	all, err := h.store.List()
+	if err != nil {
+		return nil
+	}
+	var out []store.Workspace
+	for _, ws := range all {
+		if ws.GroupID != nil && *ws.GroupID == groupID {
+			out = append(out, ws)
+		}
+	}
+	return out
 }
 
 // groupInputFrom validates and builds a group input. The base URL is validated
@@ -550,12 +696,6 @@ func (h *WorkspaceHandler) minePut(w http.ResponseWriter, r *http.Request, userI
 	if err != nil {
 		wsError(w, http.StatusInternalServerError, "lookup failed")
 		return
-	}
-	// If the naming scheme changed (an older user-<id> row), replace it so the
-	// personal workspace is keyed by the email going forward.
-	if existing != nil && existing.Namespace != ns {
-		_, _ = h.store.Delete(existing.ID)
-		existing = nil
 	}
 	if err := h.requireEncryptionForMirror(in.GitEnabled); err != nil {
 		wsError(w, http.StatusForbidden, err.Error())

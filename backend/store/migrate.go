@@ -201,6 +201,17 @@ var migrations = []struct {
 			ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS last_sync_at TIMESTAMPTZ;
 		`,
 	},
+	{
+		// A group's provenance. 'ui' groups are created and fully managed by a
+		// superadmin from the admin panel. 'provisioned' groups are reconciled on
+		// boot from operator config (GIT_REMOTE_URL + token): the admin panel may
+		// only manage their sub-projects (add/remove namespaces), never edit or
+		// delete the group itself, since it is owned by the deployment.
+		name: "012_workspace_group_source",
+		sql: `
+			ALTER TABLE workspace_groups ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'ui';
+		`,
+	},
 }
 
 // Migrate runs all pending migrations. Safe to call on every startup.
