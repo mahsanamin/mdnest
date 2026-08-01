@@ -442,8 +442,14 @@ func main() {
 			if perr != nil {
 				log.Fatalf("invalid WRITER_URL %q: %v", writerURL, perr)
 			}
-			uploadHandler.SetWriterProxy(httputil.NewSingleHostReverseProxy(u))
-			log.Printf("attachments: proxying /api/upload and /api/files/ to writer at %s", writerURL)
+			writerProxy := httputil.NewSingleHostReverseProxy(u)
+			uploadHandler.SetWriterProxy(writerProxy)
+			// The git tree — and therefore per-file commit history — lives only on
+			// the writer, so history reads must be proxied there too. Without this,
+			// an app replica finds no local .git/ and wrongly reports that history
+			// is unavailable for the namespace.
+			historyHandler.SetWriterProxy(writerProxy)
+			log.Printf("attachments + history: proxying /api/upload, /api/files/, /api/note/history and /api/note/at to writer at %s", writerURL)
 		} else {
 			// Fail loud rather than come up Ready with silently broken
 			// attachments: an app replica owns no attachment bytes, so upload
