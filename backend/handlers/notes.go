@@ -4,26 +4,27 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
-	"os"
-	"path/filepath"
+	"path"
 	"strings"
 
 	"github.com/mdnest/mdnest/backend/collab"
 	"github.com/mdnest/mdnest/backend/middleware"
+	"github.com/mdnest/mdnest/backend/storage"
 )
 
 const maxNoteSize = 10 << 20 // 10MB
 
 type NoteHandler struct {
-	notesDir string
-	hub      *collab.Hub // nil when collab disabled
+	store storage.Storage
+	hub   *collab.Hub // nil when collab disabled
 }
 
-func NewNoteHandler(notesDir string) *NoteHandler {
-	return &NoteHandler{notesDir: notesDir}
+func NewNoteHandler(store storage.Storage) *NoteHandler {
+	return &NoteHandler{store: store}
 }
 
 // SetCollabHub sets the collaboration hub for broadcasting file changes.
@@ -77,33 +78,38 @@ func (h *NoteHandler) Handle(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *NoteHandler) getNote(w http.ResponseWriter, r *http.Request) {
-	nsDir := RequireNamespace(h.notesDir, w, r)
-	if nsDir == "" {
+	ctx := r.Context()
+	ns := RequireNamespaceStore(ctx, h.store, w, r)
+	if ns == "" {
 		return
 	}
 	reqPath := r.URL.Query().Get("path")
-	absPath := SafePath(nsDir, reqPath)
-	if absPath == "" {
+	relPath, ok := SafeRelPath(reqPath)
+	if !ok {
 		http.Error(w, `{"error":"invalid path"}`, http.StatusBadRequest)
 		return
 	}
 	// Check file size before reading — reject huge non-markdown files
-	stat, err := os.Stat(absPath)
+	stat, err := h.store.Stat(ctx, ns, relPath)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, storage.ErrNotExist) {
 			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
 			return
 		}
 		http.Error(w, `{"error":"failed to read file"}`, http.StatusInternalServerError)
 		return
 	}
-	if stat.Size() > maxNoteSize {
+	if stat.Size > maxNoteSize {
 		http.Error(w, `{"error":"file too large"}`, http.StatusRequestEntityTooLarge)
 		return
 	}
 
-	data, err := os.ReadFile(absPath)
+	data, err := h.store.ReadFile(ctx, ns, relPath)
 	if err != nil {
+		if errors.Is(err, storage.ErrNotExist) {
+			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+			return
+		}
 		http.Error(w, `{"error":"failed to read file"}`, http.StatusInternalServerError)
 		return
 	}
@@ -132,22 +138,22 @@ func (h *NoteHandler) getNote(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *NoteHandler) updateNote(w http.ResponseWriter, r *http.Request) {
-	nsDir := RequireNamespace(h.notesDir, w, r)
-	if nsDir == "" {
+	ctx := r.Context()
+	ns := RequireNamespaceStore(ctx, h.store, w, r)
+	if ns == "" {
 		return
 	}
-	ns := r.URL.Query().Get("ns")
 	reqPath := r.URL.Query().Get("path")
-	absPath := SafePath(nsDir, reqPath)
-	if absPath == "" {
+	relPath, ok := SafeRelPath(reqPath)
+	if !ok {
 		http.Error(w, `{"error":"invalid path"}`, http.StatusBadRequest)
 		return
 	}
 
 	// Read current file for existence check and ETag verification
-	currentData, err := os.ReadFile(absPath)
+	currentData, err := h.store.ReadFile(ctx, ns, relPath)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, storage.ErrNotExist) {
 			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
 			return
 		}
@@ -210,11 +216,7 @@ func (h *NoteHandler) updateNote(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := os.MkdirAll(filepath.Dir(absPath), 0755); err != nil {
-		http.Error(w, `{"error":"failed to create directories"}`, http.StatusInternalServerError)
-		return
-	}
-	if err := os.WriteFile(absPath, []byte(writeContent), 0644); err != nil {
+	if err := h.store.WriteFile(ctx, ns, relPath, []byte(writeContent)); err != nil {
 		http.Error(w, `{"error":"failed to write file"}`, http.StatusInternalServerError)
 		return
 	}
@@ -257,18 +259,19 @@ func (h *NoteHandler) updateNote(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *NoteHandler) createNote(w http.ResponseWriter, r *http.Request) {
-	nsDir := RequireNamespace(h.notesDir, w, r)
-	if nsDir == "" {
+	ctx := r.Context()
+	ns := RequireNamespaceStore(ctx, h.store, w, r)
+	if ns == "" {
 		return
 	}
 	reqPath := r.URL.Query().Get("path")
-	absPath := SafePath(nsDir, reqPath)
-	if absPath == "" {
+	relPath, ok := SafeRelPath(reqPath)
+	if !ok {
 		http.Error(w, `{"error":"invalid path"}`, http.StatusBadRequest)
 		return
 	}
-	if info, err := os.Stat(absPath); err == nil {
-		if info.IsDir() {
+	if info, err := h.store.Stat(ctx, ns, relPath); err == nil {
+		if info.IsDir {
 			http.Error(w, `{"error":"path is an existing directory; provide a filename inside it (e.g. <path>/<filename>.md)"}`, http.StatusConflict)
 			return
 		}
@@ -281,9 +284,9 @@ func (h *NoteHandler) createNote(w http.ResponseWriter, r *http.Request) {
 	// the agent almost certainly meant 'put a file inside foo/bar/' and
 	// got the path syntax wrong. Surface a helpful 409 instead of
 	// silently creating the misplaced sibling.
-	if ext := filepath.Ext(absPath); ext != "" {
-		stripped := strings.TrimSuffix(absPath, ext)
-		if info, err := os.Stat(stripped); err == nil && info.IsDir() {
+	if ext := path.Ext(relPath); ext != "" {
+		stripped := strings.TrimSuffix(relPath, ext)
+		if info, err := h.store.Stat(ctx, ns, stripped); err == nil && info.IsDir {
 			rel := strings.TrimSuffix(reqPath, ext)
 			http.Error(w, `{"error":"a directory named '`+rel+`' exists at this location — to create a file inside it use path '`+rel+`/<filename>.md'"}`, http.StatusConflict)
 			return
@@ -294,11 +297,7 @@ func (h *NoteHandler) createNote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"failed to read body"}`, http.StatusBadRequest)
 		return
 	}
-	if err := os.MkdirAll(filepath.Dir(absPath), 0755); err != nil {
-		http.Error(w, `{"error":"failed to create directories"}`, http.StatusInternalServerError)
-		return
-	}
-	if err := os.WriteFile(absPath, body, 0644); err != nil {
+	if err := h.store.WriteFile(ctx, ns, relPath, body); err != nil {
 		http.Error(w, `{"error":"failed to write file"}`, http.StatusInternalServerError)
 		return
 	}
@@ -308,25 +307,30 @@ func (h *NoteHandler) createNote(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *NoteHandler) deleteNote(w http.ResponseWriter, r *http.Request) {
-	nsDir := RequireNamespace(h.notesDir, w, r)
-	if nsDir == "" {
+	ctx := r.Context()
+	ns := RequireNamespaceStore(ctx, h.store, w, r)
+	if ns == "" {
 		return
 	}
 	reqPath := r.URL.Query().Get("path")
-	absPath := SafePath(nsDir, reqPath)
-	if absPath == "" {
+	relPath, ok := SafeRelPath(reqPath)
+	if !ok {
 		http.Error(w, `{"error":"invalid path"}`, http.StatusBadRequest)
 		return
 	}
-	info, err := os.Stat(absPath)
-	if os.IsNotExist(err) {
+	info, err := h.store.Stat(ctx, ns, relPath)
+	if errors.Is(err, storage.ErrNotExist) {
 		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
 		return
 	}
-	if info.IsDir() {
-		err = os.RemoveAll(absPath)
+	if err != nil {
+		http.Error(w, `{"error":"failed to delete"}`, http.StatusInternalServerError)
+		return
+	}
+	if info.IsDir {
+		err = h.store.RemoveAll(ctx, ns, relPath)
 	} else {
-		err = os.Remove(absPath)
+		err = h.store.Remove(ctx, ns, relPath)
 	}
 	if err != nil {
 		http.Error(w, `{"error":"failed to delete"}`, http.StatusInternalServerError)
@@ -337,13 +341,14 @@ func (h *NoteHandler) deleteNote(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *NoteHandler) patchNote(w http.ResponseWriter, r *http.Request) {
-	nsDir := RequireNamespace(h.notesDir, w, r)
-	if nsDir == "" {
+	ctx := r.Context()
+	ns := RequireNamespaceStore(ctx, h.store, w, r)
+	if ns == "" {
 		return
 	}
 	reqPath := r.URL.Query().Get("path")
-	absPath := SafePath(nsDir, reqPath)
-	if absPath == "" {
+	relPath, ok := SafeRelPath(reqPath)
+	if !ok {
 		http.Error(w, `{"error":"invalid path"}`, http.StatusBadRequest)
 		return
 	}
@@ -366,10 +371,10 @@ func (h *NoteHandler) patchNote(w http.ResponseWriter, r *http.Request) {
 
 	// Read existing content (empty if file doesn't exist yet)
 	existing := ""
-	data, err := os.ReadFile(absPath)
+	data, err := h.store.ReadFile(ctx, ns, relPath)
 	if err == nil {
 		existing = string(data)
-	} else if !os.IsNotExist(err) {
+	} else if !errors.Is(err, storage.ErrNotExist) {
 		http.Error(w, `{"error":"failed to read file"}`, http.StatusInternalServerError)
 		return
 	}
@@ -390,11 +395,7 @@ func (h *NoteHandler) patchNote(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := os.MkdirAll(filepath.Dir(absPath), 0755); err != nil {
-		http.Error(w, `{"error":"failed to create directories"}`, http.StatusInternalServerError)
-		return
-	}
-	if err := os.WriteFile(absPath, []byte(result), 0644); err != nil {
+	if err := h.store.WriteFile(ctx, ns, relPath, []byte(result)); err != nil {
 		http.Error(w, `{"error":"failed to write file"}`, http.StatusInternalServerError)
 		return
 	}

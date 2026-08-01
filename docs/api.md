@@ -1273,6 +1273,116 @@ Soft-delete a comment. The JSONL file is rewritten with a `deletedAt` timestamp 
 
 ---
 
+## Task Board
+
+Endpoints backing the [task board](user-guide.md#task-board). Tasks are not
+stored separately — they are GFM checkboxes inside notes — so these endpoints
+read and rewrite the underlying markdown. The on‑disk format is specified in the
+[Task Model](tasks.md).
+
+All routes require read access to the namespace (write for mutations). Mutations
+are optimistically concurrent: send the `line`/`raw` you last saw and the server
+replies `409 Conflict` if that source line has changed.
+
+### GET /api/tasks
+
+Aggregate the tasks of a namespace (or of a single note).
+
+**Query parameters:**
+
+| Parameter | Description |
+|-----------|-------------|
+| `ns`   | Namespace name (required) |
+| `path` | Optional. Restrict aggregation to this one note ("this note" view). |
+
+**Response:** `{ "board": <BoardConfig>, "tasks": [<Task>, ...] }`, where a
+`Task` carries `id, path, line, raw, text, checked, column` and, when present,
+`status, due, priority, workload, tags[], defaultExpanded, steps[], notes`.
+
+```bash
+curl "http://localhost:8286/api/tasks?ns=work" -H "Authorization: Bearer $TOKEN"
+```
+
+### POST /api/tasks
+
+Create a task by appending a rendered task block to a note. The note is created
+if it does not exist.
+
+**Query parameters:** `ns` (required).
+
+**Body:** a task spec.
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `title` | string | Required. |
+| `note` | string | Target note (namespace‑relative). Defaults to the board's `defaultNote`. |
+| `column` | string | Board column id. Sets the checkbox (Done column → `[x]`) and `status:`. |
+| `due` | string | `YYYY-MM-DD`. |
+| `priority` | string | `high` \| `medium` \| `low`. |
+| `workload` | string | Free text. |
+| `tags` | string[] | |
+| `defaultExpanded` | bool | |
+| `steps` | `[{text, checked}]` | |
+| `notes` | string | Description (written as a `notes:` block scalar). |
+
+**Response:** `201 Created` with the created `Task`.
+
+```bash
+curl -X POST "http://localhost:8286/api/tasks?ns=work" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"note":"tasks.md","title":"Design UI","column":"doing","priority":"high","tags":["ui"],"steps":[{"text":"Wireframes","checked":true}]}'
+```
+
+### PATCH /api/tasks
+
+Mutate one task or step. Exactly one action field is used.
+
+**Query parameters:** `ns` (required), `path` (required — the note that owns the
+line).
+
+**Body:** `line` and `raw` pin the source line, plus one action:
+
+| Action | Effect |
+|--------|--------|
+| `toColumn: "<id>"` | Move a card to a column (rewrites `status:` and the checkbox). |
+| `checked: <bool>` | Toggle a task or step checkbox. |
+| `text: "<title>"` | Rename a task or step (checkbox preserved). |
+| `setField: {key, value}` | Set/clear one metadata field (`due`/`priority`/`tags`/`workload`/`status`; empty value removes it). |
+| `replace: <task spec>` | Replace the whole task block (checkbox line + detail block) from a full spec (same fields as POST). |
+
+**Response:** the updated `Task` when the mutated line is a top‑level task; for a
+step toggle, a small `{path, line, raw, checked, step:true}` acknowledgement.
+
+**Error responses:** `409 Conflict` — the source line is stale; refresh.
+
+```bash
+# Move a card to the "done" column
+curl -X PATCH "http://localhost:8286/api/tasks?ns=work&path=tasks.md" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"line":12,"raw":"- [ ] Design UI","toColumn":"done"}'
+```
+
+### GET /api/board
+
+Return the namespace's board configuration (`.mdnest/board.json`), or the default
+To Do / Doing / Done board when none is set.
+
+**Query parameters:** `ns` (required).
+
+**Response:** `{ version, defaultNote, columns: [{id, title, status, done}] }`.
+
+### PUT /api/board
+
+Replace the board configuration.
+
+**Query parameters:** `ns` (required).
+
+**Body:** a `BoardConfig`. Columns must have unique, non‑empty ids and titles.
+
+**Response:** the saved `BoardConfig`.
+
+---
+
 ## File Serving
 
 ### GET /api/files/{namespace}/{path}

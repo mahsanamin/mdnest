@@ -1,11 +1,12 @@
 # Security
 
-mdnest is a privately-hosted markdown notes platform that runs across two very different shapes:
+mdnest is a privately-hosted markdown notes platform that runs across shapes that differ widely in scale and threat model:
 
 - **Solo**: one person on a laptop or a home server, possibly reaching their notes from a phone over a private network.
 - **Small team**: a small company's shared knowledge base on a server (cloud VM or on-prem), users signing in through their corporate identity provider, role-based access to namespaces.
+- **Organization**: an active/active deployment on Kubernetes — the git-native HA topology (stateless app replicas + a single durability writer coordinated through Redis), an external managed PostgreSQL and Redis, OIDC SSO with domain gating and auto-provisioning, per-namespace RBAC, and per-user OAuth for MCP. It scales horizontally without ReadWriteMany storage, and note history stays plain git, mirrored off-cluster. It is **not** a multi-master or zero-RPO design: writes funnel through one writer, and the HA topology trades a bounded window in which an acknowledged save can be lost — see [kubernetes.md](kubernetes.md) before choosing it.
 
-Both shapes share the same engine but their threat models differ. This doc explains what's enforced, where the boundaries are, and how to harden each setup.
+All three share the same engine and the same authorization model; their threat models differ. This doc explains what's enforced, where the boundaries are, and how to harden each.
 
 ---
 
@@ -117,7 +118,7 @@ The JWT is **signed**, not encrypted. Anyone with the token can read its claims.
 For headless callers (CLI, MCP server, scripts):
 
 - Generated as 32 cryptographically random bytes encoded as `mdnest_<base64url>`.
-- Stored as **SHA-256 hashes** in the secrets volume — the raw token is shown once on creation and never again.
+- Stored as **SHA-256 hashes** — in Postgres (`api_tokens`) in multi mode, or the `tokens.json` secrets file in single mode. The raw token is shown once on creation and never again.
 - Last 4 chars are kept in plain text so they're recognizable in the UI ("ends in `…a3f9`").
 - Never expire. Revoke via Settings → API Tokens or `DELETE /api/auth/tokens?id=`.
 
@@ -274,11 +275,23 @@ mdnest's backend reaches out to `api.github.com` once per hour to check whether 
 - **Opt-out.** Set `DISABLE_UPDATE_CHECK=true` in `mdnest.conf` for air-gapped or privacy-sensitive installs. The badge disappears and the goroutine never starts. Set `UPDATE_CHECK_REPO=<owner>/<repo>` to point at a fork instead of upstream.
 - **User IPs.** End-user browsers do not contact GitHub. The check happens server-side; the client only reads the cached result from `/api/config`.
 
+### Per-workspace git credentials — sealing, fail-closed & rotation *(multi mode)*
+
+When a namespace mirrors to its own repository (Admin → Git Workspaces / Settings → Git remote), the supplied credential — an HTTPS PAT or an SSH private key, the most sensitive data mdnest holds — is sealed at rest with **AES-256-GCM** in the `workspaces` (and `workspace_groups`) table. The key is derived (SHA-256) from `MDNEST_ENCRYPTION_KEY`, which falls back to `MDNEST_JWT_SECRET`.
+
+- **Never read back.** The API only ever reports `has_credential`; the ciphertext is decrypted solely at push time, in the writer, to build the git operation. It is never returned to a client and never logged.
+- **Never in argv or a URL.** HTTPS uses a `GIT_ASKPASS` helper reading a private temp file; SSH stages the key to a private temp file wired through `GIT_SSH_COMMAND -i`. Only the *username* is embedded in the remote URL. Staged secret files are removed after each push, and `GIT_TERMINAL_PROMPT=0` prevents interactive prompts.
+- **Fail-closed.** If `MDNEST_ENCRYPTION_KEY` is unset **and** `MDNEST_JWT_SECRET` is still the default, mdnest **refuses** to enable mirroring or store a credential (HTTP `403`) rather than sealing secrets under a guessable key. Startup logs a warning. Set a dedicated, high-entropy `MDNEST_ENCRYPTION_KEY` to enable the feature.
+- **Rotation is a re-credentialing event.** There is no key-versioned envelope, so **changing `MDNEST_ENCRYPTION_KEY` makes every stored credential undecryptable**. Sync then fails and the error surfaces in the Git-remote tab (`last_sync_error`). Recovery: each owner re-enters their token / key from **Settings → Git remote**; a super-admin re-enters shared and group credentials. Plan the rotation as a maintenance window and notify owners. *(A future key-versioned envelope could allow rolling rotation without re-entry — tracked as a follow-up.)*
+- **No flag smuggling.** `remote_url` and `branch` are positional arguments to `git`, so a value starting with `-` would otherwise be parsed as an option (`--upload-pack=<cmd>` executes `<cmd>`). The API rejects both shapes and the exec site passes `--end-of-options`; either layer alone stops it.
+- **Blast radius.** The key lives in the pod, so a compromised pod can decrypt stored credentials. Mitigate by using repo-scoped, revocable credentials (fine-grained PATs / deploy tokens / deploy keys), never account-wide secrets. The writer's egress NetworkPolicy plus the optional `GIT_REMOTE_ALLOWED_HOSTS` allow-list bound where those credentials can be used.
+
 ### Secrets to rotate
 
 | Secret | Where | When to rotate |
 |---|---|---|
-| `MDNEST_JWT_SECRET` | `mdnest.conf` | If you suspect compromise. Rotation invalidates every active session immediately. |
+| `MDNEST_JWT_SECRET` | `mdnest.conf` | If you suspect compromise. Rotation invalidates every active session immediately. **If `MDNEST_ENCRYPTION_KEY` is unset, git credentials are sealed under this secret, so rotating it also makes them undecryptable** — set a dedicated `MDNEST_ENCRYPTION_KEY` so the two can be rotated independently. |
+| `MDNEST_ENCRYPTION_KEY` | `mdnest.conf` | If you suspect the git-credential store is compromised. **Rotation makes stored per-workspace git credentials undecryptable** — owners must re-enter their token / key afterwards (see above). |
 | `POSTGRES_PASSWORD` | `mdnest.conf` | After any DBA hand-off. Update + `mdnest-server rebuild`. |
 | `SSO_CLIENT_SECRET` | `mdnest.conf` | If the IdP-issued secret leaks. Generate a new one in the IdP's admin console, swap in `mdnest.conf`, `./mdnest-server reload`. |
 | Git deploy keys | `git-sync/keys/` | If a key leaks; rotation also requires updating the key in the git provider. |

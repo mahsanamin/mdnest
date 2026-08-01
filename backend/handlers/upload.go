@@ -3,22 +3,38 @@ package handlers
 import (
 	"encoding/json"
 	"io"
+	"mime"
 	"net/http"
-	"os"
-	"path/filepath"
+	"path"
 	"strings"
 
 	"github.com/mdnest/mdnest/backend/middleware"
+	"github.com/mdnest/mdnest/backend/storage"
 )
 
 type UploadHandler struct {
-	notesDir string
-	perms    *middleware.PermissionChecker
+	store storage.Storage
+	perms *middleware.PermissionChecker // nil in single mode
+	// writerProxy, when set (git-native HA app replicas), forwards attachment
+	// traffic (POST /api/upload, GET /api/files/) to the writer, which owns the
+	// git tree — keeping binary bytes off the durability queue.
+	writerProxy http.Handler
 }
 
-func NewUploadHandler(notesDir string, perms *middleware.PermissionChecker) *UploadHandler {
-	return &UploadHandler{notesDir: notesDir, perms: perms}
+func NewUploadHandler(store storage.Storage, perms *middleware.PermissionChecker) *UploadHandler {
+	return &UploadHandler{store: store, perms: perms}
 }
+
+// SetWriterProxy makes attachment upload/serve reverse-proxy to the writer.
+// Used on stateless app replicas, which hold no attachment bytes locally.
+func (h *UploadHandler) SetWriterProxy(p http.Handler) { h.writerProxy = p }
+
+// gitKeepFile is the empty placeholder written to materialise a folder. Git
+// cannot track an empty directory, and the HA app tier derives the tree from
+// the Redis working set (which lists files only), so a bare directory would be
+// invisible on the app replicas and never mirrored. The placeholder is a
+// dotfile, so buildTree hides it from the tree.
+const gitKeepFile = ".gitkeep"
 
 // HandleFolder handles POST /api/folder?ns=...&path=...
 func (h *UploadHandler) HandleFolder(w http.ResponseWriter, r *http.Request) {
@@ -26,17 +42,20 @@ func (h *UploadHandler) HandleFolder(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 		return
 	}
-	nsDir := RequireNamespace(h.notesDir, w, r)
-	if nsDir == "" {
+	ctx := r.Context()
+	ns := RequireNamespaceStore(ctx, h.store, w, r)
+	if ns == "" {
 		return
 	}
-	reqPath := r.URL.Query().Get("path")
-	absPath := SafePath(nsDir, reqPath)
-	if absPath == "" {
+	relPath, ok := SafeRelPath(r.URL.Query().Get("path"))
+	if !ok || relPath == "" {
 		http.Error(w, `{"error":"invalid path"}`, http.StatusBadRequest)
 		return
 	}
-	if err := os.MkdirAll(absPath, 0755); err != nil {
+	// Materialise the folder with an empty .gitkeep placeholder so it is durable
+	// (committed + mirrored), visible on every app replica (it appears in the
+	// working set), and hidden from the tree (dotfiles are filtered).
+	if err := h.store.WriteFile(ctx, ns, path.Join(relPath, gitKeepFile), []byte{}); err != nil {
 		http.Error(w, `{"error":"failed to create folder"}`, http.StatusInternalServerError)
 		return
 	}
@@ -51,13 +70,21 @@ func (h *UploadHandler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 		return
 	}
-	nsDir := RequireNamespace(h.notesDir, w, r)
-	if nsDir == "" {
+	// App replicas don't persist attachment bytes: forward the upload to the
+	// writer (which owns the git tree) rather than routing megabytes through the
+	// durability queue. The writer re-checks write permission on the forwarded
+	// request.
+	if h.writerProxy != nil {
+		h.writerProxy.ServeHTTP(w, r)
 		return
 	}
-	reqPath := r.URL.Query().Get("path")
-	notePath := SafePath(nsDir, reqPath)
-	if notePath == "" {
+	ctx := r.Context()
+	ns := RequireNamespaceStore(ctx, h.store, w, r)
+	if ns == "" {
+		return
+	}
+	reqRel, ok := SafeRelPath(r.URL.Query().Get("path"))
+	if !ok {
 		http.Error(w, `{"error":"invalid path"}`, http.StatusBadRequest)
 		return
 	}
@@ -73,47 +100,36 @@ func (h *UploadHandler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	noteDir := filepath.Dir(notePath)
-	if err := os.MkdirAll(noteDir, 0755); err != nil {
-		http.Error(w, `{"error":"failed to create directory"}`, http.StatusInternalServerError)
-		return
-	}
-
-	filename := filepath.Base(header.Filename)
-	destPath := filepath.Join(noteDir, filename)
-
-	destSafe := SafePath(nsDir, filepath.Join(filepath.Dir(reqPath), filename))
-	if destSafe == "" {
+	// Destination is the uploaded filename inside the requested directory.
+	filename := path.Base(header.Filename)
+	destRel, ok := SafeRelPath(path.Join(path.Dir(reqRel), filename))
+	if !ok {
 		http.Error(w, `{"error":"invalid upload destination"}`, http.StatusBadRequest)
 		return
 	}
 
-	out, err := os.Create(destPath)
-	if err != nil {
-		http.Error(w, `{"error":"failed to create file"}`, http.StatusInternalServerError)
-		return
-	}
-	defer out.Close()
-
-	if _, err := io.Copy(out, file); err != nil {
+	if err := h.store.WriteFrom(ctx, ns, destRel, file, header.Size); err != nil {
 		http.Error(w, `{"error":"failed to save file"}`, http.StatusInternalServerError)
 		return
 	}
 
-	relPath, err := filepath.Rel(nsDir, destPath)
-	if err != nil {
-		http.Error(w, `{"error":"failed to compute relative path"}`, http.StatusInternalServerError)
-		return
-	}
-
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"url": relPath})
+	json.NewEncoder(w).Encode(map[string]string{"url": destRel})
 }
 
 // HandleServeFile serves files at /api/files/{namespace}/path/to/file
 func (h *UploadHandler) HandleServeFile(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Stateless app replicas hold no attachment bytes — those live on the
+	// writer's git tree. Forward the (already authenticated) request to the
+	// writer, which serves it with range/conditional-GET support and re-checks
+	// the per-namespace read permission with the same forwarded credentials.
+	if h.writerProxy != nil {
+		h.writerProxy.ServeHTTP(w, r)
 		return
 	}
 
@@ -126,15 +142,13 @@ func (h *UploadHandler) HandleServeFile(w http.ResponseWriter, r *http.Request) 
 	// First segment is namespace, rest is file path
 	parts := strings.SplitN(fullPath, "/", 2)
 	ns := parts[0]
-
-	nsClean := filepath.Clean(ns)
-	if nsClean != ns || strings.Contains(ns, "/") || strings.HasPrefix(ns, ".") {
+	if !ValidNamespaceName(ns) {
 		http.Error(w, `{"error":"invalid namespace"}`, http.StatusBadRequest)
 		return
 	}
 
-	nsDir := filepath.Join(h.notesDir, ns)
-	if info, err := os.Stat(nsDir); err != nil || !info.IsDir() {
+	ctx := r.Context()
+	if ok, err := h.store.NamespaceExists(ctx, ns); err != nil || !ok {
 		http.Error(w, `{"error":"namespace not found"}`, http.StatusNotFound)
 		return
 	}
@@ -144,21 +158,46 @@ func (h *UploadHandler) HandleServeFile(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	relPath, ok := SafeRelPath(parts[1])
+	if !ok {
+		http.Error(w, `{"error":"invalid path"}`, http.StatusBadRequest)
+		return
+	}
+
 	// Enforce the same per-namespace read permission as every other content
 	// endpoint. Without this an authenticated user could fetch any file in any
 	// namespace by guessing the URL (the /api/files/ route can't use the query
 	// param middleware because the namespace lives in the path). Nil perms means
 	// single-user mode, where all access is granted.
-	if h.perms != nil && !h.perms.CheckRead(r, ns, "/"+parts[1]) {
+	if h.perms != nil && !h.perms.CheckRead(r, ns, "/"+relPath) {
 		middleware.DenyJSON(w)
 		return
 	}
 
-	absPath := SafePath(nsDir, parts[1])
-	if absPath == "" {
-		http.Error(w, `{"error":"invalid path"}`, http.StatusBadRequest)
+	if ct := mime.TypeByExtension(path.Ext(relPath)); ct != "" {
+		w.Header().Set("Content-Type", ct)
+	}
+
+	// Prefer range/conditional-GET support when the backend can hand out a
+	// seekable reader (local filesystem). This keeps browser image caching
+	// (304s) and media seeking working, which a plain stream would break.
+	// Backends that can only stream (object stores) fall back to a copy.
+	if rr, ok := h.store.(storage.RangeReadable); ok {
+		rs, info, err := rr.OpenSeek(ctx, ns, relPath)
+		if err != nil {
+			http.Error(w, `{"error":"file not found"}`, http.StatusNotFound)
+			return
+		}
+		defer rs.Close()
+		http.ServeContent(w, r, path.Base(relPath), info.ModTime, rs)
 		return
 	}
 
-	http.ServeFile(w, r, absPath)
+	rc, err := h.store.Open(ctx, ns, relPath)
+	if err != nil {
+		http.Error(w, `{"error":"file not found"}`, http.StatusNotFound)
+		return
+	}
+	defer rc.Close()
+	io.Copy(w, rc)
 }

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { changePassword, listTokens, createToken, revokeToken } from '../api.js';
+import { changePassword, listTokens, createToken, revokeToken, getMyWorkspace, saveMyWorkspace, deleteMyWorkspace } from '../api.js';
 
 // Derive server URL from current browser location
 function getServerUrl() {
@@ -71,6 +71,7 @@ function Settings({ onClose, userProvider }) {
           <button className={tab === 'cli' ? 'active' : ''} onClick={() => setTab('cli')}>CLI</button>
           <button className={tab === 'mcp' ? 'active' : ''} onClick={() => setTab('mcp')}>MCP</button>
           <button className={tab === 'api' ? 'active' : ''} onClick={() => setTab('api')}>API</button>
+          <button className={tab === 'gitremote' ? 'active' : ''} onClick={() => setTab('gitremote')}>Git remote</button>
           {passwordEnabled && (
             <button className={tab === 'password' ? 'active' : ''} onClick={() => setTab('password')}>Credentials</button>
           )}
@@ -79,7 +80,160 @@ function Settings({ onClose, userProvider }) {
         {tab === 'cli' && <CliTab />}
         {tab === 'mcp' && <McpTab />}
         {tab === 'api' && <ApiTab />}
+        {tab === 'gitremote' && <GitRemoteTab />}
         {tab === 'password' && passwordEnabled && <PasswordTab />}
+      </div>
+    </div>
+  );
+}
+
+// GitRemoteTab lets a user mirror their personal workspace to a git repository
+// they own (opt-in). The stored credential is never read back — the server only
+// reports has_credential — so the password field stays blank on an existing
+// config and an empty value leaves the stored secret unchanged.
+function GitRemoteTab() {
+  const [ws, setWs] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [err, setErr] = useState('');
+  const [gitEnabled, setGitEnabled] = useState(false);
+  const [transport, setTransport] = useState('https');
+  const [remoteUrl, setRemoteUrl] = useState('');
+  const [username, setUsername] = useState('oauth2');
+  const [branch, setBranch] = useState('main');
+  const [knownHosts, setKnownHosts] = useState('');
+  const [credential, setCredential] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      const data = await getMyWorkspace();
+      setWs(data);
+      setGitEnabled(!!data.git_enabled);
+      setTransport(data.transport || 'https');
+      setRemoteUrl(data.remote_url || '');
+      setUsername(data.username || 'oauth2');
+      setBranch(data.branch || 'main');
+      setKnownHosts(data.known_hosts || '');
+      setCredential('');
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const save = async () => {
+    setErr(''); setMsg(''); setSaving(true);
+    try {
+      const payload = {
+        git_enabled: gitEnabled,
+        transport,
+        remote_url: remoteUrl.trim(),
+        username: username.trim(),
+        branch: branch.trim(),
+        known_hosts: knownHosts,
+      };
+      // Only send the credential when the user typed one; blank keeps the stored secret.
+      if (credential) payload.credential = credential;
+      const data = await saveMyWorkspace(payload);
+      setWs(data);
+      setCredential('');
+      setMsg('Saved.');
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async () => {
+    if (!confirm('Remove your personal git remote? Your notes stay; only mirroring stops.')) return;
+    setErr(''); setMsg('');
+    try {
+      await deleteMyWorkspace();
+      await load();
+      setMsg('Removed.');
+    } catch (e) {
+      setErr(e.message);
+    }
+  };
+
+  if (loading) {
+    return <div className="settings-content"><p style={{ color: '#6c7086', fontSize: '0.85rem' }}>Loading...</p></div>;
+  }
+
+  const hasCredential = ws && ws.has_credential;
+  const fieldStyle = { display: 'block', marginTop: '0.6rem', fontSize: '0.85rem', color: '#a6adc8' };
+
+  return (
+    <div className="settings-content">
+      <p className="settings-description">
+        Mirror your personal workspace to a git repository you own. Notes in your
+        namespace <code>{ws?.namespace}</code> are pushed to your remote, so you
+        own durability — mdnest stores only the credential, encrypted at rest.
+        Use a repo-scoped credential (deploy token / fine-grained PAT / deploy
+        key), never an account-wide secret.
+      </p>
+      {err && <div style={{ color: '#f38ba8', fontSize: '0.85rem', marginBottom: '0.5rem' }}>{err}</div>}
+      {msg && <div style={{ color: '#a6e3a1', fontSize: '0.85rem', marginBottom: '0.5rem' }}>{msg}</div>}
+
+      {ws && ws.git_enabled && ws.last_sync_error && (
+        <div style={{ background: '#302028', border: '1px solid #f38ba8', borderRadius: '6px', padding: '0.5rem 0.7rem', marginBottom: '0.6rem' }}>
+          <div style={{ color: '#f38ba8', fontSize: '0.82rem', fontWeight: 600 }}>Last mirror sync failed</div>
+          <div style={{ color: '#f2cdcd', fontSize: '0.78rem', marginTop: '0.2rem', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{ws.last_sync_error}</div>
+          {ws.last_sync_at && <div style={{ color: '#9399b2', fontSize: '0.72rem', marginTop: '0.25rem' }}>at {new Date(ws.last_sync_at).toLocaleString()}</div>}
+        </div>
+      )}
+      {ws && ws.git_enabled && !ws.last_sync_error && ws.last_sync_at && (
+        <div style={{ color: '#a6e3a1', fontSize: '0.78rem', marginBottom: '0.6rem' }}>
+          Last mirror sync OK — {new Date(ws.last_sync_at).toLocaleString()}
+        </div>
+      )}
+
+      <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.9rem' }}>
+        <input type="checkbox" checked={gitEnabled} onChange={(e) => setGitEnabled(e.target.checked)} />
+        Enable mirroring
+      </label>
+
+      <label style={fieldStyle}>Transport
+        <select className="modal-input" value={transport} onChange={(e) => setTransport(e.target.value)}>
+          <option value="https">HTTPS (access token)</option>
+          <option value="ssh">SSH (deploy key)</option>
+        </select>
+      </label>
+
+      <label style={fieldStyle}>Remote URL
+        <input className="modal-input" value={remoteUrl} onChange={(e) => setRemoteUrl(e.target.value)}
+          placeholder={transport === 'ssh' ? 'git@gitlab.example.com:me/notes.git' : 'https://gitlab.example.com/me/notes.git'} />
+      </label>
+
+      {transport === 'https' && (
+        <label style={fieldStyle}>Username
+          <input className="modal-input" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="oauth2" />
+        </label>
+      )}
+
+      <label style={fieldStyle}>Branch
+        <input className="modal-input" value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="main" />
+      </label>
+
+      {transport === 'ssh' && (
+        <label style={fieldStyle}>Host key (known_hosts line)
+          <textarea className="modal-input" rows={2} value={knownHosts} onChange={(e) => setKnownHosts(e.target.value)}
+            placeholder="gitlab.example.com ssh-ed25519 AAAA..." />
+        </label>
+      )}
+
+      <label style={fieldStyle}>{transport === 'ssh' ? 'Private key' : 'Access token'}
+        <input className="modal-input" type="password" value={credential} onChange={(e) => setCredential(e.target.value)}
+          placeholder={hasCredential ? 'stored — leave blank to keep' : (transport === 'ssh' ? 'paste the private key' : 'paste the PAT / deploy token')} />
+      </label>
+
+      <div className="token-create-row" style={{ marginTop: '0.9rem' }}>
+        <button className="modal-btn-primary" onClick={save} disabled={saving}>{saving ? 'Saving...' : 'Save'}</button>
+        {ws && ws.id && <button className="modal-btn" onClick={remove}>Remove</button>}
       </div>
     </div>
   );

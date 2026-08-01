@@ -4,6 +4,146 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v4.0.0 — Task board, git-native HA, and bring-your-own-repo durability
+
+The first release built substantially with outside contributions, and the
+largest change to what mdnest can be deployed as since it started. Notes are
+still plain Markdown files in a git repo you own — that hasn't moved, and most
+of this release exists to keep it true at scales where it previously wasn't.
+
+**A single-box install is unchanged.** The generated `docker-compose.yml` is
+byte-identical to v3.11.7's, and `.env` gains exactly one line
+(`ENABLE_TASK_BOARD=false`). Everything below is either opt-in or invisible
+unless you run multi-user mode.
+
+Major version because two changes require operator action on upgrade — see
+Breaking changes. Huge thanks to [@ecthelion77](https://github.com/ecthelion77)
+(Olivier Gintrand), who wrote most of what follows.
+
+### Breaking changes
+
+- **Superadmins no longer have implicit read access to note content.** A
+  superadmin administers every namespace — users, grants, namespace lifecycle —
+  but that authority no longer doubles as ambient access to the notes. Data
+  access now flows through grants for every role. **On an existing multi-user
+  install**, namespaces a superadmin never held a grant in will disappear from
+  their sidebar, tree and file APIs until they self-grant; the admin surfaces
+  are unchanged and still list every namespace to administer. Single-user mode
+  is unaffected. This is arguably the change that makes multi-user mode
+  trustworthy rather than merely functional: administering a workspace and
+  reading people's notes are different powers.
+- **The Helm chart runs the backend as a StatefulSet** with per-pod
+  `volumeClaimTemplates` instead of a Deployment plus standalone PVCs (chart
+  `0.1.0` → `0.2.x`). Upgrading an existing chart install **without action would
+  delete the Deployment-era notes PVC**, so the chart now refuses that upgrade
+  and tells you to adopt the volume with
+  `persistence.notes.existingClaim: <release>-notes`. Fresh installs need
+  nothing.
+
+### Added
+
+- **Task board (opt-in — `ENABLE_TASK_BOARD=true`).** A per-namespace kanban
+  built on the `- [ ]` checkboxes already in your notes. **No new datastore**: a
+  task *is* a line in a note, the note stays the source of truth, and every
+  board action is a plain line-level edit — so anything you type in a note shows
+  up on the board and vice versa. Tasks can carry an indented detail block
+  (`status`, `due`, `priority`, `tags`, `steps`, `notes`) that remains readable
+  Markdown you wouldn't mind seeing in a diff. Column layout lives in the
+  namespace's `.mdnest/board.json` sidecar (the same convention as
+  `.mdnest/comments`, and likewise hidden from the tree and from search). Adds
+  four MCP tools — `list_tasks`, `create_task`, `edit_task`, `move_task`. Off by
+  default: the routes aren't registered and the UI chunk isn't loaded until you
+  turn it on. See `docs/tasks.md`.
+- **Git-native HA — multiple replicas without ReadWriteMany storage.** A new
+  `git` storage backend keeps the same on-disk layout but owns git history
+  in-process (one repo per namespace), replacing the git-sync sidecar and
+  debouncing commits on writer idle so an editing session becomes one commit
+  rather than one per tick. Add `REDIS_URL` and it splits into N stateless
+  **app** replicas plus a single **writer** that owns the git tree, with Redis
+  as the coherence tier. Git stays the durable source of truth — `git log`,
+  `grep` and `cp -r` all still work. **Read `docs/kubernetes.md` before choosing
+  it**: on an app replica a save is acknowledged once it's on the queue, not
+  once the writer has committed it, so an acknowledged write can be lost and
+  Redis becomes a durability component that needs AOF. A single box, or the
+  `git` backend without Redis, has an RPO of zero.
+- **Per-workspace git remotes (multi mode).** Any namespace can mirror to its
+  own repository rather than one operator-wide remote, and a user can point
+  their personal workspace at a repo they control — so "your notes are a git
+  repo you own" survives contact with a multi-team install. Credentials (HTTPS
+  PAT or SSH key) are sealed with AES-256-GCM, never returned by the API, and
+  never placed in argv or a URL; mdnest refuses to store one at all unless a
+  non-default `MDNEST_ENCRYPTION_KEY` is set. Optional
+  `GIT_REMOTE_ALLOWED_HOSTS` bounds where they can be used.
+- **MCP server over streamable HTTP, with optional per-user OAuth 2.1.** The
+  bundled MCP server can now be a shared network endpoint instead of a local
+  stdio process, and in OAuth mode each client signs in through your existing
+  SSO so actions are attributed to the real user rather than one shared token.
+  **stdio remains the default and a first-class path** — with `MCP_TRANSPORT`
+  unset, no listener is bound and no OAuth code is even imported.
+- **Opt-in Redis backplane for live collaboration** (`REDIS_URL`), so presence
+  and edits stay in sync across replicas. With it unset the hub is exactly the
+  in-process one it always was — no goroutine, no allocation per event.
+- **Opt-in SSO user auto-provisioning** (`SSO_AUTOPROVISION_USERS=true`): an
+  unknown but IdP-authenticated email is created as a least-privilege
+  collaborator with **no grants**, instead of being rejected. Off by default.
+- **Task-board support in the Helm chart** — `taskBoard.enabled`.
+
+### Changed
+
+- **API tokens live in PostgreSQL in multi mode** (single mode keeps
+  `tokens.json`, and gains no database). Existing tokens are imported from
+  `tokens.json` on first start, so an upgrade doesn't invalidate them. This is
+  what finally removed the last ReadWriteMany requirement for running multiple
+  replicas.
+- **A namespace-scoped `storage.Storage` interface** now sits between the
+  handlers and the filesystem, which is what made the `git` backend possible
+  without rewriting request logic — and made the handlers testable.
+- Note history and namespace listing move through the storage layer, and
+  `/api/files/` keeps range requests and conditional GETs (so image caching and
+  media seeking still work).
+
+### Fixed
+
+- **Ticking a task off in the Live editor now sticks.** The box changed, the
+  file didn't, and a refresh brought the tick back — so a card moved to Done
+  couldn't be un-done from the note. The editor's save gate stayed armed until
+  a keypress or a click landed inside the document, and ticking a checkbox
+  produces neither (ProseMirror handles it internally), so every checkbox edit
+  in a freshly opened note was dropped for the whole session. The gate is now
+  scoped to the document injection it exists for. Pinned by a new
+  `tests/browser/kanban.spec.js` — six specs covering the board, task parsing
+  and both checkbox directions, asserted against the bytes on disk.
+- **Editing your own note no longer raises a conflict banner or jumps the
+  cursor.** The backend fans `file-changed` to every connection on a note
+  including the tab that just saved; the handler now recognises its own echo.
+  Broadcast latency made this near-constant on a multi-replica deployment. A
+  same-user write from the CLI or MCP still propagates.
+- A namespace created for a personal workspace is materialised only once it
+  actually mirrors somewhere, so it can't exist as an undurable directory.
+- The task board and the live editor are both lazy-loaded, so neither is on the
+  critical path for someone who doesn't open them.
+
+### Security
+
+- **Command execution via a crafted git remote URL** *(unreleased code)*.
+  `remote_url` and `branch` were passed to `git` as positional arguments, so a
+  value starting with `-` was parsed as an option — `--upload-pack=<cmd>`
+  executes `<cmd>`. Any authenticated user could reach it through their own
+  personal workspace, giving command execution in the writer, the process
+  holding the sealing key and every workspace's credentials. Now blocked at the
+  API boundary *and* with `--end-of-options` at the exec site; each layer was
+  verified to stop it alone.
+- **OAuth authorization codes could be delivered to an attacker-chosen host**
+  *(unreleased code)*. `/oauth/authorize` accepted any HTTPS `redirect_uri`
+  without checking it against a registered client, and PKCE doesn't help when
+  the malicious client starts the flow. Delivery is now restricted to loopback
+  plus origins explicitly listed in `MCP_ALLOWED_REDIRECT_ORIGINS`.
+- Superadmin implicit read access removed — see Breaking changes.
+- API-token list and revoke ownership scoping is now pinned by tests; nothing
+  covered it before.
+
+---
+
 ## v3.11.7 — XSS hardening, cross-namespace file leak fixed, Helm chart, build CI
 
 _First release with outside contributions. Thanks to [@ecthelion77](https://github.com/ecthelion77) (Olivier Gintrand) for the sanitization hardening, the `/api/files/` authorization fix, the Helm chart, and the CI workflows._

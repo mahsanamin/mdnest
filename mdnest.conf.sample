@@ -68,6 +68,15 @@ GIT_AUTHOR_EMAIL=you@example.com
 # Also required for the inline comments feature (/api/comments).
 # ENABLE_LIVE_COLLAB=false
 
+# Task board (optional, works in both single and multi mode)
+# Projects the GitHub-flavoured `- [ ]` checkboxes already in your notes into a
+# per-namespace kanban board. No new datastore: a task is a line in a note, and
+# the column layout lives in the namespace's .mdnest/board.json sidecar (same
+# convention as .mdnest/comments, and hidden from the file tree).
+# Off by default — when it is off the /api/tasks and /api/board routes are not
+# registered and the frontend never loads the board's UI chunk.
+# ENABLE_TASK_BOARD=false
+
 # ==========================================================================
 # Federated identity via Firebase (optional, requires AUTH_MODE=multi)
 # ==========================================================================
@@ -122,6 +131,12 @@ GIT_AUTHOR_EMAIL=you@example.com
 #
 # Optional — only set if your redirect URI isn't FRONTEND_ORIGIN/api/auth/sso/callback:
 # SSO_REDIRECT_URL=https://notes.example.com/api/auth/sso/callback
+#
+# Optional (opt-in) — auto-create a least-privilege collaborator on first SSO
+# login for an unknown but IdP-authenticated email, instead of rejecting it, so
+# users need no superadmin invite. Off by default. Enable only when the IdP
+# gates who may obtain a token (pair with SSO_ALLOWED_DOMAINS).
+# SSO_AUTOPROVISION_USERS=true
 
 # ==========================================================================
 # INSECURE: dev-only login backdoor (for local SSO testing)
@@ -183,6 +198,35 @@ GIT_AUTHOR_EMAIL=you@example.com
 # Ports 80 and 443 are exposed; backend/frontend ports become internal only.
 # The domain must have a DNS A record pointing to this server's public IP.
 # CADDY_DOMAIN=notes.example.com
+
+# MCP server for AI agents (optional)
+# Runs the bundled Model Context Protocol server as a streamable-HTTP service
+# so AI agents (Claude, Cursor, scripts) can read/write notes over the network.
+# Disabled by default and gated behind a compose profile — existing installs
+# are unaffected. See docs/mcp.md for the full guide.
+# ENABLE_MCP=true
+#
+# service mode (default): the server uses ONE mdnest API token for every call.
+# Create it in Settings > API Tokens after the first boot, then set it here and
+# run ./mdnest-server rebuild. Only expose the endpoint on a trusted network.
+# MCP_TOKEN=mdnest_your_token_here
+#
+# Host port for the /mcp endpoint (default 3000).
+# MCP_HTTP_PORT=3000
+#
+# oauth mode: each client brings its own user's JWT via corporate SSO, so every
+# action is attributed to the real user. Requires all three variables below.
+# MCP_AUTH_MODE=oauth
+# MCP_PUBLIC_URL=https://mcp.notes.example.com
+# MCP_OAUTH_SECRET=change-me-to-a-long-random-string
+# MCP_SSO_AUTHORIZE_URL=https://notes.example.com/api/sso/authorize
+# Origins allowed to receive an OAuth authorization code, comma-separated.
+# Loopback (127.0.0.1 / localhost) is ALWAYS allowed — that covers native MCP
+# clients and needs no configuration. Only set this if a hosted client on a
+# real domain must complete the flow. Leave it empty otherwise: an
+# authorization code carries a live mdnest token, so anything not listed here
+# is refused.
+# MCP_ALLOWED_REDIRECT_ORIGINS=https://agent.example.com
 
 # Namespace mounts
 # Each line maps a namespace name to a host directory.

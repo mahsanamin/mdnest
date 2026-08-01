@@ -12,6 +12,10 @@ import EditorErrorBoundary from './components/EditorErrorBoundary.jsx';
 // ~217 KB-gzipped chunk only downloads when the user actually opens
 // Live mode.
 const LiveEditor = lazy(() => import('./components/LiveEditorCrepe.jsx'));
+// Lazy like the Live editor: the board pulls in @dnd-kit and its own CSS, and
+// it is off by default (ENABLE_TASK_BOARD), so an install that doesn't use it
+// must not carry the chunk on first paint.
+const TaskBoard = lazy(() => import('./components/TaskBoard.jsx'));
 import Preview from './components/Preview.jsx';
 import ContextMenu from './components/ContextMenu.jsx';
 import Settings from './components/Settings.jsx';
@@ -224,7 +228,7 @@ function App() {
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [comments, setComments] = useState([]);
   const [showComments, setShowComments] = useState(false);
-  const [pendingCommentSelection, setPendingCommentSelection] = useState(null);
+  const [showTaskBoard, setShowTaskBoard] = useState(false);  const [pendingCommentSelection, setPendingCommentSelection] = useState(null);
   const [highlightedCommentId, setHighlightedCommentId] = useState(null);
   const goToCommentRef = useRef(null);
   const editorWrapperRef = useRef(null);
@@ -260,6 +264,9 @@ function App() {
   // see new/resolved comments without a manual refresh), so gate on liveCollab
   // — which itself is only true when multi mode is on.
   const commentsEnabled = !!appConfig?.liveCollab;
+  // ENABLE_TASK_BOARD on the backend. When off, /api/tasks and /api/board are
+  // not registered at all, so the button must not be offered.
+  const taskBoardEnabled = !!appConfig?.taskBoard;
 
   // Live collaboration state
   const [presenceUsers, setPresenceUsers] = useState([]);
@@ -293,6 +300,21 @@ function App() {
   const [dismissedReleaseVer, setDismissedReleaseVer] = useState(() => localStorage.getItem('mdnest_dismissed_release_version') || '');
   const [wsStatus, setWsStatus] = useState('disconnected'); // 'connected' | 'connecting' | 'disconnected'
   const etagRef = useRef(null);
+  // Ring of etags this client produced via its own saves. The backend echoes
+  // file-changed (with the new etag) back to the saving tab; under HA latency
+  // an earlier save's echo can arrive after a later save already moved etagRef
+  // on, so a single-value compare misses it. Suppressing any etag we authored
+  // keeps our own saves from raising a self-conflict banner, while a same-user
+  // write from another source (CLI/MCP) carries an etag we never produced and
+  // still propagates.
+  const ownEtagsRef = useRef([]);
+  const rememberOwnEtag = useRef((etag) => {
+    if (!etag) return;
+    const buf = ownEtagsRef.current;
+    if (buf.includes(etag)) return;
+    buf.push(etag);
+    if (buf.length > 20) buf.shift();
+  }).current;
   const collabRef = useRef(null);
   const typingTimers = useRef({}); // {userId: timeoutId}
   const localTypingUntil = useRef(0); // timestamp — local user is "typing" until this time
@@ -427,6 +449,17 @@ function App() {
           }, 1000);
           break;
         case 'file-changed': {
+          // Ignore the echo of our own save. The backend fans file-changed out
+          // to every connection on the note, including the tab that just saved
+          // (an HTTP PUT has no *Conn to exclude). If the incoming etag matches
+          // the one we already hold, nothing changed for us: acting on it pops
+          // a spurious self-conflict banner while autosave is mid-flight
+          // (isClean=false), and on the clean path re-fetches and resets the
+          // editor selection (the cursor "jumps"). This makes the handler
+          // idempotent for our own save, as the backend broadcast assumes.
+          // A same-user write from another source (CLI, MCP) carries a
+          // different etag, so it still propagates.
+          if (msg.etag && (msg.etag === etagRef.current || ownEtagsRef.current.includes(msg.etag))) break;
           // Another user saved (or restored) — update etag and reload if
           // no local edits. Restores get a separate "info" banner instead
           // of the yellow conflict banner; same auto-reload-when-clean
@@ -810,6 +843,7 @@ function App() {
   }, [getScrollables, getFilePrefs]);
 
   const openNoteDirect = useCallback(async (ns, path) => {
+    setShowTaskBoard(false);
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
     try {
       const { text, etag } = await getNote(ns, path);
@@ -827,6 +861,7 @@ function App() {
   }, [restoreScrollPosition, commentsEnabled]);
 
   const handleSelectNs = useCallback((ns) => {
+    setShowTaskBoard(false);
     setSelectedNs(ns);
     // Restore the last file the user had open in the namespace they're
     // switching TO. If they've never opened anything there (or whatever
@@ -853,6 +888,7 @@ function App() {
 
   const openNote = useCallback(async (path) => {
     if (!selectedNs) return;
+    setShowTaskBoard(false);
     // Clear any pending save timer from the previous file
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
     try {
@@ -913,7 +949,7 @@ function App() {
       try {
         const result = await saveNote(selectedNs, currentPath, newContent, etagRef.current);
         setSavedContent(newContent);
-        if (result.etag) etagRef.current = result.etag;
+        if (result.etag) { etagRef.current = result.etag; rememberOwnEtag(result.etag); }
       } catch (e) {
         if (e.status === 409) {
           setConflictBanner({ username: 'another user', etag: e.etag });
@@ -964,7 +1000,8 @@ function App() {
     setSavedContent(newContent);
     if (currentPath && selectedNs) {
       try {
-        await saveNote(selectedNs, currentPath, newContent);
+        const result = await saveNote(selectedNs, currentPath, newContent);
+        if (result.etag) { etagRef.current = result.etag; rememberOwnEtag(result.etag); }
       } catch (e) {
         console.error('Checkbox save failed:', e);
       }
@@ -1365,7 +1402,9 @@ function App() {
             }
           }}
           editorMode={editorMode}
+          boardActive={showTaskBoard}
           onEditorModeChange={(mode) => {
+            setShowTaskBoard(false);
             setEditorMode(mode);
             localStorage.setItem('mdnest_editor_mode', mode);
             // User explicitly opted back into Live for this file — clear
@@ -1376,6 +1415,7 @@ function App() {
             }
           }}
           onRefresh={handleRefresh}
+          onOpenBoard={taskBoardEnabled && selectedNs ? () => setShowTaskBoard(true) : null}
           commentCount={commentsEnabled ? comments.filter(c => !c.parentId && !c.resolved).length : 0}
           onToggleComments={!commentsEnabled ? null : () => {
             const next = !showComments;
@@ -1448,7 +1488,17 @@ function App() {
           </div>
         )}
         <div className="split-view">
-          {currentPath ? (
+          {showTaskBoard && taskBoardEnabled && selectedNs ? (
+            <Suspense fallback={<div className="editor-loading">Loading task board...</div>}>
+              <TaskBoard
+                ns={selectedNs}
+                canWrite={canWrite('')}
+                currentPath={currentPath}
+                onOpenNote={(p) => { setShowTaskBoard(false); openNote(p); }}
+                onClose={() => setShowTaskBoard(false)}
+              />
+            </Suspense>
+          ) : currentPath ? (
             <>
               <div className="mobile-view-toggle">
                 <button className={mobileView === 'editor' ? 'active' : ''} onClick={() => { setMobileView('editor'); localStorage.setItem('mdnest_mobile_view', 'editor'); }}>Edit</button>

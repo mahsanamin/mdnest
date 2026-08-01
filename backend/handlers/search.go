@@ -2,16 +2,18 @@ package handlers
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/mdnest/mdnest/backend/storage"
 )
 
 // SearchConfig holds tunable search parameters.
@@ -36,9 +38,9 @@ type nsCache struct {
 }
 
 type SearchHandler struct {
-	notesDir string
-	config   SearchConfig
-	caches   sync.Map // namespace -> *nsCache
+	store  storage.Storage
+	config SearchConfig
+	caches sync.Map // namespace -> *nsCache
 }
 
 type SearchResult struct {
@@ -47,7 +49,7 @@ type SearchResult struct {
 	Snippet string `json:"snippet"`
 }
 
-func NewSearchHandler(notesDir string) *SearchHandler {
+func NewSearchHandler(store storage.Storage) *SearchHandler {
 	maxResults := envInt("SEARCH_MAX_RESULTS", 30)
 	maxFileSize := envInt64("SEARCH_MAX_FILE_SIZE", 1<<20) // 1MB
 	workers := envInt("SEARCH_WORKERS", 8)
@@ -63,13 +65,11 @@ func NewSearchHandler(notesDir string) *SearchHandler {
 	log.Printf("search config: max_results=%d, max_file_size=%d, workers=%d, cache_ttl=%s",
 		cfg.MaxResults, cfg.MaxFileSize, cfg.Workers, cfg.CacheTTL)
 
-	return &SearchHandler{notesDir: notesDir, config: cfg}
+	return &SearchHandler{store: store, config: cfg}
 }
 
 // getFiles returns a cached or freshly-built file list for a namespace.
-func (h *SearchHandler) getFiles(nsDir string) []fileEntry {
-	ns := filepath.Base(nsDir)
-
+func (h *SearchHandler) getFiles(ctx context.Context, ns string) []fileEntry {
 	val, _ := h.caches.LoadOrStore(ns, &nsCache{})
 	cache := val.(*nsCache)
 
@@ -81,18 +81,12 @@ func (h *SearchHandler) getFiles(nsDir string) []fileEntry {
 	}
 
 	var files []fileEntry
-	filepath.Walk(nsDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil
+	h.store.Walk(ctx, ns, "", func(relPath string, info storage.FileInfo) error {
+		if info.IsDir && relPath != "" && strings.HasPrefix(info.Name, ".") {
+			return storage.SkipDir
 		}
-		if info.IsDir() && strings.HasPrefix(info.Name(), ".") {
-			return filepath.SkipDir
-		}
-		if !info.IsDir() && strings.HasSuffix(strings.ToLower(info.Name()), ".md") {
-			rel, err := filepath.Rel(nsDir, path)
-			if err == nil {
-				files = append(files, fileEntry{relPath: rel, size: info.Size()})
-			}
+		if !info.IsDir && strings.HasSuffix(strings.ToLower(info.Name), ".md") {
+			files = append(files, fileEntry{relPath: relPath, size: info.Size})
 		}
 		return nil
 	})
@@ -115,8 +109,9 @@ func (h *SearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	nsDir := RequireNamespace(h.notesDir, w, r)
-	if nsDir == "" {
+	ctx := r.Context()
+	ns := RequireNamespaceStore(ctx, h.store, w, r)
+	if ns == "" {
 		return
 	}
 
@@ -127,7 +122,7 @@ func (h *SearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	files := h.getFiles(nsDir)
+	files := h.getFiles(ctx, ns)
 
 	// Phase 1: filename matches (instant, no file I/O)
 	var results []SearchResult
@@ -179,8 +174,8 @@ func (h *SearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 
-				absPath := filepath.Join(nsDir, fe.relPath)
-				file, err := os.Open(absPath)
+				absPath := fe.relPath
+				file, err := h.store.Open(ctx, ns, absPath)
 				if err != nil {
 					return
 				}

@@ -9,7 +9,7 @@ metadata:
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
-    kind: Deployment
+    kind: {{ if eq (include "mdnest.gitNativeHA" .) "true" }}Deployment{{ else }}StatefulSet{{ end }}
     name: {{ include "mdnest.backend.fullname" . }}
   minReplicas: {{ .Values.backend.autoscaling.minReplicas }}
   maxReplicas: {{ .Values.backend.autoscaling.maxReplicas }}

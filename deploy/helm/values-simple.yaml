@@ -1,0 +1,47 @@
+# =============================================================================
+# values-simple.yaml — single-user personal install
+# -----------------------------------------------------------------------------
+# The smallest useful deployment: one backend replica, file-based auth (no
+# database), notes on a per-pod PVC, exposed over ingress + TLS. This is the
+# cluster equivalent of the default Docker Compose install.
+#
+#   helm install mdnest ./deploy/helm/mdnest -f deploy/helm/values-simple.yaml \
+#     --set auth.password='<a-strong-password>' \
+#     --set auth.jwtSecret='<a-long-random-string>'
+#
+# See docs/kubernetes.md for the full reference.
+# =============================================================================
+
+auth:
+  mode: single
+  adminUser: admin
+  # Provide these at install time (--set) or via auth.existingSecret. Left empty
+  # here so the example ships no credential; if empty the chart generates a
+  # random password (retrieve it as shown in NOTES.txt after install).
+  password: ""
+  jwtSecret: ""
+
+# storage.backend defaults to `local` — notes live on this per-pod PVC.
+persistence:
+  notes:
+    enabled: true
+    size: 5Gi
+    # storageClass: ""   # empty = cluster default
+
+backend:
+  replicaCount: 1
+  # Browser-facing URL (CORS). Match your ingress host.
+  frontendOrigin: https://notes.example.com
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: notes.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - hosts:
+        - notes.example.com
+      secretName: mdnest-tls

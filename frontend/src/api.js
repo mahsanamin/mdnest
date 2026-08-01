@@ -178,6 +178,17 @@ export async function getNamespaces() {
   return res.json();
 }
 
+// getManageableNamespaces returns the namespaces the caller may administer
+// (every namespace for a superadmin, the caller's scoped namespaces for a
+// namespace admin). Unlike getNamespaces() this is not limited to the
+// namespaces the caller can access, so a superadmin — who has no implicit data
+// access — can still manage every namespace from the admin panel.
+export async function getManageableNamespaces() {
+  const res = await request('/namespaces?scope=manage');
+  if (!res.ok) throw new Error('Failed to load namespaces');
+  return res.json();
+}
+
 export async function getTree(ns) {
   const res = await request(`/tree?ns=${encodeURIComponent(ns)}`);
   if (!res.ok) throw new Error('Failed to load tree');
@@ -295,6 +306,72 @@ export async function uploadImage(ns, notePath, file) {
 export async function searchNotes(ns, query) {
   const res = await request(`/search?ns=${encodeURIComponent(ns)}&q=${encodeURIComponent(query)}`);
   if (!res.ok) throw new Error('Failed to search');
+  return res.json();
+}
+
+// --- Tasks & kanban board (namespace-scoped) ---
+
+// Aggregate every markdown task-list item in the namespace plus the board
+// column layout. Returns { board: {version, columns}, tasks: [...] }.
+export async function getTasks(ns, path) {
+  const q = path ? `&path=${encodeURIComponent(path)}` : '';
+  const res = await request(`/tasks?ns=${encodeURIComponent(ns)}${q}`);
+  if (!res.ok) throw new Error('Failed to load tasks');
+  return res.json();
+}
+
+// Create a task by appending it to a note. `body` is { text, note?, column? };
+// when note is omitted the board's default note is used.
+export async function createTask(ns, body) {
+  const res = await request(`/tasks?ns=${encodeURIComponent(ns)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to create task');
+  }
+  return res.json();
+}
+
+// Move a task to a column or toggle its checkbox. `mutation` is
+// { line, raw, toColumn } or { line, raw, checked }. `path` is the note that
+// owns the task. Throws a 409-tagged error when the source line has shifted.
+export async function patchTask(ns, path, mutation) {
+  const res = await request(`/tasks?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(mutation),
+  });
+  if (res.status === 409) {
+    const err = new Error('Task is out of date; refresh the board');
+    err.status = 409;
+    throw err;
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to update task');
+  }
+  return res.json();
+}
+
+export async function getBoard(ns) {
+  const res = await request(`/board?ns=${encodeURIComponent(ns)}`);
+  if (!res.ok) throw new Error('Failed to load board');
+  return res.json();
+}
+
+export async function saveBoard(ns, board) {
+  const res = await request(`/board?ns=${encodeURIComponent(ns)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(board),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to save board');
+  }
   return res.json();
 }
 
@@ -447,6 +524,112 @@ export async function adminSyncNamespace(ns) {
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     throw new Error(data.detail || data.error || 'Sync failed');
+  }
+  return res.json();
+}
+
+// --- Per-workspace git remotes (multi mode, opt-in) ---
+// The stored credential (PAT / SSH key) is never returned by the server; these
+// responses only report has_credential.
+
+export async function adminListWorkspaces() {
+  const res = await request('/admin/workspaces');
+  if (!res.ok) throw new Error('Failed to list workspaces');
+  return res.json();
+}
+
+export async function adminSaveWorkspace(payload, id) {
+  const res = await request(id ? `/admin/workspaces?id=${id}` : '/admin/workspaces', {
+    method: id ? 'PUT' : 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to save workspace');
+  }
+  return res.json();
+}
+
+export async function adminDeleteWorkspace(id) {
+  const res = await request(`/admin/workspaces?id=${id}`, { method: 'DELETE' });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to delete workspace');
+  }
+  return res.json();
+}
+
+// Workspace groups: a shared git remote base (one repo per namespace), the
+// UI equivalent of the GIT_REMOTE_URL env provisioning.
+
+export async function adminListWorkspaceGroups() {
+  const res = await request('/admin/workspace-groups');
+  if (!res.ok) throw new Error('Failed to list workspace groups');
+  return res.json();
+}
+
+export async function adminSaveWorkspaceGroup(payload, id) {
+  const res = await request(id ? `/admin/workspace-groups?id=${id}` : '/admin/workspace-groups', {
+    method: id ? 'PUT' : 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to save workspace group');
+  }
+  return res.json();
+}
+
+export async function adminDeleteWorkspaceGroup(id) {
+  const res = await request(`/admin/workspace-groups?id=${id}`, { method: 'DELETE' });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to delete workspace group');
+  }
+  return res.json();
+}
+
+// Create a workspace inside a group: only the namespace is needed; it inherits
+// the group's remote base + credential.
+export async function adminCreateWorkspaceInGroup(namespace, groupId) {
+  const res = await request('/admin/workspaces', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ namespace, group_id: groupId }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to create workspace in group');
+  }
+  return res.json();
+}
+
+export async function getMyWorkspace() {
+  const res = await request('/me/workspace');
+  if (!res.ok) throw new Error('Failed to load personal workspace');
+  return res.json();
+}
+
+export async function saveMyWorkspace(payload) {
+  const res = await request('/me/workspace', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to save workspace');
+  }
+  return res.json();
+}
+
+export async function deleteMyWorkspace() {
+  const res = await request('/me/workspace', { method: 'DELETE' });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to remove workspace');
   }
   return res.json();
 }

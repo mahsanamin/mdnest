@@ -2,6 +2,8 @@
 
 This guide covers installing, configuring, and running mdnest.
 
+> Running mdnest in an existing Kubernetes cluster instead — including active/active with the git-native HA topology — is covered in [kubernetes.md](kubernetes.md). This guide is the Docker Compose install.
+
 ---
 
 ## Prerequisites

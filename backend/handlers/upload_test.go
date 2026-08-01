@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/mdnest/mdnest/backend/middleware"
+	"github.com/mdnest/mdnest/backend/storage"
 	"github.com/mdnest/mdnest/backend/store"
 )
 
@@ -49,15 +50,15 @@ func (f *fakeGrantStore) GetAccessibleNamespaces(int) ([]string, error) {
 	return []string{f.namespace}, nil
 }
 
-// fakeNsAdminStore makes nobody a namespace-admin; superadmin short-circuits
-// before this is consulted.
+// fakeNsAdminStore makes nobody a namespace-admin; no role short-circuits data
+// access here — every principal falls through to the grant check.
 type fakeNsAdminStore struct{}
 
-func (fakeNsAdminStore) Add(int, string, *int) error             { return nil }
-func (fakeNsAdminStore) Remove(int, string) error                { return nil }
-func (fakeNsAdminStore) IsAdminOf(int, string) (bool, error)     { return false, nil }
-func (fakeNsAdminStore) ListByUser(int) ([]string, error)        { return nil, nil }
-func (fakeNsAdminStore) CountByUser(int) (int, error)            { return 0, nil }
+func (fakeNsAdminStore) Add(int, string, *int) error         { return nil }
+func (fakeNsAdminStore) Remove(int, string) error            { return nil }
+func (fakeNsAdminStore) IsAdminOf(int, string) (bool, error) { return false, nil }
+func (fakeNsAdminStore) ListByUser(int) ([]string, error)    { return nil, nil }
+func (fakeNsAdminStore) CountByUser(int) (int, error)        { return 0, nil }
 func (fakeNsAdminStore) ListByNamespace(string) ([]store.NamespaceAdminWithUser, error) {
 	return nil, nil
 }
@@ -79,6 +80,16 @@ func notesDirWithTwoNamespaces(t *testing.T) string {
 	return root
 }
 
+// localStore roots a local storage backend at the given notes directory.
+func localStore(t *testing.T, root string) storage.Storage {
+	t.Helper()
+	stg, err := storage.NewLocalStorage(root)
+	if err != nil {
+		t.Fatalf("new local storage: %v", err)
+	}
+	return stg
+}
+
 func serveFile(h *UploadHandler, uc *middleware.UserContext, ns string) *httptest.ResponseRecorder {
 	r := httptest.NewRequest(http.MethodGet, "/api/files/"+ns+"/secret.txt", nil)
 	if uc != nil {
@@ -92,7 +103,7 @@ func serveFile(h *UploadHandler, uc *middleware.UserContext, ns string) *httptes
 func TestServeFileEnforcesNamespaceReadAccess(t *testing.T) {
 	notesDir := notesDirWithTwoNamespaces(t)
 	perms := middleware.NewPermissionChecker(&fakeGrantStore{userID: 7, namespace: "alpha"}, fakeNsAdminStore{})
-	h := NewUploadHandler(notesDir, perms)
+	h := NewUploadHandler(localStore(t, notesDir), perms)
 
 	collaborator := &middleware.UserContext{ID: 7, Username: "carol", Role: "collaborator"}
 
@@ -118,10 +129,17 @@ func TestServeFileEnforcesNamespaceReadAccess(t *testing.T) {
 		}
 	})
 
-	t.Run("superadmin reads any namespace", func(t *testing.T) {
+	// Since v3.12.0 a superadmin administers every namespace but has no implicit
+	// read access to note content: an ungranted namespace is refused just as it is
+	// for anyone else. The full role matrix lives in middleware/permission_test.go.
+	t.Run("superadmin has no implicit read on an ungranted namespace", func(t *testing.T) {
 		root := &middleware.UserContext{ID: 1, Username: "root", Role: "superadmin"}
-		if w := serveFile(h, root, "beta"); w.Code != http.StatusOK {
-			t.Fatalf("want 200 for superadmin, got %d (%s)", w.Code, w.Body.String())
+		w := serveFile(h, root, "beta")
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("want 403 for an ungranted superadmin, got %d (%s)", w.Code, w.Body.String())
+		}
+		if body := w.Body.String(); body == "beta namespace file contents" {
+			t.Fatal("file contents leaked to an ungranted superadmin")
 		}
 	})
 }
@@ -131,11 +149,50 @@ func TestServeFileEnforcesNamespaceReadAccess(t *testing.T) {
 // note 403s on a single-user install.
 func TestServeFileSingleUserModeUnaffected(t *testing.T) {
 	notesDir := notesDirWithTwoNamespaces(t)
-	h := NewUploadHandler(notesDir, nil)
+	h := NewUploadHandler(localStore(t, notesDir), nil)
 
 	for _, ns := range []string{"alpha", "beta"} {
 		if w := serveFile(h, nil, ns); w.Code != http.StatusOK {
 			t.Fatalf("single-user mode: want 200 for %s, got %d (%s)", ns, w.Code, w.Body.String())
 		}
+	}
+}
+
+// App replicas hold no attachment bytes: when an attachment proxy is set,
+// HandleServeFile must delegate the whole request to it (the writer) instead of
+// reading locally.
+func TestServeFileDelegatesToAttachmentProxy(t *testing.T) {
+	h := NewUploadHandler(nil, nil)
+	var gotPath string
+	h.SetWriterProxy(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.WriteHeader(http.StatusTeapot)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/files/alpha/img/a.png", nil)
+	rec := httptest.NewRecorder()
+	h.HandleServeFile(rec, req)
+
+	if rec.Code != http.StatusTeapot || gotPath != "/api/files/alpha/img/a.png" {
+		t.Fatalf("expected delegation to proxy, got code=%d path=%q", rec.Code, gotPath)
+	}
+}
+
+// Attachment uploads on an app replica must also be forwarded to the writer
+// (keeping binary bytes off the durability queue) rather than written locally.
+func TestUploadDelegatesToWriterProxy(t *testing.T) {
+	h := NewUploadHandler(nil, nil)
+	var gotPath string
+	h.SetWriterProxy(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.WriteHeader(http.StatusTeapot)
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/upload?ns=alpha&path=x", nil)
+	rec := httptest.NewRecorder()
+	h.HandleUpload(rec, req)
+
+	if rec.Code != http.StatusTeapot || gotPath != "/api/upload" {
+		t.Fatalf("expected upload delegation to proxy, got code=%d path=%q", rec.Code, gotPath)
 	}
 }

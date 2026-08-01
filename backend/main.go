@@ -7,17 +7,23 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/mdnest/mdnest/backend/collab"
 	"github.com/mdnest/mdnest/backend/firebase"
 	"github.com/mdnest/mdnest/backend/handlers"
 	"github.com/mdnest/mdnest/backend/middleware"
 	"github.com/mdnest/mdnest/backend/sso"
+	"github.com/mdnest/mdnest/backend/storage"
 	"github.com/mdnest/mdnest/backend/store"
 	"github.com/mdnest/mdnest/backend/updates"
 )
@@ -66,6 +72,17 @@ func main() {
 	user := env("MDNEST_USER", "admin")
 	password := env("MDNEST_PASSWORD", "changeme")
 	jwtSecret := env("MDNEST_JWT_SECRET", "changeme")
+	// Secret used to seal per-workspace git credentials at rest (AES-256-GCM,
+	// key derived via SHA-256). Falls back to the JWT secret so one existing
+	// secret suffices. Rotating it makes previously-sealed credentials
+	// undecryptable (no key-versioned envelope): owners must re-enter their
+	// token / key — see docs/security.md.
+	encryptionSecret := env("MDNEST_ENCRYPTION_KEY", jwtSecret)
+	// A dedicated, non-default sealing secret is required to store per-workspace
+	// git credentials (the most sensitive data mdnest holds). Without it the
+	// workspace handler fails closed and refuses to enable mirroring, rather than
+	// sealing PATs / SSH keys under a guessable default key.
+	encryptionConfigured := strings.TrimSpace(encryptionSecret) != "" && encryptionSecret != "changeme"
 	notesDir := env("NOTES_DIR", "./notes")
 	frontendOrigin := env("FRONTEND_ORIGIN", "http://localhost:5173")
 	port := env("PORT", "8080")
@@ -82,6 +99,26 @@ func main() {
 	if err := os.MkdirAll(absNotesDir, 0755); err != nil {
 		log.Fatalf("failed to create NOTES_DIR: %v", err)
 	}
+
+	// Storage backend for note data (local filesystem by default). Note
+	// history and git-sync always operate on the local filesystem regardless
+	// of this setting — they are orthogonal, optional features.
+	//
+	// appCtx is cancelled on SIGINT/SIGTERM so the writer role releases its
+	// leader lock promptly (fast failover) and the HTTP server shuts down
+	// gracefully rather than being killed mid-request.
+	appCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+
+	// The per-workspace git remote resolver is DB-backed and only available
+	// once multi-mode Postgres is connected (below), so it is wired lazily here
+	// and its delegate is set after the workspace store is built.
+	wsResolver := &storage.LazyResolver{}
+	stg, err := storage.FromEnv(appCtx, absNotesDir, wsResolver)
+	if err != nil {
+		log.Fatalf("failed to initialize storage backend: %v", err)
+	}
+	log.Printf("storage backend: %s (role=%s)", stg.Kind(), env("MDNEST_ROLE", "single"))
 
 	// Database setup (multi mode only)
 	var db *store.DB
@@ -143,7 +180,7 @@ func main() {
 		if err := os.MkdirAll(secretsDir, 0700); err != nil {
 			log.Fatalf("ERROR: failed to create secrets dir: %v", err)
 		}
-		th := handlers.NewTokenHandler(secretsDir)
+		th := handlers.NewTokenHandler(store.NewFileTokenStore(secretsDir))
 		// Single mode: bind the token to MDNEST_USER for clarity in
 		// logs/UI. UserID stays 0 because there's no DB user table —
 		// the auth middleware skips per-user resolution in single mode
@@ -181,6 +218,14 @@ func main() {
 	}
 	if userProvider != "local" && !multiMode {
 		log.Fatalf("USER_PROVIDER=%s requires AUTH_MODE=multi", userProvider)
+	}
+
+	// Opt-in: auto-create a least-privilege collaborator for an unknown but
+	// IdP-authenticated email on first SSO login, instead of rejecting it.
+	// Off by default; only meaningful when USER_PROVIDER=sso.
+	ssoAutoProvisionUsers := env("SSO_AUTOPROVISION_USERS", "false") == "true"
+	if ssoAutoProvisionUsers {
+		log.Println("SSO user auto-provisioning: enabled")
 	}
 
 	// Create auth handler based on mode
@@ -286,38 +331,119 @@ func main() {
 	var perms *middleware.PermissionChecker
 	var grantStore store.GrantStore
 	var nsAdminStore store.NamespaceAdminStore
+	var workspaceStore store.WorkspaceStore
 	if multiMode {
 		grantStore = store.NewPostgresGrantStore(db)
 		nsAdminStore = store.NewPostgresNamespaceAdminStore(db)
 		perms = middleware.NewPermissionChecker(grantStore, nsAdminStore)
+
+		// Per-workspace git remote overrides: the store decrypts credentials and
+		// this adapter feeds the git committer, overriding the coarse
+		// GIT_REMOTE_URL default per namespace.
+		workspaceStore = store.NewPostgresWorkspaceStore(db, encryptionSecret)
+		wsResolver.Set(storage.RemoteResolverFunc(func(ns string) (storage.RemoteSpec, bool, error) {
+			r, err := workspaceStore.RemoteForNamespace(ns)
+			if err != nil || r == nil {
+				return storage.RemoteSpec{}, false, err
+			}
+			return storage.RemoteSpec{
+				Transport:  r.Transport,
+				RemoteURL:  r.RemoteURL,
+				Username:   r.Username,
+				Branch:     r.Branch,
+				Credential: r.Credential,
+				KnownHosts: r.KnownHosts,
+			}, true, nil
+		}))
+
+		// The durability writer records each namespace's last mirror sync outcome
+		// on its workspace row so the owner sees why mirroring fails (bad token,
+		// missing branch, unreachable remote) instead of a silently-empty ns. Only
+		// the writer/single git storage implements the sink; the app tier does not.
+		if r, ok := stg.(interface {
+			SetSyncStatusSink(storage.SyncStatusSink)
+		}); ok {
+			r.SetSyncStatusSink(workspaceStore)
+		}
 	}
+
+	// Task board (optional, off by default). When disabled the /api/tasks and
+	// /api/board routes are never registered — a clean 404 rather than a
+	// half-present feature — and the frontend never loads the board chunk.
+	enableTaskBoard := env("ENABLE_TASK_BOARD", "false") == "true"
 
 	// Live collaboration hub (optional, multi mode only)
 	enableCollab := multiMode && env("ENABLE_LIVE_COLLAB", "false") == "true"
 	var collabHub *collab.Hub
 	if enableCollab {
 		collabHub = collab.NewHub()
+		// Opt-in horizontal scaling: when REDIS_URL is set, share live events
+		// and presence across replicas via a Redis pub/sub backplane. Empty =
+		// single-instance behavior, unchanged.
+		if redisURL := env("REDIS_URL", ""); redisURL != "" {
+			if err := collabHub.EnableRedis(context.Background(), redisURL); err != nil {
+				log.Fatalf("live collaboration: failed to enable Redis backplane: %v", err)
+			}
+		}
 		log.Println("live collaboration enabled (WebSocket)")
 	}
 
-	nsHandler := handlers.NewNamespaceHandler(absNotesDir, perms)
-	noteHandler := handlers.NewNoteHandler(absNotesDir)
+	nsHandler := handlers.NewNamespaceHandler(stg, perms)
+	noteHandler := handlers.NewNoteHandler(stg)
 	historyHandler := handlers.NewHistoryHandler(absNotesDir)
 	if collabHub != nil {
 		noteHandler.SetCollabHub(collabHub)
 	}
-	treeHandler := handlers.NewTreeHandler(absNotesDir, grantStore)
-	uploadHandler := handlers.NewUploadHandler(absNotesDir, perms)
-	moveHandler := handlers.NewMoveHandler(absNotesDir)
-	searchHandler := handlers.NewSearchHandler(absNotesDir)
-	tokenHandler := handlers.NewTokenHandler(secretsDir)
+	treeHandler := handlers.NewTreeHandler(stg, grantStore)
+	uploadHandler := handlers.NewUploadHandler(stg, perms)
+	// Stateless app replicas own no attachment bytes: proxy attachment traffic
+	// (upload + serve) to the writer, which owns the git tree, when WRITER_URL is
+	// configured.
+	if env("MDNEST_ROLE", "single") == "app" {
+		if writerURL := env("WRITER_URL", ""); writerURL != "" {
+			u, perr := url.Parse(writerURL)
+			if perr != nil {
+				log.Fatalf("invalid WRITER_URL %q: %v", writerURL, perr)
+			}
+			uploadHandler.SetWriterProxy(httputil.NewSingleHostReverseProxy(u))
+			log.Printf("attachments: proxying /api/upload and /api/files/ to writer at %s", writerURL)
+		} else {
+			// Fail loud rather than come up Ready with silently broken
+			// attachments: an app replica owns no attachment bytes, so upload
+			// and serve only work when proxied to the writer.
+			log.Fatalf("MDNEST_ROLE=app requires WRITER_URL — without it /api/upload and /api/files/ are broken while the pod still reports Ready")
+		}
+	}
+	moveHandler := handlers.NewMoveHandler(stg)
+	searchHandler := handlers.NewSearchHandler(stg)
+	taskHandler := handlers.NewTaskHandler(stg)
+	// API tokens live in Postgres in multi mode (shared across replicas, no
+	// ReadWriteMany secrets volume) and in the tokens.json file in single mode
+	// (no database dependency for a single-box install).
+	var tokenStore store.TokenStore
+	if multiMode {
+		tokenStore = store.NewPostgresTokenStore(db)
+		// One-time, idempotent import so an existing multi-mode install keeps
+		// its API tokens across the move from tokens.json to Postgres.
+		if n, err := store.ImportFileTokens(db, secretsDir); err != nil {
+			log.Printf("warning: could not import legacy tokens.json: %v", err)
+		} else if n > 0 {
+			log.Printf("imported %d API token(s) from tokens.json into Postgres", n)
+		}
+	} else {
+		if err := os.MkdirAll(secretsDir, 0700); err != nil {
+			log.Fatalf("failed to create secrets dir: %v", err)
+		}
+		tokenStore = store.NewFileTokenStore(secretsDir)
+	}
+	tokenHandler := handlers.NewTokenHandler(tokenStore)
 	// Comments require both a real user identity and the WebSocket hub for
 	// live refresh on other clients, so we gate on enableCollab (which
 	// itself implies multiMode). In single mode or collab-off deployments
 	// the route is never registered → clean 404 for any caller.
 	var commentsHandler *handlers.CommentsHandler
 	if enableCollab {
-		commentsHandler = handlers.NewCommentsHandler(absNotesDir)
+		commentsHandler = handlers.NewCommentsHandler(stg)
 	}
 
 	// Wrap mutating handlers to invalidate search cache + notify tree change
@@ -366,6 +492,7 @@ func main() {
 
 	configHandler := handlers.NewConfigHandler(authMode, enableCollab, serverAlias, require2FA)
 	configHandler.SetGrantMaxDepth(grantMaxDepth)
+	configHandler.SetTaskBoard(enableTaskBoard)
 
 	// Update-availability check — opt out by setting DISABLE_UPDATE_CHECK=true.
 	// One HTTPS GET to api.github.com per server every hour; failures are
@@ -407,10 +534,22 @@ func main() {
 	// state cookie + HMAC ensures we can't be tricked into minting tokens
 	// from a replayed callback.
 	if ssoClient != nil {
+		// Optional allowlist of extra origins the SSO handoff may target, in
+		// addition to the frontend. Used by the MCP OAuth bridge so the minted
+		// JWT can be handed to the MCP server's callback. Comma-separated
+		// absolute origins, e.g. "https://mdnest-mcp.example.com".
+		var ssoReturnOrigins []string
+		for _, o := range strings.Split(env("SSO_ALLOWED_RETURN_ORIGINS", ""), ",") {
+			if o = strings.TrimSpace(o); o != "" {
+				ssoReturnOrigins = append(ssoReturnOrigins, o)
+			}
+		}
 		ssoHandler := handlers.NewSSOHandler(
 			ssoClient, userStore, jwtSecret,
 			strings.TrimRight(frontendOrigin, "/"),
 			strings.HasPrefix(frontendOrigin, "https://"),
+			ssoReturnOrigins,
+			ssoAutoProvisionUsers,
 		)
 		mux.HandleFunc("/api/auth/sso/start", ssoHandler.HandleStart)
 		mux.HandleFunc("/api/auth/sso/callback", ssoHandler.HandleCallback)
@@ -434,7 +573,7 @@ func main() {
 		mux.Handle("/api/auth/totp/setup", authMiddleware.Wrap(http.HandlerFunc(totpHandler.HandleSetupTOTP)))
 		mux.Handle("/api/auth/totp/verify-setup", authMiddleware.Wrap(http.HandlerFunc(totpHandler.HandleVerifySetup)))
 		mux.Handle("/api/auth/totp/disable", authMiddleware.Wrap(http.HandlerFunc(totpHandler.HandleDisableTOTP)))
-		mux.HandleFunc("/api/auth/verify-totp", totpHandler.HandleVerifyLoginTOTP) // no auth — uses temp token
+		mux.HandleFunc("/api/auth/verify-totp", totpHandler.HandleVerifyLoginTOTP)            // no auth — uses temp token
 		mux.HandleFunc("/api/auth/totp/setup-with-temp", totpHandler.HandleSetupTOTPWithTemp) // no auth — uses temp token for forced setup
 	}
 
@@ -454,6 +593,13 @@ func main() {
 		mux.Handle("/api/upload", authMiddleware.Wrap(perms.RequireWrite(invalidateSearch(http.HandlerFunc(uploadHandler.HandleUpload)))))
 		mux.Handle("/api/move", authMiddleware.Wrap(perms.RequireMove(invalidateSearch(http.HandlerFunc(moveHandler.HandleMove)))))
 		mux.Handle("/api/search", authMiddleware.Wrap(perms.RequireNsAccess(http.HandlerFunc(searchHandler.HandleSearch))))
+		// Task aggregation: GET reads notes, PATCH rewrites a task line in a note,
+		// so route by method (read vs write) and invalidate the search cache on
+		// mutation just like /api/note.
+		if enableTaskBoard {
+			mux.Handle("/api/tasks", authMiddleware.Wrap(perms.ReadWriteRouter(invalidateSearch(http.HandlerFunc(taskHandler.HandleTasks)))))
+			mux.Handle("/api/board", authMiddleware.Wrap(perms.ReadWriteRouter(http.HandlerFunc(taskHandler.HandleBoard))))
+		}
 		mux.Handle("/api/files/", authMiddleware.Wrap(http.HandlerFunc(uploadHandler.HandleServeFile))) // files endpoint extracts ns from URL, handled differently
 	} else {
 		mux.Handle("/api/namespaces", authMiddleware.Wrap(http.HandlerFunc(nsHandler.ListNamespaces)))
@@ -468,6 +614,10 @@ func main() {
 		mux.Handle("/api/upload", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(uploadHandler.HandleUpload))))
 		mux.Handle("/api/move", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(moveHandler.HandleMove))))
 		mux.Handle("/api/search", authMiddleware.Wrap(http.HandlerFunc(searchHandler.HandleSearch)))
+		if enableTaskBoard {
+			mux.Handle("/api/tasks", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(taskHandler.HandleTasks))))
+			mux.Handle("/api/board", authMiddleware.Wrap(http.HandlerFunc(taskHandler.HandleBoard)))
+		}
 		mux.Handle("/api/files/", authMiddleware.Wrap(http.HandlerFunc(uploadHandler.HandleServeFile)))
 	}
 
@@ -475,6 +625,15 @@ func main() {
 	if multiMode {
 		adminHandler := handlers.NewAdminHandler(userStore, grantStore, nsAdminStore, collabHub, userProvider, grantMaxDepth)
 		meHandler := handlers.NewMeHandler(userStore, grantStore, nsAdminStore)
+		// Per-workspace git remote config: superadmin CRUD over shared/team
+		// workspaces, plus each user's own personal workspace. The optional
+		// GIT_REMOTE_ALLOWED_HOSTS restricts remote hosts (defence-in-depth for
+		// SSRF; the primary control is the writer's egress NetworkPolicy).
+		workspaceHandler := handlers.NewWorkspaceHandler(workspaceStore, userStore, grantStore, stg,
+			strings.Split(env("GIT_REMOTE_ALLOWED_HOSTS", ""), ","), encryptionConfigured)
+		if !encryptionConfigured {
+			log.Println("WARNING: MDNEST_ENCRYPTION_KEY is unset and MDNEST_JWT_SECRET is default — per-workspace git mirroring is disabled (credentials cannot be sealed at rest). Set MDNEST_ENCRYPTION_KEY to enable it.")
+		}
 
 		// Admin endpoints: outer gate is RequireAdmin (= any admin role).
 		// Per-namespace scoping is done inside each handler so namespace
@@ -484,6 +643,12 @@ func main() {
 		mux.Handle("/api/admin/grants", authMiddleware.Wrap(middleware.RequireAdmin(http.HandlerFunc(adminHandler.HandleGrants))))
 		mux.Handle("/api/admin/namespace-admins", authMiddleware.Wrap(middleware.RequireAdmin(http.HandlerFunc(adminHandler.HandleNamespaceAdmins))))
 		mux.Handle("/api/me", authMiddleware.Wrap(http.HandlerFunc(meHandler.HandleMe)))
+
+		// Per-workspace git remotes: admin CRUD is superadmin-only (it manages
+		// credentials); the personal workspace is self-service for any user.
+		mux.Handle("/api/admin/workspaces", authMiddleware.Wrap(middleware.RequireSuperAdmin(http.HandlerFunc(workspaceHandler.HandleAdmin))))
+		mux.Handle("/api/admin/workspace-groups", authMiddleware.Wrap(middleware.RequireSuperAdmin(http.HandlerFunc(workspaceHandler.HandleGroups))))
+		mux.Handle("/api/me/workspace", authMiddleware.Wrap(http.HandlerFunc(workspaceHandler.HandleMine)))
 
 		// Users endpoint: GET is RequireAdmin (handler scopes the list);
 		// PUT/DELETE (role change, user delete) are SuperAdmin-only —
@@ -525,9 +690,20 @@ func main() {
 
 	handler := corsMiddleware.Wrap(mux)
 
+	srv := &http.Server{Addr: ":" + port, Handler: handler}
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("server error: %v", err)
+		}
+	}()
 	log.Printf("mdnest backend listening on :%s (NOTES_DIR=%s)", port, absNotesDir)
-	if err := http.ListenAndServe(":"+port, handler); err != nil {
-		log.Fatal(err)
+
+	<-appCtx.Done()
+	log.Println("shutdown signal received, draining…")
+	shutCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutCtx); err != nil {
+		log.Printf("graceful shutdown error: %v", err)
 	}
 }
 

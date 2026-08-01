@@ -1,0 +1,180 @@
+{{- include "mdnest.validateSupported" . -}}
+{{- if eq (include "mdnest.gitNativeHA" .) "true" }}
+{{/*
+Git-native HA durability writer: a single-replica StatefulSet (MDNEST_ROLE=
+writer). It owns the authoritative git tree on a per-pod PVC, wins the Redis
+leader lock, drains the durability queue, commits, and (opt-in) mirrors each
+namespace repo to its remote. Exactly one replica: a git working tree has one
+writer. Not fronted by the backend Service.
+*/}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "mdnest.writer.fullname" . }}
+  labels:
+    {{- include "mdnest.labels" . | nindent 4 }}
+    app.kubernetes.io/component: writer
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  serviceName: {{ include "mdnest.writer.headlessName" . }}
+  replicas: 1
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      {{- include "mdnest.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: writer
+  template:
+    metadata:
+      annotations:
+        checksum/env: {{ include (print $.Template.BasePath "/configmap-env.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- with .Values.backend.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "mdnest.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: writer
+        {{- with .Values.backend.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "mdnest.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.backend.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.backend.namespaces }}
+      initContainers:
+        # Provision the configured top-level namespaces on the writer's tree
+        # (idempotent). The writer owns the filesystem, so this runs here rather
+        # than on the stateless app replicas.
+        - name: provision-namespaces
+          image: {{ $.Values.backend.namespaceInitImage }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              for ns in {{ range . }}{{ . | quote }} {{ end }}; do
+                echo "ensuring namespace: ${ns}"
+                mkdir -p "/data/notes/${ns}"
+              done
+          {{- with $.Values.backend.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: notes
+              mountPath: /data/notes
+      {{- end }}
+      containers:
+        - name: writer
+          image: {{ include "mdnest.backend.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.backend.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: {{ include "mdnest.envConfigName" . }}
+          env:
+            - name: MDNEST_ROLE
+              value: writer
+            {{- include "mdnest.backend.secretEnv" . | nindent 12 }}
+            {{- with .Values.backend.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- if .Values.backend.livenessProbe.enabled }}
+          livenessProbe:
+            httpGet:
+              path: /api/config
+              port: http
+            initialDelaySeconds: {{ .Values.backend.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.backend.livenessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.backend.livenessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.backend.livenessProbe.failureThreshold }}
+          {{- end }}
+          {{- if .Values.backend.readinessProbe.enabled }}
+          readinessProbe:
+            httpGet:
+              path: /api/config
+              port: http
+            initialDelaySeconds: {{ .Values.backend.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.backend.readinessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.backend.readinessProbe.timeoutSeconds }}
+            failureThreshold: {{ .Values.backend.readinessProbe.failureThreshold }}
+          {{- end }}
+          {{- with .Values.writer.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: notes
+              mountPath: /data/notes
+            - name: secrets
+              mountPath: /data/secrets
+            {{- if and .Values.storage.git.remote.url .Values.storage.git.remote.existingTokenSecret }}
+            - name: git-token
+              mountPath: /etc/mdnest/git
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: secrets
+          emptyDir: {}
+        {{- if and .Values.storage.git.remote.url .Values.storage.git.remote.existingTokenSecret }}
+        - name: git-token
+          secret:
+            secretName: {{ .Values.storage.git.remote.existingTokenSecret }}
+            items:
+              - key: {{ .Values.storage.git.remote.tokenSecretKey }}
+                path: token
+        {{- end }}
+      {{- with .Values.writer.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.writer.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.writer.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  volumeClaimTemplates:
+    - metadata:
+        name: notes
+        labels:
+          {{- include "mdnest.labels" . | nindent 10 }}
+          app.kubernetes.io/component: writer
+        {{- with (merge (dict) .Values.persistence.notes.annotations .Values.commonAnnotations) }}
+        annotations:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+      spec:
+        accessModes:
+          - {{ .Values.persistence.notes.accessMode }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.notes.size | quote }}
+        {{- if .Values.persistence.notes.storageClass }}
+        storageClassName: {{ .Values.persistence.notes.storageClass | quote }}
+        {{- end }}
+  {{- with .Values.persistence.pvcRetentionPolicy }}
+  persistentVolumeClaimRetentionPolicy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}

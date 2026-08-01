@@ -1,6 +1,6 @@
 # mdnest
 
-![Version: 0.1.0](https://img.shields.io/badge/Version-0.1.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 3.11.6](https://img.shields.io/badge/AppVersion-3.11.6-informational?style=flat-square)
+![Version: 0.2.1](https://img.shields.io/badge/Version-0.2.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 3.12.0-dev](https://img.shields.io/badge/AppVersion-3.12.0--dev-informational?style=flat-square)
 
 mdnest — self-hosted Markdown knowledge base with live collaboration.
 Standard-Kubernetes chart (no CRDs). PostgreSQL and Redis are expected to be
@@ -18,36 +18,25 @@ A standard-Kubernetes Helm chart (no CRDs) that deploys [mdnest](https://github.
 
 PostgreSQL and Redis are **never bundled**: point the chart at external/managed instances.
 
-> [!IMPORTANT]
-> **Not every option below is available yet.** The chart is versioned with mdnest,
-> and three opt-in capabilities documented here are not implemented in this
-> release — the chart **refuses to install** rather than come up "healthy" while
-> doing the wrong thing:
->
-> | Option | Why it is rejected |
-> |---|---|
-> | `storage.backend=s3` | The backend reads notes from the filesystem and ignores `S3_*`; notes would land on the PVC, not your bucket. |
-> | `collab.redis.*` | There is no presence/event backplane, so replicas would diverge instead of syncing. |
-> | `mcp.enabled=true` | The bundled MCP server speaks stdio only; the Service and Ingress would route to a port nothing listens on. |
->
-> Consequently `backend.replicaCount > 1` is also rejected: active/active needs
-> the backplane. **Supported today:** single-replica `single` or `multi` mode,
-> live collaboration, git-sync, ingress, and TLS.
+> [!NOTE]
+> The chart is versioned with mdnest, and its values surface must not outrun the
+> code: `storage.backend` accepts `local` (default) and `git` — any other value
+> (there is no S3 backend) is refused at install time rather than coming up
+> "healthy" while writing notes somewhere the backend silently ignores.
 
 ## Deployment models
 
-Single instance is the default and matches upstream mdnest exactly. The horizontally-scaled column describes the target topology; it is gated off until the Redis backplane lands (see the note above).
+Single instance is the default and matches upstream mdnest exactly. Active/active is opt-in.
 
 | | Single instance (default) | Horizontally scaled (opt-in) |
 |---|---|---|
 | `auth.mode` | `single` (file auth, no DB) | `multi` (external PostgreSQL) |
 | `backend.replicaCount` | `1` | `> 1` |
-| `backend.strategy.type` | `Recreate` | `RollingUpdate` |
 | Live collaboration | off | `collab.enabled=true` |
 | Cross-replica sync | n/a | Redis (`collab.redis.*`) |
-| Notes storage | `local` PVC (RWO) | RWX PVC **or** `storage.backend=s3` |
+| Notes storage | `local` PVC (RWO) | `storage.backend=git` (per-pod, no RWX) **or** a shared RWX PVC |
 
-The chart **validates these invariants and fails fast** with a clear message if a multi-replica deployment is missing PostgreSQL, Redis, collaboration, or shared (RWX/S3) storage.
+The chart **validates these invariants and fails fast** with a clear message if a multi-replica deployment is missing PostgreSQL, Redis, collaboration, or shared storage. The `git` backend adds the git-native HA topology (a durability writer over Redis) — see [docs/kubernetes.md](https://github.com/mahsanamin/mdnest/blob/main/docs/kubernetes.md).
 
 ## TL;DR
 
@@ -91,7 +80,6 @@ Never commit real credentials to a values file. For every secret the chart accep
 | PostgreSQL | `postgres.password` | `postgres.existingSecret` |
 | Redis | `collab.redis.url` | `collab.redis.existingSecret` or `collab.redis.passwordSecret` |
 | SSO | `sso.clientSecret` | `sso.existingSecret` |
-| S3 | `storage.s3.accessKey/secretKey` | `storage.s3.existingSecret` |
 | MCP token | `mcp.auth.token` | `mcp.auth.existingSecret` |
 | MCP OAuth | `mcp.oauth.secret.value` | `mcp.oauth.secret.existingSecret` |
 
@@ -138,25 +126,20 @@ collab:
       key: password
 ```
 
-### Storage backend (local vs S3)
+### Storage backend (local vs git)
 
-`storage.backend=local` (default) keeps notes on the `notes` PVC — byte-identical to upstream. Set `storage.backend=s3` to store notes in an S3-compatible bucket, which lets multiple replicas share notes **without** ReadWriteMany storage and enables self-service namespace creation:
+`storage.backend=local` (default) keeps notes on the `notes` PVC — byte-identical to upstream. `storage.backend=git` keeps the same on-disk layout but has mdnest own per-namespace git history in-process (no git-sync sidecar needed for local history), and unlocks the git-native HA topology when you add `REDIS_URL` — N stateless replicas share notes **without** ReadWriteMany storage:
 
 ```yaml
 storage:
-  backend: s3
-  s3:
-    endpoint: s3.fr-par.scw.cloud      # no scheme
-    bucket: mdnest-notes
-    region: fr-par
-    pathStyle: true                    # required for MinIO / Ceph RGW
-    existingSecret: mdnest-s3          # provides S3_ACCESS_KEY / S3_SECRET_KEY
-persistence:
-  notes:
-    enabled: false                     # no notes PVC needed with S3
+  backend: git
+  git:
+    remote:                              # optional off-cluster mirror, one repo per namespace
+      url: https://gitlab.example.com/notes-workspaces
+      existingTokenSecret: mdnest-git-token
 ```
 
-> Note *history* (git) and the git-sync sidecar always use the local filesystem and are orthogonal to this setting.
+> The git-sync sidecar is a separate optional mirror, mutually exclusive with `storage.backend=git` (both commit to the working tree). See [docs/kubernetes.md](https://github.com/mahsanamin/mdnest/blob/main/docs/kubernetes.md) for the HA topology and its durability trade.
 
 ### Shared storage for active/active (local backend)
 
@@ -190,12 +173,13 @@ backend:
 
 ### MCP server
 
-Opt-in Model Context Protocol endpoint. See the dedicated MCP docs in the app repository for client configuration. Minimal service-token setup:
+Opt-in Model Context Protocol endpoint. See the dedicated MCP docs in the app repository for client configuration. Minimal bearer (static token) setup:
 
 ```yaml
 mcp:
   enabled: true
   auth:
+    mode: bearer
     existingSecret: mdnest-mcp-token   # key: token (an mdnest_... API token)
   ingress:
     enabled: true
@@ -204,7 +188,7 @@ mcp:
         paths: [{ path: /, pathType: Prefix }]
 ```
 
-For per-user attribution, enable `mcp.oauth.enabled=true` and set `mcp.oauth.publicUrl` + `mcp.oauth.ssoAuthorizeUrl` (requires SSO).
+For per-user attribution, set `mcp.auth.mode=oauth` and provide `mcp.oauth.publicUrl` + `mcp.oauth.ssoAuthorizeUrl` (requires SSO). `bearer` and `oauth` are mutually exclusive.
 
 ### git-sync
 
@@ -243,7 +227,7 @@ All traffic goes to the frontend Service, which proxies `/api` and `/api/ws` (We
 | auth.mode | string | `"single"` | Authentication mode: `single` (file-based, no DB) or `multi` (PostgreSQL-backed, required for HA). |
 | auth.password | string | `""` | Inline admin password (used only when `existingSecret` is empty). CHANGE THIS. |
 | auth.secretKeys | object | `{"jwtSecret":"MDNEST_JWT_SECRET","password":"MDNEST_PASSWORD"}` | Keys expected inside `existingSecret`. |
-| backend | object | `{"affinity":{},"autoscaling":{"enabled":false,"maxReplicas":4,"minReplicas":2,"targetCPUUtilizationPercentage":75,"targetMemoryUtilizationPercentage":""},"disableUpdateCheck":false,"extraEnv":[],"frontendOrigin":"http://localhost","livenessProbe":{"enabled":true,"failureThreshold":3,"initialDelaySeconds":10,"periodSeconds":20,"timeoutSeconds":3},"namespaceInitImage":"busybox:1.36","namespaces":[],"nodeSelector":{},"podAnnotations":{},"podLabels":{},"podSecurityContext":{"runAsNonRoot":false},"readinessProbe":{"enabled":true,"failureThreshold":3,"initialDelaySeconds":5,"periodSeconds":10,"timeoutSeconds":3},"replicaCount":1,"resources":{"limits":{"memory":"512Mi"},"requests":{"cpu":"50m","memory":"64Mi"}},"securityContext":{},"serverAlias":"","service":{"port":8080,"type":"ClusterIP"},"strategy":{"type":"Recreate"},"tolerations":[]}` | --------------------------------------------------------------------------- |
+| backend | object | `{"affinity":{},"autoscaling":{"enabled":false,"maxReplicas":4,"minReplicas":2,"targetCPUUtilizationPercentage":75,"targetMemoryUtilizationPercentage":""},"disableUpdateCheck":false,"extraEnv":[],"frontendOrigin":"http://localhost","livenessProbe":{"enabled":true,"failureThreshold":3,"initialDelaySeconds":10,"periodSeconds":20,"timeoutSeconds":3},"namespaceInitImage":"busybox:1.36","namespaces":[],"nodeSelector":{},"podAnnotations":{},"podLabels":{},"podManagementPolicy":"Parallel","podSecurityContext":{"runAsNonRoot":false},"readinessProbe":{"enabled":true,"failureThreshold":3,"initialDelaySeconds":5,"periodSeconds":10,"timeoutSeconds":3},"replicaCount":1,"resources":{"limits":{"memory":"512Mi"},"requests":{"cpu":"50m","memory":"64Mi"}},"securityContext":{},"serverAlias":"","service":{"port":8080,"type":"ClusterIP"},"tolerations":[],"updateStrategy":{"type":"RollingUpdate"}}` | --------------------------------------------------------------------------- |
 | backend.affinity | object | `{}` | Affinity rules for the backend. |
 | backend.autoscaling | object | `{"enabled":false,"maxReplicas":4,"minReplicas":2,"targetCPUUtilizationPercentage":75,"targetMemoryUtilizationPercentage":""}` | Optional HorizontalPodAutoscaler (active/active only — requires RWX storage + Redis). |
 | backend.disableUpdateCheck | bool | `false` | Disable the periodic GitHub release update check (`DISABLE_UPDATE_CHECK`). |
@@ -255,6 +239,7 @@ All traffic goes to the frontend Service, which proxies `/api` and `/api/ws` (We
 | backend.nodeSelector | object | `{}` | Node selector for the backend. |
 | backend.podAnnotations | object | `{}` | Extra pod annotations for the backend. |
 | backend.podLabels | object | `{}` | Extra pod labels for the backend. |
+| backend.podManagementPolicy | string | `"Parallel"` | StatefulSet pod management. `Parallel` starts/replaces pods together (better for a stateless web tier); use `OrderedReady` for strict ordering. |
 | backend.podSecurityContext | object | `{"runAsNonRoot":false}` | Pod-level security context for the backend. |
 | backend.readinessProbe | object | `{"enabled":true,"failureThreshold":3,"initialDelaySeconds":5,"periodSeconds":10,"timeoutSeconds":3}` | Readiness probe (hits the unauthenticated `GET /api/config`). |
 | backend.replicaCount | int | `1` | Number of backend replicas. Keep at `1` unless running active/active (see top-of-file notes). |
@@ -263,10 +248,10 @@ All traffic goes to the frontend Service, which proxies `/api` and `/api/ws` (We
 | backend.serverAlias | string | `""` | Optional display alias shown in the UI (`SERVER_ALIAS`). |
 | backend.service.port | int | `8080` | Backend Service port. |
 | backend.service.type | string | `"ClusterIP"` | Backend Service type. |
-| backend.strategy.type | string | `"Recreate"` | Deployment strategy. `Recreate` is required with ReadWriteOnce volumes; use `RollingUpdate` only with ReadWriteMany storage (active/active). |
 | backend.tolerations | list | `[]` | Tolerations for the backend. |
-| collab | object | `{"enabled":false,"redis":{"database":0,"existingSecret":"","host":"","passwordSecret":{"key":"password","name":""},"port":6379,"secretKeys":{"url":"REDIS_URL"},"tls":false,"url":"","username":"default"}}` | --------------------------------------------------------------------------- |
-| collab.enabled | bool | `false` | Enable live collaboration (`ENABLE_LIVE_COLLAB`; requires `auth.mode=multi`). |
+| backend.updateStrategy.type | string | `"RollingUpdate"` | StatefulSet update strategy. `RollingUpdate` is safe because each pod owns its own volume (volumeClaimTemplate) — no ReadWriteOnce hand-off deadlock, so the old Deployment `Recreate` workaround is gone. |
+| collab | object | `{"enabled":false,"redis":{"database":0,"existingSecret":"","host":"","passwordSecret":{"key":"password","name":""},"port":6379,"secretKeys":{"url":"REDIS_URL"},"tls":false,"url":"","username":"default"}}` | ---------------------------------------------------------------------------  Live collaboration (collab.enabled) works on a single backend replica. To run multiple replicas (active/active), also set a Redis backplane below so presence and edits sync across pods — validateHA enforces this, since without it replicas would silently diverge.  DURABILITY NOTE: with the git-native HA backend (storage.backend=git + REDIS_URL) this same Redis is NOT just a presence/event backplane — it also carries the durability queue between the app replicas and the writer. Between a save's ack and the writer committing it to git, the queue is the only copy, so this Redis must run with AOF persistence (appendonly yes). See docs/kubernetes.md "Git-native HA and durability (RPO)". |
+| collab.enabled | bool | `false` | Enable live collaboration (`ENABLE_LIVE_COLLAB`; requires `auth.mode=multi`). For multiple replicas, also configure `redis` below. |
 | collab.redis.database | int | `0` | Redis database index (compose mode). |
 | collab.redis.existingSecret | string | `""` | Existing Secret to source `REDIS_URL` from instead of inline `url`. |
 | collab.redis.host | string | `""` | Compose mode: when set, the chart BUILDS `REDIS_URL` from discrete parts and reads the password from `passwordSecret`. Takes precedence over `url`/`existingSecret`. Use with managed Redis (KubeBlocks, ElastiCache). |
@@ -274,7 +259,7 @@ All traffic goes to the frontend Service, which proxies `/api` and `/api/ws` (We
 | collab.redis.port | int | `6379` | Redis port (compose mode). |
 | collab.redis.secretKeys | object | `{"url":"REDIS_URL"}` | Key inside `existingSecret` holding the URL. |
 | collab.redis.tls | bool | `false` | Use TLS (`rediss://`) in compose mode. |
-| collab.redis.url | string | `""` | Full Redis URL, e.g. `redis://:password@my-redis:6379/0` (or `rediss://` for TLS). Empty = single instance. |
+| collab.redis.url | string | `""` | Full Redis URL (`redis://` / `rediss://`) -> `REDIS_URL`. When set, presence/events sync across replicas (active/active); empty = single instance. |
 | collab.redis.username | string | `"default"` | Redis username (compose mode). |
 | commonAnnotations | object | `{}` | Annotations added to every resource created by the chart. |
 | commonLabels | object | `{}` | Labels added to every resource created by the chart. |
@@ -317,16 +302,18 @@ All traffic goes to the frontend Service, which proxies `/api` and `/api/ws` (We
 | ingress.enabled | bool | `false` | Enable an Ingress routing all traffic to the frontend Service. |
 | ingress.hosts | list | `[{"host":"mdnest.local","paths":[{"path":"/","pathType":"Prefix"}]}]` | Ingress hosts and paths. |
 | ingress.tls | list | `[]` | Ingress TLS configuration. |
-| mcp | object | `{"affinity":{},"auth":{"existingSecret":"","existingSecretKey":"token","token":""},"enabled":false,"extraEnv":[],"http":{"path":"/mcp","port":3000},"ingress":{"annotations":{},"className":"","enabled":false,"hosts":[],"tls":[]},"mdnestUrl":"","nodeSelector":{},"oauth":{"enabled":false,"publicUrl":"","secret":{"existingSecret":"","existingSecretKey":"oauth-secret","value":""},"ssoAuthorizeUrl":""},"podAnnotations":{},"podLabels":{},"podSecurityContext":{},"replicaCount":1,"resources":{},"securityContext":{},"service":{"port":3000,"type":"ClusterIP"},"tolerations":[]}` | --------------------------------------------------------------------------- |
+| mcp | object | `{"affinity":{},"auth":{"existingSecret":"","existingSecretKey":"token","mode":"bearer","token":""},"enabled":false,"extraEnv":[],"http":{"path":"/mcp","port":3000},"ingress":{"annotations":{},"className":"","enabled":false,"hosts":[],"tls":[]},"mdnestUrl":"","nodeSelector":{},"oauth":{"allowedRedirectOrigins":[],"publicUrl":"","secret":{"existingSecret":"","existingSecretKey":"oauth-secret","value":""},"ssoAuthorizeUrl":""},"podAnnotations":{},"podLabels":{},"podSecurityContext":{},"replicaCount":1,"resources":{},"securityContext":{},"service":{"port":3000,"type":"ClusterIP"},"tolerations":[]}` | --------------------------------------------------------------------------- |
 | mcp.affinity | object | `{}` | Affinity rules for the MCP server. |
-| mcp.auth | object | `{"existingSecret":"","existingSecretKey":"token","token":""}` | Service-token auth (used when `oauth.enabled=false`). Provide inline via `auth.token` or reference an existing Secret. |
-| mcp.enabled | bool | `false` | Enable the MCP server (Model Context Protocol over streamable-HTTP). Adds a Deployment + Service (and optional Ingress). |
+| mcp.auth | object | `{"existingSecret":"","existingSecretKey":"token","mode":"bearer","token":""}` | Endpoint authentication. Mutually exclusive modes selected by `auth.mode`:    `bearer` — clients present a static mdnest API token (service / gateway      integration). The token is required in the endpoint's `Authorization:      Bearer` header and forwarded to the backend. Provide it inline via      `auth.token` or reference an existing Secret (`auth.existingSecret`).    `oauth`  — per-user delegation via OAuth 2.1 authorization-code + PKCE;      login is delegated to mdnest SSO and every action is attributed to the      signed-in user. Requires the `oauth.*` settings below. |
+| mcp.auth.token | string | `""` | bearer mode: static mdnest API token. Provide inline via `auth.token`    or reference an existing Secret. |
+| mcp.enabled | bool | `false` | Enable the MCP server over streamable-HTTP. |
 | mcp.extraEnv | list | `[]` | Extra environment variables appended to the MCP container. |
 | mcp.http | object | `{"path":"/mcp","port":3000}` | MCP HTTP listen port and path. |
 | mcp.ingress | object | `{"annotations":{},"className":"","enabled":false,"hosts":[],"tls":[]}` | Optional standard Ingress for the MCP endpoint (leave disabled if your cluster exposes it through its own ingress controller, e.g. a Traefik IngressRoute defined at the umbrella-chart level). |
 | mcp.mdnestUrl | string | `""` | URL the MCP server uses to reach the backend API; defaults to the in-cluster backend Service when empty. |
 | mcp.nodeSelector | object | `{}` | Node selector for the MCP server. |
-| mcp.oauth | object | `{"enabled":false,"publicUrl":"","secret":{"existingSecret":"","existingSecretKey":"oauth-secret","value":""},"ssoAuthorizeUrl":""}` | Per-user OAuth 2.1 mode. When enabled the MCP server is an OAuth AS/RS and delegates login to mdnest SSO, attributing actions to the signed-in user. When disabled (default) the shared service token is used. |
+| mcp.oauth | object | `{"allowedRedirectOrigins":[],"publicUrl":"","secret":{"existingSecret":"","existingSecretKey":"oauth-secret","value":""},"ssoAuthorizeUrl":""}` | oauth mode settings (used only when `auth.mode=oauth`). |
+| mcp.oauth.allowedRedirectOrigins | list | `[]` | Origins allowed to receive an OAuth authorization code, in addition to loopback. Loopback (127.0.0.1 / localhost) is always permitted, which covers native MCP clients. An authorization code carries a live mdnest token, so any other origin must be listed here explicitly or it is refused. Leave empty unless a hosted client on a real domain needs it. |
 | mcp.oauth.publicUrl | string | `""` | Public HTTPS base URL clients reach the MCP server on (no trailing slash). |
 | mcp.oauth.secret | object | `{"existingSecret":"","existingSecretKey":"oauth-secret","value":""}` | HMAC secret signing OAuth cookies/codes. Provide inline via `secret.value` or reference an existing Secret. |
 | mcp.oauth.ssoAuthorizeUrl | string | `""` | mdnest backend SSO start endpoint, e.g. `https://<host>/api/auth/sso/start`. |
@@ -339,16 +326,17 @@ All traffic goes to the frontend Service, which proxies `/api` and `/api/ws` (We
 | mcp.service | object | `{"port":3000,"type":"ClusterIP"}` | MCP Service type/port. |
 | mcp.tolerations | list | `[]` | Tolerations for the MCP server. |
 | nameOverride | string | `""` | Override the chart name portion of generated resource names. |
-| persistence | object | `{"notes":{"accessMode":"ReadWriteOnce","annotations":{},"enabled":true,"existingClaim":"","size":"5Gi","storageClass":""},"secrets":{"accessMode":"ReadWriteOnce","annotations":{},"enabled":true,"existingClaim":"","size":"256Mi","storageClass":""}}` | --------------------------------------------------------------------------- |
-| persistence.notes.accessMode | string | `"ReadWriteOnce"` | Access mode; must be `ReadWriteMany` for active/active. |
+| persistence | object | `{"notes":{"accessMode":"ReadWriteOnce","annotations":{},"enabled":true,"existingClaim":"","size":"5Gi","storageClass":""},"pvcRetentionPolicy":{},"secrets":{"accessMode":"ReadWriteOnce","annotations":{},"enabled":true,"existingClaim":"","size":"256Mi","storageClass":""}}` | --------------------------------------------------------------------------- |
+| persistence.notes.accessMode | string | `"ReadWriteOnce"` | Access mode for the per-pod volumeClaimTemplate. ReadWriteOnce is fine (each pod owns its volume). Sharing across pods uses existingClaim instead. |
 | persistence.notes.annotations | object | `{}` | Annotations for the notes PVC. |
-| persistence.notes.enabled | bool | `true` | Provision a PVC for note data (ignored when `storage.backend=s3`). |
-| persistence.notes.existingClaim | string | `""` | Use an existing PVC instead of creating one. |
+| persistence.notes.enabled | bool | `true` | Provision a PVC for note data. |
+| persistence.notes.existingClaim | string | `""` | Use an existing (shared) PVC instead of a per-pod volumeClaimTemplate. Required for active/active and for git-sync. |
 | persistence.notes.size | string | `"5Gi"` | Notes PVC size. |
 | persistence.notes.storageClass | string | `""` | StorageClass for the notes PVC (empty = cluster default). |
-| persistence.secrets.accessMode | string | `"ReadWriteOnce"` | Access mode; must be `ReadWriteMany` for active/active. |
+| persistence.pvcRetentionPolicy | object | `{}` | Retention policy for volumeClaimTemplate PVCs (Kubernetes >= 1.27). Lets the StatefulSet delete or retain per-pod PVCs on scale-down/delete, so their lifecycle is controlled rather than orphaned. Leave empty for the cluster default (Retain). Example: {whenDeleted: Delete, whenScaled: Retain}. |
+| persistence.secrets.accessMode | string | `"ReadWriteOnce"` | Access mode. No longer required to be ReadWriteMany for active/active (multi-mode tokens are in Postgres); set persistence.secrets.enabled=false instead of provisioning RWX. |
 | persistence.secrets.annotations | object | `{}` | Annotations for the secrets PVC. |
-| persistence.secrets.enabled | bool | `true` | Provision a PVC for the API-token/secrets store. |
+| persistence.secrets.enabled | bool | `true` | Provision a PVC for the API-token/secrets store. In multi mode API tokens live in PostgreSQL, so this PVC is unused and can be disabled (falls back to an emptyDir) — that is what removes the last ReadWriteMany requirement for active/active. Existing multi-mode installs keep their tokens: on first start the backend imports tokens.json into Postgres, so upgrade with this still enabled once, then disable it. Single mode still uses it for the file-based token store. |
 | persistence.secrets.existingClaim | string | `""` | Use an existing PVC instead of creating one. |
 | persistence.secrets.size | string | `"256Mi"` | Secrets PVC size. |
 | persistence.secrets.storageClass | string | `""` | StorageClass for the secrets PVC (empty = cluster default). |
@@ -364,9 +352,10 @@ All traffic goes to the frontend Service, which proxies `/api` and `/api/ws` (We
 | serviceAccount.annotations | object | `{}` | Annotations to add to the ServiceAccount. |
 | serviceAccount.create | bool | `true` | Create a ServiceAccount for the workloads. |
 | serviceAccount.name | string | `""` | Name of the ServiceAccount; generated when empty and `create=true`. |
-| sso | object | `{"adminEmails":"","allowedDomains":"","clientId":"","clientSecret":"","enabled":false,"existingSecret":"","issuerUrl":"","providerLabel":"SSO","redirectUrl":"","secretKeys":{"clientSecret":"SSO_CLIENT_SECRET"}}` | --------------------------------------------------------------------------- |
+| sso | object | `{"adminEmails":"","allowedDomains":"","autoProvisionUsers":false,"clientId":"","clientSecret":"","enabled":false,"existingSecret":"","issuerUrl":"","providerLabel":"SSO","redirectUrl":"","secretKeys":{"clientSecret":"SSO_CLIENT_SECRET"}}` | --------------------------------------------------------------------------- |
 | sso.adminEmails | string | `""` | Comma-separated emails auto-promoted to superadmin. |
 | sso.allowedDomains | string | `""` | Comma-separated list of allowed email domains. |
+| sso.autoProvisionUsers | bool | `false` | Opt-in: auto-create a least-privilege collaborator for an unknown but IdP-authenticated email on first login, instead of rejecting it. Off by default. Enable only when the IdP itself gates who may obtain a token (e.g. a domain-restricted enterprise IdP); pair with `allowedDomains`. |
 | sso.clientId | string | `""` | OIDC client ID. |
 | sso.clientSecret | string | `""` | Inline OIDC client secret (used only when `existingSecret` is empty). |
 | sso.enabled | bool | `false` | Enable SSO/OIDC login (`USER_PROVIDER=sso`; otherwise `local`). |
@@ -375,23 +364,31 @@ All traffic goes to the frontend Service, which proxies `/api` and `/api/ws` (We
 | sso.providerLabel | string | `"SSO"` | Label shown on the SSO login button. |
 | sso.redirectUrl | string | `""` | OAuth redirect URL; defaults to `<frontendOrigin>/api/auth/sso/callback`. |
 | sso.secretKeys | object | `{"clientSecret":"SSO_CLIENT_SECRET"}` | Key inside `existingSecret` holding the client secret. |
-| storage | object | `{"backend":"local","s3":{"accessKey":"","bucket":"","endpoint":"","existingSecret":"","pathStyle":true,"region":"us-east-1","secretKey":"","secretKeys":{"accessKey":"S3_ACCESS_KEY","secretKey":"S3_SECRET_KEY"},"useSSL":true}}` | --------------------------------------------------------------------------- |
-| storage.backend | string | `"local"` | Note storage backend: `local` (notes on the `notes` PVC, byte-identical to upstream) or `s3` (S3-compatible object store, enables multi-replica sharing without RWX and self-service namespaces). |
-| storage.s3.accessKey | string | `""` | Inline S3 access key (used only when `existingSecret` is empty). |
-| storage.s3.bucket | string | `""` | S3 bucket name. |
-| storage.s3.endpoint | string | `""` | S3 endpoint as `host[:port]` WITHOUT scheme, e.g. `s3.fr-par.scw.cloud`. |
-| storage.s3.existingSecret | string | `""` | Existing Secret holding S3 credentials (e.g. synced from Vault). When set, inline keys are ignored. |
-| storage.s3.pathStyle | bool | `true` | Path-style addressing (bucket in URL path). Required for MinIO / Ceph RGW; set `false` only if your endpoint requires virtual-hosted-style. |
-| storage.s3.region | string | `"us-east-1"` | S3 region. |
-| storage.s3.secretKey | string | `""` | Inline S3 secret key (used only when `existingSecret` is empty). |
-| storage.s3.secretKeys | object | `{"accessKey":"S3_ACCESS_KEY","secretKey":"S3_SECRET_KEY"}` | Keys inside `existingSecret` holding the credentials. |
-| storage.s3.useSSL | bool | `true` | Use TLS to reach the endpoint. |
+| storage | object | `{"backend":"local","git":{"authorEmail":"","authorName":"","commit":{"debounce":"","maxWait":""},"remote":{"branch":"main","existingTokenSecret":"","tokenSecretKey":"token","url":"","username":"oauth2"}}}` | --------------------------------------------------------------------------- |
+| storage.backend | string | `"local"` | Note storage backend: `local` (notes on the volume) or `git` (same, plus mdnest maintains per-namespace git history in-process — no git-sync sidecar needed for local history; add REDIS_URL for the git-native HA topology). Any other value is rejected at install time. |
+| storage.git.authorName | string | `""` | Author name/email for mdnest's own commits. Empty = mdnest/mdnest@localhost. |
+| storage.git.commit | object | `{"debounce":"","maxWait":""}` | Git history is committed per-namespace once the writer goes idle on it, not on a fixed timer: an editing session (many rapid saves) is coalesced into a single commit made after `commit.debounce` with no new write, so the git graph stays readable. Note bytes are durable on disk immediately; this only controls history commit cadence. |
+| storage.git.commit.debounce | string | `""` | Commit a namespace after this long with no new write (Go duration). Empty = backend default (2m). |
+| storage.git.commit.maxWait | string | `""` | Safety cap: force a commit once a namespace has been dirty this long even while still being edited (Go duration). Empty = backend default (10m). |
+| storage.git.remote | object | `{"branch":"main","existingTokenSecret":"","tokenSecretKey":"token","url":"","username":"oauth2"}` | Optional per-namespace remote mirror: one git repository per workspace, pushed over HTTPS. When `url` is set the git backend pushes each namespace repo to `<url>/<namespace>.git`. Opt-in; empty = local history only. This is the coarse global default; per-workspace remotes (multi mode) are a separate feature. |
+| storage.git.remote.branch | string | `"main"` | Branch to push. |
+| storage.git.remote.existingTokenSecret | string | `""` | Existing Secret holding the Personal Access Token, mounted read-only as a file. Create it yourself; tokens must never live in values. |
+| storage.git.remote.tokenSecretKey | string | `"token"` | Key inside `existingTokenSecret` holding the PAT. |
+| storage.git.remote.url | string | `""` | Base URL for the per-namespace remotes, e.g. `https://gitlab.example.com/notes-workspaces`. Empty = mirroring disabled. |
+| storage.git.remote.username | string | `"oauth2"` | HTTPS username (GitLab PAT: `oauth2`; GitHub PAT: `x-access-token`). |
+| taskBoard | object | `{"enabled":false}` | --------------------------------------------------------------------------- |
+| taskBoard.enabled | bool | `false` | Enable the task board (`ENABLE_TASK_BOARD`). Off by default; projects note checkboxes into a per-namespace kanban. Independent of `auth.mode`. |
+| writer | object | `{"affinity":{},"nodeSelector":{},"resources":{},"tolerations":[]}` | --------------------------------------------------------------------------- |
+| writer.affinity | object | `{}` | Affinity rules for the writer pod. |
+| writer.nodeSelector | object | `{}` | Node selector for the writer pod. |
+| writer.resources | object | `{}` | Writer resource requests/limits. |
+| writer.tolerations | list | `[]` | Tolerations for the writer pod. |
 
 ## Maintainers
 
 | Name | Email | Url |
 | ---- | ------ | --- |
-| mdnest | <https://github.com/mahsanamin/mdnest> |  |
+| mdnest |  | <https://github.com/mahsanamin/mdnest> |
 
 ---
 

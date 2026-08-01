@@ -60,7 +60,9 @@ spec:
               value: {{ .Values.mcp.http.path | quote }}
             - name: MDNEST_URL
               value: {{ .Values.mcp.mdnestUrl | default (printf "http://%s:%v" (include "mdnest.backend.fullname" .) .Values.backend.service.port) | quote }}
-            {{- if or (not .Values.mcp.oauth.enabled) .Values.mcp.auth.existingSecret .Values.mcp.auth.token }}
+            - name: MCP_AUTH_MODE
+              value: {{ .Values.mcp.auth.mode | quote }}
+            {{- if eq .Values.mcp.auth.mode "bearer" }}
             - name: MDNEST_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -71,14 +73,15 @@ spec:
                   name: {{ include "mdnest.mcp.secretName" . }}
                   key: token
                   {{- end }}
-            {{- end }}
-            {{- if .Values.mcp.oauth.enabled }}
-            - name: MCP_AUTH_MODE
-              value: "oauth"
+            {{- else if eq .Values.mcp.auth.mode "oauth" }}
             - name: MCP_PUBLIC_URL
-              value: {{ required "mcp.oauth.publicUrl is required when mcp.oauth.enabled" .Values.mcp.oauth.publicUrl | quote }}
+              value: {{ required "mcp.oauth.publicUrl is required when mcp.auth.mode=oauth" .Values.mcp.oauth.publicUrl | quote }}
             - name: MCP_SSO_AUTHORIZE_URL
-              value: {{ required "mcp.oauth.ssoAuthorizeUrl is required when mcp.oauth.enabled" .Values.mcp.oauth.ssoAuthorizeUrl | quote }}
+              value: {{ required "mcp.oauth.ssoAuthorizeUrl is required when mcp.auth.mode=oauth" .Values.mcp.oauth.ssoAuthorizeUrl | quote }}
+            {{- with .Values.mcp.oauth.allowedRedirectOrigins }}
+            - name: MCP_ALLOWED_REDIRECT_ORIGINS
+              value: {{ join "," . | quote }}
+            {{- end }}
             - name: MCP_OAUTH_SECRET
               valueFrom:
                 secretKeyRef:
@@ -89,6 +92,8 @@ spec:
                   name: {{ include "mdnest.mcp.secretName" . }}
                   key: oauth-secret
                   {{- end }}
+            {{- else }}
+            {{- fail (printf "mcp.auth.mode must be \"bearer\" or \"oauth\" (got %q)" .Values.mcp.auth.mode) }}
             {{- end }}
             {{- with .Values.mcp.extraEnv }}
             {{- toYaml . | nindent 12 }}

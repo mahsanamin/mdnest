@@ -2,17 +2,18 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
-	"os"
-	"path/filepath"
+
+	"github.com/mdnest/mdnest/backend/storage"
 )
 
 type MoveHandler struct {
-	notesDir string
+	store storage.Storage
 }
 
-func NewMoveHandler(notesDir string) *MoveHandler {
-	return &MoveHandler{notesDir: notesDir}
+func NewMoveHandler(store storage.Storage) *MoveHandler {
+	return &MoveHandler{store: store}
 }
 
 // HandleMove handles POST /api/move?ns=...&from=...&to=...
@@ -23,38 +24,30 @@ func (h *MoveHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	nsDir := RequireNamespace(h.notesDir, w, r)
-	if nsDir == "" {
+	ctx := r.Context()
+	ns := RequireNamespaceStore(ctx, h.store, w, r)
+	if ns == "" {
 		return
 	}
 
-	fromPath := r.URL.Query().Get("from")
-	toPath := r.URL.Query().Get("to")
-
-	absSrc := SafePath(nsDir, fromPath)
-	if absSrc == "" {
+	fromRel, ok := SafeRelPath(r.URL.Query().Get("from"))
+	if !ok {
 		http.Error(w, `{"error":"invalid source path"}`, http.StatusBadRequest)
 		return
 	}
 
-	absDst := SafePath(nsDir, toPath)
-	if absDst == "" {
+	toRel, ok := SafeRelPath(r.URL.Query().Get("to"))
+	if !ok {
 		http.Error(w, `{"error":"invalid destination path"}`, http.StatusBadRequest)
 		return
 	}
 
-	if _, err := os.Stat(absSrc); os.IsNotExist(err) {
+	if _, err := h.store.Stat(ctx, ns, fromRel); errors.Is(err, storage.ErrNotExist) {
 		http.Error(w, `{"error":"source not found"}`, http.StatusNotFound)
 		return
 	}
 
-	// Ensure destination parent exists
-	if err := os.MkdirAll(filepath.Dir(absDst), 0755); err != nil {
-		http.Error(w, `{"error":"failed to create destination directory"}`, http.StatusInternalServerError)
-		return
-	}
-
-	if err := os.Rename(absSrc, absDst); err != nil {
+	if err := h.store.Rename(ctx, ns, fromRel, toRel); err != nil {
 		http.Error(w, `{"error":"failed to move item"}`, http.StatusInternalServerError)
 		return
 	}

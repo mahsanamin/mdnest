@@ -242,6 +242,16 @@ export default function LiveEditorCrepe({
   const [innerEditor, setInnerEditor] = useState(null);
 
   const suppressSaveRef = useRef(true);
+  // The content value the parent last handed us. Crepe is created with
+  // `defaultValue: content`, and markdownUpdated then stores the *serialized*
+  // form in lastLocalContentRef — which differs from the file whenever the
+  // serializer normalizes anything (`-` bullets become `*`). Comparing the
+  // incoming prop against that serialized form therefore looks like a change
+  // on every open and fires a redundant replaceAll, which re-arms
+  // suppressSaveRef without necessarily producing another markdownUpdated to
+  // consume it — and the next real edit gets swallowed. Compare against what
+  // the parent actually gave us instead.
+  const lastPropContentRef = useRef(null);
   // Last markdown we serialized OUT of the editor. Used to skip the
   // content-prop sync effect for our own saves (avoid replaceAll loops).
   const lastLocalContentRef = useRef(content);
@@ -309,6 +319,7 @@ export default function LiveEditorCrepe({
       return resolved;
     };
 
+    lastPropContentRef.current = content;
     const crepe = new Crepe({
       root: rootRef.current,
       defaultValue: content,
@@ -413,6 +424,19 @@ export default function LiveEditorCrepe({
         // round-trip byte-identical through the Live editor.
         const restored = restoreWikilinks(markdown);
         lastLocalContentRef.current = restored;
+        // suppressSaveRef is armed only for the duration of a document
+        // injection (Crepe's initial render and each replaceAll), because
+        // re-serializing what we just put in would PUT the file back — and the
+        // serializer normalizes as it goes, so that write also rewrites the
+        // user's bullet style on open. It is disarmed the moment the injection
+        // finishes, NOT when an echo arrives: an injection whose serialization
+        // is byte-identical fires no markdownUpdated at all, which would leave
+        // the flag armed and silently eat the next real edit.
+        //
+        // The previous gate stayed armed until a keydown or mousedown landed
+        // inside the editor, which ticking a task checkbox never produces —
+        // ProseMirror handles it internally — so every checkbox edit in a
+        // freshly opened note was silently dropped.
         if (suppressSaveRef.current) return;
         if (markdown === prev) return;
         const cb = onChangeRef.current;
@@ -422,6 +446,8 @@ export default function LiveEditorCrepe({
 
     crepe.create().then(() => {
       crepeRef.current = crepe;
+      // The initial document is in; anything after this is a user edit.
+      suppressSaveRef.current = false;
       setInnerEditor(crepe.editor);
       if (readOnly) crepe.setReadonly(true);
     }).catch((err) => {
@@ -429,16 +455,7 @@ export default function LiveEditorCrepe({
       console.error('Crepe init failed:', err);
     });
 
-    const unsuppress = (e) => {
-      if (!rootRef.current?.contains(e.target)) return;
-      suppressSaveRef.current = false;
-    };
-    document.addEventListener('keydown', unsuppress, true);
-    document.addEventListener('mousedown', unsuppress, true);
-
     return () => {
-      document.removeEventListener('keydown', unsuppress, true);
-      document.removeEventListener('mousedown', unsuppress, true);
       if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
       setInnerEditor(null);
       try {
@@ -465,12 +482,16 @@ export default function LiveEditorCrepe({
   useEffect(() => {
     if (!innerEditor || !crepeRef.current) return;
     if (content == null) return;
+    if (content === lastPropContentRef.current) return;
     if (content === lastLocalContentRef.current) return;
+    lastPropContentRef.current = content;
     suppressSaveRef.current = true;
     try {
       crepeRef.current.editor.action(replaceAll(content));
       lastLocalContentRef.current = content;
-    } catch { /* editor not ready or replaceAll failed */ }
+    } catch { /* editor not ready or replaceAll failed */ } finally {
+      suppressSaveRef.current = false;
+    }
   }, [content, innerEditor]);
 
   // Push active comment anchors into the highlight plugin whenever comments

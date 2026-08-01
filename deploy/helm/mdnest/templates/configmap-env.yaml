@@ -16,18 +16,34 @@ data:
   SECRETS_DIR: "/data/secrets"
   PORT: "8080"
   STORAGE_BACKEND: {{ .Values.storage.backend | quote }}
-  {{- if eq .Values.storage.backend "s3" }}
-  S3_ENDPOINT: {{ required "storage.s3.endpoint is required when storage.backend=s3" .Values.storage.s3.endpoint | quote }}
-  S3_BUCKET: {{ required "storage.s3.bucket is required when storage.backend=s3" .Values.storage.s3.bucket | quote }}
-  S3_REGION: {{ .Values.storage.s3.region | quote }}
-  S3_USE_SSL: {{ .Values.storage.s3.useSSL | ternary "true" "false" | quote }}
-  S3_PATH_STYLE: {{ .Values.storage.s3.pathStyle | ternary "true" "false" | quote }}
+  {{- if eq .Values.storage.backend "git" }}
+  {{- with .Values.storage.git.commit.debounce }}
+  GIT_COMMIT_DEBOUNCE: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.storage.git.commit.maxWait }}
+  GIT_COMMIT_MAX_WAIT: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.storage.git.authorName }}
+  GIT_AUTHOR_NAME: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.storage.git.authorEmail }}
+  GIT_AUTHOR_EMAIL: {{ . | quote }}
+  {{- end }}
+  {{- if .Values.storage.git.remote.url }}
+  GIT_REMOTE_URL: {{ .Values.storage.git.remote.url | quote }}
+  GIT_REMOTE_USERNAME: {{ .Values.storage.git.remote.username | quote }}
+  GIT_REMOTE_BRANCH: {{ .Values.storage.git.remote.branch | quote }}
+  {{- if .Values.storage.git.remote.existingTokenSecret }}
+  GIT_TOKEN_FILE: "/etc/mdnest/git/token"
+  {{- end }}
+  {{- end }}
   {{- end }}
   FRONTEND_ORIGIN: {{ .Values.backend.frontendOrigin | quote }}
   {{- if .Values.backend.serverAlias }}
   SERVER_ALIAS: {{ .Values.backend.serverAlias | quote }}
   {{- end }}
   DISABLE_UPDATE_CHECK: {{ .Values.backend.disableUpdateCheck | ternary "true" "false" | quote }}
+  ENABLE_TASK_BOARD: {{ .Values.taskBoard.enabled | ternary "true" "false" | quote }}
   {{- if eq .Values.auth.mode "multi" }}
   ENABLE_LIVE_COLLAB: {{ .Values.collab.enabled | ternary "true" "false" | quote }}
   POSTGRES_HOST: {{ required "postgres.host is required when auth.mode=multi" .Values.postgres.host | quote }}
@@ -48,5 +64,8 @@ data:
   SSO_PROVIDER_LABEL: {{ .Values.sso.providerLabel | quote }}
   {{- if .Values.sso.adminEmails }}
   ADMIN_EMAILS: {{ .Values.sso.adminEmails | quote }}
+  {{- end }}
+  {{- if .Values.sso.autoProvisionUsers }}
+  SSO_AUTOPROVISION_USERS: "true"
   {{- end }}
   {{- end }}

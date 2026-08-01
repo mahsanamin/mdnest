@@ -144,6 +144,11 @@ Create an API token in Settings (gear icon) > API Tokens, then configure your MC
 
 **Available tools:** `list_namespaces`, `list_tree`, `read_note`, `write_note`, `append_note`, `prepend_note`, `create_note`, `create_folder`, `delete_item`, `move_item`, `search_notes`
 
+For a **shared/hosted endpoint** the server also speaks the streamable-HTTP
+transport (`MCP_TRANSPORT=http`, `POST /mcp`), with an optional per-user OAuth
+2.1 mode and an opt-in Docker Compose service. See
+[docs/mcp.md](docs/mcp.md) for transports, auth modes, and deployment.
+
 ## Server Management
 
 All server commands use `mdnest-server` and must be run from the project directory:
@@ -336,11 +341,14 @@ Beyond the core editor and the three access interfaces, mdnest includes:
 - **Obsidian `[[wikilinks]]`.** Bring an Obsidian vault over as-is: `[[note]]`, `[[note|alias]]`, `[[note#heading]]`, and `[[#heading]]` resolve against your notes and open in-app — in both the preview and the Live editor. Broken links show muted so you can spot missing notes, and the markdown on disk stays literal `[[...]]`.
 - **Inline comments with threads.** Highlight any text and leave a comment; commented passages stay highlighted in yellow, and reviewers reply in a thread. Click a highlight to jump to the conversation. Comments are anchored to invisible UUIDs, so moving or renaming files keeps them attached.
 - **Live collaboration.** Multiple people editing the same note see each other's cursors and changes in real time over WebSocket. Toggle with `ENABLE_LIVE_COLLAB=true`.
+- **Task board from your notes.** Every `- [ ]` checkbox becomes a card on a per-namespace kanban board — with due dates, priorities, tags, sub-steps and descriptions written as an indented block in the note itself. Drag between columns, create and edit whole tasks from the board, scope it to one note or the whole workspace — and it's still just markdown on disk. Enable with `ENABLE_TASK_BOARD=true`. See [docs/tasks.md](docs/tasks.md).
 - **Interactive mermaid diagrams.** Diagrams render in-place with a Source/Preview/zoom toolbar and click-to-edit labels — edit node text directly on the diagram without touching the code.
 - **In-app version history.** With git-sync enabled, right-click any note → **History** to browse past versions, compare any two as a diff, and one-click restore. Restoration is itself versioned and undoable through the same modal.
 - **Namespace-scoped admins.** One or two SuperAdmins overall, plus per-team Admins who manage just their own namespace — invite users, manage grants, trigger git-sync — without touching other teams' data. See [docs/security.md](docs/security.md#layer-3--authorization).
 - **Corporate SSO + 2FA.** Point mdnest at any OIDC provider (Google Workspace, Okta, Microsoft Entra, Keycloak, Auth0); the IdP owns MFA, mdnest owns per-namespace authorization. Or use local username/password with TOTP. One `USER_PROVIDER` flag — no code changes. See [docs/sso-setup.md](docs/sso-setup.md).
 - **API-first.** Full REST API + CLI with multi-server support (`mdnest read @work/eng/spec.md`). Build scripts, automations, or integrations on top of your notes.
+- **Bring your own repo, per workspace.** In multi-user mode each namespace — including a user's personal one — can mirror to its *own* git repository instead of one operator-wide remote, so a team (or a person) owns the durability of their own notes. Credentials are sealed at rest and never leave the server. See [docs/security.md](docs/security.md).
+- **Scale out without shared storage.** An optional `git` storage backend owns git history in-process, and with Redis it runs as several stateless replicas behind one durability writer — no ReadWriteMany volume required. Git stays the source of truth. Read the durability trade-off in [docs/kubernetes.md](docs/kubernetes.md) before choosing it.
 - **Git backup on your terms.** Optional sidecar auto-commits and pushes to a private repo on a schedule you control. See [Git Sync](#git-sync-optional).
 - **Update-aware.** The backend polls GitHub for newer releases; when one drops, a badge in the sidebar footer surfaces the release notes inline. Opt out with `DISABLE_UPDATE_CHECK=true` for air-gapped installs.
 
@@ -348,11 +356,13 @@ Beyond the core editor and the three access interfaces, mdnest includes:
 
 - [docs/setup.md](docs/setup.md) — Setup, configuration, env vars
 - [docs/user-guide.md](docs/user-guide.md) — End-user walkthrough
+- [docs/tasks.md](docs/tasks.md) — Task model: how notes become a kanban task board
 - [docs/security.md](docs/security.md) — Threat model, identity, authorization, role hierarchy
 - [docs/architecture.md](docs/architecture.md) — Backend / frontend / database layout
 - [docs/api.md](docs/api.md) — Full REST API reference with curl examples
 - [docs/cli.md](docs/cli.md) — `mdnest` CLI for terminal access (multi-server)
 - [docs/kubernetes.md](docs/kubernetes.md) — Optional Helm chart, if you'd rather run it in a cluster
+- [docs/mcp.md](docs/mcp.md) — MCP server for AI agents (stdio + streamable-HTTP, OAuth, Compose)
 - [docs/sso-setup.md](docs/sso-setup.md) — Corporate SSO (Google / Okta / Entra / Keycloak / Auth0)
 - [docs/firebase-setup.md](docs/firebase-setup.md) — Firebase Auth peer mode
 

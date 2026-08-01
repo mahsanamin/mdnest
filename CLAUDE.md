@@ -27,6 +27,7 @@ follow `md-fix-bugs`.
 | Fix bug(s) — from the brain `Bugs/` folder **or** an ad-hoc bug they describe | **`md-fix-bugs`** | Read/triage the backlog, verify it's really a bug (some are already fixed), fix each on its own branch from `develop`, verify (smoke test + a regression check), merge **straight into `develop`** (no per-bug PR), **delete the bug's file from the brain** so it isn't re-picked, then one clean release PR on top of `main`. |
 | Add a feature / improvement — from the brain `Features/` folder or described ad-hoc | **`md-add-improvement`** | Same disciplined flow for the features backlog. |
 | Ship / release / "update the docs + website + rebuild" after code changes | **`md-ship`** | CHANGELOG, three-file version bump, docs, website sync, rebuild the dev stack, publish the GitHub Release (tags ≠ Releases — the in-app banner needs a Release). |
+| Review PR(s) from an outside contributor — "what should we merge?", "check this PR", "is this safe?" | **`md-review-collab`** | Three gates in order: **legit** (does it do what it claims — verify by running, don't read), **safe** (no weakened path/permission check, no exploit), **direction** (doesn't trade away git-as-storage, mount-defined namespaces, or the lean core). Then merge order (simulate conflicts first), a review that only says what must be said, and merge into `develop` with owner sign-off on anything touching direction. |
 
 If unsure which applies, prefer the skill over an ad-hoc approach and say which one
 you're running. The `md-*` family is authoritative; the summaries here are just a
@@ -53,9 +54,23 @@ backend/
     comments.go              # GET/POST/PATCH/DELETE /api/comments?ns=&path=&id=
     history.go               # GET /api/note/history, /api/note/at — git-sync version history (v3.7.0+)
     sso.go                   # GET /api/auth/sso/{start,callback} (USER_PROVIDER=sso only)
+    tasks.go                 # GET/POST/PATCH /api/tasks, /api/board — task board (v4.0.0+, ENABLE_TASK_BOARD)
+    workspaces.go            # /api/admin/workspaces, /api/me/workspace — per-workspace git remotes (v4.0.0+, multi mode)
   firebase/                  # Firebase Auth + Firestore (USER_PROVIDER=firebase only)
     client.go                # Admin SDK wrapper (VerifyIDToken)
     totp_store.go            # Firestore-backed store.TOTPStore impl
+  secrets/                   # AES-256-GCM sealing for git credentials at rest (v4.0.0+)
+    secrets.go               # DeriveKey/Encrypt/Decrypt — same construction as the MCP OAuth sealing
+  storage/                   # Pluggable note persistence behind STORAGE_BACKEND (v4.0.0+)
+    storage.go               # Storage interface — namespace-scoped, backend-agnostic
+    local.go                 # Default filesystem backend; owns the symlink-containment check
+    git.go                   # STORAGE_BACKEND=git — in-process git history, idle-debounced commits
+    gitremote.go             # Per-namespace remote resolution + push plan (askpass / GIT_SSH_COMMAND)
+    queued.go                # MDNEST_ROLE=app — writes go to the working set + durability queue
+    writer.go                # MDNEST_ROLE=writer — drains the queue, owns the git tree
+    workingset.go            # Redis-backed coherence tier (the shared read path)
+    leader.go                # Writer leader election
+    factory.go               # FromEnv — local (default) | git [+ REDIS_URL -> coherent]
   sso/                       # Generic OIDC relying-party (USER_PROVIDER=sso)
     client.go                # coreos/go-oidc + oauth2 with PKCE, signed state cookie
   middleware/
@@ -95,6 +110,9 @@ frontend/
       ContextMenu.jsx        # Right-click / long-press floating menu
       CommentSidebar.jsx     # Inline comments: slide-out panel, threads, replies, Go To
       HistoryModal.jsx       # Per-file git-sync history viewer + restore (v3.7.0+)
+      TaskBoard.jsx          # Kanban board over note checkboxes (v4.0.0+); lazy-loaded
+      TaskEditor.jsx         # Rich task create/edit form used by the board
+      BoardColumnsEditor.jsx # Per-namespace column layout (.mdnest/board.json)
       MoveToModal.jsx        # Touch-friendly destination picker for "Move to…" context action (v3.8.0+)
       EditorErrorBoundary.jsx # React error boundary around Live editor — catches Milkdown crashes and flips to Basic (v3.8.0+)
 
@@ -216,6 +234,25 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 - **The local pre-push hook is defense-in-depth, not the gate.** It runs `govulncheck` too, but **silently skips it when `go` isn't installed on the host** (e.g. this dev machine) and can be `--no-verify`'d — and it doesn't run at all on a GitHub-side PR merge. Treat CI required checks as the authoritative gate; never assume a green local push means the security scan ran.
 - **Managing the gate as code:** `scripts/apply-main-branch-protection.sh` (idempotent) adds/updates the required-status-check rule on the `main-branch` ruleset. It needs a token with repo **Administration: write** (a contents/PR-scoped fine-grained PAT gets HTTP 403 on the ruleset PUT). The check-context strings in that script must match the workflow job `name:` values **exactly** — a typo becomes an "Expected" check that never reports and blocks `main` permanently.
 
+### The `develop` gate (contributors gated, owner bypasses)
+
+`develop` is the integration branch: every contributor PR lands there first and soaks for a few days before the release PR to `main`. Its ruleset is `develop-branch`, managed by `scripts/apply-develop-branch-protection.sh` (idempotent — creates if absent, else replaces the rules).
+
+- **What it enforces:** `deletion` + `non_fast_forward` protection, **1 required approval**, and **9 required status checks** — the five `CI` jobs (`ci.yml`) plus the same four `Security Audit` jobs `main` requires.
+- **The owner (admin role) is a bypass actor, deliberately.** Required status checks gate *ref updates*, not just merges, so without the bypass the `md-fix-bugs` / `md-add-improvement` flow — merge each verified branch straight into `develop` locally, then push — would start getting rejected. So `develop-branch` gates *contributors*; the local `.githooks/pre-push` remains the owner's gate. Because that hook silently skips `govulncheck` without a host Go toolchain, `security-audit.yml` also runs on **pushes** to `develop`, so the branch tip is scanned even when the hook couldn't.
+- **Why 1 approval and not 0:** outside contributors work from forks and have **no write access to the base repo**, so they cannot merge anything today regardless of rulesets — merging requires write on the base. But `mahsan_bypass` (`~ALL`) only requires *that a PR exist*, with `required_approving_review_count: 0`. The moment anyone is granted write, they could self-merge into `develop`. An author cannot approve their own PR, so requiring 1 routes any future collaborator through the owner. Set in advance rather than after.
+- **`require_code_owner_review` is left off on `develop`, and is inert on `main`** — there is no `CODEOWNERS` file in the repo. Adding one would be actively harmful while the owner is sole maintainer: `main-branch` has no bypass actors, and GitHub forbids self-approval, so a `CODEOWNERS` entry would hard-block the owner's own release PRs.
+- **Check-context strings must match what Actions *reports*, not the job `name:`.** For a **matrix** job the reported context appends the matrix values — `ci.yml`'s `images` job carries both `name` and `context` keys, so it reports as `Docker images (build only) (backend, backend)`. Always verify against a real run before editing the list, or the branch blocks forever on an "Expected" check that never arrives:
+  ```bash
+  gh api "repos/<owner>/<repo>/commits/$(git rev-parse origin/develop)/check-runs" \
+    --jq '.check_runs[].name' | sort -u
+  ```
+- **Repository-role bypass ids are asserted, not looked up** — a user-owned (non-org) repo has no roles listing endpoint. `5` is the admin role; the script verifies by asserting `current_user_can_bypass == "always"` after writing and exits non-zero if not, since a wrong id silently breaks the owner's direct pushes to `develop`.
+
+### Where contributor PRs should target
+
+`main` is still the default branch, so GitHub prefills `main` as the base for fork PRs and contributors have to retarget by hand. This is a known, accepted rough edge — the trunk-based model (PRs into `main`, release branches cut off it) is the ecosystem norm that contributors expect, whereas mdnest uses git-flow because it ships explicit versioned self-hosted releases with an in-app update banner keyed to GitHub Releases. Two ways to close it if the friction becomes real: make `develop` the default branch (**repoint `main-branch`'s condition from `~DEFAULT_BRANCH` to literal `refs/heads/main` first**, or the whole security gate silently follows the default onto `develop`), and/or add a required check on `main` that fails when a PR's head isn't `develop` / `release/*` / `hotfix/*`. Neither is in place yet.
+
 ## Debugging Practice
 
 - **Read the error message literally** — "expected 12 not 11" means count your Scan args, don't blame Docker cache
@@ -244,7 +281,7 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 
 - **The core stays lean; new capability arrives off-by-default behind a flag.** mdnest's promise is a single-box deployment anyone can stand up with `setup.sh` and reason about end to end, with plain files as the source of truth. Features that add real value are welcome — but an operator who doesn't need one must carry none of its weight or risk: no extra dependency, no new env var to understand, no new failure mode. Measure this, don't assert it. When judging whether a change kept the promise, check the numbers that matter: new entries in `go.mod` / `package.json`, gzipped bundle delta, and whether `setup.sh`, `mdnest.conf.sample`, `docker-compose.yml`, the Dockerfiles, `mdnest-server` and `nginx.conf` moved at all. v3.11.7 added ~3,180 lines but only 100 of runtime code, zero Go deps, +368 B gzipped, and left every file in that list untouched — that shape is fine. A feature that grows the default install is not.
 
-- **A configuration surface must never outrun the code behind it.** The backend silently ignores env it doesn't read, so a knob whose implementation isn't merged doesn't fail — it lies. v3.11.7 shipped a Helm chart offering `storage.backend=s3`, `collab.redis.*` and `mcp.enabled` before any of that code existed: `s3` would have written notes to the PVC while looking configured for a bucket, and a multi-replica deploy would have split collaboration state per pod, both while reporting `Ready`. Guard the option (`mdnest.validateSupported` in `deploy/helm/mdnest/templates/_helpers.tpl`) so it fails at install time naming what's missing, assert both directions in CI (the supported config renders; the unsupported ones are rejected), and **delete a guard in the same change that lands the capability behind it.**
+- **A configuration surface must never outrun the code behind it.** The backend silently ignores env it doesn't read, so a knob whose implementation isn't merged doesn't fail — it lies. v3.11.7 shipped a Helm chart offering `storage.backend=s3`, `collab.redis.*` and `mcp.enabled` before any of that code existed: `s3` would have written notes to the PVC while looking configured for a bucket, and a multi-replica deploy would have split collaboration state per pod, both while reporting `Ready`. Guard the option (`mdnest.validateSupported` in `deploy/helm/mdnest/templates/_helpers.tpl`) so it fails at install time naming what's missing, assert both directions in CI (the supported config renders; the unsupported ones are rejected), and **delete a guard in the same change that lands the capability behind it.** (The `collab.redis` and `mcp.enabled` guards have since been removed as the Redis backplane and the streamable-HTTP MCP transport landed; `storage.backend=git` added a git-sync coexistence guard of its own; and the `s3` surface was removed outright — it was never implemented, so `mdnest.validateSupported` now simply rejects any `storage.backend` other than `local` or `git`.)
 
 - **Changing what mdnest *is* is a conversation, not a diff.** Adding an option is ordinary work. Trading away a founding property — files as the source of truth, namespaces from mounts, no DB in single mode — is a maintainer decision to make before the code is reviewed, however good the code is. When an incoming change does both, ask for it split so the mechanical part can land while the contentious part is decided.
 
