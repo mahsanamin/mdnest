@@ -1,0 +1,10 @@
+# Never ship the host's build output or dependencies into the image.
+# `COPY . .` runs after `npm install`, so without this the host's node_modules
+# (built for the host's OS/arch) overwrite the ones just installed for the
+# image, and a stale local dist/ is copied in alongside the fresh build — which
+# is exactly how a Docker build can serve code that isn't what's in the tree.
+node_modules
+dist
+.vite
+test-results
+playwright-report
