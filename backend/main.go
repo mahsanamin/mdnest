@@ -409,6 +409,11 @@ func main() {
 	// half-present feature — and the frontend never loads the board chunk.
 	enableTaskBoard := env("ENABLE_TASK_BOARD", "false") == "true"
 
+	// Marp slides (optional, off by default). When enabled the frontend renders
+	// a note whose frontmatter says `marp: true` as a slide deck in the Live view
+	// instead of the editor; when disabled it never loads the Marp engine chunk.
+	enableMarp := env("ENABLE_MARP", "false") == "true"
+
 	// Live collaboration hub (optional, multi mode only)
 	enableCollab := multiMode && env("ENABLE_LIVE_COLLAB", "false") == "true"
 	var collabHub *collab.Hub
@@ -530,6 +535,7 @@ func main() {
 	configHandler := handlers.NewConfigHandler(authMode, enableCollab, serverAlias, require2FA)
 	configHandler.SetGrantMaxDepth(grantMaxDepth)
 	configHandler.SetTaskBoard(enableTaskBoard)
+	configHandler.SetMarp(enableMarp)
 
 	// Update-availability check — opt out by setting DISABLE_UPDATE_CHECK=true.
 	// One HTTPS GET to api.github.com per server every hour; failures are

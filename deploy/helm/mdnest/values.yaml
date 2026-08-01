@@ -271,6 +271,16 @@ taskBoard:
   enabled: false
 
 # -----------------------------------------------------------------------------
+# Marp slides (optional). When enabled, a note whose frontmatter declares
+# `marp: true` is rendered as a slide deck in the Live view instead of the
+# editor. Off by default; when off the frontend never loads the Marp engine
+# chunk. Independent of `auth.mode`.
+# -----------------------------------------------------------------------------
+marp:
+  # -- Enable Marp slide rendering (`ENABLE_MARP`). Off by default; renders `marp: true` notes as a slide deck in the Live view. Independent of `auth.mode`.
+  enabled: false
+
+# -----------------------------------------------------------------------------
 # SSO / OIDC (optional). Only rendered when sso.enabled=true.
 # -----------------------------------------------------------------------------
 sso:
