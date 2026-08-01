@@ -72,6 +72,17 @@ func main() {
 	user := env("MDNEST_USER", "admin")
 	password := env("MDNEST_PASSWORD", "changeme")
 	jwtSecret := env("MDNEST_JWT_SECRET", "changeme")
+	// Secret used to seal per-workspace git credentials at rest (AES-256-GCM,
+	// key derived via SHA-256). Falls back to the JWT secret so one existing
+	// secret suffices. Rotating it makes previously-sealed credentials
+	// undecryptable (no key-versioned envelope): owners must re-enter their
+	// token / key — see docs/security.md.
+	encryptionSecret := env("MDNEST_ENCRYPTION_KEY", jwtSecret)
+	// A dedicated, non-default sealing secret is required to store per-workspace
+	// git credentials (the most sensitive data mdnest holds). Without it the
+	// workspace handler fails closed and refuses to enable mirroring, rather than
+	// sealing PATs / SSH keys under a guessable default key.
+	encryptionConfigured := strings.TrimSpace(encryptionSecret) != "" && encryptionSecret != "changeme"
 	notesDir := env("NOTES_DIR", "./notes")
 	frontendOrigin := env("FRONTEND_ORIGIN", "http://localhost:5173")
 	port := env("PORT", "8080")
@@ -99,7 +110,11 @@ func main() {
 	appCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
 
-	stg, err := storage.FromEnv(appCtx, absNotesDir)
+	// The per-workspace git remote resolver is DB-backed and only available
+	// once multi-mode Postgres is connected (below), so it is wired lazily here
+	// and its delegate is set after the workspace store is built.
+	wsResolver := &storage.LazyResolver{}
+	stg, err := storage.FromEnv(appCtx, absNotesDir, wsResolver)
 	if err != nil {
 		log.Fatalf("failed to initialize storage backend: %v", err)
 	}
@@ -316,10 +331,40 @@ func main() {
 	var perms *middleware.PermissionChecker
 	var grantStore store.GrantStore
 	var nsAdminStore store.NamespaceAdminStore
+	var workspaceStore store.WorkspaceStore
 	if multiMode {
 		grantStore = store.NewPostgresGrantStore(db)
 		nsAdminStore = store.NewPostgresNamespaceAdminStore(db)
 		perms = middleware.NewPermissionChecker(grantStore, nsAdminStore)
+
+		// Per-workspace git remote overrides: the store decrypts credentials and
+		// this adapter feeds the git committer, overriding the coarse
+		// GIT_REMOTE_URL default per namespace.
+		workspaceStore = store.NewPostgresWorkspaceStore(db, encryptionSecret)
+		wsResolver.Set(storage.RemoteResolverFunc(func(ns string) (storage.RemoteSpec, bool, error) {
+			r, err := workspaceStore.RemoteForNamespace(ns)
+			if err != nil || r == nil {
+				return storage.RemoteSpec{}, false, err
+			}
+			return storage.RemoteSpec{
+				Transport:  r.Transport,
+				RemoteURL:  r.RemoteURL,
+				Username:   r.Username,
+				Branch:     r.Branch,
+				Credential: r.Credential,
+				KnownHosts: r.KnownHosts,
+			}, true, nil
+		}))
+
+		// The durability writer records each namespace's last mirror sync outcome
+		// on its workspace row so the owner sees why mirroring fails (bad token,
+		// missing branch, unreachable remote) instead of a silently-empty ns. Only
+		// the writer/single git storage implements the sink; the app tier does not.
+		if r, ok := stg.(interface {
+			SetSyncStatusSink(storage.SyncStatusSink)
+		}); ok {
+			r.SetSyncStatusSink(workspaceStore)
+		}
 	}
 
 	// Task board (optional, off by default). When disabled the /api/tasks and
@@ -580,6 +625,15 @@ func main() {
 	if multiMode {
 		adminHandler := handlers.NewAdminHandler(userStore, grantStore, nsAdminStore, collabHub, userProvider, grantMaxDepth)
 		meHandler := handlers.NewMeHandler(userStore, grantStore, nsAdminStore)
+		// Per-workspace git remote config: superadmin CRUD over shared/team
+		// workspaces, plus each user's own personal workspace. The optional
+		// GIT_REMOTE_ALLOWED_HOSTS restricts remote hosts (defence-in-depth for
+		// SSRF; the primary control is the writer's egress NetworkPolicy).
+		workspaceHandler := handlers.NewWorkspaceHandler(workspaceStore, userStore, grantStore, stg,
+			strings.Split(env("GIT_REMOTE_ALLOWED_HOSTS", ""), ","), encryptionConfigured)
+		if !encryptionConfigured {
+			log.Println("WARNING: MDNEST_ENCRYPTION_KEY is unset and MDNEST_JWT_SECRET is default — per-workspace git mirroring is disabled (credentials cannot be sealed at rest). Set MDNEST_ENCRYPTION_KEY to enable it.")
+		}
 
 		// Admin endpoints: outer gate is RequireAdmin (= any admin role).
 		// Per-namespace scoping is done inside each handler so namespace
@@ -589,6 +643,12 @@ func main() {
 		mux.Handle("/api/admin/grants", authMiddleware.Wrap(middleware.RequireAdmin(http.HandlerFunc(adminHandler.HandleGrants))))
 		mux.Handle("/api/admin/namespace-admins", authMiddleware.Wrap(middleware.RequireAdmin(http.HandlerFunc(adminHandler.HandleNamespaceAdmins))))
 		mux.Handle("/api/me", authMiddleware.Wrap(http.HandlerFunc(meHandler.HandleMe)))
+
+		// Per-workspace git remotes: admin CRUD is superadmin-only (it manages
+		// credentials); the personal workspace is self-service for any user.
+		mux.Handle("/api/admin/workspaces", authMiddleware.Wrap(middleware.RequireSuperAdmin(http.HandlerFunc(workspaceHandler.HandleAdmin))))
+		mux.Handle("/api/admin/workspace-groups", authMiddleware.Wrap(middleware.RequireSuperAdmin(http.HandlerFunc(workspaceHandler.HandleGroups))))
+		mux.Handle("/api/me/workspace", authMiddleware.Wrap(http.HandlerFunc(workspaceHandler.HandleMine)))
 
 		// Users endpoint: GET is RequireAdmin (handler scopes the list);
 		// PUT/DELETE (role change, user delete) are SuperAdmin-only —

@@ -22,6 +22,27 @@ func cacheBody(ctx context.Context, ws WorkingSet, ns, relPath string, data []by
 	}
 }
 
+// makeReflector builds a reconcileFn that reflects notes changed by a git pull
+// into the working set: changed paths are re-read from the durable tree and
+// cached, removed paths are dropped, and the namespace is (re)registered. Used
+// by the writer and the single-box coherent path so notes edited directly on a
+// remote reach stateless replicas and the UI.
+func makeReflector(inner Storage, ws WorkingSet, maxBytes int64) reconcileFn {
+	return func(ctx context.Context, ns string, changed, removed []string) {
+		for _, p := range removed {
+			_ = ws.Delete(ctx, ns, p)
+		}
+		for _, p := range changed {
+			data, err := inner.ReadFile(ctx, ns, p)
+			if err != nil {
+				continue
+			}
+			cacheBody(ctx, ws, ns, p, data, maxBytes)
+		}
+		_ = ws.AddNamespace(ctx, ns)
+	}
+}
+
 // CoherentStorage layers a shared WorkingSet (Redis) over an inner Storage to
 // give strong read-after-write of note bodies across replicas. Every mutation
 // is written through to the inner Storage first (that remains the durability
@@ -56,6 +77,15 @@ func newCoherentStorage(inner Storage, ws WorkingSet, maxBytes int64) Storage {
 		return &coherentRangeStorage{c}
 	}
 	return c
+}
+
+// SetSyncStatusSink forwards a sync-status sink to the inner git storage so the
+// writer reports per-namespace mirror outcomes. No-op when the inner backend
+// does not support it. Promoted to coherentRangeStorage via embedding.
+func (c *CoherentStorage) SetSyncStatusSink(s SyncStatusSink) {
+	if g, ok := c.Storage.(interface{ SetSyncStatusSink(SyncStatusSink) }); ok {
+		g.SetSyncStatusSink(s)
+	}
 }
 
 // Close tears down the inner backend (if it is a Closer, e.g. GitStorage stops

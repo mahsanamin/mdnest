@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -47,6 +48,35 @@ func (g *GitStorage) Kind() string { return "git" }
 
 // Close stops the committer (final flush).
 func (g *GitStorage) Close() error { return g.committer.Close() }
+
+// SetReconciler installs a callback that reflects notes changed by a remote
+// pull into a coherence tier (the Redis working set), so stateless replicas and
+// the UI see notes edited directly on the remote. No-op unless the git backend
+// uses the interval committer (single/writer roles). Safe to call once at
+// startup before the first sync.
+func (g *GitStorage) SetReconciler(fn reconcileFn) {
+	if c, ok := g.committer.(*intervalCommitter); ok {
+		c.reconcile.Store(&fn)
+	}
+}
+
+// SetSyncInterval sets how often the committer pulls remote changes even with no
+// local edits (0 disables). Safe to call at startup before the loop's first tick.
+func (g *GitStorage) SetSyncInterval(d time.Duration) {
+	if c, ok := g.committer.(*intervalCommitter); ok {
+		c.syncInterval.Store(int64(d))
+	}
+}
+
+// SetSyncStatusSink installs a sink that receives each namespace's last mirror
+// sync outcome (error text, or "" on success), so a failing mirror is visible to
+// the user instead of a silently-empty namespace. No-op unless the git backend
+// uses the interval committer (single/writer roles).
+func (g *GitStorage) SetSyncStatusSink(s SyncStatusSink) {
+	if c, ok := g.committer.(*intervalCommitter); ok {
+		c.statusSink.Store(&s)
+	}
+}
 
 // --- mutations: do the filesystem op, then record the namespace as dirty ---
 
@@ -118,6 +148,18 @@ func (NoopCommitter) Record(string)               {}
 func (NoopCommitter) Flush(context.Context) error { return nil }
 func (NoopCommitter) Close() error                { return nil }
 
+// reconcileFn reflects the on-disk result of a remote pull into a coherence tier
+// (the Redis working set): changed note paths are re-read and cached, removed
+// paths are dropped.
+type reconcileFn func(ctx context.Context, ns string, changed, removed []string)
+
+// SyncStatusSink records the outcome of a namespace's most recent mirror sync so
+// it can be surfaced to the user (e.g. persisted on the workspace row). syncErr
+// is "" when the last sync succeeded.
+type SyncStatusSink interface {
+	SetSyncStatus(ns, syncErr string) error
+}
+
 // intervalCommitter commits dirty namespaces to per-namespace git repos once
 // the writer has gone idle on them, rather than on a fixed interval: an edit
 // burst (many rapid saves during a live editing session) is coalesced into a
@@ -139,6 +181,17 @@ type intervalCommitter struct {
 	authorName  string
 	authorEmail string
 	remote      remoteConfig
+	resolver    RemoteResolver // per-namespace mirror override; nil = env default only
+	// reconcile reflects notes changed by a remote pull into the coherence tier
+	// (Redis working set); nil = filesystem-only (single-box git).
+	reconcile atomic.Pointer[reconcileFn]
+	// syncInterval (nanoseconds) is how often to pull remote changes even with no
+	// local edits; 0 disables the periodic pull. Set by the factory.
+	syncInterval atomic.Int64
+	// statusSink records each namespace's last sync outcome (nil = not reported).
+	// lastStatus dedupes writes so only a changed status is persisted.
+	statusSink atomic.Pointer[SyncStatusSink]
+	lastStatus map[string]string
 
 	mu    sync.Mutex
 	dirty map[string]dirtyEntry
@@ -201,6 +254,7 @@ func NewIntervalCommitter(root string, debounce, maxWait time.Duration, authorNa
 		dirty:       make(map[string]dirtyEntry),
 		pushNext:    make(map[string]time.Time),
 		pushFails:   make(map[string]int),
+		lastStatus:  make(map[string]string),
 		stop:        make(chan struct{}),
 		done:        make(chan struct{}),
 	}
@@ -278,13 +332,37 @@ func (c *intervalCommitter) loop() {
 	defer close(c.done)
 	t := time.NewTicker(c.pollInterval())
 	defer t.Stop()
+	lastSync := time.Now()
 	for {
 		select {
-		case <-t.C:
-			_ = c.flushDue(context.Background(), time.Now())
+		case now := <-t.C:
+			_ = c.flushDue(context.Background(), now)
+			// Periodic two-way pull: bring in notes changed directly on the
+			// remotes, even for namespaces with no local edits.
+			if si := time.Duration(c.syncInterval.Load()); si > 0 && now.Sub(lastSync) >= si {
+				c.syncAllRemotes(context.Background())
+				lastSync = time.Now()
+			}
 		case <-c.stop:
 			_ = c.Flush(context.Background())
 			return
+		}
+	}
+}
+
+// syncAllRemotes runs a two-way sync for every namespace that has a remote, so
+// external changes are pulled in on a cadence independent of local edits.
+func (c *intervalCommitter) syncAllRemotes(ctx context.Context) {
+	entries, err := os.ReadDir(c.root)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		if err := c.commit(ctx, e.Name()); err != nil && err != errPushPending {
+			log.Printf("storage: git sync %s: %v", e.Name(), err)
 		}
 	}
 }
@@ -365,25 +443,32 @@ func (c *intervalCommitter) commit(ctx context.Context, ns string) error {
 			return fmt.Errorf("git commit %s: %w", ns, err)
 		}
 	}
-	// Mirror to the remote (one repo per namespace). Pushing an unchanged repo
-	// is a cheap "up-to-date" no-op, so this also flushes any commit whose push
-	// failed on an earlier flush (the namespace stays marked dirty until it
-	// succeeds).
-	if c.remote.enabled() {
-		return c.pushWithBackoff(ctx, dir, ns)
+	// Two-way sync with the remote (one repo per namespace): fetch external
+	// changes, integrate them, push ours, and reflect the result into the
+	// coherence tier. Local-only when no remote is configured.
+	if c.remote.enabled() || c.resolver != nil {
+		return c.syncWithBackoff(ctx, dir, ns)
 	}
 	return nil
 }
 
-// pushWithBackoff mirrors a namespace, applying exponential backoff after a
-// failure so a missing/misconfigured remote does not trigger a failing push (and
-// a log line) on every commit interval. It returns a non-nil error while a push
-// is still owed, which keeps the namespace marked dirty for a later retry.
-func (c *intervalCommitter) pushWithBackoff(ctx context.Context, dir, ns string) error {
+// errNoRemote signals that a namespace has no remote configured, so a sync is a
+// no-op (not a failure).
+var errNoRemote = errors.New("storage: no remote for namespace")
+
+// syncWithBackoff runs a full two-way sync, applying exponential backoff after a
+// failure so a missing/misconfigured/unreachable remote does not fail (and log)
+// on every interval. It returns a non-nil error while a sync is still owed, which
+// keeps the namespace marked dirty for a later retry.
+func (c *intervalCommitter) syncWithBackoff(ctx context.Context, dir, ns string) error {
 	if t, ok := c.pushNext[ns]; ok && time.Now().Before(t) {
 		return errPushPending // inside the backoff window; retry later, no push/log
 	}
-	if err := c.push(ctx, dir, ns); err != nil {
+	err := c.sync(ctx, dir, ns)
+	if err == errNoRemote {
+		return nil // nothing configured for this namespace: local-only history
+	}
+	if err != nil {
 		n := c.pushFails[ns] + 1
 		c.pushFails[ns] = n
 		shift := n - 1
@@ -396,31 +481,125 @@ func (c *intervalCommitter) pushWithBackoff(ctx context.Context, dir, ns string)
 		}
 		c.pushNext[ns] = time.Now().Add(backoff)
 		if n == 1 || n%10 == 0 { // log the first failure and every 10th, not every retry
-			log.Printf("storage: git push %s failed (attempt %d, backing off %s): %v", ns, n, backoff, err)
+			log.Printf("storage: git sync %s failed (attempt %d, backing off %s): %v", ns, n, backoff, err)
 		}
+		c.reportStatus(ns, err.Error())
 		return err
 	}
 	delete(c.pushFails, ns)
 	delete(c.pushNext, ns)
+	c.reportStatus(ns, "")
 	return nil
 }
 
-// push mirrors a namespace repo to its remote over HTTPS. Credentials are
-// supplied out-of-band via the askpass helper (see remoteConfig), never in argv.
-func (c *intervalCommitter) push(ctx context.Context, dir, ns string) error {
-	remoteURL, err := c.remote.remoteURL(ns)
-	if err != nil {
-		return fmt.Errorf("git remote url %s: %w", ns, err)
+// reportStatus persists a namespace's last sync outcome via the status sink,
+// de-duplicating so only a changed status is written (the sink is a DB row).
+func (c *intervalCommitter) reportStatus(ns, msg string) {
+	p := c.statusSink.Load()
+	if p == nil || *p == nil {
+		return
 	}
-	cmd := exec.CommandContext(ctx, "git", "push", remoteURL, "HEAD:refs/heads/"+c.remote.branch)
-	cmd.Dir = dir
-	cmd.Env = c.remote.pushEnv()
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("git push %s: %v: %s", ns, err, stderr.String())
+	const maxLen = 500
+	if len(msg) > maxLen {
+		msg = msg[:maxLen]
+	}
+	if prev, ok := c.lastStatus[ns]; ok && prev == msg {
+		return // unchanged since the last report: skip the DB write
+	}
+	c.lastStatus[ns] = msg
+	if err := (*p).SetSyncStatus(ns, msg); err != nil {
+		log.Printf("storage: record sync status for %s: %v", ns, err)
+	}
+}
+
+// sync performs one two-way synchronisation of a namespace repo with its remote:
+//  1. fetch the remote branch;
+//  2. integrate it — seed a fresh local repo from the remote, else merge (a
+//     conflict is committed with markers so nothing is lost and the user
+//     resolves it in the editor);
+//  3. push the merged result;
+//  4. reflect the on-disk changes into the coherence tier so stateless replicas
+//     and the UI see notes that changed directly on the remote.
+//
+// The per-namespace remote comes from the resolver (DB override) or the coarse
+// env default. Credentials are supplied out-of-band (askpass for HTTPS, a staged
+// key + GIT_SSH_COMMAND for SSH), never in argv.
+func (c *intervalCommitter) sync(ctx context.Context, dir, ns string) error {
+	plan, ok, err := c.resolvePush(ns)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errNoRemote
+	}
+	defer plan.cleanup()
+
+	oldHEAD := c.revParse(ctx, dir, "HEAD")
+
+	// Fetch. A missing remote branch (a fresh remote repo) is not an error: we
+	// have nothing to integrate and go straight to publishing ours.
+	fetched := true
+	if err := c.gitEnv(ctx, dir, plan.env, "fetch", "--no-tags", "--quiet", plan.url, plan.branch); err != nil {
+		if oldHEAD == "" {
+			return fmt.Errorf("git fetch %s: %w", ns, err)
+		}
+		fetched = false
+	}
+	if fetched {
+		if oldHEAD == "" {
+			// Fresh local repo: adopt the remote as the base (imports existing notes).
+			if err := c.git(ctx, dir, "reset", "--hard", "--quiet", "FETCH_HEAD"); err != nil {
+				return fmt.Errorf("git seed %s: %w", ns, err)
+			}
+		} else if err := c.git(ctx, dir, "merge", "--no-edit", "--allow-unrelated-histories", "FETCH_HEAD"); err != nil {
+			// Merge conflict: keep both sides as conflict markers and commit, so
+			// no data is lost and the user resolves it in the editor.
+			_ = c.git(ctx, dir, "add", "-A")
+			_ = c.git(ctx, dir, "commit", "--no-edit", "-m", "mdnest: merge remote (conflicts kept as markers)")
+		}
+	}
+
+	newHEAD := c.revParse(ctx, dir, "HEAD")
+	if newHEAD == "" {
+		return nil // empty namespace: nothing to push or reflect
+	}
+	if err := c.gitEnv(ctx, dir, plan.env, "push", "--quiet", plan.url, "HEAD:refs/heads/"+plan.branch); err != nil {
+		return fmt.Errorf("git push %s: %w", ns, err)
+	}
+	if newHEAD != oldHEAD {
+		if p := c.reconcile.Load(); p != nil && *p != nil {
+			changed, removed := c.diffStatus(ctx, dir, oldHEAD, newHEAD)
+			(*p)(ctx, ns, changed, removed)
+		}
 	}
 	return nil
+}
+
+// resolvePush returns the mirror push plan for a namespace: the per-namespace
+// override from the resolver, else the coarse env default. ok=false means the
+// namespace has no remote and history stays local-only.
+func (c *intervalCommitter) resolvePush(ns string) (pushPlan, bool, error) {
+	if c.resolver != nil {
+		spec, ok, err := c.resolver.ResolveRemote(ns)
+		if err != nil {
+			return pushPlan{}, false, fmt.Errorf("git remote resolve %s: %w", ns, err)
+		}
+		if ok {
+			plan, err := planFromSpec(spec)
+			if err != nil {
+				return pushPlan{}, false, err
+			}
+			return plan, true, nil
+		}
+	}
+	if c.remote.enabled() {
+		plan, err := c.remote.plan(ns)
+		if err != nil {
+			return pushPlan{}, false, err
+		}
+		return plan, true, nil
+	}
+	return pushPlan{}, false, nil
 }
 
 func (c *intervalCommitter) git(ctx context.Context, dir string, args ...string) error {
@@ -432,4 +611,87 @@ func (c *intervalCommitter) git(ctx context.Context, dir string, args ...string)
 		return fmt.Errorf("%v: %s", err, stderr.String())
 	}
 	return nil
+}
+
+// gitEnv runs a git command with a specific environment (the fetch/push auth:
+// askpass for HTTPS or GIT_SSH_COMMAND for SSH).
+func (c *intervalCommitter) gitEnv(ctx context.Context, dir string, env []string, args ...string) error {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = dir
+	cmd.Env = env
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%v: %s", err, stderr.String())
+	}
+	return nil
+}
+
+// revParse returns the commit hash for ref, or "" if it does not resolve (e.g. a
+// repo that has no commits yet).
+func (c *intervalCommitter) revParse(ctx context.Context, dir, ref string) string {
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", "--quiet", ref)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// diffStatus returns the note paths changed (added/modified/renamed-to) and
+// removed between two commits. When old is empty every tracked file is treated
+// as changed (a fresh seed). Paths are NUL-delimited to avoid quoting issues.
+func (c *intervalCommitter) diffStatus(ctx context.Context, dir, old, new string) (changed, removed []string) {
+	if old == "" {
+		cmd := exec.CommandContext(ctx, "git", "ls-tree", "-r", "--name-only", "-z", new)
+		cmd.Dir = dir
+		out, _ := cmd.Output()
+		for _, p := range splitNUL(out) {
+			if p != "" {
+				changed = append(changed, p)
+			}
+		}
+		return changed, nil
+	}
+	cmd := exec.CommandContext(ctx, "git", "diff", "--name-status", "-z", old, new)
+	cmd.Dir = dir
+	out, _ := cmd.Output()
+	f := splitNUL(out)
+	for i := 0; i < len(f); {
+		status := f[i]
+		if status == "" {
+			i++
+			continue
+		}
+		switch status[0] {
+		case 'R', 'C': // rename/copy: status, old-path, new-path
+			if i+2 < len(f) {
+				removed = append(removed, f[i+1])
+				changed = append(changed, f[i+2])
+			}
+			i += 3
+		case 'D':
+			if i+1 < len(f) {
+				removed = append(removed, f[i+1])
+			}
+			i += 2
+		default: // A, M, T, …: status, path
+			if i+1 < len(f) {
+				changed = append(changed, f[i+1])
+			}
+			i += 2
+		}
+	}
+	return changed, removed
+}
+
+// splitNUL splits a NUL-delimited git output into fields (trailing empty dropped
+// by callers).
+func splitNUL(b []byte) []string {
+	s := strings.TrimRight(string(b), "\x00")
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, "\x00")
 }
