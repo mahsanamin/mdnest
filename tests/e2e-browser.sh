@@ -65,6 +65,7 @@ docker run -d --name "$BE" --network "$NET" --network-alias backend \
   -e MDNEST_JWT_SECRET=e2e-test-secret \
   -e NOTES_DIR=/notes \
   -e FRONTEND_ORIGIN=http://localhost \
+  -e ENABLE_TASK_BOARD=true \
   -v "$NOTES_DIR:/notes" "$BE_IMAGE" >/dev/null
 
 log "Starting frontend (nginx) on an ephemeral host port"
@@ -117,6 +118,40 @@ flowchart TD
 " >/dev/null || { fail "could not seed mermaid note"; exit 1; }
 pass "seeded $MERMAID_FILE (label $MERMAID_LABEL)"
 
+# A note with task-list items, so the suite can drive the kanban board and the
+# Live editor's checkbox round-trip. Ticking a checkbox is a mouse-only
+# interaction handled inside ProseMirror — it never produces a keydown or a
+# document-level mousedown, which is exactly how the save gate came to swallow
+# those edits for a whole session (v4.0.0).
+BOARD_FILE="e2e-board.md"
+BOARD_TASK="zzt${SFX}task"
+curl -fsS -X POST "$BASE_URL/api/note?ns=testing_workspace&path=$BOARD_FILE" \
+  -H "Authorization: Bearer $TOKEN" \
+  --data "# Sprint
+
+- [ ] $BOARD_TASK
+  - priority: high
+  - tags: [release]
+- [x] Already finished
+" >/dev/null || { fail "could not seed board note"; exit 1; }
+pass "seeded $BOARD_FILE (task $BOARD_TASK)"
+
+# Two more board notes, one per mutating spec, so the checkbox round-trip tests
+# never depend on each other's edits and no test has to reset shared state
+# mid-run (resetting a note the app already has open leaves the editor holding
+# a stale ETag, which masks the very thing these specs measure).
+for pair in "tick:[ ]" "untick:[x]"; do
+  name="${pair%%:*}"; box="${pair##*:}"
+  curl -fsS -X POST "$BASE_URL/api/note?ns=testing_workspace&path=e2e-board-$name.md" \
+    -H "Authorization: Bearer $TOKEN" \
+    --data "# $name
+
+- $box $BOARD_TASK
+  - priority: high
+" >/dev/null || { fail "could not seed e2e-board-$name.md"; exit 1; }
+done
+pass "seeded e2e-board-tick.md / e2e-board-untick.md"
+
 # ── Install Playwright + Chromium on demand ──────────────────────────────────
 log "Preparing Playwright (installs Chromium on first run)"
 (
@@ -134,6 +169,7 @@ if ( cd tests/browser && \
      MDNEST_USER=e2e MDNEST_PASSWORD=e2epass123 \
      MDNEST_SEED_FILE="$SEED_FILE" MDNEST_SEED_TOKEN="$SEED_TOKEN" \
      MDNEST_MERMAID_FILE="$MERMAID_FILE" MDNEST_MERMAID_LABEL="$MERMAID_LABEL" \
+     MDNEST_BOARD_FILE="$BOARD_FILE" MDNEST_BOARD_TASK="$BOARD_TASK" \
      npx playwright test ); then
   pass "BROWSER E2E: all specs passed"
   exit 0
