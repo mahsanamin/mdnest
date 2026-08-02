@@ -4,6 +4,73 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v4.1.0 — Marp slides, Git Workspaces admin, and the image v4.0.0 forgot
+
+A short cycle on top of v4.0.0, and it starts with an apology: **v4.0.0 shipped
+without its `mdnest-mcp-server` image**, so any Kubernetes install with
+`mcp.enabled=true` hit `ImagePullBackOff` on a tag that was never built. This
+release publishes it and makes that class of mistake impossible to repeat.
+
+### Fixed
+
+- **v4.0.0 published no `mdnest-mcp-server` image** ([#76]). The release
+  workflow's build matrix and the chart had drifted apart: the matrix entry was
+  removed in a hotfix while the MCP server had no Dockerfile, re-added once it
+  did — and then silently lost again when the release branch merged into `main`
+  (the branch's file matched the merge base exactly, so git took the other
+  side's removal and nothing warned). All three images are published for this
+  release. The workflow now **reconciles every image the chart references
+  against the registry and refuses to publish** if one is missing, so a release
+  can no longer ship a chart pointing at nothing.
+- **Version History was broken on every namespace of a git-native HA install.**
+  App replicas hold no git tree — only the writer does — so the history
+  endpoints reported "git-sync is not configured" for everything. They now
+  proxy to the writer, exactly as attachments already did. Single-box and
+  writer roles are unchanged.
+- **Deleting a Git Workspace no longer destroys notes that exist nowhere else.**
+  Decommissioning purges a namespace from storage only when a mirror
+  demonstrably holds the current copy (mirroring on, last sync succeeded).
+  Without one, access is revoked and the config removed but the bytes stay put
+  — which matters most for a namespace that came from a `MOUNT_`, where the
+  purge would have emptied a bind-mounted host directory.
+- **Mirror status stops claiming "ok" for a workspace that has never synced.**
+  Four honest states — `off` / `pending` / `ok` / `error` — driven by whether a
+  sync actually happened, with push-to-create on a fresh remote classified as a
+  benign `pending` rather than a red error.
+- Personal workspaces no longer appear in the Access Grants and Namespace
+  Admins pickers; they are managed by their owner, not administered by others.
+- Deleting a workspace or group now revokes the namespace's grants and
+  namespace-admins instead of leaving them orphaned.
+
+### Added
+
+- **Marp slide rendering (opt-in — `ENABLE_MARP=true`).** A note whose
+  frontmatter declares `marp: true` renders as a slide deck in the Preview
+  pane, so the note you drafted an idea in is the deck you present from — no
+  second copy in Slides or PowerPoint to keep in sync. The source stays plain,
+  diff-able, git-mirrored Markdown. Slides render per-slide in a fully
+  sandboxed `<iframe sandbox="">`, which is what makes it safe to honour the
+  inline HTML real decks use. Off by default; the engine is a lazy chunk, so an
+  install that doesn't want slides carries **1.6 KB**, not the engine.
+- **Git Workspaces admin management** — workspace groups, discovery of
+  operator-provisioned sub-projects, and per-group project add/enable/remove,
+  all in the Admin panel.
+
+### Notes for operators
+
+- If you are on **v4.0.0 with `mcp.enabled=true`**, upgrade to v4.1.0 — the
+  image your chart references now exists. Nothing else about v4.0.0 needs
+  action.
+- `ENABLE_MARP` is plumbed through `mdnest.conf` / `setup.sh` as well as the
+  chart, so it works on the single-box path too.
+
+Thanks again to [@ecthelion77](https://github.com/ecthelion77), who found the
+missing image, diagnosed it, and sent the fix.
+
+[#76]: https://github.com/mahsanamin/mdnest/issues/76
+
+---
+
 ## v4.0.0 — Task board, git-native HA, and bring-your-own-repo durability
 
 The first release built substantially with outside contributions, and the
