@@ -16,6 +16,9 @@ const LiveEditor = lazy(() => import('./components/LiveEditorCrepe.jsx'));
 // it is off by default (ENABLE_TASK_BOARD), so an install that doesn't use it
 // must not carry the chunk on first paint.
 const TaskBoard = lazy(() => import('./components/TaskBoard.jsx'));
+// Lazy Marp slide-deck renderer: pulls in the Marp engine, off by default
+// (ENABLE_MARP), so an install that doesn't use it never carries the chunk.
+const MarpDeck = lazy(() => import('./components/MarpDeck.jsx'));
 import Preview from './components/Preview.jsx';
 import ContextMenu from './components/ContextMenu.jsx';
 import Settings from './components/Settings.jsx';
@@ -27,6 +30,7 @@ import HistoryModal from './components/HistoryModal.jsx';
 import MoveToModal from './components/MoveToModal.jsx';
 import ReleaseNotesModal from './components/ReleaseNotesModal.jsx';
 import CollabClient from './collab.js';
+import { isMarpDoc } from './marp.js';
 import {
   getToken,
   getNote,
@@ -267,6 +271,15 @@ function App() {
   // ENABLE_TASK_BOARD on the backend. When off, /api/tasks and /api/board are
   // not registered at all, so the button must not be offered.
   const taskBoardEnabled = !!appConfig?.taskBoard;
+
+  // ENABLE_MARP on the backend. When on, a note whose frontmatter says
+  // `marp: true` is shown as a slide deck in the Live view instead of the editor.
+  const marpEnabled = !!appConfig?.marp;
+  const marpActive = marpEnabled && isMarpDoc(content);
+  // Editor scroll ratio (0..1), mirrored to the Marp deck's current slide in
+  // split view. The deck is paginated (not scrollable), so unlike the plain
+  // Preview it can't share a scrollTop — we map the ratio to a slide instead.
+  const [marpScrollPct, setMarpScrollPct] = useState(0);
 
   // Live collaboration state
   const [presenceUsers, setPresenceUsers] = useState([]);
@@ -1249,6 +1262,39 @@ function App() {
     };
   }, [viewMode, currentPath, editorMode]);
 
+  // Marp split-view sync: the deck is paginated, not scrollable, so the
+  // scrollTop mirror above doesn't apply. Instead, track the editor's scroll
+  // ratio and hand it to MarpDeck, which maps it to the matching slide. The
+  // update is rAF-throttled and deduped so a large App tree isn't re-rendered
+  // on every scroll frame; only meaningful movement flows through.
+  useEffect(() => {
+    if (isMobile || viewMode !== 'split' || !marpActive) return undefined;
+    const findScrollable = (wrapper) => {
+      if (!wrapper) return null;
+      const textarea = wrapper.querySelector('.editor-textarea');
+      if (textarea) return textarea;
+      const liveContent = wrapper.querySelector('.live-editor-wrapper');
+      if (liveContent) return liveContent;
+      return wrapper;
+    };
+    const editorEl = findScrollable(editorWrapperRef.current);
+    if (!editorEl) return undefined;
+    let raf = 0;
+    const update = () => {
+      raf = 0;
+      const max = editorEl.scrollHeight - editorEl.clientHeight;
+      const pct = max > 0 ? editorEl.scrollTop / max : 0;
+      setMarpScrollPct((prev) => (Math.abs(prev - pct) < 0.005 ? prev : pct));
+    };
+    const onScroll = () => { if (!raf) raf = requestAnimationFrame(update); };
+    editorEl.addEventListener('scroll', onScroll, { passive: true });
+    update(); // seed the initial slide from the current scroll position
+    return () => {
+      editorEl.removeEventListener('scroll', onScroll);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [viewMode, isMobile, marpActive, currentPath, editorMode]);
+
   const handleRefresh = useCallback(async () => {
     if (!authenticated || !selectedNs) return;
     // broadcast: this is the Sidebar's manual Refresh AND the git-sync button
@@ -1602,7 +1648,13 @@ function App() {
                   className={`preview-wrapper${mobileView === 'preview' ? ' mobile-active' : ''}`}
                   style={!isMobile && viewMode === 'split' ? { flex: `0 0 ${100 - splitRatio}%` } : undefined}
                 >
-                  <Preview content={content || ''} currentPath={currentPath} ns={selectedNs} onCheckboxToggle={canWriteCurrent ? handleCheckboxToggle : null} pathIndex={wikiIndex} onWikiLink={openNote} />
+                  {marpEnabled && isMarpDoc(content) ? (
+                    <Suspense fallback={<div className="editor-loading">Loading slides…</div>}>
+                      <MarpDeck content={content || ''} scrollPct={viewMode === 'split' && !isMobile ? marpScrollPct : undefined} />
+                    </Suspense>
+                  ) : (
+                    <Preview content={content || ''} currentPath={currentPath} ns={selectedNs} onCheckboxToggle={canWriteCurrent ? handleCheckboxToggle : null} pathIndex={wikiIndex} onWikiLink={openNote} />
+                  )}
                 </div>
               )}
             </>

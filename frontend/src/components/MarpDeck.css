@@ -1,0 +1,91 @@
+/* Marp slide deck viewer (shown in the Live view for `marp: true` notes). */
+.marp-deck {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  background: #181825;
+  outline: none;
+}
+
+.marp-deck-stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+/* 16:9 stage that fits the available area without overflowing. */
+.marp-deck-frame {
+  width: 100%;
+  max-width: calc((100vh - 8rem) * 16 / 9);
+  aspect-ratio: 16 / 9;
+  max-height: 100%;
+  border: 1px solid #313244;
+  border-radius: 8px;
+  background: #0b0b12;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
+}
+
+.marp-deck-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 0.5rem;
+  border-top: 1px solid #313244;
+  background: #1e1e2e;
+}
+
+.marp-deck-controls button {
+  min-width: 2.2rem;
+  height: 2.2rem;
+  padding: 0 0.6rem;
+  background: #313244;
+  color: #cdd6f4;
+  border: 1px solid #45475a;
+  border-radius: 6px;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.marp-deck-controls button:hover:not(:disabled) {
+  background: #45475a;
+}
+
+.marp-deck-controls button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.marp-deck-counter {
+  min-width: 4.5rem;
+  text-align: center;
+  color: #a6adc8;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.marp-deck-fs {
+  margin-left: 0.5rem;
+}
+
+.marp-deck-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: #6c7086;
+  font-size: 0.9rem;
+}
+
+/* When the deck is fullscreen, let the frame use the whole screen. */
+.marp-deck:fullscreen {
+  background: #0b0b12;
+}
+.marp-deck:fullscreen .marp-deck-frame {
+  max-width: calc(100vh * 16 / 9);
+}
