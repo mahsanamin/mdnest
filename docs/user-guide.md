@@ -358,6 +358,11 @@ Checkboxes are also the atoms of the **[Task Board](#task-board)**: any checkbox
 
 ## Task Board
 
+> Slides: a note whose frontmatter declares `marp: true` renders as a
+> [Marp](https://marp.app/) slide deck in the Preview pane — the same note you
+> drafted the idea in is the deck you present from. Also opt-in
+> (`ENABLE_MARP=true`); notes without `marp: true` are unaffected.
+
 > Opt-in: the board appears only when the operator sets `ENABLE_TASK_BOARD=true`
 > (see [setup](setup.md)). If you don't see the board button, that's why.
 

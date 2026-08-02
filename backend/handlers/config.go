@@ -32,6 +32,7 @@ type ConfigHandler struct {
 	devLoginEnabled bool                   // INSECURE_DEV_LOGIN is on (signals frontend to expose /?login=dev + warning bar)
 	grantMaxDepth   int                    // server-side ceiling on grant path depth (0 = no limit). PathPicker uses this to filter the dropdown.
 	taskBoard       bool                   // ENABLE_TASK_BOARD is on — the frontend may show the board button and load its chunk
+	marp            bool                   // ENABLE_MARP is on — the frontend may render Marp-format notes as a slide deck (loads its chunk)
 	updateChecker   *updates.Checker       // optional — polls GitHub releases so the frontend can hint when a newer mdnest is available
 }
 
@@ -88,6 +89,13 @@ func (h *ConfigHandler) SetTaskBoard(enabled bool) {
 	h.taskBoard = enabled
 }
 
+// SetMarp flips on the Marp signal. Off by default: when false the frontend
+// never renders Marp-format notes as a slide deck and never loads the Marp
+// engine chunk — an operator who just wants notes carries none of it.
+func (h *ConfigHandler) SetMarp(enabled bool) {
+	h.marp = enabled
+}
+
 // SetUpdateChecker wires in the GitHub-release poller. When set, /api/config
 // includes a latestRelease object (once the first poll has succeeded) so the
 // frontend can hint that a newer mdnest version is available.
@@ -106,7 +114,7 @@ func (h *ConfigHandler) HandleConfig(w http.ResponseWriter, r *http.Request) {
 		"liveCollab":   h.liveCollab,
 		"require2FA":   h.require2FA,
 		"userProvider": h.userProvider,
-		"version":      "4.0.0",
+		"version":      "4.1.0",
 		"commit":       Commit,
 		"buildTime":    BuildTime,
 	}
@@ -127,6 +135,9 @@ func (h *ConfigHandler) HandleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.taskBoard {
 		resp["taskBoard"] = true
+	}
+	if h.marp {
+		resp["marp"] = true
 	}
 	if h.updateChecker != nil {
 		s := h.updateChecker.Status()

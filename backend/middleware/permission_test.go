@@ -41,6 +41,7 @@ func (f *fakeGrantStore) CreateGrant(int, string, string, string, *int) (*store.
 }
 func (f *fakeGrantStore) UpdateGrantPermission(int, string) error { return nil }
 func (f *fakeGrantStore) DeleteGrant(int) error                   { return nil }
+func (f *fakeGrantStore) DeleteGrantsForNamespace(string) (int64, error) { return 0, nil }
 func (f *fakeGrantStore) GetGrant(int) (*store.Grant, error)      { return nil, nil }
 func (f *fakeGrantStore) GetGrantsForUser(int) ([]store.Grant, error) {
 	return nil, nil
@@ -61,6 +62,7 @@ type fakeNsAdminStore struct {
 func (f fakeNsAdminStore) IsAdminOf(userID int, namespace string) (bool, error) {
 	return f.admin[userID][namespace], nil
 }
+func (f fakeNsAdminStore) DeleteAllForNamespace(string) (int64, error) { return 0, nil }
 func (f fakeNsAdminStore) ListByUser(userID int) ([]string, error) {
 	var out []string
 	for ns := range f.admin[userID] {

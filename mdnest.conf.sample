@@ -77,6 +77,15 @@ GIT_AUTHOR_EMAIL=you@example.com
 # registered and the frontend never loads the board's UI chunk.
 # ENABLE_TASK_BOARD=false
 
+# Marp slide rendering (optional, works in both single and multi mode)
+# A note whose frontmatter declares `marp: true` renders as a slide deck in the
+# Preview pane, so the note you draft an idea in is also the deck you present
+# from. The Live editor is unchanged, and notes without `marp: true` render
+# exactly as before.
+# Off by default — when it is off the capability is not advertised and the
+# frontend never loads the Marp engine chunk.
+# ENABLE_MARP=false
+
 # ==========================================================================
 # Federated identity via Firebase (optional, requires AUTH_MODE=multi)
 # ==========================================================================

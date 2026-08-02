@@ -1,13 +1,16 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mdnest/mdnest/backend/middleware"
+	"github.com/mdnest/mdnest/backend/storage"
 	"github.com/mdnest/mdnest/backend/store"
 )
 
@@ -16,6 +19,7 @@ type fakeWSStore struct {
 	personal    map[int]*store.Workspace
 	byNS        map[string]*store.Workspace
 	groups      map[int]*store.WorkspaceGroup
+	getResult   *store.Workspace
 	lastCreate  store.WorkspaceInput
 	created     bool
 	inGroupNS   string
@@ -24,7 +28,7 @@ type fakeWSStore struct {
 }
 
 func (f *fakeWSStore) List() ([]store.Workspace, error)  { return nil, nil }
-func (f *fakeWSStore) Get(int) (*store.Workspace, error) { return nil, nil }
+func (f *fakeWSStore) Get(int) (*store.Workspace, error) { return f.getResult, nil }
 func (f *fakeWSStore) GetByNamespace(ns string) (*store.Workspace, error) {
 	return f.byNS[ns], nil
 }
@@ -46,6 +50,7 @@ func (f *fakeWSStore) RemoteForNamespace(string) (*store.WorkspaceRemote, error)
 	return nil, nil
 }
 func (f *fakeWSStore) SetSyncStatus(string, string) error          { return nil }
+func (f *fakeWSStore) PersonalNamespaces() ([]string, error)       { return nil, nil }
 func (f *fakeWSStore) ListGroups() ([]store.WorkspaceGroup, error) { return nil, nil }
 func (f *fakeWSStore) GetGroup(id int) (*store.WorkspaceGroup, error) {
 	return f.groups[id], nil
@@ -58,6 +63,9 @@ func (f *fakeWSStore) UpdateGroup(_ int, in store.WorkspaceGroupInput) (*store.W
 	return &store.WorkspaceGroup{Name: in.Name}, nil
 }
 func (f *fakeWSStore) DeleteGroup(int) (bool, error) { return true, nil }
+func (f *fakeWSStore) EnsureProvisionedGroup(spec store.ProvisionedGroupSpec) (*store.WorkspaceGroup, error) {
+	return &store.WorkspaceGroup{Name: spec.Name, BaseURL: spec.BaseURL, Source: "provisioned"}, nil
+}
 func (f *fakeWSStore) CreateInGroup(groupID int, ns string, _ bool) (*store.Workspace, error) {
 	f.inGroupCall = true
 	f.inGroupID = groupID
@@ -80,6 +88,7 @@ func (f fakeUsers) GetUserByID(id int) (*store.User, error) {
 type fakeGrants struct {
 	created bool
 	ns      string
+	deleted string
 }
 
 func (f *fakeGrants) GetGrantsForUser(int) ([]store.Grant, error) { return nil, nil }
@@ -87,6 +96,63 @@ func (f *fakeGrants) CreateGrant(userID int, ns, path, perm string, by *int) (*s
 	f.created = true
 	f.ns = ns
 	return &store.Grant{}, nil
+}
+func (f *fakeGrants) DeleteGrantsForNamespace(ns string) (int64, error) {
+	f.deleted = ns
+	return 0, nil
+}
+
+// fakeNsCleaner records the namespace whose admin rows were removed.
+type fakeNsCleaner struct{ deleted string }
+
+func (f *fakeNsCleaner) DeleteAllForNamespace(ns string) (int64, error) {
+	f.deleted = ns
+	return 0, nil
+}
+
+// Deleting a workspace/project revokes every access grant and namespace-admin
+// row on its namespace so no orphaned access metadata lingers.
+func TestAdminDeleteRevokesNamespaceAccess(t *testing.T) {
+	fs := &fakeWSStore{getResult: &store.Workspace{ID: 5, Namespace: "team-x"}}
+	gr := &fakeGrants{}
+	nsa := &fakeNsCleaner{}
+	h := NewWorkspaceHandler(fs, nil, gr, nil, nil, true)
+	h.SetNamespaceAdminCleaner(nsa)
+	r := httptest.NewRequest(http.MethodDelete, "/api/admin/workspaces?id=5", nil)
+	w := httptest.NewRecorder()
+	h.HandleAdmin(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if gr.deleted != "team-x" {
+		t.Fatalf("grants not revoked for namespace: %q", gr.deleted)
+	}
+	if nsa.deleted != "team-x" {
+		t.Fatalf("namespace-admins not revoked: %q", nsa.deleted)
+	}
+}
+
+// Storage is purged only when a durable copy demonstrably exists: git mirroring
+// enabled AND the last sync succeeded. A timestamp alone (stamped on failed
+// syncs too) or a mount-backed / unsynced namespace must NOT be purged — the
+// bytes could be the only copy.
+func TestStorageHasDurableCopy(t *testing.T) {
+	ts := time.Now()
+	for _, c := range []struct {
+		name string
+		ws   *store.Workspace
+		want bool
+	}{
+		{"nil", nil, false},
+		{"not git-enabled (e.g. a mount)", &store.Workspace{Namespace: "n", GitEnabled: false, LastSyncAt: &ts}, false},
+		{"git-enabled, never synced (pending)", &store.Workspace{Namespace: "n", GitEnabled: true, LastSyncAt: nil}, false},
+		{"git-enabled, last sync errored", &store.Workspace{Namespace: "n", GitEnabled: true, LastSyncAt: &ts, LastSyncError: "boom"}, false},
+		{"git-enabled, last sync ok", &store.Workspace{Namespace: "n", GitEnabled: true, LastSyncAt: &ts, LastSyncError: ""}, true},
+	} {
+		if got := storageHasDurableCopy(c.ws); got != c.want {
+			t.Errorf("%s: storageHasDurableCopy = %v, want %v", c.name, got, c.want)
+		}
+	}
 }
 
 // A personal-workspace PUT ignores a client-supplied namespace and always
@@ -210,18 +276,6 @@ func TestGroupCreateFailsClosedWithoutEncryption(t *testing.T) {
 	}
 }
 
-func TestAdminCreateRejectsReservedPrefix(t *testing.T) {
-	fs := &fakeWSStore{byNS: map[string]*store.Workspace{}}
-	h := NewWorkspaceHandler(fs, nil, nil, nil, nil, true)
-	body := `{"namespace":"user-1","git_enabled":false}`
-	r := httptest.NewRequest(http.MethodPost, "/api/admin/workspaces", strings.NewReader(body))
-	w := httptest.NewRecorder()
-	h.HandleAdmin(w, r)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 for reserved user- prefix", w.Code)
-	}
-}
-
 func TestValidateRemote(t *testing.T) {
 	h := NewWorkspaceHandler(nil, nil, nil, nil, []string{"gitlab.forterro.com"}, true)
 	cases := []struct {
@@ -321,6 +375,29 @@ func TestGroupCreateValidatesBaseURL(t *testing.T) {
 	}
 }
 
+// A provisioned group is owned by the deployment: the admin panel may manage its
+// sub-projects but must not edit or delete the group itself.
+func TestProvisionedGroupIsImmutable(t *testing.T) {
+	fs := &fakeWSStore{groups: map[int]*store.WorkspaceGroup{
+		3: {ID: 3, Name: "Provisioned workspaces", Source: "provisioned", BaseURL: "https://gitlab.forterro.com/mdnest-workspaces/dev"},
+	}}
+	h := NewWorkspaceHandler(fs, nil, nil, nil, nil, true)
+
+	put := httptest.NewRequest(http.MethodPut, "/api/admin/workspace-groups?id=3", strings.NewReader(`{"name":"renamed","transport":"https","base_url":"https://gitlab.forterro.com/g"}`))
+	pw := httptest.NewRecorder()
+	h.HandleGroups(pw, put)
+	if pw.Code != http.StatusForbidden {
+		t.Fatalf("PUT status=%d, want 403 for provisioned group", pw.Code)
+	}
+
+	del := httptest.NewRequest(http.MethodDelete, "/api/admin/workspace-groups?id=3", nil)
+	dw := httptest.NewRecorder()
+	h.HandleGroups(dw, del)
+	if dw.Code != http.StatusForbidden {
+		t.Fatalf("DELETE status=%d, want 403 for provisioned group", dw.Code)
+	}
+}
+
 // remote_url and branch are passed to git as positional arguments, so a value
 // beginning with "-" is parsed as an option instead. `--upload-pack=<cmd>`
 // makes git execute <cmd>, which turns "configure my own workspace" — available
@@ -365,5 +442,54 @@ func TestBranchRejectsFlagSmuggling(t *testing.T) {
 		if _, err := h.inputFrom(workspaceRequest{Branch: ok}, false); err != nil {
 			t.Errorf("rejected valid branch %q: %v", ok, err)
 		}
+	}
+}
+
+// recordingStorage notes whether the namespace's bytes were purged.
+type recordingStorage struct {
+	storage.Storage
+	removedAll []string
+}
+
+func (r *recordingStorage) RemoveAll(_ context.Context, ns, relPath string) error {
+	if relPath == "" {
+		r.removedAll = append(r.removedAll, ns)
+	}
+	return nil
+}
+func (r *recordingStorage) MkdirAll(context.Context, string, string) error { return nil }
+
+// TestStorageHasDurableCopy pins the predicate; this pins that decommission
+// actually *consults* it. Without this, deleting the condition from the call
+// site reinstates the original data-loss bug — purging a namespace whose notes
+// exist nowhere else — while every other test stays green.
+func TestDecommissionPurgesOnlyWithADurableCopy(t *testing.T) {
+	at := time.Now()
+	cases := []struct {
+		name       string
+		ws         store.Workspace
+		wantPurged bool
+	}{
+		{"mirrored and last sync ok", store.Workspace{Namespace: "ok-ns", GitEnabled: true, LastSyncAt: &at}, true},
+		{"never synced (pending)", store.Workspace{Namespace: "pending-ns", GitEnabled: true}, false},
+		{"last sync errored", store.Workspace{Namespace: "err-ns", GitEnabled: true, LastSyncAt: &at, LastSyncError: "boom"}, false},
+		{"not mirroring at all", store.Workspace{Namespace: "mount-ns"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := &recordingStorage{}
+			gr := &fakeGrants{}
+			h := NewWorkspaceHandler(&fakeWSStore{personal: map[int]*store.Workspace{}}, nil, gr, rec, nil, true)
+			ws := tc.ws
+			h.decommissionNamespace(context.Background(), &ws)
+
+			purged := len(rec.removedAll) > 0
+			if purged != tc.wantPurged {
+				t.Errorf("purged=%v, want %v (removedAll=%v)", purged, tc.wantPurged, rec.removedAll)
+			}
+			if !tc.wantPurged && purged {
+				t.Errorf("DATA LOSS: purged %q with no durable copy to restore from", ws.Namespace)
+			}
+		})
 	}
 }

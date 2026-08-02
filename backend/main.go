@@ -35,6 +35,19 @@ func env(key, fallback string) string {
 	return fallback
 }
 
+// readGitToken returns the coarse env-default git PAT used by the provisioned
+// group, from GIT_TOKEN_FILE (preferred: a mounted Secret) or GIT_TOKEN. It
+// returns "" when neither is set — the reconcile then keeps any previously
+// sealed credential rather than clearing it.
+func readGitToken() string {
+	if f := strings.TrimSpace(os.Getenv("GIT_TOKEN_FILE")); f != "" {
+		if b, err := os.ReadFile(f); err == nil {
+			return strings.TrimSpace(string(b))
+		}
+	}
+	return strings.TrimSpace(os.Getenv("GIT_TOKEN"))
+}
+
 // envInt reads an integer env var, falling back to the given default if
 // unset or unparseable.
 func envInt(key string, fallback int) int {
@@ -365,12 +378,41 @@ func main() {
 		}); ok {
 			r.SetSyncStatusSink(workspaceStore)
 		}
+
+		// Reconcile the operator-provisioned workspace group from env. When a
+		// coarse default remote is configured (GIT_REMOTE_URL — the same base the
+		// env provisioning mirrors every namespace under), surface it as a
+		// 'provisioned' group so a superadmin can see it and add sub-projects to
+		// it, without being able to edit or delete a group the deployment owns.
+		// Its credential is sealed into the DB row so grouped members resolve
+		// through the same path as UI groups; skipped when the server has no
+		// dedicated sealing secret (fail-closed, like the rest of mirroring).
+		if encryptionConfigured {
+			if base := strings.TrimRight(strings.TrimSpace(env("GIT_REMOTE_URL", "")), "/"); base != "" {
+				spec := store.ProvisionedGroupSpec{
+					Name:       env("GIT_PROVISIONED_GROUP_NAME", "Provisioned workspaces"),
+					Transport:  "https",
+					BaseURL:    base,
+					Username:   env("GIT_REMOTE_USERNAME", "oauth2"),
+					Branch:     env("GIT_REMOTE_BRANCH", "main"),
+					Credential: readGitToken(),
+				}
+				if _, err := workspaceStore.EnsureProvisionedGroup(spec); err != nil {
+					log.Printf("workspaces: could not reconcile provisioned group: %v", err)
+				}
+			}
+		}
 	}
 
 	// Task board (optional, off by default). When disabled the /api/tasks and
 	// /api/board routes are never registered — a clean 404 rather than a
 	// half-present feature — and the frontend never loads the board chunk.
 	enableTaskBoard := env("ENABLE_TASK_BOARD", "false") == "true"
+
+	// Marp slides (optional, off by default). When enabled the frontend renders
+	// a note whose frontmatter says `marp: true` as a slide deck in the Live view
+	// instead of the editor; when disabled it never loads the Marp engine chunk.
+	enableMarp := env("ENABLE_MARP", "false") == "true"
 
 	// Live collaboration hub (optional, multi mode only)
 	enableCollab := multiMode && env("ENABLE_LIVE_COLLAB", "false") == "true"
@@ -388,7 +430,7 @@ func main() {
 		log.Println("live collaboration enabled (WebSocket)")
 	}
 
-	nsHandler := handlers.NewNamespaceHandler(stg, perms)
+	nsHandler := handlers.NewNamespaceHandler(stg, perms, workspaceStore)
 	noteHandler := handlers.NewNoteHandler(stg)
 	historyHandler := handlers.NewHistoryHandler(absNotesDir)
 	if collabHub != nil {
@@ -405,8 +447,14 @@ func main() {
 			if perr != nil {
 				log.Fatalf("invalid WRITER_URL %q: %v", writerURL, perr)
 			}
-			uploadHandler.SetWriterProxy(httputil.NewSingleHostReverseProxy(u))
-			log.Printf("attachments: proxying /api/upload and /api/files/ to writer at %s", writerURL)
+			writerProxy := httputil.NewSingleHostReverseProxy(u)
+			uploadHandler.SetWriterProxy(writerProxy)
+			// The git tree — and therefore per-file commit history — lives only on
+			// the writer, so history reads must be proxied there too. Without this,
+			// an app replica finds no local .git/ and wrongly reports that history
+			// is unavailable for the namespace.
+			historyHandler.SetWriterProxy(writerProxy)
+			log.Printf("attachments + history: proxying /api/upload, /api/files/, /api/note/history and /api/note/at to writer at %s", writerURL)
 		} else {
 			// Fail loud rather than come up Ready with silently broken
 			// attachments: an app replica owns no attachment bytes, so upload
@@ -493,6 +541,7 @@ func main() {
 	configHandler := handlers.NewConfigHandler(authMode, enableCollab, serverAlias, require2FA)
 	configHandler.SetGrantMaxDepth(grantMaxDepth)
 	configHandler.SetTaskBoard(enableTaskBoard)
+	configHandler.SetMarp(enableMarp)
 
 	// Update-availability check — opt out by setting DISABLE_UPDATE_CHECK=true.
 	// One HTTPS GET to api.github.com per server every hour; failures are
@@ -631,6 +680,7 @@ func main() {
 		// SSRF; the primary control is the writer's egress NetworkPolicy).
 		workspaceHandler := handlers.NewWorkspaceHandler(workspaceStore, userStore, grantStore, stg,
 			strings.Split(env("GIT_REMOTE_ALLOWED_HOSTS", ""), ","), encryptionConfigured)
+		workspaceHandler.SetNamespaceAdminCleaner(nsAdminStore)
 		if !encryptionConfigured {
 			log.Println("WARNING: MDNEST_ENCRYPTION_KEY is unset and MDNEST_JWT_SECRET is default — per-workspace git mirroring is disabled (credentials cannot be sealed at rest). Set MDNEST_ENCRYPTION_KEY to enable it.")
 		}

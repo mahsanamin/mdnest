@@ -14,17 +14,42 @@ import (
 // to <base_url>/<namespace>.git using the group's shared credential, so an
 // operator declares the base + token once and then adds namespaces to it.
 type WorkspaceGroup struct {
-	ID             int       `json:"id"`
-	Name           string    `json:"name"`
-	Transport      string    `json:"transport"` // "https" | "ssh"
-	BaseURL        string    `json:"base_url"`
-	Username       string    `json:"username"`
-	Branch         string    `json:"branch"`
-	KnownHosts     string    `json:"known_hosts,omitempty"`
-	HasCredential  bool      `json:"has_credential"`
+	ID            int    `json:"id"`
+	Name          string `json:"name"`
+	Transport     string `json:"transport"` // "https" | "ssh"
+	BaseURL       string `json:"base_url"`
+	Username      string `json:"username"`
+	Branch        string `json:"branch"`
+	KnownHosts    string `json:"known_hosts,omitempty"`
+	HasCredential bool   `json:"has_credential"`
+	// Source is 'ui' (superadmin-managed in the admin panel) or 'provisioned'
+	// (reconciled on boot from operator config: the panel may only manage its
+	// sub-projects, never edit or delete the group itself).
+	Source         string    `json:"source"`
 	WorkspaceCount int       `json:"workspace_count"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
+	// ImplicitNamespaces is populated by the handler (never stored/scanned): for
+	// a provisioned group it lists existing namespaces that mirror under its base
+	// via the env default but have no explicit workspace row.
+	ImplicitNamespaces []string `json:"implicit_namespaces,omitempty"`
+}
+
+// IsProvisioned reports whether the group is operator-owned (env-reconciled) and
+// therefore immutable from the admin panel except for its sub-projects.
+func (g WorkspaceGroup) IsProvisioned() bool { return g.Source == "provisioned" }
+
+// ProvisionedGroupSpec is an operator-declared group reconciled on boot from
+// environment config (GIT_REMOTE_URL + token). Credential is the plaintext PAT
+// or SSH key; it is sealed at rest like any other group credential so grouped
+// members resolve through the exact same path as UI groups.
+type ProvisionedGroupSpec struct {
+	Name       string
+	Transport  string
+	BaseURL    string
+	Username   string
+	Branch     string
+	Credential string
 }
 
 // WorkspaceGroupInput carries the writable fields of a group. Credential (the
@@ -41,7 +66,7 @@ type WorkspaceGroupInput struct {
 
 const groupSelect = `
 	SELECT g.id, g.name, g.transport, g.base_url, g.username, g.branch,
-	       g.known_hosts, (g.credential_encrypted <> '') AS has_credential,
+	       g.known_hosts, (g.credential_encrypted <> '') AS has_credential, g.source,
 	       (SELECT COUNT(*) FROM workspaces w WHERE w.group_id = g.id),
 	       g.created_at, g.updated_at
 	FROM workspace_groups g`
@@ -169,15 +194,7 @@ func (s *PostgresWorkspaceStore) CreateInGroup(groupID int, namespace string, gi
 }
 
 func normalizeGroup(in WorkspaceGroupInput) WorkspaceGroupInput {
-	if in.Transport = strings.ToLower(strings.TrimSpace(in.Transport)); in.Transport != "ssh" {
-		in.Transport = "https"
-	}
-	if strings.TrimSpace(in.Username) == "" {
-		in.Username = "oauth2"
-	}
-	if strings.TrimSpace(in.Branch) == "" {
-		in.Branch = "main"
-	}
+	in.Transport, in.Username, in.Branch = normalizeGitDefaults(in.Transport, in.Username, in.Branch)
 	in.BaseURL = strings.TrimSpace(in.BaseURL)
 	return in
 }
@@ -186,9 +203,59 @@ func scanGroup(row rowScanner) (WorkspaceGroup, error) {
 	var g WorkspaceGroup
 	if err := row.Scan(
 		&g.ID, &g.Name, &g.Transport, &g.BaseURL, &g.Username, &g.Branch,
-		&g.KnownHosts, &g.HasCredential, &g.WorkspaceCount, &g.CreatedAt, &g.UpdatedAt,
+		&g.KnownHosts, &g.HasCredential, &g.Source, &g.WorkspaceCount, &g.CreatedAt, &g.UpdatedAt,
 	); err != nil {
 		return WorkspaceGroup{}, err
 	}
 	return g, nil
+}
+
+// EnsureProvisionedGroup upserts a source='provisioned' group by name, reconciled
+// on boot from operator config. The base/transport/username/branch are refreshed
+// every call so editing the deployment values and restarting updates the group;
+// the credential is refreshed only when a non-empty one is supplied (so a missing
+// token at boot never wipes a previously-sealed one). A name that already exists
+// as a 'ui' group is taken over as provisioned — provisioned config wins.
+func (s *PostgresWorkspaceStore) EnsureProvisionedGroup(spec ProvisionedGroupSpec) (*WorkspaceGroup, error) {
+	transport, username, branch := normalizeGitDefaults(spec.Transport, spec.Username, spec.Branch)
+	baseURL := strings.TrimRight(strings.TrimSpace(spec.BaseURL), "/")
+	enc := ""
+	if spec.Credential != "" {
+		var err error
+		if enc, err = secrets.Encrypt([]byte(spec.Credential), s.key); err != nil {
+			return nil, fmt.Errorf("encrypt provisioned group credential: %w", err)
+		}
+	}
+	// credential_encrypted is only overwritten when a new token is supplied
+	// (COALESCE keeps the existing one when EXCLUDED is '').
+	var id int
+	err := s.db.QueryRow(
+		`INSERT INTO workspace_groups
+		   (name, transport, base_url, username, branch, credential_encrypted, source)
+		 VALUES ($1, $2, $3, $4, $5, $6, 'provisioned')
+		 ON CONFLICT (name) DO UPDATE SET
+		   transport = EXCLUDED.transport,
+		   base_url  = EXCLUDED.base_url,
+		   username  = EXCLUDED.username,
+		   branch    = EXCLUDED.branch,
+		   credential_encrypted = CASE WHEN EXCLUDED.credential_encrypted <> ''
+		                               THEN EXCLUDED.credential_encrypted
+		                               ELSE workspace_groups.credential_encrypted END,
+		   source    = 'provisioned',
+		   updated_at = now()
+		 RETURNING id`,
+		strings.TrimSpace(spec.Name), transport, baseURL, username, branch, enc,
+	).Scan(&id)
+	if err != nil {
+		return nil, err
+	}
+	// Keep a single provisioned group: if the operator renamed it
+	// (GIT_PROVISIONED_GROUP_NAME) the stale row would otherwise linger as an
+	// undeletable orphan, so drop any other provisioned group here.
+	if _, err := s.db.Exec(
+		`DELETE FROM workspace_groups WHERE source = 'provisioned' AND id <> $1`, id,
+	); err != nil {
+		return nil, err
+	}
+	return s.GetGroup(id)
 }

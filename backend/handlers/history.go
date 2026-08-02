@@ -10,25 +10,34 @@ import (
 	"strings"
 )
 
-// HistoryHandler exposes the per-file git-sync history that the optional
-// git-sync sidecar maintains. Two endpoints:
+// HistoryHandler exposes the per-file git history that the storage backend
+// maintains. Two endpoints:
 //
-//   GET /api/note/history?ns=&path=     list of recent commits affecting a file
-//   GET /api/note/at?ns=&path=&ref=     content of a file at a specific commit
+//	GET /api/note/history?ns=&path=     list of recent commits affecting a file
+//	GET /api/note/at?ns=&path=&ref=     content of a file at a specific commit
 //
-// Both work in single mode and multi mode identically — what they need
-// (a per-namespace .git/) is provided by the git-sync sidecar regardless
-// of AUTH_MODE. If the namespace has no .git/ (i.e. git-sync was never
-// enabled), both endpoints return 404 with a clear message; the frontend
-// can hide the History menu entry on that signal.
+// Both read a per-namespace .git/ directly off the local filesystem. On a
+// git-native HA deployment the stateless app replicas own no git tree — only
+// the writer does — so when a writerProxy is configured (MDNEST_ROLE=app) both
+// endpoints forward to the writer, exactly like attachment traffic. Without a
+// proxy and without a local .git/ (single/writer with a namespace that has no
+// history yet), both return 404 so the frontend can hide the History entry.
 type HistoryHandler struct {
 	notesDir string
+	// writerProxy, when set (git-native HA app replicas), forwards history reads
+	// to the writer, which owns the git tree. App replicas keep no .git/ locally,
+	// so history can only be answered by the writer.
+	writerProxy http.Handler
 }
 
 // NewHistoryHandler creates a new history handler.
 func NewHistoryHandler(notesDir string) *HistoryHandler {
 	return &HistoryHandler{notesDir: notesDir}
 }
+
+// SetWriterProxy makes the read-only history endpoints reverse-proxy to the
+// writer. Used on stateless app replicas, which hold no git tree locally.
+func (h *HistoryHandler) SetWriterProxy(p http.Handler) { h.writerProxy = p }
 
 // shaRe matches a 7-40 char hex string. We deliberately reject branch
 // names, HEAD~N, tags, and other ref forms — accepting only commit SHAs
@@ -50,6 +59,12 @@ type commitEntry struct {
 func (h *HistoryHandler) HandleHistory(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	// App replicas hold no git tree: the writer owns it, so history can only be
+	// answered there. Forward the read rather than reporting a bogus "no history".
+	if h.writerProxy != nil {
+		h.writerProxy.ServeHTTP(w, r)
 		return
 	}
 
@@ -123,6 +138,11 @@ func (h *HistoryHandler) HandleHistory(w http.ResponseWriter, r *http.Request) {
 func (h *HistoryHandler) HandleNoteAt(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	// App replicas hold no git tree: forward the snapshot read to the writer.
+	if h.writerProxy != nil {
+		h.writerProxy.ServeHTTP(w, r)
 		return
 	}
 

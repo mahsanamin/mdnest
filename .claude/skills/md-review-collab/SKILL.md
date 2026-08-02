@@ -69,7 +69,12 @@ itself as a pure refactor.
   ```
 - **Mutation-test their tests.** A passing test proves nothing. Undo the fix,
   re-run, and confirm the test goes red. If it stays green the test is
-  decoration. This confirmed #53's permission tests (four cases red across two
+  decoration. **Mutate in two places: the logic and its call site.** A
+  predicate test proves the predicate, never that anything consults it — in
+  #72 a guard against destroying un-mirrored notes was pinned by a unit test,
+  yet deleting the guard from `decommissionNamespace` left the whole suite
+  green and reinstated the data loss. For anything whose failure mode is
+  irreversible, pin both halves. This confirmed #53's permission tests (four cases red across two
   packages) and #50's backplane tests (three cross-instance tests red, while
   the single-instance one correctly stayed green).
 - **Diff the test files, not just the source.** Adapting a constructor call is
@@ -149,6 +154,14 @@ nearly shipped.
   ```bash
   git grep -n "exec.Command" pr/<n> -- backend/
   ```
+- **Destructive operations that assume a backup exists.** A delete that says
+  "the remote copy is kept" must *verify* it, not hedge with "if any". #72's
+  decommission ran `RemoveAll` on the namespace unconditionally: a namespace
+  that came from a `MOUNT_` had its bind-mounted host directory wiped, and a
+  mirror that had never completed its first push — a state that same PR added
+  a `pending` label for — lost the only copy. Ask: what exactly makes the data
+  recoverable, is it *checked*, and does the confirmation text state a fact or
+  a hope?
 - **New render targets.** Any new `innerHTML` / `dangerouslySetInnerHTML` must
   go through `frontend/src/sanitize.js`. Never sanitize inline.
 - **New dependencies.** `git diff origin/develop...pr/<n> -- '*/go.mod' '*/package.json'`.
@@ -384,6 +397,50 @@ close button.
 - After merging, tell the contributor which of their other PRs now need a
   rebase, and name the conflicting files — you already know from the simulation.
 - **Get the owner's sign-off before merging anything that touches Gate 3.**
+- **Don't cut a release over a fix you already know is coming.** If a
+  contributor has said a fix is in flight for a defect in code that's *in this
+  cut*, wait for it or explicitly decide not to. v4.0.0 shipped with a sync
+  column showing green for a never-synced workspace, personal namespaces in the
+  grant pickers, and delete orphaning grants — all fixed in a PR that landed
+  hours later. Say which release a PR is going into and mean it; if that
+  changes, say so on the thread rather than letting them find out from the tag.
+
+## When you're fixing it yourself, bisect — don't theorise
+
+The expensive mistake in this repo's history is not a wrong fix, it's a long
+run of plausible ones. Chasing the task-checkbox bug cost far more than it
+should have because each round changed something and re-ran the whole suite,
+instead of isolating what actually differed.
+
+- **Find the smallest thing that reproduces, then change one variable.** The
+  checkbox save failed in the e2e suite and passed against the dev stack. Four
+  hypotheses (stale image, a `.dockerignore`, hash navigation, test ordering)
+  were all wrong. The answer came from running the *same probe* against one
+  note and then another: it was the **note**, not the environment or the spec.
+  A document whose serialization is byte-identical fires no echo — everything
+  else was noise.
+- **Instrument before the third attempt.** `page.on('console')`,
+  `page.on('response')` and a printed disk read answered in one run what four
+  edit-and-rerun cycles hadn't. If two fixes in a row miss, stop editing and
+  print something.
+- **A fix verified in one environment is verified in one environment.** The
+  first fix passed on the dev stack and failed in e2e, and that difference
+  *was* the bug — not a flaky harness. Treat the discrepancy as the signal.
+- **Suspect your own test before the product.** Two failures here were the
+  spec's fault: an assertion left between a fetch and its check, and a reset
+  that left the app holding a stale ETag. Both looked like product bugs.
+
+## Writing tests for someone else's feature
+
+- **Assert against the durable state, not the DOM.** "The UI shows it" was the
+  entire bug. Read the note back through the API and compare bytes.
+- **Make each spec hermetic by seeding its own fixture**, not by resetting
+  shared state mid-run. Resetting a note the app already has open leaves the
+  editor on a stale ETag, so the next save 409s and the test measures the wrong
+  thing. Seed one note per mutating spec in the runner instead.
+- **Exercise the interaction the user actually performs.** The bug only
+  appeared on a mouse-only toggle as the *first* interaction with a document;
+  any spec that clicked or typed elsewhere first would have passed.
 
 ## Field notes (things that cost a round trip)
 
@@ -398,12 +455,24 @@ close button.
 - Always `git worktree remove --force` when done, and `git worktree list` at the
   end to confirm nothing is left behind.
 - Reproductions belong in the scratchpad, never committed to the repo.
+- `frontend/Dockerfile` runs `COPY . .` *after* `npm install`. Without a
+  `.dockerignore` that copies the host's `node_modules` and a stale `dist/`
+  over the image's — so a Docker build can serve something other than the
+  tree. Both `.dockerignore` files exist now; if a build ever seems to ignore
+  your change, check that first.
+- Running `npm ci` inside a container against a bind-mounted host directory
+  replaces the host's `node_modules` with the container's platform binaries,
+  and the next host-side `npm run build` fails on rollup's native module.
+  Reinstall natively (`rm -rf node_modules && npm ci`) if the pre-push hook
+  starts failing on a build that worked.
 
 ## Done criteria
 
 - Every open contributor PR has been through all three gates.
 - Every blocking finding is backed by a reproduction, not a suspicion.
 - Every finding was checked against the base branch before being blamed on the PR.
+- Mutation-testing hit both the logic and its call site for anything whose
+  failure mode is irreversible.
 - The merge order is decided and, if non-obvious, was simulated.
 - No contributor PR was closed, retargeted or pushed to on their behalf.
 - Direction questions are either resolved against a precedent / a smaller fix /

@@ -1,6 +1,6 @@
 # mdnest
 
-![Version: 0.2.1](https://img.shields.io/badge/Version-0.2.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 3.12.0-dev](https://img.shields.io/badge/AppVersion-3.12.0--dev-informational?style=flat-square)
+![Version: 0.3.0](https://img.shields.io/badge/Version-0.3.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 4.1.0](https://img.shields.io/badge/AppVersion-4.1.0-informational?style=flat-square)
 
 mdnest — self-hosted Markdown knowledge base with live collaboration.
 Standard-Kubernetes chart (no CRDs). PostgreSQL and Redis are expected to be
@@ -302,6 +302,8 @@ All traffic goes to the frontend Service, which proxies `/api` and `/api/ws` (We
 | ingress.enabled | bool | `false` | Enable an Ingress routing all traffic to the frontend Service. |
 | ingress.hosts | list | `[{"host":"mdnest.local","paths":[{"path":"/","pathType":"Prefix"}]}]` | Ingress hosts and paths. |
 | ingress.tls | list | `[]` | Ingress TLS configuration. |
+| marp | object | `{"enabled":false}` | --------------------------------------------------------------------------- |
+| marp.enabled | bool | `false` | Enable Marp slide rendering (`ENABLE_MARP`). Off by default; renders `marp: true` notes as a slide deck in the Live view. Independent of `auth.mode`. |
 | mcp | object | `{"affinity":{},"auth":{"existingSecret":"","existingSecretKey":"token","mode":"bearer","token":""},"enabled":false,"extraEnv":[],"http":{"path":"/mcp","port":3000},"ingress":{"annotations":{},"className":"","enabled":false,"hosts":[],"tls":[]},"mdnestUrl":"","nodeSelector":{},"oauth":{"allowedRedirectOrigins":[],"publicUrl":"","secret":{"existingSecret":"","existingSecretKey":"oauth-secret","value":""},"ssoAuthorizeUrl":""},"podAnnotations":{},"podLabels":{},"podSecurityContext":{},"replicaCount":1,"resources":{},"securityContext":{},"service":{"port":3000,"type":"ClusterIP"},"tolerations":[]}` | --------------------------------------------------------------------------- |
 | mcp.affinity | object | `{}` | Affinity rules for the MCP server. |
 | mcp.auth | object | `{"existingSecret":"","existingSecretKey":"token","mode":"bearer","token":""}` | Endpoint authentication. Mutually exclusive modes selected by `auth.mode`:    `bearer` — clients present a static mdnest API token (service / gateway      integration). The token is required in the endpoint's `Authorization:      Bearer` header and forwarded to the backend. Provide it inline via      `auth.token` or reference an existing Secret (`auth.existingSecret`).    `oauth`  — per-user delegation via OAuth 2.1 authorization-code + PKCE;      login is delegated to mdnest SSO and every action is attributed to the      signed-in user. Requires the `oauth.*` settings below. |
