@@ -25,6 +25,7 @@
 export function createEchoGate({ capacity = 20 } = {}) {
   let inFlight = 0;
   let deferred = [];
+  let epoch = 0;
   const ownEtags = [];
 
   return {
@@ -37,15 +38,25 @@ export function createEchoGate({ capacity = 20 } = {}) {
     },
 
     // Mark a save as outstanding. Call right before issuing the PUT.
+    // Returns a token to hand back to endSave: it ties the save to the
+    // current epoch, so a save that was still settling when the user
+    // switched notes (reset() bumps the epoch) can't touch the new
+    // note's window when it finally lands.
     beginSave() {
       inFlight++;
+      return epoch;
     },
 
-    // Mark a save as settled (success OR failure — call from `finally`).
-    // Returns the messages deferred while saves were in flight, but only
-    // once the last outstanding save settles; the caller must run each one
-    // through its file-changed handler again so `check` gets a second look.
-    endSave() {
+    // Mark a save as settled (success OR failure — call from `finally`
+    // with the token beginSave returned). Returns the messages deferred
+    // while saves were in flight, but only once the last outstanding save
+    // settles; the caller must run each one through its file-changed
+    // handler again so `check` gets a second look. A token from a closed
+    // epoch is ignored outright — that save's window was already torn
+    // down by reset(), and its late settle must neither decrement the new
+    // note's in-flight count nor flush the new note's deferred messages.
+    endSave(token) {
+      if (token !== epoch) return [];
       inFlight = Math.max(0, inFlight - 1);
       if (inFlight > 0) return [];
       const flushed = deferred;
@@ -69,8 +80,13 @@ export function createEchoGate({ capacity = 20 } = {}) {
       return 'process';
     },
 
-    // Drop deferred messages (on file switch they'd target the wrong note).
+    // Tear down the window on file switch: drop deferred messages (they
+    // target the previous note), clear the in-flight count (an old note's
+    // outstanding save must not defer the new note's broadcasts), and
+    // open a new epoch so that stale save's eventual endSave is a no-op.
     reset() {
+      epoch++;
+      inFlight = 0;
       deferred = [];
     },
   };
