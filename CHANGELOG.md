@@ -4,6 +4,33 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v4.1.1 — The conflict banner learns whose save it is
+
+Patch release fixing GitHub issue #82.
+
+### Fixed
+
+- **Editing your own note in multi mode no longer flashes "This file was
+  modified by *you*. Your changes may conflict."** (#82). The v4.0.0 fix
+  remembered the etags this tab's saves produced and suppressed matching
+  `file-changed` echoes — but it learned each etag from the PUT *response*,
+  while the backend broadcasts the echo *before* it writes that response. The
+  echo therefore usually arrived first, found nothing to match, and popped the
+  conflict banner naming the editing user on nearly every autosave — reflowing
+  the document up and down while typing. The suppression now lives in a pure
+  `echo-gate` module with an in-flight-save window: broadcasts that arrive
+  while this tab's own PUT is outstanding are deferred and re-checked once the
+  save settles, by which point the response has registered its etag and the
+  echo is recognized and dropped. A genuine change by another user — or by the
+  same user through the CLI/MCP — is still delivered after the save settles,
+  and deferred messages are discarded on file switch so they can't replay
+  against the wrong note. Regression-pinned in
+  `frontend/src/__tests__/echo-gate.test.js`, covering the exact race from the
+  issue, the late-echo ordering the old ring handled, and the
+  remote-change-during-save path.
+
+---
+
 ## v4.1.0 — Marp slides, Git Workspaces admin, and the image v4.0.0 forgot
 
 A short cycle on top of v4.0.0, and it starts with an apology: **v4.0.0 shipped
