@@ -48,6 +48,7 @@ import {
   PermissionError,
 } from './api.js';
 import { buildPathIndex } from './wikilink.js';
+import { createEchoGate } from './echo-gate.js';
 import { broadcastTabMessage, onTabMessage } from './tab-sync.js';
 import { initFirebase, signOutFirebase } from './firebase-config.js';
 import './App.css';
@@ -313,21 +314,14 @@ function App() {
   const [dismissedReleaseVer, setDismissedReleaseVer] = useState(() => localStorage.getItem('mdnest_dismissed_release_version') || '');
   const [wsStatus, setWsStatus] = useState('disconnected'); // 'connected' | 'connecting' | 'disconnected'
   const etagRef = useRef(null);
-  // Ring of etags this client produced via its own saves. The backend echoes
-  // file-changed (with the new etag) back to the saving tab; under HA latency
-  // an earlier save's echo can arrive after a later save already moved etagRef
-  // on, so a single-value compare misses it. Suppressing any etag we authored
-  // keeps our own saves from raising a self-conflict banner, while a same-user
-  // write from another source (CLI/MCP) carries an etag we never produced and
-  // still propagates.
-  const ownEtagsRef = useRef([]);
-  const rememberOwnEtag = useRef((etag) => {
-    if (!etag) return;
-    const buf = ownEtagsRef.current;
-    if (buf.includes(etag)) return;
-    buf.push(etag);
-    if (buf.length > 20) buf.shift();
-  }).current;
+  // Echo gate: recognizes the file-changed echoes of this tab's own saves so
+  // they never raise a self-conflict banner. The backend broadcasts BEFORE it
+  // writes the PUT response, so the echo usually beats the response that
+  // carries the new etag — the gate defers broadcasts that arrive while a
+  // save is in flight and re-checks them once the save settles (issue #82).
+  // A same-user write from another source (CLI/MCP) carries an etag this tab
+  // never produced and still propagates. Pure module: echo-gate.js.
+  const echoGate = useRef(createEchoGate()).current;
   const collabRef = useRef(null);
   const typingTimers = useRef({}); // {userId: timeoutId}
   const localTypingUntil = useRef(0); // timestamp — local user is "typing" until this time
@@ -409,6 +403,48 @@ function App() {
     return () => { clearInterval(interval); clearTimeout(initial); };
   }, []);
 
+  // Handle a file-changed broadcast. Extracted from the collab switch so the
+  // echo gate can replay deferred messages through the exact same logic once
+  // an in-flight save settles. The gate makes the handler idempotent for our
+  // own saves, as the backend broadcast assumes: acting on our own echo would
+  // pop a spurious self-conflict banner while autosave is mid-flight
+  // (isClean=false), and on the clean path re-fetch and reset the editor
+  // selection (the cursor "jumps").
+  const handleFileChanged = useCallback((msg) => {
+    if (echoGate.check(msg, etagRef.current) !== 'process') return;
+    // Another user saved (or restored) — update etag and reload if
+    // no local edits. Restores get a separate "info" banner instead
+    // of the yellow conflict banner; same auto-reload-when-clean
+    // path otherwise.
+    etagRef.current = msg.etag;
+    const isRestore = msg.reason === 'restored';
+    const isClean = (contentRef.current || '').trim() === (savedContentRef.current || '').trim();
+    if (isClean) {
+      setConflictBanner(null);
+      const ns = selectedNsRef.current;
+      const path = currentPathRef.current;
+      if (ns && path) {
+        getNote(ns, path).then(({ text, etag }) => {
+          if (selectedNsRef.current === ns && currentPathRef.current === path) {
+            setContent(text);
+            setSavedContent(text);
+            etagRef.current = etag;
+            if (isRestore) {
+              // Show a brief info banner so the user knows their
+              // content updated because of an explicit restore by
+              // someone else, not a normal save.
+              setRestoreBanner({ username: msg.username, ref: msg.restoreFromRef });
+            }
+          }
+        }).catch(() => {});
+      }
+    } else if (isRestore) {
+      setRestoreBanner({ username: msg.username, ref: msg.restoreFromRef, etag: msg.etag });
+    } else {
+      setConflictBanner({ username: msg.username, etag: msg.etag });
+    }
+  }, []);
+
   // Initialize collab client
   useEffect(() => {
     if (!appConfig?.liveCollab) return;
@@ -461,51 +497,9 @@ function App() {
             if (selectedNsRef.current) refreshTree(selectedNsRef.current);
           }, 1000);
           break;
-        case 'file-changed': {
-          // Ignore the echo of our own save. The backend fans file-changed out
-          // to every connection on the note, including the tab that just saved
-          // (an HTTP PUT has no *Conn to exclude). If the incoming etag matches
-          // the one we already hold, nothing changed for us: acting on it pops
-          // a spurious self-conflict banner while autosave is mid-flight
-          // (isClean=false), and on the clean path re-fetches and resets the
-          // editor selection (the cursor "jumps"). This makes the handler
-          // idempotent for our own save, as the backend broadcast assumes.
-          // A same-user write from another source (CLI, MCP) carries a
-          // different etag, so it still propagates.
-          if (msg.etag && (msg.etag === etagRef.current || ownEtagsRef.current.includes(msg.etag))) break;
-          // Another user saved (or restored) — update etag and reload if
-          // no local edits. Restores get a separate "info" banner instead
-          // of the yellow conflict banner; same auto-reload-when-clean
-          // path otherwise.
-          etagRef.current = msg.etag;
-          const isRestore = msg.reason === 'restored';
-          const isClean = (contentRef.current || '').trim() === (savedContentRef.current || '').trim();
-          if (isClean) {
-            setConflictBanner(null);
-            const ns = selectedNsRef.current;
-            const path = currentPathRef.current;
-            if (ns && path) {
-              getNote(ns, path).then(({ text, etag }) => {
-                if (selectedNsRef.current === ns && currentPathRef.current === path) {
-                  setContent(text);
-                  setSavedContent(text);
-                  etagRef.current = etag;
-                  if (isRestore) {
-                    // Show a brief info banner so the user knows their
-                    // content updated because of an explicit restore by
-                    // someone else, not a normal save.
-                    setRestoreBanner({ username: msg.username, ref: msg.restoreFromRef });
-                  }
-                }
-              }).catch(() => {});
-            }
-          } else if (isRestore) {
-            setRestoreBanner({ username: msg.username, ref: msg.restoreFromRef, etag: msg.etag });
-          } else {
-            setConflictBanner({ username: msg.username, etag: msg.etag });
-          }
+        case 'file-changed':
+          handleFileChanged(msg);
           break;
-        }
       }
     }, setWsStatus);
     collabRef.current = client;
@@ -519,6 +513,7 @@ function App() {
       setPresenceUsers([]);
       setRemoteCursors({});
       setConflictBanner(null);
+      echoGate.reset();
       return;
     }
     collabRef.current.connect(selectedNs, currentPath);
@@ -526,6 +521,9 @@ function App() {
     setRemoteCursors({});
     setTypingUsers({});
     setConflictBanner(null);
+    // Broadcasts deferred during an in-flight save targeted the previous
+    // note — drop them rather than replaying them against this one.
+    echoGate.reset();
   }, [selectedNs, currentPath]);
 
   const loadNamespaces = useCallback(async () => {
@@ -959,10 +957,11 @@ function App() {
         console.warn('mdnest: autosave skipped — refusing to overwrite non-empty note with empty content. Use the explicit clear action to deliberately empty a file.');
         return;
       }
+      const saveToken = echoGate.beginSave();
       try {
         const result = await saveNote(selectedNs, currentPath, newContent, etagRef.current);
         setSavedContent(newContent);
-        if (result.etag) { etagRef.current = result.etag; rememberOwnEtag(result.etag); }
+        if (result.etag) { etagRef.current = result.etag; echoGate.rememberOwnEtag(result.etag); }
       } catch (e) {
         if (e.status === 409) {
           setConflictBanner({ username: 'another user', etag: e.etag });
@@ -971,6 +970,12 @@ function App() {
         } else {
           console.error('Auto-save failed:', e);
         }
+      } finally {
+        // Re-check any broadcast that arrived while the save was in flight —
+        // our own echo is now recognizable, a real remote change still lands.
+        // (A no-op if the user switched notes mid-save: the token's epoch
+        // is closed and endSave returns nothing.)
+        echoGate.endSave(saveToken).forEach(handleFileChanged);
       }
     }, 800);
     saveTimerRef.current = timer;
@@ -1012,11 +1017,14 @@ function App() {
     setContent(newContent);
     setSavedContent(newContent);
     if (currentPath && selectedNs) {
+      const saveToken = echoGate.beginSave();
       try {
         const result = await saveNote(selectedNs, currentPath, newContent);
-        if (result.etag) { etagRef.current = result.etag; rememberOwnEtag(result.etag); }
+        if (result.etag) { etagRef.current = result.etag; echoGate.rememberOwnEtag(result.etag); }
       } catch (e) {
         console.error('Checkbox save failed:', e);
+      } finally {
+        echoGate.endSave(saveToken).forEach(handleFileChanged);
       }
     }
   }, [content, currentPath, selectedNs]);
