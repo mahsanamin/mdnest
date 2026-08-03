@@ -957,8 +957,8 @@ function App() {
         console.warn('mdnest: autosave skipped — refusing to overwrite non-empty note with empty content. Use the explicit clear action to deliberately empty a file.');
         return;
       }
+      const saveToken = echoGate.beginSave();
       try {
-        echoGate.beginSave();
         const result = await saveNote(selectedNs, currentPath, newContent, etagRef.current);
         setSavedContent(newContent);
         if (result.etag) { etagRef.current = result.etag; echoGate.rememberOwnEtag(result.etag); }
@@ -973,7 +973,9 @@ function App() {
       } finally {
         // Re-check any broadcast that arrived while the save was in flight —
         // our own echo is now recognizable, a real remote change still lands.
-        echoGate.endSave().forEach(handleFileChanged);
+        // (A no-op if the user switched notes mid-save: the token's epoch
+        // is closed and endSave returns nothing.)
+        echoGate.endSave(saveToken).forEach(handleFileChanged);
       }
     }, 800);
     saveTimerRef.current = timer;
@@ -1015,14 +1017,14 @@ function App() {
     setContent(newContent);
     setSavedContent(newContent);
     if (currentPath && selectedNs) {
+      const saveToken = echoGate.beginSave();
       try {
-        echoGate.beginSave();
         const result = await saveNote(selectedNs, currentPath, newContent);
         if (result.etag) { etagRef.current = result.etag; echoGate.rememberOwnEtag(result.etag); }
       } catch (e) {
         console.error('Checkbox save failed:', e);
       } finally {
-        echoGate.endSave().forEach(handleFileChanged);
+        echoGate.endSave(saveToken).forEach(handleFileChanged);
       }
     }
   }, [content, currentPath, selectedNs]);
