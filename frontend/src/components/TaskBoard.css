@@ -308,6 +308,70 @@
   .tb-column { flex-basis: 82vw; }
 }
 
+/* --- filters ---------------------------------------------------------- */
+.tb-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #313244;
+}
+.tb-filter-search,
+.tb-filter-assignee {
+  background: #181825;
+  border: 1px solid #313244;
+  border-radius: 6px;
+  color: #cdd6f4;
+  padding: 4px 8px;
+  font-size: 13px;
+}
+.tb-filter-search { min-width: 160px; }
+.tb-filter-search:focus,
+.tb-filter-assignee:focus { outline: none; border-color: #89b4fa; }
+.tb-filter-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.tb-filter-tag {
+  background: #181825;
+  border: 1px solid #313244;
+  border-radius: 999px;
+  color: #a6adc8;
+  padding: 2px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.tb-filter-tag:hover { border-color: #45475a; }
+.tb-filter-tag.active {
+  background: #89b4fa;
+  border-color: #89b4fa;
+  color: #11111b;
+  font-weight: 600;
+}
+.tb-editor-tag-suggest {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+.tb-filter-clear {
+  background: none;
+  border: none;
+  color: #89b4fa;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 4px;
+  margin-left: auto;
+}
+.tb-filter-clear:hover { text-decoration: underline; }
+.tb-link-btn {
+  background: none;
+  border: none;
+  color: #89b4fa;
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+}
+.tb-link-btn:hover { text-decoration: underline; }
+
 /* --- rich task card --------------------------------------------------- */
 .tb-card-head { display: flex; align-items: center; gap: 6px; cursor: grab; }
 .tb-card.dragging .tb-card-head, .tb-card-head:active { cursor: grabbing; }
@@ -338,6 +402,21 @@
 }
 .tb-chip, .tb-due { background: #181825; border: 1px solid #313244; border-radius: 4px; padding: 1px 6px; }
 .tb-due.overdue { color: #f38ba8; border-color: #f38ba8; }
+/* Source-workspace label shown on cards in the global ("All workspaces") view. */
+.tb-card-ns {
+  display: inline-block;
+  align-self: flex-start;
+  margin-bottom: 6px;
+  padding: 1px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #89b4fa;
+  background: #1e2030;
+  border: 1px solid #45475a;
+}
+.tb-list-note.tb-list-note-static { cursor: default; background: none; }
+.tb-list-note .tb-ns { color: #89b4fa; }
 
 .tb-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 .tb-tag { font-size: 10px; color: #89b4fa; background: #1e2030; border: 1px solid #313244; border-radius: 10px; padding: 1px 7px; }

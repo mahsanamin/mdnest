@@ -1548,6 +1548,7 @@ function App() {
                 ns={selectedNs}
                 canWrite={canWrite('')}
                 currentPath={currentPath}
+                currentUser={userInfo?.username}
                 onOpenNote={(p) => { setShowTaskBoard(false); openNote(p); }}
                 onClose={() => setShowTaskBoard(false)}
               />

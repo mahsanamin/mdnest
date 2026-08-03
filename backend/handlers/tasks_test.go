@@ -5,6 +5,34 @@ import (
 	"testing"
 )
 
+func TestParseTagsList(t *testing.T) {
+	cases := []struct {
+		in   string
+		want []string
+	}{
+		{"[design, ui]", []string{"design", "ui"}},
+		{"a, b, c", []string{"a", "b", "c"}},
+		{`\[ui]`, []string{"ui"}}, // markdown-escaped bracket from the editor
+		{`\[design, ui\]`, []string{"design", "ui"}},
+		{"[[ui, code]]", []string{"ui", "code"}}, // doubled brackets
+		{"", nil},
+		{"[]", nil},
+	}
+	for _, c := range cases {
+		got := parseTagsList(c.in)
+		if len(got) != len(c.want) {
+			t.Errorf("parseTagsList(%q) = %v, want %v", c.in, got, c.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Errorf("parseTagsList(%q) = %v, want %v", c.in, got, c.want)
+				break
+			}
+		}
+	}
+}
+
 func TestParseTaskLine(t *testing.T) {
 	cases := []struct {
 		line        string
@@ -119,6 +147,7 @@ func TestParseNoteTasks(t *testing.T) {
 		"  - status: doing",
 		"  - due: 2024-01-15",
 		"  - priority: high",
+		"  - assignee: alice",
 		"  - tags: [design, ui]",
 		"  - steps:",
 		"    - [x] Wireframes",
@@ -141,6 +170,9 @@ func TestParseNoteTasks(t *testing.T) {
 	}
 	if d.Due != "2024-01-15" || d.Priority != "high" || len(d.Tags) != 2 {
 		t.Errorf("card0 fields wrong: %+v", d)
+	}
+	if d.Assignee != "alice" {
+		t.Errorf("card0 assignee wrong: %q", d.Assignee)
 	}
 	if len(d.Steps) != 2 || !d.Steps[0].Checked || d.Steps[1].Checked {
 		t.Errorf("steps wrong: %+v", d.Steps)
@@ -238,7 +270,7 @@ func TestRenderTaskBlock(t *testing.T) {
 	b := defaultBoard()
 	s := taskSpec{
 		Title: "Design UI", Column: "doing", Due: "2024-01-15",
-		Priority: "high", Workload: "hard", Tags: []string{"design", "ui"},
+		Priority: "high", Workload: "hard", Assignee: "alice", Tags: []string{"design", "ui"},
 		DefaultExpanded: true,
 		Steps:           []stepSpec{{Text: "Wireframes", Checked: true}, {Text: "Visual", Checked: false}},
 		Notes:           "line1\nline2",
@@ -250,6 +282,7 @@ func TestRenderTaskBlock(t *testing.T) {
 		"  - due: 2024-01-15",
 		"  - priority: high",
 		"  - workload: hard",
+		"  - assignee: alice",
 		"  - tags: [design, ui]",
 		"  - defaultExpanded: true",
 		"  - steps:",
@@ -266,6 +299,9 @@ func TestRenderTaskBlock(t *testing.T) {
 	tasks := parseNoteTasks("n.md", []byte(got+"\n"), b)
 	if len(tasks) != 1 || tasks[0].Status != "doing" || len(tasks[0].Steps) != 2 || tasks[0].Priority != "high" {
 		t.Fatalf("round-trip failed: %+v", tasks)
+	}
+	if tasks[0].Assignee != "alice" {
+		t.Fatalf("round-trip assignee lost: %+v", tasks[0])
 	}
 	// Done column: checkbox, no status.
 	if g := strings.Join(renderTaskBlock(b, taskSpec{Title: "x", Column: "done"}), "\n"); g != "- [x] x" {

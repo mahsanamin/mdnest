@@ -646,8 +646,19 @@ func main() {
 		// so route by method (read vs write) and invalidate the search cache on
 		// mutation just like /api/note.
 		if enableTaskBoard {
+			taskHandler.SetNamespaceFilter(perms.FilterNamespaces)
 			mux.Handle("/api/tasks", authMiddleware.Wrap(perms.ReadWriteRouter(invalidateSearch(http.HandlerFunc(taskHandler.HandleTasks)))))
 			mux.Handle("/api/board", authMiddleware.Wrap(perms.ReadWriteRouter(http.HandlerFunc(taskHandler.HandleBoard))))
+			// Cross-namespace view: aggregates the caller's accessible namespaces.
+			// Auth-only here — the handler self-filters via the namespace filter,
+			// so it must not be wrapped in the single-namespace RequireNsAccess.
+			mux.Handle("/api/tasks/all", authMiddleware.Wrap(http.HandlerFunc(taskHandler.HandleGlobalTasks)))
+			// Namespace members for the task assignee picker. Read-access gated:
+			// anyone who can see the namespace may list who else is on it.
+			if pg, ok := grantStore.(*store.PostgresGrantStore); ok {
+				teamHandler := handlers.NewTeamHandler(stg, pg)
+				mux.Handle("/api/namespace/users", authMiddleware.Wrap(perms.RequireNsAccess(http.HandlerFunc(teamHandler.HandleNamespaceUsers))))
+			}
 		}
 		mux.Handle("/api/files/", authMiddleware.Wrap(http.HandlerFunc(uploadHandler.HandleServeFile))) // files endpoint extracts ns from URL, handled differently
 	} else {
@@ -666,6 +677,9 @@ func main() {
 		if enableTaskBoard {
 			mux.Handle("/api/tasks", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(taskHandler.HandleTasks))))
 			mux.Handle("/api/board", authMiddleware.Wrap(http.HandlerFunc(taskHandler.HandleBoard)))
+			// Single mode: one user owns every namespace, so the global view
+			// aggregates them all (nil namespace filter).
+			mux.Handle("/api/tasks/all", authMiddleware.Wrap(http.HandlerFunc(taskHandler.HandleGlobalTasks)))
 		}
 		mux.Handle("/api/files/", authMiddleware.Wrap(http.HandlerFunc(uploadHandler.HandleServeFile)))
 	}
