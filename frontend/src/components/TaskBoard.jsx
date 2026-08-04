@@ -24,7 +24,11 @@ function cardKey(t) {
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-function TaskCard({ task, canWrite, onOpen, onToggleStep, onEdit, onDelete }) {
+// Relation types and their card icons. Values are lists of referenced task
+// titles (Option A: reference by title, resolved best-effort in the loaded set).
+const REL_ICON = { 'depends-on': '⬆', 'blocked-by': '⛔', 'related-to': '🔗' };
+
+function TaskCard({ task, canWrite, onOpen, onToggleStep, onEdit, resolve, onDelete }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: cardKey(task),
     data: { task },
@@ -37,6 +41,16 @@ function TaskCard({ task, canWrite, onOpen, onToggleStep, onEdit, onDelete }) {
   const overdue = task.due && !task.checked && task.due < today();
   const noSwallow = (e) => e.stopPropagation();
 
+  // Relations (depends-on / blocked-by / related-to) and derived blocked state:
+  // this task is blocked when a task it depends on / is blocked by is still open.
+  const rels = [['depends-on', task.dependsOn], ['blocked-by', task.blockedBy], ['related-to', task.relatedTo]]
+    .filter(([, v]) => v && v.length);
+  const blockers = [...(task.dependsOn || []), ...(task.blockedBy || [])];
+  const isBlocked = !task.checked && blockers.some((title) => {
+    const r = resolve && resolve(title);
+    return r && !r.checked;
+  });
+
   return (
     <div className={`tb-card${isDragging ? ' dragging' : ''}${task.checked ? ' checked' : ''}`} ref={setNodeRef}>
       {task.namespace && (
@@ -48,6 +62,7 @@ function TaskCard({ task, canWrite, onOpen, onToggleStep, onEdit, onDelete }) {
         {task.priority && (
           <span className={`tb-pri tb-pri-${String(task.priority).toLowerCase()}`}>{task.priority}</span>
         )}
+        {isBlocked && <span className="tb-blocked" title="Blocked: a task it depends on is still open">⛔ blocked</span>}
         <span className="tb-card-text">{task.text || <em>(empty)</em>}</span>
       </div>
 
@@ -62,6 +77,20 @@ function TaskCard({ task, canWrite, onOpen, onToggleStep, onEdit, onDelete }) {
 
       {task.tags && task.tags.length > 0 && (
         <div className="tb-tags">{task.tags.map((t) => <span key={t} className="tb-tag">{t}</span>)}</div>
+      )}
+
+      {rels.length > 0 && (
+        <div className="tb-rels">
+          {rels.flatMap(([label, titles]) => titles.map((title) => {
+            const r = resolve && resolve(title);
+            const state = r ? (r.checked ? '✓' : '○') : '';
+            return (
+              <span key={label + '\u0000' + title} className={`tb-rel${r && !r.checked ? ' open' : ''}`} title={label}>
+                {REL_ICON[label]} {state} {title}
+              </span>
+            );
+          }))}
+        </div>
       )}
 
       {steps.length > 0 && (
@@ -116,7 +145,7 @@ function TaskCard({ task, canWrite, onOpen, onToggleStep, onEdit, onDelete }) {
   );
 }
 
-function BoardColumn({ column, tasks, canWrite, onOpen, onToggleStep, onEdit, onDelete, collapsed, onToggleCollapse }) {
+function BoardColumn({ column, tasks, canWrite, onOpen, onToggleStep, onEdit, resolve, onDelete, collapsed, onToggleCollapse }) {
   const { setNodeRef, isOver } = useDroppable({ id: column.id, disabled: !canWrite });
   return (
     <div ref={setNodeRef} className={`tb-column${isOver ? ' over' : ''}${collapsed ? ' collapsed' : ''}`}>
@@ -136,7 +165,7 @@ function BoardColumn({ column, tasks, canWrite, onOpen, onToggleStep, onEdit, on
       {!collapsed && (
         <div className="tb-column-body">
           {tasks.map((t) => (
-            <TaskCard key={cardKey(t)} task={t} canWrite={canWrite} onOpen={onOpen} onToggleStep={onToggleStep} onEdit={onEdit} onDelete={onDelete} />
+            <TaskCard key={cardKey(t)} task={t} canWrite={canWrite} onOpen={onOpen} onToggleStep={onToggleStep} onEdit={onEdit} resolve={resolve} onDelete={onDelete} />
           ))}
           {tasks.length === 0 && <div className="tb-column-empty">No tasks</div>}
         </div>
@@ -429,6 +458,24 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
     [tasks],
   );
 
+  // Distinct task titles (for relation pickers) + a title→task index so cards
+  // can resolve a relation reference to its current status (best-effort, by
+  // title; first match wins across the loaded set).
+  const taskTitles = useMemo(() => {
+    const s = new Set();
+    for (const t of tasks) if (t.text) s.add(t.text);
+    return [...s].sort((a, b) => a.localeCompare(b));
+  }, [tasks]);
+  const taskByTitle = useMemo(() => {
+    const m = new Map();
+    for (const t of tasks) {
+      const k = (t.text || '').trim().toLowerCase();
+      if (k && !m.has(k)) m.set(k, t);
+    }
+    return m;
+  }, [tasks]);
+  const resolveTitle = useCallback((title) => taskByTitle.get(String(title || '').trim().toLowerCase()) || null, [taskByTitle]);
+
   const toggleTag = useCallback((tag) => {
     setTagFilter((cur) => (cur.includes(tag) ? cur.filter((t) => t !== tag) : [...cur, tag]));
   }, []);
@@ -631,6 +678,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
                 onOpen={onOpenNote}
                 onToggleStep={handleToggleStep}
                 onEdit={openEdit}
+                resolve={resolveTitle}
                 onDelete={handleDelete}
                 collapsed={!!collapsedCols && collapsedCols.has(col.id)}
                 onToggleCollapse={() => toggleCollapse(col.id)}
@@ -711,6 +759,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
           currentUser={currentUser}
           users={nsUsers}
           tagSuggestions={allTags}
+          taskTitles={taskTitles}
           onSave={handleEditorSave}
           onCancel={() => setEditorOpen(false)}
         />
