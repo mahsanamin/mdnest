@@ -161,6 +161,10 @@ function App() {
   // the undo stack into that empty state, wiping real content.
   const [content, setContent] = useState(null);
   const [sidebarWidth, setSidebarWidth] = useState(260);
+  const [commentWidth, setCommentWidth] = useState(() => {
+    const v = parseInt(localStorage.getItem('mdnest_comment_width'), 10);
+    return Number.isFinite(v) ? Math.min(760, Math.max(260, v)) : 340;
+  });
   const [savedContent, setSavedContent] = useState('');
   const saveTimerRef = useRef(null);
   const [sidebarVisible, setSidebarVisible] = useState(false);
@@ -1434,7 +1438,10 @@ function App() {
         width={sidebarWidth}
         onResize={setSidebarWidth}
       />
-      <div className="main">
+      <div
+        className="main"
+        style={commentsEnabled && showComments && currentPath && !isMobile ? { marginRight: commentWidth } : undefined}
+      >
         <Toolbar
           currentPath={currentPath}
           onToggleSidebar={() => setSidebarVisible((v) => !v)}
@@ -1472,25 +1479,12 @@ function App() {
           onOpenBoard={taskBoardEnabled && selectedNs ? () => setShowTaskBoard(true) : null}
           commentCount={commentsEnabled ? comments.filter(c => !c.parentId && !c.resolved).length : 0}
           onToggleComments={!commentsEnabled ? null : () => {
-            const next = !showComments;
-            setShowComments(next);
-            // When opening comments, snap the user to Live editor — that's
-            // the only surface where highlights render, selection → Comment
-            // works, and Go To can scroll to the text.
-            if (next) {
-              if (viewMode === 'preview') {
-                setViewMode('editor');
-                localStorage.setItem('mdnest_view_mode', 'editor');
-              }
-              if (editorMode !== 'live') {
-                setEditorMode('live');
-                localStorage.setItem('mdnest_editor_mode', 'live');
-              }
-              if (isMobile && mobileView === 'preview') {
-                setMobileView('editor');
-                localStorage.setItem('mdnest_mobile_view', 'editor');
-              }
-            }
+            // A plain toggle: the panel is usable in any view mode (including
+            // preview-only, e.g. reviewing Marp slides). Selection-anchored
+            // comments and highlights still require the Live editor, but
+            // general comments work everywhere, so we no longer force the
+            // user out of their current view.
+            setShowComments((v) => !v);
           }}
           wsStatus={appConfig?.liveCollab ? wsStatus : null}
         />
@@ -1758,6 +1752,8 @@ function App() {
           onGoTo={(c) => { if (goToCommentRef.current) goToCommentRef.current(c); }}
           highlightedId={highlightedCommentId}
           onHighlightConsumed={() => setHighlightedCommentId(null)}
+          width={!isMobile ? commentWidth : undefined}
+          onWidthChange={!isMobile ? (w) => { setCommentWidth(w); localStorage.setItem('mdnest_comment_width', String(w)); } : undefined}
         />
       )}
     </div>

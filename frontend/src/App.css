@@ -12,6 +12,7 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+  transition: margin-right 0.15s ease;
 }
 
 .split-view {
@@ -1678,6 +1679,22 @@ pre:hover .code-copy-btn {
   box-shadow: -4px 0 16px rgba(0, 0, 0, 0.3);
 }
 
+/* Grab strip on the panel's left edge to resize its width. */
+.comment-resize-handle {
+  position: absolute;
+  top: 0;
+  left: -3px;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 10;
+}
+
+.comment-resize-handle:hover,
+.comment-resize-handle:active {
+  background: #89b4fa44;
+}
+
 .comment-sidebar-header {
   display: flex;
   align-items: center;
@@ -1719,7 +1736,8 @@ pre:hover .code-copy-btn {
   color: #cdd6f4;
   padding: 8px;
   font-size: 0.82rem;
-  resize: none;
+  resize: vertical;
+  min-height: 46px;
   outline: none;
 }
 
@@ -1799,6 +1817,14 @@ pre:hover .code-copy-btn {
   color: #cdd6f4;
   line-height: 1.4;
   margin-bottom: 6px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.comment-edited {
+  color: #585b70;
+  font-size: 0.72rem;
+  font-style: italic;
 }
 
 .comment-actions {
@@ -1972,6 +1998,30 @@ pre:hover .code-copy-btn {
 .comment-reply-actions button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* Inline edit form (author editing their own comment). */
+.comment-edit-form {
+  margin-bottom: 6px;
+}
+
+.comment-edit-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: #181825;
+  color: #cdd6f4;
+  border: 1px solid #313244;
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-family: inherit;
+  font-size: 0.85rem;
+  resize: vertical;
+  min-height: 60px;
+}
+
+.comment-edit-textarea:focus {
+  outline: none;
+  border-color: #89b4fa;
 }
 
 /* Transient flash applied to commented text when Go To is invoked.

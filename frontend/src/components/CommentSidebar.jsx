@@ -1,12 +1,15 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { createComment, resolveComment, deleteComment } from '../api.js';
+import { createComment, resolveComment, deleteComment, editComment } from '../api.js';
 
-function CommentSidebar({ comments, ns, currentPath, onRefresh, onClose, userInfo, pendingSelection, onSelectionConsumed, onGoTo, highlightedId, onHighlightConsumed }) {
+function CommentSidebar({ comments, ns, currentPath, onRefresh, onClose, userInfo, pendingSelection, onSelectionConsumed, onGoTo, highlightedId, onHighlightConsumed, width, onWidthChange }) {
   const [newComment, setNewComment] = useState('');
   const [adding, setAdding] = useState(false);
   const [replyingTo, setReplyingTo] = useState(null); // parent comment id
   const [replyBody, setReplyBody] = useState('');
   const [replyPosting, setReplyPosting] = useState(false);
+  const [editingId, setEditingId] = useState(null); // comment id being edited
+  const [editBody, setEditBody] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
   const [flashingId, setFlashingId] = useState(null);
   const textareaRef = useRef(null);
   const replyRef = useRef(null);
@@ -103,6 +106,33 @@ function CommentSidebar({ comments, ns, currentPath, onRefresh, onClose, userInf
     }
   }, [ns, currentPath, onRefresh]);
 
+  const startEdit = useCallback((c) => {
+    setReplyingTo(null);
+    setEditingId(c.id);
+    setEditBody(c.body);
+  }, []);
+
+  const cancelEdit = useCallback(() => {
+    setEditingId(null);
+    setEditBody('');
+  }, []);
+
+  const handleEdit = useCallback(async (c) => {
+    const body = editBody.trim();
+    if (!body || body === c.body) { cancelEdit(); return; }
+    setEditSaving(true);
+    try {
+      await editComment(ns, currentPath, c.id, body);
+      setEditingId(null);
+      setEditBody('');
+      if (onRefresh) onRefresh();
+    } catch (e) {
+      console.error('Failed to edit comment:', e);
+    } finally {
+      setEditSaving(false);
+    }
+  }, [editBody, ns, currentPath, onRefresh, cancelEdit]);
+
   // Group comments into threads: top-level (no parentId) with their replies.
   const threads = (comments || []).reduce((acc, c) => {
     if (!c.parentId) {
@@ -130,6 +160,39 @@ function CommentSidebar({ comments, ns, currentPath, onRefresh, onClose, userInf
   // gap that any admin can delete across any namespace is out of scope
   // for this release; revisit alongside per-namespace comment auth.
   const canDelete = (c) => userInfo && (userInfo.is_super_admin || userInfo.role === 'admin' || userInfo.id === c.authorId);
+  // Only the author may edit the words attributed to them.
+  const canEdit = (c) => userInfo && userInfo.id === c.authorId;
+
+  // Comment text can hold multiple lines; render it with preserved line
+  // breaks (CSS white-space: pre-wrap) or swap in the inline edit form.
+  const renderBody = (c) => (
+    editingId === c.id ? (
+      <div className="comment-edit-form">
+        <textarea
+          className="comment-edit-textarea"
+          value={editBody}
+          onChange={(e) => setEditBody(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); handleEdit(c); }
+            if (e.key === 'Escape') { cancelEdit(); }
+          }}
+          rows={3}
+          autoFocus
+        />
+        <div className="comment-reply-actions">
+          <button onClick={() => handleEdit(c)} disabled={editSaving || !editBody.trim()}>
+            {editSaving ? 'Saving...' : 'Save'}
+          </button>
+          <button onClick={cancelEdit}>Cancel</button>
+        </div>
+      </div>
+    ) : (
+      <div className="comment-body">
+        {c.body}
+        {c.editedAt && <span className="comment-edited"> (edited)</span>}
+      </div>
+    )
+  );
 
   const renderReply = (r) => (
     <div key={r.id} className="comment-reply">
@@ -137,10 +200,11 @@ function CommentSidebar({ comments, ns, currentPath, onRefresh, onClose, userInf
         <span className="comment-author">{r.author}</span>
         <span className="comment-time">{formatTime(r.createdAt)}</span>
       </div>
-      <div className="comment-body">{r.body}</div>
-      {canDelete(r) && (
+      {renderBody(r)}
+      {editingId !== r.id && (canEdit(r) || canDelete(r)) && (
         <div className="comment-actions">
-          <button className="danger" onClick={() => handleDelete(r.id)}>Delete</button>
+          {canEdit(r) && <button onClick={() => startEdit(r)}>Edit</button>}
+          {canDelete(r) && <button className="danger" onClick={() => handleDelete(r.id)}>Delete</button>}
         </div>
       )}
     </div>
@@ -159,7 +223,7 @@ function CommentSidebar({ comments, ns, currentPath, onRefresh, onClose, userInf
       {c.anchorText && (
         <div className="comment-anchor">&ldquo;{c.anchorText.slice(0, 60)}{c.anchorText.length > 60 ? '...' : ''}&rdquo;</div>
       )}
-      <div className="comment-body">{c.body}</div>
+      {renderBody(c)}
 
       {c.replies.length > 0 && (
         <div className="comment-thread">
@@ -167,6 +231,7 @@ function CommentSidebar({ comments, ns, currentPath, onRefresh, onClose, userInf
         </div>
       )}
 
+      {editingId !== c.id && (
       <div className="comment-actions">
         {c.anchorText && onGoTo && (
           <button onClick={() => onGoTo(c)}>Go to</button>
@@ -180,10 +245,14 @@ function CommentSidebar({ comments, ns, currentPath, onRefresh, onClose, userInf
         {c.resolved && (
           <button onClick={() => handleResolve(c.id, false)}>Reopen</button>
         )}
+        {canEdit(c) && (
+          <button onClick={() => startEdit(c)}>Edit</button>
+        )}
         {canDelete(c) && (
           <button className="danger" onClick={() => handleDelete(c.id)}>Delete</button>
         )}
       </div>
+      )}
 
       {replyingTo === c.id && (
         <div className="comment-reply-form">
@@ -210,7 +279,33 @@ function CommentSidebar({ comments, ns, currentPath, onRefresh, onClose, userInf
   );
 
   return (
-    <div className="comment-sidebar">
+    <div className="comment-sidebar" style={width ? { width } : undefined}>
+      {onWidthChange && (
+        <div
+          className="comment-resize-handle"
+          onMouseDown={(e) => {
+            e.preventDefault();
+            const startX = e.clientX;
+            const startWidth = width || 320;
+            const onMove = (ev) => {
+              // Panel is anchored to the right edge, so dragging the handle
+              // left (smaller clientX) widens it.
+              const newWidth = Math.min(760, Math.max(260, startWidth + startX - ev.clientX));
+              onWidthChange(newWidth);
+            };
+            const onUp = () => {
+              document.removeEventListener('mousemove', onMove);
+              document.removeEventListener('mouseup', onUp);
+              document.body.style.cursor = '';
+              document.body.style.userSelect = '';
+            };
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none';
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+          }}
+        />
+      )}
       <div className="comment-sidebar-header">
         <h3>Comments</h3>
         <button className="comment-sidebar-close" onClick={onClose}>&times;</button>

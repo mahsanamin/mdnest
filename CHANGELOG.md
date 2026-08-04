@@ -4,6 +4,30 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## Unreleased
+
+### Added
+
+- **Edit your own comments.** The author (and only the author) can now revise a
+  comment's text inline from the comment panel; an "(edited)" marker is shown
+  once a comment has been changed. Resolve/reopen stays open to everyone.
+- **Resizable comment panel.** Drag the panel's left edge to widen or narrow it
+  (persisted per browser), and the comment/reply/edit text areas can be resized
+  vertically.
+
+### Changed
+
+- **The comment panel is usable in any view.** Opening comments no longer forces
+  you out of preview-only into the Live editor — you can review Marp slides and
+  leave general comments side by side. Selection-anchored comments and
+  highlights still require the Live editor.
+- **The preview now makes room for the comment panel** instead of being covered
+  by it, so slides stay fully visible while commenting.
+- **Comment text preserves line breaks** instead of collapsing multi-line
+  comments into a single block.
+
+---
+
 ## v4.1.2 — `mdnest list` you can actually read
 
 Patch release fixing GitHub issue #87, reported from Fedora 44. Both halves of
@@ -75,6 +99,8 @@ that report were the CLI's fault, and both are fixed. Nothing outside the
   and **no** JSON keys, that `--json` still returns the scoped payload, and that
   legacy `note read` returns a note body. All of it passes in the bare
   no-python3/no-jq alpine container of `tests/e2e-docker.sh`.
+
+---
 
 ---
 

@@ -665,6 +665,19 @@ export async function resolveComment(ns, path, commentId, resolved) {
   return res.json();
 }
 
+export async function editComment(ns, path, commentId, body) {
+  const res = await request(`/comments?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}&id=${encodeURIComponent(commentId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ body }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to edit comment');
+  }
+  return res.json();
+}
+
 export async function deleteComment(ns, path, commentId) {
   const res = await request(`/comments?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}&id=${encodeURIComponent(commentId)}`, {
     method: 'DELETE',
