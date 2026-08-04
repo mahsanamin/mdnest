@@ -26,6 +26,15 @@ All notable changes to mdnest are documented here.
 - **Comment text preserves line breaks** instead of collapsing multi-line
   comments into a single block.
 
+### Fixed
+
+- **Comments no longer vanish when a note is deleted and recreated.** A note's
+  identity (its hidden `mdnest:` marker, which links it to its
+  `.mdnest/comments/<id>.jsonl` sidecar) is now reconciled on write: a recreated
+  or marker-stripped note recovers the marker the path previously carried in git
+  history, so its comments stay attached instead of being orphaned. A note's
+  marker is also snapped back if an overwrite tries to change it.
+
 ---
 
 ## v4.1.2 — `mdnest list` you can actually read
