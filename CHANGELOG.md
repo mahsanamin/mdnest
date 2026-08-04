@@ -4,6 +4,20 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## Unreleased
+
+### Fixed
+
+- **Marp decks are no longer corrupted by the Live editor.** A note whose
+  frontmatter declares `marp: true` is now always edited as raw text — the
+  Live/WYSIWYG editor is disabled for it, because round-tripping the markdown
+  through the editor's document model rewrote the frontmatter (`---` → `***`)
+  and slide separators and silently broke the deck on autosave. The Basic
+  editor (with the live slide preview alongside) is forced, and the "Live"
+  toggle is disabled with an explanatory tooltip while a Marp note is open.
+
+---
+
 ## v4.1.2 — `mdnest list` you can actually read
 
 Patch release fixing GitHub issue #87, reported from Fedora 44. Both halves of
@@ -75,6 +89,8 @@ that report were the CLI's fault, and both are fixed. Nothing outside the
   and **no** JSON keys, that `--json` still returns the scoped payload, and that
   legacy `note read` returns a note body. All of it passes in the bare
   no-python3/no-jq alpine container of `tests/e2e-docker.sh`.
+
+---
 
 ---
 
