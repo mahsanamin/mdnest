@@ -5,7 +5,7 @@ import './TaskBoard.css';
 // (status/column, due, priority, workload, assignee, tags, steps, notes). It
 // emits a spec the backend renders to markdown, so the note stays the source of
 // truth.
-export default function TaskEditor({ board, task, defaultNote, defaultColumn, notePaths, currentUser, users, tagSuggestions, onSave, onCancel }) {
+export default function TaskEditor({ board, task, defaultNote, defaultColumn, notePaths, currentUser, users, tagSuggestions, taskTitles, onSave, onCancel }) {
   const isNew = !task;
   const cols = board?.columns || [];
   const [title, setTitle] = useState(task?.text || '');
@@ -18,6 +18,11 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
   // whatever the task already carries (empty stays empty).
   const [assignee, setAssignee] = useState(task ? (task.assignee || '') : (currentUser || ''));
   const [tags, setTags] = useState((task?.tags || []).join(', '));
+  // Relations reference other tasks by title (comma-separated); each field is
+  // autocompleted from the existing task titles.
+  const [dependsOn, setDependsOn] = useState((task?.dependsOn || []).join(', '));
+  const [blockedBy, setBlockedBy] = useState((task?.blockedBy || []).join(', '));
+  const [relatedTo, setRelatedTo] = useState((task?.relatedTo || []).join(', '));
   const [defaultExpanded, setDefaultExpanded] = useState(!!task?.defaultExpanded);
   const [steps, setSteps] = useState((task?.steps || []).map((s) => ({ text: s.text, checked: s.checked })));
   const [notes, setNotes] = useState(task?.notes || '');
@@ -57,6 +62,9 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
       workload: workload.trim(),
       assignee: assignee.trim(),
       tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
+      dependsOn: dependsOn.split(',').map((t) => t.trim()).filter(Boolean),
+      blockedBy: blockedBy.split(',').map((t) => t.trim()).filter(Boolean),
+      relatedTo: relatedTo.split(',').map((t) => t.trim()).filter(Boolean),
       defaultExpanded,
       steps: steps.map((s) => ({ text: s.text.trim(), checked: !!s.checked })).filter((s) => s.text),
       notes: notes.replace(/\s+$/, ''),
@@ -140,6 +148,23 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
           <input type="checkbox" checked={defaultExpanded} onChange={(e) => setDefaultExpanded(e.target.checked)} />
           Expanded by default
         </label>
+
+        <div className="tb-modal-field">Relations
+          <datalist id="tb-editor-tasks">
+            {(taskTitles || []).map((t) => <option key={t} value={t} />)}
+          </datalist>
+          <div className="tb-editor-rels">
+            <label className="tb-editor-rel">⬆ Depends on
+              <input value={dependsOn} list="tb-editor-tasks" placeholder="task title, task title" onChange={(e) => setDependsOn(e.target.value)} />
+            </label>
+            <label className="tb-editor-rel">⛔ Blocked by
+              <input value={blockedBy} list="tb-editor-tasks" placeholder="task title" onChange={(e) => setBlockedBy(e.target.value)} />
+            </label>
+            <label className="tb-editor-rel">🔗 Related to
+              <input value={relatedTo} list="tb-editor-tasks" placeholder="task title" onChange={(e) => setRelatedTo(e.target.value)} />
+            </label>
+          </div>
+        </div>
 
         <div className="tb-modal-field">Steps
           <div className="tb-editor-steps">

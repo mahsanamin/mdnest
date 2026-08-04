@@ -109,6 +109,9 @@ type Task struct {
 	Workload        string   `json:"workload,omitempty"`
 	Assignee        string   `json:"assignee,omitempty"` // who is responsible for the task
 	Tags            []string `json:"tags,omitempty"`
+	DependsOn       []string `json:"dependsOn,omitempty"` // titles of tasks this one depends on
+	BlockedBy       []string `json:"blockedBy,omitempty"` // titles of tasks blocking this one
+	RelatedTo       []string `json:"relatedTo,omitempty"` // titles of loosely related tasks
 	DefaultExpanded bool     `json:"defaultExpanded,omitempty"`
 	Steps           []Step   `json:"steps,omitempty"`
 	Notes           string   `json:"notes,omitempty"`
@@ -150,6 +153,9 @@ type taskSpec struct {
 	Workload        string     `json:"workload"`
 	Assignee        string     `json:"assignee"`
 	Tags            []string   `json:"tags"`
+	DependsOn       []string   `json:"dependsOn"`
+	BlockedBy       []string   `json:"blockedBy"`
+	RelatedTo       []string   `json:"relatedTo"`
 	DefaultExpanded bool       `json:"defaultExpanded"`
 	Steps           []stepSpec `json:"steps"`
 	Notes           string     `json:"notes"`
@@ -290,7 +296,7 @@ func taskID(relPath, text string) string {
 
 var (
 	fenceRe    = regexp.MustCompile("^([`~]{3,})")
-	metaLineRe = regexp.MustCompile(`^\s*[-*+]\s+([A-Za-z][A-Za-z0-9_]*)\s*:\s?(.*)$`)
+	metaLineRe = regexp.MustCompile(`^\s*[-*+]\s+([A-Za-z][A-Za-z0-9_-]*)\s*:\s?(.*)$`)
 )
 
 // fenceMarker returns the opening fence run ("```" / "~~~...") of a trimmed line,
@@ -471,6 +477,12 @@ func parseCard(fp string, lines []string, cardIdx int, checked bool, rest string
 			t.Assignee = val
 		case "tags":
 			t.Tags = parseTagsList(val)
+		case "depends-on":
+			t.DependsOn = parseTagsList(val)
+		case "blocked-by":
+			t.BlockedBy = parseTagsList(val)
+		case "related-to":
+			t.RelatedTo = parseTagsList(val)
 		case "defaultexpanded":
 			t.DefaultExpanded = val == "true" || val == "yes"
 		case "notes":
@@ -566,7 +578,7 @@ func applyColumnRich(lines []string, cardIdx int, b BoardConfig, colID string) (
 // editableField reports whether key is a metadata field the API may set inline.
 func editableField(key string) bool {
 	switch key {
-	case "due", "priority", "workload", "assignee", "tags", "status":
+	case "due", "priority", "workload", "assignee", "tags", "status", "depends-on", "blocked-by", "related-to":
 		return true
 	}
 	return false
@@ -666,6 +678,20 @@ func renderTaskBlock(b BoardConfig, s taskSpec) []string {
 	if len(tags) > 0 {
 		lines = append(lines, "  - tags: ["+strings.Join(tags, ", ")+"]")
 	}
+	addList := func(k string, vals []string) {
+		var out []string
+		for _, v := range vals {
+			if v = strings.TrimSpace(v); v != "" {
+				out = append(out, v)
+			}
+		}
+		if len(out) > 0 {
+			lines = append(lines, "  - "+k+": ["+strings.Join(out, ", ")+"]")
+		}
+	}
+	addList("depends-on", s.DependsOn)
+	addList("blocked-by", s.BlockedBy)
+	addList("related-to", s.RelatedTo)
 	if s.DefaultExpanded {
 		lines = append(lines, "  - defaultExpanded: true")
 	}

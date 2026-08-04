@@ -348,3 +348,38 @@ func TestValidBoard(t *testing.T) {
 		t.Error("default board should be valid")
 	}
 }
+
+func TestTaskRelations(t *testing.T) {
+	b := defaultBoard()
+	s := taskSpec{
+		Title: "Ship release", Column: "todo",
+		DependsOn: []string{"Write changelog", "Cut tag"},
+		BlockedBy: []string{"Security review"},
+		RelatedTo: []string{"Update docs"},
+	}
+	got := strings.Join(renderTaskBlock(b, s), "\n")
+	for _, want := range []string{
+		"  - depends-on: [Write changelog, Cut tag]",
+		"  - blocked-by: [Security review]",
+		"  - related-to: [Update docs]",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("render missing %q in:\n%s", want, got)
+		}
+	}
+	// Round-trip: hyphenated keys parse back into the relation lists.
+	tasks := parseNoteTasks("n.md", []byte(got+"\n"), b)
+	if len(tasks) != 1 {
+		t.Fatalf("want 1 task, got %d", len(tasks))
+	}
+	tk := tasks[0]
+	if len(tk.DependsOn) != 2 || tk.DependsOn[0] != "Write changelog" || tk.DependsOn[1] != "Cut tag" {
+		t.Errorf("dependsOn round-trip wrong: %+v", tk.DependsOn)
+	}
+	if len(tk.BlockedBy) != 1 || tk.BlockedBy[0] != "Security review" {
+		t.Errorf("blockedBy round-trip wrong: %+v", tk.BlockedBy)
+	}
+	if len(tk.RelatedTo) != 1 || tk.RelatedTo[0] != "Update docs" {
+		t.Errorf("relatedTo round-trip wrong: %+v", tk.RelatedTo)
+	}
+}

@@ -78,6 +78,9 @@ ignored, so you can keep your own notes alongside.
 | `workload` | free text (e.g. `easy` / `medium` / `hard`) | Effort estimate. |
 | `assignee` | free text (a username) | Who is responsible for the task. Shown as a badge; the board's create form defaults it to the current user. |
 | `tags` | `[a, b, c]` | Comma‑separated list in brackets. Shown as chips. |
+| `depends-on` | `[Title A, Title B]` | Titles of tasks this one depends on. The board resolves them best‑effort and flags this task **blocked** while a referenced task is still open. |
+| `blocked-by` | `[Title]` | Titles of tasks blocking this one (same blocked behaviour as `depends-on`). |
+| `related-to` | `[Title]` | Titles of loosely related tasks, shown as reference chips. |
 | `defaultExpanded` | `true` | The board card shows its steps/notes expanded by default. |
 
 ### Steps (sub‑tasks)
