@@ -79,10 +79,28 @@ The same format is used when you right-click → Copy Path in the web UI.
 ### List namespaces or files
 
 ```bash
-mdnest list                              # namespaces on default server
+mdnest list                              # namespaces on default server (one per line)
 mdnest list @work                        # namespaces on @work
-mdnest list @work/engineering             # files in namespace
+mdnest list @work/engineering             # files in namespace, as a tree
+mdnest list @work/engineering/Architecture  # scoped to one folder
+mdnest list --json @work/engineering      # raw API JSON, for scripts
 ```
+
+A namespace listing is rendered as a tree with a count at the end:
+
+```
+engineering
+├── Architecture/
+│   ├── system-overview.md
+│   └── decisions/
+│       └── 001-storage.md
+└── README.md
+
+2 folders, 3 files
+```
+
+Pass `--json` (or set `MDNEST_JSON=1`) to get the raw `/api/tree` payload
+instead — the shape scripts were parsing before the tree rendering existed.
 
 ### Read a note
 
