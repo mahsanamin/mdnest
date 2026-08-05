@@ -57,7 +57,50 @@ else
   echo "── (python3 not present — skipping the python3 pass) ──"
 fi
 
-# Pass 2: force the pure-bash/awk fallbacks by making `have` deny python3 + jq.
+# Passes 2 and 3 need a python3 stand-in on PATH, so they're driven through a
+# shim directory. This is the issue-#87 class of bug: on the reporter's Fedora
+# box a stale matplotlib .pth made EVERY python3 start print a traceback to
+# stderr, and that traceback landed in the middle of mdnest's output. The CLI
+# must (a) not leak python's stderr, and (b) still produce correct values —
+# whether python3 is merely noisy or outright broken.
+REAL_PY="$(command -v python3 || true)"
+SHIM_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mdnest-unit.XXXXXX")"
+trap 'rm -rf "$SHIM_DIR"' EXIT
+
+make_shim() {  # make_shim <mode: noisy|broken>
+  # PATH is restored to the pre-shim value before exec'ing the real python3:
+  # a version-manager shim (pyenv et al.) re-resolves "python3" through PATH,
+  # which would otherwise find this shim again and recurse forever.
+  cat > "$SHIM_DIR/python3" <<SHIM
+#!/bin/sh
+echo "Error processing line 1 of /home/u/.local/lib/python3.14/site-packages/x-nspkg.pth:" >&2
+echo "AttributeError: 'NoneType' object has no attribute 'loader'" >&2
+echo "Remainder of file ignored" >&2
+$([ "$1" = "broken" ] && echo 'exit 1' || printf 'PATH=%s; export PATH; exec "%s" "$@"' "'$PATH'" "$REAL_PY")
+SHIM
+  chmod +x "$SHIM_DIR/python3"
+}
+
+# Pass 2: python3 works but prints startup noise on every run (the exact repro).
+if [ -n "$REAL_PY" ]; then
+  make_shim noisy
+  PATH="$SHIM_DIR:$PATH" run_suite "noisy python3 (broken .pth on stderr)"
+  eq "noisy python3: nothing leaks to stderr" "" \
+     "$(PATH="$SHIM_DIR:$PATH" urlencode '19 Jun 2026.md' 2>&1 >/dev/null)"
+  eq "noisy python3: json parse leaks nothing" "" \
+     "$(printf '%s' "$CONFIG_JSON" | PATH="$SHIM_DIR:$PATH" json_top_string version 2>&1 >/dev/null)"
+else
+  echo "── (python3 not present — skipping the noisy-python3 pass) ──"
+fi
+
+# Pass 3: python3 is present but exits non-zero — the CLI must degrade to the
+# pure-bash/awk fallbacks instead of returning empty/wrong values.
+make_shim broken
+PATH="$SHIM_DIR:$PATH" run_suite "broken python3 (exits 1)"
+eq "broken python3: nothing leaks to stderr" "" \
+   "$(PATH="$SHIM_DIR:$PATH" urlencode 'x&y=z?q' 2>&1 >/dev/null)"
+
+# Pass 4: force the pure-bash/awk fallbacks by making `have` deny python3 + jq.
 # This is the fresh-machine path — the one the recent regression broke.
 have() { case "$1" in python3|jq) return 1 ;; *) command -v "$1" >/dev/null 2>&1 ;; esac; }
 run_suite "fallback (no python3/jq)"
