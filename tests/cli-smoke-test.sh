@@ -137,17 +137,36 @@ printf '%s' "needle $token here" | m create "$ROOT/search.md" - >/dev/null 2>&1
 sleep 1   # let any search index/cache settle
 assert_contains "search finds unique token" "$token" "$(m search "$BASE" "$token" 2>/dev/null)"
 
-# ── 13. list shows the namespace tree ───────────────────────────────────────
-assert_contains "list namespace returns the run folder" "$RUN_DIR" "$(m list "$BASE" 2>/dev/null)"
+# ── 13. list renders the namespace as a tree, not raw JSON ──────────────────
+# Raw JSON was the whole complaint in issue #87, so assert on what a human sees:
+# the folder name with a tree connector, and no JSON punctuation anywhere.
+nslist="$(m list "$BASE" 2>/dev/null)"
+assert_contains "list namespace returns the run folder" "$RUN_DIR" "$nslist"
+assert_contains "list namespace draws a tree"          "── ${RUN_DIR}/" "$nslist"
+assert_contains "list namespace counts what it showed" " files"        "$nslist"
+case "$nslist" in
+  *'"type":'*|*'"name":'*) bad "list namespace is not raw JSON" "found JSON keys in [$nslist]" ;;
+  *) ok "list namespace is not raw JSON" ;;
+esac
 
 # ── 13b. list scopes to a subfolder (not the whole namespace) ────────────────
-# Assert on the JSON *values* (name + a child file), not on colon spacing — the
-# output is pretty-printed with python3/jq and compact on a bare (no-parser)
-# machine, but both must be correctly scoped to the subfolder.
 sublist="$(m list "$ROOT" 2>/dev/null)"
-assert_contains "list subfolder is scoped to that folder" "\"$RUN_DIR\"" "$sublist"
+assert_contains "list subfolder header names that folder" "$RUN_DIR" "$sublist"
 assert_contains "list subfolder shows its own files" "order.md" "$sublist"
+case "$sublist" in
+  *"__clitest"*"__clitest"*) bad "list subfolder is scoped" "looks like the whole namespace: [$sublist]" ;;
+  *) ok "list subfolder is scoped" ;;
+esac
 assert_fails "list missing subfolder errors" -- m list "$ROOT/does-not-exist"
+
+# ── 13c. --json still returns the raw payload, scoped the same way ───────────
+subjson="$(m list --json "$ROOT" 2>/dev/null)"
+assert_contains "list --json returns JSON"           "\"type\"" "$subjson"
+assert_contains "list --json is scoped to the folder" "\"$RUN_DIR\"" "$subjson"
+assert_contains "list --json shows its own files"     "order.md" "$subjson"
+assert_contains "list --json of a namespace returns the tree root" '"root"' \
+  "$(m list --json "$BASE" 2>/dev/null)"
+assert_fails "list rejects an unknown option" -- m list --nope "$BASE"
 
 # ── 14. delete removes a file ───────────────────────────────────────────────
 m delete "$ROOT/search.md" >/dev/null 2>&1
@@ -157,6 +176,16 @@ assert_fails "delete removes the file" -- m read "$ROOT/search.md"
 m create "$ROOT/sp ace.md" "spaced body" >/dev/null 2>&1
 assert_eq "mdnest:// URI percent-decodes to the spaced file" "spaced body" "$(m read "mdnest://${BASE}/${RUN_DIR}/sp%20ace.md" 2>/dev/null)"
 m delete "$ROOT/sp ace.md" >/dev/null 2>&1
+
+# ── 16. legacy `note` form: read must return the note, not its tree entry ────
+# It used to try the tree lookup first and print {"name":..,"type":..} for any
+# path that existed, so the note body was only ever returned for a MISSING file.
+m create "$ROOT/legacy.md" "legacy body" >/dev/null 2>&1
+assert_eq "note read returns the note body" "legacy body" \
+  "$(m note read "$NS" "${RUN_DIR}/legacy.md" 2>/dev/null)"
+assert_contains "note list renders the tree" "── legacy.md" \
+  "$(m note list "${BASE}/${RUN_DIR}" 2>/dev/null)"
+m delete "$ROOT/legacy.md" >/dev/null 2>&1
 
 # ── Summary ─────────────────────────────────────────────────────────────────
 echo

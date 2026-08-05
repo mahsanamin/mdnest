@@ -24,8 +24,12 @@ ok()  { PASS=$((PASS+1)); printf '  %s %s\n' "$(green PASS)" "$1"; }
 bad() { FAIL=$((FAIL+1)); printf '  %s %s\n' "$(red FAIL)" "$1"; printf '         %s\n' "$2"; }
 eq()  { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "expected [$2] got [$3]"; fi; }
 
-# Load the real CLI functions without dispatching a command.
+# Load the real CLI functions without dispatching a command. The CLI runs under
+# `set -e`, and sourcing it applies that to this shell too — which would abort
+# the run at the first check that deliberately exercises a failure path. Turn it
+# back off; each check asserts on the status it captured.
 MDNEST_LIB=1 source "$REPO_ROOT/mdnest"
+set +e
 
 # A representative /api/config body: latestRelease.version ("3.11.1") comes
 # BEFORE the top-level version ("9.9.9-test"), so a naive grep|head picks the
@@ -47,6 +51,52 @@ run_suite() {
   eq "json: missing field is empty" ""                          "$(printf '%s' "$CONFIG_JSON" | json_top_string nope)"
 }
 
+# ── list rendering ──────────────────────────────────────────────────────────
+# `mdnest list <namespace>` used to print the raw API JSON, which is unreadable
+# for a namespace of any size (issue #87). These pin the tree rendering: it is
+# awk-only by design, so it must produce byte-identical output on every machine
+# — no python3/jq tier to disagree with. The names below are written the way the
+# Go API actually encodes them: \u0026 for &, \u003c/\u003e for <>, \" for a
+# quote — so the string decoder is covered too, not just the layout.
+TREE_JSON='{"name":"root","type":"folder","children":[{"name":"docs","type":"folder","path":"docs","children":[{"name":"a \u0026 b \u003cx\u003e.md","type":"file","path":"docs/a \u0026 b \u003cx\u003e.md"},{"name":"deep","type":"folder","path":"docs/deep","children":[{"name":"q\"uote.md","type":"file","path":"docs/deep/q\"uote.md"}]}]},{"name":"empty","type":"folder","path":"empty"},{"name":"top.md","type":"file","path":"top.md"}]}'
+
+run_list_suite() {
+  echo "── $1 ──"
+  local want got
+
+  want='ns
+├── docs/
+│   ├── a & b <x>.md
+│   └── deep/
+│       └── q"uote.md
+├── empty/
+└── top.md
+
+3 folders, 3 files'
+  eq "tree: whole namespace" "$want" "$(format_tree "$TREE_JSON" ns)"
+
+  want='ns/docs
+├── a & b <x>.md
+└── deep/
+    └── q"uote.md
+
+1 folder, 2 files'
+  eq "tree: scoped to a subfolder" "$want" "$(format_tree "$TREE_JSON" ns/docs docs)"
+
+  eq "tree: scoped to a file"  "ns/top.md"    "$(format_tree "$TREE_JSON" ns/top.md top.md)"
+  eq "tree: empty folder"      "ns/empty
+  (empty)"                                    "$(format_tree "$TREE_JSON" ns/empty empty)"
+
+  got="$(format_tree "$TREE_JSON" ns/nope nope 2>/dev/null)"; local rc=$?
+  eq "tree: missing path fails"    "3"  "$rc"
+  eq "tree: missing path is quiet" ""   "$got"
+  eq "tree: missing path explains itself" "Error: path not found in namespace: nope" \
+     "$(format_tree "$TREE_JSON" ns/nope nope 2>&1 >/dev/null)"
+
+  eq "namespaces: one per line" "one
+two & three" "$(format_namespaces '["one","two & three"]')"
+}
+
 echo "=== mdnest CLI unit tests ==="
 echo
 
@@ -56,11 +106,58 @@ if command -v python3 >/dev/null 2>&1; then
 else
   echo "── (python3 not present — skipping the python3 pass) ──"
 fi
+run_list_suite "list rendering"
 
-# Pass 2: force the pure-bash/awk fallbacks by making `have` deny python3 + jq.
+# Passes 2 and 3 need a python3 stand-in on PATH, so they're driven through a
+# shim directory. This is the issue-#87 class of bug: on the reporter's Fedora
+# box a stale matplotlib .pth made EVERY python3 start print a traceback to
+# stderr, and that traceback landed in the middle of mdnest's output. The CLI
+# must (a) not leak python's stderr, and (b) still produce correct values —
+# whether python3 is merely noisy or outright broken.
+REAL_PY="$(command -v python3 || true)"
+SHIM_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mdnest-unit.XXXXXX")"
+trap 'rm -rf "$SHIM_DIR"' EXIT
+
+make_shim() {  # make_shim <mode: noisy|broken>
+  # PATH is restored to the pre-shim value before exec'ing the real python3:
+  # a version-manager shim (pyenv et al.) re-resolves "python3" through PATH,
+  # which would otherwise find this shim again and recurse forever.
+  cat > "$SHIM_DIR/python3" <<SHIM
+#!/bin/sh
+echo "Error processing line 1 of /home/u/.local/lib/python3.14/site-packages/x-nspkg.pth:" >&2
+echo "AttributeError: 'NoneType' object has no attribute 'loader'" >&2
+echo "Remainder of file ignored" >&2
+$([ "$1" = "broken" ] && echo 'exit 1' || printf 'PATH=%s; export PATH; exec "%s" "$@"' "'$PATH'" "$REAL_PY")
+SHIM
+  chmod +x "$SHIM_DIR/python3"
+}
+
+# Pass 2: python3 works but prints startup noise on every run (the exact repro).
+if [ -n "$REAL_PY" ]; then
+  make_shim noisy
+  PATH="$SHIM_DIR:$PATH" run_suite "noisy python3 (broken .pth on stderr)"
+  eq "noisy python3: nothing leaks to stderr" "" \
+     "$(PATH="$SHIM_DIR:$PATH" urlencode '19 Jun 2026.md' 2>&1 >/dev/null)"
+  eq "noisy python3: json parse leaks nothing" "" \
+     "$(printf '%s' "$CONFIG_JSON" | PATH="$SHIM_DIR:$PATH" json_top_string version 2>&1 >/dev/null)"
+else
+  echo "── (python3 not present — skipping the noisy-python3 pass) ──"
+fi
+
+# Pass 3: python3 is present but exits non-zero — the CLI must degrade to the
+# pure-bash/awk fallbacks instead of returning empty/wrong values.
+make_shim broken
+PATH="$SHIM_DIR:$PATH" run_suite "broken python3 (exits 1)"
+eq "broken python3: nothing leaks to stderr" "" \
+   "$(PATH="$SHIM_DIR:$PATH" urlencode 'x&y=z?q' 2>&1 >/dev/null)"
+
+# Pass 4: force the pure-bash/awk fallbacks by making `have` deny python3 + jq.
 # This is the fresh-machine path — the one the recent regression broke.
 have() { case "$1" in python3|jq) return 1 ;; *) command -v "$1" >/dev/null 2>&1 ;; esac; }
 run_suite "fallback (no python3/jq)"
+# Same listings again with no parser at all: the rendering must be identical,
+# since it is awk-only. A difference here means a python3/jq tier crept back in.
+run_list_suite "list rendering (no python3/jq)"
 
 echo
 echo "=== $((PASS+FAIL)) checks: $(green "$PASS passed"), $([ "$FAIL" -gt 0 ] && red "$FAIL failed" || echo "0 failed") ==="
