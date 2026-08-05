@@ -92,6 +92,8 @@ frontend/
     wikilink.js              # Obsidian [[wikilink]] support (v3.11.5+) — pure module: parse/resolve, marked inline extension, relative-.md-link resolver, restoreWikilinks() serializer-unescape. No React imports (unit-tested standalone).
     sanitize.js              # DOMPurify wrappers (v3.11.7+): sanitizeHtml for marked output + release notes, sanitizeSvg for mermaid. sanitizeSvg MUST keep ADD_TAGS:['foreignObject'] or every flowchart label renders blank.
     __tests__/sanitize.test.js # Pins both directions — labels survive, payloads don't
+    echo-gate.js             # v4.1.1+ — pure module (no React): suppresses the file-changed echo of a tab's own save. In-flight-save window + epoch token: broadcasts arriving before the PUT response resolves are deferred and re-checked once the save settles; reset() on note switch invalidates the window. Closes the self-conflict-banner race (issue #82).
+    __tests__/echo-gate.test.js # Pins the echo-beats-response race, late echoes, note-switch epochs
     mermaid-config.js         # Shared mermaid init, theme, and fixMermaidTextColors()
     firebase-config.js       # Firebase SDK lazy init (USER_PROVIDER=firebase only)
     components/

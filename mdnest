@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-MDNEST_CLI_VERSION="4.1.1"
+MDNEST_CLI_VERSION="4.1.2"
 CONFIG_DIR="${HOME}/.config/mdnest"
 SERVERS_DIR="${CONFIG_DIR}/servers"
 DEFAULT_FILE="${CONFIG_DIR}/default"
@@ -176,6 +176,23 @@ api() {
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# py — run a python3 snippet defensively. Every python3 call in this CLI goes
+# through here, for two reasons:
+#   -S  skip site initialisation. A broken entry in the user's site-packages
+#       (a stale .pth left behind by e.g. matplotlib) makes python3 print a
+#       traceback to stderr on EVERY start; without -S that noise lands in the
+#       middle of mdnest's output and looks like an mdnest crash (issue #87).
+#   -E  ignore PYTHON* env vars, so a stray PYTHONPATH/PYTHONWARNINGS can't
+#       inject imports or warnings either.
+# stderr is dropped and a non-zero exit is returned to the caller, because every
+# call site has a pure-bash/awk fallback: a python3 that is present but broken
+# must degrade to the fallback, not fail the command. Snippets here use only the
+# standard library, which -S/-E do not affect.
+py() {
+  have python3 || return 127
+  python3 -S -E "$@" 2>/dev/null
+}
+
 # Resolve this script's real path (following symlinks) WITHOUT depending on
 # `readlink -f` (unsupported on macOS/BSD) or python3 — both of which are absent
 # on a bare fresh machine, where the old fallback left the path empty and broke
@@ -208,9 +225,11 @@ warn_no_parser() {
 }
 
 urlencode() {
-  if have python3; then
-    python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))" "$1"
-    return
+  local out
+  if out=$(py -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))" "$1") \
+     && { [ -n "$out" ] || [ -z "$1" ]; }; then
+    printf '%s' "$out"
+    return 0
   fi
   # Pure-bash percent-encode. Reserved set matches urllib.parse.quote's DEFAULT
   # (safe='/'), so '/' stays literal — urlencode is called on full note paths
@@ -230,9 +249,11 @@ urlencode() {
 }
 
 urldecode() {
-  if have python3; then
-    python3 -c "import urllib.parse, sys; print(urllib.parse.unquote(sys.argv[1]))" "$1"
-    return
+  local out
+  if out=$(py -c "import urllib.parse, sys; print(urllib.parse.unquote(sys.argv[1]))" "$1") \
+     && { [ -n "$out" ] || [ -z "$1" ]; }; then
+    printf '%s' "$out"
+    return 0
   fi
   # Turn '+' into space and %XX into the raw byte, then let printf %b emit the
   # bytes (works for UTF-8 sequences too: %E2%80%A6 -> \xE2\x80\xA6 -> bytes).
@@ -246,13 +267,14 @@ urldecode() {
 # returns the top-level "version", not latestRelease.version — which is emitted
 # FIRST in /api/config, so a naive grep|head would pick the wrong one).
 json_top_string() {
-  local field="$1" data
+  local field="$1" data out
   data=$(cat)
-  if have python3; then
-    printf '%s' "$data" | python3 -c "import sys,json
-try: print(json.load(sys.stdin).get('$field',''))
-except Exception: pass" 2>/dev/null
-    return
+  # A python3 that can't parse the body (or can't start at all) returns non-zero
+  # and we fall through to jq/awk, rather than reporting an empty field.
+  if out=$(printf '%s' "$data" | py -c \
+      "import sys,json; print(json.load(sys.stdin).get(sys.argv[1],''))" "$field"); then
+    printf '%s\n' "$out"
+    return 0
   fi
   if have jq; then
     printf '%s' "$data" | jq -r --arg f "$field" '.[$f] // empty' 2>/dev/null
@@ -286,6 +308,168 @@ except Exception: pass" 2>/dev/null
           print val; exit
         }
       }
+    }'
+}
+
+# ─── Output formatting ──────────────────────────────────────────────────────
+# `mdnest list` used to dump the raw API JSON, which is unreadable for a
+# namespace of any size (issue #87). The formatters below render it for humans;
+# `--json` still returns the raw payload for scripts.
+#
+# Deliberately awk-only, no python3/jq tier: awk is on every machine mdnest
+# supports, the output is then identical everywhere, and a broken python
+# install can't garble a listing.
+
+# Shared awk helpers, so both formatters decode JSON strings the same way.
+_AWK_JSON_LIB='
+function hex2dec(h,   i, c, d, v) {
+  v = 0
+  for (i = 1; i <= length(h); i++) {
+    c = tolower(substr(h, i, 1))
+    d = index("0123456789abcdef", c) - 1
+    if (d < 0) return -1
+    v = v * 16 + d
+  }
+  return v
+}
+# Decode a JSON string body (the bytes between the quotes) into plain text.
+function unesc(s,   out, i, len, c, nx, v) {
+  out = ""; len = length(s); i = 1
+  while (i <= len) {
+    c = substr(s, i, 1)
+    if (c != "\\") { out = out c; i++; continue }
+    nx = substr(s, i + 1, 1)
+    if (nx == "u") {
+      # Go escapes the HTML-unsafe ASCII characters (<, >, &) as \uXXXX. Decode
+      # the printable ASCII range; leave anything else as the literal escape
+      # rather than guessing at multi-byte sequences (Go emits those raw anyway).
+      v = hex2dec(substr(s, i + 2, 4))
+      if (v >= 32 && v < 127) { out = out sprintf("%c", v); i += 6; continue }
+      out = out substr(s, i, 6); i += 6; continue
+    }
+    if (nx == "n") { out = out "\n"; i += 2; continue }
+    if (nx == "t") { out = out "\t"; i += 2; continue }
+    if (nx == "r") { i += 2; continue }
+    out = out nx; i += 2   # \" \\ \/ and anything else: keep the character
+  }
+  return out
+}
+# Read the JSON string starting at buf[i] (i on the opening quote): sets JSTR to
+# the decoded value and returns the index just past the closing quote.
+function jstr(buf, i,   s, ch, len) {
+  len = length(buf); s = ""; i++
+  while (i <= len) {
+    ch = substr(buf, i, 1)
+    if (ch == "\\") { s = s substr(buf, i, 2); i += 2; continue }
+    if (ch == "\"") { i++; break }
+    s = s ch; i++
+  }
+  JSTR = unesc(s)
+  return i
+}
+'
+
+# format_namespaces <json>  — a JSON string array, one name per line.
+format_namespaces() {
+  printf '%s' "$1" | awk "$_AWK_JSON_LIB"'
+    { buf = buf $0 }
+    END {
+      len = length(buf); i = 1; cnt = 0
+      while (i <= len) {
+        if (substr(buf, i, 1) == "\"") { i = jstr(buf, i); print JSTR; cnt++; continue }
+        i++
+      }
+      if (cnt == 0) {
+        print "No namespaces on this server — they come from MOUNT_ entries in mdnest.conf." > "/dev/stderr"
+      }
+    }'
+}
+
+# format_tree <json> <header> [scoped-path]  — render an /api/tree response as
+# an indented tree under <header>. With a scoped path, only that node and its
+# descendants are shown (and a missing path is an error, exit 3).
+format_tree() {
+  printf '%s' "$1" | MDN_HEADER="$2" MDN_WANT="${3:-}" awk "$_AWK_JSON_LIB"'
+    BEGIN {
+      header = ENVIRON["MDN_HEADER"]; want = ENVIRON["MDN_WANT"]
+      sub(/^\/+/, "", want); sub(/\/+$/, "", want)
+    }
+    { buf = buf $0 }
+    END {
+      # Pass 1 — flatten the tree into pre-order arrays. The API emits each node
+      # as {"name":..,"type":..,"path":..,"children":[..]}, so a node is complete
+      # before its children appear and document order IS pre-order. Depth is the
+      # number of open braces, which is all the nesting information we need.
+      len = length(buf); i = 1; depth = 0; key = ""; cnt = 0; maxd = 0
+      while (i <= len) {
+        c = substr(buf, i, 1)
+        if (c == "\"") {
+          i = jstr(buf, i); s = JSTR
+          j = i
+          while (j <= len && substr(buf, j, 1) ~ /[ \t\r\n]/) j++
+          if (substr(buf, j, 1) == ":") { key = s; i = j + 1; continue }
+          # Values are recorded against the object that is currently open, and
+          # back-filled if "type" (which creates the entry) came first.
+          if (key == "name") { nm[depth] = s; if (at[depth]) nname[at[depth]] = s }
+          else if (key == "path") { pth[depth] = s; if (at[depth]) npath[at[depth]] = s }
+          else if (key == "type") {
+            cnt++; nd[cnt] = depth; ntype[cnt] = s
+            nname[cnt] = nm[depth]; npath[cnt] = pth[depth]; at[depth] = cnt
+          }
+          key = ""
+          continue
+        }
+        if (c == "{") {
+          depth++; if (depth > maxd) maxd = depth
+          nm[depth] = ""; pth[depth] = ""; at[depth] = 0; i++; continue
+        }
+        if (c == "}") { depth--; i++; continue }
+        i++
+      }
+      if (cnt == 0) { print "Error: could not read the namespace tree" > "/dev/stderr"; exit 4 }
+
+      # Pass 2 — pick the slice to print: the whole tree, or one scoped subtree.
+      base = nd[1]; ttype = ntype[1]; start = 2; endi = cnt
+      if (want != "") {
+        found = 0
+        for (k = 1; k <= cnt; k++) {
+          p = npath[k]; sub(/^\/+/, "", p); sub(/\/+$/, "", p)
+          if (p == want) { found = k; break }
+        }
+        if (found == 0) { print "Error: path not found in namespace: " want > "/dev/stderr"; exit 3 }
+        base = nd[found]; ttype = ntype[found]; start = found + 1; endi = cnt
+        for (k = start; k <= cnt; k++) if (nd[k] <= base) { endi = k - 1; break }
+        if (header == "") header = npath[found]
+      }
+
+      print header
+      if (endi < start) {
+        if (ttype == "folder") print "  (empty)"
+        exit 0
+      }
+
+      # Pass 3 — a node is the last child of its parent when no later node shares
+      # its depth before the depth drops. Walking backwards answers that at once:
+      # seen[d] is reset for everything deeper each time the depth drops.
+      for (k = endi; k >= start; k--) {
+        d = nd[k]
+        islast[k] = seen[d] ? 0 : 1
+        seen[d] = 1
+        for (e = d + 1; e <= maxd; e++) seen[e] = 0
+      }
+
+      folders = 0; files = 0
+      for (k = start; k <= endi; k++) {
+        lvl = nd[k] - base
+        pre = ""
+        for (a = 1; a < lvl; a++) pre = pre (anc[a] ? "    " : "│   ")
+        pre = pre (islast[k] ? "└── " : "├── ")
+        anc[lvl] = islast[k]
+        if (ntype[k] == "folder") { print pre nname[k] "/"; folders++ }
+        else                      { print pre nname[k];     files++ }
+      }
+      printf "\n%d %s, %d %s\n", folders, (folders == 1 ? "folder" : "folders"), \
+                                 files,   (files   == 1 ? "file"   : "files")
     }'
 }
 
@@ -515,13 +699,15 @@ cmd_servers() {
         ns_json=$(curl -s --connect-timeout 5 --max-time 8 -H "Authorization: Bearer $tok" "${url}/api/namespaces" 2>/dev/null)
         if [ -n "$ns_json" ] && [ "$ns_json" != "[]" ]; then
           local namespaces
-          if have python3; then
-            namespaces=$(echo "$ns_json" | python3 -c "import sys,json; [print('    → @${name}/' + ns) for ns in json.load(sys.stdin)]" 2>/dev/null) || true
-          else
+          namespaces=$(printf '%s' "$ns_json" | py -c \
+            "import sys,json; [print(ns) for ns in json.load(sys.stdin)]") || namespaces=""
+          if [ -z "$namespaces" ]; then
             # Fallback: extract the JSON string array elements without python3.
-            namespaces=$(echo "$ns_json" | grep -o '"[^"]*"' | sed 's/^"//; s/"$//' | sed "s#^#    → @${name}/#") || true
+            namespaces=$(printf '%s' "$ns_json" | grep -o '"[^"]*"' | sed 's/^"//; s/"$//') || namespaces=""
           fi
-          [ -n "$namespaces" ] && echo "$namespaces"
+          if [ -n "$namespaces" ]; then
+            printf '%s\n' "$namespaces" | sed "s#^#    → @${name}/#"
+          fi
         fi
       fi
     done
@@ -597,29 +783,56 @@ cmd_update() {
 }
 
 cmd_list() {
-  parse_path "$1"
-  require_server
-  if [ -z "$PARSED_NS" ]; then
-    api GET "/namespaces"
-  elif [ -z "$PARSED_PATH" ]; then
-    api GET "/tree?ns=$(urlencode "$PARSED_NS")"
-  else
-    # Scope to a subfolder. /tree returns the whole namespace, so fetch it and
-    # extract just the node at PARSED_PATH (the folder + its children, or the
-    # file entry). Previously the deeper path was ignored and the entire
-    # namespace tree came back, which was misleading.
-    local tree
-    tree=$(api GET "/tree?ns=$(urlencode "$PARSED_NS")") || return 1
-    local target="${PARSED_PATH#/}"; target="${target%/}"
+  local as_json="${MDNEST_JSON:-0}" arg=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --json) as_json=1 ;;
+      -*)     echo "Unknown option: $1 — usage: mdnest list [--json] [@alias/namespace/path]" >&2; return 1 ;;
+      *)      if [ -z "$arg" ]; then arg="$1"; fi ;;
+    esac
+    shift
+  done
 
-    if have python3; then
-      printf '%s' "$tree" | TARGET="$target" python3 -c '
+  parse_path "$arg"
+  require_server
+
+  # No namespace given: list the namespaces on this server.
+  if [ -z "$PARSED_NS" ]; then
+    local ns_json
+    ns_json=$(api GET "/namespaces") || return 1
+    if [ "$as_json" = "1" ]; then printf '%s\n' "$ns_json"; return 0; fi
+    format_namespaces "$ns_json"
+    return 0
+  fi
+
+  # /tree returns the WHOLE namespace, so a deeper path is scoped client-side to
+  # just that node (the folder + its children, or the file entry) — before this
+  # the deeper path was ignored and the entire namespace came back.
+  local tree
+  tree=$(api GET "/tree?ns=$(urlencode "$PARSED_NS")") || return 1
+  local target="${PARSED_PATH#/}"; target="${target%/}"
+
+  if [ "$as_json" != "1" ]; then
+    local header="$PARSED_NS"
+    if [ -n "$target" ]; then header="$PARSED_NS/$target"; fi
+    format_tree "$tree" "$header" "$target"
+    return
+  fi
+
+  # ── --json: the raw API payload, for scripts ──
+  if [ -z "$target" ]; then
+    printf '%s\n' "$tree"
+    return 0
+  fi
+
+  # python3 first for pretty-printed output; if it's missing OR broken OR
+  # finds nothing, fall through to the jq/awk tiers below (which report the
+  # not-found error themselves — py() drops python's stderr on purpose).
+  local sub
+  if sub=$(printf '%s' "$tree" | TARGET="$target" py -c '
 import sys, json, os
 target = os.environ["TARGET"].strip("/")
-try:
-    root = json.load(sys.stdin)
-except Exception:
-    sys.exit("Error: could not parse namespace tree")
+root = json.load(sys.stdin)
 def find(node):
     if node.get("path", "").strip("/") == target:
         return node
@@ -630,27 +843,26 @@ def find(node):
     return None
 node = find(root)
 if node is None:
-    sys.exit("Error: path not found in namespace: " + target)
+    sys.exit(3)
 print(json.dumps(node, indent=2))
-'
-      return $?
-    fi
+') && [ -n "$sub" ]; then
+    printf '%s\n' "$sub"
+    return 0
+  fi
 
-    if have jq; then
-      local sub
-      sub=$(printf '%s' "$tree" | jq --arg t "$target" \
-        'first(.. | objects | select((.path // "" | sub("^/";"") | sub("/$";"")) == $t))' 2>/dev/null)
-      if [ -z "$sub" ] || [ "$sub" = "null" ]; then
-        echo "Error: path not found in namespace: $target" >&2; return 1
-      fi
-      printf '%s\n' "$sub"; return 0
+  if have jq; then
+    sub=$(printf '%s' "$tree" | jq --arg t "$target" \
+      'first(.. | objects | select((.path // "" | sub("^/";"") | sub("/$";"")) == $t))' 2>/dev/null)
+    if [ -z "$sub" ] || [ "$sub" = "null" ]; then
+      echo "Error: path not found in namespace: $target" >&2; return 1
     fi
+    printf '%s\n' "$sub"; return 0
+  fi
 
-    # Pure-awk fallback (no python3/jq): extract the balanced {...} object whose
-    # top-level "path" equals target. Output is compact but correctly SCOPED
-    # (the actual behaviour); install python3 for pretty-printed output.
-    local sub
-    sub=$(printf '%s' "$tree" | awk -v want="$target" '
+  # Pure-awk fallback (no python3/jq): extract the balanced {...} object whose
+  # top-level "path" equals target. Output is compact but correctly SCOPED
+  # (the actual behaviour); install python3 for pretty-printed output.
+  sub=$(printf '%s' "$tree" | awk -v want="$target" '
       { buf = buf $0 }
       END {
         n=length(buf)
@@ -681,11 +893,10 @@ print(json.dumps(node, indent=2))
         }
         exit 3
       }')
-    if [ -z "$sub" ]; then
-      echo "Error: path not found in namespace: $target" >&2; return 1
-    fi
-    printf '%s\n' "$sub"
+  if [ -z "$sub" ]; then
+    echo "Error: path not found in namespace: $target" >&2; return 1
   fi
+  printf '%s\n' "$sub"
 }
 
 cmd_read() {
@@ -817,7 +1028,10 @@ cmd_note_legacy() {
   require_server
   case "$subcmd" in
     list)     cmd_list "$1" ;;
-    read)     cmd_list "${1}/${2}" 2>/dev/null || api GET "/note?ns=$(urlencode "$1")&path=$(urlencode "$2")" ;;
+    # Read the note itself. This used to try cmd_list first and only fall back to
+    # /note if that failed — so for a path that exists it printed the tree entry
+    # (name/type/path JSON) instead of the note body.
+    read)     api GET "/note?ns=$(urlencode "$1")&path=$(urlencode "$2")" ;;
     write)    local ns="$1" p="$2" c; c=$(read_content "$3") || exit 1; require_content "$c"; api PUT "/note?ns=$(urlencode "$ns")&path=$(urlencode "$p")" "$c" ;;
     create)   local ns="$1" p="$2" c; c=$(read_content "$3") || exit 1; require_content "$c"; api POST "/note?ns=$(urlencode "$ns")&path=$(urlencode "$p")" "$c" ;;
     append)   local ns="$1" p="$2" c; c=$(read_content "$3") || exit 1; require_content "$c"; api PATCH "/note?ns=$(urlencode "$ns")&path=$(urlencode "$p")&position=bottom" "$c" ;;
@@ -882,7 +1096,8 @@ NOTE OPERATIONS
   prepend  <path> <content|->     Prepend text to start (creates file if not found)
   delete   <path>                 Delete a note or folder
   move     <path> <new-path>      Move/rename within the same namespace
-  list     [@alias/namespace]     List namespaces, or files in a namespace
+  list     [@alias/namespace]     List namespaces, or a namespace/folder as a tree
+           [--json]               ...as the raw API JSON instead (for scripts)
   search   <ns-path> "query"      Search note contents
 
 OTHER
@@ -919,6 +1134,11 @@ EXAMPLES
 
   # Search
   mdnest search @work/engineering "database schema"
+
+  # List — a tree for humans, --json for scripts
+  mdnest list @work/engineering
+  mdnest list @work/engineering/Architecture      # scoped to one folder
+  mdnest list --json @work/engineering            # raw API JSON
 
   # Single-server shorthand (no @alias needed)
   mdnest list
