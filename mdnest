@@ -176,6 +176,23 @@ api() {
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# py — run a python3 snippet defensively. Every python3 call in this CLI goes
+# through here, for two reasons:
+#   -S  skip site initialisation. A broken entry in the user's site-packages
+#       (a stale .pth left behind by e.g. matplotlib) makes python3 print a
+#       traceback to stderr on EVERY start; without -S that noise lands in the
+#       middle of mdnest's output and looks like an mdnest crash (issue #87).
+#   -E  ignore PYTHON* env vars, so a stray PYTHONPATH/PYTHONWARNINGS can't
+#       inject imports or warnings either.
+# stderr is dropped and a non-zero exit is returned to the caller, because every
+# call site has a pure-bash/awk fallback: a python3 that is present but broken
+# must degrade to the fallback, not fail the command. Snippets here use only the
+# standard library, which -S/-E do not affect.
+py() {
+  have python3 || return 127
+  python3 -S -E "$@" 2>/dev/null
+}
+
 # Resolve this script's real path (following symlinks) WITHOUT depending on
 # `readlink -f` (unsupported on macOS/BSD) or python3 — both of which are absent
 # on a bare fresh machine, where the old fallback left the path empty and broke
@@ -208,9 +225,11 @@ warn_no_parser() {
 }
 
 urlencode() {
-  if have python3; then
-    python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))" "$1"
-    return
+  local out
+  if out=$(py -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))" "$1") \
+     && { [ -n "$out" ] || [ -z "$1" ]; }; then
+    printf '%s' "$out"
+    return 0
   fi
   # Pure-bash percent-encode. Reserved set matches urllib.parse.quote's DEFAULT
   # (safe='/'), so '/' stays literal — urlencode is called on full note paths
@@ -230,9 +249,11 @@ urlencode() {
 }
 
 urldecode() {
-  if have python3; then
-    python3 -c "import urllib.parse, sys; print(urllib.parse.unquote(sys.argv[1]))" "$1"
-    return
+  local out
+  if out=$(py -c "import urllib.parse, sys; print(urllib.parse.unquote(sys.argv[1]))" "$1") \
+     && { [ -n "$out" ] || [ -z "$1" ]; }; then
+    printf '%s' "$out"
+    return 0
   fi
   # Turn '+' into space and %XX into the raw byte, then let printf %b emit the
   # bytes (works for UTF-8 sequences too: %E2%80%A6 -> \xE2\x80\xA6 -> bytes).
@@ -246,13 +267,14 @@ urldecode() {
 # returns the top-level "version", not latestRelease.version — which is emitted
 # FIRST in /api/config, so a naive grep|head would pick the wrong one).
 json_top_string() {
-  local field="$1" data
+  local field="$1" data out
   data=$(cat)
-  if have python3; then
-    printf '%s' "$data" | python3 -c "import sys,json
-try: print(json.load(sys.stdin).get('$field',''))
-except Exception: pass" 2>/dev/null
-    return
+  # A python3 that can't parse the body (or can't start at all) returns non-zero
+  # and we fall through to jq/awk, rather than reporting an empty field.
+  if out=$(printf '%s' "$data" | py -c \
+      "import sys,json; print(json.load(sys.stdin).get(sys.argv[1],''))" "$field"); then
+    printf '%s\n' "$out"
+    return 0
   fi
   if have jq; then
     printf '%s' "$data" | jq -r --arg f "$field" '.[$f] // empty' 2>/dev/null
@@ -515,13 +537,15 @@ cmd_servers() {
         ns_json=$(curl -s --connect-timeout 5 --max-time 8 -H "Authorization: Bearer $tok" "${url}/api/namespaces" 2>/dev/null)
         if [ -n "$ns_json" ] && [ "$ns_json" != "[]" ]; then
           local namespaces
-          if have python3; then
-            namespaces=$(echo "$ns_json" | python3 -c "import sys,json; [print('    → @${name}/' + ns) for ns in json.load(sys.stdin)]" 2>/dev/null) || true
-          else
+          namespaces=$(printf '%s' "$ns_json" | py -c \
+            "import sys,json; [print(ns) for ns in json.load(sys.stdin)]") || namespaces=""
+          if [ -z "$namespaces" ]; then
             # Fallback: extract the JSON string array elements without python3.
-            namespaces=$(echo "$ns_json" | grep -o '"[^"]*"' | sed 's/^"//; s/"$//' | sed "s#^#    → @${name}/#") || true
+            namespaces=$(printf '%s' "$ns_json" | grep -o '"[^"]*"' | sed 's/^"//; s/"$//') || namespaces=""
           fi
-          [ -n "$namespaces" ] && echo "$namespaces"
+          if [ -n "$namespaces" ]; then
+            printf '%s\n' "$namespaces" | sed "s#^#    → @${name}/#"
+          fi
         fi
       fi
     done
@@ -612,14 +636,14 @@ cmd_list() {
     tree=$(api GET "/tree?ns=$(urlencode "$PARSED_NS")") || return 1
     local target="${PARSED_PATH#/}"; target="${target%/}"
 
-    if have python3; then
-      printf '%s' "$tree" | TARGET="$target" python3 -c '
+    # python3 first for pretty-printed output; if it's missing OR broken OR
+    # finds nothing, fall through to the jq/awk tiers below (which report the
+    # not-found error themselves — py() drops python's stderr on purpose).
+    local sub
+    if sub=$(printf '%s' "$tree" | TARGET="$target" py -c '
 import sys, json, os
 target = os.environ["TARGET"].strip("/")
-try:
-    root = json.load(sys.stdin)
-except Exception:
-    sys.exit("Error: could not parse namespace tree")
+root = json.load(sys.stdin)
 def find(node):
     if node.get("path", "").strip("/") == target:
         return node
@@ -630,14 +654,14 @@ def find(node):
     return None
 node = find(root)
 if node is None:
-    sys.exit("Error: path not found in namespace: " + target)
+    sys.exit(3)
 print(json.dumps(node, indent=2))
-'
-      return $?
+') && [ -n "$sub" ]; then
+      printf '%s\n' "$sub"
+      return 0
     fi
 
     if have jq; then
-      local sub
       sub=$(printf '%s' "$tree" | jq --arg t "$target" \
         'first(.. | objects | select((.path // "" | sub("^/";"") | sub("/$";"")) == $t))' 2>/dev/null)
       if [ -z "$sub" ] || [ "$sub" = "null" ]; then
@@ -649,7 +673,6 @@ print(json.dumps(node, indent=2))
     # Pure-awk fallback (no python3/jq): extract the balanced {...} object whose
     # top-level "path" equals target. Output is compact but correctly SCOPED
     # (the actual behaviour); install python3 for pretty-printed output.
-    local sub
     sub=$(printf '%s' "$tree" | awk -v want="$target" '
       { buf = buf $0 }
       END {
