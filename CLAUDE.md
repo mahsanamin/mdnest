@@ -190,6 +190,14 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 - Backend sees them as subdirectories under NOTES_DIR
 - GET /api/namespaces lists them (reads top-level dirs)
 
+### Client CLI (`mdnest`, bash)
+- Runs under `set -e` — a helper used as a bare statement must `return 0` on its success path or it aborts the script. (This also leaks into anything that *sources* the CLI: `tests/cli-unit.sh` does `set +e` right after the `MDNEST_LIB=1 source` for exactly this reason.)
+- **Every python3 call goes through `py()`** (v4.1.2+), never `python3` directly. It passes `-S` (skip site initialisation, so a user's broken site-packages/`.pth` can't print a traceback into our output — issue #87) and `-E` (ignore `PYTHON*` env), drops python's stderr, and returns its exit status. **Gate on the result, not on presence:** `have python3` passing does not mean python3 *works*, so every call site must fall through to its pure-bash/awk tier when `py` fails. A present-but-broken interpreter is the failure mode that bit us, not a missing one.
+- Dependency tiers, in order: python3 (`py`) → jq → pure bash/awk. The awk tier is not a token gesture; it is the tier that runs on a fresh machine, and `tests/e2e-docker.sh` proves it in a bare alpine container with neither python3 nor jq.
+- **Human-facing output is rendered in awk only** — `format_tree` / `format_namespaces` for `mdnest list` have deliberately no python3/jq tier, so a listing is byte-identical on every machine and a broken python can't garble it. Verified on gawk, mawk and busybox awk. Raw API JSON stays available behind `--json` / `MDNEST_JSON=1` for scripts; don't make raw JSON the default output of a command again.
+- Adding a command means three edits: the `case` dispatch, the help **Commands** list, and the help **Examples** block (`grep -c '<cmd>' mdnest` ≥ 3).
+- `mdnest update` self-updates from `raw.githubusercontent.com/.../main` — so a CLI fix reaches users when it lands on `main`, independent of the tag/Release (those drive the in-app *server* update banner). Corollary: the CLI installed on this machine lags `develop`, so test with `./mdnest`, not `mdnest`.
+
 ### Docker
 - Backend: golang:1.24-alpine build, alpine runtime
 - Frontend: node:20-alpine build, nginx:alpine serve
@@ -298,9 +306,15 @@ override: `MDNEST_SKIP_E2E=1`.
 
 - **Fast tier (every push):**
   - `tests/cli-unit.sh` — instant pure-function checks of the CLI helpers
-    (`urlencode`/`urldecode`/`json_top_string`), run **twice**: with `python3`
-    and with `python3`/`jq` force-disabled. This is the cheap guard for the
-    class of bug where the CLI silently breaks on a machine without `python3`.
+    (`urlencode`/`urldecode`/`json_top_string`) plus the `list` renderers
+    (`format_tree`/`format_namespaces`), run across **four** parser
+    environments: real `python3`; a **noisy** python3 (a PATH shim that prints a
+    `.pth` traceback to stderr on every start — the issue #87 repro); a
+    **broken** python3 (exits non-zero); and `python3`/`jq` force-disabled. This
+    is the cheap guard for the class of bug where the CLI breaks — or leaks
+    someone else's traceback — because of the machine's python rather than ours.
+    The rendering checks run in the with- and without-parser passes and must
+    agree, which is what keeps a python3/jq tier from creeping back into output.
     Uses the CLI's `MDNEST_LIB=1 source mdnest` hook to load the real functions.
   - Plus the existing builds, `npm test`, audits, version consistency, shellcheck.
 - **CLI smoke test**: `tests/cli-smoke-test.sh` exercises every `mdnest` note

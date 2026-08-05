@@ -4,6 +4,80 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v4.1.2 — `mdnest list` you can actually read
+
+Patch release fixing GitHub issue #87, reported from Fedora 44. Both halves of
+that report were the CLI's fault, and both are fixed. Nothing outside the
+`mdnest` CLI changed.
+
+### Fixed
+
+- **A broken python3 install no longer pollutes CLI output** (#87). The
+  reporter had a stale `matplotlib` `.pth` in `~/.local`, which makes *every*
+  python3 start print a traceback to stderr. Because the CLI shells out to
+  python3 for percent-encoding and JSON parsing, that traceback landed in the
+  middle of mdnest's own output and `mdnest list <workspace>` looked like it had
+  crashed. Every python3 call now goes through one guarded helper that passes
+  `-S` (skip site initialisation, so the user's `.pth` files are never
+  processed) and `-E` (ignore `PYTHON*` env vars), drops python's stderr, and
+  reports failure so a python3 that is present but *broken* degrades to the
+  pure-bash/awk fallback each call site already had, instead of silently
+  returning an empty value. `mdnest servers -v` and the JSON field parser now
+  fall through the same way, rather than reporting an unreachable server or an
+  empty field when python3 misbehaves.
+
+- **`mdnest list` renders a tree instead of dumping raw JSON** (#87). Listing a
+  namespace printed the entire `/api/tree` payload as one long line of compact
+  JSON — unreadable for a namespace of any size — and `mdnest list` with no
+  namespace printed a raw JSON array. Namespaces now print one per line, and a
+  namespace or folder prints as a tree with a folders/files count:
+
+  ```
+  engineering
+  ├── Architecture/
+  │   ├── decisions/
+  │   │   └── 001-storage.md
+  │   └── system-overview.md
+  └── README.md
+
+  2 folders, 3 files
+  ```
+
+  Pass `--json` (or set `MDNEST_JSON=1`) to get the exact previous payload, so
+  anything scripted against it keeps working — including the client-side
+  subfolder scoping. The renderer is deliberately awk-only, with no python3/jq
+  tier: awk is on every machine mdnest supports, so a listing looks identical
+  everywhere and a broken python install cannot garble it. Verified byte-for-byte
+  on gawk, mawk and busybox awk.
+
+- **The legacy `mdnest note read <ns> <path>` form returns the note again.** It
+  tried a tree lookup first, so for any file that actually existed it printed
+  that file's `{"name","type","path"}` tree entry instead of its content — the
+  note body only came back for a *missing* path. The flat `mdnest read` form was
+  never affected.
+
+### Chores
+
+- Lock-file-only dependency bumps to clear advisories published since v4.1.1:
+  `undici` 7.28.0 → 7.29.0 (frontend, dev-only via jsdom) and
+  `@modelcontextprotocol/sdk` 1.27.1 → 1.30.0 (pulling `hono` 4.13.0,
+  `ip-address` 10.4.0, `fast-uri` 3.1.5). Both audits report zero
+  vulnerabilities.
+
+### Tests
+
+- `tests/cli-unit.sh` gained two passes that reproduce the issue #87 environment
+  through a PATH shim — a python3 that is noisy-but-working and one that exits
+  non-zero — asserting correct values *and* a clean stderr in both, plus unit
+  coverage of the tree/namespace rendering (run twice, with and without a parser
+  present, since the two must agree).
+- `tests/cli-smoke-test.sh` now asserts that a listing contains tree connectors
+  and **no** JSON keys, that `--json` still returns the scoped payload, and that
+  legacy `note read` returns a note body. All of it passes in the bare
+  no-python3/no-jq alpine container of `tests/e2e-docker.sh`.
+
+---
+
 ## v4.1.1 — The conflict banner learns whose save it is
 
 Patch release fixing GitHub issue #82.
