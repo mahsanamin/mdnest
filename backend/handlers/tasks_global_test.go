@@ -30,7 +30,8 @@ func TestHandleGlobalTasks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := NewTaskHandler(stg) // nil nsFilter → all namespaces
+	// Single-mode wiring: an explicit all-access pass-through.
+	h := NewTaskHandler(stg, func(_ *http.Request, names []string) []string { return names })
 
 	r := httptest.NewRequest(http.MethodGet, "/api/tasks/all", nil)
 	w := httptest.NewRecorder()
@@ -67,9 +68,8 @@ func TestHandleGlobalTasks_FilterEnforced(t *testing.T) {
 	writeNs(t, root, "team-a", "plan.md", "- [ ] Alpha\n")
 	writeNs(t, root, "secret", "s.md", "- [ ] Hidden\n")
 	stg, _ := storage.NewLocalStorage(root)
-	h := NewTaskHandler(stg)
 	// Only team-a is accessible.
-	h.SetNamespaceFilter(func(_ *http.Request, names []string) []string {
+	h := NewTaskHandler(stg, func(_ *http.Request, names []string) []string {
 		var out []string
 		for _, n := range names {
 			if n == "team-a" {
@@ -94,6 +94,31 @@ func TestHandleGlobalTasks_FilterEnforced(t *testing.T) {
 	}
 	if len(resp.Tasks) != 1 {
 		t.Fatalf("want only team-a's task, got %d", len(resp.Tasks))
+	}
+}
+
+// A handler built without an access filter must serve nothing rather than
+// leak every namespace — the global view fails closed.
+func TestHandleGlobalTasks_NilFilterServesNothing(t *testing.T) {
+	root := t.TempDir()
+	writeNs(t, root, "team-a", "plan.md", "- [ ] Alpha\n")
+	writeNs(t, root, "secret", "s.md", "- [ ] Hidden\n")
+	stg, _ := storage.NewLocalStorage(root)
+	h := NewTaskHandler(stg, nil)
+
+	r := httptest.NewRequest(http.MethodGet, "/api/tasks/all", nil)
+	w := httptest.NewRecorder()
+	h.HandleGlobalTasks(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var resp TasksResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Tasks) != 0 {
+		t.Fatalf("nil filter must serve no tasks, got %d: %+v", len(resp.Tasks), resp.Tasks)
 	}
 }
 

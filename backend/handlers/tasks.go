@@ -35,22 +35,21 @@ import (
 type TaskHandler struct {
 	store storage.Storage
 	// nsFilter narrows a list of namespaces to those the request's user may
-	// read. Set in multi mode (perms.FilterNamespaces); nil in single mode,
-	// where every namespace is accessible. Used by the global (cross-namespace)
-	// task view to enforce access.
+	// read. Supplied at construction (multi mode: perms.FilterNamespaces;
+	// single mode: an explicit all-access pass-through). The global
+	// (cross-namespace) task view enforces access solely through it, and
+	// treats a nil filter as deny-all so access can never be left unwired.
 	nsFilter func(r *http.Request, namespaces []string) []string
 }
 
 // NewTaskHandler creates a task/board handler backed by the given storage.
-func NewTaskHandler(store storage.Storage) *TaskHandler {
-	return &TaskHandler{store: store}
-}
-
-// SetNamespaceFilter installs the per-request namespace access filter used by
-// the global task view. Multi mode only; single mode leaves it nil (all
-// namespaces are the caller's).
-func (h *TaskHandler) SetNamespaceFilter(f func(r *http.Request, namespaces []string) []string) {
-	h.nsFilter = f
+// nsFilter is the per-request namespace access filter for the global
+// (cross-namespace) task view and must be supplied by the caller: multi mode
+// passes perms.FilterNamespaces; single mode passes an explicit pass-through
+// (the single user owns every namespace). A nil filter makes the global view
+// serve nothing rather than leak every namespace.
+func NewTaskHandler(store storage.Storage, nsFilter func(r *http.Request, namespaces []string) []string) *TaskHandler {
+	return &TaskHandler{store: store, nsFilter: nsFilter}
 }
 
 // BoardColumn is a single kanban column. Status is the value written to a task's
@@ -898,7 +897,12 @@ func (h *TaskHandler) HandleGlobalTasks(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, `{"error":"failed to read namespaces"}`, http.StatusInternalServerError)
 		return
 	}
-	if h.nsFilter != nil {
+	// Access to the global view is controlled entirely by nsFilter, so fail
+	// closed: a nil filter serves nothing instead of leaking every namespace.
+	// Normal wiring always supplies one (see NewTaskHandler).
+	if h.nsFilter == nil {
+		names = nil
+	} else {
 		names = h.nsFilter(r, names)
 	}
 

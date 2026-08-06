@@ -464,7 +464,18 @@ func main() {
 	}
 	moveHandler := handlers.NewMoveHandler(stg)
 	searchHandler := handlers.NewSearchHandler(stg)
-	taskHandler := handlers.NewTaskHandler(stg)
+	// The global (cross-namespace) task view is access-controlled entirely by
+	// this filter. Multi mode enforces per-user access (perms.FilterNamespaces);
+	// single mode has one owner of every namespace, so an explicit all-access
+	// pass-through documents that intent and keeps the filter non-nil (a nil
+	// filter fails closed and would serve nothing).
+	var taskNsFilter func(r *http.Request, namespaces []string) []string
+	if perms != nil {
+		taskNsFilter = perms.FilterNamespaces
+	} else {
+		taskNsFilter = func(_ *http.Request, namespaces []string) []string { return namespaces }
+	}
+	taskHandler := handlers.NewTaskHandler(stg, taskNsFilter)
 	// API tokens live in Postgres in multi mode (shared across replicas, no
 	// ReadWriteMany secrets volume) and in the tokens.json file in single mode
 	// (no database dependency for a single-box install).
@@ -646,7 +657,6 @@ func main() {
 		// so route by method (read vs write) and invalidate the search cache on
 		// mutation just like /api/note.
 		if enableTaskBoard {
-			taskHandler.SetNamespaceFilter(perms.FilterNamespaces)
 			mux.Handle("/api/tasks", authMiddleware.Wrap(perms.ReadWriteRouter(invalidateSearch(http.HandlerFunc(taskHandler.HandleTasks)))))
 			mux.Handle("/api/board", authMiddleware.Wrap(perms.ReadWriteRouter(http.HandlerFunc(taskHandler.HandleBoard))))
 			// Cross-namespace view: aggregates the caller's accessible namespaces.
