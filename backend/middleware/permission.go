@@ -11,13 +11,15 @@ import (
 type PermissionChecker struct {
 	grantStore   store.GrantStore
 	nsAdminStore store.NamespaceAdminStore
+	groupStore   store.GroupStore // role-based "Groups" access; nil disables it
 }
 
 // NewPermissionChecker creates a new PermissionChecker. nsAdminStore is
 // consulted for role="admin" requests to decide whether the namespace is
-// in the user's admin scope; superadmins bypass it entirely.
-func NewPermissionChecker(grantStore store.GrantStore, nsAdminStore store.NamespaceAdminStore) *PermissionChecker {
-	return &PermissionChecker{grantStore: grantStore, nsAdminStore: nsAdminStore}
+// in the user's admin scope; superadmins bypass it entirely. groupStore adds
+// role-based ("Groups") access on top of per-user grants; nil disables it.
+func NewPermissionChecker(grantStore store.GrantStore, nsAdminStore store.NamespaceAdminStore, groupStore store.GroupStore) *PermissionChecker {
+	return &PermissionChecker{grantStore: grantStore, nsAdminStore: nsAdminStore, groupStore: groupStore}
 }
 
 // hasAdminScope returns true if the user's role grants admin-level
@@ -54,7 +56,15 @@ func (pc *PermissionChecker) check(r *http.Request, namespace, path, permission 
 	if pc.hasAdminScope(uc, namespace) {
 		return true
 	}
-	return pc.grantStore.CheckAccess(uc.ID, namespace, path, permission)
+	if pc.grantStore.CheckAccess(uc.ID, namespace, path, permission) {
+		return true
+	}
+	// Role-based access: any group the user belongs to (directly or via an
+	// OIDC group ID) may grant the permission.
+	if pc.groupStore != nil {
+		return pc.groupStore.CheckGroupAccess(uc.ID, uc.Groups, namespace, path, permission)
+	}
+	return false
 }
 
 // FilterNamespaces returns only the namespaces the user has (data) access to.
@@ -72,6 +82,13 @@ func (pc *PermissionChecker) FilterNamespaces(r *http.Request, namespaces []stri
 	if accessible, err := pc.grantStore.GetAccessibleNamespaces(uc.ID); err == nil {
 		for _, ns := range accessible {
 			accessSet[ns] = true
+		}
+	}
+	if pc.groupStore != nil {
+		if accessible, err := pc.groupStore.GetAccessibleNamespacesForGroups(uc.ID, uc.Groups); err == nil {
+			for _, ns := range accessible {
+				accessSet[ns] = true
+			}
 		}
 	}
 	if uc.Role == "admin" && pc.nsAdminStore != nil {
@@ -189,6 +206,17 @@ func (pc *PermissionChecker) RequireNsAccess(next http.Handler) http.Handler {
 			if a == ns {
 				next.ServeHTTP(w, r)
 				return
+			}
+		}
+		// ...or any access-group grant in this namespace.
+		if pc.groupStore != nil {
+			if gns, err := pc.groupStore.GetAccessibleNamespacesForGroups(uc.ID, uc.Groups); err == nil {
+				for _, a := range gns {
+					if a == ns {
+						next.ServeHTTP(w, r)
+						return
+					}
+				}
 			}
 		}
 		DenyJSON(w)

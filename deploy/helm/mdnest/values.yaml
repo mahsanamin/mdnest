@@ -297,6 +297,10 @@ sso:
   redirectUrl: ""
   # -- Comma-separated list of allowed email domains.
   allowedDomains: ""
+  # -- ID-token claim carrying the user's IdP group IDs, enabling access
+  # "Groups" membership via OIDC groups (e.g. "groups" on Entra ID). Empty
+  # disables OIDC-group resolution; direct user membership still works.
+  groupsClaim: ""
   # -- Label shown on the SSO login button.
   providerLabel: "SSO"
   # -- Comma-separated emails auto-promoted to superadmin.

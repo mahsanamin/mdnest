@@ -23,6 +23,19 @@ All notable changes to mdnest are documented here.
   marp-cli's bespoke player (vendored, MIT) — no server dependency and nothing
   added to the backend image. Centralized themes are resolved and images inlined,
   so the file is fully self-contained.
+- **Role-based access "Groups" (multi mode).** A new superadmin-managed
+  **Groups** admin tab lets you define named groups whose members are mdnest
+  users and/or IdP (OIDC) group IDs, and grant those groups read/write access
+  to namespaces (with the same path scoping as per-user grants). A user's
+  effective access is the **union** of their own grants and the grants of every
+  group they belong to — directly, or through an OIDC group ID carried in their
+  login token. OIDC-group membership is read from a configurable ID-token claim
+  (`OIDC_GROUPS_CLAIM`, e.g. `groups` on Entra ID) and snapshotted at login, so
+  a change at the IdP applies on the member's next sign-in; direct user
+  membership takes effect immediately. Each OIDC-group member can carry an
+  optional display label (reference only — matching is always on the group ID).
+  Fully additive and opt-in: with no groups defined and `OIDC_GROUPS_CLAIM`
+  unset, behaviour is unchanged.
 
 ### Fixed
 
@@ -136,6 +149,8 @@ couldn't be copied at all.
   stalled with a perpetual out-of-sync diff. The claim templates now carry only
   the release-invariant `mdnest.selectorLabels`, so upgrades apply cleanly.
   Chart version bumped to 0.3.1 (template-only change).
+
+---
 
 ---
 

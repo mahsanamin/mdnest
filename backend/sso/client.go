@@ -41,6 +41,7 @@ type Config struct {
 	AllowedDomains []string // optional lowercase email-domain allowlist
 	Scopes         []string // defaults to ["openid","email","profile"]
 	CookieSecret   []byte   // used to HMAC the state cookie (reuses JWT secret)
+	GroupsClaim    string   // optional ID-token claim holding the user's group IDs (e.g. "groups"); empty = disabled
 }
 
 // Client wraps the OIDC provider + OAuth2 config. Safe for concurrent use.
@@ -166,8 +167,9 @@ type VerifiedClaims struct {
 	Name          string
 	Picture       string // OIDC `picture` claim (profile image URL); empty if the IdP doesn't provide one
 	Subject       string
-	From          string // where the original request wanted to land
-	ReturnOrigin  string // optional allowlisted origin for the handoff (MCP OAuth bridge); empty for normal login
+	Groups        []string // IdP group IDs from the configured GroupsClaim; empty when disabled or absent
+	From          string   // where the original request wanted to land
+	ReturnOrigin  string   // optional allowlisted origin for the handoff (MCP OAuth bridge); empty for normal login
 }
 
 // ExchangeCallback validates the callback query parameters, exchanges the
@@ -236,9 +238,39 @@ func (c *Client) ExchangeCallback(ctx context.Context, cookieValue, state, code 
 		Name:          claims.Name,
 		Picture:       claims.Picture,
 		Subject:       idToken.Subject,
+		Groups:        c.extractGroups(idToken),
 		From:          sc.From,
 		ReturnOrigin:  sc.ReturnOrigin,
 	}, nil
+}
+
+// extractGroups pulls the configured groups claim (GroupsClaim) from the ID
+// token as a list of group IDs. Returns nil when the feature is disabled
+// (empty GroupsClaim) or the claim is absent/malformed — the IdP's group
+// values are treated as opaque strings.
+func (c *Client) extractGroups(idToken *oidc.IDToken) []string {
+	if c.cfg.GroupsClaim == "" {
+		return nil
+	}
+	var all map[string]json.RawMessage
+	if err := idToken.Claims(&all); err != nil {
+		return nil
+	}
+	raw, ok := all[c.cfg.GroupsClaim]
+	if !ok {
+		return nil
+	}
+	var groups []string
+	if err := json.Unmarshal(raw, &groups); err != nil {
+		return nil
+	}
+	out := groups[:0]
+	for _, g := range groups {
+		if g = strings.TrimSpace(g); g != "" {
+			out = append(out, g)
+		}
+	}
+	return out
 }
 
 func (c *Client) domainAllowed(email string) bool {

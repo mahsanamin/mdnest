@@ -234,6 +234,11 @@ func (h *SSOHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		// "stay signed in" expectation users get from other corporate apps.
 		"exp": time.Now().Add(jwtTTL(true)).Unix(),
 	})
+	// Carry the IdP group IDs (snapshot at login) so access-group membership
+	// can be resolved per request. Omitted when the IdP emits none.
+	if len(claims.Groups) > 0 {
+		token.Claims.(jwt.MapClaims)["groups"] = claims.Groups
+	}
 	signed, err := token.SignedString(h.secret)
 	if err != nil {
 		log.Printf("sso jwt sign: %v", err)

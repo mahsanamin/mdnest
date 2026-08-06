@@ -729,10 +729,117 @@ export async function saveMarpTheme(name, css) {
   return res.json();
 }
 
+// --- Role-based access "Groups" (superadmin only) ---
+
+export async function adminListGroups() {
+  const res = await request('/admin/groups');
+  if (!res.ok) throw new Error('Failed to list groups');
+  return res.json();
+}
+
+export async function adminCreateGroup(name, description) {
+  const res = await request('/admin/groups', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, description }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to create group');
+  }
+  return res.json();
+}
+
 export async function deleteMarpTheme(name) {
   const res = await request(`/marp/themes?name=${encodeURIComponent(name)}`, { method: 'DELETE' });
   if (!res.ok) throw new Error('Failed to delete theme');
   return res.json();
+}
+
+export async function adminUpdateGroup(id, name, description) {
+  const res = await request('/admin/groups', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id, name, description }),
+  });
+  if (!res.ok) throw new Error('Failed to update group');
+}
+
+export async function adminDeleteGroup(id) {
+  const res = await request(`/admin/groups?id=${id}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error('Failed to delete group');
+}
+
+export async function adminListGroupMembers(groupId) {
+  const res = await request(`/admin/groups/members?group_id=${groupId}`);
+  if (!res.ok) throw new Error('Failed to list members');
+  return res.json();
+}
+
+export async function adminAddGroupUser(groupId, userId) {
+  const res = await request('/admin/groups/members', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ group_id: groupId, user_id: userId }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to add member');
+  }
+}
+
+export async function adminAddGroupOIDC(groupId, oidcGroup, oidcLabel) {
+  const res = await request('/admin/groups/members', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ group_id: groupId, oidc_group: oidcGroup, oidc_label: oidcLabel }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to add OIDC group');
+  }
+}
+
+export async function adminRemoveGroupUser(groupId, userId) {
+  const res = await request(`/admin/groups/members?group_id=${groupId}&user_id=${userId}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error('Failed to remove member');
+}
+
+export async function adminRemoveGroupOIDC(groupId, oidcGroup) {
+  const res = await request(`/admin/groups/members?group_id=${groupId}&oidc_group=${encodeURIComponent(oidcGroup)}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error('Failed to remove member');
+}
+
+export async function adminListGroupGrants(groupId) {
+  const res = await request(`/admin/groups/grants?group_id=${groupId}`);
+  if (!res.ok) throw new Error('Failed to list group grants');
+  return res.json();
+}
+
+export async function adminCreateGroupGrant(groupId, namespace, path, permission) {
+  const res = await request('/admin/groups/grants', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ group_id: groupId, namespace, path, permission }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to create grant');
+  }
+}
+
+export async function adminUpdateGroupGrant(id, permission) {
+  const res = await request(`/admin/groups/grants?id=${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id, permission }),
+  });
+  if (!res.ok) throw new Error('Failed to update grant');
+}
+
+export async function adminDeleteGroupGrant(id) {
+  const res = await request(`/admin/groups/grants?id=${id}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error('Failed to delete grant');
 }
 
 export { getToken, setToken, clearToken, PermissionError };
