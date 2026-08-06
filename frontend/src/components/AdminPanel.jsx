@@ -20,10 +20,14 @@ import {
   adminDeleteWorkspaceGroup,
   adminCreateWorkspaceInGroup,
   getManageableNamespaces,
+  getMarpThemes,
+  saveMarpTheme,
+  deleteMarpTheme,
 } from '../api.js';
+import { clearMarpThemeCache } from './MarpDeck.jsx';
 import PathPicker from './PathPicker.jsx';
 
-function AdminPanel({ onClose, namespaces, isSuperAdmin, adminNamespaces, userProvider = 'local', grantMaxDepth = 0 }) {
+function AdminPanel({ onClose, namespaces, isSuperAdmin, adminNamespaces, userProvider = 'local', grantMaxDepth = 0, marpThemesEnabled = false }) {
   const [tab, setTab] = useState('users');
 
   // Management-plane namespace list. A superadmin no longer has implicit data
@@ -67,11 +71,15 @@ function AdminPanel({ onClose, namespaces, isSuperAdmin, adminNamespaces, userPr
         {isSuperAdmin && (
           <button className={tab === 'workspaces' ? 'active' : ''} onClick={() => setTab('workspaces')}>Git Workspaces</button>
         )}
+        {isSuperAdmin && marpThemesEnabled && (
+          <button className={tab === 'marp-themes' ? 'active' : ''} onClick={() => setTab('marp-themes')}>Marp Themes</button>
+        )}
       </div>
       {tab === 'users' && <UsersTab isSuperAdmin={isSuperAdmin} manageableNs={manageableNs} isFederated={isFederated} userProvider={userProvider} />}
       {tab === 'grants' && <GrantsTab namespaces={manageableNs} grantMaxDepth={grantMaxDepth} />}
       {tab === 'nsadmins' && <NamespaceAdminsTab manageableNs={manageableNs} />}
       {tab === 'workspaces' && isSuperAdmin && <WorkspacesTab />}
+      {tab === 'marp-themes' && isSuperAdmin && marpThemesEnabled && <MarpThemesTab />}
     </div>
   );
 }
@@ -1024,6 +1032,108 @@ function GroupsSection({ workspaces = [], onWorkspacesChanged }) {
             </div>
             );
           })}
+      </div>
+    </div>
+  );
+}
+
+// MarpThemesTab: superadmin editor for the centralized Marp theme catalog.
+function MarpThemesTab() {
+  const [themes, setThemes] = useState([]);
+  const [selected, setSelected] = useState(null); // theme name, or '__new__'
+  const [name, setName] = useState('');
+  const [css, setCss] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [status, setStatus] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      const t = await getMarpThemes();
+      setThemes(Array.isArray(t) ? t : []);
+    } catch { setThemes([]); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const openTheme = (t) => { setSelected(t.name); setName(t.name); setCss(t.css); setErr(''); setStatus(''); };
+  const openNew = () => {
+    setSelected('__new__'); setName('');
+    setCss("/* @theme my-theme */\n@import 'default';\n\nsection {\n}\n");
+    setErr(''); setStatus('');
+  };
+
+  const save = async () => {
+    setErr(''); setStatus(''); setBusy(true);
+    try {
+      await saveMarpTheme(name.trim(), css);
+      clearMarpThemeCache();
+      setStatus('Saved. Open decks pick it up on reload.');
+      setSelected(name.trim());
+      await load();
+    } catch (e) { setErr(e.message || 'Save failed'); }
+    finally { setBusy(false); }
+  };
+
+  const remove = async (t) => {
+    if (!confirm(`Delete theme "${t}"? Decks using it fall back to the default Marp theme.`)) return;
+    setBusy(true); setErr('');
+    try {
+      await deleteMarpTheme(t);
+      clearMarpThemeCache();
+      if (selected === t) { setSelected(null); setName(''); setCss(''); }
+      await load();
+    } catch (e) { setErr(e.message || 'Delete failed'); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="marp-themes-tab">
+      <div className="admin-section-header">
+        <h3>Marp Themes</h3>
+        <button onClick={openNew}>+ New theme</button>
+      </div>
+      <p className="admin-hint">
+        Centralized presentation styles. A deck selects one with <code>theme: &lt;name&gt;</code> in its
+        frontmatter instead of embedding a <code>style:</code> block. Start the CSS with
+        <code> /* @theme name */ </code> and usually <code>@import 'default';</code>.
+      </p>
+      <div className="marp-themes-layout">
+        <ul className="marp-themes-list">
+          {themes.length === 0 && <li className="admin-hint">No themes yet.</li>}
+          {themes.map((t) => (
+            <li key={t.name} className={selected === t.name ? 'active' : ''}>
+              <span className="marp-theme-name" onClick={() => openTheme(t)}>{t.name}</span>
+              <button className="danger" onClick={() => remove(t.name)} title="Delete theme">✕</button>
+            </li>
+          ))}
+        </ul>
+        {selected && (
+          <div className="marp-theme-editor">
+            <label className="marp-theme-name-field">
+              Name
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="my-theme"
+                disabled={selected !== '__new__'}
+              />
+            </label>
+            <textarea
+              className="marp-theme-css"
+              value={css}
+              onChange={(e) => setCss(e.target.value)}
+              spellCheck={false}
+              rows={22}
+            />
+            {err && <div className="admin-error">{err}</div>}
+            {status && <div className="admin-hint">{status}</div>}
+            <div className="marp-theme-actions">
+              <button className="modal-btn-primary" onClick={save} disabled={busy || !name.trim() || !css.trim()}>
+                {busy ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

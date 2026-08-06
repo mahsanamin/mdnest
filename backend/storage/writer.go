@@ -72,6 +72,21 @@ func (w *Writer) hydrate(ctx context.Context) error {
 			return err
 		}
 	}
+	// Reserved system namespaces (e.g. the hidden Marp theme catalog) are
+	// excluded from ListNamespaces, so hydrate them explicitly — otherwise
+	// app-role replicas, which read only from the coherence tier, would never
+	// see them. A missing directory (nothing seeded yet) is not an error.
+	for _, ns := range SystemNamespaces {
+		_ = w.dst.Walk(ctx, ns, "", func(relPath string, info FileInfo) error {
+			if info.IsDir || info.Size > w.maxBytes {
+				return nil
+			}
+			if data, rerr := w.dst.ReadFile(ctx, ns, relPath); rerr == nil {
+				_ = w.ws.Set(ctx, ns, relPath, data)
+			}
+			return nil
+		})
+	}
 	return nil
 }
 

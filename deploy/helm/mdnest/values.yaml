@@ -279,6 +279,9 @@ taskBoard:
 marp:
   # -- Enable Marp slide rendering (`ENABLE_MARP`). Off by default; renders `marp: true` notes as a slide deck in the Live view. Independent of `auth.mode`.
   enabled: false
+  themes:
+    # -- Enable the centralized Marp theme catalog + superadmin editor (`ENABLE_MARP_THEMES`). A separate opt-in on top of `marp.enabled`. Off by default; when off the theme routes are not registered, nothing is seeded, and the admin tab is hidden. Themes live in a reserved, hidden namespace (never mirrored to a git remote).
+    enabled: false
 
 # -----------------------------------------------------------------------------
 # SSO / OIDC (optional). Only rendered when sso.enabled=true.

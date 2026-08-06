@@ -1378,6 +1378,7 @@ function App() {
       adminNamespaces={adminNamespaces}
       userProvider={appConfig?.userProvider || 'local'}
       grantMaxDepth={appConfig?.grantMaxDepth || 0}
+      marpThemesEnabled={!!appConfig?.marpThemes}
     />;
   }
 
@@ -1658,7 +1659,7 @@ function App() {
                 >
                   {marpEnabled && isMarpDoc(content) ? (
                     <Suspense fallback={<div className="editor-loading">Loading slides…</div>}>
-                      <MarpDeck content={content || ''} scrollPct={viewMode === 'split' && !isMobile ? marpScrollPct : undefined} />
+                      <MarpDeck content={content || ''} title={currentPath} scrollPct={viewMode === 'split' && !isMobile ? marpScrollPct : undefined} />
                     </Suspense>
                   ) : (
                     <Preview content={content || ''} currentPath={currentPath} ns={selectedNs} onCheckboxToggle={canWriteCurrent ? handleCheckboxToggle : null} pathIndex={wikiIndex} onWikiLink={openNote} />

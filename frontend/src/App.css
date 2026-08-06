@@ -2114,6 +2114,12 @@ pre:hover .code-copy-btn {
   background: #74c7ec;
 }
 
+.modal-btn-primary:disabled {
+  background: #45475a;
+  color: #6c7086;
+  cursor: not-allowed;
+}
+
 .modal-wide {
   width: 500px;
   max-width: 95vw;
@@ -5113,3 +5119,24 @@ pre:hover .code-copy-btn {
   opacity: 0.5;
   cursor: default;
 }
+
+/* Marp Themes admin tab */
+.marp-themes-tab {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px;
+  box-sizing: border-box;
+}
+.marp-themes-layout { display:flex; gap:16px; margin-top:12px; align-items:flex-start; }
+.marp-themes-list { list-style:none; margin:0; padding:0; width:200px; flex:0 0 200px; border:1px solid #313244; border-radius:6px; overflow:hidden; }
+.marp-themes-list li { display:flex; align-items:center; justify-content:space-between; padding:6px 10px; border-bottom:1px solid #313244; cursor:pointer; font-size:0.85rem; }
+.marp-themes-list li.active { background:#313244; }
+.marp-themes-list li .marp-theme-name { flex:1; color:#cdd6f4; }
+.marp-themes-list li .danger { background:transparent; border:none; color:#6c7086; cursor:pointer; }
+.marp-themes-list li .danger:hover { color:#f38ba8; }
+.marp-theme-editor { flex:1; display:flex; flex-direction:column; gap:8px; min-width:0; }
+.marp-theme-name-field { display:flex; flex-direction:column; gap:4px; font-size:0.8rem; color:#a6adc8; }
+.marp-theme-name-field input { background:#1e1e2e; border:1px solid #313244; border-radius:4px; color:#cdd6f4; padding:6px 8px; }
+.marp-theme-css { width:100%; box-sizing:border-box; background:#181825; color:#cdd6f4; border:1px solid #313244; border-radius:6px; padding:10px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:0.78rem; line-height:1.45; resize:vertical; }
+.marp-theme-actions { display:flex; justify-content:flex-end; }
