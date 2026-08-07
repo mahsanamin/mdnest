@@ -231,3 +231,50 @@ test('a file created outside the API appears without a manual refresh', async ({
   // with the unconditional 30s poll it lands well inside the window.
   await expect(page.locator('.tree-label', { hasText: name })).toBeVisible({ timeout: 50_000 });
 });
+
+// Diagram text must be copyable. Dragging a selection across an SVG is
+// unreliable, and the fullscreen viewer made it impossible outright: the canvas
+// was `user-select: none` and every mousedown started a pan. The rule meant to
+// keep inline preview labels selectable had also been hanging off
+// `.mermaid-clickable`, a class nothing has applied since click-anywhere-to-
+// expand was replaced by the expand button — so it matched nothing at all.
+test('mermaid diagram text can be copied from the preview and the viewer', async ({ page, context }) => {
+  const file = process.env.MDNEST_MERMAID_FILE || 'e2e-mermaid.md';
+  const label = process.env.MDNEST_MERMAID_LABEL || 'zzmlabel';
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+
+  await login(page);
+  const row = page.locator('.tree-label', { hasText: file });
+  await expect(row).toBeVisible({ timeout: 20_000 });
+  await row.click();
+  await expect(page.locator('.toolbar-path')).toContainText(file, { timeout: 20_000 });
+  await page.click('button[title="Preview only"]');
+
+  const container = page.locator('.mermaid-container').first();
+  await expect(container.locator('svg')).toBeVisible({ timeout: 30_000 });
+
+  // Inline preview: the hover-revealed copy button puts the labels on the clipboard.
+  await container.hover();
+  const copyBtn = container.locator('.mermaid-copy-btn');
+  await expect(copyBtn).toBeVisible({ timeout: 10_000 });
+  await copyBtn.click();
+  await expect(copyBtn).toHaveText('Copied!');
+  let clip = await page.evaluate(() => navigator.clipboard.readText());
+  expect(clip).toContain(label);
+  expect(clip).toContain('Second Node');
+
+  // Labels are also selectable, which is what the dead CSS was supposed to do.
+  const selectable = await container.locator('svg text, svg foreignObject').first()
+    .evaluate((el) => getComputedStyle(el).userSelect);
+  expect(selectable).not.toBe('none');
+
+  // Fullscreen viewer: same text, via its own toolbar button.
+  await container.locator('.mermaid-expand-btn').click();
+  const viewer = page.locator('.mermaid-viewer');
+  await expect(viewer).toBeVisible({ timeout: 10_000 });
+  await page.evaluate(() => navigator.clipboard.writeText('cleared'));
+  await viewer.locator('.mermaid-viewer-copy').click();
+  await expect(viewer.locator('.mermaid-viewer-copy')).toHaveText('Copied!');
+  clip = await page.evaluate(() => navigator.clipboard.readText());
+  expect(clip).toContain(label);
+});
