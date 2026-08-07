@@ -197,3 +197,37 @@ test('mermaid diagram renders its node labels (not empty boxes)', async ({ page 
   // pass but every label is gone — which is exactly the regression this guards.
   await expect(svg.getByText(label, { exact: false }).first()).toBeVisible({ timeout: 20_000 });
 });
+
+// A write that never went through the API must still show up in the sidebar on
+// its own. `tree-changed` is broadcast from the backend's mutating-HTTP wrapper,
+// so it only fires for API writes — git-sync pulling another machine's commits,
+// or anything touching the notes directory directly, produces no event at all.
+// The tree poll is the only thing that notices, which is why it now runs
+// unconditionally (see frontend/src/tree-refresh.js). This writes straight into
+// the mounted notes directory, bypassing the API exactly as git-sync does, and
+// never touches the Refresh button.
+test('a file created outside the API appears without a manual refresh', async ({ page }) => {
+  const notesDir = process.env.MDNEST_NOTES_DIR;
+  test.skip(!notesDir, 'MDNEST_NOTES_DIR not provided by the runner');
+  // The poll interval is 30s, so this test outlives the 45s suite default.
+  test.setTimeout(120_000);
+
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const name = `e2e-oob-${Date.now()}.md`;
+
+  await login(page);
+  // Be sure the tree has loaded once before the out-of-band write, so passing
+  // can't be an artifact of the initial load happening to come second.
+  await expect(page.locator('.tree-label').first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('.tree-label', { hasText: name })).toHaveCount(0);
+
+  fs.writeFileSync(
+    path.join(notesDir, 'testing_workspace', name),
+    '# Out of band\n\nWritten straight to disk, as git-sync would.\n',
+  );
+
+  // No clicking Refresh. Under the 60s-and-only-without-collab poll this fails;
+  // with the unconditional 30s poll it lands well inside the window.
+  await expect(page.locator('.tree-label', { hasText: name })).toBeVisible({ timeout: 50_000 });
+});
