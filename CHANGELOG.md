@@ -31,8 +31,12 @@ All notable changes to mdnest are documented here.
   group they belong to — directly, or through an OIDC group ID carried in their
   login token. OIDC-group membership is read from a configurable ID-token claim
   (`OIDC_GROUPS_CLAIM`, e.g. `groups` on Entra ID) and snapshotted at login, so
-  a change at the IdP applies on the member's next sign-in; direct user
-  membership takes effect immediately. Each OIDC-group member can carry an
+  a change at the IdP applies on the member's next sign-in. **Note for
+  operators:** because the OIDC-group snapshot lives in the session token,
+  removing a user from an IdP group (e.g. offboarding) does not revoke their
+  mdnest access until that token expires — up to the SSO token lifetime. Direct
+  user membership, by contrast, takes effect immediately (added and revoked live).
+  Each OIDC-group member can carry an
   optional display label (reference only — matching is always on the group ID).
   Fully additive and opt-in: with no groups defined and `OIDC_GROUPS_CLAIM`
   unset, behaviour is unchanged.
