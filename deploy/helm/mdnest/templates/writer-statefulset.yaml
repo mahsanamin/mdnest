@@ -155,10 +155,15 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
   volumeClaimTemplates:
+    # volumeClaimTemplates is an immutable part of the StatefulSet spec, so it
+    # must carry only STABLE labels. mdnest.labels includes helm.sh/chart and
+    # app.kubernetes.io/version, which change on every release and would make
+    # each upgrade an illegal update to an immutable field (server-side-apply
+    # dry-run then fails and stalls Argo). selectorLabels are release-invariant.
     - metadata:
         name: notes
         labels:
-          {{- include "mdnest.labels" . | nindent 10 }}
+          {{- include "mdnest.selectorLabels" . | nindent 10 }}
           app.kubernetes.io/component: writer
         {{- with (merge (dict) .Values.persistence.notes.annotations .Values.commonAnnotations) }}
         annotations:

@@ -43,6 +43,15 @@ All notable changes to mdnest are documented here.
   and slide separators and silently broke the deck on autosave. The Basic
   editor (with the live slide preview alongside) is forced, and the "Live"
   toggle is disabled with an explanatory tooltip while a Marp note is open.
+- **Helm: StatefulSet upgrades no longer stall on an immutable-field diff.**
+  `volumeClaimTemplates` carried the full `mdnest.labels` set, which includes
+  `helm.sh/chart` and `app.kubernetes.io/version` — both change on every
+  release. Because `volumeClaimTemplates` is an immutable part of the
+  StatefulSet spec, each upgrade became an illegal update to an immutable
+  field: a server-side-apply dry-run failed and Argo CD (or `helm upgrade`)
+  stalled with a perpetual out-of-sync diff. The claim templates now carry only
+  the release-invariant `mdnest.selectorLabels`, so upgrades apply cleanly.
+  Chart version bumped to 0.3.1 (template-only change).
 
 ---
 
