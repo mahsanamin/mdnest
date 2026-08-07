@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   DndContext,
   DragOverlay,
@@ -144,7 +144,7 @@ function BoardColumn({ column, tasks, canWrite, onOpen, onToggleStep, onEdit, co
 // item in the namespace, either as a flat list (with checkbox toggling) or as
 // a kanban board (drag a card between columns). Both views project the same
 // data — the notes themselves — so a change in one is reflected in the other.
-export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPath, currentUser }) {
+export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPath, currentUser, refreshSignal }) {
   const [board, setBoard] = useState(null);
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -203,6 +203,16 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
       .catch(() => { if (!cancelled) setNsUsers([]); });
     return () => { cancelled = true; };
   }, [ns]);
+
+  // Toolbar Refresh: reload the board on demand. Skip the initial value so we
+  // don't double-load on mount (the effect above already does the first load).
+  const firstRefresh = useRef(true);
+  useEffect(() => {
+    if (firstRefresh.current) { firstRefresh.current = false; return; }
+    reload();
+    // Only react to the external refresh signal, not to reload's identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshSignal]);
 
   const setModePersist = useCallback((m) => {
     setMode(m);

@@ -238,7 +238,11 @@ function App() {
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [comments, setComments] = useState([]);
   const [showComments, setShowComments] = useState(false);
-  const [showTaskBoard, setShowTaskBoard] = useState(false);  const [pendingCommentSelection, setPendingCommentSelection] = useState(null);
+  const [showTaskBoard, setShowTaskBoard] = useState(false);
+  // Bumped by the toolbar Refresh so the task board reloads its tasks too
+  // (the board isn't part of the note/tree refresh path).
+  const [boardRefreshNonce, setBoardRefreshNonce] = useState(0);
+  const [pendingCommentSelection, setPendingCommentSelection] = useState(null);
   const [highlightedCommentId, setHighlightedCommentId] = useState(null);
   const goToCommentRef = useRef(null);
   const editorWrapperRef = useRef(null);
@@ -1315,6 +1319,9 @@ function App() {
 
   const handleRefresh = useCallback(async () => {
     if (!authenticated || !selectedNs) return;
+    // When the board overlay is up, Refresh should reload its tasks — bump the
+    // nonce the board watches (the note/tree refresh below doesn't touch it).
+    if (showTaskBoard) setBoardRefreshNonce((n) => n + 1);
     // broadcast: this is the Sidebar's manual Refresh AND the git-sync button
     // (both call onRefreshTree), so tell other tabs to refresh too.
     await refreshTree(selectedNs, { broadcast: true });
@@ -1329,7 +1336,7 @@ function App() {
         // Note may have been deleted
       }
     }
-  }, [authenticated, selectedNs, currentPath, refreshTree]);
+  }, [authenticated, selectedNs, currentPath, refreshTree, showTaskBoard]);
 
   // Reload note content (used by conflict banner)
   const handleReloadNote = useCallback(async () => {
@@ -1554,6 +1561,7 @@ function App() {
                 canWrite={canWrite('')}
                 currentPath={currentPath}
                 currentUser={userInfo?.username}
+                refreshSignal={boardRefreshNonce}
                 onOpenNote={(p) => { setShowTaskBoard(false); openNote(p); }}
                 onClose={() => setShowTaskBoard(false)}
               />
