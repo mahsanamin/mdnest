@@ -152,12 +152,11 @@
 /* Collapsed column: a slim, full-height rail with a vertical title. */
 .tb-column.collapsed {
   flex: 0 0 auto;
-  align-self: stretch;
+  align-self: flex-start;
 }
 .tb-column.collapsed .tb-column-head {
   flex-direction: column;
   gap: 8px;
-  height: 100%;
   padding: 10px 6px;
   border-bottom: none;
   cursor: pointer;
