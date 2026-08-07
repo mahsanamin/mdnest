@@ -1248,7 +1248,7 @@ function GroupsTab({ namespaces, grantMaxDepth }) {
                   <div className="grants-user-body">
                     <GroupMembers groupId={g.id} users={users} />
                     <GroupGrants groupId={g.id} namespaces={namespaces} grantMaxDepth={grantMaxDepth} />
-                    <div className="grants-add-row" style={{ marginTop: 12 }}>
+                    <div className="grants-add-row group-delete-row">
                       <button className="share-revoke-btn" onClick={() => handleDelete(g.id)}>Delete group</button>
                     </div>
                   </div>
