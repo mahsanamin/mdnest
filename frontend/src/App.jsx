@@ -30,7 +30,7 @@ import HistoryModal from './components/HistoryModal.jsx';
 import MoveToModal from './components/MoveToModal.jsx';
 import ReleaseNotesModal from './components/ReleaseNotesModal.jsx';
 import CollabClient from './collab.js';
-import { isMarpDoc } from './marp.js';
+import { isMarpDoc, effectiveEditorMode } from './marp.js';
 import {
   getToken,
   getNote,
@@ -281,6 +281,10 @@ function App() {
   // `marp: true` is shown as a slide deck in the Live view instead of the editor.
   const marpEnabled = !!appConfig?.marp;
   const marpActive = marpEnabled && isMarpDoc(content);
+  // Marp decks must never go through the Live/WYSIWYG editor — it reformats the
+  // markdown and corrupts the frontmatter and slide breaks. Force Basic (raw)
+  // editing for them, regardless of the user's editor-mode preference.
+  const editorModeForNote = effectiveEditorMode(editorMode, marpActive);
   // Editor scroll ratio (0..1), mirrored to the Marp deck's current slide in
   // split view. The deck is paginated (not scrollable), so unlike the plain
   // Preview it can't share a scrollTop — we map the ratio to a slide instead.
@@ -1462,9 +1466,13 @@ function App() {
               restoreScrollPosition(selectedNs, currentPath);
             }
           }}
-          editorMode={editorMode}
+          editorMode={editorModeForNote}
+          marpLocked={marpActive}
           boardActive={showTaskBoard}
           onEditorModeChange={(mode) => {
+            // Marp decks are locked to Basic — ignore attempts to switch to the
+            // Live editor, which would reformat and break the slides.
+            if (marpActive && mode === 'live') return;
             setShowTaskBoard(false);
             setEditorMode(mode);
             localStorage.setItem('mdnest_editor_mode', mode);
@@ -1561,7 +1569,7 @@ function App() {
                 >
                   {content === null ? (
                     <div className="editor-loading">Loading note…</div>
-                  ) : editorMode === 'live' ? (
+                  ) : editorModeForNote === 'live' ? (
                     <EditorErrorBoundary
                       resetKey={`${selectedNs}/${currentPath}`}
                       onError={() => {

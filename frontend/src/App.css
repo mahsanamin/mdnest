@@ -2950,6 +2950,11 @@ pre:hover .code-copy-btn {
   color: #1e1e2e;
 }
 
+.editor-mode-toggle button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 /* ===== Live Editor (Milkdown) ===== */
 .live-editor-pane {
   flex: 1;

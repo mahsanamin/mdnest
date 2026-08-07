@@ -12,6 +12,16 @@ export function isMarpDoc(content) {
   return /^[ \t]*marp[ \t]*:[ \t]*true[ \t]*$/im.test(m[1]);
 }
 
+// effectiveEditorMode forces the plain-text (Basic) editor for Marp decks. The
+// Live/WYSIWYG editor round-trips markdown through its document model and
+// re-serializes it on every change, which rewrites Marp frontmatter (`---` →
+// `***`), escapes characters, and mangles slide separators — silently breaking
+// the deck on autosave. Marp notes are therefore always edited as raw text
+// (with the live slide preview alongside), never through the WYSIWYG editor.
+export function effectiveEditorMode(mode, marpActive) {
+  return marpActive ? 'basic' : mode;
+}
+
 // slideStarts returns, from Marp source, the 0-based source line at which each
 // slide begins, plus the total line count. It powers scroll-sync between the
 // editor and the (paginated) deck: mapping an even scrollPct → slide breaks the

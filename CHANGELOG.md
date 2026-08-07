@@ -28,12 +28,21 @@ All notable changes to mdnest are documented here.
 
 ### Fixed
 
-- **Comments no longer vanish when a note is deleted and recreated.** A note's
-  identity (its hidden `mdnest:` marker, which links it to its
-  `.mdnest/comments/<id>.jsonl` sidecar) is now reconciled on write: a recreated
-  or marker-stripped note recovers the marker the path previously carried in git
-  history, so its comments stay attached instead of being orphaned. A note's
-  marker is also snapped back if an overwrite tries to change it.
+- **Comments no longer vanish when a note is deleted and recreated**
+  (`STORAGE_BACKEND=git` only). A note's identity (its hidden `mdnest:` marker,
+  which links it to its `.mdnest/comments/<id>.jsonl` sidecar) is now reconciled
+  on write: a recreated or marker-stripped note recovers the marker the path
+  previously carried in git history, so its comments stay attached instead of
+  being orphaned. A note's marker is also snapped back if an overwrite tries to
+  change it. The default `local` backend is unaffected by this change — a
+  delete+recreate there still starts a fresh comment thread.
+- **Marp decks are no longer corrupted by the Live editor.** A note whose
+  frontmatter declares `marp: true` is now always edited as raw text — the
+  Live/WYSIWYG editor is disabled for it, because round-tripping the markdown
+  through the editor's document model rewrote the frontmatter (`---` → `***`)
+  and slide separators and silently broke the deck on autosave. The Basic
+  editor (with the live slide preview alongside) is forced, and the "Live"
+  toggle is disabled with an explanatory tooltip while a Marp note is open.
 
 ---
 
