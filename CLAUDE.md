@@ -95,6 +95,10 @@ frontend/
     __tests__/sanitize.test.js # Pins both directions — labels survive, payloads don't
     echo-gate.js             # v4.1.1+ — pure module (no React): suppresses the file-changed echo of a tab's own save. In-flight-save window + epoch token: broadcasts arriving before the PUT response resolves are deferred and re-checked once the save settles; reset() on note switch invalidates the window. Closes the self-conflict-banner race (issue #82).
     __tests__/echo-gate.test.js # Pins the echo-beats-response race, late echoes, note-switch epochs
+    tree-refresh.js          # v4.1.3+ — pure module: when the sidebar tree re-reads itself (TREE_POLL_MS + shouldPollTree). The live-collab websocket is deliberately NOT an input — `tree-changed` only fires for API writes, so gating the poll on it left git-sync/filesystem writes invisible until a manual Refresh.
+    __tests__/tree-refresh.test.js # Pins that collab state is ignored and the cadence stays sub-minute
+    mermaid-text.js          # v4.1.3+ — pure module: extractDiagramText (labels live in BOTH svg <text> and <foreignObject>, depending on diagram type) + copyPlainText (hidden-textarea/execCommand, since mdnest is often reached over plain HTTP where navigator.clipboard is unavailable)
+    __tests__/mermaid-text.test.js # Pins extraction per diagram shape, dedupe, whitespace collapse
     mermaid-config.js         # Shared mermaid init, theme, and fixMermaidTextColors()
     firebase-config.js       # Firebase SDK lazy init (USER_PROVIDER=firebase only)
     components/
@@ -138,7 +142,7 @@ deploy/
   release.yml                # (v3.11.7+) on v* tags: push images + chart to ghcr.io/<owner>/
 
 mdnest                       # Client CLI (login, note read/write/append, works from any machine)
-mdnest-server                # Server management CLI (start, stop, rebuild, reset-password, runs from project dir)
+mdnest-server                # Server management CLI (start, stop, rebuild, reset-password, runs from project dir). `MDNEST_SERVER_LIB=1 source ./mdnest-server` loads its functions without dispatching, mirroring the client CLI's MDNEST_LIB hook (v4.1.3+)
 setup.sh                     # Reads mdnest.conf, generates docker-compose.yml + .env
 mdnest.conf.sample           # Template config with MOUNT_ entries
 ```
@@ -180,6 +184,7 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 - Wikilinks (v3.11.5+, `wikilink.js`): resolution runs against the current namespace tree only (built via `buildPathIndex(tree)` and memoized in `App.jsx`, shared by `Preview.jsx` and the Live editor). Round-trip fidelity is the hard requirement — the Live editor stores literal `[[...]]`, but Milkdown's serializer escapes `[[`→`\[\[` in plain text, so `markdownUpdated` routes every serialized doc through `restoreWikilinks()` before `onChange`. Don't add a wikilink node to the schema — the decoration + serializer-unescape approach is deliberate so bytes never change.
 - Mermaid: `LiveEditorCrepe.jsx` defines an inline `mermaidNodeView` that renders the `MermaidBlock` React component for `code_block` nodes where `language === 'mermaid'`. The compose-mermaid plugin runs after `SchemaReady`, reads Crepe's existing `code_block` factory from `nodeViewCtx`, and writes a wrapper that delegates to it for non-mermaid blocks — so Crepe's CodeMirror UI still works for other code languages AND mermaid renders via our React component.
 - Image upload: Crepe's `image-block` `onUpload` calls `uploadImage()` in `api.js`. `proxyDomURL` resolves the bare-filename markdown src (e.g. `![](photo.png)`) into `/api/files/<ns>/<dir>/<file>?token=<jwt>` for rendering — the `?token=` query param is the auth-fallback the middleware accepts for `<img>` GETs that can't carry an `Authorization` header.
+- **The tree must refresh for writes that never touched the API** (v4.1.3+, `tree-refresh.js`). `tree-changed` is broadcast from the mutating-HTTP wrapper in `main.go`, so it fires *only* for changes that came through the API — git-sync pulling another machine's commits, a host-side editor, or a restored backup produce nothing. Do not gate the poll on `appConfig.liveCollab`: a connected websocket is not evidence the tree is current, and that gate meant installs running both collab and git-sync got no automatic update at all. Automatic refreshes pass `{ soft: true }` so they skip `treeLoading` — the sidebar draws an indicator bar whenever that's set, which is right for a user-initiated Refresh and pure noise on a timer.
 - Per-namespace last-file memory: `localStorage` key `mdnest_last_path:<ns>` records the path of whichever note was last opened in each namespace. Restored on namespace switch and on initial load when there's no URL hash. URL hashes still win for explicit navigation. Per-file scroll position lives in `mdnest_file_prefs:<ns>/<path>.scrollPct` (existing pre-v3.10 mechanism).
 - Crepe nodeView composition: when overriding a node view that Crepe registers (e.g. `code_block` for mermaid, `table` for the click-to-cursor fix), the pattern is to wait for `SchemaReady`, read the existing entry from `nodeViewCtx`, then append a new entry with the same node-type id. `Object.fromEntries(nodeViewCtx)` keeps the last entry for duplicate keys, so ours wins; we keep a reference to the original factory and delegate to it for cases we don't want to override.
 - Both editor implementations share the same onChange/content props — Crepe is now the only Live editor, but `App.jsx` keeps its lazy import named `LiveEditor` so the JSX call site stays editor-agnostic.
@@ -198,6 +203,8 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 - **Human-facing output is rendered in awk only** — `format_tree` / `format_namespaces` for `mdnest list` have deliberately no python3/jq tier, so a listing is byte-identical on every machine and a broken python can't garble it. Verified on gawk, mawk and busybox awk. Raw API JSON stays available behind `--json` / `MDNEST_JSON=1` for scripts; don't make raw JSON the default output of a command again.
 - Adding a command means three edits: the `case` dispatch, the help **Commands** list, and the help **Examples** block (`grep -c '<cmd>' mdnest` ≥ 3).
 - `mdnest update` self-updates from `raw.githubusercontent.com/.../main` — so a CLI fix reaches users when it lands on `main`, independent of the tag/Release (those drive the in-app *server* update banner). Corollary: the CLI installed on this machine lags `develop`, so test with `./mdnest`, not `mdnest`.
+- **Never print `<angle brackets>` inside a command you tell the user to RUN** (v4.1.3+). `<name>` is a shell redirection, so a hint like `mdnest login @<name> ...` errors in zsh and bash the moment it's pasted — the recovery instruction became a second error. Use literal placeholder words (`@myserver`, `mdnest_yourtoken`) whenever real values are being substituted in. Bracket notation is still fine in `Usage:`/`--help` *synopses*, which nobody pastes. `tests/cli-unit.sh` asserts no suggested command contains a bracket.
+- **Validate before you conclude, and before you persist.** Two failures of the same shape shipped together in `login`: reporting "this server has no SERVER_ALIAS configured" for a host we never reached (the curl exit code was thrown away, so "couldn't connect" and "connected, no alias" were one empty string), and saving a non-URL to disk — where it became the *default* server. Keep curl's exit status when the reason matters (`fetch_server_config` + `curl_reason`), and never write config you haven't validated.
 
 ### Docker
 - Backend: golang:1.24-alpine build, alpine runtime
@@ -316,6 +323,20 @@ override: `MDNEST_SKIP_E2E=1`.
     someone else's traceback — because of the machine's python rather than ours.
     The rendering checks run in the with- and without-parser passes and must
     agree, which is what keeps a python3/jq tier from creeping back into output.
+    Also carries a **login argument-handling suite** (v4.1.3+) that runs the real
+    CLI as a subprocess against a throwaway `HOME`: it pins the exit status, that
+    a rejected login leaves *nothing* on disk, that the unreachable path never
+    mentions `SERVER_ALIAS`, and that no suggested command contains an angle
+    bracket. (Run those via `login_run`, never inside `$(…)` — a command
+    substitution is a subshell, so the `HOME` and status it sets are lost and the
+    assertions pass vacuously.)
+  - `tests/server-unit.sh` — **new in v4.1.3.** Pure-function checks of
+    `mdnest-server`, loaded through its `MDNEST_SERVER_LIB=1 source` hook (the
+    mirror of the client CLI's `MDNEST_LIB`). Currently covers namespace-drift
+    reporting — `namespace_drift_report` is split out from the Docker-querying
+    `namespace_drift` precisely so it can be tested with no Docker and no running
+    stack. Assertions run against whitespace-normalized output so they pin the
+    words, not the column padding.
     Uses the CLI's `MDNEST_LIB=1 source mdnest` hook to load the real functions.
   - Plus the existing builds, `npm test`, audits, version consistency, shellcheck.
 - **CLI smoke test**: `tests/cli-smoke-test.sh` exercises every `mdnest` note

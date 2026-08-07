@@ -281,6 +281,19 @@ graph TD
 
 This renders as an interactive diagram in the preview pane. Mermaid supports many diagram types including flowcharts, sequence diagrams, Gantt charts, class diagrams, and more. Refer to the [Mermaid documentation](https://mermaid.js.org/intro/) for the full syntax reference.
 
+### Getting the text back out
+
+A rendered diagram's labels are still text, and you can take them with you
+(v4.1.3+):
+
+- **Select them.** Drag across a label in the preview or in the fullscreen
+  viewer. In fullscreen, a drag that *starts* on a label selects it; a drag
+  starting anywhere else still pans the diagram.
+- **Copy all of it.** Hover a diagram and click **Copy text** (next to the
+  expand button), or use the **Copy text** button in the fullscreen viewer's
+  toolbar. Every label lands on the clipboard, one per line, in diagram order —
+  faster than selecting by hand on a zoomed or panned diagram.
+
 ---
 
 ## Live Collaboration
@@ -293,7 +306,7 @@ When live collab is on, mdnest opens a WebSocket from your browser to the backen
 - **Cursors.** When a teammate is editing the same note in **Live** mode, you see their cursor as a thin coloured caret with their name on it. Cursor positions update in real time.
 - **Typing indicator.** When someone is actively typing, their avatar in the presence stack pulses faintly so you know to expect changes.
 - **Conflict banner.** If two people save the same note within the auto-save window, the second save shows a "your edit is based on a stale copy" banner with a one-click reload. This rarely fires — the cursor sharing usually keeps people out of each other's way.
-- **Tree refresh.** When someone else creates / renames / deletes a file in your namespace, your sidebar updates within a second without a manual refresh.
+- **Tree refresh.** When someone else creates / renames / deletes a file in your namespace, your sidebar updates within a second without a manual refresh. This covers changes made *through mdnest*; a write that lands straight on the filesystem (a git-sync pull, an editor on the host) sends no event, and is picked up by the sidebar's own 30-second refresh instead — that refresh runs whether or not live collab is on.
 
 Live collab is gated on the WebSocket hub being up. If `/api/ws` is unreachable (server restart, proxy hiccup), the editor still works — you just lose the presence + cursor + auto-tree-refresh features until the connection reconnects (the app retries with backoff).
 
@@ -452,7 +465,7 @@ mdnest is designed to work on mobile browsers.
 - **Moving files:** Long-press → **Move to…** opens a destination picker. HTML5 drag-and-drop is disabled on touch (it interferes with scrolling), so this is the touch-friendly path for moves.
 - **Show full names:** Tree labels ellipsize by default to keep the visual rhythm consistent. Tap the lines icon in the tree control bar to switch to wrap mode and read long file/folder names in full. The choice is remembered across visits.
 - **Loading state:** A centered spinner shows while the tree loads on a slow connection; a thin animated bar appears at the top of the tree during a refresh so silence on the network never looks like an empty namespace.
-- **Refresh tree:** A refresh icon sits in the tree-control row at the top of the sidebar. Tap it to reload the tree — useful for files created outside the browser (via the `mdnest` CLI, MCP, or git-sync) when live-collab isn't enabled or no file is open to keep the WebSocket alive.
+- **Refresh tree:** A refresh icon sits in the tree-control row at the top of the sidebar. Tap it to reload the tree on demand. You shouldn't often need to — the tree re-reads itself every 30 seconds while the tab is visible, and again the moment you switch back to a backgrounded tab (v4.1.3+), which is what picks up files created outside the browser via the `mdnest` CLI, MCP, or a git-sync pull. That automatic refresh is deliberately silent: no spinner or progress bar for a reload you didn't ask for.
 - **Toolbar path:** The currently-open file's basename always stays visible — only the parent path gets ellipsized when the toolbar is cramped.
 
 ---
