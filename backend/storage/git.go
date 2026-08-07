@@ -81,6 +81,7 @@ func (g *GitStorage) SetSyncStatusSink(s SyncStatusSink) {
 // --- mutations: do the filesystem op, then record the namespace as dirty ---
 
 func (g *GitStorage) WriteFile(ctx context.Context, ns, relPath string, data []byte) error {
+	data = g.reconcileNoteMarker(ctx, ns, relPath, data)
 	if err := g.LocalStorage.WriteFile(ctx, ns, relPath, data); err != nil {
 		return err
 	}

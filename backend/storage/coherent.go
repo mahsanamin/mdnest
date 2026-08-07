@@ -127,7 +127,10 @@ func (c *CoherentStorage) WriteFile(ctx context.Context, ns, relPath string, dat
 	if err := c.Storage.WriteFile(ctx, ns, relPath, data); err != nil {
 		return err
 	}
-	cacheBody(ctx, c.ws, ns, relPath, data, c.maxBytes)
+	// Re-read rather than caching the input: the inner git backend may
+	// reconcile a note's mdnest marker on write, so the coherence tier must
+	// reflect what actually landed on disk, not the pre-reconcile bytes.
+	c.publish(ctx, ns, relPath)
 	return nil
 }
 
