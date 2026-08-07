@@ -6,6 +6,19 @@ All notable changes to mdnest are documented here.
 
 ## Unreleased
 
+_Nothing yet — `develop` is at `4.1.4-dev`._
+
+---
+
+## v4.1.3 — comments, Marp safety, and four papercuts that made mdnest look broken
+
+Alongside the comment-editing and Marp work, this release clears a batch of
+reported bugs that shared a shape: mdnest was working correctly but not *saying*
+so, so each one read as a malfunction. A DNS failure blamed the server's config
+file. A namespace added to `mdnest.conf` simply never appeared. A file created on
+disk sat invisible in the sidebar until you clicked Refresh. Diagram text
+couldn't be copied at all.
+
 ### Added
 
 - **Task assignees, filtering, and a cross-workspace view** (task board only,
@@ -36,6 +49,47 @@ All notable changes to mdnest are documented here.
 
 ### Fixed
 
+- **`mdnest login` now diagnoses the actual problem and prints a fix you can
+  paste.** Four bugs in one code path. An unreachable server was reported as
+  "this server has no SERVER_ALIAS configured" — a claim about an `mdnest.conf`
+  the CLI never managed to read, which sent people off to edit and rebuild a
+  blameless server; the two cases are now distinguished and the real reason is
+  named (DNS, refused, timeout, TLS). The recovery hint was rebuilt from the raw
+  positional arguments, so it kept whatever bad argument you typed and dropped
+  your token entirely. That hint's placeholder was `@<name>`, and `<name>` is a
+  shell redirection, so pasting the suggested fix errored in both zsh and bash —
+  every command mdnest tells you to run now uses literal placeholder words. And
+  an argument that wasn't a URL was saved to disk anyway with only a warning,
+  becoming the *default* server on a fresh machine so every later command aimed
+  at garbage. The common root cause — an alias written without its leading `@`,
+  which shifts every argument along — now gets the same command back with that
+  one character fixed.
+- **The file tree refreshes itself for writes that never went through the API.**
+  A file appearing on disk stayed invisible in the sidebar until you pressed
+  Refresh. The `tree-changed` event is emitted only for changes that arrive
+  through the API, so git-sync pulling another machine's commits (or an editor on
+  the host) produces no event at all — and the polling fallback was skipped
+  entirely whenever the live-collab websocket was connected, treating "the socket
+  is up" as "the tree is current". Exactly the installs running both collab and
+  git-sync got no automatic update at all. The poll now always runs, at 30s
+  instead of 60s, and silently: no spinner or indicator bar for a refresh you
+  didn't ask for.
+- **Mermaid diagram text can be selected and copied.** In the inline preview the
+  rule making labels selectable was attached to a CSS class nothing had applied
+  since click-anywhere-to-expand was replaced by the expand button, so it matched
+  nothing. In the fullscreen viewer it was impossible by construction: the canvas
+  suppresses selection so a drag pans, and every mousedown started that pan —
+  including one on a label. A drag beginning on text now selects instead of
+  panning, and both modes gained a **Copy text** button that puts the whole
+  diagram's labels on the clipboard, the same affordance code blocks already had.
+- **Adding a namespace tells you it isn't live yet.** Namespaces are Docker
+  volume mounts, so writing a `MOUNT_` line only changes the desired state — the
+  running backend keeps serving the mounts it was created with. Nothing surfaced
+  that gap, so an added namespace was just absent from the UI and the API.
+  `add-namespace` now offers to reload for you (defaulting to yes), and
+  `mdnest-server status` compares `mdnest.conf` against what the running
+  container actually serves, reporting either direction: configured but not live,
+  or still served but no longer in the conf.
 - **Comments no longer vanish when a note is deleted and recreated**
   (`STORAGE_BACKEND=git` only). A note's identity (its hidden `mdnest:` marker,
   which links it to its `.mdnest/comments/<id>.jsonl` sidecar) is now reconciled
