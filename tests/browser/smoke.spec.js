@@ -197,3 +197,84 @@ test('mermaid diagram renders its node labels (not empty boxes)', async ({ page 
   // pass but every label is gone — which is exactly the regression this guards.
   await expect(svg.getByText(label, { exact: false }).first()).toBeVisible({ timeout: 20_000 });
 });
+
+// A write that never went through the API must still show up in the sidebar on
+// its own. `tree-changed` is broadcast from the backend's mutating-HTTP wrapper,
+// so it only fires for API writes — git-sync pulling another machine's commits,
+// or anything touching the notes directory directly, produces no event at all.
+// The tree poll is the only thing that notices, which is why it now runs
+// unconditionally (see frontend/src/tree-refresh.js). This writes straight into
+// the mounted notes directory, bypassing the API exactly as git-sync does, and
+// never touches the Refresh button.
+test('a file created outside the API appears without a manual refresh', async ({ page }) => {
+  const notesDir = process.env.MDNEST_NOTES_DIR;
+  test.skip(!notesDir, 'MDNEST_NOTES_DIR not provided by the runner');
+  // The poll interval is 30s, so this test outlives the 45s suite default.
+  test.setTimeout(120_000);
+
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const name = `e2e-oob-${Date.now()}.md`;
+
+  await login(page);
+  // Be sure the tree has loaded once before the out-of-band write, so passing
+  // can't be an artifact of the initial load happening to come second.
+  await expect(page.locator('.tree-label').first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('.tree-label', { hasText: name })).toHaveCount(0);
+
+  fs.writeFileSync(
+    path.join(notesDir, 'testing_workspace', name),
+    '# Out of band\n\nWritten straight to disk, as git-sync would.\n',
+  );
+
+  // No clicking Refresh. Under the 60s-and-only-without-collab poll this fails;
+  // with the unconditional 30s poll it lands well inside the window.
+  await expect(page.locator('.tree-label', { hasText: name })).toBeVisible({ timeout: 50_000 });
+});
+
+// Diagram text must be copyable. Dragging a selection across an SVG is
+// unreliable, and the fullscreen viewer made it impossible outright: the canvas
+// was `user-select: none` and every mousedown started a pan. The rule meant to
+// keep inline preview labels selectable had also been hanging off
+// `.mermaid-clickable`, a class nothing has applied since click-anywhere-to-
+// expand was replaced by the expand button — so it matched nothing at all.
+test('mermaid diagram text can be copied from the preview and the viewer', async ({ page, context }) => {
+  const file = process.env.MDNEST_MERMAID_FILE || 'e2e-mermaid.md';
+  const label = process.env.MDNEST_MERMAID_LABEL || 'zzmlabel';
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+
+  await login(page);
+  const row = page.locator('.tree-label', { hasText: file });
+  await expect(row).toBeVisible({ timeout: 20_000 });
+  await row.click();
+  await expect(page.locator('.toolbar-path')).toContainText(file, { timeout: 20_000 });
+  await page.click('button[title="Preview only"]');
+
+  const container = page.locator('.mermaid-container').first();
+  await expect(container.locator('svg')).toBeVisible({ timeout: 30_000 });
+
+  // Inline preview: the hover-revealed copy button puts the labels on the clipboard.
+  await container.hover();
+  const copyBtn = container.locator('.mermaid-copy-btn');
+  await expect(copyBtn).toBeVisible({ timeout: 10_000 });
+  await copyBtn.click();
+  await expect(copyBtn).toHaveText('Copied!');
+  let clip = await page.evaluate(() => navigator.clipboard.readText());
+  expect(clip).toContain(label);
+  expect(clip).toContain('Second Node');
+
+  // Labels are also selectable, which is what the dead CSS was supposed to do.
+  const selectable = await container.locator('svg text, svg foreignObject').first()
+    .evaluate((el) => getComputedStyle(el).userSelect);
+  expect(selectable).not.toBe('none');
+
+  // Fullscreen viewer: same text, via its own toolbar button.
+  await container.locator('.mermaid-expand-btn').click();
+  const viewer = page.locator('.mermaid-viewer');
+  await expect(viewer).toBeVisible({ timeout: 10_000 });
+  await page.evaluate(() => navigator.clipboard.writeText('cleared'));
+  await viewer.locator('.mermaid-viewer-copy').click();
+  await expect(viewer.locator('.mermaid-viewer-copy')).toHaveText('Copied!');
+  clip = await page.evaluate(() => navigator.clipboard.readText());
+  expect(clip).toContain(label);
+});

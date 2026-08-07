@@ -177,11 +177,16 @@ spec:
   # persistence.*.existingClaim (a claim you provision); a disabled volume uses
   # an emptyDir.
   volumeClaimTemplates:
+    # volumeClaimTemplates is an immutable part of the StatefulSet spec, so it
+    # must carry only STABLE labels. mdnest.labels includes helm.sh/chart and
+    # app.kubernetes.io/version, which change on every release and would make
+    # each upgrade an illegal update to an immutable field (server-side-apply
+    # dry-run then fails and stalls Argo). selectorLabels are release-invariant.
     {{- if and .Values.persistence.notes.enabled (not .Values.persistence.notes.existingClaim) }}
     - metadata:
         name: notes
         labels:
-          {{- include "mdnest.labels" . | nindent 10 }}
+          {{- include "mdnest.selectorLabels" . | nindent 10 }}
           app.kubernetes.io/component: notes
         {{- with (merge (dict) .Values.persistence.notes.annotations .Values.commonAnnotations) }}
         annotations:
@@ -201,7 +206,7 @@ spec:
     - metadata:
         name: secrets
         labels:
-          {{- include "mdnest.labels" . | nindent 10 }}
+          {{- include "mdnest.selectorLabels" . | nindent 10 }}
           app.kubernetes.io/component: secrets
         {{- with (merge (dict) .Values.persistence.secrets.annotations .Values.commonAnnotations) }}
         annotations:

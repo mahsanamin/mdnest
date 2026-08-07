@@ -31,6 +31,7 @@ type Comment struct {
 	CreatedAt  string  `json:"createdAt"`
 	Resolved   bool    `json:"resolved"`
 	DeletedAt  *string `json:"deletedAt,omitempty"`
+	EditedAt   *string `json:"editedAt,omitempty"`
 }
 
 // CommentsHandler handles CRUD for inline comments.
@@ -212,14 +213,30 @@ func (h *CommentsHandler) updateComment(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	uc := middleware.UserFromContext(r.Context())
+
 	found := false
 	for i, c := range comments {
 		if c.ID == commentID {
+			if req.Body != nil {
+				// Only the author may edit a comment's text — rewriting
+				// words attributed to someone else is an integrity issue.
+				// Resolve/reopen stays open to everyone (handled below).
+				if uc == nil || c.AuthorID != uc.ID {
+					http.Error(w, `{"error":"only the author can edit this comment"}`, http.StatusForbidden)
+					return
+				}
+				body := strings.TrimSpace(*req.Body)
+				if body == "" {
+					http.Error(w, `{"error":"comment body is required"}`, http.StatusBadRequest)
+					return
+				}
+				comments[i].Body = body
+				now := time.Now().UTC().Format(time.RFC3339)
+				comments[i].EditedAt = &now
+			}
 			if req.Resolved != nil {
 				comments[i].Resolved = *req.Resolved
-			}
-			if req.Body != nil {
-				comments[i].Body = *req.Body
 			}
 			found = true
 			break

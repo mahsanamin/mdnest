@@ -63,6 +63,17 @@ else
   FAILED=1
 fi
 
+# 2c. Server CLI unit tests: pure helpers in mdnest-server (namespace drift
+# reporting). Also fast and Docker-free.
+echo -n "Server CLI unit tests... "
+if bash tests/server-unit.sh > /dev/null 2>&1; then
+  echo "OK"
+else
+  echo "FAILED"
+  echo "  Run: bash tests/server-unit.sh"
+  FAILED=1
+fi
+
 # 3. Frontend: npm audit
 echo -n "Frontend security (npm audit)... "
 if (cd frontend && npm audit --audit-level=high) > /dev/null 2>&1; then

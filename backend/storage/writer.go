@@ -86,7 +86,14 @@ func (w *Writer) apply(ctx context.Context, op DurabilityOp) error {
 		if err := w.dst.WriteFile(ctx, op.NS, op.Path, op.Data); err != nil {
 			return err
 		}
-		cacheBody(ctx, w.ws, op.NS, op.Path, op.Data, w.maxBytes)
+		// The git backend may reconcile a note's mdnest marker on write, so
+		// cache what actually landed rather than the queued bytes; otherwise
+		// replicas would serve the pre-reconcile content from the working set.
+		if b, rerr := w.dst.ReadFile(ctx, op.NS, op.Path); rerr == nil {
+			cacheBody(ctx, w.ws, op.NS, op.Path, b, w.maxBytes)
+		} else {
+			cacheBody(ctx, w.ws, op.NS, op.Path, op.Data, w.maxBytes)
+		}
 	case OpMkdir:
 		if err := w.dst.MkdirAll(ctx, op.NS, op.Path); err != nil {
 			return err

@@ -12,6 +12,7 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+  transition: margin-right 0.15s ease;
 }
 
 .split-view {
@@ -1263,6 +1264,7 @@ pre:hover .code-copy-btn {
   .heading-toggle,
   .code-copy-btn,
   .mermaid-expand-btn,
+  .mermaid-copy-btn,
   .preview-toolbar {
     display: none !important;
   }
@@ -1307,30 +1309,25 @@ pre:hover .code-copy-btn {
   }
 }
 
-.mermaid-clickable {
-  border: 1px solid transparent;
-  border-radius: 8px;
-  padding: 4px;
-  transition: border-color 0.15s;
-  position: relative;
-}
-
-.mermaid-clickable:hover {
-  border-color: #89b4fa;
-}
-
-.mermaid-clickable svg text,
-.mermaid-clickable svg tspan,
-.mermaid-clickable svg .nodeLabel,
-.mermaid-clickable svg foreignObject {
-  user-select: text !important;
+/* A diagram's labels must be selectable like any other text in the note.
+   These rules used to hang off `.mermaid-clickable`, from back when clicking
+   anywhere on a diagram expanded it — that class was dropped in favour of the
+   expand button below and nothing has applied it since, so the rules quietly
+   stopped matching anything and the text stopped being selectable. */
+.mermaid-container svg text,
+.mermaid-container svg tspan,
+.mermaid-container svg .nodeLabel,
+.mermaid-container svg .edgeLabel,
+.mermaid-container svg foreignObject {
+  -webkit-user-select: text;
+  user-select: text;
   cursor: text;
 }
 
-.mermaid-expand-btn {
+.mermaid-expand-btn,
+.mermaid-copy-btn {
   position: absolute;
   top: 6px;
-  right: 8px;
   background: #313244;
   border: 1px solid #45475a;
   color: #6c7086;
@@ -1343,11 +1340,29 @@ pre:hover .code-copy-btn {
   z-index: 5;
 }
 
-.mermaid-container:hover .mermaid-expand-btn {
+.mermaid-expand-btn { right: 8px; }
+
+/* Sits to the left of the expand button. Narrower font-size than the expand
+   glyph since it carries a word rather than an icon. */
+.mermaid-copy-btn {
+  right: 44px;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.mermaid-container:hover .mermaid-expand-btn,
+.mermaid-container:hover .mermaid-copy-btn {
   opacity: 1;
 }
 
-.mermaid-expand-btn:hover {
+/* Keyboard users never trigger :hover, so the buttons would be unreachable. */
+.mermaid-expand-btn:focus-visible,
+.mermaid-copy-btn:focus-visible {
+  opacity: 1;
+}
+
+.mermaid-expand-btn:hover,
+.mermaid-copy-btn:hover {
   background: #45475a;
   color: #cdd6f4;
 }
@@ -1418,11 +1433,25 @@ pre:hover .code-copy-btn {
   align-items: center;
   justify-content: center;
   touch-action: none;
+  /* Dragging the empty canvas pans, so it must not paint a text selection. */
   user-select: none;
 }
 
 .mermaid-viewer-content {
   transition: transform 0.05s linear;
+}
+
+/* ...but the diagram's own labels stay selectable, so the fullscreen view can
+   be read AND copied from. MermaidViewer.jsx suppresses the pan when a drag
+   starts on one of these, so the two gestures don't fight over the mousedown. */
+.mermaid-viewer-content text,
+.mermaid-viewer-content tspan,
+.mermaid-viewer-content .nodeLabel,
+.mermaid-viewer-content .edgeLabel,
+.mermaid-viewer-content foreignObject {
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: text;
 }
 
 .mermaid-viewer-content svg {
@@ -1678,6 +1707,22 @@ pre:hover .code-copy-btn {
   box-shadow: -4px 0 16px rgba(0, 0, 0, 0.3);
 }
 
+/* Grab strip on the panel's left edge to resize its width. */
+.comment-resize-handle {
+  position: absolute;
+  top: 0;
+  left: -3px;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 10;
+}
+
+.comment-resize-handle:hover,
+.comment-resize-handle:active {
+  background: #89b4fa44;
+}
+
 .comment-sidebar-header {
   display: flex;
   align-items: center;
@@ -1719,7 +1764,8 @@ pre:hover .code-copy-btn {
   color: #cdd6f4;
   padding: 8px;
   font-size: 0.82rem;
-  resize: none;
+  resize: vertical;
+  min-height: 46px;
   outline: none;
 }
 
@@ -1799,6 +1845,14 @@ pre:hover .code-copy-btn {
   color: #cdd6f4;
   line-height: 1.4;
   margin-bottom: 6px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.comment-edited {
+  color: #585b70;
+  font-size: 0.72rem;
+  font-style: italic;
 }
 
 .comment-actions {
@@ -1972,6 +2026,30 @@ pre:hover .code-copy-btn {
 .comment-reply-actions button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* Inline edit form (author editing their own comment). */
+.comment-edit-form {
+  margin-bottom: 6px;
+}
+
+.comment-edit-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: #181825;
+  color: #cdd6f4;
+  border: 1px solid #313244;
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-family: inherit;
+  font-size: 0.85rem;
+  resize: vertical;
+  min-height: 60px;
+}
+
+.comment-edit-textarea:focus {
+  outline: none;
+  border-color: #89b4fa;
 }
 
 /* Transient flash applied to commented text when Go To is invoked.
@@ -2898,6 +2976,11 @@ pre:hover .code-copy-btn {
 .editor-mode-toggle button.active {
   background: #89b4fa;
   color: #1e1e2e;
+}
+
+.editor-mode-toggle button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 /* ===== Live Editor (Milkdown) ===== */

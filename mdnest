@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-MDNEST_CLI_VERSION="4.1.2"
+MDNEST_CLI_VERSION="4.1.3"
 CONFIG_DIR="${HOME}/.config/mdnest"
 SERVERS_DIR="${CONFIG_DIR}/servers"
 DEFAULT_FILE="${CONFIG_DIR}/default"
@@ -63,13 +63,43 @@ WARN
   fi
 }
 
-# Pulls SERVER_ALIAS (if any) out of the target server's /api/config.
-# Stdout is the alias, or empty if none / unreachable.
-fetch_server_alias() {
-  local url="$1"
-  curl -s --max-time 5 "${url}/api/config" 2>/dev/null \
-    | grep -o '"serverAlias":"[^"]*"' \
-    | cut -d'"' -f4
+# Is this string something we can actually talk to? Anything without an
+# http(s) scheme isn't, and the overwhelmingly common cause is an alias
+# written without its leading '@' — which shifts every positional along, so
+# the URL lands in the token slot and the token is dropped entirely. Catch it
+# here rather than reporting a conclusion about a server we never contacted.
+valid_url() {
+  case "$1" in
+    http://?*|https://?*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# GETs the target server's /api/config. Stdout is the raw body; the exit
+# status is curl's, so the caller can tell "we never reached it" apart from
+# "we reached it and it told us nothing" — two different problems that need
+# two different fixes, and conflating them is what made a DNS failure read as
+# a complaint about the server's mdnest.conf.
+fetch_server_config() {
+  curl -s --connect-timeout 5 --max-time 8 "${1}/api/config" 2>/dev/null
+}
+
+# Turns a curl exit code into a reason a human can act on.
+curl_reason() {
+  case "$1" in
+    6)     echo "the host name could not be resolved (DNS)" ;;
+    7)     echo "the connection was refused" ;;
+    28)    echo "the connection timed out" ;;
+    35|60) echo "the TLS handshake failed" ;;
+    *)     echo "curl exited $1" ;;
+  esac
+}
+
+# Pulls SERVER_ALIAS (if any) out of an /api/config body already fetched by
+# fetch_server_config. Stdout is the alias, or empty if the server has none.
+parse_server_alias() {
+  printf '%s' "$1" | grep -o '"serverAlias":"[^"]*"' | cut -d'"' -f4
+  return 0
 }
 
 require_server() {
@@ -508,21 +538,84 @@ USAGE
     exit 1
   fi
 
+  # Validate the URL before we do anything with it: before contacting a
+  # server, before drawing conclusions about its config, and above all before
+  # writing it to disk. Saving a non-URL used to succeed with only a warning,
+  # and on a fresh machine it also became the default server — so every later
+  # command aimed at garbage.
+  if ! valid_url "$url"; then
+    if [ "$alias_source" = "autodetect" ] && valid_url "$tok"; then
+      # `mdnest login myserver https://... mdnest_token` — the alias is missing
+      # its '@', so print the same command with that one character fixed.
+      # Placeholders here are literal words, never <angle brackets>: the shell
+      # reads '<name>' as a redirection, so a hint containing one can't be
+      # pasted back into the terminal that just printed it.
+      cat >&2 <<ERR
+Error: '${url}' is not a URL — an alias needs a leading '@'.
+
+Run:
+  mdnest login @${url} ${tok} ${3:-mdnest_yourtoken}
+ERR
+    else
+      cat >&2 <<ERR
+Error: '${url}' is not a URL — it must start with http:// or https://.
+
+Run:
+  mdnest login @myserver https://notes.example.com mdnest_yourtoken
+ERR
+    fi
+    exit 1
+  fi
+
+  # Only now that the positionals line up: reject a stray extra one instead of
+  # ignoring it. A silent drop saves credentials for something the user didn't
+  # quite ask for. (Checked after the URL, so a missing '@' still gets the
+  # specific hint above rather than this generic one.)
+  if { [ "$alias_source" = "explicit" ] && [ -n "$4" ]; } ||
+     { [ "$alias_source" = "autodetect" ] && [ -n "$3" ]; }; then
+    cat >&2 <<ERR
+Error: too many arguments. login takes an optional @alias, a URL, and a token:
+
+  mdnest login @myserver https://notes.example.com mdnest_yourtoken
+ERR
+    exit 1
+  fi
+
   url="${url%/}"
 
   # Resolve alias when it wasn't given explicitly: ask the server.
   if [ "$alias_source" = "autodetect" ]; then
-    alias=$(fetch_server_alias "$url")
+    local cfg="" cfg_rc=0
+    cfg=$(fetch_server_config "$url") && cfg_rc=0 || cfg_rc=$?
+    if [ "$cfg_rc" != "0" ] || [ -z "$cfg" ]; then
+      local reason
+      if [ "$cfg_rc" = "0" ]; then
+        reason="it returned an empty response"
+      else
+        reason=$(curl_reason "$cfg_rc")
+      fi
+      cat >&2 <<ERR
+Error: couldn't reach ${url} to ask what it calls itself — ${reason}.
+
+Nothing about that server's own config can be read until it answers, so
+either get it reachable from here, or name it yourself:
+
+  mdnest login @myserver ${url} ${tok}
+ERR
+      exit 1
+    fi
+    alias=$(parse_server_alias "$cfg")
     if [ -z "$alias" ]; then
       cat >&2 <<ERR
-Error: this server has no SERVER_ALIAS configured, so the CLI can't
-pick a name for it automatically.
+Error: ${url} answered, but has no SERVER_ALIAS set, so the CLI can't pick
+a name for it automatically.
 
-Fix one of:
-  1. Pass an alias explicitly:
-       mdnest login @<name> $url $tok
-  2. Set SERVER_ALIAS in the server's mdnest.conf and rebuild:
-       SERVER_ALIAS=work
+Fix either end:
+  1. Name it here and now — nothing to change on the server:
+       mdnest login @myserver ${url} ${tok}
+  2. Or set SERVER_ALIAS in the server's mdnest.conf and reload it:
+       SERVER_ALIAS=myserver
+       ./mdnest-server reload
 
 (We used to silently name it @default, but that hid which server was
 which — so it's blocked now.)
@@ -654,7 +747,7 @@ cmd_servers() {
   if [ -d "$SERVERS_DIR" ] && [ -n "$(ls "$SERVERS_DIR" 2>/dev/null)" ]; then
     printf "  %-12s  %-35s  %-22s  %s\n" "ALIAS" "URL" "VERSION" "DEFAULT"
     printf "  %-12s  %-35s  %-22s  %s\n" "────────────" "───────────────────────────────────" "──────────────────────" "───────"
-    local any_unreachable=0
+    local any_unreachable=0 first_unreachable_url=""
     for f in "$SERVERS_DIR"/*; do
       local name=$(basename "$f")
       local url=$(grep '^url=' "$f" 2>/dev/null | cut -d= -f2-)
@@ -682,6 +775,7 @@ cmd_servers() {
         [ -n "$commit" ] && [ "$commit" != "dev" ] && ver="$ver ($commit)"
       else
         any_unreachable=1
+        [ -n "$first_unreachable_url" ] || first_unreachable_url="$url"
         case "$curl_rc" in
           6)      ver="unreachable (DNS)" ;;
           7)      ver="unreachable (refused)" ;;
@@ -715,7 +809,9 @@ cmd_servers() {
       echo ""
       echo "  A server marked 'unreachable' but working in your browser usually means the"
       echo "  CLI can't reach that URL directly. Check: the stored URL ('mdnest servers -v'),"
-      echo "  VPN/network, or try 'curl -v ${url}/api/config'." >&2
+      # Name an actually-unreachable server, not whichever one the loop happened
+      # to end on — that was often the healthy one, which made the hint useless.
+      echo "  VPN/network, or try 'curl -v ${first_unreachable_url}/api/config'."
     fi
   elif [ -f "$LEGACY_CONFIG" ]; then
     local url=$(grep '^url=' "$LEGACY_CONFIG" 2>/dev/null | cut -d= -f2-)

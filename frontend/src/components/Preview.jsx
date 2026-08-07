@@ -4,6 +4,7 @@ import mermaid, { fixMermaidTextColors } from '../mermaid-config.js';
 import MermaidViewer from './MermaidViewer.jsx';
 import { resolveWikiLink, wikiLinkExtension, internalMdLinkHtml } from '../wikilink.js';
 import { sanitizeHtml, sanitizeSvg } from '../sanitize.js';
+import { extractDiagramText, copyPlainText } from '../mermaid-text.js';
 
 // Safety net for any render-time exception inside Preview (mostly marked, but
 // also mermaid rendering, task-checkbox DOM work, etc.). Without this, a
@@ -396,7 +397,21 @@ function Preview({ content, currentPath, ns, onCheckboxToggle, pathIndex, onWiki
                 e.stopPropagation();
                 setViewerSvg(originalSvg);
               });
+              // Copy the diagram's labels. Dragging a selection across an SVG
+              // is unreliable at best, so give the text the same one-click
+              // affordance code blocks and headings already have.
+              const copyBtn = document.createElement('button');
+              copyBtn.className = 'mermaid-copy-btn';
+              copyBtn.title = 'Copy diagram text';
+              copyBtn.textContent = 'Copy text';
+              copyBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                copyPlainText(extractDiagramText(wrapper.querySelector('svg')));
+                copyBtn.textContent = 'Copied!';
+                setTimeout(() => { copyBtn.textContent = 'Copy text'; }, 1500);
+              });
               wrapper.style.position = 'relative';
+              wrapper.appendChild(copyBtn);
               wrapper.appendChild(expandBtn);
               mEl.replaceWith(wrapper);
             }
@@ -461,7 +476,7 @@ function Preview({ content, currentPath, ns, onCheckboxToggle, pathIndex, onWiki
   .mermaid-container svg [stroke="#7f849c"] { stroke: #6b7280 !important; }
   .mermaid-container svg text { fill: #1a1a1a !important; }
   .mermaid-container svg .nodeLabel { color: #1a1a1a !important; }
-  .heading-copy, .heading-toggle, .code-copy-btn, .mermaid-expand-btn { display: none !important; }
+  .heading-copy, .heading-toggle, .code-copy-btn, .mermaid-expand-btn, .mermaid-copy-btn { display: none !important; }
   @media print { body { padding: 0; } }
 </style>
 </head>

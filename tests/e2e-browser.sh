@@ -170,6 +170,7 @@ if ( cd tests/browser && \
      MDNEST_SEED_FILE="$SEED_FILE" MDNEST_SEED_TOKEN="$SEED_TOKEN" \
      MDNEST_MERMAID_FILE="$MERMAID_FILE" MDNEST_MERMAID_LABEL="$MERMAID_LABEL" \
      MDNEST_BOARD_FILE="$BOARD_FILE" MDNEST_BOARD_TASK="$BOARD_TASK" \
+     MDNEST_NOTES_DIR="$NOTES_DIR" \
      npx playwright test ); then
   pass "BROWSER E2E: all specs passed"
   exit 0
