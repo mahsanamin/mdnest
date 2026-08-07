@@ -1,11 +1,22 @@
 import { useRef, useState, useEffect, useCallback } from 'react';
 import { sanitizeSvg } from '../sanitize.js';
+import { extractDiagramText, copyPlainText } from '../mermaid-text.js';
+
+// Does this element belong to the diagram's text rather than its drawing?
+// Pan starts on a mousedown anywhere in the canvas, which made selecting a
+// label impossible — the drag was always read as a pan. Starting a drag on
+// text now selects instead of panning; the rest of the canvas still pans.
+function isTextTarget(el) {
+  return !!(el && typeof el.closest === 'function' &&
+    el.closest('text, tspan, foreignObject, .nodeLabel, .edgeLabel'));
+}
 
 function MermaidViewer({ svgContent, onClose }) {
   const containerRef = useRef(null);
   const [scale, setScale] = useState(1);
   const [translate, setTranslate] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
+  const [copied, setCopied] = useState(false);
   const dragStart = useRef({ x: 0, y: 0 });
   const translateStart = useRef({ x: 0, y: 0 });
 
@@ -47,6 +58,7 @@ function MermaidViewer({ svgContent, onClose }) {
   // Mouse pan
   const handleMouseDown = useCallback((e) => {
     if (e.button !== 0) return;
+    if (isTextTarget(e.target)) return; // let the drag select the label instead
     setDragging(true);
     dragStart.current = { x: e.clientX, y: e.clientY };
     translateStart.current = { ...translate };
@@ -103,6 +115,15 @@ function MermaidViewer({ svgContent, onClose }) {
   }, []);
   const resetView = () => { setScale(1); setTranslate({ x: 0, y: 0 }); };
 
+  // Selection now works on labels, but pulling every label out of a zoomed,
+  // panned diagram by hand is still tedious — so offer the whole thing at once.
+  const handleCopyText = useCallback(() => {
+    const svgEl = containerRef.current?.querySelector('svg');
+    if (!copyPlainText(extractDiagramText(svgEl))) return;
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }, []);
+
   const handlePrint = useCallback(() => {
     const w = window.open('', '_blank');
     if (!w) return;
@@ -153,6 +174,9 @@ function MermaidViewer({ svgContent, onClose }) {
           <button onClick={fitView} title="Fit to screen">Fit</button>
           <button onClick={resetView} title="Reset to 100%">100%</button>
           <div className="mermaid-viewer-spacer" />
+          <button className="mermaid-viewer-copy" onClick={handleCopyText} title="Copy the diagram's text">
+            {copied ? 'Copied!' : 'Copy text'}
+          </button>
           <button onClick={handlePrint} title="Print diagram">Print</button>
           <button onClick={onClose} title="Close">Close</button>
         </div>
