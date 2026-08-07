@@ -50,6 +50,7 @@ renders as a normal nested list in any viewer.
   - due: 2024-01-15
   - priority: high
   - workload: hard
+  - assignee: alice
   - tags: [design, ui, frontend]
   - defaultExpanded: true
   - steps:
@@ -75,6 +76,7 @@ ignored, so you can keep your own notes alongside.
 | `due` | `YYYY-MM-DD` | Due date. The board flags it red when it is in the past and the task is not done. |
 | `priority` | `high` \| `medium` \| `low` | Shown as a coloured badge. |
 | `workload` | free text (e.g. `easy` / `medium` / `hard`) | Effort estimate. |
+| `assignee` | free text (a username) | Who is responsible for the task. Shown as a badge; the board's create form defaults it to the current user. |
 | `tags` | `[a, b, c]` | Comma‑separated list in brackets. Shown as chips. |
 | `defaultExpanded` | `true` | The board card shows its steps/notes expanded by default. |
 

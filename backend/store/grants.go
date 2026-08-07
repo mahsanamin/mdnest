@@ -163,6 +163,37 @@ func (s *PostgresGrantStore) GetGrantsForNamespace(namespace string) ([]Grant, e
 	)
 }
 
+// NamespaceUser is a user who has access to a namespace, for assignment pickers.
+type NamespaceUser struct {
+	ID       int    `json:"id"`
+	Username string `json:"username"`
+}
+
+// UsersForNamespace returns the distinct users who hold a grant on the namespace
+// (namespace admins are auto-granted, so they are included; superadmins have no
+// grant rows and are not). Ordered by username for a stable picker.
+func (s *PostgresGrantStore) UsersForNamespace(namespace string) ([]NamespaceUser, error) {
+	rows, err := s.db.Query(
+		`SELECT DISTINCT u.id, u.username
+		   FROM access_grants g JOIN users u ON g.user_id = u.id
+		  WHERE g.namespace = $1 AND u.username <> ''
+		  ORDER BY u.username`, namespace,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("users for namespace: %w", err)
+	}
+	defer rows.Close()
+	var users []NamespaceUser
+	for rows.Next() {
+		var u NamespaceUser
+		if err := rows.Scan(&u.ID, &u.Username); err != nil {
+			return nil, fmt.Errorf("scan namespace user: %w", err)
+		}
+		users = append(users, u)
+	}
+	return users, rows.Err()
+}
+
 func (s *PostgresGrantStore) ListAllGrants() ([]GrantWithUser, error) {
 	rows, err := s.db.Query(
 		`SELECT g.id, g.user_id, g.namespace, g.path, g.permission, g.granted_by, g.created_at, u.username
