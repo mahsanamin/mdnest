@@ -317,6 +317,19 @@ if [ "$USER_PROVIDER" = "firebase" ]; then
 "
 fi
 
+# Marp theme catalog: app-managed data that is NOT user notes. NOTES_DIR itself
+# is not a volume here (each MOUNT_ namespace is bind-mounted individually), so
+# the catalog would land in the container's writable layer and be discarded by
+# `mdnest-server rebuild` (compose up --force-recreate). Back it with a named
+# volume declared up front — same pattern as mdnest-secrets — so it survives a
+# rebuild. Only emitted when the theme catalog is enabled.
+MARP_THEMES_NAMED_VOLUME=""
+if [ "$ENABLE_MARP_THEMES" = "true" ]; then
+  BACKEND_VOLUMES="${BACKEND_VOLUMES}      - mdnest-marp-themes:/data/notes/.marp-themes
+"
+  MARP_THEMES_NAMED_VOLUME="  mdnest-marp-themes:"
+fi
+
 # SSH key for git pull/push (backend sync button + git-sync sidecar)
 SSH_KEY_VOLUME=""
 SSH_KEY_GITSYNC=""
@@ -536,6 +549,7 @@ ${GITSYNC_VOLUMES}      - ./git-sync/sync.sh:/sync.sh:ro
 ${MCP_SERVICE}
 volumes:
   mdnest-secrets:
+${MARP_THEMES_NAMED_VOLUME}
 ${EXTRA_VOLUMES}
 ${CADDY_VOLUMES}
 EOF
