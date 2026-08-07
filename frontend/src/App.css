@@ -307,6 +307,20 @@
   background: #45475a;
 }
 
+/* Narrow / mobile: let the top toolbar wrap so the editor-mode (Basic/Live/
+   Board) and view-mode (Editor/Split/Preview) button groups never overlap.
+   The file path drops onto its own line below the controls. */
+@media (max-width: 900px) {
+  .toolbar {
+    flex-wrap: wrap;
+    row-gap: 0.4rem;
+  }
+  .toolbar-path {
+    order: 99;
+    flex-basis: 100%;
+  }
+}
+
 /* Sidebar */
 .sidebar {
   width: 260px;
