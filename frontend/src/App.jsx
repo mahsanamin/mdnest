@@ -880,7 +880,9 @@ function App() {
   }, [restoreScrollPosition, commentsEnabled]);
 
   const handleSelectNs = useCallback((ns) => {
-    setShowTaskBoard(false);
+    // Keep the task board open when switching workspace so the chosen view is
+    // preserved — it re-scopes to the new namespace. Opening a note still
+    // leaves the board (see openNote/openNoteDirect).
     setSelectedNs(ns);
     // Restore the last file the user had open in the namespace they're
     // switching TO. If they've never opened anything there (or whatever

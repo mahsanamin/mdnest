@@ -152,7 +152,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
   const [mode, setMode] = useState(() => localStorage.getItem('mdnest_taskboard_mode') || 'board');
   const [editingColumns, setEditingColumns] = useState(false);
   const [activeTask, setActiveTask] = useState(null);
-  const [scope, setScope] = useState('workspace');
+  const [scope, setScope] = useState(() => localStorage.getItem('mdnest_taskboard_scope') || 'workspace');
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorTask, setEditorTask] = useState(null);
   // Namespace members, to populate the assignee picker. Empty in single mode
@@ -207,6 +207,11 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
   const setModePersist = useCallback((m) => {
     setMode(m);
     localStorage.setItem('mdnest_taskboard_mode', m);
+  }, []);
+
+  const setScopePersist = useCallback((s) => {
+    setScope(s);
+    localStorage.setItem('mdnest_taskboard_scope', s);
   }, []);
 
   // Per-column collapse state, persisted per namespace. null = not yet
@@ -381,11 +386,11 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
             <button className={mode === 'board' ? 'active' : ''} onClick={() => setModePersist('board')}>Kanban</button>
           </div>
           <div className="tb-mode-toggle">
-            <button className={effectiveScope === 'workspace' ? 'active' : ''} onClick={() => setScope('workspace')} title="All notes in this workspace">Workspace</button>
+            <button className={effectiveScope === 'workspace' ? 'active' : ''} onClick={() => setScopePersist('workspace')} title="All notes in this workspace">Workspace</button>
             {currentPath && (
-              <button className={effectiveScope === 'note' ? 'active' : ''} onClick={() => setScope('note')} title="Only the current note">This note</button>
+              <button className={effectiveScope === 'note' ? 'active' : ''} onClick={() => setScopePersist('note')} title="Only the current note">This note</button>
             )}
-            <button className={effectiveScope === 'global' ? 'active' : ''} onClick={() => setScope('global')} title="Tasks across every workspace you can access">All workspaces</button>
+            <button className={effectiveScope === 'global' ? 'active' : ''} onClick={() => setScopePersist('global')} title="Tasks across every workspace you can access">All workspaces</button>
           </div>
         </div>
         <div className="tb-header-right">
