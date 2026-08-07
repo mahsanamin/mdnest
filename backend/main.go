@@ -464,7 +464,18 @@ func main() {
 	}
 	moveHandler := handlers.NewMoveHandler(stg)
 	searchHandler := handlers.NewSearchHandler(stg)
-	taskHandler := handlers.NewTaskHandler(stg)
+	// The global (cross-namespace) task view is access-controlled entirely by
+	// this filter. Multi mode enforces per-user access (perms.FilterNamespaces);
+	// single mode has one owner of every namespace, so an explicit all-access
+	// pass-through documents that intent and keeps the filter non-nil (a nil
+	// filter fails closed and would serve nothing).
+	var taskNsFilter func(r *http.Request, namespaces []string) []string
+	if perms != nil {
+		taskNsFilter = perms.FilterNamespaces
+	} else {
+		taskNsFilter = func(_ *http.Request, namespaces []string) []string { return namespaces }
+	}
+	taskHandler := handlers.NewTaskHandler(stg, taskNsFilter)
 	// API tokens live in Postgres in multi mode (shared across replicas, no
 	// ReadWriteMany secrets volume) and in the tokens.json file in single mode
 	// (no database dependency for a single-box install).
@@ -648,6 +659,16 @@ func main() {
 		if enableTaskBoard {
 			mux.Handle("/api/tasks", authMiddleware.Wrap(perms.ReadWriteRouter(invalidateSearch(http.HandlerFunc(taskHandler.HandleTasks)))))
 			mux.Handle("/api/board", authMiddleware.Wrap(perms.ReadWriteRouter(http.HandlerFunc(taskHandler.HandleBoard))))
+			// Cross-namespace view: aggregates the caller's accessible namespaces.
+			// Auth-only here — the handler self-filters via the namespace filter,
+			// so it must not be wrapped in the single-namespace RequireNsAccess.
+			mux.Handle("/api/tasks/all", authMiddleware.Wrap(http.HandlerFunc(taskHandler.HandleGlobalTasks)))
+			// Namespace members for the task assignee picker. Read-access gated:
+			// anyone who can see the namespace may list who else is on it.
+			if pg, ok := grantStore.(*store.PostgresGrantStore); ok {
+				teamHandler := handlers.NewTeamHandler(stg, pg)
+				mux.Handle("/api/namespace/users", authMiddleware.Wrap(perms.RequireNsAccess(http.HandlerFunc(teamHandler.HandleNamespaceUsers))))
+			}
 		}
 		mux.Handle("/api/files/", authMiddleware.Wrap(http.HandlerFunc(uploadHandler.HandleServeFile))) // files endpoint extracts ns from URL, handled differently
 	} else {
@@ -666,6 +687,9 @@ func main() {
 		if enableTaskBoard {
 			mux.Handle("/api/tasks", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(taskHandler.HandleTasks))))
 			mux.Handle("/api/board", authMiddleware.Wrap(http.HandlerFunc(taskHandler.HandleBoard)))
+			// Single mode: one user owns every namespace, so the global view
+			// aggregates them all (nil namespace filter).
+			mux.Handle("/api/tasks/all", authMiddleware.Wrap(http.HandlerFunc(taskHandler.HandleGlobalTasks)))
 		}
 		mux.Handle("/api/files/", authMiddleware.Wrap(http.HandlerFunc(uploadHandler.HandleServeFile)))
 	}

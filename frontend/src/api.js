@@ -320,6 +320,15 @@ export async function getTasks(ns, path) {
   return res.json();
 }
 
+// Aggregate tasks across every workspace the caller can access (the global
+// view). Each task carries its owning `namespace`; the board is the union of
+// the per-workspace column layouts.
+export async function getAllTasks() {
+  const res = await request('/tasks/all');
+  if (!res.ok) throw new Error('Failed to load tasks');
+  return res.json();
+}
+
 // Create a task by appending it to a note. `body` is { text, note?, column? };
 // when note is omitted the board's default note is used.
 export async function createTask(ns, body) {
@@ -359,6 +368,17 @@ export async function patchTask(ns, path, mutation) {
 export async function getBoard(ns) {
   const res = await request(`/board?ns=${encodeURIComponent(ns)}`);
   if (!res.ok) throw new Error('Failed to load board');
+  return res.json();
+}
+
+// List the users who have access to a namespace, to populate the task
+// assignee picker. Returns [{ id, username }]. Returns [] when the endpoint
+// isn't available (single mode / task board off), so callers degrade to a
+// free-choice list built from the current user and any existing assignee.
+export async function getNamespaceUsers(ns) {
+  const res = await request(`/namespace/users?ns=${encodeURIComponent(ns)}`);
+  if (res.status === 404) return [];
+  if (!res.ok) throw new Error('Failed to load namespace users');
   return res.json();
 }
 
@@ -662,6 +682,19 @@ export async function resolveComment(ns, path, commentId, resolved) {
     body: JSON.stringify({ resolved }),
   });
   if (!res.ok) throw new Error('Failed to update comment');
+  return res.json();
+}
+
+export async function editComment(ns, path, commentId, body) {
+  const res = await request(`/comments?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}&id=${encodeURIComponent(commentId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ body }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to edit comment');
+  }
   return res.json();
 }
 

@@ -30,7 +30,8 @@ import HistoryModal from './components/HistoryModal.jsx';
 import MoveToModal from './components/MoveToModal.jsx';
 import ReleaseNotesModal from './components/ReleaseNotesModal.jsx';
 import CollabClient from './collab.js';
-import { isMarpDoc } from './marp.js';
+import { isMarpDoc, effectiveEditorMode } from './marp.js';
+import { TREE_POLL_MS, shouldPollTree } from './tree-refresh.js';
 import {
   getToken,
   getNote,
@@ -161,6 +162,10 @@ function App() {
   // the undo stack into that empty state, wiping real content.
   const [content, setContent] = useState(null);
   const [sidebarWidth, setSidebarWidth] = useState(260);
+  const [commentWidth, setCommentWidth] = useState(() => {
+    const v = parseInt(localStorage.getItem('mdnest_comment_width'), 10);
+    return Number.isFinite(v) ? Math.min(760, Math.max(260, v)) : 340;
+  });
   const [savedContent, setSavedContent] = useState('');
   const saveTimerRef = useRef(null);
   const [sidebarVisible, setSidebarVisible] = useState(false);
@@ -277,6 +282,10 @@ function App() {
   // `marp: true` is shown as a slide deck in the Live view instead of the editor.
   const marpEnabled = !!appConfig?.marp;
   const marpActive = marpEnabled && isMarpDoc(content);
+  // Marp decks must never go through the Live/WYSIWYG editor — it reformats the
+  // markdown and corrupts the frontmatter and slide breaks. Force Basic (raw)
+  // editing for them, regardless of the user's editor-mode preference.
+  const editorModeForNote = effectiveEditorMode(editorMode, marpActive);
   // Editor scroll ratio (0..1), mirrored to the Marp deck's current slide in
   // split view. The deck is paginated (not scrollable), so unlike the plain
   // Preview it can't share a scrollTop — we map the ratio to a slide instead.
@@ -485,7 +494,7 @@ function App() {
           // (e.g. bulk file operations) should only trigger one refresh
           if (treeRefreshTimer.current) clearTimeout(treeRefreshTimer.current);
           treeRefreshTimer.current = setTimeout(() => {
-            if (selectedNsRef.current) refreshTree(selectedNsRef.current);
+            if (selectedNsRef.current) refreshTree(selectedNsRef.current, { soft: true });
           }, 1000);
           break;
         case 'access-changed':
@@ -544,13 +553,18 @@ function App() {
   // `opts.broadcast` — set by handlers that represent a change THIS tab made
   // (create/delete/move/upload, git-sync, manual Refresh). It posts a
   // BroadcastChannel message so other same-browser tabs refresh their tree
-  // instantly instead of waiting for the 60s poll. Background refreshes (poll,
+  // instantly instead of waiting for the poll. Background refreshes (poll,
   // init, WebSocket, and the cross-tab listener below) omit it, so a received
   // broadcast never triggers another broadcast — no echo loop.
+  //
+  // `opts.soft` — skip the loading state. The sidebar renders a thin indicator
+  // bar whenever `treeLoading` is set, which is right for a refresh the user
+  // asked for but is pure visual noise on a timer. Anything automatic and
+  // unprompted passes soft, so the tree just quietly gains the new file.
   const refreshTree = useCallback(async (ns, opts) => {
     const target = ns || selectedNs;
     if (!target) return;
-    setTreeLoading(true);
+    if (!opts?.soft) setTreeLoading(true);
     try {
       const data = await getTree(target);
       setTree(data.children || []);
@@ -558,7 +572,7 @@ function App() {
     } catch (e) {
       console.error('Failed to load file tree:', e);
     } finally {
-      setTreeLoading(false);
+      if (!opts?.soft) setTreeLoading(false);
     }
   }, [selectedNs]);
 
@@ -688,26 +702,20 @@ function App() {
     return () => clearInterval(interval);
   }, [authenticated, selectedNs, currentPath]);
 
-  // Auto-refresh the tree every 60s when the live-collab websocket isn't
-  // available. With websocket: tree-changed events handle external writes
-  // (CLI, MCP, git-sync, another browser tab). Without it: the tree stays
-  // stale until the user clicks the Refresh button. This polling fallback
-  // closes that gap for single-mode and multi-mode-without-collab installs
-  // — costs one tree GET per minute per active session, which is cheap
-  // (the tree is a small JSON document and the handler caches each node's
-  // stat in the request scope).
+  // Soft auto-refresh of the tree, ALWAYS — including when the live-collab
+  // websocket is connected. The policy (and why the websocket is deliberately
+  // not part of it) lives in tree-refresh.js. `soft` keeps it invisible: no
+  // spinner, no indicator bar, the tree just quietly gains the new file.
   useEffect(() => {
     if (!authenticated || !selectedNs) return;
-    if (appConfig?.liveCollab) return; // websocket already covers this
     const interval = setInterval(() => {
-      // Skip if browser tab is hidden — saves a request per minute per
-      // backgrounded tab.
-      if (typeof document !== 'undefined' && document.hidden) return;
       const ns = selectedNsRef.current;
-      if (ns) refreshTree(ns).catch(() => {});
-    }, 60000);
+      const hidden = typeof document !== 'undefined' && document.hidden;
+      if (!shouldPollTree({ authenticated, namespace: ns, hidden })) return;
+      refreshTree(ns, { soft: true }).catch(() => {});
+    }, TREE_POLL_MS);
     return () => clearInterval(interval);
-  }, [authenticated, selectedNs, appConfig?.liveCollab, refreshTree]);
+  }, [authenticated, selectedNs, refreshTree]);
 
   // Instant cross-tab sync: another tab of this browser broadcasts
   // `tree-changed` after a create/delete/move/upload or a git-sync (see
@@ -723,13 +731,13 @@ function App() {
       if (treeRefreshTimer.current) clearTimeout(treeRefreshTimer.current);
       treeRefreshTimer.current = setTimeout(() => {
         const ns = selectedNsRef.current;
-        if (ns) refreshTree(ns).catch(() => {});
+        if (ns) refreshTree(ns, { soft: true }).catch(() => {});
       }, 250);
     });
   }, [authenticated, refreshTree]);
 
   // Refresh the tree the moment a backgrounded tab becomes visible again,
-  // instead of waiting for the next 60s poll tick (the poll skips hidden tabs).
+  // instead of waiting for the next poll tick (the poll skips hidden tabs).
   // Catches changes made while the tab was in the background — by another tab,
   // the CLI/MCP, or git-sync. Explicit ns → no broadcast.
   useEffect(() => {
@@ -737,7 +745,7 @@ function App() {
     const onVisible = () => {
       if (document.visibilityState !== 'visible') return;
       const ns = selectedNsRef.current;
-      if (ns) refreshTree(ns).catch(() => {});
+      if (ns) refreshTree(ns, { soft: true }).catch(() => {});
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
@@ -1434,7 +1442,10 @@ function App() {
         width={sidebarWidth}
         onResize={setSidebarWidth}
       />
-      <div className="main">
+      <div
+        className="main"
+        style={commentsEnabled && showComments && currentPath && !isMobile ? { marginRight: commentWidth } : undefined}
+      >
         <Toolbar
           currentPath={currentPath}
           onToggleSidebar={() => setSidebarVisible((v) => !v)}
@@ -1455,9 +1466,13 @@ function App() {
               restoreScrollPosition(selectedNs, currentPath);
             }
           }}
-          editorMode={editorMode}
+          editorMode={editorModeForNote}
+          marpLocked={marpActive}
           boardActive={showTaskBoard}
           onEditorModeChange={(mode) => {
+            // Marp decks are locked to Basic — ignore attempts to switch to the
+            // Live editor, which would reformat and break the slides.
+            if (marpActive && mode === 'live') return;
             setShowTaskBoard(false);
             setEditorMode(mode);
             localStorage.setItem('mdnest_editor_mode', mode);
@@ -1472,25 +1487,12 @@ function App() {
           onOpenBoard={taskBoardEnabled && selectedNs ? () => setShowTaskBoard(true) : null}
           commentCount={commentsEnabled ? comments.filter(c => !c.parentId && !c.resolved).length : 0}
           onToggleComments={!commentsEnabled ? null : () => {
-            const next = !showComments;
-            setShowComments(next);
-            // When opening comments, snap the user to Live editor — that's
-            // the only surface where highlights render, selection → Comment
-            // works, and Go To can scroll to the text.
-            if (next) {
-              if (viewMode === 'preview') {
-                setViewMode('editor');
-                localStorage.setItem('mdnest_view_mode', 'editor');
-              }
-              if (editorMode !== 'live') {
-                setEditorMode('live');
-                localStorage.setItem('mdnest_editor_mode', 'live');
-              }
-              if (isMobile && mobileView === 'preview') {
-                setMobileView('editor');
-                localStorage.setItem('mdnest_mobile_view', 'editor');
-              }
-            }
+            // A plain toggle: the panel is usable in any view mode (including
+            // preview-only, e.g. reviewing Marp slides). Selection-anchored
+            // comments and highlights still require the Live editor, but
+            // general comments work everywhere, so we no longer force the
+            // user out of their current view.
+            setShowComments((v) => !v);
           }}
           wsStatus={appConfig?.liveCollab ? wsStatus : null}
         />
@@ -1548,6 +1550,7 @@ function App() {
                 ns={selectedNs}
                 canWrite={canWrite('')}
                 currentPath={currentPath}
+                currentUser={userInfo?.username}
                 onOpenNote={(p) => { setShowTaskBoard(false); openNote(p); }}
                 onClose={() => setShowTaskBoard(false)}
               />
@@ -1566,7 +1569,7 @@ function App() {
                 >
                   {content === null ? (
                     <div className="editor-loading">Loading note…</div>
-                  ) : editorMode === 'live' ? (
+                  ) : editorModeForNote === 'live' ? (
                     <EditorErrorBoundary
                       resetKey={`${selectedNs}/${currentPath}`}
                       onError={() => {
@@ -1758,6 +1761,8 @@ function App() {
           onGoTo={(c) => { if (goToCommentRef.current) goToCommentRef.current(c); }}
           highlightedId={highlightedCommentId}
           onHighlightConsumed={() => setHighlightedCommentId(null)}
+          width={!isMobile ? commentWidth : undefined}
+          onWidthChange={!isMobile ? (w) => { setCommentWidth(w); localStorage.setItem('mdnest_comment_width', String(w)); } : undefined}
         />
       )}
     </div>

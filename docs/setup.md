@@ -131,15 +131,25 @@ The backend scans `/data/notes/` at runtime and exposes each subdirectory as a n
    ./mdnest-server add-namespace
    ```
 
+   It offers to reload for you at the end, which is the whole of step 3.
+
    Or manually add a `MOUNT_` line to `mdnest.conf`:
    ```
    MOUNT_projects=/home/ahsan/notes/projects
    ```
 
-3. Re-run setup and restart:
+3. Apply it:
    ```bash
-   ./mdnest-server rebuild
+   ./mdnest-server reload
    ```
+
+   **A conf edit alone changes nothing.** Namespaces are Docker volume mounts,
+   so the running backend keeps serving the mounts it was created with until the
+   containers are recreated — a namespace you have added but not applied is
+   simply absent from the UI and the API. `./mdnest-server status` compares
+   `mdnest.conf` against what the running container actually serves and tells you
+   when the two disagree, in either direction. Use `rebuild` instead of `reload`
+   only when you also need the images rebuilt (`reload` is ~10s, `rebuild` ~60s).
 
 ### Removing a Namespace
 
@@ -149,7 +159,7 @@ The backend scans `/data/notes/` at runtime and exposes each subdirectory as a n
 
 Lists all namespaces, asks which to remove, cleans up config and deploy key. Files on disk are NOT deleted.
 
-Or manually: remove the `MOUNT_` line from `mdnest.conf` and run `./mdnest-server rebuild`.
+Or manually: remove the `MOUNT_` line from `mdnest.conf` and run `./mdnest-server reload`. Until you do, the container still has the old mount and keeps serving the namespace — `./mdnest-server status` flags that too.
 
 ### Naming Rules
 

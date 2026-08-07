@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isMarpDoc, slideStarts } from '../marp.js';
+import { isMarpDoc, slideStarts, effectiveEditorMode } from '../marp.js';
 
 describe('isMarpDoc', () => {
   it('detects a leading frontmatter with marp: true', () => {
@@ -29,6 +29,18 @@ describe('isMarpDoc', () => {
   it('handles non-string input', () => {
     expect(isMarpDoc(null)).toBe(false);
     expect(isMarpDoc(undefined)).toBe(false);
+  });
+});
+
+describe('effectiveEditorMode', () => {
+  it('forces Basic for a Marp deck regardless of preference', () => {
+    expect(effectiveEditorMode('live', true)).toBe('basic');
+    expect(effectiveEditorMode('basic', true)).toBe('basic');
+  });
+
+  it('keeps the chosen mode for non-Marp notes', () => {
+    expect(effectiveEditorMode('live', false)).toBe('live');
+    expect(effectiveEditorMode('basic', false)).toBe('basic');
   });
 });
 

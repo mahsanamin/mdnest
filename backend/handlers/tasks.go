@@ -34,11 +34,22 @@ import (
 // default To Do / Doing / Done board is used.
 type TaskHandler struct {
 	store storage.Storage
+	// nsFilter narrows a list of namespaces to those the request's user may
+	// read. Supplied at construction (multi mode: perms.FilterNamespaces;
+	// single mode: an explicit all-access pass-through). The global
+	// (cross-namespace) task view enforces access solely through it, and
+	// treats a nil filter as deny-all so access can never be left unwired.
+	nsFilter func(r *http.Request, namespaces []string) []string
 }
 
 // NewTaskHandler creates a task/board handler backed by the given storage.
-func NewTaskHandler(store storage.Storage) *TaskHandler {
-	return &TaskHandler{store: store}
+// nsFilter is the per-request namespace access filter for the global
+// (cross-namespace) task view and must be supplied by the caller: multi mode
+// passes perms.FilterNamespaces; single mode passes an explicit pass-through
+// (the single user owns every namespace). A nil filter makes the global view
+// serve nothing rather than leak every namespace.
+func NewTaskHandler(store storage.Storage, nsFilter func(r *http.Request, namespaces []string) []string) *TaskHandler {
+	return &TaskHandler{store: store, nsFilter: nsFilter}
 }
 
 // BoardColumn is a single kanban column. Status is the value written to a task's
@@ -84,17 +95,19 @@ type Step struct {
 // Task is one aggregated task-list item, optionally enriched by an indented
 // detail block (metadata bullets, nested step checkboxes and a description).
 type Task struct {
-	ID              string   `json:"id"`   // content-stable id (path + title)
-	Path            string   `json:"path"` // note that owns the item
-	Line            int      `json:"line"` // 1-based line of the checkbox
-	Raw             string   `json:"raw"`  // exact source line, for optimistic mutation
-	Text            string   `json:"text"` // title without checkbox or status tag
+	ID              string   `json:"id"`                  // content-stable id (path + title)
+	Namespace       string   `json:"namespace,omitempty"` // owning namespace (set in the global view)
+	Path            string   `json:"path"`                // note that owns the item
+	Line            int      `json:"line"`                // 1-based line of the checkbox
+	Raw             string   `json:"raw"`                 // exact source line, for optimistic mutation
+	Text            string   `json:"text"`                // title without checkbox or status tag
 	Checked         bool     `json:"checked"`
 	Column          string   `json:"column"` // resolved column id
 	Status          string   `json:"status,omitempty"`
 	Due             string   `json:"due,omitempty"`
 	Priority        string   `json:"priority,omitempty"`
 	Workload        string   `json:"workload,omitempty"`
+	Assignee        string   `json:"assignee,omitempty"` // who is responsible for the task
 	Tags            []string `json:"tags,omitempty"`
 	DefaultExpanded bool     `json:"defaultExpanded,omitempty"`
 	Steps           []Step   `json:"steps,omitempty"`
@@ -135,6 +148,7 @@ type taskSpec struct {
 	Due             string     `json:"due"`
 	Priority        string     `json:"priority"`
 	Workload        string     `json:"workload"`
+	Assignee        string     `json:"assignee"`
 	Tags            []string   `json:"tags"`
 	DefaultExpanded bool       `json:"defaultExpanded"`
 	Steps           []stepSpec `json:"steps"`
@@ -317,13 +331,20 @@ func stripIndent(line string, n int) string {
 }
 
 // parseTagsList parses `[a, b, c]` (or a bare comma list) into trimmed tags.
+// It tolerates markdown-escaped brackets (`\[a, b\]`), which the WYSIWYG editor
+// writes when tags are typed there, and strips any stray brackets left on an
+// individual tag by malformed input — so a value never surfaces as "\[ui".
 func parseTagsList(val string) []string {
 	val = strings.TrimSpace(val)
+	val = strings.ReplaceAll(val, "\\[", "[")
+	val = strings.ReplaceAll(val, "\\]", "]")
 	val = strings.TrimPrefix(val, "[")
 	val = strings.TrimSuffix(val, "]")
 	var out []string
 	for _, p := range strings.Split(val, ",") {
-		if s := strings.TrimSpace(p); s != "" {
+		s := strings.TrimSpace(p)
+		s = strings.TrimSpace(strings.Trim(s, "[]"))
+		if s != "" {
 			out = append(out, s)
 		}
 	}
@@ -446,6 +467,8 @@ func parseCard(fp string, lines []string, cardIdx int, checked bool, rest string
 			t.Priority = val
 		case "workload":
 			t.Workload = val
+		case "assignee":
+			t.Assignee = val
 		case "tags":
 			t.Tags = parseTagsList(val)
 		case "defaultexpanded":
@@ -543,7 +566,7 @@ func applyColumnRich(lines []string, cardIdx int, b BoardConfig, colID string) (
 // editableField reports whether key is a metadata field the API may set inline.
 func editableField(key string) bool {
 	switch key {
-	case "due", "priority", "workload", "tags", "status":
+	case "due", "priority", "workload", "assignee", "tags", "status":
 		return true
 	}
 	return false
@@ -633,6 +656,7 @@ func renderTaskBlock(b BoardConfig, s taskSpec) []string {
 	add("due", s.Due)
 	add("priority", s.Priority)
 	add("workload", s.Workload)
+	add("assignee", s.Assignee)
 	var tags []string
 	for _, t := range s.Tags {
 		if t = strings.TrimSpace(t); t != "" {
@@ -790,20 +814,42 @@ func (h *TaskHandler) aggregate(w http.ResponseWriter, r *http.Request) {
 			files = []string{rel}
 		}
 	} else {
-		h.store.Walk(ctx, ns, "", func(relPath string, info storage.FileInfo) error {
-			if info.IsDir {
-				if relPath != "" && strings.HasPrefix(info.Name, ".") {
-					return storage.SkipDir
-				}
-				return nil
-			}
-			if strings.HasSuffix(strings.ToLower(info.Name), ".md") {
-				files = append(files, relPath)
-			}
-			return nil
-		})
+		files = h.namespaceMdFiles(ctx, ns)
 	}
 
+	tasks := h.collectTasks(ctx, ns, files, board)
+	sort.SliceStable(tasks, func(i, j int) bool {
+		if tasks[i].Path != tasks[j].Path {
+			return tasks[i].Path < tasks[j].Path
+		}
+		return tasks[i].Line < tasks[j].Line
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(TasksResponse{Board: board, Tasks: tasks})
+}
+
+// namespaceMdFiles lists every .md file in a namespace (skipping dot-dirs).
+func (h *TaskHandler) namespaceMdFiles(ctx context.Context, ns string) []string {
+	var files []string
+	h.store.Walk(ctx, ns, "", func(relPath string, info storage.FileInfo) error {
+		if info.IsDir {
+			if relPath != "" && strings.HasPrefix(info.Name, ".") {
+				return storage.SkipDir
+			}
+			return nil
+		}
+		if strings.HasSuffix(strings.ToLower(info.Name), ".md") {
+			files = append(files, relPath)
+		}
+		return nil
+	})
+	return files
+}
+
+// collectTasks reads and parses the given files of a namespace in parallel,
+// stamping each task with its owning namespace.
+func (h *TaskHandler) collectTasks(ctx context.Context, ns string, files []string, board BoardConfig) []Task {
 	var (
 		mu    sync.Mutex
 		tasks []Task
@@ -822,6 +868,9 @@ func (h *TaskHandler) aggregate(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			local := parseNoteTasks(fp, data, board)
+			for i := range local {
+				local[i].Namespace = ns
+			}
 			if len(local) > 0 {
 				mu.Lock()
 				tasks = append(tasks, local...)
@@ -830,16 +879,87 @@ func (h *TaskHandler) aggregate(w http.ResponseWriter, r *http.Request) {
 		}(f)
 	}
 	wg.Wait()
+	return tasks
+}
 
-	sort.SliceStable(tasks, func(i, j int) bool {
-		if tasks[i].Path != tasks[j].Path {
-			return tasks[i].Path < tasks[j].Path
+// HandleGlobalTasks aggregates tasks across every namespace the caller can read
+// (GET /api/tasks/all). It self-enforces access via the namespace filter, so it
+// is not wrapped in RequireNsAccess (which is single-namespace). The response
+// board is the union of the per-namespace column layouts.
+func (h *TaskHandler) HandleGlobalTasks(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	ctx := r.Context()
+	names, err := h.store.ListNamespaces(ctx)
+	if err != nil {
+		http.Error(w, `{"error":"failed to read namespaces"}`, http.StatusInternalServerError)
+		return
+	}
+	// Access to the global view is controlled entirely by nsFilter, so fail
+	// closed: a nil filter serves nothing instead of leaking every namespace.
+	// Normal wiring always supplies one (see NewTaskHandler).
+	if h.nsFilter == nil {
+		names = nil
+	} else {
+		names = h.nsFilter(r, names)
+	}
+
+	var (
+		mu       sync.Mutex
+		allTasks []Task
+		boards   []BoardConfig
+		wg       sync.WaitGroup
+		sem      = make(chan struct{}, 4)
+	)
+	for _, ns := range names {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(ns string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			board := h.loadBoard(ctx, ns)
+			ts := h.collectTasks(ctx, ns, h.namespaceMdFiles(ctx, ns), board)
+			mu.Lock()
+			allTasks = append(allTasks, ts...)
+			boards = append(boards, board)
+			mu.Unlock()
+		}(ns)
+	}
+	wg.Wait()
+
+	sort.SliceStable(allTasks, func(i, j int) bool {
+		if allTasks[i].Namespace != allTasks[j].Namespace {
+			return allTasks[i].Namespace < allTasks[j].Namespace
 		}
-		return tasks[i].Line < tasks[j].Line
+		if allTasks[i].Path != allTasks[j].Path {
+			return allTasks[i].Path < allTasks[j].Path
+		}
+		return allTasks[i].Line < allTasks[j].Line
 	})
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(TasksResponse{Board: board, Tasks: tasks})
+	json.NewEncoder(w).Encode(TasksResponse{Board: unionBoards(boards), Tasks: allTasks})
+}
+
+// unionBoards merges per-namespace column layouts into one: the default columns
+// first, then any extra columns (by id) contributed by a namespace's board.
+func unionBoards(boards []BoardConfig) BoardConfig {
+	out := defaultBoard()
+	seen := map[string]bool{}
+	for _, c := range out.Columns {
+		seen[c.ID] = true
+	}
+	for _, b := range boards {
+		for _, c := range b.Columns {
+			if !seen[c.ID] {
+				out.Columns = append(out.Columns, c)
+				seen[c.ID] = true
+			}
+		}
+	}
+	return out
 }
 
 func (h *TaskHandler) mutate(w http.ResponseWriter, r *http.Request) {

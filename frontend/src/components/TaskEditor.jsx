@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import './TaskBoard.css';
 
 // TaskEditor is the full create/edit form for a task and its detail block
-// (status/column, due, priority, workload, tags, steps, notes). It emits a spec
-// the backend renders to markdown, so the note stays the source of truth.
-export default function TaskEditor({ board, task, defaultNote, defaultColumn, notePaths, onSave, onCancel }) {
+// (status/column, due, priority, workload, assignee, tags, steps, notes). It
+// emits a spec the backend renders to markdown, so the note stays the source of
+// truth.
+export default function TaskEditor({ board, task, defaultNote, defaultColumn, notePaths, currentUser, users, tagSuggestions, onSave, onCancel }) {
   const isNew = !task;
   const cols = board?.columns || [];
   const [title, setTitle] = useState(task?.text || '');
@@ -13,6 +14,9 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
   const [due, setDue] = useState(task?.due || '');
   const [priority, setPriority] = useState(task?.priority || '');
   const [workload, setWorkload] = useState(task?.workload || '');
+  // Who is responsible. New tasks default to the current user; editing keeps
+  // whatever the task already carries (empty stays empty).
+  const [assignee, setAssignee] = useState(task ? (task.assignee || '') : (currentUser || ''));
   const [tags, setTags] = useState((task?.tags || []).join(', '));
   const [defaultExpanded, setDefaultExpanded] = useState(!!task?.defaultExpanded);
   const [steps, setSteps] = useState((task?.steps || []).map((s) => ({ text: s.text, checked: s.checked })));
@@ -23,6 +27,26 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
   const updateStep = (i, patch) => setSteps((s) => s.map((st, j) => (j === i ? { ...st, ...patch } : st)));
   const removeStep = (i) => setSteps((s) => s.filter((_, j) => j !== i));
 
+  // Existing tags offered as one-click chips next to the free-text input, so a
+  // task can be dropped onto one or more established tags without retyping.
+  const selectedTags = tags.split(',').map((t) => t.trim()).filter(Boolean);
+  const toggleTag = (tag) => {
+    const set = selectedTags.slice();
+    const i = set.indexOf(tag);
+    if (i >= 0) set.splice(i, 1); else set.push(tag);
+    setTags(set.join(', '));
+  };
+
+  // Assignee choices: the namespace's members, plus the current user and the
+  // task's existing assignee so the pre-filled/legacy value is always
+  // selectable even if that person no longer holds a grant.
+  const assigneeOptions = useMemo(() => {
+    const names = new Set((users || []).map((u) => u.username).filter(Boolean));
+    if (currentUser) names.add(currentUser);
+    if (task?.assignee) names.add(task.assignee);
+    return [...names].sort((a, b) => a.localeCompare(b));
+  }, [users, currentUser, task]);
+
   const submit = () => {
     if (!title.trim()) { setErr('A title is required'); return; }
     const spec = {
@@ -31,6 +55,7 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
       due: due.trim(),
       priority,
       workload: workload.trim(),
+      assignee: assignee.trim(),
       tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
       defaultExpanded,
       steps: steps.map((s) => ({ text: s.text.trim(), checked: !!s.checked })).filter((s) => s.text),
@@ -84,10 +109,31 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
           <label className="tb-modal-field">Workload
             <input value={workload} placeholder="easy / medium / hard" onChange={(e) => setWorkload(e.target.value)} />
           </label>
+          <label className="tb-modal-field">Assignee
+            <select value={assignee} onChange={(e) => setAssignee(e.target.value)}>
+              <option value="">—</option>
+              {assigneeOptions.map((u) => <option key={u} value={u}>{u}</option>)}
+            </select>
+          </label>
         </div>
 
         <label className="tb-modal-field">Tags
           <input value={tags} placeholder="design, ui" onChange={(e) => setTags(e.target.value)} />
+          {(tagSuggestions || []).length > 0 && (
+            <div className="tb-editor-tag-suggest">
+              {tagSuggestions.map((tag) => (
+                <button
+                  key={tag}
+                  type="button"
+                  className={`tb-filter-tag${selectedTags.includes(tag) ? ' active' : ''}`}
+                  onClick={() => toggleTag(tag)}
+                  title={selectedTags.includes(tag) ? `Remove ${tag}` : `Add ${tag}`}
+                >
+                  {tag}
+                </button>
+              ))}
+            </div>
+          )}
         </label>
 
         <label className="tb-check-field">
