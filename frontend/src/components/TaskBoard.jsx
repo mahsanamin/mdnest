@@ -111,20 +111,31 @@ function TaskCard({ task, canWrite, onOpen, onToggleStep, onEdit }) {
   );
 }
 
-function BoardColumn({ column, tasks, canWrite, onOpen, onToggleStep, onEdit }) {
+function BoardColumn({ column, tasks, canWrite, onOpen, onToggleStep, onEdit, collapsed, onToggleCollapse }) {
   const { setNodeRef, isOver } = useDroppable({ id: column.id, disabled: !canWrite });
   return (
-    <div ref={setNodeRef} className={`tb-column${isOver ? ' over' : ''}`}>
-      <div className="tb-column-head">
+    <div ref={setNodeRef} className={`tb-column${isOver ? ' over' : ''}${collapsed ? ' collapsed' : ''}`}>
+      <div className="tb-column-head" onClick={collapsed ? onToggleCollapse : undefined}>
+        <button
+          type="button"
+          className="tb-column-collapse"
+          onClick={(e) => { e.stopPropagation(); onToggleCollapse(); }}
+          title={collapsed ? 'Expand column' : 'Collapse column'}
+          aria-expanded={!collapsed}
+        >
+          {collapsed ? '\u25B8' : '\u25BE'}
+        </button>
         <span className="tb-column-title">{column.title}</span>
         <span className="tb-column-count">{tasks.length}</span>
       </div>
-      <div className="tb-column-body">
-        {tasks.map((t) => (
-          <TaskCard key={cardKey(t)} task={t} canWrite={canWrite} onOpen={onOpen} onToggleStep={onToggleStep} onEdit={onEdit} />
-        ))}
-        {tasks.length === 0 && <div className="tb-column-empty">No tasks</div>}
-      </div>
+      {!collapsed && (
+        <div className="tb-column-body">
+          {tasks.map((t) => (
+            <TaskCard key={cardKey(t)} task={t} canWrite={canWrite} onOpen={onOpen} onToggleStep={onToggleStep} onEdit={onEdit} />
+          ))}
+          {tasks.length === 0 && <div className="tb-column-empty">No tasks</div>}
+        </div>
+      )}
     </div>
   );
 }
@@ -197,6 +208,24 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
     setMode(m);
     localStorage.setItem('mdnest_taskboard_mode', m);
   }, []);
+
+  // Per-column collapse state, persisted per namespace. null = not yet
+  // initialised, so the Done column can be collapsed by default on first show.
+  const collapseKey = `mdnest_taskboard_collapsed_${ns}`;
+  const [collapsedCols, setCollapsedCols] = useState(() => {
+    try {
+      const raw = localStorage.getItem(collapseKey);
+      return raw ? new Set(JSON.parse(raw)) : null;
+    } catch { return null; }
+  });
+  const toggleCollapse = useCallback((id) => {
+    setCollapsedCols((prev) => {
+      const next = new Set(prev || []);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      localStorage.setItem(collapseKey, JSON.stringify([...next]));
+      return next;
+    });
+  }, [collapseKey]);
 
   // Optimistically replace a task in local state after a successful mutation,
   // keyed by its (still-current) source location.
@@ -313,6 +342,15 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
     [tasks, search, tagFilter, assigneeFilter, currentUser],
   );
 
+  // First time a board is shown (no stored collapse state), collapse the Done
+  // column by default — it's usually the least-consulted.
+  useEffect(() => {
+    if (collapsedCols !== null || columns.length === 0) return;
+    const done = new Set(columns.filter((c) => c.done || c.id === 'done').map((c) => c.id));
+    setCollapsedCols(done);
+    localStorage.setItem(collapseKey, JSON.stringify([...done]));
+  }, [columns, collapsedCols, collapseKey]);
+
   const tasksByColumn = useMemo(() => {
     const map = {};
     for (const c of columns) map[c.id] = [];
@@ -426,6 +464,8 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
                 onOpen={onOpenNote}
                 onToggleStep={handleToggleStep}
                 onEdit={openEdit}
+                collapsed={!!collapsedCols && collapsedCols.has(col.id)}
+                onToggleCollapse={() => toggleCollapse(col.id)}
               />
             ))}
           </div>
