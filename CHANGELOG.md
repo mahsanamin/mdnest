@@ -8,6 +8,14 @@ All notable changes to mdnest are documented here.
 
 ### Added
 
+- **Task assignees, filtering, and a cross-workspace view** (task board only,
+  still behind `ENABLE_TASK_BOARD`). Tasks carry an `assignee:` metadata field
+  picked from the workspace's members; a filter bar narrows the loaded tasks by
+  title, tags and assignee (All / Me / Unassigned / a member); and a new "All
+  workspaces" scope aggregates tasks from every workspace you can access, with
+  each card showing which workspace it came from. The cross-workspace view
+  enforces access per request and serves nothing if its namespace filter is
+  ever left unwired.
 - **Edit your own comments.** The author (and only the author) can now revise a
   comment's text inline from the comment panel; an "(edited)" marker is shown
   once a comment has been changed. Resolve/reopen stays open to everyone.
