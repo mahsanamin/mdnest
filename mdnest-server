@@ -33,6 +33,79 @@ compose() {
   docker compose $SYNC_PROFILE $MCP_PROFILE "$@"
 }
 
+# Compares the MOUNT_ entries in mdnest.conf against what the RUNNING backend
+# container actually has mounted under /data/notes.
+#
+# Namespaces come from Docker volume mounts, so editing mdnest.conf only
+# changes the *desired* state — the running container keeps serving the mounts
+# it was created with until it is recreated. Nothing said so, so a namespace
+# added by hand simply never showed up, which reads as mdnest losing a
+# namespace rather than as a step not taken yet.
+#
+# Prints a report and returns 1 when the two disagree, 0 when they match. A
+# stopped stack is not drift: `start` creates containers from the current conf.
+# NOTE: returns non-zero by design, so callers under `set -e` must use
+# `namespace_drift || true` or test it in an `if`.
+namespace_drift() {
+  local cid
+  cid=$(compose ps -q backend 2>/dev/null | head -1 || true)
+  [ -n "$cid" ] || return 0
+
+  # What the container is serving right now: its /data/notes/<ns> mounts.
+  local live want
+  live=$(docker inspect -f '{{range .Mounts}}{{.Destination}}{{"\n"}}{{end}}' "$cid" 2>/dev/null \
+    | sed -n 's#^/data/notes/##p' || true)
+  # What mdnest.conf asks for.
+  want=$(grep '^MOUNT_' mdnest.conf 2>/dev/null | sed -n 's/^MOUNT_\([^=]*\)=.*/\1/p' || true)
+
+  namespace_drift_report "$want" "$live"
+}
+
+# The comparison itself, split out so it can be tested without Docker or a
+# running stack: takes the wanted and live namespace lists (one name per line)
+# and prints the report. Returns 1 on drift, 0 when they agree.
+namespace_drift_report() {
+  local want="$1" live="$2"
+  local pending="" stale="" name
+
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    printf '%s\n' "$live" | grep -qxF "$name" || pending="$pending $name"
+  done <<< "$want"
+
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    printf '%s\n' "$want" | grep -qxF "$name" || stale="$stale $name"
+  done <<< "$live"
+
+  if [ -z "$pending" ] && [ -z "$stale" ]; then
+    return 0
+  fi
+
+  # The accumulators above build up as " a b"; drop the leading space and pad
+  # the labels to a common width so the two lists line up under each other.
+  pending="${pending# }"
+  stale="${stale# }"
+
+  echo ""
+  echo "  ⚠  mdnest.conf and the running containers disagree:"
+  [ -n "$pending" ] && printf '       %-27s%s\n' "configured, not live yet:" "$pending"
+  [ -n "$stale" ]   && printf '       %-27s%s\n' "still served, not in conf:" "$stale"
+  echo ""
+  echo "  A namespace is a Docker volume mount, so a conf edit takes effect"
+  echo "  only once the containers are recreated:"
+  echo ""
+  echo "    ./mdnest-server reload"
+  echo ""
+  return 1
+}
+
+# Test hook, mirroring the client CLI's MDNEST_LIB: `MDNEST_SERVER_LIB=1 source
+# ./mdnest-server` loads the functions above WITHOUT dispatching a command, so
+# tests exercise the real namespace_drift_report rather than a copy of it. When
+# executed normally this line is a no-op.
+if [ -n "${MDNEST_SERVER_LIB:-}" ]; then return 0 2>/dev/null || exit 0; fi
+
 CMD="${1:-help}"
 shift 2>/dev/null || true
 
@@ -122,6 +195,9 @@ case "$CMD" in
     ;;
   status)
     compose ps
+    # The one place someone looks when a namespace "isn't there" — so it's the
+    # place that has to say the conf hasn't been applied yet.
+    namespace_drift || true
     ;;
   update)
     git pull
@@ -510,7 +586,25 @@ case "$CMD" in
     echo "MOUNT_${NS_NAME}=${NS_PATH}" >> mdnest.conf
     echo "Added to mdnest.conf: MOUNT_${NS_NAME}=${NS_PATH}"
     echo ""
-    echo "=== Done! Run ./mdnest-server reload ==="
+    # Writing the conf entry is not enough: the namespace list comes from the
+    # backend's volume mounts, so it stays invisible until the containers are
+    # recreated. Printing the command and walking away meant the namespace
+    # looked simply missing. Offer to do it, and say plainly what happens if we
+    # don't. Default yes — the operator just asked for this namespace.
+    echo "${NS_NAME} won't appear until the containers are recreated (a"
+    echo "namespace is a volume mount, not a runtime setting)."
+    echo ""
+    read -p "Reload now? [Y/n]: " DO_RELOAD
+    case "${DO_RELOAD:-y}" in
+      [Nn]*)
+        echo ""
+        echo "=== Done! ${NS_NAME} goes live on: ./mdnest-server reload ==="
+        ;;
+      *)
+        echo ""
+        exec "$0" reload
+        ;;
+    esac
     ;;
   remove-namespace)
     echo "=== Remove namespace from mdnest ==="
@@ -768,7 +862,7 @@ Commands:
   rebuild --full  Force recreate ALL containers including postgres + git-sync (rare)
   logs        View logs (all services, or specify: backend, frontend, git-sync, postgres)
   git-check   Diagnose git-sync: keys, remotes, SSH connectivity
-  status      Show running containers
+  status      Show running containers (warns if mdnest.conf needs a reload)
   update      Pull latest code, rebuild, and start
   migrate     Run database migrations (multi-user mode only)
   reset-password <email>   Reset a user's password (multi mode + local provider)
