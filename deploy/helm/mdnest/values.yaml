@@ -301,8 +301,8 @@ sso:
   # "Groups" membership via OIDC groups (e.g. "groups" on Entra ID). Empty
   # disables OIDC-group resolution; direct user membership still works.
   # Note: OIDC-group membership is snapshotted at login, so IdP group changes
-  # (e.g. offboarding) only apply at next login, up to the token lifetime;
-  # direct user membership is revoked immediately.
+  # (e.g. offboarding) only apply at next login, bounded to the SSO session
+  # lifetime (12h); direct user membership is revoked immediately.
   groupsClaim: ""
   # -- Label shown on the SSO login button.
   providerLabel: "SSO"

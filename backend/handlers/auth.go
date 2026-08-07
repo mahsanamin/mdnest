@@ -71,6 +71,16 @@ func jwtTTL(rememberMe bool) time.Duration {
 	return 30 * 24 * time.Hour
 }
 
+// ssoJWTTTL is the access-token lifetime for SSO sessions. It is deliberately
+// short because the SSO token snapshots IdP group membership, which drives
+// access-group authorization: a stale token keeps stale group grants until it
+// expires, so this TTL bounds the window between an IdP change (e.g. removing a
+// user from a group during offboarding) and its effect in mdnest. The IdP owns
+// the session UX, so re-auth within an active IdP session is typically silent.
+func ssoJWTTTL() time.Duration {
+	return 12 * time.Hour
+}
+
 type loginResponse struct {
 	Token    string `json:"token,omitempty"`
 	Status   string `json:"status,omitempty"`   // "ok", "change_password_required", "totp_required"

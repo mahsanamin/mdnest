@@ -147,8 +147,9 @@ GIT_AUTHOR_EMAIL=you@example.com
 # ID; emit only groups assigned to the app to avoid the token overage limit).
 # Empty disables OIDC-group resolution; direct user membership still works.
 # Note: OIDC-group membership is snapshotted into the login token, so changing a
-# user's IdP groups (e.g. offboarding) only takes effect at their next login, up
-# to the token lifetime; direct user membership is revoked immediately.
+# user's IdP groups (e.g. offboarding) only takes effect at their next login,
+# bounded to the SSO session lifetime (12h); direct user membership is revoked
+# immediately.
 # OIDC_GROUPS_CLAIM=groups
 #
 # Optional — override the button label shown on the sign-in page:
