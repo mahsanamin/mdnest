@@ -206,7 +206,6 @@
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
 }
 .tb-card.checked .tb-card-text {
-  text-decoration: line-through;
   color: #6c7086;
 }
 .tb-card-text {
@@ -262,7 +261,6 @@
 }
 .tb-list-items input[type="checkbox"] { accent-color: #89b4fa; margin-top: 3px; }
 .tb-list-items li.checked .tb-list-text {
-  text-decoration: line-through;
   color: #6c7086;
 }
 .tb-list-text { font-size: 13px; line-height: 1.5; }
