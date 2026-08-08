@@ -17,14 +17,30 @@ function renderWithThemes(content, themes) {
   return marp.render(content); // { html, css }
 }
 
-// fetchAsDataURI fetches a same-origin/app URL (with the auth token) and returns
-// a data: URI, or null on failure (the original URL is then left as-is).
+// fetchAsDataURI fetches an image URL and returns a data: URI, or null on
+// failure (the original URL is then left as-is).
+//
+// The auth token is attached ONLY for same-origin URLs. Deck content is authored
+// by users and shared between them, so an image URL is attacker-controlled: a
+// deck containing `![](https://evil.example/x.png)` would otherwise send the
+// mdnest JWT of whoever exports it to that host, handing over their session.
+// Cross-origin images are still fetched (so public assets inline and the deck
+// stays self-contained) — just never with credentials.
 async function fetchAsDataURI(url) {
+  let abs;
+  try {
+    abs = new URL(url, window.location.href);
+  } catch {
+    return null; // unparseable — leave the original URL alone
+  }
+  if (abs.protocol !== 'http:' && abs.protocol !== 'https:') return null;
   try {
     const headers = {};
-    const token = getToken?.();
-    if (token) headers.Authorization = `Bearer ${token}`;
-    const res = await fetch(url, { headers });
+    if (abs.origin === window.location.origin) {
+      const token = getToken?.();
+      if (token) headers.Authorization = `Bearer ${token}`;
+    }
+    const res = await fetch(abs.toString(), { headers });
     if (!res.ok) return null;
     const blob = await res.blob();
     return await new Promise((resolve) => {
