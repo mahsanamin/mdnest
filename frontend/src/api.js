@@ -706,4 +706,33 @@ export async function deleteComment(ns, path, commentId) {
   return res.json();
 }
 
+// --- Marp themes (centralized presentation catalog) ---
+
+// getMarpThemes returns the shared Marp theme catalog: [{name, css}]. Readable
+// by any authenticated user; used by MarpDeck to register themes globally.
+export async function getMarpThemes() {
+  const res = await request('/marp/themes');
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function saveMarpTheme(name, css) {
+  const res = await request('/marp/themes', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, css }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to save theme');
+  }
+  return res.json();
+}
+
+export async function deleteMarpTheme(name) {
+  const res = await request(`/marp/themes?name=${encodeURIComponent(name)}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error('Failed to delete theme');
+  return res.json();
+}
+
 export { getToken, setToken, clearToken, PermissionError };

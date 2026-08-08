@@ -623,6 +623,13 @@ func (c *intervalCommitter) sync(ctx context.Context, dir, ns string) error {
 // override from the resolver, else the coarse env default. ok=false means the
 // namespace has no remote and history stays local-only.
 func (c *intervalCommitter) resolvePush(ns string) (pushPlan, bool, error) {
+	// Reserved / hidden namespaces (names starting with ".") are app-internal
+	// (e.g. the Marp theme catalog). They are versioned locally but never
+	// mirrored to a per-workspace git remote — remote hosts such as GitLab also
+	// reject project names that start with a dot. ok=false ⇒ local-only history.
+	if strings.HasPrefix(ns, ".") {
+		return pushPlan{}, false, nil
+	}
 	if c.resolver != nil {
 		spec, ok, err := c.resolver.ResolveRemote(ns)
 		if err != nil {

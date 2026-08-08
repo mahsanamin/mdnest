@@ -413,6 +413,10 @@ func main() {
 	// a note whose frontmatter says `marp: true` as a slide deck in the Live view
 	// instead of the editor; when disabled it never loads the Marp engine chunk.
 	enableMarp := env("ENABLE_MARP", "false") == "true"
+	// ENABLE_MARP_THEMES is a separate opt-in on top of ENABLE_MARP: the
+	// centralized theme catalog (reserved namespace, seed, /api/marp/themes,
+	// admin editor). Off by default so plain-Marp operators are unaffected.
+	enableMarpThemes := enableMarp && env("ENABLE_MARP_THEMES", "false") == "true"
 
 	// Live collaboration hub (optional, multi mode only)
 	enableCollab := multiMode && env("ENABLE_LIVE_COLLAB", "false") == "true"
@@ -553,6 +557,7 @@ func main() {
 	configHandler.SetGrantMaxDepth(grantMaxDepth)
 	configHandler.SetTaskBoard(enableTaskBoard)
 	configHandler.SetMarp(enableMarp)
+	configHandler.SetMarpThemes(enableMarpThemes)
 
 	// Update-availability check — opt out by setting DISABLE_UPDATE_CHECK=true.
 	// One HTTPS GET to api.github.com per server every hour; failures are
@@ -692,6 +697,21 @@ func main() {
 			mux.Handle("/api/tasks/all", authMiddleware.Wrap(http.HandlerFunc(taskHandler.HandleGlobalTasks)))
 		}
 		mux.Handle("/api/files/", authMiddleware.Wrap(http.HandlerFunc(uploadHandler.HandleServeFile)))
+	}
+
+	// Centralized Marp themes: a global, read-for-all / write-for-superadmin
+	// catalog stored in a reserved hidden namespace. Decks reference a theme by
+	// name (`theme: <name>`) instead of embedding a per-deck style block. Opt-in
+	// via ENABLE_MARP_THEMES (on top of ENABLE_MARP); available in both modes.
+	if enableMarpThemes {
+		marpThemeHandler := handlers.NewMarpThemeHandler(stg)
+		mux.Handle("/api/marp/themes", authMiddleware.Wrap(http.HandlerFunc(marpThemeHandler.Handle)))
+		// Seed the neutral starter theme once, from the node that owns the tree
+		// (single or writer). App replicas read it from the coherence tier after
+		// the writer hydrates the reserved namespace.
+		if env("MDNEST_ROLE", "single") != "app" {
+			marpThemeHandler.SeedDefault(context.Background())
+		}
 	}
 
 	// Multi-mode routes (require admin role for /admin/*, authenticated for /me)

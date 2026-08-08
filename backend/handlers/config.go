@@ -33,6 +33,7 @@ type ConfigHandler struct {
 	grantMaxDepth   int                    // server-side ceiling on grant path depth (0 = no limit). PathPicker uses this to filter the dropdown.
 	taskBoard       bool                   // ENABLE_TASK_BOARD is on — the frontend may show the board button and load its chunk
 	marp            bool                   // ENABLE_MARP is on — the frontend may render Marp-format notes as a slide deck (loads its chunk)
+	marpThemes      bool                   // ENABLE_MARP_THEMES is on — the centralized theme catalog + admin editor are available
 	updateChecker   *updates.Checker       // optional — polls GitHub releases so the frontend can hint when a newer mdnest is available
 }
 
@@ -96,6 +97,15 @@ func (h *ConfigHandler) SetMarp(enabled bool) {
 	h.marp = enabled
 }
 
+// SetMarpThemes flips on the centralized Marp theme catalog (ENABLE_MARP_THEMES,
+// a separate opt-in on top of ENABLE_MARP). Off by default: when false the
+// /api/marp/themes route is not registered, nothing is seeded into the reserved
+// namespace, and the frontend hides the theme admin tab — an operator who wants
+// plain Marp decks carries none of it.
+func (h *ConfigHandler) SetMarpThemes(enabled bool) {
+	h.marpThemes = enabled
+}
+
 // SetUpdateChecker wires in the GitHub-release poller. When set, /api/config
 // includes a latestRelease object (once the first poll has succeeded) so the
 // frontend can hint that a newer mdnest version is available.
@@ -138,6 +148,9 @@ func (h *ConfigHandler) HandleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.marp {
 		resp["marp"] = true
+	}
+	if h.marpThemes {
+		resp["marpThemes"] = true
 	}
 	if h.updateChecker != nil {
 		s := h.updateChecker.Status()

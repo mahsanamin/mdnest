@@ -86,6 +86,13 @@ GIT_AUTHOR_EMAIL=you@example.com
 # frontend never loads the Marp engine chunk.
 # ENABLE_MARP=false
 
+# Centralized Marp themes (optional, requires ENABLE_MARP=true). A separate
+# opt-in that adds a shared theme catalog decks reference by name (theme:
+# <name>) plus a superadmin editor. Themes live in a reserved, hidden
+# namespace (auto-created, git-versioned locally, never mirrored to a remote).
+# Off by default.
+# ENABLE_MARP_THEMES=false
+
 # ==========================================================================
 # Federated identity via Firebase (optional, requires AUTH_MODE=multi)
 # ==========================================================================

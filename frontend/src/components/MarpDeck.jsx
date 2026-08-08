@@ -11,11 +11,39 @@
 import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { Marp } from '@marp-team/marp-core';
 import { slideStarts } from '../marp.js';
+import { getMarpThemes } from '../api.js';
+import { exportHtml } from '../marpExport.js';
 import './MarpDeck.css';
 
-// render turns the note into per-slide HTML fragments + the theme CSS.
-function render(content) {
+// Centralized Marp themes are fetched once and shared across every deck (a
+// global catalog, not scoped to any namespace). The admin theme editor calls
+// clearMarpThemeCache() after a change so the next deck render picks it up.
+let themeCache = null;
+let themePromise = null;
+
+export function clearMarpThemeCache() {
+  themeCache = null;
+  themePromise = null;
+}
+
+function loadThemes() {
+  if (themeCache) return Promise.resolve(themeCache);
+  if (!themePromise) {
+    themePromise = getMarpThemes()
+      .then((t) => { themeCache = Array.isArray(t) ? t : []; return themeCache; })
+      .catch(() => { themeCache = []; return themeCache; });
+  }
+  return themePromise;
+}
+
+// render turns the note into per-slide HTML fragments + the theme CSS. The
+// centralized themes are registered into the engine first, so a deck can select
+// one with `theme: <name>` instead of embedding a per-deck style block.
+function render(content, themes) {
   const marp = new Marp({ html: true, script: false });
+  for (const t of themes || []) {
+    try { marp.themeSet.add(t.css); } catch { /* skip a malformed theme */ }
+  }
   const { html, css } = marp.render(content);
   // Marp emits one <svg data-marpit-svg> per slide inside a .marpit wrapper.
   const doc = new DOMParser().parseFromString(html, 'text/html');
@@ -31,14 +59,24 @@ function render(content) {
 // mapping off. Instead we anchor to where slides *actually* begin;
 // see marp.js for the exact rules.
 
-export default function MarpDeck({ content, scrollPct }) {
+export default function MarpDeck({ content, scrollPct, title }) {
+  // Centralized themes load asynchronously; until then we render with the
+  // built-in themes only (a deck that selects a custom theme falls back to
+  // `default` for one frame, then re-renders once the catalog arrives).
+  const [themes, setThemes] = useState(() => themeCache || []);
+  useEffect(() => {
+    let cancelled = false;
+    loadThemes().then((t) => { if (!cancelled) setThemes(t); });
+    return () => { cancelled = true; };
+  }, []);
+
   const { slides, css, error } = useMemo(() => {
     try {
-      return render(content);
+      return render(content, themes);
     } catch (e) {
       return { slides: [], css: '', error: e.message };
     }
-  }, [content]);
+  }, [content, themes]);
 
   const total = slides.length;
   const [idx, setIdx] = useState(0);
@@ -87,6 +125,20 @@ export default function MarpDeck({ content, scrollPct }) {
     else el.requestFullscreen?.();
   }, []);
 
+  const [exporting, setExporting] = useState('');
+  const doExport = useCallback(async () => {
+    if (exporting) return;
+    setExporting('html');
+    try {
+      await exportHtml(content, themes, title);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('Marp export failed:', e);
+    } finally {
+      setExporting('');
+    }
+  }, [content, themes, title, exporting]);
+
   const srcDoc = useMemo(() => {
     if (!total) return '';
     return `<!doctype html><html><head><meta charset="utf-8">`
@@ -114,6 +166,7 @@ export default function MarpDeck({ content, scrollPct }) {
         <button type="button" onClick={() => go(-1)} disabled={idx === 0} aria-label="Previous slide">‹</button>
         <span className="marp-deck-counter">{idx + 1} / {total}</span>
         <button type="button" onClick={() => go(1)} disabled={idx === total - 1} aria-label="Next slide">›</button>
+        <button type="button" className="marp-deck-export" onClick={() => doExport()} disabled={!!exporting} title="Export as a standalone Marp presentation (navigation, fullscreen, presenter)">{exporting ? '…' : 'HTML'}</button>
         <button type="button" className="marp-deck-fs" onClick={toggleFullscreen} aria-label="Toggle fullscreen">⛶</button>
       </div>
     </div>

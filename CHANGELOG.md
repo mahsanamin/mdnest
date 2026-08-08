@@ -6,7 +6,29 @@ All notable changes to mdnest are documented here.
 
 ## Unreleased
 
-_Nothing yet — `develop` is at `4.1.4-dev`._
+### Added
+
+- **Centralized Marp themes (opt-in — `ENABLE_MARP_THEMES=true`, on top of
+  `ENABLE_MARP`).** Decks can reference a shared theme by name (`theme: <name>`
+  in the frontmatter) instead of embedding a large per-deck `style:` block, so
+  presentation styles are managed and evolve in one place. Themes live in a
+  reserved, hidden namespace (auto-created, git-versioned locally, and never
+  mirrored to a per-workspace git remote), are readable by every deck in any
+  namespace, and are edited by superadmins from a new **Marp Themes** admin tab.
+  A neutral `starter` theme is seeded on first start when the catalog is empty.
+- **Export a Marp deck as a real, standalone presentation.** From the deck view,
+  export to a single self-contained `.html`: a genuine Marp *bespoke* deck
+  (keyboard/touch navigation, fullscreen and presenter view) that opens offline
+  in any browser. Rendered entirely in the browser with marp-core and wrapped in
+  marp-cli's bespoke player (vendored, MIT) — no server dependency and nothing
+  added to the backend image. Centralized themes are resolved and images inlined,
+  so the file is fully self-contained.
+
+### Fixed
+
+- **The Marp theme editor's Save button is styled** to match the rest of the
+  admin panel (a primary button with a proper disabled state) instead of the
+  default browser control.
 
 ---
 
