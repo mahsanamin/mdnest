@@ -73,4 +73,34 @@ describe('matchesTaskFilters', () => {
     expect(matchesTaskFilters(task(), { search: 'design', tags: ['ui'], assignee: 'alice' })).toBe(true);
     expect(matchesTaskFilters(task(), { search: 'design', tags: ['ui'], assignee: 'bob' })).toBe(false);
   });
+
+  it('filters by due-date window against a fixed today', () => {
+    const today = '2026-08-09';
+    const overdue = task({ due: '2026-08-01' });
+    const dueToday = task({ due: today });
+    const inWeek = task({ due: '2026-08-14' });
+    const inMonth = task({ due: '2026-09-01' });
+    const far = task({ due: '2027-01-01' });
+    const noDue = task({ due: '' });
+
+    expect(matchesTaskFilters(overdue, { due: 'overdue', today })).toBe(true);
+    expect(matchesTaskFilters(dueToday, { due: 'overdue', today })).toBe(false);
+    // A completed overdue task is not "overdue" for the filter.
+    expect(matchesTaskFilters(task({ due: '2026-08-01', checked: true }), { due: 'overdue', today })).toBe(false);
+
+    expect(matchesTaskFilters(dueToday, { due: 'today', today })).toBe(true);
+    expect(matchesTaskFilters(overdue, { due: 'today', today })).toBe(false);
+
+    expect(matchesTaskFilters(inWeek, { due: 'week', today })).toBe(true);
+    expect(matchesTaskFilters(inMonth, { due: 'week', today })).toBe(false);
+    expect(matchesTaskFilters(overdue, { due: 'week', today })).toBe(false); // past, not upcoming
+
+    expect(matchesTaskFilters(inMonth, { due: 'month', today })).toBe(true);
+    expect(matchesTaskFilters(far, { due: 'month', today })).toBe(false);
+
+    expect(matchesTaskFilters(dueToday, { due: 'has', today })).toBe(true);
+    expect(matchesTaskFilters(noDue, { due: 'has', today })).toBe(false);
+    expect(matchesTaskFilters(noDue, { due: 'none', today })).toBe(true);
+    expect(matchesTaskFilters(dueToday, { due: 'none', today })).toBe(false);
+  });
 });

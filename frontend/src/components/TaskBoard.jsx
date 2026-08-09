@@ -47,6 +47,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
   const [assigneeFilter, setAssigneeFilter] = useState(''); // '' | '@me' | '@unassigned' | <username>
   const [priorityFilter, setPriorityFilter] = useState(''); // '' | high | medium | low
   const [relationFilter, setRelationFilter] = useState(''); // '' | any | depends-on | blocked-by | related-to
+  const [dueFilter, setDueFilter] = useState(''); // '' | overdue | today | week | month | has | none
   // Done tasks are hidden by default so the views focus on active work; a
   // toggle brings them back. (Kanban's Done column is also collapsed by default.)
   const [showDone, setShowDone] = useState(false);
@@ -336,10 +337,11 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
     (assigneeFilter !== '' ? 1 : 0) +
     (priorityFilter !== '' ? 1 : 0) +
     (relationFilter !== '' ? 1 : 0) +
+    (dueFilter !== '' ? 1 : 0) +
     (showDone && mode === 'list' ? 1 : 0);
   const filtersActive = activeFilterCount > 0;
   const clearFilters = useCallback(() => {
-    setSearch(''); setTagFilter([]); setAssigneeFilter(''); setPriorityFilter(''); setRelationFilter(''); setShowDone(false);
+    setSearch(''); setTagFilter([]); setAssigneeFilter(''); setPriorityFilter(''); setRelationFilter(''); setDueFilter(''); setShowDone(false);
   }, []);
 
   // Hiding done tasks only applies to the flat list — the kanban board keeps
@@ -351,9 +353,9 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
   const filteredTasks = useMemo(
     () => tasks.filter((t) => matchesTaskFilters(t, {
       search, tags: tagFilter, assignee: assigneeFilter, priority: priorityFilter,
-      relation: relationFilter, showDone: effectiveShowDone, doneColumns: doneColumnIds, currentUser,
+      relation: relationFilter, due: dueFilter, showDone: effectiveShowDone, doneColumns: doneColumnIds, currentUser,
     })),
-    [tasks, search, tagFilter, assigneeFilter, priorityFilter, relationFilter, effectiveShowDone, doneColumnIds, currentUser],
+    [tasks, search, tagFilter, assigneeFilter, priorityFilter, relationFilter, dueFilter, effectiveShowDone, doneColumnIds, currentUser],
   );
 
   // First time a board is shown (no stored collapse state), collapse the Done
@@ -477,6 +479,20 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
                   <option value="related-to">Has related-to</option>
                 </select>
               )}
+              <select
+                className="tb-filter-priority"
+                value={dueFilter}
+                onChange={(e) => setDueFilter(e.target.value)}
+                title="Filter by due date"
+              >
+                <option value="">Any due date</option>
+                <option value="overdue">Overdue</option>
+                <option value="today">Due today</option>
+                <option value="week">Due in 7 days</option>
+                <option value="month">Due in 30 days</option>
+                <option value="has">Has a due date</option>
+                <option value="none">No due date</option>
+              </select>
               <label className="tb-filter-showdone" title="Include tasks in Done columns (list view)">
                 <input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} disabled={mode === 'board'} />
                 Show done
