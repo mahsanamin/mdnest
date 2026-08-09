@@ -6,10 +6,15 @@
 //   - tags:   the task must carry at least one of the selected tags (OR)
 //   - assignee: '@me' (=== currentUser), '@unassigned' (empty assignee),
 //               or an exact username; '' means any assignee
-export function matchesTaskFilters(task, { search = '', tags = [], assignee = '', currentUser = '' } = {}) {
+//   - priority: exact (case-insensitive) match on the task's priority; '' = any
+//   - showDone + doneColumns: when showDone is false, tasks sitting in a "done"
+//               column are hidden (active work is the default focus)
+export function matchesTaskFilters(task, { search = '', tags = [], assignee = '', priority = '', showDone = true, doneColumns = [], currentUser = '' } = {}) {
   const q = String(search).trim().toLowerCase();
   if (q && !String(task.text || '').toLowerCase().includes(q)) return false;
   if (tags.length && !(task.tags || []).some((tg) => tags.includes(tg))) return false;
+  if (priority && String(task.priority || '').toLowerCase() !== String(priority).toLowerCase()) return false;
+  if (!showDone && doneColumns.includes(task.column)) return false;
   const who = String(task.assignee || '').trim();
   if (assignee === '@me') return who === (currentUser || '');
   if (assignee === '@unassigned') return who === '';

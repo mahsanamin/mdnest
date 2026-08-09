@@ -37,6 +37,24 @@ describe('matchesTaskFilters', () => {
     expect(matchesTaskFilters(task({ assignee: 'alice' }), { assignee: 'bob' })).toBe(false);
   });
 
+  it('filters by priority (case-insensitive), empty means any', () => {
+    expect(matchesTaskFilters(task({ priority: 'high' }), { priority: 'high' })).toBe(true);
+    expect(matchesTaskFilters(task({ priority: 'High' }), { priority: 'high' })).toBe(true);
+    expect(matchesTaskFilters(task({ priority: 'low' }), { priority: 'high' })).toBe(false);
+    expect(matchesTaskFilters(task({ priority: '' }), { priority: 'high' })).toBe(false);
+    expect(matchesTaskFilters(task({ priority: 'low' }), { priority: '' })).toBe(true);
+  });
+
+  it('hides tasks in done columns unless showDone is set', () => {
+    const done = task({ column: 'done' });
+    expect(matchesTaskFilters(done, { showDone: false, doneColumns: ['done'] })).toBe(false);
+    expect(matchesTaskFilters(done, { showDone: true, doneColumns: ['done'] })).toBe(true);
+    // A non-done column is unaffected by the done filter.
+    expect(matchesTaskFilters(task({ column: 'todo' }), { showDone: false, doneColumns: ['done'] })).toBe(true);
+    // Default (showDone omitted) keeps done tasks visible — callers opt into hiding.
+    expect(matchesTaskFilters(done, { doneColumns: ['done'] })).toBe(true);
+  });
+
   it('combines filters (all must pass)', () => {
     expect(matchesTaskFilters(task(), { search: 'design', tags: ['ui'], assignee: 'alice' })).toBe(true);
     expect(matchesTaskFilters(task(), { search: 'design', tags: ['ui'], assignee: 'bob' })).toBe(false);

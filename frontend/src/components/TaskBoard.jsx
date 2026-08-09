@@ -165,6 +165,16 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
   const [search, setSearch] = useState('');
   const [tagFilter, setTagFilter] = useState([]); // selected tags (OR)
   const [assigneeFilter, setAssigneeFilter] = useState(''); // '' | '@me' | '@unassigned' | <username>
+  const [priorityFilter, setPriorityFilter] = useState(''); // '' | high | medium | low
+  // Done tasks are hidden by default so the views focus on active work; a
+  // toggle brings them back. (Kanban's Done column is also collapsed by default.)
+  const [showDone, setShowDone] = useState(false);
+  // The filter bar folds behind a single toggle — expanded on wide screens,
+  // collapsed on mobile where horizontal room is scarce.
+  const [filtersOpen, setFiltersOpen] = useState(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return true;
+    return !window.matchMedia('(max-width: 700px)').matches;
+  });
 
   // The note-scoped view only makes sense with a note open; the global view
   // spans every workspace and ignores the current note/namespace for reads.
@@ -333,28 +343,61 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
 
   const columns = board?.columns || [];
 
+  // Column ids that count as "done" — used to hide finished tasks by default.
+  const doneColumnIds = useMemo(
+    () => columns.filter((c) => c.done || c.id === 'done').map((c) => c.id),
+    [columns],
+  );
+
   // Distinct tags and assignees present in the loaded tasks, for the filter UI.
+  // Tags carried only by done tasks are omitted while done tasks are hidden, so
+  // the tag list doesn't advertise labels you can't currently see.
   const allTags = useMemo(() => {
     const s = new Set();
-    for (const t of tasks) for (const tag of (t.tags || [])) s.add(tag);
+    const hideDone = !showDone && mode !== 'board';
+    for (const t of tasks) {
+      if (hideDone && doneColumnIds.includes(t.column)) continue;
+      for (const tag of (t.tags || [])) s.add(tag);
+    }
     return [...s].sort((a, b) => a.localeCompare(b));
-  }, [tasks]);
+  }, [tasks, showDone, mode, doneColumnIds]);
   const assigneeChoices = useMemo(() => {
     const s = new Set();
     for (const t of tasks) if (t.assignee) s.add(t.assignee);
+    return [...s].sort((a, b) => a.localeCompare(b));
+  }, [tasks]);
+  const priorityChoices = useMemo(() => {
+    const s = new Set();
+    for (const t of tasks) if (t.priority) s.add(String(t.priority));
     return [...s].sort((a, b) => a.localeCompare(b));
   }, [tasks]);
 
   const toggleTag = useCallback((tag) => {
     setTagFilter((cur) => (cur.includes(tag) ? cur.filter((t) => t !== tag) : [...cur, tag]));
   }, []);
-  const filtersActive = search.trim() !== '' || tagFilter.length > 0 || assigneeFilter !== '';
-  const clearFilters = useCallback(() => { setSearch(''); setTagFilter([]); setAssigneeFilter(''); }, []);
+  const activeFilterCount =
+    (search.trim() !== '' ? 1 : 0) +
+    (tagFilter.length > 0 ? 1 : 0) +
+    (assigneeFilter !== '' ? 1 : 0) +
+    (priorityFilter !== '' ? 1 : 0) +
+    (showDone && mode === 'list' ? 1 : 0);
+  const filtersActive = activeFilterCount > 0;
+  const clearFilters = useCallback(() => {
+    setSearch(''); setTagFilter([]); setAssigneeFilter(''); setPriorityFilter(''); setShowDone(false);
+  }, []);
+
+  // Hiding done tasks only applies to the flat list — the kanban board keeps
+  // them in the (collapsed-by-default) Done column so a card dragged there
+  // doesn't silently vanish.
+  const effectiveShowDone = mode === 'board' ? true : showDone;
 
   // Tasks after filters — every downstream view derives from this.
   const filteredTasks = useMemo(
-    () => tasks.filter((t) => matchesTaskFilters(t, { search, tags: tagFilter, assignee: assigneeFilter, currentUser })),
-    [tasks, search, tagFilter, assigneeFilter, currentUser],
+    () => tasks.filter((t) => matchesTaskFilters(t, {
+      search, tags: tagFilter, assignee: assigneeFilter, priority: priorityFilter,
+      showDone: effectiveShowDone, doneColumns: doneColumnIds, currentUser,
+    })),
+    [tasks, search, tagFilter, assigneeFilter, priorityFilter, effectiveShowDone, doneColumnIds, currentUser],
   );
 
   // First time a board is shown (no stored collapse state), collapse the Done
@@ -415,41 +458,69 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
       </div>
 
       {!loading && tasks.length > 0 && (
-        <div className="tb-filters">
-          <input
-            className="tb-filter-search"
-            value={search}
-            placeholder="Filter by text…"
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          <select
-            className="tb-filter-assignee"
-            value={assigneeFilter}
-            onChange={(e) => setAssigneeFilter(e.target.value)}
-            title="Filter by assignee"
+        <div className={`tb-filters${filtersOpen ? ' open' : ''}`}>
+          <button
+            type="button"
+            className="tb-filters-toggle"
+            onClick={() => setFiltersOpen((v) => !v)}
+            aria-expanded={filtersOpen}
+            title={filtersOpen ? 'Hide filters' : 'Show filters'}
           >
-            <option value="">All assignees</option>
-            {currentUser && <option value="@me">Me ({currentUser})</option>}
-            <option value="@unassigned">Unassigned</option>
-            {assigneeChoices.map((u) => <option key={u} value={u}>{u}</option>)}
-          </select>
-          {allTags.length > 0 && (
-            <div className="tb-filter-tags">
-              {allTags.map((tag) => (
-                <button
-                  key={tag}
-                  type="button"
-                  className={`tb-filter-tag${tagFilter.includes(tag) ? ' active' : ''}`}
-                  onClick={() => toggleTag(tag)}
-                  title={`Filter by tag: ${tag}`}
+            {filtersOpen ? '\u25BE' : '\u25B8'} Filters{!filtersOpen && activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
+          </button>
+          {filtersOpen && (
+            <div className="tb-filters-body">
+              <input
+                className="tb-filter-search"
+                value={search}
+                placeholder="Filter by text…"
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              <select
+                className="tb-filter-assignee"
+                value={assigneeFilter}
+                onChange={(e) => setAssigneeFilter(e.target.value)}
+                title="Filter by assignee"
+              >
+                <option value="">All assignees</option>
+                {currentUser && <option value="@me">Me ({currentUser})</option>}
+                <option value="@unassigned">Unassigned</option>
+                {assigneeChoices.map((u) => <option key={u} value={u}>{u}</option>)}
+              </select>
+              {priorityChoices.length > 0 && (
+                <select
+                  className="tb-filter-priority"
+                  value={priorityFilter}
+                  onChange={(e) => setPriorityFilter(e.target.value)}
+                  title="Filter by priority"
                 >
-                  {tag}
-                </button>
-              ))}
+                  <option value="">Any priority</option>
+                  {priorityChoices.map((p) => <option key={p} value={p}>{p}</option>)}
+                </select>
+              )}
+              <label className="tb-filter-showdone" title="Include tasks in Done columns (list view)">
+                <input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} disabled={mode === 'board'} />
+                Show done
+              </label>
+              {allTags.length > 0 && (
+                <div className="tb-filter-tags">
+                  {allTags.map((tag) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      className={`tb-filter-tag${tagFilter.includes(tag) ? ' active' : ''}`}
+                      onClick={() => toggleTag(tag)}
+                      title={`Filter by tag: ${tag}`}
+                    >
+                      {tag}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {filtersActive && (
+                <button type="button" className="tb-filter-clear" onClick={clearFilters}>Clear</button>
+              )}
             </div>
-          )}
-          {filtersActive && (
-            <button type="button" className="tb-filter-clear" onClick={clearFilters}>Clear</button>
           )}
         </div>
       )}
