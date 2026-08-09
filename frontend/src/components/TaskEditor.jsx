@@ -1,30 +1,36 @@
 import { useMemo, useState } from 'react';
 import './TaskBoard.css';
 
-// splitList splits a comma list while keeping double-quoted segments whole, so a
-// task title containing a comma survives as a single relation entry.
-function splitList(str) {
-  const out = [];
-  let buf = '', inQuote = false, escaped = false;
-  for (const ch of str) {
-    if (escaped) { buf += ch; escaped = false; continue; }
-    if (inQuote && ch === '\\') { escaped = true; continue; }
-    if (ch === '"') { inQuote = !inQuote; continue; }
-    if (ch === ',' && !inQuote) { const v = buf.trim(); if (v) out.push(v); buf = ''; continue; }
-    buf += ch;
-  }
-  const v = buf.trim();
-  if (v) out.push(v);
-  return out;
+// RelationField edits one relation kind (depends-on / blocked-by / related-to)
+// as a list of removable chips plus an add-input: picking a datalist suggestion
+// or pressing Enter appends a task, so several dependencies can be added without
+// any comma juggling.
+function RelationField({ icon, label, values, listId, isOption, labelFor, onAdd, onRemove }) {
+  const [input, setInput] = useState('');
+  const commit = (raw) => { const v = raw.trim(); if (v) onAdd(v); setInput(''); };
+  return (
+    <div className="tb-editor-rel">
+      <span className="tb-editor-rel-label">{icon} {label}</span>
+      {values.length > 0 && (
+        <div className="tb-rel-chips">
+          {values.map((v, i) => (
+            <span key={v + '\u0000' + i} className="tb-rel-chip">
+              {labelFor(v)}
+              <button type="button" className="tb-rel-chip-x" aria-label={`Remove ${labelFor(v)}`} onClick={() => onRemove(i)}>×</button>
+            </span>
+          ))}
+        </div>
+      )}
+      <input
+        value={input}
+        list={listId}
+        placeholder="add a task (title or ref)"
+        onChange={(e) => { const val = e.target.value; if (isOption(val)) commit(val); else setInput(val); }}
+        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(input); } }}
+      />
+    </div>
+  );
 }
-
-// quoteValue wraps a value in quotes when it holds a comma or quote, so the
-// comma can't be read as a list separator.
-function quoteValue(v) {
-  return /[",]/.test(v) ? `"${v.replace(/"/g, '\\"')}"` : v;
-}
-
-const joinRels = (arr) => (arr || []).map(quoteValue).join(', ');
 
 // TaskEditor is the full create/edit form for a task and its detail block
 // (status/column, due, priority, workload, assignee, tags, steps, notes). It
@@ -43,14 +49,12 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
   // whatever the task already carries (empty stays empty).
   const [assignee, setAssignee] = useState(task ? (task.assignee || '') : (currentUser || ''));
   const [tags, setTags] = useState((task?.tags || []).join(', '));
-  // Relations are stored by stable ref (comma-free, rename-proof) but shown by
-  // title for readability: map the task's stored refs back to titles for the
-  // initial value, and resolve titles/refs back to refs on save.
-  const refToTitle = new Map((taskRefs || []).map(({ ref, title: t }) => [String(ref).toLowerCase(), t]));
-  const relInit = (arr) => joinRels((arr || []).map((v) => refToTitle.get(String(v).toLowerCase()) || v));
-  const [dependsOn, setDependsOn] = useState(relInit(task?.dependsOn));
-  const [blockedBy, setBlockedBy] = useState(relInit(task?.blockedBy));
-  const [relatedTo, setRelatedTo] = useState(relInit(task?.relatedTo));
+  // Relations are stored by stable ref (comma-free, rename-proof) as a list, so
+  // a task can carry several dependencies. Kept as arrays here; entered
+  // titles/refs are resolved to refs on add and again on save.
+  const [dependsOn, setDependsOn] = useState(task?.dependsOn || []);
+  const [blockedBy, setBlockedBy] = useState(task?.blockedBy || []);
+  const [relatedTo, setRelatedTo] = useState(task?.relatedTo || []);
   const [defaultExpanded, setDefaultExpanded] = useState(!!task?.defaultExpanded);
   const [steps, setSteps] = useState((task?.steps || []).map((s) => ({ text: s.text, checked: s.checked })));
   const [notes, setNotes] = useState(task?.notes || '');
@@ -80,22 +84,37 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
     return [...names].sort((a, b) => a.localeCompare(b));
   }, [users, currentUser, task]);
 
-  const submit = () => {
-    if (!title.trim()) { setErr('A title is required'); return; }
-    // A relation may be typed as a task title or a task ref; store the stable
-    // ref (comma-free, rename-proof). Unmatched free text is kept as-is.
+  // Relation lookup: resolve an entered title/ref to a stable ref, back to a
+  // title for the chip label, and tell whether a typed value matches a known
+  // task (so a datalist pick auto-commits).
+  const relMaps = useMemo(() => {
+    const refToTitle = new Map();
     const refByLower = new Map();
     const titleToRef = new Map();
+    const optionSet = new Set();
     for (const { ref, title: t } of (taskRefs || [])) {
-      refByLower.set(String(ref).toLowerCase(), ref);
-      const k = String(t).trim().toLowerCase();
-      if (!titleToRef.has(k)) titleToRef.set(k, ref);
+      const rl = String(ref).toLowerCase();
+      refToTitle.set(rl, t);
+      refByLower.set(rl, ref);
+      optionSet.add(rl);
+      const tl = String(t).trim().toLowerCase();
+      if (!titleToRef.has(tl)) titleToRef.set(tl, ref);
+      optionSet.add(tl);
     }
-    const toRef = (v) => {
-      const k = v.trim().toLowerCase();
-      return refByLower.get(k) || titleToRef.get(k) || v.trim();
-    };
-    const parseRels = (v) => splitList(v).map(toRef);
+    for (const t of (taskTitles || [])) optionSet.add(String(t).trim().toLowerCase());
+    return { refToTitle, refByLower, titleToRef, optionSet };
+  }, [taskRefs, taskTitles]);
+  const toRef = (v) => {
+    const k = String(v).trim().toLowerCase();
+    return relMaps.refByLower.get(k) || relMaps.titleToRef.get(k) || String(v).trim();
+  };
+  const relLabel = (v) => relMaps.refToTitle.get(String(v).toLowerCase()) || v;
+  const isOption = (v) => relMaps.optionSet.has(String(v).trim().toLowerCase());
+  const addRel = (setter) => (raw) => { const tok = toRef(raw); setter((cur) => (cur.includes(tok) ? cur : [...cur, tok])); };
+  const removeRel = (setter) => (i) => setter((cur) => cur.filter((_, j) => j !== i));
+
+  const submit = () => {
+    if (!title.trim()) { setErr('A title is required'); return; }
     const spec = {
       title: title.trim(),
       column,
@@ -104,9 +123,9 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
       workload: workload.trim(),
       assignee: assignee.trim(),
       tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
-      dependsOn: parseRels(dependsOn),
-      blockedBy: parseRels(blockedBy),
-      relatedTo: parseRels(relatedTo),
+      dependsOn: dependsOn.map(toRef),
+      blockedBy: blockedBy.map(toRef),
+      relatedTo: relatedTo.map(toRef),
       defaultExpanded,
       steps: steps.map((s) => ({ text: s.text.trim(), checked: !!s.checked })).filter((s) => s.text),
       notes: notes.replace(/\s+$/, ''),
@@ -193,19 +212,16 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
 
         <div className="tb-modal-field">Relations
           <datalist id="tb-editor-tasks">
-            {(taskTitles || []).map((t) => <option key={t} value={quoteValue(t)} />)}
-            {(taskRefs || []).map(({ ref, title: t }) => <option key={'r-' + ref} value={quoteValue(ref)}>{t}</option>)}
+            {(taskTitles || []).map((t) => <option key={t} value={t} />)}
+            {(taskRefs || []).map(({ ref, title: t }) => <option key={'r-' + ref} value={ref}>{t}</option>)}
           </datalist>
           <div className="tb-editor-rels">
-            <label className="tb-editor-rel">⬆ Depends on
-              <input value={dependsOn} list="tb-editor-tasks" placeholder="title or ref, title or ref" onChange={(e) => setDependsOn(e.target.value)} />
-            </label>
-            <label className="tb-editor-rel">⛔ Blocked by
-              <input value={blockedBy} list="tb-editor-tasks" placeholder="title or ref" onChange={(e) => setBlockedBy(e.target.value)} />
-            </label>
-            <label className="tb-editor-rel">🔗 Related to
-              <input value={relatedTo} list="tb-editor-tasks" placeholder="title or ref" onChange={(e) => setRelatedTo(e.target.value)} />
-            </label>
+            <RelationField icon="⬆" label="Depends on" values={dependsOn} listId="tb-editor-tasks"
+              isOption={isOption} labelFor={relLabel} onAdd={addRel(setDependsOn)} onRemove={removeRel(setDependsOn)} />
+            <RelationField icon="⛔" label="Blocked by" values={blockedBy} listId="tb-editor-tasks"
+              isOption={isOption} labelFor={relLabel} onAdd={addRel(setBlockedBy)} onRemove={removeRel(setBlockedBy)} />
+            <RelationField icon="🔗" label="Related to" values={relatedTo} listId="tb-editor-tasks"
+              isOption={isOption} labelFor={relLabel} onAdd={addRel(setRelatedTo)} onRemove={removeRel(setRelatedTo)} />
           </div>
         </div>
 
