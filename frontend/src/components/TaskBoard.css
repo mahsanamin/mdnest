@@ -560,6 +560,16 @@
   padding: 0;
 }
 .tb-expand:hover { text-decoration: underline; }
+.tb-card-delete {
+  background: none;
+  border: none;
+  color: #6c7086;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+}
+.tb-card-delete:hover { color: #f38ba8; }
 
 .tb-edit { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; border-top: 1px solid #313244; padding-top: 8px; }
 .tb-edit label { display: flex; align-items: center; gap: 8px; font-size: 11px; color: #a6adc8; }

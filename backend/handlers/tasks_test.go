@@ -349,6 +349,31 @@ func TestTaskRefRoundTripAndUniqueness(t *testing.T) {
 	}
 }
 
+func TestRemoveTaskViaDetailBlock(t *testing.T) {
+	b := defaultBoard()
+	note := strings.Join([]string{
+		"- [ ] Keep me",
+		"  - status: todo",
+		"- [ ] Delete me",
+		"  - status: doing",
+		"  - tags: [x]",
+		"- [ ] Also keep",
+	}, "\n")
+	lines := strings.Split(note, "\n")
+	// Remove the middle task (line 3, 1-based) and its whole detail block.
+	_, end := detailBlockRange(lines, 2)
+	lines = append(lines[:2], lines[end:]...)
+	tasks := parseNoteTasks("n.md", []byte(strings.Join(lines, "\n")+"\n"), b)
+	if len(tasks) != 2 {
+		t.Fatalf("expected 2 tasks after delete, got %d: %+v", len(tasks), tasks)
+	}
+	for _, tk := range tasks {
+		if tk.Text == "Delete me" {
+			t.Fatalf("deleted task still present: %+v", tasks)
+		}
+	}
+}
+
 func TestReplaceTaskBlock(t *testing.T) {
 	b := defaultBoard()
 	lines := []string{

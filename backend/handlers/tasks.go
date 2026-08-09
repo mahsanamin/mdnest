@@ -830,9 +830,56 @@ func (h *TaskHandler) HandleTasks(w http.ResponseWriter, r *http.Request) {
 		h.create(w, r)
 	case http.MethodPatch:
 		h.mutate(w, r)
+	case http.MethodDelete:
+		h.remove(w, r)
 	default:
 		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
 	}
+}
+
+// remove deletes a task (its checkbox line and detail block) from a note. The
+// target is pinned by Line + Raw so a stale client can't delete the wrong task.
+func (h *TaskHandler) remove(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	ns := RequireNamespaceStore(ctx, h.store, w, r)
+	if ns == "" {
+		return
+	}
+	relPath, ok := SafeRelPath(r.URL.Query().Get("path"))
+	if !ok {
+		http.Error(w, `{"error":"invalid path"}`, http.StatusBadRequest)
+		return
+	}
+	var body struct {
+		Line int    `json:"line"`
+		Raw  string `json:"raw"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, `{"error":"invalid body"}`, http.StatusBadRequest)
+		return
+	}
+	data, err := h.store.ReadFile(ctx, ns, relPath)
+	if err != nil {
+		http.Error(w, `{"error":"note not found"}`, http.StatusNotFound)
+		return
+	}
+	lines := strings.Split(string(data), "\n")
+	if body.Line < 1 || body.Line > len(lines) || lines[body.Line-1] != body.Raw {
+		http.Error(w, `{"error":"task line is stale; refresh"}`, http.StatusConflict)
+		return
+	}
+	if taskLineRe.FindStringSubmatch(lines[body.Line-1]) == nil {
+		http.Error(w, `{"error":"not a task"}`, http.StatusBadRequest)
+		return
+	}
+	_, end := detailBlockRange(lines, body.Line-1)
+	lines = append(lines[:body.Line-1], lines[end:]...)
+	newData := []byte(strings.Join(lines, "\n"))
+	if err := h.store.WriteFile(ctx, ns, relPath, newData); err != nil {
+		http.Error(w, `{"error":"failed to write note"}`, http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // create appends a new task line to a note (the request's note, else the board's

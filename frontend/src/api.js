@@ -365,6 +365,23 @@ export async function patchTask(ns, path, mutation) {
   return res.json();
 }
 
+export async function deleteTask(ns, path, line, raw) {
+  const res = await request(`/tasks?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ line, raw }),
+  });
+  if (res.status === 409) {
+    const err = new Error('Task is out of date; refresh the board');
+    err.status = 409;
+    throw err;
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to delete task');
+  }
+}
+
 export async function getBoard(ns) {
   const res = await request(`/board?ns=${encodeURIComponent(ns)}`);
   if (!res.ok) throw new Error('Failed to load board');
