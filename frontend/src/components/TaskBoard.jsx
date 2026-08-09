@@ -475,6 +475,16 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
     return m;
   }, [tasks]);
   const resolveTitle = useCallback((title) => taskByTitle.get(String(title || '').trim().toLowerCase()) || null, [taskByTitle]);
+  // {ref, title} pairs so the relations editor can search/pick a task by its
+  // stable ref as well as its title (refs are resolved back to titles on save).
+  const taskRefs = useMemo(() => {
+    const seen = new Set();
+    const out = [];
+    for (const t of tasks) {
+      if (t.ref && t.text && !seen.has(t.ref)) { seen.add(t.ref); out.push({ ref: t.ref, title: t.text }); }
+    }
+    return out.sort((a, b) => a.ref.localeCompare(b.ref));
+  }, [tasks]);
 
   const toggleTag = useCallback((tag) => {
     setTagFilter((cur) => (cur.includes(tag) ? cur.filter((t) => t !== tag) : [...cur, tag]));
@@ -760,6 +770,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
           users={nsUsers}
           tagSuggestions={allTags}
           taskTitles={taskTitles}
+          taskRefs={taskRefs}
           onSave={handleEditorSave}
           onCancel={() => setEditorOpen(false)}
         />

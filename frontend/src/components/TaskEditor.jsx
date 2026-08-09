@@ -5,7 +5,7 @@ import './TaskBoard.css';
 // (status/column, due, priority, workload, assignee, tags, steps, notes). It
 // emits a spec the backend renders to markdown, so the note stays the source of
 // truth.
-export default function TaskEditor({ board, task, defaultNote, defaultColumn, notePaths, currentUser, users, tagSuggestions, taskTitles, onSave, onCancel }) {
+export default function TaskEditor({ board, task, defaultNote, defaultColumn, notePaths, currentUser, users, tagSuggestions, taskTitles, taskRefs, onSave, onCancel }) {
   const isNew = !task;
   const cols = board?.columns || [];
   const [title, setTitle] = useState(task?.text || '');
@@ -54,6 +54,10 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
 
   const submit = () => {
     if (!title.trim()) { setErr('A title is required'); return; }
+    // A relation may be typed as a task title or a task ref; resolve refs back
+    // to the referenced task's title (relations are stored by title).
+    const refToTitle = new Map((taskRefs || []).map(({ ref, title: t }) => [String(ref).toLowerCase(), t]));
+    const parseRels = (v) => v.split(',').map((t) => t.trim()).filter(Boolean).map((t) => refToTitle.get(t.toLowerCase()) || t);
     const spec = {
       title: title.trim(),
       column,
@@ -62,9 +66,9 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
       workload: workload.trim(),
       assignee: assignee.trim(),
       tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
-      dependsOn: dependsOn.split(',').map((t) => t.trim()).filter(Boolean),
-      blockedBy: blockedBy.split(',').map((t) => t.trim()).filter(Boolean),
-      relatedTo: relatedTo.split(',').map((t) => t.trim()).filter(Boolean),
+      dependsOn: parseRels(dependsOn),
+      blockedBy: parseRels(blockedBy),
+      relatedTo: parseRels(relatedTo),
       defaultExpanded,
       steps: steps.map((s) => ({ text: s.text.trim(), checked: !!s.checked })).filter((s) => s.text),
       notes: notes.replace(/\s+$/, ''),
@@ -152,16 +156,17 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
         <div className="tb-modal-field">Relations
           <datalist id="tb-editor-tasks">
             {(taskTitles || []).map((t) => <option key={t} value={t} />)}
+            {(taskRefs || []).map(({ ref, title: t }) => <option key={'r-' + ref} value={ref}>{t}</option>)}
           </datalist>
           <div className="tb-editor-rels">
             <label className="tb-editor-rel">⬆ Depends on
-              <input value={dependsOn} list="tb-editor-tasks" placeholder="task title, task title" onChange={(e) => setDependsOn(e.target.value)} />
+              <input value={dependsOn} list="tb-editor-tasks" placeholder="title or ref, title or ref" onChange={(e) => setDependsOn(e.target.value)} />
             </label>
             <label className="tb-editor-rel">⛔ Blocked by
-              <input value={blockedBy} list="tb-editor-tasks" placeholder="task title" onChange={(e) => setBlockedBy(e.target.value)} />
+              <input value={blockedBy} list="tb-editor-tasks" placeholder="title or ref" onChange={(e) => setBlockedBy(e.target.value)} />
             </label>
             <label className="tb-editor-rel">🔗 Related to
-              <input value={relatedTo} list="tb-editor-tasks" placeholder="task title" onChange={(e) => setRelatedTo(e.target.value)} />
+              <input value={relatedTo} list="tb-editor-tasks" placeholder="title or ref" onChange={(e) => setRelatedTo(e.target.value)} />
             </label>
           </div>
         </div>
