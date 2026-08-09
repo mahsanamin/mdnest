@@ -55,6 +55,20 @@ describe('matchesTaskFilters', () => {
     expect(matchesTaskFilters(done, { doneColumns: ['done'] })).toBe(true);
   });
 
+  it('filters by relation kind, empty means any', () => {
+    const dep = task({ dependsOn: ['Other'] });
+    const blk = task({ blockedBy: ['Other'] });
+    const rel = task({ relatedTo: ['Other'] });
+    const none = task();
+    expect(matchesTaskFilters(dep, { relation: 'any' })).toBe(true);
+    expect(matchesTaskFilters(none, { relation: 'any' })).toBe(false);
+    expect(matchesTaskFilters(dep, { relation: 'depends-on' })).toBe(true);
+    expect(matchesTaskFilters(blk, { relation: 'depends-on' })).toBe(false);
+    expect(matchesTaskFilters(blk, { relation: 'blocked-by' })).toBe(true);
+    expect(matchesTaskFilters(rel, { relation: 'related-to' })).toBe(true);
+    expect(matchesTaskFilters(none, { relation: '' })).toBe(true);
+  });
+
   it('combines filters (all must pass)', () => {
     expect(matchesTaskFilters(task(), { search: 'design', tags: ['ui'], assignee: 'alice' })).toBe(true);
     expect(matchesTaskFilters(task(), { search: 'design', tags: ['ui'], assignee: 'bob' })).toBe(false);

@@ -170,6 +170,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
   const [tagFilter, setTagFilter] = useState([]); // selected tags (OR)
   const [assigneeFilter, setAssigneeFilter] = useState(''); // '' | '@me' | '@unassigned' | <username>
   const [priorityFilter, setPriorityFilter] = useState(''); // '' | high | medium | low
+  const [relationFilter, setRelationFilter] = useState(''); // '' | any | depends-on | blocked-by | related-to
   // Done tasks are hidden by default so the views focus on active work; a
   // toggle brings them back. (Kanban's Done column is also collapsed by default.)
   const [showDone, setShowDone] = useState(false);
@@ -403,6 +404,12 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
     for (const t of tasks) if (t.priority) s.add(String(t.priority));
     return [...s].sort((a, b) => a.localeCompare(b));
   }, [tasks]);
+  // Relation filtering only makes sense once tasks carry relation metadata
+  // (depends-on / blocked-by / related-to); the control stays hidden otherwise.
+  const hasAnyRelations = useMemo(
+    () => tasks.some((t) => (t.dependsOn?.length || t.blockedBy?.length || t.relatedTo?.length)),
+    [tasks],
+  );
 
   const toggleTag = useCallback((tag) => {
     setTagFilter((cur) => (cur.includes(tag) ? cur.filter((t) => t !== tag) : [...cur, tag]));
@@ -412,10 +419,11 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
     (tagFilter.length > 0 ? 1 : 0) +
     (assigneeFilter !== '' ? 1 : 0) +
     (priorityFilter !== '' ? 1 : 0) +
+    (relationFilter !== '' ? 1 : 0) +
     (showDone && mode === 'list' ? 1 : 0);
   const filtersActive = activeFilterCount > 0;
   const clearFilters = useCallback(() => {
-    setSearch(''); setTagFilter([]); setAssigneeFilter(''); setPriorityFilter(''); setShowDone(false);
+    setSearch(''); setTagFilter([]); setAssigneeFilter(''); setPriorityFilter(''); setRelationFilter(''); setShowDone(false);
   }, []);
 
   // Hiding done tasks only applies to the flat list — the kanban board keeps
@@ -427,9 +435,9 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
   const filteredTasks = useMemo(
     () => tasks.filter((t) => matchesTaskFilters(t, {
       search, tags: tagFilter, assignee: assigneeFilter, priority: priorityFilter,
-      showDone: effectiveShowDone, doneColumns: doneColumnIds, currentUser,
+      relation: relationFilter, showDone: effectiveShowDone, doneColumns: doneColumnIds, currentUser,
     })),
-    [tasks, search, tagFilter, assigneeFilter, priorityFilter, effectiveShowDone, doneColumnIds, currentUser],
+    [tasks, search, tagFilter, assigneeFilter, priorityFilter, relationFilter, effectiveShowDone, doneColumnIds, currentUser],
   );
 
   // First time a board is shown (no stored collapse state), collapse the Done
@@ -537,6 +545,20 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
                 >
                   <option value="">Any priority</option>
                   {priorityChoices.map((p) => <option key={p} value={p}>{p}</option>)}
+                </select>
+              )}
+              {hasAnyRelations && (
+                <select
+                  className="tb-filter-priority"
+                  value={relationFilter}
+                  onChange={(e) => setRelationFilter(e.target.value)}
+                  title="Filter by relations"
+                >
+                  <option value="">Any relations</option>
+                  <option value="any">Has relations</option>
+                  <option value="depends-on">Has depends-on</option>
+                  <option value="blocked-by">Has blocked-by</option>
+                  <option value="related-to">Has related-to</option>
                 </select>
               )}
               <label className="tb-filter-showdone" title="Include tasks in Done columns (list view)">
