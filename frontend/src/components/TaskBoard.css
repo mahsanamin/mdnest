@@ -31,6 +31,21 @@
   row-gap: 8px;
   flex-wrap: wrap;
 }
+.tb-header-right { position: relative; }
+.tb-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* The overflow toggle is desktop-hidden; the buttons sit inline. */
+.tb-actions-toggle {
+  display: none;
+  background: #181825;
+  border: 1px solid #313244;
+  border-radius: 6px;
+  color: #cdd6f4;
+  cursor: pointer;
+  padding: 4px 12px;
+  font-size: 16px;
+  line-height: 1;
+}
+.tb-actions-toggle:hover { border-color: #45475a; }
 
 .tb-title { font-size: 15px; }
 .tb-ns {
@@ -347,6 +362,26 @@
 
 @media (max-width: 640px) {
   .tb-column { flex-basis: 82vw; }
+  /* Fold the header actions into a ⋯ dropdown to reclaim the row. */
+  .tb-actions-toggle { display: inline-flex; }
+  .tb-actions {
+    display: none;
+    position: absolute;
+    top: 100%;
+    right: 0;
+    z-index: 20;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    background: #1e1e2e;
+    border: 1px solid #313244;
+    border-radius: 8px;
+    padding: 6px;
+    margin-top: 4px;
+    min-width: 150px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+  }
+  .tb-actions.open { display: flex; }
 }
 
 /* --- filters ---------------------------------------------------------- */

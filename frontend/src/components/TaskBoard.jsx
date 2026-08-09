@@ -173,8 +173,10 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
   // collapsed on mobile where horizontal room is scarce.
   const [filtersOpen, setFiltersOpen] = useState(() => {
     if (typeof window === 'undefined' || !window.matchMedia) return true;
-    return !window.matchMedia('(max-width: 700px)').matches;
+    return !window.matchMedia('(max-width: 640px)').matches;
   });
+  // The header action buttons fold into a ⋯ menu on mobile (see CSS).
+  const [actionsOpen, setActionsOpen] = useState(false);
 
   // The note-scoped view only makes sense with a note open; the global view
   // spans every workspace and ignores the current note/namespace for reads.
@@ -447,13 +449,22 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
           </div>
         </div>
         <div className="tb-header-right">
-          {canWrite && !isGlobal && (
-            <button className="tb-btn" onClick={openCreate} title="New task">+ New task</button>
-          )}
-          <button className="tb-btn" onClick={reload} title="Refresh">&#8635;</button>
-          {canWrite && !isGlobal && (
-            <button className="tb-btn" onClick={() => setEditingColumns(true)} title="Edit columns">Columns…</button>
-          )}
+          <button
+            type="button"
+            className="tb-actions-toggle"
+            onClick={() => setActionsOpen((v) => !v)}
+            aria-expanded={actionsOpen}
+            title="Actions"
+          >⋯</button>
+          <div className={`tb-actions${actionsOpen ? ' open' : ''}`}>
+            {canWrite && !isGlobal && (
+              <button className="tb-btn" onClick={() => { setActionsOpen(false); openCreate(); }} title="New task">+ New task</button>
+            )}
+            <button className="tb-btn" onClick={() => { setActionsOpen(false); reload(); }} title="Refresh">&#8635;</button>
+            {canWrite && !isGlobal && (
+              <button className="tb-btn" onClick={() => { setActionsOpen(false); setEditingColumns(true); }} title="Edit columns">Columns…</button>
+            )}
+          </div>
         </div>
       </div>
 
