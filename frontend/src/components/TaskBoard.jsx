@@ -152,6 +152,10 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
   const [mode, setMode] = useState(() => localStorage.getItem('mdnest_taskboard_mode') || 'board');
   const [editingColumns, setEditingColumns] = useState(false);
   const [activeTask, setActiveTask] = useState(null);
+  // Mirror of activeTask for the auto-refresh effect, so a background poll can
+  // bail out mid-drag without re-subscribing on every drag.
+  const activeTaskRef = useRef(null);
+  useEffect(() => { activeTaskRef.current = activeTask; }, [activeTask]);
   const [scope, setScope] = useState(() => localStorage.getItem('mdnest_taskboard_scope') || 'workspace');
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorTask, setEditorTask] = useState(null);
@@ -187,24 +191,50 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
   );
 
-  const reload = useCallback(async () => {
+  // reload refetches the board. `silent` skips the loading/error UI so a
+  // background auto-refresh doesn't flash the spinner or clobber the view.
+  const reload = useCallback(async (opts = {}) => {
     if (!ns && !isGlobal) return;
-    setLoading(true);
-    setError(null);
+    if (!opts.silent) setLoading(true);
+    if (!opts.silent) setError(null);
     try {
       const data = isGlobal
         ? await getAllTasks()
         : await getTasks(ns, effectiveScope === 'note' ? currentPath : undefined);
       setBoard(data.board);
       setTasks(data.tasks || []);
+      setError(null);
     } catch (e) {
-      setError(e.message || 'Failed to load tasks');
+      if (!opts.silent) setError(e.message || 'Failed to load tasks');
     } finally {
-      setLoading(false);
+      if (!opts.silent) setLoading(false);
     }
   }, [ns, effectiveScope, isGlobal, currentPath]);
 
   useEffect(() => { reload(); }, [reload]);
+
+  // Auto-refresh: keep the board current without a manual refresh. Poll every
+  // 20s and refetch the moment the tab regains focus. Both are silent (no
+  // spinner), so an in-progress drag or scroll isn't disrupted.
+  useEffect(() => {
+    const POLL_MS = 20000;
+    const silentReload = () => {
+      if (activeTaskRef.current) return; // don't disrupt an in-progress drag
+      if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+        reload({ silent: true });
+      }
+    };
+    const id = setInterval(silentReload, POLL_MS);
+    const onVisible = () => {
+      if (activeTaskRef.current) return;
+      if (document.visibilityState === 'visible') reload({ silent: true });
+    };
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(id);
+      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [reload]);
 
   // Load the namespace's members once per namespace for the assignee picker.
   useEffect(() => {
