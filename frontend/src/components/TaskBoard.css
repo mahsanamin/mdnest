@@ -364,12 +364,16 @@
   .tb-column { flex-basis: 82vw; }
   /* Fold the header actions into a ⋯ dropdown to reclaim the row. */
   .tb-actions-toggle { display: inline-flex; }
+  /* Keep the toggle (and thus the dropdown) right-aligned even when the header
+     wraps it onto its own line, so the menu never opens off-screen. */
+  .tb-header-right { margin-left: auto; }
   .tb-actions {
     display: none;
     position: absolute;
     top: 100%;
     right: 0;
-    z-index: 20;
+    left: auto;
+    z-index: 50;
     flex-direction: column;
     align-items: stretch;
     gap: 6px;
@@ -379,6 +383,7 @@
     padding: 6px;
     margin-top: 4px;
     min-width: 150px;
+    max-width: calc(100vw - 24px);
     box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
   }
   .tb-actions.open { display: flex; }

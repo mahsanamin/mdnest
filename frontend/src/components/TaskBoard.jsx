@@ -404,13 +404,14 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
   // the tag list doesn't advertise labels you can't currently see.
   const allTags = useMemo(() => {
     const s = new Set();
-    const hideDone = !showDone && mode !== 'board';
+    // Tags carried only by done tasks are dropped from the filter (unless the
+    // user opts into showing done), regardless of the current view.
     for (const t of tasks) {
-      if (hideDone && doneColumnIds.includes(t.column)) continue;
+      if (!showDone && doneColumnIds.includes(t.column)) continue;
       for (const tag of (t.tags || [])) s.add(tag);
     }
     return [...s].sort((a, b) => a.localeCompare(b));
-  }, [tasks, showDone, mode, doneColumnIds]);
+  }, [tasks, showDone, doneColumnIds]);
   const assigneeChoices = useMemo(() => {
     const s = new Set();
     for (const t of tasks) if (t.assignee) s.add(t.assignee);
