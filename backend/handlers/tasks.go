@@ -539,6 +539,21 @@ func (h *TaskHandler) mutate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	board := h.loadBoard(ctx, ns)
+	// Block closing a task while it still has unresolved sub-tasks. Closing is
+	// either checking it done or moving it to a Done column.
+	closing := mut.Checked != nil && *mut.Checked
+	if !closing && mut.ToColumn != "" {
+		for _, c := range board.Columns {
+			if c.ID == mut.ToColumn && c.Done {
+				closing = true
+				break
+			}
+		}
+	}
+	if closing && hasUnresolvedSteps(lines, mut.Line-1) {
+		http.Error(w, `{"error":"resolve all sub-tasks before closing this task"}`, http.StatusUnprocessableEntity)
+		return
+	}
 	if mut.Replace != nil {
 		// Preserve the task's stable ref across an edit, backfilling one for
 		// tasks created before refs existed.

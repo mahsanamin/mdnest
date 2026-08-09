@@ -338,6 +338,19 @@ func detailBlockRange(lines []string, cardIdx int) (int, int) {
 	return start, j
 }
 
+// hasUnresolvedSteps reports whether the task at cardIdx has at least one
+// unchecked nested step in its detail block. Used to block closing a task while
+// its sub-tasks are still open.
+func hasUnresolvedSteps(lines []string, cardIdx int) bool {
+	start, end := detailBlockRange(lines, cardIdx)
+	for j := start; j < end; j++ {
+		if checked, _, ok := parseTaskLine(lines[j]); ok && !checked {
+			return true
+		}
+	}
+	return false
+}
+
 // parseNoteTasks aggregates the task-list items of one note. A checkbox that is
 // not nested in another task's detail block is a card; any checkbox inside a
 // detail block is a step of that card. Fenced code blocks are opaque (their
