@@ -112,9 +112,9 @@ type Task struct {
 	Workload        string   `json:"workload,omitempty"`
 	Assignee        string   `json:"assignee,omitempty"` // who is responsible for the task
 	Tags            []string `json:"tags,omitempty"`
-	DependsOn       []string `json:"dependsOn,omitempty"` // titles of tasks this one depends on
-	BlockedBy       []string `json:"blockedBy,omitempty"` // titles of tasks blocking this one
-	RelatedTo       []string `json:"relatedTo,omitempty"` // titles of loosely related tasks
+	DependsOn       []string `json:"dependsOn,omitempty"` // refs of tasks this one depends on (legacy notes may hold titles)
+	BlockedBy       []string `json:"blockedBy,omitempty"` // refs of tasks blocking this one
+	RelatedTo       []string `json:"relatedTo,omitempty"` // refs of loosely related tasks
 	DefaultExpanded bool     `json:"defaultExpanded,omitempty"`
 	Steps           []Step   `json:"steps,omitempty"`
 	Notes           string   `json:"notes,omitempty"`

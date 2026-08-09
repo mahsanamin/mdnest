@@ -25,7 +25,9 @@ function cardKey(t) {
 const today = () => new Date().toISOString().slice(0, 10);
 
 // Relation types and their card icons. Values are lists of referenced task
-// titles (Option A: reference by title, resolved best-effort in the loaded set).
+// refs (stable, comma-free ids); each is resolved back to the live task so the
+// card shows its current title/status. Legacy notes that stored titles still
+// resolve via a title fallback.
 const REL_ICON = { 'depends-on': '⬆', 'blocked-by': '⛔', 'related-to': '🔗' };
 
 function TaskCard({ task, canWrite, onOpen, onToggleStep, onEdit, resolve, onDelete }) {
@@ -46,8 +48,8 @@ function TaskCard({ task, canWrite, onOpen, onToggleStep, onEdit, resolve, onDel
   const rels = [['depends-on', task.dependsOn], ['blocked-by', task.blockedBy], ['related-to', task.relatedTo]]
     .filter(([, v]) => v && v.length);
   const blockers = [...(task.dependsOn || []), ...(task.blockedBy || [])];
-  const isBlocked = !task.checked && blockers.some((title) => {
-    const r = resolve && resolve(title);
+  const isBlocked = !task.checked && blockers.some((ref) => {
+    const r = resolve && resolve(ref);
     return r && !r.checked;
   });
 
@@ -81,12 +83,13 @@ function TaskCard({ task, canWrite, onOpen, onToggleStep, onEdit, resolve, onDel
 
       {rels.length > 0 && (
         <div className="tb-rels">
-          {rels.flatMap(([label, titles]) => titles.map((title) => {
-            const r = resolve && resolve(title);
+          {rels.flatMap(([label, refs]) => refs.map((ref) => {
+            const r = resolve && resolve(ref);
             const state = r ? (r.checked ? '✓' : '○') : '';
+            const shown = r ? r.text : ref;
             return (
-              <span key={label + '\u0000' + title} className={`tb-rel${r && !r.checked ? ' open' : ''}`} title={label}>
-                {REL_ICON[label]} {state} {title}
+              <span key={label + '\u0000' + ref} className={`tb-rel${r && !r.checked ? ' open' : ''}`} title={label}>
+                {REL_ICON[label]} {state} {shown}
               </span>
             );
           }))}
@@ -474,9 +477,22 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
     }
     return m;
   }, [tasks]);
-  const resolveTitle = useCallback((title) => taskByTitle.get(String(title || '').trim().toLowerCase()) || null, [taskByTitle]);
+  const taskByRef = useMemo(() => {
+    const m = new Map();
+    for (const t of tasks) {
+      const k = (t.ref || '').trim().toLowerCase();
+      if (k && !m.has(k)) m.set(k, t);
+    }
+    return m;
+  }, [tasks]);
+  // Relations are stored by stable ref; resolve by ref first, then fall back to
+  // title so notes written before the switch still light up.
+  const resolveRelation = useCallback((value) => {
+    const k = String(value || '').trim().toLowerCase();
+    return taskByRef.get(k) || taskByTitle.get(k) || null;
+  }, [taskByRef, taskByTitle]);
   // {ref, title} pairs so the relations editor can search/pick a task by its
-  // stable ref as well as its title (refs are resolved back to titles on save).
+  // stable ref or its title, then store the ref (comma-free, rename-proof).
   const taskRefs = useMemo(() => {
     const seen = new Set();
     const out = [];
@@ -688,7 +704,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
                 onOpen={onOpenNote}
                 onToggleStep={handleToggleStep}
                 onEdit={openEdit}
-                resolve={resolveTitle}
+                resolve={resolveRelation}
                 onDelete={handleDelete}
                 collapsed={!!collapsedCols && collapsedCols.has(col.id)}
                 onToggleCollapse={() => toggleCollapse(col.id)}

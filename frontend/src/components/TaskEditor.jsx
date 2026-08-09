@@ -43,11 +43,14 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
   // whatever the task already carries (empty stays empty).
   const [assignee, setAssignee] = useState(task ? (task.assignee || '') : (currentUser || ''));
   const [tags, setTags] = useState((task?.tags || []).join(', '));
-  // Relations reference other tasks by title (comma-separated); each field is
-  // autocompleted from the existing task titles.
-  const [dependsOn, setDependsOn] = useState(joinRels(task?.dependsOn));
-  const [blockedBy, setBlockedBy] = useState(joinRels(task?.blockedBy));
-  const [relatedTo, setRelatedTo] = useState(joinRels(task?.relatedTo));
+  // Relations are stored by stable ref (comma-free, rename-proof) but shown by
+  // title for readability: map the task's stored refs back to titles for the
+  // initial value, and resolve titles/refs back to refs on save.
+  const refToTitle = new Map((taskRefs || []).map(({ ref, title: t }) => [String(ref).toLowerCase(), t]));
+  const relInit = (arr) => joinRels((arr || []).map((v) => refToTitle.get(String(v).toLowerCase()) || v));
+  const [dependsOn, setDependsOn] = useState(relInit(task?.dependsOn));
+  const [blockedBy, setBlockedBy] = useState(relInit(task?.blockedBy));
+  const [relatedTo, setRelatedTo] = useState(relInit(task?.relatedTo));
   const [defaultExpanded, setDefaultExpanded] = useState(!!task?.defaultExpanded);
   const [steps, setSteps] = useState((task?.steps || []).map((s) => ({ text: s.text, checked: s.checked })));
   const [notes, setNotes] = useState(task?.notes || '');
@@ -79,10 +82,20 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
 
   const submit = () => {
     if (!title.trim()) { setErr('A title is required'); return; }
-    // A relation may be typed as a task title or a task ref; resolve refs back
-    // to the referenced task's title (relations are stored by title).
-    const refToTitle = new Map((taskRefs || []).map(({ ref, title: t }) => [String(ref).toLowerCase(), t]));
-    const parseRels = (v) => splitList(v).map((t) => refToTitle.get(t.toLowerCase()) || t);
+    // A relation may be typed as a task title or a task ref; store the stable
+    // ref (comma-free, rename-proof). Unmatched free text is kept as-is.
+    const refByLower = new Map();
+    const titleToRef = new Map();
+    for (const { ref, title: t } of (taskRefs || [])) {
+      refByLower.set(String(ref).toLowerCase(), ref);
+      const k = String(t).trim().toLowerCase();
+      if (!titleToRef.has(k)) titleToRef.set(k, ref);
+    }
+    const toRef = (v) => {
+      const k = v.trim().toLowerCase();
+      return refByLower.get(k) || titleToRef.get(k) || v.trim();
+    };
+    const parseRels = (v) => splitList(v).map(toRef);
     const spec = {
       title: title.trim(),
       column,
