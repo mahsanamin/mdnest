@@ -483,6 +483,17 @@
 .tb-card-head { display: flex; align-items: center; gap: 6px; cursor: grab; }
 .tb-card.dragging .tb-card-head, .tb-card-head:active { cursor: grabbing; }
 .tb-card-head .tb-card-text { flex: 1 1 auto; }
+.tb-ref {
+  flex: 0 0 auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  color: #6c7086;
+  background: #181825;
+  border: 1px solid #313244;
+  border-radius: 4px;
+  padding: 0 4px;
+  letter-spacing: 0.02em;
+}
 
 .tb-pri {
   flex: 0 0 auto;

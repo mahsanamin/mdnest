@@ -309,6 +309,46 @@ func TestRenderTaskBlock(t *testing.T) {
 	}
 }
 
+func TestNamespaceAcronym(t *testing.T) {
+	cases := map[string]string{
+		"mon-workspace-client":          "MWC",
+		"olivier.gintrand@forterro.com": "OGFC",
+		"brain":                         "BRA",
+		"a":                             "A",
+		"":                              "TSK",
+	}
+	for in, want := range cases {
+		if got := namespaceAcronym(in); got != want {
+			t.Errorf("namespaceAcronym(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestTaskRefRoundTripAndUniqueness(t *testing.T) {
+	b := defaultBoard()
+	// A ref renders as a bullet and parses back onto the task.
+	got := strings.Join(renderTaskBlock(b, taskSpec{Title: "T", Column: "todo", Ref: "OGF-a3f9x"}), "\n")
+	if !strings.Contains(got, "- ref: OGF-a3f9x") {
+		t.Fatalf("ref not rendered: %q", got)
+	}
+	tasks := parseNoteTasks("n.md", []byte(got+"\n"), b)
+	if len(tasks) != 1 || tasks[0].Ref != "OGF-a3f9x" {
+		t.Fatalf("ref round-trip failed: %+v", tasks)
+	}
+	// generateTaskRef uses the namespace acronym and avoids taken refs.
+	taken := map[string]bool{}
+	for i := 0; i < 200; i++ {
+		id := generateTaskRef("mon-workspace-client", taken)
+		if !strings.HasPrefix(id, "MWC-") {
+			t.Fatalf("ref %q missing acronym prefix", id)
+		}
+		if taken[id] {
+			t.Fatalf("generateTaskRef returned a taken id: %q", id)
+		}
+		taken[id] = true
+	}
+}
+
 func TestReplaceTaskBlock(t *testing.T) {
 	b := defaultBoard()
 	lines := []string{

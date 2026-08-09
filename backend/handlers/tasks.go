@@ -5,12 +5,14 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
+	"math/rand/v2"
 	"net/http"
 	"path"
 	"regexp"
 	"sort"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/mdnest/mdnest/backend/storage"
 )
@@ -96,6 +98,7 @@ type Step struct {
 // detail block (metadata bullets, nested step checkboxes and a description).
 type Task struct {
 	ID              string   `json:"id"`                  // content-stable id (path + title)
+	Ref             string   `json:"ref,omitempty"`       // stable human id (namespace acronym + suffix), persisted in the note
 	Namespace       string   `json:"namespace,omitempty"` // owning namespace (set in the global view)
 	Path            string   `json:"path"`                // note that owns the item
 	Line            int      `json:"line"`                // 1-based line of the checkbox
@@ -144,6 +147,7 @@ type taskMutation struct {
 // detail block (the board editor's payload). Column drives the checkbox + status.
 type taskSpec struct {
 	Title           string     `json:"title"`
+	Ref             string     `json:"ref"` // preserved on edit; generated when empty
 	Column          string     `json:"column"`
 	Due             string     `json:"due"`
 	Priority        string     `json:"priority"`
@@ -279,6 +283,93 @@ func resolveColumn(b BoardConfig, checked bool, rest string) string {
 func taskID(relPath, text string) string {
 	sum := sha1.Sum([]byte(relPath + "\x00" + text))
 	return hex.EncodeToString(sum[:])[:12]
+}
+
+// refSegRe splits a namespace into alphanumeric segments for the acronym.
+var refSegRe = regexp.MustCompile(`[^A-Za-z0-9]+`)
+
+// namespaceAcronym derives a short uppercase code from a namespace name: the
+// initial of each alphanumeric segment (e.g. "mon-workspace-client" -> "MWC",
+// "olivier.gintrand@forterro.com" -> "OGFC", capped at 4). A single-segment
+// name falls back to its first three letters ("brain" -> "BRA").
+func namespaceAcronym(ns string) string {
+	segs := refSegRe.Split(ns, -1)
+	var initials []rune
+	var first string
+	for _, s := range segs {
+		if s == "" {
+			continue
+		}
+		if first == "" {
+			first = s
+		}
+		initials = append(initials, unicode.ToUpper([]rune(s)[0]))
+	}
+	switch {
+	case len(initials) >= 2:
+		if len(initials) > 4 {
+			initials = initials[:4]
+		}
+		return string(initials)
+	case len(initials) == 1:
+		r := []rune(strings.ToUpper(first))
+		if len(r) > 3 {
+			r = r[:3]
+		}
+		return string(r)
+	default:
+		return "TSK"
+	}
+}
+
+// refSuffix returns an n-char lowercase base36 random string.
+func refSuffix(n int) string {
+	const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
+	b := make([]byte, n)
+	for i := range b {
+		b[i] = alphabet[rand.IntN(len(alphabet))]
+	}
+	return string(b)
+}
+
+// generateTaskRef builds a stable human id "<ACRONYM>-<suffix>" unique against
+// the supplied set of already-used refs (best-effort: the caller passes the
+// refs in the target note; the random suffix keeps it practically unique
+// beyond that).
+func generateTaskRef(ns string, taken map[string]bool) string {
+	prefix := namespaceAcronym(ns)
+	for i := 0; i < 20; i++ {
+		id := prefix + "-" + refSuffix(5)
+		if !taken[id] {
+			return id
+		}
+	}
+	return prefix + "-" + refSuffix(8)
+}
+
+// collectNoteRefs gathers the "- ref:" values already present in a note's lines,
+// so a freshly generated ref doesn't collide within the same note.
+func collectNoteRefs(lines []string) map[string]bool {
+	refs := map[string]bool{}
+	for _, l := range lines {
+		if m := metaLineRe.FindStringSubmatch(l); m != nil && strings.EqualFold(m[1], "ref") {
+			if v := strings.TrimSpace(m[2]); v != "" {
+				refs[v] = true
+			}
+		}
+	}
+	return refs
+}
+
+// cardRef returns the "- ref:" value in a task's detail block, or "".
+func cardRef(lines []string, cardIdx int) string {
+	start, end := detailBlockRange(lines, cardIdx)
+	for j := start; j < end; j++ {
+		if m := metaLineRe.FindStringSubmatch(lines[j]); m != nil && strings.EqualFold(m[1], "ref") {
+			return strings.TrimSpace(m[2])
+		}
+	}
+	return ""
 }
 
 // --- rich task parsing ------------------------------------------------------
@@ -469,6 +560,8 @@ func parseCard(fp string, lines []string, cardIdx int, checked bool, rest string
 			t.Workload = val
 		case "assignee":
 			t.Assignee = val
+		case "ref":
+			t.Ref = val
 		case "tags":
 			t.Tags = parseTagsList(val)
 		case "defaultexpanded":
@@ -652,6 +745,7 @@ func renderTaskBlock(b BoardConfig, s taskSpec) []string {
 			lines = append(lines, "  - "+k+": "+strings.TrimSpace(v))
 		}
 	}
+	add("ref", s.Ref)
 	add("status", status)
 	add("due", s.Due)
 	add("priority", s.Priority)
@@ -782,6 +876,10 @@ func (h *TaskHandler) create(w http.ResponseWriter, r *http.Request) {
 		lines = strings.Split(strings.TrimRight(string(data), "\n"), "\n")
 	}
 	cardIdx := len(lines)
+	// New tasks get a stable human ref (namespace acronym + unique suffix).
+	if strings.TrimSpace(req.taskSpec.Ref) == "" {
+		req.taskSpec.Ref = generateTaskRef(ns, collectNoteRefs(lines))
+	}
 	lines = append(lines, renderTaskBlock(board, req.taskSpec)...)
 	newData := []byte(strings.Join(lines, "\n") + "\n")
 	if err := h.store.WriteFile(ctx, ns, relPath, newData); err != nil {
@@ -998,6 +1096,15 @@ func (h *TaskHandler) mutate(w http.ResponseWriter, r *http.Request) {
 
 	board := h.loadBoard(ctx, ns)
 	if mut.Replace != nil {
+		// Preserve the task's stable ref across an edit, backfilling one for
+		// tasks created before refs existed.
+		if strings.TrimSpace(mut.Replace.Ref) == "" {
+			if ex := cardRef(lines, mut.Line-1); ex != "" {
+				mut.Replace.Ref = ex
+			} else {
+				mut.Replace.Ref = generateTaskRef(ns, collectNoteRefs(lines))
+			}
+		}
 		var ok2 bool
 		lines, ok2 = replaceTaskBlock(lines, mut.Line-1, board, *mut.Replace)
 		if !ok2 {

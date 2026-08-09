@@ -44,6 +44,7 @@ function TaskCard({ task, canWrite, onOpen, onToggleStep, onEdit }) {
       )}
       {/* The head is the drag handle; interactive controls below stop propagation. */}
       <div className="tb-card-head" {...(canWrite ? { ...attributes, ...listeners } : {})}>
+        {task.ref && <span className="tb-ref" title="Task id">{task.ref}</span>}
         {task.priority && (
           <span className={`tb-pri tb-pri-${String(task.priority).toLowerCase()}`}>{task.priority}</span>
         )}
