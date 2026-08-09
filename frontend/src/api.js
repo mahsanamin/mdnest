@@ -330,9 +330,11 @@ export async function getAllTasks() {
 }
 
 // Create a task by appending it to a note. `body` is { text, note?, column? };
-// when note is omitted the board's default note is used.
+// when note is omitted the board's default note is used. The note is also sent
+// as the `path` query param so the route's write-access check targets it.
 export async function createTask(ns, body) {
-  const res = await request(`/tasks?ns=${encodeURIComponent(ns)}`, {
+  const q = body?.note ? `&path=${encodeURIComponent(body.note)}` : '';
+  const res = await request(`/tasks?ns=${encodeURIComponent(ns)}${q}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),

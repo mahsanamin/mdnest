@@ -479,7 +479,16 @@ func main() {
 	} else {
 		taskNsFilter = func(_ *http.Request, namespaces []string) []string { return namespaces }
 	}
-	taskHandler := handlers.NewTaskHandler(stg, taskNsFilter)
+	// create writes to a note named in the request body, past the path-based
+	// route guard, so the handler re-checks write access on that real target.
+	// Multi mode uses per-user grants; single mode's one owner may write anywhere.
+	var taskCanWrite func(r *http.Request, ns, path string) bool
+	if perms != nil {
+		taskCanWrite = perms.CheckWrite
+	} else {
+		taskCanWrite = func(_ *http.Request, _, _ string) bool { return true }
+	}
+	taskHandler := handlers.NewTaskHandler(stg, taskNsFilter, taskCanWrite)
 	// API tokens live in Postgres in multi mode (shared across replicas, no
 	// ReadWriteMany secrets volume) and in the tokens.json file in single mode
 	// (no database dependency for a single-box install).

@@ -31,7 +31,7 @@ func TestHandleGlobalTasks(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Single-mode wiring: an explicit all-access pass-through.
-	h := NewTaskHandler(stg, func(_ *http.Request, names []string) []string { return names })
+	h := NewTaskHandler(stg, func(_ *http.Request, names []string) []string { return names }, func(_ *http.Request, _, _ string) bool { return true })
 
 	r := httptest.NewRequest(http.MethodGet, "/api/tasks/all", nil)
 	w := httptest.NewRecorder()
@@ -77,7 +77,7 @@ func TestHandleGlobalTasks_FilterEnforced(t *testing.T) {
 			}
 		}
 		return out
-	})
+	}, func(_ *http.Request, _, _ string) bool { return true })
 
 	r := httptest.NewRequest(http.MethodGet, "/api/tasks/all", nil)
 	w := httptest.NewRecorder()
@@ -104,7 +104,7 @@ func TestHandleGlobalTasks_NilFilterServesNothing(t *testing.T) {
 	writeNs(t, root, "team-a", "plan.md", "- [ ] Alpha\n")
 	writeNs(t, root, "secret", "s.md", "- [ ] Hidden\n")
 	stg, _ := storage.NewLocalStorage(root)
-	h := NewTaskHandler(stg, nil)
+	h := NewTaskHandler(stg, nil, func(_ *http.Request, _, _ string) bool { return true })
 
 	r := httptest.NewRequest(http.MethodGet, "/api/tasks/all", nil)
 	w := httptest.NewRecorder()

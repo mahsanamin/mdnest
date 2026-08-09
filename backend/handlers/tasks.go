@@ -42,6 +42,12 @@ type TaskHandler struct {
 	// (cross-namespace) task view enforces access solely through it, and
 	// treats a nil filter as deny-all so access can never be left unwired.
 	nsFilter func(r *http.Request, namespaces []string) []string
+	// canWrite reports whether the request's user may write the given
+	// namespace/path. create writes to a note named in the request body, which
+	// the path-based route middleware cannot see, so it re-checks the real
+	// target here. Supplied at construction (multi mode: perms.CheckWrite;
+	// single mode: pass-through). A nil checker fails closed.
+	canWrite func(r *http.Request, ns, path string) bool
 }
 
 // NewTaskHandler creates a task/board handler backed by the given storage.
@@ -50,8 +56,8 @@ type TaskHandler struct {
 // passes perms.FilterNamespaces; single mode passes an explicit pass-through
 // (the single user owns every namespace). A nil filter makes the global view
 // serve nothing rather than leak every namespace.
-func NewTaskHandler(store storage.Storage, nsFilter func(r *http.Request, namespaces []string) []string) *TaskHandler {
-	return &TaskHandler{store: store, nsFilter: nsFilter}
+func NewTaskHandler(store storage.Storage, nsFilter func(r *http.Request, namespaces []string) []string, canWrite func(r *http.Request, ns, path string) bool) *TaskHandler {
+	return &TaskHandler{store: store, nsFilter: nsFilter, canWrite: canWrite}
 }
 
 // BoardColumn is a single kanban column. Status is the value written to a task's
@@ -980,6 +986,13 @@ func (h *TaskHandler) create(w http.ResponseWriter, r *http.Request) {
 	relPath, ok := SafeRelPath(note)
 	if !ok {
 		http.Error(w, `{"error":"invalid note path"}`, http.StatusBadRequest)
+		return
+	}
+	// The route middleware authorized the query path, but the note target comes
+	// from the body — re-check write access on the actual note we're about to
+	// touch so a partial-write grant can't be aimed at another note.
+	if h.canWrite == nil || !h.canWrite(r, ns, relPath) {
+		http.Error(w, `{"error":"access denied"}`, http.StatusForbidden)
 		return
 	}
 	// Append the rendered task, creating the note if it does not exist yet.
