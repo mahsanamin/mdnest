@@ -10,6 +10,7 @@ import {
 } from '@dnd-kit/core';
 import { getTasks, patchTask, saveBoard, createTask, getNamespaceUsers, getAllTasks, deleteTask } from '../api';
 import { matchesTaskFilters } from '../taskFilters';
+import { buildRelationLookup, resolveTask } from '../relations';
 import BoardColumnsEditor from './BoardColumnsEditor';
 import TaskEditor from './TaskEditor';
 import './TaskBoard.css';
@@ -469,28 +470,14 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
     for (const t of tasks) if (t.text) s.add(t.text);
     return [...s].sort((a, b) => a.localeCompare(b));
   }, [tasks]);
-  const taskByTitle = useMemo(() => {
-    const m = new Map();
-    for (const t of tasks) {
-      const k = (t.text || '').trim().toLowerCase();
-      if (k && !m.has(k)) m.set(k, t);
-    }
-    return m;
-  }, [tasks]);
-  const taskByRef = useMemo(() => {
-    const m = new Map();
-    for (const t of tasks) {
-      const k = (t.ref || '').trim().toLowerCase();
-      if (k && !m.has(k)) m.set(k, t);
-    }
-    return m;
-  }, [tasks]);
+
   // Relations are stored by stable ref; resolve by ref first, then fall back to
   // title so notes written before the switch still light up.
-  const resolveRelation = useCallback((value) => {
-    const k = String(value || '').trim().toLowerCase();
-    return taskByRef.get(k) || taskByTitle.get(k) || null;
-  }, [taskByRef, taskByTitle]);
+  const relationLookup = useMemo(
+    () => buildRelationLookup(tasks.map((t) => ({ ref: t.ref, title: t.text, task: t }))),
+    [tasks],
+  );
+  const resolveRelation = useCallback((value) => resolveTask(relationLookup, value), [relationLookup]);
   // {ref, title} pairs so the relations editor can search/pick a task by its
   // stable ref or its title, then store the ref (comma-free, rename-proof).
   const taskRefs = useMemo(() => {

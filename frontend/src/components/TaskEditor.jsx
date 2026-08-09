@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import './TaskBoard.css';
+import { buildRelationLookup, toRef, relLabel, isKnownOption } from '../relations';
 
 // RelationField edits one relation kind (depends-on / blocked-by / related-to)
 // as a list of removable chips plus an add-input: picking a datalist suggestion
@@ -87,30 +88,14 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
   // Relation lookup: resolve an entered title/ref to a stable ref, back to a
   // title for the chip label, and tell whether a typed value matches a known
   // task (so a datalist pick auto-commits).
-  const relMaps = useMemo(() => {
-    const refToTitle = new Map();
-    const refByLower = new Map();
-    const titleToRef = new Map();
-    const optionSet = new Set();
-    for (const { ref, title: t } of (taskRefs || [])) {
-      const rl = String(ref).toLowerCase();
-      refToTitle.set(rl, t);
-      refByLower.set(rl, ref);
-      optionSet.add(rl);
-      const tl = String(t).trim().toLowerCase();
-      if (!titleToRef.has(tl)) titleToRef.set(tl, ref);
-      optionSet.add(tl);
-    }
-    for (const t of (taskTitles || [])) optionSet.add(String(t).trim().toLowerCase());
-    return { refToTitle, refByLower, titleToRef, optionSet };
-  }, [taskRefs, taskTitles]);
-  const toRef = (v) => {
-    const k = String(v).trim().toLowerCase();
-    return relMaps.refByLower.get(k) || relMaps.titleToRef.get(k) || String(v).trim();
-  };
-  const relLabel = (v) => relMaps.refToTitle.get(String(v).toLowerCase()) || v;
-  const isOption = (v) => relMaps.optionSet.has(String(v).trim().toLowerCase());
-  const addRel = (setter) => (raw) => { const tok = toRef(raw); setter((cur) => (cur.includes(tok) ? cur : [...cur, tok])); };
+  const relLookup = useMemo(() => buildRelationLookup([
+    ...(taskRefs || []).map(({ ref, title: t }) => ({ ref, title: t })),
+    ...(taskTitles || []).map((t) => ({ title: t })),
+  ]), [taskRefs, taskTitles]);
+  const resolveRef = (v) => toRef(relLookup, v);
+  const relationLabel = (v) => relLabel(relLookup, v);
+  const isOption = (v) => isKnownOption(relLookup, v);
+  const addRel = (setter) => (raw) => { const tok = resolveRef(raw); setter((cur) => (cur.includes(tok) ? cur : [...cur, tok])); };
   const removeRel = (setter) => (i) => setter((cur) => cur.filter((_, j) => j !== i));
 
   const submit = () => {
@@ -123,9 +108,9 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
       workload: workload.trim(),
       assignee: assignee.trim(),
       tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
-      dependsOn: dependsOn.map(toRef),
-      blockedBy: blockedBy.map(toRef),
-      relatedTo: relatedTo.map(toRef),
+      dependsOn: dependsOn.map(resolveRef),
+      blockedBy: blockedBy.map(resolveRef),
+      relatedTo: relatedTo.map(resolveRef),
       defaultExpanded,
       steps: steps.map((s) => ({ text: s.text.trim(), checked: !!s.checked })).filter((s) => s.text),
       notes: notes.replace(/\s+$/, ''),
@@ -217,11 +202,11 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
           </datalist>
           <div className="tb-editor-rels">
             <RelationField icon="⬆" label="Depends on" values={dependsOn} listId="tb-editor-tasks"
-              isOption={isOption} labelFor={relLabel} onAdd={addRel(setDependsOn)} onRemove={removeRel(setDependsOn)} />
+              isOption={isOption} labelFor={relationLabel} onAdd={addRel(setDependsOn)} onRemove={removeRel(setDependsOn)} />
             <RelationField icon="⛔" label="Blocked by" values={blockedBy} listId="tb-editor-tasks"
-              isOption={isOption} labelFor={relLabel} onAdd={addRel(setBlockedBy)} onRemove={removeRel(setBlockedBy)} />
+              isOption={isOption} labelFor={relationLabel} onAdd={addRel(setBlockedBy)} onRemove={removeRel(setBlockedBy)} />
             <RelationField icon="🔗" label="Related to" values={relatedTo} listId="tb-editor-tasks"
-              isOption={isOption} labelFor={relLabel} onAdd={addRel(setRelatedTo)} onRemove={removeRel(setRelatedTo)} />
+              isOption={isOption} labelFor={relationLabel} onAdd={addRel(setRelatedTo)} onRemove={removeRel(setRelatedTo)} />
           </div>
         </div>
 
