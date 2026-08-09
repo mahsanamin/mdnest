@@ -429,23 +429,69 @@ func stripIndent(line string, n int) string {
 
 // parseTagsList parses `[a, b, c]` (or a bare comma list) into trimmed tags.
 // It tolerates markdown-escaped brackets (`\[a, b\]`), which the WYSIWYG editor
-// writes when tags are typed there, and strips any stray brackets left on an
-// individual tag by malformed input — so a value never surfaces as "\[ui".
+// writes when tags are typed there, and honors double-quoted segments so a
+// value containing a comma (e.g. a task title referenced by a relation) is kept
+// whole instead of being split into several.
 func parseTagsList(val string) []string {
 	val = strings.TrimSpace(val)
 	val = strings.ReplaceAll(val, "\\[", "[")
 	val = strings.ReplaceAll(val, "\\]", "]")
 	val = strings.TrimPrefix(val, "[")
 	val = strings.TrimSuffix(val, "]")
+	return splitList(val)
+}
+
+// splitList splits a comma-separated list, keeping double-quoted segments intact
+// (so a value with a comma survives) and unescaping \" inside quotes.
+func splitList(s string) []string {
 	var out []string
-	for _, p := range strings.Split(val, ",") {
-		s := strings.TrimSpace(p)
-		s = strings.TrimSpace(strings.Trim(s, "[]"))
-		if s != "" {
-			out = append(out, s)
+	var buf strings.Builder
+	inQuote, escaped := false, false
+	flush := func() {
+		v := strings.TrimSpace(buf.String())
+		v = strings.TrimSpace(strings.Trim(v, "[]"))
+		if v != "" {
+			out = append(out, v)
+		}
+		buf.Reset()
+	}
+	for _, r := range s {
+		switch {
+		case escaped:
+			buf.WriteRune(r)
+			escaped = false
+		case inQuote && r == '\\':
+			escaped = true
+		case r == '"':
+			inQuote = !inQuote
+		case r == ',' && !inQuote:
+			flush()
+		default:
+			buf.WriteRune(r)
 		}
 	}
+	flush()
 	return out
+}
+
+// quoteListValue wraps a value in double quotes when it contains a comma or a
+// quote, so a comma inside (e.g. a task title) can't be read as a separator.
+func quoteListValue(v string) string {
+	if strings.ContainsAny(v, ",\"") {
+		return `"` + strings.ReplaceAll(v, `"`, `\"`) + `"`
+	}
+	return v
+}
+
+// joinListValues renders values as a comma-separated list, quoting as needed.
+func joinListValues(vals []string) string {
+	parts := make([]string, 0, len(vals))
+	for _, v := range vals {
+		if v = strings.TrimSpace(v); v != "" {
+			parts = append(parts, quoteListValue(v))
+		}
+	}
+	return strings.Join(parts, ", ")
 }
 
 // detailBlockRange returns [start,end) line indices of the indented detail block
@@ -770,17 +816,11 @@ func renderTaskBlock(b BoardConfig, s taskSpec) []string {
 		}
 	}
 	if len(tags) > 0 {
-		lines = append(lines, "  - tags: ["+strings.Join(tags, ", ")+"]")
+		lines = append(lines, "  - tags: ["+joinListValues(tags)+"]")
 	}
 	addList := func(k string, vals []string) {
-		var out []string
-		for _, v := range vals {
-			if v = strings.TrimSpace(v); v != "" {
-				out = append(out, v)
-			}
-		}
-		if len(out) > 0 {
-			lines = append(lines, "  - "+k+": ["+strings.Join(out, ", ")+"]")
+		if joined := joinListValues(vals); joined != "" {
+			lines = append(lines, "  - "+k+": ["+joined+"]")
 		}
 	}
 	addList("depends-on", s.DependsOn)

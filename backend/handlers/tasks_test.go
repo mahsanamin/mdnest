@@ -374,6 +374,23 @@ func TestRemoveTaskViaDetailBlock(t *testing.T) {
 	}
 }
 
+func TestRelationWithCommaInTitle(t *testing.T) {
+	b := defaultBoard()
+	s := taskSpec{Title: "T", Column: "todo", DependsOn: []string{"Design, ship it", "Other"}}
+	got := strings.Join(renderTaskBlock(b, s), "\n")
+	if !strings.Contains(got, `- depends-on: ["Design, ship it", Other]`) {
+		t.Fatalf("comma value not quoted on render: %q", got)
+	}
+	tasks := parseNoteTasks("n.md", []byte(got+"\n"), b)
+	if len(tasks) != 1 {
+		t.Fatalf("want 1 task, got %d", len(tasks))
+	}
+	dep := tasks[0].DependsOn
+	if len(dep) != 2 || dep[0] != "Design, ship it" || dep[1] != "Other" {
+		t.Fatalf("comma-in-title relation not preserved: %#v", dep)
+	}
+}
+
 func TestReplaceTaskBlock(t *testing.T) {
 	b := defaultBoard()
 	lines := []string{

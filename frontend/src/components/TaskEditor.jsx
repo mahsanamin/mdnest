@@ -1,6 +1,31 @@
 import { useMemo, useState } from 'react';
 import './TaskBoard.css';
 
+// splitList splits a comma list while keeping double-quoted segments whole, so a
+// task title containing a comma survives as a single relation entry.
+function splitList(str) {
+  const out = [];
+  let buf = '', inQuote = false, escaped = false;
+  for (const ch of str) {
+    if (escaped) { buf += ch; escaped = false; continue; }
+    if (inQuote && ch === '\\') { escaped = true; continue; }
+    if (ch === '"') { inQuote = !inQuote; continue; }
+    if (ch === ',' && !inQuote) { const v = buf.trim(); if (v) out.push(v); buf = ''; continue; }
+    buf += ch;
+  }
+  const v = buf.trim();
+  if (v) out.push(v);
+  return out;
+}
+
+// quoteValue wraps a value in quotes when it holds a comma or quote, so the
+// comma can't be read as a list separator.
+function quoteValue(v) {
+  return /[",]/.test(v) ? `"${v.replace(/"/g, '\\"')}"` : v;
+}
+
+const joinRels = (arr) => (arr || []).map(quoteValue).join(', ');
+
 // TaskEditor is the full create/edit form for a task and its detail block
 // (status/column, due, priority, workload, assignee, tags, steps, notes). It
 // emits a spec the backend renders to markdown, so the note stays the source of
@@ -20,9 +45,9 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
   const [tags, setTags] = useState((task?.tags || []).join(', '));
   // Relations reference other tasks by title (comma-separated); each field is
   // autocompleted from the existing task titles.
-  const [dependsOn, setDependsOn] = useState((task?.dependsOn || []).join(', '));
-  const [blockedBy, setBlockedBy] = useState((task?.blockedBy || []).join(', '));
-  const [relatedTo, setRelatedTo] = useState((task?.relatedTo || []).join(', '));
+  const [dependsOn, setDependsOn] = useState(joinRels(task?.dependsOn));
+  const [blockedBy, setBlockedBy] = useState(joinRels(task?.blockedBy));
+  const [relatedTo, setRelatedTo] = useState(joinRels(task?.relatedTo));
   const [defaultExpanded, setDefaultExpanded] = useState(!!task?.defaultExpanded);
   const [steps, setSteps] = useState((task?.steps || []).map((s) => ({ text: s.text, checked: s.checked })));
   const [notes, setNotes] = useState(task?.notes || '');
@@ -57,7 +82,7 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
     // A relation may be typed as a task title or a task ref; resolve refs back
     // to the referenced task's title (relations are stored by title).
     const refToTitle = new Map((taskRefs || []).map(({ ref, title: t }) => [String(ref).toLowerCase(), t]));
-    const parseRels = (v) => v.split(',').map((t) => t.trim()).filter(Boolean).map((t) => refToTitle.get(t.toLowerCase()) || t);
+    const parseRels = (v) => splitList(v).map((t) => refToTitle.get(t.toLowerCase()) || t);
     const spec = {
       title: title.trim(),
       column,
@@ -155,8 +180,8 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
 
         <div className="tb-modal-field">Relations
           <datalist id="tb-editor-tasks">
-            {(taskTitles || []).map((t) => <option key={t} value={t} />)}
-            {(taskRefs || []).map(({ ref, title: t }) => <option key={'r-' + ref} value={ref}>{t}</option>)}
+            {(taskTitles || []).map((t) => <option key={t} value={quoteValue(t)} />)}
+            {(taskRefs || []).map(({ ref, title: t }) => <option key={'r-' + ref} value={quoteValue(ref)}>{t}</option>)}
           </datalist>
           <div className="tb-editor-rels">
             <label className="tb-editor-rel">⬆ Depends on
