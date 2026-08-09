@@ -866,7 +866,8 @@ function App() {
   }, [getScrollables, getFilePrefs]);
 
   const openNoteDirect = useCallback(async (ns, path) => {
-    setShowTaskBoard(false);
+    // Board stays open across note navigation so the chosen view persists; the
+    // board's own "open source note" action closes it explicitly.
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
     try {
       const { text, etag } = await getNote(ns, path);
@@ -885,8 +886,8 @@ function App() {
 
   const handleSelectNs = useCallback((ns) => {
     // Keep the task board open when switching workspace so the chosen view is
-    // preserved — it re-scopes to the new namespace. Opening a note still
-    // leaves the board (see openNote/openNoteDirect).
+    // preserved — it re-scopes to the new namespace. Note navigation keeps it
+    // open too (see openNote/openNoteDirect).
     setSelectedNs(ns);
     // Restore the last file the user had open in the namespace they're
     // switching TO. If they've never opened anything there (or whatever
@@ -913,7 +914,8 @@ function App() {
 
   const openNote = useCallback(async (path) => {
     if (!selectedNs) return;
-    setShowTaskBoard(false);
+    // Board stays open across note navigation so the chosen view persists; the
+    // board's own "open source note" action closes it explicitly.
     // Clear any pending save timer from the previous file
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
     try {
