@@ -76,3 +76,30 @@ func TestMutate_AllowsClosingWhenSubtasksResolved(t *testing.T) {
 		t.Fatalf("close parent: status = %d, want 200; body = %s", w.Code, w.Body.String())
 	}
 }
+
+// Saving an edit (Replace) that lands the task in a Done column is blocked while
+// the incoming step set still has an open sub-task.
+func TestMutate_BlocksClosingViaEditorSave(t *testing.T) {
+	root := t.TempDir()
+	writeNs(t, root, "team", "n.md", "- [ ] Parent\n  - steps:\n    - [ ] one\n")
+	stg, _ := storage.NewLocalStorage(root)
+	h := newRWTaskHandler(stg)
+
+	// Editor save into the Done column with one step still open -> rejected.
+	body := `{"line":1,"raw":"- [ ] Parent","replace":{"title":"Parent","column":"done","steps":[{"text":"one","checked":false}]}}`
+	r := httptest.NewRequest(http.MethodPatch, "/api/tasks?ns=team&path=n.md", bytes.NewBufferString(body))
+	w := httptest.NewRecorder()
+	h.HandleTasks(w, r)
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("editor close: status = %d, want 422; body = %s", w.Code, w.Body.String())
+	}
+
+	// Same save with the step resolved -> allowed.
+	body = `{"line":1,"raw":"- [ ] Parent","replace":{"title":"Parent","column":"done","steps":[{"text":"one","checked":true}]}}`
+	r = httptest.NewRequest(http.MethodPatch, "/api/tasks?ns=team&path=n.md", bytes.NewBufferString(body))
+	w = httptest.NewRecorder()
+	h.HandleTasks(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("editor close resolved: status = %d, want 200; body = %s", w.Code, w.Body.String())
+	}
+}

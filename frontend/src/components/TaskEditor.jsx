@@ -115,7 +115,7 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
       steps: steps.map((s) => ({ text: s.text.trim(), checked: !!s.checked })).filter((s) => s.text),
       notes: notes.replace(/\s+$/, ''),
     };
-    onSave(spec, isNew ? note.trim() : task.path);
+    Promise.resolve(onSave(spec, isNew ? note.trim() : task.path)).catch((e) => setErr(e?.message || 'Failed to save task'));
   };
 
   return (

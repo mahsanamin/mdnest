@@ -540,17 +540,32 @@ func (h *TaskHandler) mutate(w http.ResponseWriter, r *http.Request) {
 
 	board := h.loadBoard(ctx, ns)
 	// Block closing a task while it still has unresolved sub-tasks. Closing is
-	// either checking it done or moving it to a Done column.
-	closing := mut.Checked != nil && *mut.Checked
-	if !closing && mut.ToColumn != "" {
+	// checking it done, moving it to a Done column (drag), or saving an edit
+	// into a Done column. An editor save carries its own (possibly changed)
+	// step set, so it is checked against the incoming spec rather than the note.
+	isDoneCol := func(id string) bool {
 		for _, c := range board.Columns {
-			if c.ID == mut.ToColumn && c.Done {
-				closing = true
-				break
+			if c.ID == id && c.Done {
+				return true
 			}
 		}
+		return false
 	}
-	if closing && hasUnresolvedSteps(lines, mut.Line-1) {
+	blocked := false
+	if mut.Replace != nil {
+		if isDoneCol(mut.Replace.Column) {
+			for _, st := range mut.Replace.Steps {
+				if !st.Checked {
+					blocked = true
+					break
+				}
+			}
+		}
+	} else {
+		closing := (mut.Checked != nil && *mut.Checked) || (mut.ToColumn != "" && isDoneCol(mut.ToColumn))
+		blocked = closing && hasUnresolvedSteps(lines, mut.Line-1)
+	}
+	if blocked {
 		http.Error(w, `{"error":"resolve all sub-tasks before closing this task"}`, http.StatusUnprocessableEntity)
 		return
 	}

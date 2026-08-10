@@ -201,7 +201,8 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
       }
     } catch (e) {
       if (e.status === 409) { await reload(); return; }
-      setError(e.message); await reload();
+      await reload();
+      setError(e.message);
     }
   }, [ns, reload]);
 
@@ -232,7 +233,8 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
       await reload();
     } catch (e) {
       if (e.status === 409) { setEditorOpen(false); await reload(); return; }
-      setError(e.message);
+      // Surface the message in the editor (e.g. blocked close) by rethrowing.
+      throw e;
     }
   }, [ns, editorTask, reload]);
 
@@ -258,8 +260,9 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
       applyUpdated(key, updated);
     } catch (e) {
       if (e.status === 409) { await reload(); return; }
-      setError(e.message);
+      // reload reverts the optimistic move and clears error, so set it after.
       await reload();
+      setError(e.message);
     }
   }, [ns, applyUpdated, reload]);
 
