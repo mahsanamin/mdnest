@@ -12,6 +12,23 @@ export function isExcalidrawDoc(path) {
   return p.endsWith('.excalidraw.md') || p.endsWith('.excalidraw');
 }
 
+// noteRelativePath resolves a note-relative href (e.g. a drawing embed target)
+// to a namespace-relative path usable with getNote — independent of the
+// file-serving baseDir the <img> renderer uses. A leading slash is treated as
+// the namespace root.
+export function noteRelativePath(notePath, href) {
+  if (!href) return '';
+  if (href.startsWith('/')) return href.replace(/^\/+/, '');
+  const dir = notePath && notePath.includes('/') ? notePath.slice(0, notePath.lastIndexOf('/') + 1) : '';
+  const out = [];
+  for (const seg of (dir + href).split('/')) {
+    if (seg === '' || seg === '.') continue;
+    if (seg === '..') out.pop();
+    else out.push(seg);
+  }
+  return out.join('/');
+}
+
 // Keep only the appState fields that are safe and stable to persist; the rest
 // (selection, collaborators, transient UI) would churn the file on every edit.
 function stableAppState(appState) {
