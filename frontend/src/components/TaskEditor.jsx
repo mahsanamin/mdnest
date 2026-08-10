@@ -122,7 +122,6 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
     <div className="tb-modal-backdrop" onClick={onCancel}>
       <div className="tb-modal tb-editor" onClick={(e) => e.stopPropagation()}>
         <h3>{isNew ? 'New task' : 'Edit task'}</h3>
-        {err && <div className="tb-error">{err}</div>}
 
         <label className="tb-modal-field">Title
           <input className="tb-col-title" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} />
@@ -227,6 +226,7 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
           <textarea rows={4} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </label>
 
+        {err && <div className="tb-error">{err}</div>}
         <div className="tb-modal-actions">
           <button onClick={onCancel}>Cancel</button>
           <button className="primary" onClick={submit}>{isNew ? 'Create' : 'Save'}</button>

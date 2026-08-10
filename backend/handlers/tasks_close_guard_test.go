@@ -103,3 +103,23 @@ func TestMutate_BlocksClosingViaEditorSave(t *testing.T) {
 		t.Fatalf("editor close resolved: status = %d, want 200; body = %s", w.Code, w.Body.String())
 	}
 }
+
+// Dragging (in the global view) onto a column the task's own board doesn't have
+// returns a clear message rather than the cryptic "unknown column or not a task".
+func TestMutate_UnknownColumnGivesClearMessage(t *testing.T) {
+	root := t.TempDir()
+	writeNs(t, root, "team", "n.md", "- [ ] Solo\n")
+	stg, _ := storage.NewLocalStorage(root)
+	h := newRWTaskHandler(stg)
+
+	body := `{"line":1,"raw":"- [ ] Solo","toColumn":"col-does-not-exist"}`
+	r := httptest.NewRequest(http.MethodPatch, "/api/tasks?ns=team&path=n.md", bytes.NewBufferString(body))
+	w := httptest.NewRecorder()
+	h.HandleTasks(w, r)
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422; body = %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "this task's board") {
+		t.Fatalf("message not coherent: %s", w.Body.String())
+	}
+}

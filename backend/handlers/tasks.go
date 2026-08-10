@@ -586,10 +586,24 @@ func (h *TaskHandler) mutate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else if mut.ToColumn != "" {
+		// In the global view the board is a union of every namespace's columns,
+		// so a card may be dropped on a column absent from its own board. Say so
+		// clearly instead of the cryptic "unknown column or not a task".
+		known := false
+		for _, c := range board.Columns {
+			if c.ID == mut.ToColumn {
+				known = true
+				break
+			}
+		}
+		if !known {
+			http.Error(w, `{"error":"that column isn't part of this task's board"}`, http.StatusUnprocessableEntity)
+			return
+		}
 		var ok2 bool
 		lines, ok2 = applyColumnRich(lines, mut.Line-1, board, mut.ToColumn)
 		if !ok2 {
-			http.Error(w, `{"error":"unknown column or not a task"}`, http.StatusBadRequest)
+			http.Error(w, `{"error":"not a task"}`, http.StatusBadRequest)
 			return
 		}
 	} else if mut.SetField != nil {
