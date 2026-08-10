@@ -1,6 +1,6 @@
 # mdnest
 
-![Version: 0.3.0](https://img.shields.io/badge/Version-0.3.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 4.1.0](https://img.shields.io/badge/AppVersion-4.1.0-informational?style=flat-square)
+![Version: 0.3.1](https://img.shields.io/badge/Version-0.3.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 4.1.4-dev](https://img.shields.io/badge/AppVersion-4.1.4--dev-informational?style=flat-square)
 
 mdnest — self-hosted Markdown knowledge base with live collaboration.
 Standard-Kubernetes chart (no CRDs). PostgreSQL and Redis are expected to be
@@ -263,6 +263,9 @@ All traffic goes to the frontend Service, which proxies `/api` and `/api/ws` (We
 | collab.redis.username | string | `"default"` | Redis username (compose mode). |
 | commonAnnotations | object | `{}` | Annotations added to every resource created by the chart. |
 | commonLabels | object | `{}` | Labels added to every resource created by the chart. |
+| excalidraw | object | `{"enabled":false,"libraries":[]}` | --------------------------------------------------------------------------- |
+| excalidraw.enabled | bool | `false` | Enable the Excalidraw drawing editor (`ENABLE_EXCALIDRAW`). Off by default; when off `.excalidraw.md` files open as plain text and the (large) editor chunk is never loaded. |
+| excalidraw.libraries | list | `[]` | Operator-provided default Excalidraw libraries (`EXCALIDRAW_LIBRARIES`): a list of URLs to `.excalidrawlib` files, preloaded into every drawing so an organisation can ship a shared shape set. The URLs must be reachable by the browser (CORS-enabled or same-origin). |
 | frontend | object | `{"affinity":{},"env":[],"nodeSelector":{},"podAnnotations":{},"podLabels":{},"podSecurityContext":{},"replicaCount":1,"resources":{"limits":{"memory":"128Mi"},"requests":{"cpu":"10m","memory":"16Mi"}},"securityContext":{},"service":{"port":80,"type":"ClusterIP"},"tolerations":[],"wsTimeoutSeconds":86400}` | --------------------------------------------------------------------------- |
 | frontend.affinity | object | `{}` | Affinity rules for the frontend. |
 | frontend.env | list | `[]` | Extra nginx env vars. Set `NGINX_ENTRYPOINT_WORKER_PROCESSES_AUTOTUNE=1` with a CPU limit to avoid nginx spawning one worker per host CPU (OOM risk). |

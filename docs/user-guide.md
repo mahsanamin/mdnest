@@ -376,6 +376,10 @@ Checkboxes are also the atoms of the **[Task Board](#task-board)**: any checkbox
 > drafted the idea in is the deck you present from. Also opt-in
 > (`ENABLE_MARP=true`); notes without `marp: true` are unaffected.
 
+> Drawings: a `.excalidraw.md` note opens on a full Excalidraw canvas, and any
+> note can embed one read-only with `![alt](path.excalidraw.md)`. Opt-in
+> (`ENABLE_EXCALIDRAW=true`); see [Excalidraw](excalidraw.md).
+
 > Opt-in: the board appears only when the operator sets `ENABLE_TASK_BOARD=true`
 > (see [setup](setup.md)). If you don't see the board button, that's why.
 
