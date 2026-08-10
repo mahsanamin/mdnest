@@ -291,6 +291,8 @@ marp:
 excalidraw:
   # -- Enable the Excalidraw drawing editor (`ENABLE_EXCALIDRAW`). Off by default; when off `.excalidraw.md` files open as plain text and the (large) editor chunk is never loaded.
   enabled: false
+  # -- Operator-provided default Excalidraw libraries (`EXCALIDRAW_LIBRARIES`): a list of URLs to `.excalidrawlib` files, preloaded into every drawing so an organisation can ship a shared shape set. The URLs must be reachable by the browser (CORS-enabled or same-origin).
+  libraries: []
 
 # -----------------------------------------------------------------------------
 # SSO / OIDC (optional). Only rendered when sso.enabled=true.

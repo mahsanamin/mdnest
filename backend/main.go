@@ -562,6 +562,17 @@ func main() {
 	configHandler.SetMarp(enableMarp)
 	configHandler.SetMarpThemes(enableMarpThemes)
 	configHandler.SetExcalidraw(enableExcalidraw)
+	if enableExcalidraw {
+		// Operator-provided default Excalidraw libraries: comma-separated URLs to
+		// .excalidrawlib files preloaded into every drawing (org shape set).
+		var excalidrawLibs []string
+		for _, u := range strings.Split(env("EXCALIDRAW_LIBRARIES", ""), ",") {
+			if u = strings.TrimSpace(u); u != "" {
+				excalidrawLibs = append(excalidrawLibs, u)
+			}
+		}
+		configHandler.SetExcalidrawLibraries(excalidrawLibs)
+	}
 
 	// Update-availability check — opt out by setting DISABLE_UPDATE_CHECK=true.
 	// One HTTPS GET to api.github.com per server every hour; failures are

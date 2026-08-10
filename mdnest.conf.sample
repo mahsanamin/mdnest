@@ -100,6 +100,12 @@ GIT_AUTHOR_EMAIL=you@example.com
 # never loads the (large) Excalidraw chunk.
 # ENABLE_EXCALIDRAW=false
 
+# Operator-provided default Excalidraw libraries (requires ENABLE_EXCALIDRAW).
+# Comma-separated URLs to .excalidrawlib files, preloaded into every drawing so
+# an organisation can ship a shared shape set. The URLs must be reachable by
+# the browser (CORS-enabled or same-origin).
+# EXCALIDRAW_LIBRARIES=
+
 # ==========================================================================
 # Federated identity via Firebase (optional, requires AUTH_MODE=multi)
 # ==========================================================================

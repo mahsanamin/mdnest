@@ -35,6 +35,7 @@ type ConfigHandler struct {
 	marp            bool                   // ENABLE_MARP is on — the frontend may render Marp-format notes as a slide deck (loads its chunk)
 	marpThemes      bool                   // ENABLE_MARP_THEMES is on — the centralized theme catalog + admin editor are available
 	excalidraw      bool                   // ENABLE_EXCALIDRAW is on — the frontend may open .excalidraw.md files in the drawing editor (loads its chunk)
+	excalidrawLibs  []string               // EXCALIDRAW_LIBRARIES — operator-provided .excalidrawlib URLs preloaded into every drawing
 	updateChecker   *updates.Checker       // optional — polls GitHub releases so the frontend can hint when a newer mdnest is available
 }
 
@@ -115,6 +116,13 @@ func (h *ConfigHandler) SetExcalidraw(enabled bool) {
 	h.excalidraw = enabled
 }
 
+// SetExcalidrawLibraries sets the operator-provided default Excalidraw library
+// URLs (.excalidrawlib) the frontend preloads into every drawing, so an
+// organisation can ship a shared shape set. Ignored unless Excalidraw is on.
+func (h *ConfigHandler) SetExcalidrawLibraries(urls []string) {
+	h.excalidrawLibs = urls
+}
+
 // SetUpdateChecker wires in the GitHub-release poller. When set, /api/config
 // includes a latestRelease object (once the first poll has succeeded) so the
 // frontend can hint that a newer mdnest version is available.
@@ -163,6 +171,9 @@ func (h *ConfigHandler) HandleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.excalidraw {
 		resp["excalidraw"] = true
+		if len(h.excalidrawLibs) > 0 {
+			resp["excalidrawLibraries"] = h.excalidrawLibs
+		}
 	}
 	if h.updateChecker != nil {
 		s := h.updateChecker.Status()

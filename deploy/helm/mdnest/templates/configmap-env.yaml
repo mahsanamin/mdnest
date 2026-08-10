@@ -47,6 +47,7 @@ data:
   ENABLE_MARP: {{ .Values.marp.enabled | ternary "true" "false" | quote }}
   ENABLE_MARP_THEMES: {{ .Values.marp.themes.enabled | ternary "true" "false" | quote }}
   ENABLE_EXCALIDRAW: {{ .Values.excalidraw.enabled | ternary "true" "false" | quote }}
+  EXCALIDRAW_LIBRARIES: {{ .Values.excalidraw.libraries | default list | join "," | quote }}
   {{- if eq .Values.auth.mode "multi" }}
   ENABLE_LIVE_COLLAB: {{ .Values.collab.enabled | ternary "true" "false" | quote }}
   POSTGRES_HOST: {{ required "postgres.host is required when auth.mode=multi" .Values.postgres.host | quote }}
