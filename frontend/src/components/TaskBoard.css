@@ -530,9 +530,10 @@
 .tb-link-btn:hover { text-decoration: underline; }
 
 /* --- rich task card --------------------------------------------------- */
-.tb-card-head { display: flex; align-items: center; gap: 6px; cursor: grab; }
+.tb-card-head { display: flex; flex-direction: column; align-items: stretch; gap: 4px; cursor: grab; }
 .tb-card.dragging .tb-card-head, .tb-card-head:active { cursor: grabbing; }
-.tb-card-head .tb-card-text { flex: 1 1 auto; }
+.tb-card-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.tb-card-head .tb-card-text { width: 100%; }
 .tb-ref {
   flex: 0 0 auto;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
