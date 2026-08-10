@@ -27,20 +27,39 @@ describe('excalidraw round-trip', () => {
     expect(md).toContain('excalidraw-plugin: parsed');
     expect(md).toContain('## Text Elements');
     expect(md).toContain('Hello, world ^t1'); // live text mirrored + searchable
-    expect(md).not.toContain('gone ^t2'); // deleted text isn't listed as searchable
+    expect(md).not.toContain('gone'); // deleted elements are stripped entirely
     expect(md).toContain('## Drawing');
     expect(md).toContain('```json');
   });
 
-  it('parses back the elements, keeping only stable appState fields', () => {
+  it('parses back only the live elements (deleted are stripped)', () => {
     const md = serializeExcalidraw(scene);
     const back = parseExcalidraw(md);
-    expect(back.elements).toHaveLength(3);
+    expect(back.elements).toHaveLength(2);
+    expect(back.elements.map((e) => e.id)).toEqual(['a1', 't1']);
     expect(back.elements[1].text).toBe('Hello, world');
     // transient appState (selection) is not persisted
     expect(back.appState.selectedElementIds).toBeUndefined();
     expect(back.appState.viewBackgroundColor).toBe('#fff');
     expect(back.appState.gridSize).toBe(20);
+  });
+
+  it('round-trips referenced image files and prunes orphaned ones', () => {
+    const withImages = {
+      elements: [
+        { id: 'img1', type: 'image', fileId: 'f-used' },
+        { id: 'img2', type: 'image', fileId: 'f-orphan', isDeleted: true },
+      ],
+      appState: {},
+      files: {
+        'f-used': { mimeType: 'image/png', dataURL: 'data:image/png;base64,AAAA' },
+        'f-orphan': { mimeType: 'image/png', dataURL: 'data:image/png;base64,BBBB' },
+      },
+    };
+    const back = parseExcalidraw(serializeExcalidraw(withImages));
+    expect(back.elements).toHaveLength(1); // deleted image dropped
+    expect(back.files['f-used']).toBeTruthy(); // referenced image kept
+    expect(back.files['f-orphan']).toBeUndefined(); // orphaned image pruned
   });
 
   it('returns null for an empty/blank note (a fresh drawing)', () => {

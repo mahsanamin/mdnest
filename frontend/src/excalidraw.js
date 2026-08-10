@@ -62,18 +62,31 @@ export function parseExcalidraw(content) {
 }
 
 // serializeExcalidraw renders a scene back to the Obsidian-compatible markdown.
+// Deleted elements (kept in memory only for session undo) are dropped and any
+// embedded image the drawing no longer references is pruned, so the file stays
+// small.
 export function serializeExcalidraw({ elements, appState, files } = {}) {
   const els = Array.isArray(elements) ? elements : [];
+  const live = els.filter((el) => el && !el.isDeleted);
+  const usedFileIds = new Set(
+    live.filter((el) => el.type === 'image' && el.fileId).map((el) => el.fileId),
+  );
+  const prunedFiles = {};
+  if (files && typeof files === 'object') {
+    for (const [id, f] of Object.entries(files)) {
+      if (usedFileIds.has(id)) prunedFiles[id] = f;
+    }
+  }
   const scene = {
     type: 'excalidraw',
     version: 2,
     source: 'mdnest',
-    elements: els,
+    elements: live,
     appState: stableAppState(appState),
-    files: files && typeof files === 'object' ? files : {},
+    files: prunedFiles,
   };
-  const textElements = els
-    .filter((el) => el && el.type === 'text' && !el.isDeleted && el.text)
+  const textElements = live
+    .filter((el) => el.type === 'text' && el.text)
     .map((el) => `${el.text} ^${el.id}`)
     .join('\n\n');
   return [
