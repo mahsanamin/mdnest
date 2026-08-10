@@ -22,6 +22,18 @@
   position: relative;
 }
 
+/* Excalidraw fills the whole content area; the library canvas needs a sized,
+   positioned host. */
+.excalidraw-wrapper {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+.excalidraw-host {
+  position: absolute;
+  inset: 0;
+}
+
 .editor-wrapper {
   flex: 1;
   display: flex;

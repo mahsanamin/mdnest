@@ -34,6 +34,7 @@ type ConfigHandler struct {
 	taskBoard       bool                   // ENABLE_TASK_BOARD is on — the frontend may show the board button and load its chunk
 	marp            bool                   // ENABLE_MARP is on — the frontend may render Marp-format notes as a slide deck (loads its chunk)
 	marpThemes      bool                   // ENABLE_MARP_THEMES is on — the centralized theme catalog + admin editor are available
+	excalidraw      bool                   // ENABLE_EXCALIDRAW is on — the frontend may open .excalidraw.md files in the drawing editor (loads its chunk)
 	updateChecker   *updates.Checker       // optional — polls GitHub releases so the frontend can hint when a newer mdnest is available
 }
 
@@ -106,6 +107,14 @@ func (h *ConfigHandler) SetMarpThemes(enabled bool) {
 	h.marpThemes = enabled
 }
 
+// SetExcalidraw flips on the Excalidraw signal. Off by default: when false the
+// frontend never opens .excalidraw.md files in the drawing editor and never
+// loads the Excalidraw chunk — an operator who just wants notes carries none of
+// it.
+func (h *ConfigHandler) SetExcalidraw(enabled bool) {
+	h.excalidraw = enabled
+}
+
 // SetUpdateChecker wires in the GitHub-release poller. When set, /api/config
 // includes a latestRelease object (once the first poll has succeeded) so the
 // frontend can hint that a newer mdnest version is available.
@@ -151,6 +160,9 @@ func (h *ConfigHandler) HandleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.marpThemes {
 		resp["marpThemes"] = true
+	}
+	if h.excalidraw {
+		resp["excalidraw"] = true
 	}
 	if h.updateChecker != nil {
 		s := h.updateChecker.Status()

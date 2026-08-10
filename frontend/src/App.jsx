@@ -19,6 +19,9 @@ const TaskBoard = lazy(() => import('./components/TaskBoard.jsx'));
 // Lazy Marp slide-deck renderer: pulls in the Marp engine, off by default
 // (ENABLE_MARP), so an install that doesn't use it never carries the chunk.
 const MarpDeck = lazy(() => import('./components/MarpDeck.jsx'));
+// Lazy Excalidraw drawing editor: pulls in the (large) Excalidraw bundle, off
+// by default (ENABLE_EXCALIDRAW), so notes-only installs never carry the chunk.
+const ExcalidrawEditor = lazy(() => import('./components/ExcalidrawEditor.jsx'));
 import Preview from './components/Preview.jsx';
 import ContextMenu from './components/ContextMenu.jsx';
 import Settings from './components/Settings.jsx';
@@ -31,6 +34,7 @@ import MoveToModal from './components/MoveToModal.jsx';
 import ReleaseNotesModal from './components/ReleaseNotesModal.jsx';
 import CollabClient from './collab.js';
 import { isMarpDoc, effectiveEditorMode } from './marp.js';
+import { isExcalidrawDoc } from './excalidraw.js';
 import { TREE_POLL_MS, shouldPollTree } from './tree-refresh.js';
 import {
   getToken,
@@ -286,6 +290,10 @@ function App() {
   // markdown and corrupts the frontmatter and slide breaks. Force Basic (raw)
   // editing for them, regardless of the user's editor-mode preference.
   const editorModeForNote = effectiveEditorMode(editorMode, marpActive);
+  // `.excalidraw.md` files open in the drawing editor (opt-in ENABLE_EXCALIDRAW),
+  // bypassing the text editor/preview entirely.
+  const excalidrawEnabled = !!appConfig?.excalidraw;
+  const excalidrawActive = excalidrawEnabled && isExcalidrawDoc(currentPath);
   // Editor scroll ratio (0..1), mirrored to the Marp deck's current slide in
   // split view. The deck is paginated (not scrollable), so unlike the plain
   // Preview it can't share a scrollTop — we map the ratio to a slide instead.
@@ -1557,6 +1565,23 @@ function App() {
               />
             </Suspense>
           ) : currentPath ? (
+            excalidrawActive ? (
+              <div className="excalidraw-wrapper">
+                {content === null ? (
+                  <div className="editor-loading">Loading drawing…</div>
+                ) : (
+                  <Suspense fallback={<div className="editor-loading">Loading drawing editor…</div>}>
+                    <ExcalidrawEditor
+                      key={`${selectedNs}/${currentPath}`}
+                      content={content}
+                      docPath={`${selectedNs}/${currentPath}`}
+                      onChange={canWriteCurrent ? handleContentChange : null}
+                      readOnly={!canWriteCurrent}
+                    />
+                  </Suspense>
+                )}
+              </div>
+            ) : (
             <>
               <div className="mobile-view-toggle">
                 <button className={mobileView === 'editor' ? 'active' : ''} onClick={() => { setMobileView('editor'); localStorage.setItem('mdnest_mobile_view', 'editor'); }}>Edit</button>
@@ -1670,6 +1695,7 @@ function App() {
                 </div>
               )}
             </>
+            )
           ) : (
             <div className="empty-state">
               <p>{namespaces.length === 0 ? 'No namespaces found. Check your mdnest.conf mounts.' : 'Select a note or create one to get started.'}</p>

@@ -284,6 +284,15 @@ marp:
     enabled: false
 
 # -----------------------------------------------------------------------------
+# Excalidraw drawings (optional). `.excalidraw.md` files open in a drawing
+# editor; the markdown file stays the source of truth. Independent of
+# `auth.mode`.
+# -----------------------------------------------------------------------------
+excalidraw:
+  # -- Enable the Excalidraw drawing editor (`ENABLE_EXCALIDRAW`). Off by default; when off `.excalidraw.md` files open as plain text and the (large) editor chunk is never loaded.
+  enabled: false
+
+# -----------------------------------------------------------------------------
 # SSO / OIDC (optional). Only rendered when sso.enabled=true.
 # -----------------------------------------------------------------------------
 sso:
