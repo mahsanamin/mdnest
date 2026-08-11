@@ -16,12 +16,17 @@ transports**:
 > **Available tools:** `list_namespaces`, `list_tree`, `read_note`,
 > `write_note`, `append_note`, `prepend_note`, `create_note`, `create_folder`,
 > `delete_item`, `move_item`, `search_notes`, `list_tasks`, `create_task`,
-> `move_task`, `edit_task`.
+> `move_task`, `edit_task`, `set_task_field`, `toggle_task`, `delete_task`,
+> `search_tasks`, `create_excalidraw`, `create_marp`, `add_marp_slide`.
 >
 > The `*_task` tools drive the [task board](tasks.md): `list_tasks` returns the
 > board columns and every task (with the `path`/`line`/`raw` needed to mutate
-> one); `create_task`/`edit_task` author a whole task (title, column, due,
-> priority, workload, tags, steps, notes); `move_task` changes a task's column.
+> one); `create_task`/`edit_task` author a whole task (title, column, status,
+> due, priority, workload, assignee, tags, relations, steps, notes);
+> `set_task_field` edits one field, `toggle_task` checks/unchecks, `move_task`
+> changes a task's column, `delete_task` removes it and `search_tasks` filters
+> across a namespace (or all of them). `create_excalidraw`, `create_marp` and
+> `add_marp_slide` scaffold drawing and slide-deck notes.
 
 ---
 
@@ -241,13 +246,38 @@ and rewrite that markdown.
 | Tool | Purpose | Key inputs |
 |------|---------|------------|
 | `list_tasks` | Board columns + every task in a namespace (or one note). Returns each task's `path`, `line` and `raw` — needed to mutate it. | `namespace`, `note?` |
-| `create_task` | Append a whole task to a note (the note, else the board's default note; created if missing). | `namespace`, `title`, `note?`, `column?`, `due?`, `priority?`, `workload?`, `tags?`, `notes?`, `steps?`, `defaultExpanded?` |
+| `create_task` | Append a whole task to a note (the note, else the board's default note; created if missing). | `namespace`, `title`, `note?`, `column?`, `status?`, `due?`, `priority?`, `workload?`, `assignee?`, `tags?`, `dependsOn?`, `blockedBy?`, `relatedTo?`, `notes?`, `steps?`, `defaultExpanded?` |
 | `move_task` | Move a task to a column (sets its status; checks the box for the Done column). | `namespace`, `path`, `line`, `raw`, `column` |
-| `edit_task` | Replace a task's whole definition (omitted fields are cleared). | `namespace`, `path`, `line`, `raw`, `title`, `column?`, `due?`, `priority?`, `workload?`, `tags?`, `notes?`, `steps?`, `defaultExpanded?` |
+| `edit_task` | Replace a task's whole definition (omitted fields are cleared; pass `ref` to keep the stable id). | `namespace`, `path`, `line`, `raw`, `title`, `ref?`, `column?`, `status?`, `due?`, `priority?`, `workload?`, `assignee?`, `tags?`, `dependsOn?`, `blockedBy?`, `relatedTo?`, `notes?`, `steps?`, `defaultExpanded?` |
+| `set_task_field` | Set or clear a single field without resending the whole task. | `namespace`, `path`, `line`, `raw`, `key`, `value` |
+| `toggle_task` | Check/uncheck a task or one of its steps (blocked with `422` if closing over open steps). | `namespace`, `path`, `line`, `raw`, `checked` |
+| `delete_task` | Delete a task (checkbox + detail block). | `namespace`, `path`, `line`, `raw` |
+| `search_tasks` | Filter tasks in a namespace, or across all of them with `global`. Filters are ANDed. | `namespace?`, `global?`, `note?`, `text?`, `column?`, `status?`, `priority?`, `assignee?`, `tags?`, `checked?`, `relatesTo?`, `dueBefore?` |
+
+Relations (`dependsOn` / `blockedBy` / `relatedTo`) reference other tasks by
+their stable `ref` (shown by `list_tasks`). `set_task_field` takes those same
+keys as `depends-on` / `blocked-by` / `related-to` with a comma-separated value.
 
 **Workflow.** Call `list_tasks` first to read the column ids and each task's
-`path`/`line`/`raw`; pass those back to `move_task` / `edit_task`. The mutations
+`path`/`line`/`raw`; pass those back to `move_task` / `edit_task` /
+`set_task_field` / `toggle_task` / `delete_task`. The mutations
 are optimistically concurrent — a `409` means the note changed under you, so
 re-run `list_tasks` and retry. See the [task model](tasks.md) for the markdown a
 task compiles to and the [API reference](api.md#task-board) for the underlying
 endpoints.
+
+## 9. Drawing & slide tools
+
+Excalidraw drawings and Marp decks are ordinary notes with a specific layout, so
+these tools scaffold a valid file that the app then renders.
+
+| Tool | Purpose | Key inputs |
+|------|---------|------------|
+| `create_excalidraw` | Create an empty, valid Obsidian-compatible `.excalidraw.md` drawing (suffix added if missing). | `namespace`, `path`, `background?` |
+| `create_marp` | Create a Marp deck note (`marp: true` frontmatter + `---`-separated slides). | `namespace`, `path`, `title?`, `theme?`, `paginate?`, `slides?` |
+| `add_marp_slide` | Append a slide (a `---` separator + markdown) to an existing deck. | `namespace`, `path`, `content` |
+
+Both features are gated in the app by `ENABLE_EXCALIDRAW` / `ENABLE_MARP`; the
+notes are still created and editable as plain markdown when a feature is off.
+Edit an existing drawing/deck through `read_note` + `write_note` (keep the
+`.excalidraw.md` scene block or the `marp: true` frontmatter intact).
