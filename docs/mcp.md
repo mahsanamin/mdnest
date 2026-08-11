@@ -18,7 +18,8 @@ transports**:
 > `delete_item`, `move_item`, `search_notes`, `list_tasks`, `create_task`,
 > `move_task`, `edit_task`, `set_task_field`, `toggle_task`, `delete_task`,
 > `search_tasks`, `create_excalidraw`, `draw_excalidraw`, `read_excalidraw`,
-> `create_marp`, `add_marp_slide`.
+> `create_marp`, `add_marp_slide`, `list_marp_slides`, `read_marp_slide`,
+> `edit_marp_slide`, `delete_marp_slide`, `move_marp_slide`.
 >
 > The `*_task` tools drive the [task board](tasks.md): `list_tasks` returns the
 > board columns and every task (with the `path`/`line`/`raw` needed to mutate
@@ -278,7 +279,19 @@ these tools scaffold a valid file that the app then renders.
 | `draw_excalidraw` | Author/edit a diagram from a high-level spec: `nodes` (labelled shapes) + `edges` (arrows). Compiles to a valid scene with bound labels and connected arrows. `replace` (default) or `append`. | `namespace`, `path`, `nodes?`, `edges?`, `mode?`, `background?` |
 | `read_excalidraw` | Read a drawing back as `{ nodes, edges }` (with stable element ids) so an agent can inspect before editing. | `namespace`, `path` |
 | `create_marp` | Create a Marp deck note (`marp: true` frontmatter + `---`-separated slides). | `namespace`, `path`, `title?`, `theme?`, `paginate?`, `slides?` |
-| `add_marp_slide` | Append a slide (a `---` separator + markdown) to an existing deck. | `namespace`, `path`, `content` |
+| `list_marp_slides` | List a deck's slides (1-based index, first line, length) + its frontmatter. | `namespace`, `path` |
+| `read_marp_slide` | Read one slide's markdown by index. | `namespace`, `path`, `index` |
+| `add_marp_slide` | Add a slide — appended, or inserted before a 1-based `index`. | `namespace`, `path`, `content`, `index?` |
+| `edit_marp_slide` | Replace one slide's markdown by index (frontmatter + other slides untouched). | `namespace`, `path`, `index`, `content` |
+| `delete_marp_slide` | Delete one slide by index. | `namespace`, `path`, `index` |
+| `move_marp_slide` | Reorder: move the slide at `from` to `to`. | `namespace`, `path`, `from`, `to` |
+
+**Slides are CRUD.** A Marp deck is a note whose subject is a list of slides, so
+the deck is editable both as a whole (the note tools) and per slide: `list_/
+read_marp_slide` to inspect, `add_/edit_/delete_/move_marp_slide` to change one
+slide by its 1-based index. Slide boundaries follow the same rule as the app's
+preview (a blank-line-preceded `---` outside fenced code), so a `---` inside a
+code block never splits a slide.
 
 **Diagrams.** `draw_excalidraw` lets an agent build or edit a drawing without
 touching Excalidraw's raw element schema: describe `nodes` (each with an `id`,

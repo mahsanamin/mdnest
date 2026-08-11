@@ -181,6 +181,49 @@ export function buildMarpDeck({ title = "Untitled deck", theme = "default", pagi
   return fm.join("\n") + "\n\n" + body.join("\n\n---\n\n") + "\n";
 }
 
+// splitMarp separates a Marp note into its leading YAML frontmatter and an
+// array of slide bodies. Slide boundaries are `---` lines preceded by a blank
+// line and outside fenced code blocks — the same rule the app's slide preview
+// uses (frontend/src/marp.js) — so an agent edits the same slides the deck
+// shows.
+export function splitMarp(content) {
+  const lines = (content == null ? "" : String(content)).split("\n");
+  let frontmatter = "";
+  let i = 0;
+  if (lines.length && /^---\s*$/.test(lines[0])) {
+    let j = 1;
+    while (j < lines.length && !/^---\s*$/.test(lines[j])) j++;
+    if (j < lines.length) {
+      frontmatter = lines.slice(0, j + 1).join("\n");
+      i = j + 1;
+    }
+  }
+  const body = lines.slice(i);
+  const slides = [];
+  let cur = [];
+  let inFence = false;
+  let prevBlank = true;
+  for (const line of body) {
+    if (/^\s*(```|~~~)/.test(line)) { inFence = !inFence; cur.push(line); prevBlank = false; continue; }
+    if (!inFence && prevBlank && /^---\s*$/.test(line)) {
+      slides.push(cur);
+      cur = [];
+      prevBlank = true;
+      continue; // the separator itself belongs to no slide
+    }
+    cur.push(line);
+    prevBlank = line.trim() === "";
+  }
+  slides.push(cur);
+  return { frontmatter, slides: slides.map((arr) => arr.join("\n").replace(/^\n+/, "").replace(/\n+$/, "")) };
+}
+
+// joinMarp rebuilds a Marp note from its frontmatter and slide bodies.
+export function joinMarp(frontmatter, slides) {
+  const body = (slides || []).map((s) => String(s).trim()).join("\n\n---\n\n");
+  return (frontmatter ? frontmatter + "\n\n" : "") + body + "\n";
+}
+
 // --- Excalidraw scene compiler -------------------------------------------
 // An Excalidraw scene is a flat list of elements with a lot of required
 // bookkeeping fields (seed, versionNonce, bindings, ...). Authoring that by
@@ -1089,29 +1132,160 @@ if (features.marp) server.tool(
   }
 );
 
+// Shared read-modify-write for the per-slide Marp CRUD tools: load the note,
+// split it into { frontmatter, slides }; callers mutate slides then saveMarp.
+async function loadMarp(namespace, path) {
+  const url = `/api/note?ns=${encodeURIComponent(namespace)}&path=${encodeURIComponent(path)}`;
+  const res = await api(url);
+  if (!res.ok) return { error: `Error ${res.status}: ${await res.text().catch(() => "")}` };
+  const content = await res.text();
+  return { url, ...splitMarp(content) };
+}
+async function saveMarp(url, frontmatter, slides) {
+  const res = await api(url, { method: "PUT", body: joinMarp(frontmatter, slides) });
+  if (!res.ok) return `Error ${res.status}: ${await res.text().catch(() => "")}`;
+  return null;
+}
+const marpErr = (text) => ({ content: [{ type: "text", text }], isError: true });
+const marpBadIndex = (index, count) => marpErr(`Slide ${index} is out of range (deck has ${count} slide${count === 1 ? "" : "s"}).`);
+
 if (features.marp) server.tool(
   "add_marp_slide",
-  "Append a new slide to an existing Marp deck (adds a `---` separator then the slide markdown). The note must already exist.",
+  "Add a slide to a Marp deck. Appends at the end by default, or inserts before the 1-based `index`. The note must already exist.",
   {
     namespace: z.string().describe("Namespace name"),
     path: z.string().describe("Path to the Marp deck note"),
     content: z.string().describe("Markdown body of the new slide"),
+    index: z.number().optional().describe("1-based position to insert before (default: append at the end)"),
   },
-  async ({ namespace, path, content }) => {
+  async ({ namespace, path, content, index }) => {
     try {
-      const slide = `\n\n---\n\n${String(content).trim()}\n`;
-      const res = await api(
-        `/api/note?ns=${encodeURIComponent(namespace)}&path=${encodeURIComponent(path)}&position=bottom`,
-        { method: "PATCH", body: slide }
-      );
-      if (!res.ok) {
-        const t = await res.text().catch(() => "");
-        return { content: [{ type: "text", text: `Error ${res.status}: ${t}` }], isError: true };
-      }
-      const data = await res.json().catch(() => ({}));
-      return { content: [{ type: "text", text: `Appended slide to ${path}\n${JSON.stringify(data)}` }] };
+      const m = await loadMarp(namespace, path);
+      if (m.error) return marpErr(m.error);
+      const pos = index == null ? m.slides.length : Math.max(0, Math.min(m.slides.length, index - 1));
+      m.slides.splice(pos, 0, String(content).trim());
+      const err = await saveMarp(m.url, m.frontmatter, m.slides);
+      if (err) return marpErr(err);
+      return { content: [{ type: "text", text: `Added slide at position ${pos + 1}/${m.slides.length} in ${path}` }] };
     } catch (err) {
-      return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+      return marpErr(`Error: ${err.message}`);
+    }
+  }
+);
+
+if (features.marp) server.tool(
+  "list_marp_slides",
+  "List the slides of a Marp deck: the deck's frontmatter plus, for each slide, its 1-based index, first non-empty line and length. Use the index with read/edit/delete/move_marp_slide.",
+  {
+    namespace: z.string().describe("Namespace name"),
+    path: z.string().describe("Path to the Marp deck note"),
+  },
+  async ({ namespace, path }) => {
+    try {
+      const m = await loadMarp(namespace, path);
+      if (m.error) return marpErr(m.error);
+      const slides = m.slides.map((s, i) => ({
+        index: i + 1,
+        firstLine: (s.split("\n").find((l) => l.trim() !== "") || "").trim().slice(0, 120),
+        chars: s.length,
+      }));
+      return { content: [{ type: "text", text: JSON.stringify({ frontmatter: m.frontmatter, count: slides.length, slides }, null, 2) }] };
+    } catch (err) {
+      return marpErr(`Error: ${err.message}`);
+    }
+  }
+);
+
+if (features.marp) server.tool(
+  "read_marp_slide",
+  "Read the full markdown of one Marp slide by its 1-based index (from list_marp_slides).",
+  {
+    namespace: z.string().describe("Namespace name"),
+    path: z.string().describe("Path to the Marp deck note"),
+    index: z.number().describe("1-based slide index"),
+  },
+  async ({ namespace, path, index }) => {
+    try {
+      const m = await loadMarp(namespace, path);
+      if (m.error) return marpErr(m.error);
+      if (index < 1 || index > m.slides.length) return marpBadIndex(index, m.slides.length);
+      return { content: [{ type: "text", text: m.slides[index - 1] }] };
+    } catch (err) {
+      return marpErr(`Error: ${err.message}`);
+    }
+  }
+);
+
+if (features.marp) server.tool(
+  "edit_marp_slide",
+  "Replace the markdown of one Marp slide by its 1-based index (from list_marp_slides). The frontmatter and other slides are untouched.",
+  {
+    namespace: z.string().describe("Namespace name"),
+    path: z.string().describe("Path to the Marp deck note"),
+    index: z.number().describe("1-based slide index"),
+    content: z.string().describe("New markdown body for the slide"),
+  },
+  async ({ namespace, path, index, content }) => {
+    try {
+      const m = await loadMarp(namespace, path);
+      if (m.error) return marpErr(m.error);
+      if (index < 1 || index > m.slides.length) return marpBadIndex(index, m.slides.length);
+      m.slides[index - 1] = String(content).trim();
+      const err = await saveMarp(m.url, m.frontmatter, m.slides);
+      if (err) return marpErr(err);
+      return { content: [{ type: "text", text: `Updated slide ${index}/${m.slides.length} in ${path}` }] };
+    } catch (err) {
+      return marpErr(`Error: ${err.message}`);
+    }
+  }
+);
+
+if (features.marp) server.tool(
+  "delete_marp_slide",
+  "Delete one Marp slide by its 1-based index (from list_marp_slides).",
+  {
+    namespace: z.string().describe("Namespace name"),
+    path: z.string().describe("Path to the Marp deck note"),
+    index: z.number().describe("1-based slide index"),
+  },
+  async ({ namespace, path, index }) => {
+    try {
+      const m = await loadMarp(namespace, path);
+      if (m.error) return marpErr(m.error);
+      if (index < 1 || index > m.slides.length) return marpBadIndex(index, m.slides.length);
+      m.slides.splice(index - 1, 1);
+      const err = await saveMarp(m.url, m.frontmatter, m.slides);
+      if (err) return marpErr(err);
+      return { content: [{ type: "text", text: `Deleted slide ${index}; ${m.slides.length} slide${m.slides.length === 1 ? "" : "s"} left in ${path}` }] };
+    } catch (err) {
+      return marpErr(`Error: ${err.message}`);
+    }
+  }
+);
+
+if (features.marp) server.tool(
+  "move_marp_slide",
+  "Reorder a Marp slide: move the slide at 1-based `from` to 1-based `to`.",
+  {
+    namespace: z.string().describe("Namespace name"),
+    path: z.string().describe("Path to the Marp deck note"),
+    from: z.number().describe("1-based current slide index"),
+    to: z.number().describe("1-based target slide index"),
+  },
+  async ({ namespace, path, from, to }) => {
+    try {
+      const m = await loadMarp(namespace, path);
+      if (m.error) return marpErr(m.error);
+      const n = m.slides.length;
+      if (from < 1 || from > n) return marpBadIndex(from, n);
+      if (to < 1 || to > n) return marpBadIndex(to, n);
+      const [s] = m.slides.splice(from - 1, 1);
+      m.slides.splice(to - 1, 0, s);
+      const err = await saveMarp(m.url, m.frontmatter, m.slides);
+      if (err) return marpErr(err);
+      return { content: [{ type: "text", text: `Moved slide ${from} -> ${to} in ${path}` }] };
+    } catch (err) {
+      return marpErr(`Error: ${err.message}`);
     }
   }
 );
