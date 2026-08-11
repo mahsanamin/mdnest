@@ -281,3 +281,11 @@ Both features are gated in the app by `ENABLE_EXCALIDRAW` / `ENABLE_MARP`; the
 notes are still created and editable as plain markdown when a feature is off.
 Edit an existing drawing/deck through `read_note` + `write_note` (keep the
 `.excalidraw.md` scene block or the `marp: true` frontmatter intact).
+
+> **Feature-gating.** At startup the server reads the backend's unauthenticated
+> `GET /api/config` and only registers the tools for features mdnest has
+> enabled: the `*_task` tools appear only when the task board is on, the Marp
+> tools only when Marp is on, and `create_excalidraw` only when Excalidraw is
+> on. A notes-only mdnest therefore exposes just the note/tree/search tools. If
+> `/api/config` can't be read the server stays permissive and exposes
+> everything. (Restart the MCP server after toggling a backend feature.)

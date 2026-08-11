@@ -51,6 +51,29 @@ async function authenticate() {
 }
 
 // ---------------------------------------------------------------------------
+// Feature flags (mirror the backend so the tool surface matches the app)
+// ---------------------------------------------------------------------------
+// The gated features (task board, Marp, Excalidraw) are read from the backend's
+// unauthenticated GET /api/config once at startup. Their tools are only
+// registered when the backend has them enabled — an operator running notes-only
+// mdnest sees no task/drawing/slide tools. If /api/config can't be read we stay
+// permissive (expose everything) rather than hide a working feature.
+const features = { taskBoard: true, marp: true, excalidraw: true };
+async function loadFeatures() {
+  try {
+    const res = await fetch(`${BASE_URL}/api/config`);
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    const cfg = await res.json();
+    features.taskBoard = !!cfg.taskBoard;
+    features.marp = !!cfg.marp;
+    features.excalidraw = !!cfg.excalidraw;
+  } catch (err) {
+    console.error(`Could not read /api/config (${err.message}); exposing all tools.`);
+    features.taskBoard = features.marp = features.excalidraw = true;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Authenticated fetch with automatic 401 retry
 // ---------------------------------------------------------------------------
 async function api(path, options = {}, _retried = false) {
@@ -472,7 +495,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (features.taskBoard) server.tool(
   "list_tasks",
   "List the task-board tasks of a namespace (optionally scoped to a single note). Returns the board columns and every task with its `path`, `line` and `raw` — you need those three to move or edit a task. A task may carry status, due, priority, workload, tags, steps and notes. Tasks are plain markdown checkboxes in the notes.",
   {
@@ -495,7 +518,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (features.taskBoard) server.tool(
   "create_task",
   "Create a task by appending it to a note (the given note, else the board's default note; the note is created if missing). Column ids come from the board returned by list_tasks.",
   {
@@ -535,7 +558,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (features.taskBoard) server.tool(
   "move_task",
   "Move a task to a board column (updates its status and, for the Done column, checks the box). Take `path`, `line` and `raw` from list_tasks; a 409 means the note changed — re-run list_tasks and retry.",
   {
@@ -563,7 +586,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (features.taskBoard) server.tool(
   "edit_task",
   "Replace a task's whole definition. Omitted fields are cleared, so pass the full desired state (read the current task with list_tasks first). Take `path`, `line` and `raw` from list_tasks; a 409 means re-list and retry.",
   {
@@ -606,7 +629,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (features.taskBoard) server.tool(
   "delete_task",
   "Delete a task (its checkbox line and indented detail block) from a note. Take `path`, `line` and `raw` from list_tasks; a 409 means the note changed — re-run list_tasks and retry.",
   {
@@ -632,7 +655,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (features.taskBoard) server.tool(
   "set_task_field",
   "Set or clear a single task field without resending the whole task (lighter than edit_task). Take `path`, `line` and `raw` from list_tasks; a 409 means re-list and retry. An empty value removes the field.",
   {
@@ -661,7 +684,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (features.taskBoard) server.tool(
   "toggle_task",
   "Check or uncheck a task (or one of its sub-steps). Checking a task while it still has open sub-steps is rejected (422). Take `path`, `line` and `raw` from list_tasks (use a step's own line/raw to toggle that step); a 409 means re-list and retry.",
   {
@@ -689,7 +712,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (features.taskBoard) server.tool(
   "search_tasks",
   "Search / filter tasks. Scans a namespace (or every accessible namespace when `global` is true) and returns the tasks matching all provided filters. Filters are ANDed; omit a filter to ignore it.",
   {
@@ -760,7 +783,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (features.excalidraw) server.tool(
   "create_excalidraw",
   "Create an Excalidraw drawing note. Scaffolds a valid, empty Obsidian-compatible `.excalidraw.md` file (openable in the app's drawing editor). The path gets a `.excalidraw.md` suffix if missing.",
   {
@@ -790,7 +813,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (features.marp) server.tool(
   "create_marp",
   "Create a Marp slide-deck note. Scaffolds a `.md` note whose frontmatter carries `marp: true`, with slides separated by `---`. Provide `slides` (one markdown string per slide) or get a single title slide.",
   {
@@ -822,7 +845,7 @@ server.tool(
   }
 );
 
-server.tool(
+if (features.marp) server.tool(
   "add_marp_slide",
   "Append a new slide to an existing Marp deck (adds a `---` separator then the slide markdown). The note must already exist.",
   {
@@ -1078,6 +1101,9 @@ async function main() {
   if (!oauthMode) {
     await authenticate();
   }
+  // Read the backend's feature flags before building any server so the tool
+  // surface only advertises what mdnest actually has enabled.
+  await loadFeatures();
   if (httpMode) {
     await startHttp();
   } else {
