@@ -17,7 +17,8 @@ transports**:
 > `write_note`, `append_note`, `prepend_note`, `create_note`, `create_folder`,
 > `delete_item`, `move_item`, `search_notes`, `list_tasks`, `create_task`,
 > `move_task`, `edit_task`, `set_task_field`, `toggle_task`, `delete_task`,
-> `search_tasks`, `create_excalidraw`, `create_marp`, `add_marp_slide`.
+> `search_tasks`, `create_excalidraw`, `draw_excalidraw`, `read_excalidraw`,
+> `create_marp`, `add_marp_slide`.
 >
 > The `*_task` tools drive the [task board](tasks.md): `list_tasks` returns the
 > board columns and every task (with the `path`/`line`/`raw` needed to mutate
@@ -274,8 +275,19 @@ these tools scaffold a valid file that the app then renders.
 | Tool | Purpose | Key inputs |
 |------|---------|------------|
 | `create_excalidraw` | Create an empty, valid Obsidian-compatible `.excalidraw.md` drawing (suffix added if missing). | `namespace`, `path`, `background?` |
+| `draw_excalidraw` | Author/edit a diagram from a high-level spec: `nodes` (labelled shapes) + `edges` (arrows). Compiles to a valid scene with bound labels and connected arrows. `replace` (default) or `append`. | `namespace`, `path`, `nodes?`, `edges?`, `mode?`, `background?` |
+| `read_excalidraw` | Read a drawing back as `{ nodes, edges }` (with stable element ids) so an agent can inspect before editing. | `namespace`, `path` |
 | `create_marp` | Create a Marp deck note (`marp: true` frontmatter + `---`-separated slides). | `namespace`, `path`, `title?`, `theme?`, `paginate?`, `slides?` |
 | `add_marp_slide` | Append a slide (a `---` separator + markdown) to an existing deck. | `namespace`, `path`, `content` |
+
+**Diagrams.** `draw_excalidraw` lets an agent build or edit a drawing without
+touching Excalidraw's raw element schema: describe `nodes` (each with an `id`,
+optional `text`, `shape`, position/size and colours) and `edges`
+(`from`/`to` node ids, optional `text`/`dashed`/`arrowhead`). The server emits a
+valid scene — shapes with centred labels, arrows bound to their endpoints, and
+the searchable `## Text Elements` mirror. In `append` mode an edge may connect a
+new node to an existing shape by the element id reported by `read_excalidraw`.
+Omit `x`/`y` to auto-lay-out on a grid.
 
 Both features are gated in the app by `ENABLE_EXCALIDRAW` / `ENABLE_MARP`; the
 notes are still created and editable as plain markdown when a feature is off.

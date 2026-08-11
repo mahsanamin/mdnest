@@ -5,6 +5,8 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { createServer as createHttpServer } from "node:http";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { timingSafeEqual, createHash } from "node:crypto";
+import { fileURLToPath } from "node:url";
+import { realpathSync } from "node:fs";
 import { z } from "zod";
 
 // ---------------------------------------------------------------------------
@@ -139,7 +141,7 @@ function treeToText(node, indent = 0) {
 // element is mirrored under "## Text Elements" (searchable). Mirrors the app's
 // frontend/src/excalidraw.js serializer so the file opens and round-trips
 // cleanly. `elements`/`files` default to an empty (but valid) drawing.
-function buildExcalidraw({ elements = [], files = {}, background = "#ffffff" } = {}) {
+export function buildExcalidraw({ elements = [], files = {}, background = "#ffffff" } = {}) {
   const live = (Array.isArray(elements) ? elements : []).filter((el) => el && !el.isDeleted);
   const appState = {};
   if (background) appState.viewBackgroundColor = background;
@@ -171,12 +173,162 @@ function buildExcalidraw({ elements = [], files = {}, background = "#ffffff" } =
 // buildMarpDeck renders a Marp slide deck: YAML frontmatter carrying the
 // `marp: true` marker Marp detection keys on, followed by slides separated by a
 // blank-line-delimited `---`. Slides default to a single title slide.
-function buildMarpDeck({ title = "Untitled deck", theme = "default", paginate = true, slides } = {}) {
+export function buildMarpDeck({ title = "Untitled deck", theme = "default", paginate = true, slides } = {}) {
   const fm = ["---", "marp: true", `theme: ${theme}`, `paginate: ${paginate ? "true" : "false"}`, "---"];
   const body = Array.isArray(slides) && slides.length
     ? slides.map((s) => String(s).trim())
     : [`# ${title}`];
   return fm.join("\n") + "\n\n" + body.join("\n\n---\n\n") + "\n";
+}
+
+// --- Excalidraw scene compiler -------------------------------------------
+// An Excalidraw scene is a flat list of elements with a lot of required
+// bookkeeping fields (seed, versionNonce, bindings, ...). Authoring that by
+// hand is error-prone for an agent, so `draw_excalidraw` takes a high-level
+// diagram (nodes + edges) and compiles it here into a valid scene: shapes with
+// centred bound labels, arrows bound to their endpoints, and the reciprocal
+// `boundElements` back-references Excalidraw needs to keep them connected.
+const exId = () => {
+  const chars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  let s = "";
+  for (let i = 0; i < 21; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return s;
+};
+const randInt = () => Math.floor(Math.random() * 2 ** 31);
+
+function baseElement(p) {
+  const el = {
+    id: p.id,
+    type: p.type,
+    x: p.x, y: p.y, width: p.width, height: p.height,
+    angle: 0,
+    strokeColor: p.strokeColor || "#1e1e1e",
+    backgroundColor: p.backgroundColor || "transparent",
+    fillStyle: p.fillStyle || "solid",
+    strokeWidth: 2,
+    strokeStyle: p.strokeStyle || "solid",
+    roughness: 1,
+    opacity: 100,
+    groupIds: [],
+    frameId: null,
+    roundness: p.roundness ?? null,
+    seed: randInt(),
+    version: 1,
+    versionNonce: randInt(),
+    isDeleted: false,
+    boundElements: p.boundElements ?? null,
+    updated: Date.now(),
+    link: null,
+    locked: false,
+  };
+  return Object.assign(el, p.extra || {});
+}
+
+const SHAPES = ["rectangle", "ellipse", "diamond"];
+
+// compileDiagram turns { nodes, edges } into Excalidraw elements. When
+// existingElements is given (append mode) their shapes can be edge endpoints
+// too and their boundElements are updated in place; the returned list is the
+// full scene.
+export function compileDiagram({ nodes = [], edges = [], existingElements = [] }) {
+  const out = existingElements.slice();
+  const byId = new Map();
+  const register = (key, el) => {
+    if (el.boundElements == null) el.boundElements = [];
+    byId.set(String(key), { el, cx: el.x + el.width / 2, cy: el.y + el.height / 2 });
+  };
+  for (const el of existingElements) {
+    if (SHAPES.includes(el.type)) register(el.id, el);
+  }
+  const cols = 3;
+  nodes.forEach((n, i) => {
+    const w = Number(n.width) || 160;
+    const h = Number(n.height) || 80;
+    const x = n.x != null ? Number(n.x) : 120 + (i % cols) * (w + 90);
+    const y = n.y != null ? Number(n.y) : 120 + Math.floor(i / cols) * (h + 90);
+    const shape = SHAPES.includes(n.shape) ? n.shape : "rectangle";
+    const id = exId();
+    const shapeEl = baseElement({
+      id, type: shape, x, y, width: w, height: h,
+      strokeColor: n.strokeColor,
+      backgroundColor: n.backgroundColor,
+      fillStyle: n.fillStyle,
+      roundness: shape === "rectangle" ? { type: 3 } : null,
+      boundElements: [],
+    });
+    out.push(shapeEl);
+    register(n.id, shapeEl);
+    if (n.text) {
+      const textId = exId();
+      out.push(baseElement({
+        id: textId, type: "text",
+        x: x + 8, y: y + h / 2 - 12, width: Math.max(20, w - 16), height: 25,
+        strokeColor: n.strokeColor,
+        extra: { text: String(n.text), fontSize: 20, fontFamily: 1, textAlign: "center", verticalAlign: "middle", containerId: id, originalText: String(n.text), lineHeight: 1.25, autoResize: true },
+      }));
+      shapeEl.boundElements.push({ id: textId, type: "text" });
+    }
+  });
+  edges.forEach((e) => {
+    const a = byId.get(String(e.from));
+    const b = byId.get(String(e.to));
+    if (!a || !b) return; // endpoint not found — skip rather than emit a dangling arrow
+    const id = exId();
+    const arrowEl = baseElement({
+      id, type: "arrow",
+      x: a.cx, y: a.cy, width: b.cx - a.cx, height: b.cy - a.cy,
+      strokeStyle: e.dashed ? "dashed" : "solid",
+      boundElements: e.text ? [] : null,
+      extra: {
+        points: [[0, 0], [b.cx - a.cx, b.cy - a.cy]],
+        lastCommittedPoint: null,
+        startBinding: { elementId: a.el.id, focus: 0, gap: 4 },
+        endBinding: { elementId: b.el.id, focus: 0, gap: 4 },
+        startArrowhead: null,
+        endArrowhead: e.arrowhead === false ? null : "arrow",
+        elbowed: false,
+      },
+    });
+    out.push(arrowEl);
+    a.el.boundElements.push({ id, type: "arrow" });
+    b.el.boundElements.push({ id, type: "arrow" });
+    if (e.text) {
+      const textId = exId();
+      const mx = a.cx + (b.cx - a.cx) / 2;
+      const my = a.cy + (b.cy - a.cy) / 2;
+      out.push(baseElement({
+        id: textId, type: "text",
+        x: mx - 40, y: my - 12, width: 80, height: 25,
+        extra: { text: String(e.text), fontSize: 16, fontFamily: 1, textAlign: "center", verticalAlign: "middle", containerId: id, originalText: String(e.text), lineHeight: 1.25, autoResize: true },
+      }));
+      arrowEl.boundElements.push({ id: textId, type: "text" });
+    }
+  });
+  return out;
+}
+
+// sceneToDiagram parses a `.excalidraw.md` note back into the high-level
+// { nodes, edges } shape so an agent can inspect a drawing before editing it.
+export function sceneToDiagram(content) {
+  const text = content || "";
+  const fence = text.match(/```json\s*\n([\s\S]*?)\n```/);
+  let raw = fence ? fence[1] : (text.trim().startsWith("{") ? text : null);
+  if (!raw) return { nodes: [], edges: [], nodeCount: 0, edgeCount: 0 };
+  let scene;
+  try { scene = JSON.parse(raw); } catch { return { nodes: [], edges: [], nodeCount: 0, edgeCount: 0, error: "unparseable scene" }; }
+  const els = (Array.isArray(scene.elements) ? scene.elements : []).filter((el) => el && !el.isDeleted);
+  const labelOf = {};
+  for (const el of els) if (el.type === "text" && el.containerId) labelOf[el.containerId] = el.text;
+  const nodes = els.filter((el) => SHAPES.includes(el.type)).map((el) => ({
+    id: el.id, shape: el.type, x: el.x, y: el.y, width: el.width, height: el.height,
+    ...(labelOf[el.id] ? { text: labelOf[el.id] } : {}),
+  }));
+  const edges = els.filter((el) => el.type === "arrow" || el.type === "line").map((el) => ({
+    from: el.startBinding?.elementId || null,
+    to: el.endBinding?.elementId || null,
+    ...(labelOf[el.id] ? { text: labelOf[el.id] } : {}),
+  }));
+  return { background: scene.appState?.viewBackgroundColor, nodeCount: nodes.length, edgeCount: edges.length, nodes, edges };
 }
 
 // ---------------------------------------------------------------------------
@@ -813,6 +965,98 @@ if (features.excalidraw) server.tool(
   }
 );
 
+if (features.excalidraw) server.tool(
+  "draw_excalidraw",
+  "Author or edit an Excalidraw diagram from a high-level spec: `nodes` (labelled shapes) and `edges` (arrows between nodes). Compiles to a valid drawing with bound labels and connected arrows. `mode:\"replace\"` (default) rewrites the whole drawing from your spec; `mode:\"append\"` adds to the existing one — in append mode an edge's `from`/`to` may reference a new node id OR an existing element id (see read_excalidraw). Omit x/y to auto-layout on a grid. The path gets a `.excalidraw.md` suffix if missing.",
+  {
+    namespace: z.string().describe("Namespace name"),
+    path: z.string().describe("Path to the drawing note"),
+    nodes: z.array(z.object({
+      id: z.string().describe("Logical id you reference from edges"),
+      text: z.string().optional().describe("Label shown centred in the shape"),
+      shape: z.enum(["rectangle", "ellipse", "diamond"]).optional().describe("Shape (default rectangle)"),
+      x: z.number().optional().describe("Top-left x (auto-laid-out if omitted)"),
+      y: z.number().optional().describe("Top-left y (auto-laid-out if omitted)"),
+      width: z.number().optional().describe("Width (default 160)"),
+      height: z.number().optional().describe("Height (default 80)"),
+      strokeColor: z.string().optional().describe("Stroke colour (hex, default #1e1e1e)"),
+      backgroundColor: z.string().optional().describe("Fill colour (hex, default transparent)"),
+      fillStyle: z.enum(["solid", "hachure", "cross-hatch"]).optional().describe("Fill style (default solid)"),
+    })).optional().describe("Nodes (labelled shapes)"),
+    edges: z.array(z.object({
+      from: z.string().describe("Source node id (or existing element id in append mode)"),
+      to: z.string().describe("Target node id (or existing element id in append mode)"),
+      text: z.string().optional().describe("Arrow label"),
+      dashed: z.boolean().optional().describe("Dashed line"),
+      arrowhead: z.boolean().optional().describe("Draw an arrowhead at the target end (default true)"),
+    })).optional().describe("Edges (arrows between nodes)"),
+    mode: z.enum(["replace", "append"]).optional().describe("replace (default) rewrites the drawing; append adds to it"),
+    background: z.string().optional().describe("Canvas background colour (hex)"),
+  },
+  async ({ namespace, path, nodes, edges, mode, background }) => {
+    try {
+      let notePath = path;
+      if (!/\.excalidraw(\.md)?$/i.test(notePath)) notePath += ".excalidraw.md";
+      else if (/\.excalidraw$/i.test(notePath)) notePath += ".md";
+      const noteUrl = `/api/note?ns=${encodeURIComponent(namespace)}&path=${encodeURIComponent(notePath)}`;
+
+      let existingElements = [];
+      let existingFiles = {};
+      let bg = background;
+      let exists = false;
+      const getRes = await api(noteUrl);
+      if (getRes.ok) {
+        exists = true;
+        const cur = await getRes.text();
+        const fence = cur.match(/```json\s*\n([\s\S]*?)\n```/);
+        if (fence) {
+          try {
+            const sc = JSON.parse(fence[1]);
+            if (Array.isArray(sc.elements)) existingElements = sc.elements.filter((el) => el && !el.isDeleted);
+            if (sc.files && typeof sc.files === "object") existingFiles = sc.files;
+            if (!bg && sc.appState?.viewBackgroundColor) bg = sc.appState.viewBackgroundColor;
+          } catch { /* fresh/empty drawing */ }
+        }
+      }
+
+      const seed = mode === "append" ? existingElements : [];
+      const elements = compileDiagram({ nodes: nodes || [], edges: edges || [], existingElements: seed });
+      const content = buildExcalidraw({ elements, files: mode === "append" ? existingFiles : {}, background: bg || "#ffffff" });
+      const res = await api(noteUrl, { method: exists ? "PUT" : "POST", body: content });
+      if (!res.ok) {
+        const t = await res.text().catch(() => "");
+        return { content: [{ type: "text", text: `Error ${res.status}: ${t}` }], isError: true };
+      }
+      const summary = sceneToDiagram(content);
+      return { content: [{ type: "text", text: `${mode === "append" ? "Updated" : "Wrote"} drawing ${notePath} \u2014 ${summary.nodeCount} nodes, ${summary.edgeCount} edges` }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+if (features.excalidraw) server.tool(
+  "read_excalidraw",
+  "Read an Excalidraw drawing as a high-level diagram: its nodes (shape, label, position, and stable element id) and edges (from/to element ids, label). Use the returned element ids to target existing shapes when calling draw_excalidraw in append mode.",
+  {
+    namespace: z.string().describe("Namespace name"),
+    path: z.string().describe("Path to the drawing note"),
+  },
+  async ({ namespace, path }) => {
+    try {
+      const res = await api(`/api/note?ns=${encodeURIComponent(namespace)}&path=${encodeURIComponent(path)}`);
+      if (!res.ok) {
+        const t = await res.text().catch(() => "");
+        return { content: [{ type: "text", text: `Error ${res.status}: ${t}` }], isError: true };
+      }
+      const diagram = sceneToDiagram(await res.text());
+      return { content: [{ type: "text", text: JSON.stringify(diagram, null, 2) }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+    }
+  }
+);
+
 if (features.marp) server.tool(
   "create_marp",
   "Create a Marp slide-deck note. Scaffolds a `.md` note whose frontmatter carries `marp: true`, with slides separated by `---`. Provide `slides` (one markdown string per slide) or get a single title slide.",
@@ -1111,7 +1355,12 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error("Fatal:", err);
-  process.exit(1);
-});
+// Only auto-start when run as the entry point (node index.js); importing the
+// module for unit tests must not spin up a transport.
+const isEntry = process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+if (isEntry) {
+  main().catch((err) => {
+    console.error("Fatal:", err);
+    process.exit(1);
+  });
+}
