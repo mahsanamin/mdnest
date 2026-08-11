@@ -720,7 +720,7 @@ func main() {
 	// Multi-mode routes (require admin role for /admin/*, authenticated for /me)
 	if multiMode {
 		adminHandler := handlers.NewAdminHandler(userStore, grantStore, nsAdminStore, collabHub, userProvider, grantMaxDepth)
-		meHandler := handlers.NewMeHandler(userStore, grantStore, nsAdminStore)
+		meHandler := handlers.NewMeHandler(userStore, grantStore, nsAdminStore, groupStore)
 		// Per-workspace git remote config: superadmin CRUD over shared/team
 		// workspaces, plus each user's own personal workspace. The optional
 		// GIT_REMOTE_ALLOWED_HOSTS restricts remote hosts (defence-in-depth for

@@ -14,11 +14,12 @@ type MeHandler struct {
 	userStore    store.UserStore
 	grantStore   store.GrantStore
 	nsAdminStore store.NamespaceAdminStore
+	groupStore   store.GroupStore // nil in single mode or when groups are disabled
 }
 
 // NewMeHandler creates a new MeHandler.
-func NewMeHandler(userStore store.UserStore, grantStore store.GrantStore, nsAdminStore store.NamespaceAdminStore) *MeHandler {
-	return &MeHandler{userStore: userStore, grantStore: grantStore, nsAdminStore: nsAdminStore}
+func NewMeHandler(userStore store.UserStore, grantStore store.GrantStore, nsAdminStore store.NamespaceAdminStore, groupStore store.GroupStore) *MeHandler {
+	return &MeHandler{userStore: userStore, grantStore: grantStore, nsAdminStore: nsAdminStore, groupStore: groupStore}
 }
 
 type meResponse struct {
@@ -80,6 +81,28 @@ func (h *MeHandler) HandleMe(w http.ResponseWriter, r *http.Request) {
 			Path:       g.Path,
 			Permission: g.Permission,
 		})
+	}
+
+	// Fold in grants inherited from the user's access groups, otherwise the
+	// frontend (which derives write access from this list) would render every
+	// group-only namespace read-only.
+	if h.groupStore != nil {
+		if nss, err := h.groupStore.GetAccessibleNamespacesForGroups(uc.ID, uc.Groups); err == nil {
+			for _, ns := range nss {
+				gg, err := h.groupStore.MemberGroupGrants(uc.ID, uc.Groups, ns)
+				if err != nil {
+					continue
+				}
+				for _, g := range gg {
+					meGrants = append(meGrants, meGrant{
+						ID:         g.ID,
+						Namespace:  g.Namespace,
+						Path:       g.Path,
+						Permission: g.Permission,
+					})
+				}
+			}
+		}
 	}
 
 	avatar := ""

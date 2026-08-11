@@ -39,8 +39,12 @@ func (treeGroupStore) DeleteGroupGrantsForNamespace(string) (int64, error) { ret
 func (treeGroupStore) CheckGroupAccess(int, []string, string, string, string) bool {
 	return false
 }
-func (treeGroupStore) GetAccessibleNamespacesForGroups(int, []string) ([]string, error) {
-	return nil, nil
+func (s treeGroupStore) GetAccessibleNamespacesForGroups(userID int, _ []string) ([]string, error) {
+	var out []string
+	for ns := range s.grants[userID] {
+		out = append(out, ns)
+	}
+	return out, nil
 }
 func (s treeGroupStore) MemberGroupGrants(userID int, _ []string, namespace string) ([]store.GroupGrant, error) {
 	return s.grants[userID][namespace], nil
