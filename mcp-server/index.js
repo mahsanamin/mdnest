@@ -367,11 +367,144 @@ export function sceneToDiagram(content) {
     ...(labelOf[el.id] ? { text: labelOf[el.id] } : {}),
   }));
   const edges = els.filter((el) => el.type === "arrow" || el.type === "line").map((el) => ({
+    id: el.id,
     from: el.startBinding?.elementId || null,
     to: el.endBinding?.elementId || null,
     ...(labelOf[el.id] ? { text: labelOf[el.id] } : {}),
   }));
   return { background: scene.appState?.viewBackgroundColor, nodeCount: nodes.length, edgeCount: edges.length, nodes, edges };
+}
+
+// --- Excalidraw element-level edits --------------------------------------
+// parseScene extracts the full (unsimplified) element list + files + background
+// from a `.excalidraw.md` note, so element-level edits keep every Excalidraw
+// bookkeeping field intact.
+export function parseScene(content) {
+  const fence = (content || "").match(/```json\s*\n([\s\S]*?)\n```/);
+  if (!fence) return { elements: [], files: {}, background: undefined };
+  try {
+    const sc = JSON.parse(fence[1]);
+    return {
+      elements: (Array.isArray(sc.elements) ? sc.elements : []).filter((el) => el && !el.isDeleted),
+      files: sc.files && typeof sc.files === "object" ? sc.files : {},
+      background: sc.appState?.viewBackgroundColor,
+    };
+  } catch {
+    return { elements: [], files: {}, background: undefined };
+  }
+}
+
+// reflowScene keeps a scene consistent after an edit: bound arrows are redrawn
+// from their endpoints' centres and bound labels re-centred on their container.
+function reflowScene(elements) {
+  const byId = new Map(elements.map((e) => [e.id, e]));
+  const center = (el) => ({ x: el.x + el.width / 2, y: el.y + el.height / 2 });
+  for (const el of elements) {
+    if (el.type === "arrow" && el.startBinding && el.endBinding) {
+      const a = byId.get(el.startBinding.elementId);
+      const b = byId.get(el.endBinding.elementId);
+      if (a && b) {
+        const ac = center(a), bc = center(b);
+        el.x = ac.x; el.y = ac.y;
+        el.width = bc.x - ac.x; el.height = bc.y - ac.y;
+        el.points = [[0, 0], [bc.x - ac.x, bc.y - ac.y]];
+      }
+    }
+  }
+  for (const el of elements) {
+    if (el.type === "text" && el.containerId) {
+      const c = byId.get(el.containerId);
+      if (!c) continue;
+      if (SHAPES.includes(c.type)) { el.x = c.x + 8; el.y = c.y + c.height / 2 - 12; el.width = Math.max(20, c.width - 16); }
+      else if (c.type === "arrow") { el.x = c.x + c.width / 2 - (el.width || 80) / 2; el.y = c.y + c.height / 2 - 12; }
+    }
+  }
+  return elements;
+}
+
+// setBoundLabel creates, updates, or (text === "") removes the text label bound
+// to a container element, keeping the reciprocal boundElements ref in sync.
+function setBoundLabel(elements, container, text) {
+  const label = elements.find((e) => e.type === "text" && e.containerId === container.id);
+  if (text === "") {
+    if (!label) return elements;
+    if (Array.isArray(container.boundElements)) container.boundElements = container.boundElements.filter((b) => b.id !== label.id);
+    return elements.filter((e) => e.id !== label.id);
+  }
+  if (label) {
+    label.text = String(text); label.originalText = String(text);
+    label.version = (label.version || 1) + 1; label.versionNonce = randInt(); label.updated = Date.now();
+    return elements;
+  }
+  const tid = exId();
+  const isShape = SHAPES.includes(container.type);
+  const t = baseElement({
+    id: tid, type: "text",
+    x: container.x + 8, y: container.y + (container.height || 0) / 2 - 12,
+    width: Math.max(20, (container.width || 80) - 16), height: 25,
+    extra: { text: String(text), fontSize: isShape ? 20 : 16, fontFamily: 1, textAlign: "center", verticalAlign: "middle", containerId: container.id, originalText: String(text), lineHeight: 1.25, autoResize: true },
+  });
+  if (!Array.isArray(container.boundElements)) container.boundElements = [];
+  container.boundElements.push({ id: tid, type: "text" });
+  return elements.concat([t]);
+}
+
+// editExcalidrawNode updates a single shape (geometry, colours, shape kind,
+// label) by element id.
+export function editExcalidrawNode(elements, id, props = {}) {
+  const el = elements.find((e) => e.id === id && SHAPES.includes(e.type));
+  if (!el) return { error: `node ${id} not found` };
+  if (props.x != null) el.x = Number(props.x);
+  if (props.y != null) el.y = Number(props.y);
+  if (props.width != null) el.width = Number(props.width);
+  if (props.height != null) el.height = Number(props.height);
+  if (props.strokeColor) el.strokeColor = props.strokeColor;
+  if (props.backgroundColor) el.backgroundColor = props.backgroundColor;
+  if (props.fillStyle) el.fillStyle = props.fillStyle;
+  if (props.shape && SHAPES.includes(props.shape)) { el.type = props.shape; el.roundness = props.shape === "rectangle" ? { type: 3 } : null; }
+  el.version = (el.version || 1) + 1; el.versionNonce = randInt(); el.updated = Date.now();
+  let out = elements;
+  if (props.text != null) out = setBoundLabel(out, el, String(props.text));
+  reflowScene(out);
+  return { elements: out };
+}
+
+// editExcalidrawEdge updates a single arrow (label, dashed, arrowhead, colour).
+export function editExcalidrawEdge(elements, id, props = {}) {
+  const el = elements.find((e) => e.id === id && (e.type === "arrow" || e.type === "line"));
+  if (!el) return { error: `edge ${id} not found` };
+  if (props.dashed != null) el.strokeStyle = props.dashed ? "dashed" : "solid";
+  if (props.arrowhead != null) el.endArrowhead = props.arrowhead ? "arrow" : null;
+  if (props.strokeColor) el.strokeColor = props.strokeColor;
+  el.version = (el.version || 1) + 1; el.versionNonce = randInt(); el.updated = Date.now();
+  let out = elements;
+  if (props.text != null) out = setBoundLabel(out, el, String(props.text));
+  reflowScene(out);
+  return { elements: out };
+}
+
+// deleteExcalidrawElement removes an element by id and everything that only
+// existed because of it: a shape takes its label and every connected arrow (and
+// their labels); an arrow takes its label.
+export function deleteExcalidrawElement(elements, id) {
+  const byId = new Map(elements.map((e) => [e.id, e]));
+  const target = byId.get(id);
+  if (!target) return { error: `element ${id} not found` };
+  const remove = new Set([id]);
+  if (SHAPES.includes(target.type)) {
+    for (const el of elements) {
+      if (el.type === "arrow" && (el.startBinding?.elementId === id || el.endBinding?.elementId === id)) remove.add(el.id);
+      if (el.type === "text" && el.containerId === id) remove.add(el.id);
+    }
+  } else {
+    for (const el of elements) if (el.type === "text" && el.containerId === id) remove.add(el.id);
+  }
+  // Labels bound to any arrow we are removing go too.
+  for (const el of elements) if (el.type === "text" && el.containerId && remove.has(el.containerId)) remove.add(el.id);
+  const kept = elements.filter((e) => !remove.has(e.id));
+  for (const el of kept) if (Array.isArray(el.boundElements)) el.boundElements = el.boundElements.filter((b) => !remove.has(b.id));
+  reflowScene(kept);
+  return { elements: kept, removed: remove.size };
 }
 
 // ---------------------------------------------------------------------------
@@ -1096,6 +1229,100 @@ if (features.excalidraw) server.tool(
       return { content: [{ type: "text", text: JSON.stringify(diagram, null, 2) }] };
     } catch (err) {
       return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+// Shared read-modify-write for the element-level Excalidraw edit tools.
+async function loadScene(namespace, path) {
+  const url = `/api/note?ns=${encodeURIComponent(namespace)}&path=${encodeURIComponent(path)}`;
+  const res = await api(url);
+  if (!res.ok) return { error: `Error ${res.status}: ${await res.text().catch(() => "")}` };
+  return { url, ...parseScene(await res.text()) };
+}
+async function saveScene(url, elements, files, background) {
+  const res = await api(url, { method: "PUT", body: buildExcalidraw({ elements, files, background: background || "#ffffff" }) });
+  if (!res.ok) return `Error ${res.status}: ${await res.text().catch(() => "")}`;
+  return null;
+}
+const exEditErr = (text) => ({ content: [{ type: "text", text }], isError: true });
+
+if (features.excalidraw) server.tool(
+  "edit_excalidraw_node",
+  "Edit one shape of a drawing by its element id (from read_excalidraw), without redrawing the rest: change its label, shape kind, position, size or colours. Connected arrows and the label re-flow automatically. Set `text` to \"\" to remove the label.",
+  {
+    namespace: z.string().describe("Namespace name"),
+    path: z.string().describe("Path to the drawing note"),
+    id: z.string().describe("Element id of the shape (from read_excalidraw)"),
+    text: z.string().optional().describe("New label (\"\" removes it)"),
+    shape: z.enum(["rectangle", "ellipse", "diamond"]).optional().describe("Change the shape kind"),
+    x: z.number().optional(), y: z.number().optional(),
+    width: z.number().optional(), height: z.number().optional(),
+    strokeColor: z.string().optional().describe("Stroke colour (hex)"),
+    backgroundColor: z.string().optional().describe("Fill colour (hex)"),
+    fillStyle: z.enum(["solid", "hachure", "cross-hatch"]).optional(),
+  },
+  async ({ namespace, path, id, ...props }) => {
+    try {
+      const s = await loadScene(namespace, path);
+      if (s.error) return exEditErr(s.error);
+      const r = editExcalidrawNode(s.elements, id, props);
+      if (r.error) return exEditErr(r.error);
+      const err = await saveScene(s.url, r.elements, s.files, s.background);
+      if (err) return exEditErr(err);
+      return { content: [{ type: "text", text: `Updated node ${id} in ${path}` }] };
+    } catch (err) {
+      return exEditErr(`Error: ${err.message}`);
+    }
+  }
+);
+
+if (features.excalidraw) server.tool(
+  "edit_excalidraw_edge",
+  "Edit one arrow of a drawing by its element id (from read_excalidraw): change its label, dashed style, arrowhead or colour. Set `text` to \"\" to remove the label.",
+  {
+    namespace: z.string().describe("Namespace name"),
+    path: z.string().describe("Path to the drawing note"),
+    id: z.string().describe("Element id of the arrow (from read_excalidraw)"),
+    text: z.string().optional().describe("New label (\"\" removes it)"),
+    dashed: z.boolean().optional().describe("Dashed vs solid line"),
+    arrowhead: z.boolean().optional().describe("Draw an arrowhead at the target end"),
+    strokeColor: z.string().optional().describe("Stroke colour (hex)"),
+  },
+  async ({ namespace, path, id, ...props }) => {
+    try {
+      const s = await loadScene(namespace, path);
+      if (s.error) return exEditErr(s.error);
+      const r = editExcalidrawEdge(s.elements, id, props);
+      if (r.error) return exEditErr(r.error);
+      const err = await saveScene(s.url, r.elements, s.files, s.background);
+      if (err) return exEditErr(err);
+      return { content: [{ type: "text", text: `Updated edge ${id} in ${path}` }] };
+    } catch (err) {
+      return exEditErr(`Error: ${err.message}`);
+    }
+  }
+);
+
+if (features.excalidraw) server.tool(
+  "delete_excalidraw_element",
+  "Delete one element of a drawing by its element id (from read_excalidraw). Deleting a shape also removes its label and every arrow connected to it; deleting an arrow removes its label.",
+  {
+    namespace: z.string().describe("Namespace name"),
+    path: z.string().describe("Path to the drawing note"),
+    id: z.string().describe("Element id to delete (from read_excalidraw)"),
+  },
+  async ({ namespace, path, id }) => {
+    try {
+      const s = await loadScene(namespace, path);
+      if (s.error) return exEditErr(s.error);
+      const r = deleteExcalidrawElement(s.elements, id);
+      if (r.error) return exEditErr(r.error);
+      const err = await saveScene(s.url, r.elements, s.files, s.background);
+      if (err) return exEditErr(err);
+      return { content: [{ type: "text", text: `Deleted ${r.removed} element${r.removed === 1 ? "" : "s"} (${id} + dependents) in ${path}` }] };
+    } catch (err) {
+      return exEditErr(`Error: ${err.message}`);
     }
   }
 );

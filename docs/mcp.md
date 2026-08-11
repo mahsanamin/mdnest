@@ -18,6 +18,7 @@ transports**:
 > `delete_item`, `move_item`, `search_notes`, `list_tasks`, `create_task`,
 > `move_task`, `edit_task`, `set_task_field`, `toggle_task`, `delete_task`,
 > `search_tasks`, `create_excalidraw`, `draw_excalidraw`, `read_excalidraw`,
+> `edit_excalidraw_node`, `edit_excalidraw_edge`, `delete_excalidraw_element`,
 > `create_marp`, `add_marp_slide`, `list_marp_slides`, `read_marp_slide`,
 > `edit_marp_slide`, `delete_marp_slide`, `move_marp_slide`.
 >
@@ -278,6 +279,9 @@ these tools scaffold a valid file that the app then renders.
 | `create_excalidraw` | Create an empty, valid Obsidian-compatible `.excalidraw.md` drawing (suffix added if missing). | `namespace`, `path`, `background?` |
 | `draw_excalidraw` | Author/edit a diagram from a high-level spec: `nodes` (labelled shapes) + `edges` (arrows). Compiles to a valid scene with bound labels and connected arrows. `replace` (default) or `append`. | `namespace`, `path`, `nodes?`, `edges?`, `mode?`, `background?` |
 | `read_excalidraw` | Read a drawing back as `{ nodes, edges }` (with stable element ids) so an agent can inspect before editing. | `namespace`, `path` |
+| `edit_excalidraw_node` | Edit one shape by element id (label, shape kind, position, size, colours); connected arrows re-flow. | `namespace`, `path`, `id`, `text?`, `shape?`, `x?`, `y?`, `width?`, `height?`, `strokeColor?`, `backgroundColor?`, `fillStyle?` |
+| `edit_excalidraw_edge` | Edit one arrow by element id (label, dashed, arrowhead, colour). | `namespace`, `path`, `id`, `text?`, `dashed?`, `arrowhead?`, `strokeColor?` |
+| `delete_excalidraw_element` | Delete one element by id (a shape takes its label + connected arrows; an arrow takes its label). | `namespace`, `path`, `id` |
 | `create_marp` | Create a Marp deck note (`marp: true` frontmatter + `---`-separated slides). | `namespace`, `path`, `title?`, `theme?`, `paginate?`, `slides?` |
 | `list_marp_slides` | List a deck's slides (1-based index, first line, length) + its frontmatter. | `namespace`, `path` |
 | `read_marp_slide` | Read one slide's markdown by index. | `namespace`, `path`, `index` |
@@ -300,7 +304,10 @@ optional `text`, `shape`, position/size and colours) and `edges`
 valid scene — shapes with centred labels, arrows bound to their endpoints, and
 the searchable `## Text Elements` mirror. In `append` mode an edge may connect a
 new node to an existing shape by the element id reported by `read_excalidraw`.
-Omit `x`/`y` to auto-lay-out on a grid.
+Omit `x`/`y` to auto-lay-out on a grid. For surgical changes, `read_excalidraw`
+exposes each node's and arrow's stable element id, which `edit_excalidraw_node`,
+`edit_excalidraw_edge` and `delete_excalidraw_element` target directly — so a
+drawing is CRUD per element, not only redraw-in-full.
 
 Both features are gated in the app by `ENABLE_EXCALIDRAW` / `ENABLE_MARP`; the
 notes are still created and editable as plain markdown when a feature is off.
