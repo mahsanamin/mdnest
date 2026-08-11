@@ -291,6 +291,19 @@ func (fakeGroupStore) DeleteGroupGrant(int) error                          { ret
 func (fakeGroupStore) ListGrantsForGroup(int) ([]store.GroupGrant, error)  { return nil, nil }
 func (fakeGroupStore) DeleteGroupGrantsForNamespace(string) (int64, error) { return 0, nil }
 
+func (f fakeGroupStore) MemberGroupGrants(userID int, oidcGroups []string, namespace string) ([]store.GroupGrant, error) {
+	var out []store.GroupGrant
+	if perm := f.userNs[userID][namespace]; perm != "" {
+		out = append(out, store.GroupGrant{Namespace: namespace, Path: "/", Permission: perm})
+	}
+	for _, g := range oidcGroups {
+		if perm := f.oidcNs[g][namespace]; perm != "" {
+			out = append(out, store.GroupGrant{Namespace: namespace, Path: "/", Permission: perm})
+		}
+	}
+	return out, nil
+}
+
 // Access granted purely through an access-group (no direct grant, no admin
 // scope) must be honored — including membership carried by an OIDC group id in
 // the JWT — and must surface in the namespace filter.

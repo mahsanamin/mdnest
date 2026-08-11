@@ -16,6 +16,7 @@ import (
 type TreeHandler struct {
 	store      storage.Storage
 	grantStore store.GrantStore // nil in single mode
+	groupStore store.GroupStore // nil in single mode or when groups are disabled
 }
 
 type TreeNode struct {
@@ -25,8 +26,8 @@ type TreeNode struct {
 	Children []*TreeNode `json:"children,omitempty"`
 }
 
-func NewTreeHandler(store storage.Storage, grantStore store.GrantStore) *TreeHandler {
-	return &TreeHandler{store: store, grantStore: grantStore}
+func NewTreeHandler(store storage.Storage, grantStore store.GrantStore, groupStore store.GroupStore) *TreeHandler {
+	return &TreeHandler{store: store, grantStore: grantStore, groupStore: groupStore}
 }
 
 // GetTree handles GET /api/tree?ns=...
@@ -58,6 +59,16 @@ func (h *TreeHandler) GetTree(w http.ResponseWriter, r *http.Request) {
 			for _, g := range grants {
 				if g.Namespace == ns {
 					nsGrants = append(nsGrants, g)
+				}
+			}
+			// Include grants inherited from the user's groups, otherwise a user
+			// who can reach the namespace only through a group would see the
+			// namespace but an empty tree.
+			if h.groupStore != nil {
+				if groupGrants, err := h.groupStore.MemberGroupGrants(uc.ID, uc.Groups, ns); err == nil {
+					for _, g := range groupGrants {
+						nsGrants = append(nsGrants, store.Grant{Namespace: ns, Path: g.Path, Permission: g.Permission})
+					}
 				}
 			}
 			root = filterTreeByGrants(root, nsGrants)

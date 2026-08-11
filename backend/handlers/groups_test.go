@@ -86,6 +86,9 @@ func (m *memGroupStore) CheckGroupAccess(int, []string, string, string, string) 
 func (m *memGroupStore) GetAccessibleNamespacesForGroups(int, []string) ([]string, error) {
 	return nil, nil
 }
+func (m *memGroupStore) MemberGroupGrants(int, []string, string) ([]store.GroupGrant, error) {
+	return nil, nil
+}
 
 func doJSON(t *testing.T, h http.HandlerFunc, method, target string, body interface{}) *httptest.ResponseRecorder {
 	t.Helper()

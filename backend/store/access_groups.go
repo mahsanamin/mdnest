@@ -68,6 +68,10 @@ type GroupStore interface {
 	// GetAccessibleNamespacesForGroups returns the namespaces reachable through
 	// the user's group memberships.
 	GetAccessibleNamespacesForGroups(userID int, oidcGroups []string) ([]string, error)
+	// MemberGroupGrants returns the grants a user inherits, within a single
+	// namespace, from the groups they belong to (as a direct member or through
+	// one of their OIDC group IDs).
+	MemberGroupGrants(userID int, oidcGroups []string, namespace string) ([]GroupGrant, error)
 }
 
 // PostgresGroupStore implements GroupStore against Postgres.
@@ -277,7 +281,10 @@ func (s *PostgresGroupStore) DeleteGroupGrantsForNamespace(namespace string) (in
 
 // memberGroupGrants returns all group grants in a namespace for the groups the
 // user belongs to (directly or via an OIDC group ID).
-func (s *PostgresGroupStore) memberGroupGrants(userID int, oidcGroups []string, namespace string) ([]GroupGrant, error) {
+// MemberGroupGrants returns the grants a user inherits, within namespace, from
+// the groups they belong to (as a direct member or via one of their OIDC group
+// IDs).
+func (s *PostgresGroupStore) MemberGroupGrants(userID int, oidcGroups []string, namespace string) ([]GroupGrant, error) {
 	rows, err := s.db.Query(
 		`SELECT gg.id, gg.group_id, gg.namespace, gg.path, gg.permission, gg.granted_by, gg.created_at
 		 FROM access_group_grants gg
@@ -307,7 +314,7 @@ func (s *PostgresGroupStore) CheckGroupAccess(userID int, oidcGroups []string, n
 	if !strings.HasPrefix(path, "/") {
 		path = "/" + path
 	}
-	grants, err := s.memberGroupGrants(userID, oidcGroups, namespace)
+	grants, err := s.MemberGroupGrants(userID, oidcGroups, namespace)
 	if err != nil {
 		return false
 	}
