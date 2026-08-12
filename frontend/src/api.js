@@ -330,9 +330,11 @@ export async function getAllTasks() {
 }
 
 // Create a task by appending it to a note. `body` is { text, note?, column? };
-// when note is omitted the board's default note is used.
+// when note is omitted the board's default note is used. The note is also sent
+// as the `path` query param so the route's write-access check targets it.
 export async function createTask(ns, body) {
-  const res = await request(`/tasks?ns=${encodeURIComponent(ns)}`, {
+  const q = body?.note ? `&path=${encodeURIComponent(body.note)}` : '';
+  const res = await request(`/tasks?ns=${encodeURIComponent(ns)}${q}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -363,6 +365,23 @@ export async function patchTask(ns, path, mutation) {
     throw new Error(data.error || 'Failed to update task');
   }
   return res.json();
+}
+
+export async function deleteTask(ns, path, line, raw) {
+  const res = await request(`/tasks?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ line, raw }),
+  });
+  if (res.status === 409) {
+    const err = new Error('Task is out of date; refresh the board');
+    err.status = 409;
+    throw err;
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to delete task');
+  }
 }
 
 export async function getBoard(ns) {

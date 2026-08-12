@@ -238,7 +238,11 @@ function App() {
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [comments, setComments] = useState([]);
   const [showComments, setShowComments] = useState(false);
-  const [showTaskBoard, setShowTaskBoard] = useState(false);  const [pendingCommentSelection, setPendingCommentSelection] = useState(null);
+  const [showTaskBoard, setShowTaskBoard] = useState(false);
+  // Bumped by the toolbar Refresh so the task board reloads its tasks too
+  // (the board isn't part of the note/tree refresh path).
+  const [boardRefreshNonce, setBoardRefreshNonce] = useState(0);
+  const [pendingCommentSelection, setPendingCommentSelection] = useState(null);
   const [highlightedCommentId, setHighlightedCommentId] = useState(null);
   const goToCommentRef = useRef(null);
   const editorWrapperRef = useRef(null);
@@ -862,7 +866,8 @@ function App() {
   }, [getScrollables, getFilePrefs]);
 
   const openNoteDirect = useCallback(async (ns, path) => {
-    setShowTaskBoard(false);
+    // Board stays open across note navigation so the chosen view persists; the
+    // board's own "open source note" action closes it explicitly.
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
     try {
       const { text, etag } = await getNote(ns, path);
@@ -880,7 +885,9 @@ function App() {
   }, [restoreScrollPosition, commentsEnabled]);
 
   const handleSelectNs = useCallback((ns) => {
-    setShowTaskBoard(false);
+    // Keep the task board open when switching workspace so the chosen view is
+    // preserved — it re-scopes to the new namespace. Note navigation keeps it
+    // open too (see openNote/openNoteDirect).
     setSelectedNs(ns);
     // Restore the last file the user had open in the namespace they're
     // switching TO. If they've never opened anything there (or whatever
@@ -907,7 +914,8 @@ function App() {
 
   const openNote = useCallback(async (path) => {
     if (!selectedNs) return;
-    setShowTaskBoard(false);
+    // Board stays open across note navigation so the chosen view persists; the
+    // board's own "open source note" action closes it explicitly.
     // Clear any pending save timer from the previous file
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
     try {
@@ -1313,6 +1321,9 @@ function App() {
 
   const handleRefresh = useCallback(async () => {
     if (!authenticated || !selectedNs) return;
+    // When the board overlay is up, Refresh should reload its tasks — bump the
+    // nonce the board watches (the note/tree refresh below doesn't touch it).
+    if (showTaskBoard) setBoardRefreshNonce((n) => n + 1);
     // broadcast: this is the Sidebar's manual Refresh AND the git-sync button
     // (both call onRefreshTree), so tell other tabs to refresh too.
     await refreshTree(selectedNs, { broadcast: true });
@@ -1327,7 +1338,7 @@ function App() {
         // Note may have been deleted
       }
     }
-  }, [authenticated, selectedNs, currentPath, refreshTree]);
+  }, [authenticated, selectedNs, currentPath, refreshTree, showTaskBoard]);
 
   // Reload note content (used by conflict banner)
   const handleReloadNote = useCallback(async () => {
@@ -1552,6 +1563,7 @@ function App() {
                 canWrite={canWrite('')}
                 currentPath={currentPath}
                 currentUser={userInfo?.username}
+                refreshSignal={boardRefreshNonce}
                 onOpenNote={(p) => { setShowTaskBoard(false); openNote(p); }}
                 onClose={() => setShowTaskBoard(false)}
               />
