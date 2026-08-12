@@ -229,11 +229,17 @@ func (h *SSOHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		"role":         user.Role,
 		"totp_enabled": false,
 		"iat":          time.Now().Unix(),
-		// SSO has no per-flow "Remember me" checkbox (the IdP owns the
-		// session UX), so default to the long-lived TTL — matches the
-		// "stay signed in" expectation users get from other corporate apps.
-		"exp": time.Now().Add(jwtTTL(true)).Unix(),
+		// SSO tokens snapshot IdP group membership (used for authorization),
+		// so they use a short TTL that bounds how long a stale snapshot can
+		// outlive an IdP change. The IdP owns the session UX; re-auth within
+		// an active IdP session is typically silent.
+		"exp": time.Now().Add(ssoJWTTTL()).Unix(),
 	})
+	// Carry the IdP group IDs (snapshot at login) so access-group membership
+	// can be resolved per request. Omitted when the IdP emits none.
+	if len(claims.Groups) > 0 {
+		token.Claims.(jwt.MapClaims)["groups"] = claims.Groups
+	}
 	signed, err := token.SignedString(h.secret)
 	if err != nil {
 		log.Printf("sso jwt sign: %v", err)

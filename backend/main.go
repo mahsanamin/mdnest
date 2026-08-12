@@ -304,6 +304,7 @@ func main() {
 				RedirectURL:    redirect,
 				AllowedDomains: domains,
 				CookieSecret:   []byte(jwtSecret),
+				GroupsClaim:    env("OIDC_GROUPS_CLAIM", ""),
 			})
 			if err != nil {
 				log.Fatalf("failed to init SSO client: %v", err)
@@ -344,11 +345,13 @@ func main() {
 	var perms *middleware.PermissionChecker
 	var grantStore store.GrantStore
 	var nsAdminStore store.NamespaceAdminStore
+	var groupStore store.GroupStore
 	var workspaceStore store.WorkspaceStore
 	if multiMode {
 		grantStore = store.NewPostgresGrantStore(db)
 		nsAdminStore = store.NewPostgresNamespaceAdminStore(db)
-		perms = middleware.NewPermissionChecker(grantStore, nsAdminStore)
+		groupStore = store.NewPostgresGroupStore(db)
+		perms = middleware.NewPermissionChecker(grantStore, nsAdminStore, groupStore)
 
 		// Per-workspace git remote overrides: the store decrypts credentials and
 		// this adapter feeds the git committer, overriding the coarse
@@ -440,7 +443,7 @@ func main() {
 	if collabHub != nil {
 		noteHandler.SetCollabHub(collabHub)
 	}
-	treeHandler := handlers.NewTreeHandler(stg, grantStore)
+	treeHandler := handlers.NewTreeHandler(stg, grantStore, groupStore)
 	uploadHandler := handlers.NewUploadHandler(stg, perms)
 	// Stateless app replicas own no attachment bytes: proxy attachment traffic
 	// (upload + serve) to the writer, which owns the git tree, when WRITER_URL is
@@ -726,7 +729,7 @@ func main() {
 	// Multi-mode routes (require admin role for /admin/*, authenticated for /me)
 	if multiMode {
 		adminHandler := handlers.NewAdminHandler(userStore, grantStore, nsAdminStore, collabHub, userProvider, grantMaxDepth)
-		meHandler := handlers.NewMeHandler(userStore, grantStore, nsAdminStore)
+		meHandler := handlers.NewMeHandler(userStore, grantStore, nsAdminStore, groupStore)
 		// Per-workspace git remote config: superadmin CRUD over shared/team
 		// workspaces, plus each user's own personal workspace. The optional
 		// GIT_REMOTE_ALLOWED_HOSTS restricts remote hosts (defence-in-depth for
@@ -752,6 +755,13 @@ func main() {
 		mux.Handle("/api/admin/workspaces", authMiddleware.Wrap(middleware.RequireSuperAdmin(http.HandlerFunc(workspaceHandler.HandleAdmin))))
 		mux.Handle("/api/admin/workspace-groups", authMiddleware.Wrap(middleware.RequireSuperAdmin(http.HandlerFunc(workspaceHandler.HandleGroups))))
 		mux.Handle("/api/me/workspace", authMiddleware.Wrap(http.HandlerFunc(workspaceHandler.HandleMine)))
+
+		// Role-based access "Groups": superadmin-only management of named sets
+		// (users + OIDC group IDs) and their namespace grants.
+		groupsHandler := handlers.NewGroupsHandler(groupStore)
+		mux.Handle("/api/admin/groups", authMiddleware.Wrap(middleware.RequireSuperAdmin(http.HandlerFunc(groupsHandler.HandleGroups))))
+		mux.Handle("/api/admin/groups/members", authMiddleware.Wrap(middleware.RequireSuperAdmin(http.HandlerFunc(groupsHandler.HandleMembers))))
+		mux.Handle("/api/admin/groups/grants", authMiddleware.Wrap(middleware.RequireSuperAdmin(http.HandlerFunc(groupsHandler.HandleGrants))))
 
 		// Users endpoint: GET is RequireAdmin (handler scopes the list);
 		// PUT/DELETE (role change, user delete) are SuperAdmin-only —

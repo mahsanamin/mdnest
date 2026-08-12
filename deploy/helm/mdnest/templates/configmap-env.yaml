@@ -63,6 +63,9 @@ data:
   {{- if .Values.sso.allowedDomains }}
   SSO_ALLOWED_DOMAINS: {{ .Values.sso.allowedDomains | quote }}
   {{- end }}
+  {{- if .Values.sso.groupsClaim }}
+  OIDC_GROUPS_CLAIM: {{ .Values.sso.groupsClaim | quote }}
+  {{- end }}
   SSO_PROVIDER_LABEL: {{ .Values.sso.providerLabel | quote }}
   {{- if .Values.sso.adminEmails }}
   ADMIN_EMAILS: {{ .Values.sso.adminEmails | quote }}

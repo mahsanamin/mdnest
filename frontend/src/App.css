@@ -5237,3 +5237,54 @@ pre:hover .code-copy-btn {
 .marp-theme-name-field input { background:#1e1e2e; border:1px solid #313244; border-radius:4px; color:#cdd6f4; padding:6px 8px; }
 .marp-theme-css { width:100%; box-sizing:border-box; background:#181825; color:#cdd6f4; border:1px solid #313244; border-radius:6px; padding:10px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:0.78rem; line-height:1.45; resize:vertical; }
 .marp-theme-actions { display:flex; justify-content:flex-end; }
+
+/* ===== Access "Groups" admin tab ===== */
+/* Separate the create form from the intro above and the group list below. */
+.admin-section > .grants-add-form {
+  margin-bottom: 18px;
+}
+
+/* Create form: let the name + description inputs fill the available width. */
+.admin-section > .grants-add-form .grants-add-row input {
+  width: auto;
+  flex: 1;
+}
+
+/* Sections inside an expanded group card (Members / Namespace access). */
+.group-members,
+.group-grants {
+  margin-top: 18px;
+}
+
+.grants-user-body > .group-members:first-child {
+  margin-top: 14px;
+}
+
+.group-members h4,
+.group-grants h4 {
+  margin: 0 0 8px 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #a6adc8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Stacked add-rows (user row, then the OIDC id/label row) must not touch. */
+.group-members .grants-add-row,
+.group-grants .grants-add-row {
+  margin-top: 8px;
+}
+
+/* The OIDC id + display-name inputs should share the width evenly. */
+.group-members .grants-add-row input {
+  width: auto;
+  flex: 1;
+}
+
+/* Set the Delete-group action apart from the sections above it. */
+.group-delete-row {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px dashed #313244;
+}

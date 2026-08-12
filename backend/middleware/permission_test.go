@@ -39,10 +39,10 @@ func (f *fakeGrantStore) GetAccessibleNamespaces(userID int) ([]string, error) {
 func (f *fakeGrantStore) CreateGrant(int, string, string, string, *int) (*store.Grant, error) {
 	return nil, nil
 }
-func (f *fakeGrantStore) UpdateGrantPermission(int, string) error { return nil }
-func (f *fakeGrantStore) DeleteGrant(int) error                   { return nil }
+func (f *fakeGrantStore) UpdateGrantPermission(int, string) error        { return nil }
+func (f *fakeGrantStore) DeleteGrant(int) error                          { return nil }
 func (f *fakeGrantStore) DeleteGrantsForNamespace(string) (int64, error) { return 0, nil }
-func (f *fakeGrantStore) GetGrant(int) (*store.Grant, error)      { return nil, nil }
+func (f *fakeGrantStore) GetGrant(int) (*store.Grant, error)             { return nil, nil }
 func (f *fakeGrantStore) GetGrantsForUser(int) ([]store.Grant, error) {
 	return nil, nil
 }
@@ -71,8 +71,8 @@ func (f fakeNsAdminStore) ListByUser(userID int) ([]string, error) {
 	sort.Strings(out)
 	return out, nil
 }
-func (fakeNsAdminStore) Add(int, string, *int) error { return nil }
-func (fakeNsAdminStore) Remove(int, string) error    { return nil }
+func (fakeNsAdminStore) Add(int, string, *int) error  { return nil }
+func (fakeNsAdminStore) Remove(int, string) error     { return nil }
 func (fakeNsAdminStore) CountByUser(int) (int, error) { return 0, nil }
 func (fakeNsAdminStore) ListByNamespace(string) ([]store.NamespaceAdminWithUser, error) {
 	return nil, nil
@@ -96,6 +96,7 @@ func newChecker() *PermissionChecker {
 		fakeNsAdminStore{admin: map[int]map[string]bool{
 			2: {"beta": true},
 		}},
+		nil,
 	)
 }
 
@@ -227,4 +228,112 @@ func TestAPITokenSuperadminHasNoBypass(t *testing.T) {
 	}
 	assertSlice(t, pc.FilterManageableNamespaces(reqAs(tokenSuper), allNamespaces),
 		[]string{"alpha", "beta", "gamma"})
+}
+
+// fakeGroupStore models role-based access: a namespace is reachable if the user
+// is a direct member (userNs) or carries a matching OIDC group id (oidcNs).
+type fakeGroupStore struct {
+	userNs map[int]map[string]string    // userID -> ns -> permission
+	oidcNs map[string]map[string]string // oidc group id -> ns -> permission
+}
+
+func (f fakeGroupStore) CheckGroupAccess(userID int, oidcGroups []string, namespace, path, required string) bool {
+	ok := func(perm string) bool {
+		if perm == "" {
+			return false
+		}
+		return required == "read" || perm == "write"
+	}
+	if ok(f.userNs[userID][namespace]) {
+		return true
+	}
+	for _, g := range oidcGroups {
+		if ok(f.oidcNs[g][namespace]) {
+			return true
+		}
+	}
+	return false
+}
+
+func (f fakeGroupStore) GetAccessibleNamespacesForGroups(userID int, oidcGroups []string) ([]string, error) {
+	set := map[string]bool{}
+	for ns := range f.userNs[userID] {
+		set[ns] = true
+	}
+	for _, g := range oidcGroups {
+		for ns := range f.oidcNs[g] {
+			set[ns] = true
+		}
+	}
+	var out []string
+	for ns := range set {
+		out = append(out, ns)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+func (fakeGroupStore) CreateGroup(string, string) (*store.AccessGroup, error) { return nil, nil }
+func (fakeGroupStore) UpdateGroup(int, string, string) error                  { return nil }
+func (fakeGroupStore) DeleteGroup(int) error                                  { return nil }
+func (fakeGroupStore) GetGroup(int) (*store.AccessGroup, error)               { return nil, nil }
+func (fakeGroupStore) ListGroups() ([]store.AccessGroup, error)               { return nil, nil }
+func (fakeGroupStore) AddUserMember(int, int) error                           { return nil }
+func (fakeGroupStore) AddOIDCMember(int, string, string) error                { return nil }
+func (fakeGroupStore) RemoveUserMember(int, int) error                        { return nil }
+func (fakeGroupStore) RemoveOIDCMember(int, string) error                     { return nil }
+func (fakeGroupStore) ListMembers(int) ([]store.GroupMember, error)           { return nil, nil }
+func (fakeGroupStore) CreateGroupGrant(int, string, string, string, *int) (*store.GroupGrant, error) {
+	return nil, nil
+}
+func (fakeGroupStore) UpdateGroupGrantPermission(int, string) error        { return nil }
+func (fakeGroupStore) DeleteGroupGrant(int) error                          { return nil }
+func (fakeGroupStore) ListGrantsForGroup(int) ([]store.GroupGrant, error)  { return nil, nil }
+func (fakeGroupStore) DeleteGroupGrantsForNamespace(string) (int64, error) { return 0, nil }
+
+func (f fakeGroupStore) MemberGroupGrants(userID int, oidcGroups []string, namespace string) ([]store.GroupGrant, error) {
+	var out []store.GroupGrant
+	if perm := f.userNs[userID][namespace]; perm != "" {
+		out = append(out, store.GroupGrant{Namespace: namespace, Path: "/", Permission: perm})
+	}
+	for _, g := range oidcGroups {
+		if perm := f.oidcNs[g][namespace]; perm != "" {
+			out = append(out, store.GroupGrant{Namespace: namespace, Path: "/", Permission: perm})
+		}
+	}
+	return out, nil
+}
+
+// Access granted purely through an access-group (no direct grant, no admin
+// scope) must be honored — including membership carried by an OIDC group id in
+// the JWT — and must surface in the namespace filter.
+func TestGroupBasedAccess(t *testing.T) {
+	pc := NewPermissionChecker(
+		&fakeGrantStore{grants: map[int]map[string]bool{}},
+		fakeNsAdminStore{},
+		fakeGroupStore{
+			userNs: map[int]map[string]string{5: {"alpha": "read"}},
+			oidcNs: map[string]map[string]string{"gid-eng": {"beta": "write"}},
+		},
+	)
+	// Direct group member: read on alpha, but not write.
+	u := &UserContext{ID: 5, Username: "carol", Role: "collaborator"}
+	if !pc.CheckRead(reqAs(u), "alpha", "n.md") {
+		t.Fatal("direct group member denied read")
+	}
+	if pc.CheckWrite(reqAs(u), "alpha", "n.md") {
+		t.Fatal("read-only group grant allowed write")
+	}
+	// Membership via an OIDC group id carried in the JWT: write on beta.
+	viaOIDC := &UserContext{ID: 9, Username: "dave", Role: "collaborator", Groups: []string{"gid-eng"}}
+	if !pc.CheckWrite(reqAs(viaOIDC), "beta", "n.md") {
+		t.Fatal("OIDC-group member denied write")
+	}
+	// Without the group id, no access.
+	noGroup := &UserContext{ID: 9, Username: "dave", Role: "collaborator"}
+	if pc.CheckRead(reqAs(noGroup), "beta", "n.md") {
+		t.Fatal("access leaked to a user without the group id")
+	}
+	// Group-reachable namespaces surface in the data-plane filter.
+	assertSlice(t, pc.FilterNamespaces(reqAs(viaOIDC), allNamespaces), []string{"beta"})
 }

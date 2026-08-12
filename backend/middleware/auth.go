@@ -106,6 +106,13 @@ func (a *AuthMiddleware) Wrap(next http.Handler) http.Handler {
 				if v, ok := claims["role"].(string); ok {
 					uc.Role = v
 				}
+				if raw, ok := claims["groups"].([]interface{}); ok {
+					for _, g := range raw {
+						if s, ok := g.(string); ok && s != "" {
+							uc.Groups = append(uc.Groups, s)
+						}
+					}
+				}
 				r = WithUser(r, uc)
 			}
 		}

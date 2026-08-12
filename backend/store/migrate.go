@@ -212,6 +212,51 @@ var migrations = []struct {
 			ALTER TABLE workspace_groups ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'ui';
 		`,
 	},
+	{
+		// Role-based access ("Groups"): named, superadmin-managed sets whose
+		// members are either mdnest users or IdP (OIDC) group IDs, and which
+		// carry namespace grants that mirror access_grants. Access becomes the
+		// union of a user's own grants and the grants of every group they
+		// belong to. Fully additive: with no rows, behaviour is unchanged.
+		name: "013_create_access_groups",
+		sql: `
+			CREATE TABLE IF NOT EXISTS access_groups (
+				id          SERIAL PRIMARY KEY,
+				name        TEXT UNIQUE NOT NULL,
+				description TEXT NOT NULL DEFAULT '',
+				created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+			);
+			CREATE TABLE IF NOT EXISTS access_group_members (
+				group_id   INTEGER NOT NULL REFERENCES access_groups(id) ON DELETE CASCADE,
+				user_id    INTEGER REFERENCES users(id) ON DELETE CASCADE,
+				oidc_group TEXT,
+				-- optional human label for an OIDC group id (display only; the
+				-- code matches on oidc_group, never on this)
+				oidc_group_label TEXT NOT NULL DEFAULT '',
+				created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				-- exactly one of user_id / oidc_group is set
+				CHECK ((user_id IS NULL) <> (oidc_group IS NULL))
+			);
+			CREATE UNIQUE INDEX IF NOT EXISTS idx_access_group_members_user
+				ON access_group_members(group_id, user_id) WHERE user_id IS NOT NULL;
+			CREATE UNIQUE INDEX IF NOT EXISTS idx_access_group_members_oidc
+				ON access_group_members(group_id, oidc_group) WHERE oidc_group IS NOT NULL;
+			CREATE INDEX IF NOT EXISTS idx_access_group_members_uid ON access_group_members(user_id);
+			CREATE INDEX IF NOT EXISTS idx_access_group_members_gid ON access_group_members(group_id);
+			CREATE TABLE IF NOT EXISTS access_group_grants (
+				id          SERIAL PRIMARY KEY,
+				group_id    INTEGER NOT NULL REFERENCES access_groups(id) ON DELETE CASCADE,
+				namespace   TEXT NOT NULL,
+				path        TEXT NOT NULL DEFAULT '/',
+				permission  TEXT NOT NULL DEFAULT 'write',
+				granted_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+				created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+				UNIQUE(group_id, namespace, path)
+			);
+			CREATE INDEX IF NOT EXISTS idx_access_group_grants_group ON access_group_grants(group_id);
+			CREATE INDEX IF NOT EXISTS idx_access_group_grants_ns ON access_group_grants(namespace);
+		`,
+	},
 }
 
 // Migrate runs all pending migrations. Safe to call on every startup.

@@ -104,7 +104,7 @@ func serveFile(h *UploadHandler, uc *middleware.UserContext, ns string) *httptes
 
 func TestServeFileEnforcesNamespaceReadAccess(t *testing.T) {
 	notesDir := notesDirWithTwoNamespaces(t)
-	perms := middleware.NewPermissionChecker(&fakeGrantStore{userID: 7, namespace: "alpha"}, fakeNsAdminStore{})
+	perms := middleware.NewPermissionChecker(&fakeGrantStore{userID: 7, namespace: "alpha"}, fakeNsAdminStore{}, nil)
 	h := NewUploadHandler(localStore(t, notesDir), perms)
 
 	collaborator := &middleware.UserContext{ID: 7, Username: "carol", Role: "collaborator"}
