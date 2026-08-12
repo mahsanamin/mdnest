@@ -27,6 +27,7 @@ import PresenceBar from './components/PresenceBar.jsx';
 import CommentSidebar from './components/CommentSidebar.jsx';
 import ShareDialog from './components/ShareDialog.jsx';
 import HistoryModal from './components/HistoryModal.jsx';
+import AttributionModal from './components/AttributionModal.jsx';
 import MoveToModal from './components/MoveToModal.jsx';
 import ReleaseNotesModal from './components/ReleaseNotesModal.jsx';
 import CollabClient from './collab.js';
@@ -308,6 +309,8 @@ function App() {
   const [restoreBanner, setRestoreBanner] = useState(null); // {username, ref, etag}
   // historyModal is { ns, path } when the History modal is open, null otherwise.
   const [historyModal, setHistoryModal] = useState(null);
+  // attributionModal is { ns, path } when the Authors modal is open, null otherwise.
+  const [attributionModal, setAttributionModal] = useState(null);
   // moveModal is { ns, target } when the Move-to picker is open. The
   // picker replaces drag-and-drop on touch devices (where draggable is
   // false on tree rows) and is also available from the context menu on
@@ -1125,6 +1128,11 @@ function App() {
         setHistoryModal({ ns: selectedNs, path: target.path });
         break;
       }
+      case 'authors': {
+        if (!target || !selectedNs) return;
+        setAttributionModal({ ns: selectedNs, path: target.path });
+        break;
+      }
       case 'move': {
         if (!target || !selectedNs) return;
         // The MoveToModal handles the destination picking, the API
@@ -1718,6 +1726,13 @@ function App() {
             setSavedContent(text);
             setHistoryModal(null);
           }}
+        />
+      )}
+      {attributionModal && (
+        <AttributionModal
+          ns={attributionModal.ns}
+          path={attributionModal.path}
+          onClose={() => setAttributionModal(null)}
         />
       )}
       {moveModal && (

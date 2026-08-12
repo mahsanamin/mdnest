@@ -88,6 +88,17 @@ func (c *CoherentStorage) SetSyncStatusSink(s SyncStatusSink) {
 	}
 }
 
+// Attribute forwards note-save attribution to the inner git storage so the next
+// commit credits the savers (message body + Co-authored-by trailers). No-op when
+// the inner backend keeps no git history.
+func (c *CoherentStorage) Attribute(ns, relPath, name, email string) {
+	if g, ok := c.Storage.(interface {
+		Attribute(ns, relPath, name, email string)
+	}); ok {
+		g.Attribute(ns, relPath, name, email)
+	}
+}
+
 // Close tears down the inner backend (if it is a Closer, e.g. GitStorage stops
 // its committer) and the working set connection.
 func (c *CoherentStorage) Close() error {

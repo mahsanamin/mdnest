@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -14,13 +15,16 @@ import (
 	"github.com/mdnest/mdnest/backend/collab"
 	"github.com/mdnest/mdnest/backend/middleware"
 	"github.com/mdnest/mdnest/backend/storage"
+	"github.com/mdnest/mdnest/backend/store"
 )
 
 const maxNoteSize = 10 << 20 // 10MB
 
 type NoteHandler struct {
-	store storage.Storage
-	hub   *collab.Hub // nil when collab disabled
+	store    storage.Storage
+	hub      *collab.Hub      // nil when collab disabled
+	activity ActivityRecorder // nil in single mode: no identities to attribute
+	idents   IdentityResolver // nil unless multi mode: resolves git author email
 }
 
 func NewNoteHandler(store storage.Storage) *NoteHandler {
@@ -30,6 +34,50 @@ func NewNoteHandler(store storage.Storage) *NoteHandler {
 // SetCollabHub sets the collaboration hub for broadcasting file changes.
 func (h *NoteHandler) SetCollabHub(hub *collab.Hub) {
 	h.hub = hub
+}
+
+// SetActivity installs the per-note authorship recorder (Postgres-backed in
+// multi mode). Nil-safe: with no recorder set, saves are not trailed.
+func (h *NoteHandler) SetActivity(a ActivityRecorder) {
+	h.activity = a
+}
+
+// SetIdentityResolver installs a resolver that maps a user ID to their git
+// author identity (name + email) for commit Co-authored-by trailers. Optional:
+// without it, attribution falls back to the username and a synthesised noreply
+// address.
+func (h *NoteHandler) SetIdentityResolver(r IdentityResolver) {
+	h.idents = r
+}
+
+// recordSave threads a completed note save into the two attribution surfaces:
+// the authorship trail (created/edited, for the note UI) and the git commit
+// (message body + Co-authored-by trailers, for the mirror and the History
+// view). Both are best-effort — a failure here never affects the save the
+// caller has already committed to storage. A no-op in single-user mode, where
+// there is no authenticated identity to attribute.
+func (h *NoteHandler) recordSave(ctx context.Context, ns, relPath, noteID, action string) {
+	uc := middleware.UserFromContext(ctx)
+	if uc == nil {
+		return
+	}
+	if h.activity != nil {
+		if err := h.activity.Record(ns, relPath, noteID, uc.ID, action); err != nil {
+			log.Printf("attribution: record %s ns=%s path=%s: %v", action, ns, relPath, err)
+		}
+	}
+	if a, ok := h.store.(storage.Attributor); ok {
+		name, email := uc.Username, ""
+		if h.idents != nil {
+			if n, e, ok := h.idents.Resolve(uc.ID); ok {
+				if n != "" {
+					name = n
+				}
+				email = e
+			}
+		}
+		a.Attribute(ns, relPath, name, email)
+	}
 }
 
 func contentETag(data []byte) string {
@@ -221,6 +269,9 @@ func (h *NoteHandler) updateNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Trail the edit for attribution (best-effort; never blocks the save).
+	h.recordSave(ctx, ns, relPath, existingNoteID, store.NoteActionEdited)
+
 	// ETag is based on the clean content (without marker) — matches what
 	// the frontend sees. canonicalForETag keeps it consistent with what
 	// the next If-Match check will compute (which goes through
@@ -301,6 +352,7 @@ func (h *NoteHandler) createNote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"failed to write file"}`, http.StatusInternalServerError)
 		return
 	}
+	h.recordSave(ctx, ns, relPath, "", store.NoteActionCreated)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]string{"status": "created"})
@@ -399,6 +451,7 @@ func (h *NoteHandler) patchNote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"failed to write file"}`, http.StatusInternalServerError)
 		return
 	}
+	h.recordSave(ctx, ns, relPath, "", store.NoteActionEdited)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
