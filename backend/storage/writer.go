@@ -135,12 +135,39 @@ func (w *Writer) apply(ctx context.Context, op DurabilityOp) error {
 		if err := w.dst.Rename(ctx, op.NS, op.Path, op.To); err != nil && err != ErrNotExist {
 			return err
 		}
+		// The source is gone; drop its cached entries. The destination must be
+		// re-hydrated from the durable tree, not deleted: app replicas read only
+		// from the working set, so dropping the destination stranded the moved
+		// body (and, for a directory, its whole subtree) and made every read of
+		// it 404 until the next full hydrate.
 		_ = w.ws.DeletePrefix(ctx, op.NS, op.Path)
 		_ = w.ws.DeletePrefix(ctx, op.NS, op.To)
+		w.recacheDest(ctx, op.NS, op.To)
 	default:
 		// Unknown op: ack it (return nil) so a poison entry does not wedge the
 		// queue; the durable tree is unchanged.
 		log.Printf("storage: writer skipping unknown op kind %q", op.Kind)
 	}
 	return nil
+}
+
+// recacheDest reflects a rename destination back into the working set from the
+// durable tree, mirroring hydrate's caching rules. It handles both a single
+// file and a moved directory subtree so app replicas (which read only from the
+// working set) can see the destination immediately after a rename.
+func (w *Writer) recacheDest(ctx context.Context, ns, path string) {
+	if data, err := w.dst.ReadFile(ctx, ns, path); err == nil {
+		cacheBody(ctx, w.ws, ns, path, data, w.maxBytes)
+		return
+	}
+	// Not a file (directory, or gone): re-hydrate every moved file under it.
+	_ = w.dst.Walk(ctx, ns, path, func(relPath string, info FileInfo) error {
+		if info.IsDir || info.Size > w.maxBytes {
+			return nil
+		}
+		if data, rerr := w.dst.ReadFile(ctx, ns, relPath); rerr == nil {
+			cacheBody(ctx, w.ws, ns, relPath, data, w.maxBytes)
+		}
+		return nil
+	})
 }
