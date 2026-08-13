@@ -13,6 +13,18 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
   if (node.tagName === 'A' && node.getAttribute('target') === '_blank') {
     node.setAttribute('rel', 'noopener noreferrer');
   }
+  // Excalidraw paints an embedded image as a <symbol> in <defs> referenced by a
+  // <use href="#…"> (see sanitizeSvg, which allows <use>). Keep only
+  // same-document fragment references: an off-document <use href> is a classic
+  // SVG XSS/exfil vector, which is exactly why DOMPurify drops <use> by default.
+  if (node.nodeName && node.nodeName.toLowerCase() === 'use') {
+    const href = node.getAttribute('href')
+      || node.getAttributeNS('http://www.w3.org/1999/xlink', 'href')
+      || node.getAttribute('xlink:href');
+    if (!href || href.charAt(0) !== '#') {
+      node.parentNode && node.parentNode.removeChild(node);
+    }
+  }
 });
 
 // Sanitize marked() output before it is injected as HTML. DOMPurify's default
@@ -48,6 +60,10 @@ export function sanitizeSvg(dirty) {
   if (!dirty) return '';
   return DOMPurify.sanitize(dirty, {
     USE_PROFILES: { svg: true, svgFilters: true },
-    ADD_TAGS: ['foreignObject'],
+    // `use` is paired with the same-document-only guard in the
+    // afterSanitizeAttributes hook above, so an embedded Excalidraw image
+    // (<symbol> in <defs> painted by <use href="#…">) survives while an
+    // off-document reference is dropped.
+    ADD_TAGS: ['foreignObject', 'use'],
   });
 }
