@@ -422,6 +422,9 @@ func main() {
 	// centralized theme catalog (reserved namespace, seed, /api/marp/themes,
 	// admin editor). Off by default so plain-Marp operators are unaffected.
 	enableMarpThemes := enableMarp && env("ENABLE_MARP_THEMES", "false") == "true"
+	// ENABLE_EXCALIDRAW opens .excalidraw.md files in the drawing editor. Off by
+	// default so an operator who just wants notes carries none of its chunk.
+	enableExcalidraw := env("ENABLE_EXCALIDRAW", "false") == "true"
 
 	// Live collaboration hub (optional, multi mode only)
 	enableCollab := multiMode && env("ENABLE_LIVE_COLLAB", "false") == "true"
@@ -581,6 +584,18 @@ func main() {
 	configHandler.SetTaskBoard(enableTaskBoard)
 	configHandler.SetMarp(enableMarp)
 	configHandler.SetMarpThemes(enableMarpThemes)
+	configHandler.SetExcalidraw(enableExcalidraw)
+	if enableExcalidraw {
+		// Operator-provided default Excalidraw libraries: comma-separated URLs to
+		// .excalidrawlib files preloaded into every drawing (org shape set).
+		var excalidrawLibs []string
+		for _, u := range strings.Split(env("EXCALIDRAW_LIBRARIES", ""), ",") {
+			if u = strings.TrimSpace(u); u != "" {
+				excalidrawLibs = append(excalidrawLibs, u)
+			}
+		}
+		configHandler.SetExcalidrawLibraries(excalidrawLibs)
+	}
 
 	// Update-availability check — opt out by setting DISABLE_UPDATE_CHECK=true.
 	// One HTTPS GET to api.github.com per server every hour; failures are

@@ -8,6 +8,17 @@ All notable changes to mdnest are documented here.
 
 ### Added
 
+- **Excalidraw drawings (opt-in — `ENABLE_EXCALIDRAW=true`).** A `.excalidraw.md`
+  note opens on a full [Excalidraw](https://excalidraw.com/) canvas, and any note
+  can embed a drawing read-only with an `![alt](path.excalidraw.md)` image embed.
+  The file is Obsidian-compatible: the scene is stored as a JSON block and the
+  drawing's text is mirrored into a `## Text Elements` section so it stays
+  searchable and readable, so drawings reuse the same history, restore, comments
+  and search as any note. Off by default; the (large) editor bundle is code-split
+  and only loads when a drawing is opened. Operators can preload organisation-wide
+  shape libraries via `EXCALIDRAW_LIBRARIES` (Helm `excalidraw.libraries`), a list
+  of `.excalidrawlib` URLs. Concurrent editing is last-write-wins with a conflict
+  warning. See [docs/excalidraw.md](docs/excalidraw.md).
 - **Centralized Marp themes (opt-in — `ENABLE_MARP_THEMES=true`, on top of
   `ENABLE_MARP`).** Decks can reference a shared theme by name (`theme: <name>`
   in the frontmatter) instead of embedding a large per-deck `style:` block, so

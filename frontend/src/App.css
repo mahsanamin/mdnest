@@ -22,6 +22,40 @@
   position: relative;
 }
 
+/* Excalidraw fills the whole content area; the library canvas needs a sized,
+   positioned host. */
+.excalidraw-wrapper {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+.excalidraw-host {
+  position: absolute;
+  inset: 0;
+}
+
+/* A drawing embedded read-only inside a normal note's preview. */
+.excalidraw-embed {
+  margin: 12px 0;
+  padding: 8px;
+  border: 1px solid #313244;
+  border-radius: 8px;
+  background: #ffffff;
+  overflow: auto;
+  text-align: center;
+}
+.excalidraw-embed.excalidraw-embed-msg {
+  background: #181825;
+  color: #6c7086;
+  font-size: 13px;
+}
+.excalidraw-embed svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
 .editor-wrapper {
   flex: 1;
   display: flex;

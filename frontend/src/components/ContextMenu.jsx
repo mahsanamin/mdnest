@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 
-function ContextMenu({ visible, x, y, target, onAction, onClose, canWrite, isAdmin, selectedNs }) {
+function ContextMenu({ visible, x, y, target, onAction, onClose, canWrite, isAdmin, selectedNs, excalidraw }) {
   const menuRef = useRef(null);
 
   useEffect(() => {
@@ -64,6 +64,7 @@ function ContextMenu({ visible, x, y, target, onAction, onClose, canWrite, isAdm
 
   if ((isFolder || isEmptyArea) && hasWrite) {
     items.push({ label: 'New Note', action: 'new-note' });
+    if (excalidraw) items.push({ label: 'New Drawing', action: 'new-drawing' });
     items.push({ label: 'New Folder', action: 'new-folder' });
   }
 

@@ -13,6 +13,7 @@
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
+    "@excalidraw/excalidraw": "^0.18.1",
     "@marp-team/marp-core": "^4.4.0",
     "@milkdown/core": "^7.20.0",
     "@milkdown/ctx": "^7.20.0",
@@ -36,5 +37,10 @@
     "jsdom": "^29.1.1",
     "vite": "^6.0.0",
     "vitest": "^4.1.9"
+  },
+  "//overrides": "Patch two HIGH advisories pulled in transitively by @excalidraw/excalidraw: nanoid (<=3.3.16||4.0.0-5.1.15) and lodash-es (<=4.17.23, via mermaid-to-excalidraw->langium->chevrotain). nanoid@^5.1.16 is the patched line milkdown already resolves to; lodash-es@4.18.x is published by the lodash author (jdalton). Both are API-compatible ESM.",
+  "overrides": {
+    "nanoid": "^5.1.16",
+    "lodash-es": "^4.18.1"
   }
 }

@@ -19,6 +19,9 @@ const TaskBoard = lazy(() => import('./components/TaskBoard.jsx'));
 // Lazy Marp slide-deck renderer: pulls in the Marp engine, off by default
 // (ENABLE_MARP), so an install that doesn't use it never carries the chunk.
 const MarpDeck = lazy(() => import('./components/MarpDeck.jsx'));
+// Lazy Excalidraw drawing editor: pulls in the (large) Excalidraw bundle, off
+// by default (ENABLE_EXCALIDRAW), so notes-only installs never carry the chunk.
+const ExcalidrawEditor = lazy(() => import('./components/ExcalidrawEditor.jsx'));
 import Preview from './components/Preview.jsx';
 import ContextMenu from './components/ContextMenu.jsx';
 import Settings from './components/Settings.jsx';
@@ -32,6 +35,7 @@ import MoveToModal from './components/MoveToModal.jsx';
 import ReleaseNotesModal from './components/ReleaseNotesModal.jsx';
 import CollabClient from './collab.js';
 import { isMarpDoc, effectiveEditorMode } from './marp.js';
+import { isExcalidrawDoc } from './excalidraw.js';
 import { TREE_POLL_MS, shouldPollTree } from './tree-refresh.js';
 import {
   getToken,
@@ -291,6 +295,10 @@ function App() {
   // markdown and corrupts the frontmatter and slide breaks. Force Basic (raw)
   // editing for them, regardless of the user's editor-mode preference.
   const editorModeForNote = effectiveEditorMode(editorMode, marpActive);
+  // `.excalidraw.md` files open in the drawing editor (opt-in ENABLE_EXCALIDRAW),
+  // bypassing the text editor/preview entirely.
+  const excalidrawEnabled = !!appConfig?.excalidraw;
+  const excalidrawActive = excalidrawEnabled && isExcalidrawDoc(currentPath);
   // Editor scroll ratio (0..1), mirrored to the Marp deck's current slide in
   // split view. The deck is paginated (not scrollable), so unlike the plain
   // Preview it can't share a scrollTop — we map the ratio to a slide instead.
@@ -301,6 +309,11 @@ function App() {
   const [remoteCursors, setRemoteCursors] = useState({});
   const [typingUsers, setTypingUsers] = useState({}); // {userId: username}
   const [conflictBanner, setConflictBanner] = useState(null); // {username, etag}
+  // Bumped only on remote-driven reloads (another user's save/restore, or an
+  // explicit Reload). The Excalidraw editor is keyed on it so its canvas remounts
+  // with the fresh scene — otherwise a drawing would keep the stale scene and
+  // the next stroke would silently overwrite the remote change (LWW).
+  const [drawingReloadKey, setDrawingReloadKey] = useState(0);
   // restoreBanner is shown when another user used the History modal to
   // restore an older version of the current file. It's deliberately a
   // separate state from conflictBanner because a restore is an
@@ -445,6 +458,9 @@ function App() {
             setContent(text);
             setSavedContent(text);
             etagRef.current = etag;
+            // Remount the drawing canvas so it shows the remote scene, not the
+            // stale one it was mounted with.
+            setDrawingReloadKey((k) => k + 1);
             if (isRestore) {
               // Show a brief info banner so the user knows their
               // content updated because of an explicit restore by
@@ -1085,6 +1101,23 @@ function App() {
     }
   }, [selectedNs, getTargetDir, refreshTree, openNote]);
 
+  // Create an empty Excalidraw drawing and open it in the drawing editor.
+  const doCreateDrawing = useCallback(async (target) => {
+    if (!selectedNs) return;
+    let name = prompt('Drawing name (e.g. sketch.excalidraw.md):');
+    if (!name) return;
+    if (!isExcalidrawDoc(name)) name += '.excalidraw.md';
+    const dir = getTargetDir(target);
+    const path = dir + name.replace(/^\/+/, '');
+    try {
+      await createNote(selectedNs, path);
+      await refreshTree(undefined, { broadcast: true });
+      openNote(path);
+    } catch (e) {
+      alert('Failed to create drawing: ' + e.message);
+    }
+  }, [selectedNs, getTargetDir, refreshTree, openNote]);
+
   const doCreateFolder = useCallback(async (target) => {
     if (!selectedNs) return;
     const name = prompt('Folder name:');
@@ -1102,6 +1135,7 @@ function App() {
   const handleContextAction = useCallback(async (action, target) => {
     switch (action) {
       case 'new-note': await doCreateNote(target); break;
+      case 'new-drawing': await doCreateDrawing(target); break;
       case 'new-folder': await doCreateFolder(target); break;
       case 'delete-file': {
         if (!target || !selectedNs) return;
@@ -1223,7 +1257,7 @@ function App() {
         break;
       }
     }
-  }, [selectedNs, currentPath, refreshTree, doCreateNote, doCreateFolder, getLastPath, setLastPath]);
+  }, [selectedNs, currentPath, refreshTree, doCreateNote, doCreateDrawing, doCreateFolder, getLastPath, setLastPath]);
 
   const handleTreeDrop = useCallback(async (fromPath, toFolderPath) => {
     if (!selectedNs) return;
@@ -1356,6 +1390,7 @@ function App() {
       setContent(text);
       setSavedContent(text);
       etagRef.current = etag;
+      setDrawingReloadKey((k) => k + 1);
       setConflictBanner(null);
     } catch (e) {
       console.error('Failed to reload:', e);
@@ -1444,6 +1479,7 @@ function App() {
         onLogout={logout}
         onAdminPanel={isAdmin && isMulti ? () => setShowAdminPanel(true) : null}
         onNewNote={canWrite('') ? () => doCreateNote(null) : null}
+        onNewDrawing={excalidrawEnabled && canWrite('') ? () => doCreateDrawing(null) : null}
         onNewFolder={canWrite('') ? () => doCreateFolder(null) : null}
         onRefreshTree={handleRefresh}
         isAdmin={isAdmin}
@@ -1577,6 +1613,24 @@ function App() {
               />
             </Suspense>
           ) : currentPath ? (
+            excalidrawActive ? (
+              <div className="excalidraw-wrapper">
+                {content === null ? (
+                  <div className="editor-loading">Loading drawing…</div>
+                ) : (
+                  <Suspense fallback={<div className="editor-loading">Loading drawing editor…</div>}>
+                    <ExcalidrawEditor
+                      key={`${selectedNs}/${currentPath}#${drawingReloadKey}`}
+                      content={content}
+                      docPath={`${selectedNs}/${currentPath}#${drawingReloadKey}`}
+                      onChange={canWriteCurrent ? handleContentChange : null}
+                      readOnly={!canWriteCurrent}
+                      libraries={appConfig?.excalidrawLibraries}
+                    />
+                  </Suspense>
+                )}
+              </div>
+            ) : (
             <>
               <div className="mobile-view-toggle">
                 <button className={mobileView === 'editor' ? 'active' : ''} onClick={() => { setMobileView('editor'); localStorage.setItem('mdnest_mobile_view', 'editor'); }}>Edit</button>
@@ -1690,6 +1744,7 @@ function App() {
                 </div>
               )}
             </>
+            )
           ) : (
             <div className="empty-state">
               <p>{namespaces.length === 0 ? 'No namespaces found. Check your mdnest.conf mounts.' : 'Select a note or create one to get started.'}</p>
@@ -1762,6 +1817,7 @@ function App() {
         canWrite={canWrite}
         isAdmin={isAdmin && isMulti}
         selectedNs={selectedNs}
+        excalidraw={excalidrawEnabled}
       />
       {showReleaseNotes && appConfig?.latestRelease && (
         <ReleaseNotesModal
