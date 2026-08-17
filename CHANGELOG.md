@@ -122,6 +122,13 @@ One fix here matters more than its size suggests: in the git-native HA topology 
 
 ### Security
 
+- **Go 1.26.6 and refreshed `golang.org/x/*`.** The backend image built on
+  go1.26.5, whose standard library carried reachable advisories in `crypto/tls`,
+  `net/http`, `encoding/asn1` and `net`; `golang.org/x/text` v0.38.0 was also
+  reachable, from `HandleNoteAt` through `ReverseProxy` into `norm.Form`. The go
+  directive and the builder image move to **1.26.6**, `x/net` to v0.56.0 and
+  `x/text` to v0.39.0. `govulncheck` reports zero vulnerabilities affecting
+  mdnest's code.
 - **Frontend dependency advisories cleared.** v4.1.3 bundled `nanoid` 3.3.16
   (high — GHSA-28wg-ghj8-5hjv, GHSA-2v37-7h3g-55p8) plus moderate advisories in
   `mermaid` 11.15.0 and `dompurify` 3.4.12. All are transitive, none were
