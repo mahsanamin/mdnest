@@ -57,6 +57,12 @@ backend/
     sso.go                   # GET /api/auth/sso/{start,callback} (USER_PROVIDER=sso only)
     tasks.go                 # GET/POST/PATCH /api/tasks, /api/board — task board (v4.0.0+, ENABLE_TASK_BOARD)
     workspaces.go            # /api/admin/workspaces, /api/me/workspace — per-workspace git remotes (v4.0.0+, multi mode)
+    tasks_markdown.go        # v4.2.0+ — the PURE markdown half of the task board (parse a task line + its detail block, resolve columns, render a spec back to markdown, generate stable refs). Split out of tasks.go by a verified pure move; tasks.go is request handling only. Put new parsing/rendering here, not in the handler.
+    team.go                  # GET /api/namespace/users — namespace members for the assignee picker (v4.2.0+, multi mode). Uses a narrow interface, deliberately NOT on GrantStore, so existing fakes are untouched.
+    groups.go                # /api/admin/groups(/members|/grants) — role-based access Groups (v4.2.0+). Superadmin-only; multi mode only.
+    attribution.go           # GET /api/note/attribution (v4.2.0+). Route is NOT registered without a DB — single mode has no identities to attribute.
+    marp_themes.go           # GET/PUT/DELETE /api/marp/themes (v4.2.0+, ENABLE_MARP_THEMES). GET is any authenticated user (any deck must resolve its theme); PUT/DELETE superadmin.
+    marp_starter.css         # Seeded once into the empty theme catalog.
   firebase/                  # Firebase Auth + Firestore (USER_PROVIDER=firebase only)
     client.go                # Admin SDK wrapper (VerifyIDToken)
     totp_store.go            # Firestore-backed store.TOTPStore impl
@@ -68,7 +74,8 @@ backend/
     git.go                   # STORAGE_BACKEND=git — in-process git history, idle-debounced commits
     gitremote.go             # Per-namespace remote resolution + push plan (askpass / GIT_SSH_COMMAND)
     queued.go                # MDNEST_ROLE=app — writes go to the working set + durability queue
-    writer.go                # MDNEST_ROLE=writer — drains the queue, owns the git tree
+    writer.go                # MDNEST_ROLE=writer — drains the queue, owns the git tree. NOTE (v4.2.0): OpRename must RE-CACHE the destination from the durable tree, not delete it — app replicas can't re-hydrate on a cache miss, so evicting both ends made a move look like data loss until the next full hydrate. `recacheDest` handles a file and a moved subtree; both are pinned by tests.
+    system.go                # Reserved, hidden namespaces (names start with "."), excluded from every listing and picker. Currently .marp-themes. The writer hydrates these explicitly.
     workingset.go            # Redis-backed coherence tier (the shared read path)
     leader.go                # Writer leader election
     factory.go               # FromEnv — local (default) | git [+ REDIS_URL -> coherent]
@@ -81,9 +88,11 @@ backend/
     checker.go               # 24h GitHub releases poll, served on /api/config as latestRelease
   store/
     db.go                    # Postgres connection pool (multi mode only)
-    migrate.go               # Auto-migration: schema_migrations, users, access_grants, firebase_uid (005), avatar_url (006), namespace_admins (007)
+    migrate.go               # Auto-migration: schema_migrations, users, access_grants, firebase_uid (005), avatar_url (006), namespace_admins (007), access_groups (013), note_activity (014). **Applied by full NAME, not the numeric prefix** — two migrations sharing a number both run, so a duplicate prefix is a merge conflict and a readability problem, never a silent skip.
     users.go                 # UserStore (Postgres) + UpsertFirebaseUser / PromoteToSuperAdmin
     namespace_admins.go      # NamespaceAdminStore — per-namespace admin scope (v3.5.0+)
+    access_groups.go         # GroupStore (v4.2.0+) — groups, members (user_id XOR oidc_group, DB CHECK), group grants. Direct membership resolves LIVE; OIDC membership comes from the token claim.
+    note_activity.go         # NoteActivityStore (v4.2.0+) — per-note save trail behind the Attribution panel
     totp_store.go            # TOTPStore interface + PostgresTOTPStore
 
 frontend/
@@ -91,8 +100,14 @@ frontend/
     App.jsx                  # Root: auth, namespace/tree state, context menu, URL routing
     api.js                   # All API calls (fetch wrapper with JWT + 401 handling)
     wikilink.js              # Obsidian [[wikilink]] support (v3.11.5+) — pure module: parse/resolve, marked inline extension, relative-.md-link resolver, restoreWikilinks() serializer-unescape. No React imports (unit-tested standalone).
-    sanitize.js              # DOMPurify wrappers (v3.11.7+): sanitizeHtml for marked output + release notes, sanitizeSvg for mermaid. sanitizeSvg MUST keep ADD_TAGS:['foreignObject'] or every flowchart label renders blank.
-    __tests__/sanitize.test.js # Pins both directions — labels survive, payloads don't
+    sanitize.js              # DOMPurify wrappers (v3.11.7+): sanitizeHtml for marked output + release notes, sanitizeSvg for mermaid AND Excalidraw embeds. sanitizeSvg MUST keep ADD_TAGS:['foreignObject'] or every flowchart label renders blank. v4.2.0+ it also allows `use` — Excalidraw paints an embedded image as a <symbol> in <defs> painted by <use href="#…">, so without it the image sits in <defs> and silently never renders. `use` is ONLY safe paired with the afterSanitizeAttributes hook that drops any href/xlink:href not starting with '#' (an off-document <use href> is a classic SVG exfil vector — that pairing is why DOMPurify drops the tag by default). Never add one half without the other.
+    __tests__/sanitize.test.js # Pins both directions — labels survive, payloads don't, same-document <use> survives, off-document <use> is dropped
+    marpExport.js            # v4.2.0+ — standalone Marp deck export (render -> inline assets -> Blob download; never rendered in-app, so no sanitize call is needed on the output). The auth token is attached ONLY for same-origin asset URLs: deck content is user-authored and shared, so `![](https://evil/x.png)` would otherwise send the exporter's JWT to that host. Cross-origin images are still fetched, just without credentials.
+    __tests__/marpExport-token.test.js # Pins that the JWT never goes cross-origin (absolute, protocol-relative, xlink) and still goes same-origin
+    marpBespoke.js           # Wraps exported slides in marp-cli's vendored bespoke player (src/vendor/marp-bespoke, MIT) — no npm dep, nothing added to the backend image
+    excalidraw.js            # v4.2.0+ — pure module: isExcalidrawDoc / parseExcalidraw / serializeExcalidraw / noteRelativePath. The .excalidraw.md format is Obsidian-compatible (scene JSON + a mirrored `## Text Elements` section so drawing text stays searchable)
+    relations.js             # v4.2.0+ — pure module: task depends-on / blocked-by / related-to resolution by stable ref
+    cardKey.js               # v4.2.0+ — stable board card identity (namespace + path + ref), so the cross-workspace view can't collide two tasks
     echo-gate.js             # v4.1.1+ — pure module (no React): suppresses the file-changed echo of a tab's own save. In-flight-save window + epoch token: broadcasts arriving before the PUT response resolves are deferred and re-checked once the save settles; reset() on note switch invalidates the window. Closes the self-conflict-banner race (issue #82).
     __tests__/echo-gate.test.js # Pins the echo-beats-response race, late echoes, note-switch epochs
     tree-refresh.js          # v4.1.3+ — pure module: when the sidebar tree re-reads itself (TREE_POLL_MS + shouldPollTree). The live-collab websocket is deliberately NOT an input — `tree-changed` only fires for API writes, so gating the poll on it left git-sync/filesystem writes invisible until a manual Refresh.
@@ -117,9 +132,13 @@ frontend/
       ContextMenu.jsx        # Right-click / long-press floating menu
       CommentSidebar.jsx     # Inline comments: slide-out panel, threads, replies, Go To
       HistoryModal.jsx       # Per-file git-sync history viewer + restore (v3.7.0+)
-      TaskBoard.jsx          # Kanban board over note checkboxes (v4.0.0+); lazy-loaded
+      TaskBoard.jsx          # Kanban board over note checkboxes (v4.0.0+); lazy-loaded. v4.2.0+ adds the filter bar and the "All workspaces" scope
+      TaskCard.jsx           # v4.2.0+ — one card (title on its own full-width line, badges, relations, steps)
+      BoardColumn.jsx        # v4.2.0+ — one kanban column + drop target
       TaskEditor.jsx         # Rich task create/edit form used by the board
       BoardColumnsEditor.jsx # Per-namespace column layout (.mdnest/board.json)
+      ExcalidrawEditor.jsx   # v4.2.0+ — the drawing canvas for a .excalidraw.md note. React.lazy()'d, and Preview.jsx dynamic-imports the engine only when an embed is present, so the entry bundle grows ~1.8 KB gzipped rather than ~1.5 MB
+      AttributionModal.jsx   # v4.2.0+ — created / last-edited / contributors, from the note context menu (multi mode only)
       MoveToModal.jsx        # Touch-friendly destination picker for "Move to…" context action (v3.8.0+)
       EditorErrorBoundary.jsx # React error boundary around Live editor — catches Milkdown crashes and flips to Basic (v3.8.0+)
 
@@ -155,6 +174,8 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 - Two auth modes: `AUTH_MODE=single` (file-based, no DB) or `AUTH_MODE=multi` (Postgres)
 - Three identity providers (multi-mode only): `USER_PROVIDER=local` (default, username/password), `USER_PROVIDER=firebase` (Firebase Auth + Firestore TOTP), `USER_PROVIDER=sso` (generic OIDC). Exclusive; chosen at startup. In `sso` mode 2FA is skipped entirely (IdP owns MFA) and local password endpoints are unused. See `docs/sso-setup.md` and `docs/firebase-setup.md`.
 - **Three role values** (v3.5.0+): `superadmin` (global), `admin` (namespace-scoped via the `namespace_admins` table), `collaborator` (per-grant only). Pre-v3.5.0 `admin` is migrated to `superadmin` by migration 007. `ADMIN_EMAILS` auto-promotes to `superadmin`. Permission checks go through `middleware.PermissionChecker.hasAdminScope(uc, ns)` — superadmin bypasses everywhere; admin only for `namespace_admins` rows; everyone else falls through to grants. API tokens follow the same precedence chain (no admin bypass for tokens).
+- **Access Groups are a second grant source, unioned in** (v4.2.0+): effective access = own grants ∪ every group's grants. Consulted only after direct grants fail, and a nil `groupStore` disables the layer (single mode / no DB). The two member kinds have *different revocation latency* and that asymmetry is deliberate but must stay documented: a `user_id` member resolves live per request, while an `oidc_group` member is matched against the `groups` claim snapshotted into the JWT at login. That is why SSO sessions use `ssoJWTTTL` (12h) instead of the year-long remember-me TTL — it bounds how long a stale IdP snapshot outlives a change. Note `uc.Role` is read from the token too, so role changes are equally deferred; that is pre-existing, not new.
+- **An access filter passed as a function must be required, not optional.** `/api/tasks/all` is access-controlled *solely* by its namespace filter and deliberately skips `RequireNsAccess` (it isn't scoped to one namespace). The filter is a mandatory `NewTaskHandler` argument, and `HandleGlobalTasks` treats nil as deny-all — so forgetting to wire it is a compile error, and if one ever slips through the endpoint serves nothing instead of every namespace. When a test pins a guard, mutate the *call site* too: a nil-means-permissive default is invisible to a predicate test.
 - In single mode, the store/ package is not initialized — zero DB dependency
 - All handlers take `notesDir` (absolute path) in constructor
 - All file APIs require `ns` query param (namespace = top-level dir under NOTES_DIR)
@@ -195,6 +216,7 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 - `setup.sh` generates docker-compose.yml volume mounts from these
 - Backend sees them as subdirectories under NOTES_DIR
 - GET /api/namespaces lists them (reads top-level dirs)
+- **App-managed data that is NOT user notes needs its own declared volume.** `/data/notes` is not itself a volume — `setup.sh` bind-mounts each `MOUNT_` namespace *individually* — so anything the backend creates under `NOTES_DIR` at runtime lands in the container's writable layer and is destroyed by `./mdnest-server rebuild` (`compose up --force-recreate`). v4.2.0's Marp theme catalog hit exactly this in review: `.marp-themes` is a reserved system namespace created at runtime and deliberately never mirrored to a git remote, so a rebuild would have wiped every custom theme with no copy anywhere. The fix is the pattern `mdnest-secrets` already uses — `setup.sh` emits a **named volume** (`mdnest-marp-themes:/data/notes/.marp-themes`) when the feature is on, and `tests/setup-marp-themes.sh` pins that the generated compose both mounts *and declares* it. The Helm chart is unaffected: it mounts all of `/data/notes` as a PVC. If you add another system namespace, add its volume in the same change.
 
 ### Client CLI (`mdnest`, bash)
 - Runs under `set -e` — a helper used as a bare statement must `return 0` on its success path or it aborts the script. (This also leaks into anything that *sources* the CLI: `tests/cli-unit.sh` does `set +e` right after the `MDNEST_LIB=1 source` for exactly this reason.)

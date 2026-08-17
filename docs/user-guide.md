@@ -390,7 +390,15 @@ The task board gathers every task-list item in a namespace and presents it as a 
 **Views.**
 
 - **Kanban / List** -- a toggle at the top left. Kanban shows one column per board column (drag a card between columns to change its status); List shows tasks grouped by note with quick checkboxes.
-- **Workspace / This note** -- when a note is open, scope the board to the whole namespace or just the current note.
+- **Workspace / This note / All workspaces** -- when a note is open, scope the board to the whole namespace, just the current note, or *(v4.2.0+)* every workspace you can access. In the cross-workspace view each card shows which workspace it came from; creating tasks and editing columns are hidden there, since both belong to one specific workspace.
+
+**Filtering** *(v4.2.0+).* A filter bar narrows the loaded tasks by title text, tags (click chips to toggle; matching is OR) and assignee (**All / Me / Unassigned / a member**). It applies to every scope and both views, and filters before grouping, so it's instant with no extra round-trip.
+
+**Assignees** *(v4.2.0+).* A task can carry an `assignee`, picked from the workspace's members in the task editor. New tasks default to you. In single mode, where there's no member list, it's a free-choice field.
+
+**Relations** *(v4.2.0+).* A task can declare `depends-on`, `blocked-by` and `related-to` links to other tasks, shown on the card and resolved by each task's stable `ref`.
+
+**Sub-tasks gate closing** *(v4.2.0+).* A task with unresolved sub-steps can't be closed — checking it done, dragging it to a Done column, and saving an edit into one are all refused, with the reason shown. Tick the remaining steps first. This is enforced by the server, so it holds however you reach it.
 
 **Cards.** Each card shows the title, a priority badge, the due date (red when overdue), tags, workload and a step progress bar. **More** expands the steps (tick them off individually) and the description.
 
@@ -451,6 +459,7 @@ The context menu provides quick actions for files and folders in the sidebar.
 
 - Rename -- rename the file
 - Delete -- remove the file
+- Attribution *(v4.2.0+, multi mode)* -- who created the note, who last edited it, and everyone who has contributed. Built from an activity trail of every save, cross-checked against the note's git history so edits made outside the app are still credited. Single-mode installs have no user identities to attribute, so the entry is hidden.
 
 **Toolbar actions** (appear when a file is open):
 
