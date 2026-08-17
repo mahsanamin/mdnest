@@ -73,6 +73,12 @@
   margin-left: 0.5rem;
 }
 
+.marp-deck-export {
+  font-size: 0.72rem !important;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
 .marp-deck-empty {
   display: flex;
   align-items: center;

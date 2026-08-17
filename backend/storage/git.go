@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -75,6 +76,17 @@ func (g *GitStorage) SetSyncInterval(d time.Duration) {
 func (g *GitStorage) SetSyncStatusSink(s SyncStatusSink) {
 	if c, ok := g.committer.(*intervalCommitter); ok {
 		c.statusSink.Store(&s)
+	}
+}
+
+// Attribute records that the given identity saved relPath in ns, to be credited
+// in the next commit's message and Co-authored-by trailers. No-op unless the git
+// backend uses the interval committer (single/writer roles). Safe to call after
+// the corresponding WriteFile; ordering with the eventual commit is best-effort,
+// matching the committer's existing debounce semantics.
+func (g *GitStorage) Attribute(ns, relPath, name, email string) {
+	if c, ok := g.committer.(*intervalCommitter); ok {
+		c.Attribute(ns, relPath, name, email)
 	}
 }
 
@@ -161,6 +173,15 @@ type SyncStatusSink interface {
 	SetSyncStatus(ns, syncErr string) error
 }
 
+// Attributor is implemented by storage backends that keep git history and can
+// credit the people who saved a note in the resulting commit. Handlers
+// type-assert the active Storage against this to record a save's author without
+// coupling to a concrete backend; backends without git history simply do not
+// implement it (the assertion fails and attribution is skipped).
+type Attributor interface {
+	Attribute(ns, relPath, name, email string)
+}
+
 // intervalCommitter commits dirty namespaces to per-namespace git repos once
 // the writer has gone idle on them, rather than on a fixed interval: an edit
 // burst (many rapid saves during a live editing session) is coalesced into a
@@ -197,6 +218,15 @@ type intervalCommitter struct {
 	mu    sync.Mutex
 	dirty map[string]dirtyEntry
 
+	// contrib accumulates, per namespace since its last commit, which
+	// identities saved which files. It turns the otherwise-anonymous bot
+	// commit into an attributed one: the message body lists each file's
+	// savers and the commit carries Co-authored-by trailers (which GitHub /
+	// GitLab render as co-authors). Guarded by mu. A single debounced commit
+	// can aggregate several files by several people, which is exactly what
+	// this captures. Populated via Attribute, drained at commit time.
+	contrib map[string]map[string]map[ident]struct{} // ns -> path -> set(ident)
+
 	// Push backoff state, touched only from the (serialized) Flush path.
 	pushNext  map[string]time.Time // ns -> earliest next push attempt
 	pushFails map[string]int       // ns -> consecutive push failures
@@ -211,6 +241,14 @@ type intervalCommitter struct {
 type dirtyEntry struct {
 	first time.Time
 	last  time.Time
+}
+
+// ident is a save author's git identity (display name + email) accumulated for
+// commit attribution. Email may be empty when it cannot be resolved; the
+// Co-authored-by trailer is then synthesised from the name.
+type ident struct {
+	name  string
+	email string
 }
 
 // Push retry backoff bounds: after a failed mirror push a namespace waits
@@ -299,6 +337,100 @@ func (c *intervalCommitter) Record(ns string) {
 	e.last = now
 	c.dirty[ns] = e
 	c.mu.Unlock()
+}
+
+// Attribute records that identity name/email saved path in namespace ns since
+// the last commit. It is additive and idempotent per (path, identity): saving
+// the same file twice before a commit lists the author once. Safe to call
+// concurrently and non-blocking. A no-op when both name and email are empty
+// (e.g. single-user mode with no configured identity).
+func (c *intervalCommitter) Attribute(ns, path, name, email string) {
+	if name == "" && email == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.contrib == nil {
+		c.contrib = make(map[string]map[string]map[ident]struct{})
+	}
+	files := c.contrib[ns]
+	if files == nil {
+		files = make(map[string]map[ident]struct{})
+		c.contrib[ns] = files
+	}
+	set := files[path]
+	if set == nil {
+		set = make(map[ident]struct{})
+		files[path] = set
+	}
+	set[ident{name: name, email: email}] = struct{}{}
+}
+
+// takeContrib removes and returns the accumulated attribution for ns. Called at
+// commit time so each contributor is credited exactly once, in the commit that
+// carries their change.
+func (c *intervalCommitter) takeContrib(ns string) map[string]map[ident]struct{} {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	files := c.contrib[ns]
+	delete(c.contrib, ns)
+	return files
+}
+
+// commitMessage builds the commit message. The subject stays a stable,
+// timestamped "mdnest: <ts>" line (the bot is the committer — honest, since it
+// is the process making the commit). When attribution was recorded, the body
+// lists each changed file with the people who saved it, followed by standard
+// Co-authored-by trailers so the forge (GitHub / GitLab) credits every
+// participant. With no attribution (single-user mode, CLI writes, remote
+// merges) the message is exactly the previous timestamp-only form.
+func (c *intervalCommitter) commitMessage(files map[string]map[ident]struct{}) string {
+	subject := "mdnest: " + time.Now().UTC().Format("2006-01-02 15:04:05 UTC")
+	if len(files) == 0 {
+		return subject
+	}
+
+	paths := make([]string, 0, len(files))
+	for p := range files {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+
+	var body strings.Builder
+	coauthors := make(map[string]ident) // dedupe trailers by "name<email>"
+	for _, p := range paths {
+		set := files[p]
+		names := make([]string, 0, len(set))
+		for id := range set {
+			names = append(names, id.name)
+			coauthors[id.name+"\x00"+id.email] = id
+		}
+		sort.Strings(names)
+		fmt.Fprintf(&body, "%s \u2014 %s\n", p, strings.Join(names, ", "))
+	}
+
+	trailers := make([]string, 0, len(coauthors))
+	for _, id := range coauthors {
+		trailers = append(trailers, "Co-authored-by: "+coauthoredBy(id))
+	}
+	sort.Strings(trailers)
+
+	return subject + "\n\n" + strings.TrimRight(body.String(), "\n") + "\n\n" + strings.Join(trailers, "\n") + "\n"
+}
+
+// coauthoredBy formats an identity as the "Name <email>" value of a
+// Co-authored-by trailer. A missing email falls back to a stable noreply
+// address derived from the name so the trailer is still well-formed.
+func coauthoredBy(id ident) string {
+	email := id.email
+	if email == "" {
+		slug := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(id.name), " ", "."))
+		if slug == "" {
+			slug = "unknown"
+		}
+		email = slug + "@users.noreply.mdnest"
+	}
+	return id.name + " <" + email + ">"
 }
 
 // recordDue re-marks a namespace as immediately due after a failed commit, so
@@ -439,7 +571,7 @@ func (c *intervalCommitter) commit(ctx context.Context, ns string) error {
 	}
 	// Commit only when the index has staged changes.
 	if c.git(ctx, dir, "diff", "--cached", "--quiet") != nil {
-		msg := "mdnest: " + time.Now().UTC().Format("2006-01-02 15:04:05 UTC")
+		msg := c.commitMessage(c.takeContrib(ns))
 		if err := c.git(ctx, dir, "commit", "--quiet", "-m", msg); err != nil {
 			return fmt.Errorf("git commit %s: %w", ns, err)
 		}
@@ -623,6 +755,13 @@ func (c *intervalCommitter) sync(ctx context.Context, dir, ns string) error {
 // override from the resolver, else the coarse env default. ok=false means the
 // namespace has no remote and history stays local-only.
 func (c *intervalCommitter) resolvePush(ns string) (pushPlan, bool, error) {
+	// Reserved / hidden namespaces (names starting with ".") are app-internal
+	// (e.g. the Marp theme catalog). They are versioned locally but never
+	// mirrored to a per-workspace git remote — remote hosts such as GitLab also
+	// reject project names that start with a dot. ok=false ⇒ local-only history.
+	if strings.HasPrefix(ns, ".") {
+		return pushPlan{}, false, nil
+	}
 	if c.resolver != nil {
 		spec, ok, err := c.resolver.ResolveRemote(ns)
 		if err != nil {

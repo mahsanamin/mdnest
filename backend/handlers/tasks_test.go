@@ -309,6 +309,88 @@ func TestRenderTaskBlock(t *testing.T) {
 	}
 }
 
+func TestNamespaceAcronym(t *testing.T) {
+	cases := map[string]string{
+		"mon-workspace-client":          "MWC",
+		"olivier.gintrand@forterro.com": "OGFC",
+		"brain":                         "BRA",
+		"a":                             "A",
+		"":                              "TSK",
+	}
+	for in, want := range cases {
+		if got := namespaceAcronym(in); got != want {
+			t.Errorf("namespaceAcronym(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestTaskRefRoundTripAndUniqueness(t *testing.T) {
+	b := defaultBoard()
+	// A ref renders as a bullet and parses back onto the task.
+	got := strings.Join(renderTaskBlock(b, taskSpec{Title: "T", Column: "todo", Ref: "OGF-a3f9x"}), "\n")
+	if !strings.Contains(got, "- ref: OGF-a3f9x") {
+		t.Fatalf("ref not rendered: %q", got)
+	}
+	tasks := parseNoteTasks("n.md", []byte(got+"\n"), b)
+	if len(tasks) != 1 || tasks[0].Ref != "OGF-a3f9x" {
+		t.Fatalf("ref round-trip failed: %+v", tasks)
+	}
+	// generateTaskRef uses the namespace acronym and avoids taken refs.
+	taken := map[string]bool{}
+	for i := 0; i < 200; i++ {
+		id := generateTaskRef("mon-workspace-client", taken)
+		if !strings.HasPrefix(id, "MWC-") {
+			t.Fatalf("ref %q missing acronym prefix", id)
+		}
+		if taken[id] {
+			t.Fatalf("generateTaskRef returned a taken id: %q", id)
+		}
+		taken[id] = true
+	}
+}
+
+func TestRemoveTaskViaDetailBlock(t *testing.T) {
+	b := defaultBoard()
+	note := strings.Join([]string{
+		"- [ ] Keep me",
+		"  - status: todo",
+		"- [ ] Delete me",
+		"  - status: doing",
+		"  - tags: [x]",
+		"- [ ] Also keep",
+	}, "\n")
+	lines := strings.Split(note, "\n")
+	// Remove the middle task (line 3, 1-based) and its whole detail block.
+	_, end := detailBlockRange(lines, 2)
+	lines = append(lines[:2], lines[end:]...)
+	tasks := parseNoteTasks("n.md", []byte(strings.Join(lines, "\n")+"\n"), b)
+	if len(tasks) != 2 {
+		t.Fatalf("expected 2 tasks after delete, got %d: %+v", len(tasks), tasks)
+	}
+	for _, tk := range tasks {
+		if tk.Text == "Delete me" {
+			t.Fatalf("deleted task still present: %+v", tasks)
+		}
+	}
+}
+
+func TestRelationWithCommaInTitle(t *testing.T) {
+	b := defaultBoard()
+	s := taskSpec{Title: "T", Column: "todo", DependsOn: []string{"Design, ship it", "Other"}}
+	got := strings.Join(renderTaskBlock(b, s), "\n")
+	if !strings.Contains(got, `- depends-on: ["Design, ship it", Other]`) {
+		t.Fatalf("comma value not quoted on render: %q", got)
+	}
+	tasks := parseNoteTasks("n.md", []byte(got+"\n"), b)
+	if len(tasks) != 1 {
+		t.Fatalf("want 1 task, got %d", len(tasks))
+	}
+	dep := tasks[0].DependsOn
+	if len(dep) != 2 || dep[0] != "Design, ship it" || dep[1] != "Other" {
+		t.Fatalf("comma-in-title relation not preserved: %#v", dep)
+	}
+}
+
 func TestReplaceTaskBlock(t *testing.T) {
 	b := defaultBoard()
 	lines := []string{
@@ -346,5 +428,40 @@ func TestValidBoard(t *testing.T) {
 	}
 	if !validBoard(defaultBoard()) {
 		t.Error("default board should be valid")
+	}
+}
+
+func TestTaskRelations(t *testing.T) {
+	b := defaultBoard()
+	s := taskSpec{
+		Title: "Ship release", Column: "todo",
+		DependsOn: []string{"Write changelog", "Cut tag"},
+		BlockedBy: []string{"Security review"},
+		RelatedTo: []string{"Update docs"},
+	}
+	got := strings.Join(renderTaskBlock(b, s), "\n")
+	for _, want := range []string{
+		"  - depends-on: [Write changelog, Cut tag]",
+		"  - blocked-by: [Security review]",
+		"  - related-to: [Update docs]",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("render missing %q in:\n%s", want, got)
+		}
+	}
+	// Round-trip: hyphenated keys parse back into the relation lists.
+	tasks := parseNoteTasks("n.md", []byte(got+"\n"), b)
+	if len(tasks) != 1 {
+		t.Fatalf("want 1 task, got %d", len(tasks))
+	}
+	tk := tasks[0]
+	if len(tk.DependsOn) != 2 || tk.DependsOn[0] != "Write changelog" || tk.DependsOn[1] != "Cut tag" {
+		t.Errorf("dependsOn round-trip wrong: %+v", tk.DependsOn)
+	}
+	if len(tk.BlockedBy) != 1 || tk.BlockedBy[0] != "Security review" {
+		t.Errorf("blockedBy round-trip wrong: %+v", tk.BlockedBy)
+	}
+	if len(tk.RelatedTo) != 1 || tk.RelatedTo[0] != "Update docs" {
+		t.Errorf("relatedTo round-trip wrong: %+v", tk.RelatedTo)
 	}
 }

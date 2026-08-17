@@ -1,11 +1,43 @@
 import { useMemo, useState } from 'react';
 import './TaskBoard.css';
+import { buildRelationLookup, toRef, relLabel, isKnownOption } from '../relations';
+
+// RelationField edits one relation kind (depends-on / blocked-by / related-to)
+// as a list of removable chips plus an add-input: picking a datalist suggestion
+// or pressing Enter appends a task, so several dependencies can be added without
+// any comma juggling.
+function RelationField({ icon, label, values, listId, isOption, labelFor, onAdd, onRemove }) {
+  const [input, setInput] = useState('');
+  const commit = (raw) => { const v = raw.trim(); if (v) onAdd(v); setInput(''); };
+  return (
+    <div className="tb-editor-rel">
+      <span className="tb-editor-rel-label">{icon} {label}</span>
+      {values.length > 0 && (
+        <div className="tb-rel-chips">
+          {values.map((v, i) => (
+            <span key={v + '\u0000' + i} className="tb-rel-chip">
+              {labelFor(v)}
+              <button type="button" className="tb-rel-chip-x" aria-label={`Remove ${labelFor(v)}`} onClick={() => onRemove(i)}>×</button>
+            </span>
+          ))}
+        </div>
+      )}
+      <input
+        value={input}
+        list={listId}
+        placeholder="add a task (title or ref)"
+        onChange={(e) => { const val = e.target.value; if (isOption(val)) commit(val); else setInput(val); }}
+        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(input); } }}
+      />
+    </div>
+  );
+}
 
 // TaskEditor is the full create/edit form for a task and its detail block
 // (status/column, due, priority, workload, assignee, tags, steps, notes). It
 // emits a spec the backend renders to markdown, so the note stays the source of
 // truth.
-export default function TaskEditor({ board, task, defaultNote, defaultColumn, notePaths, currentUser, users, tagSuggestions, onSave, onCancel }) {
+export default function TaskEditor({ board, task, defaultNote, defaultColumn, notePaths, currentUser, users, tagSuggestions, taskTitles, taskRefs, onSave, onCancel }) {
   const isNew = !task;
   const cols = board?.columns || [];
   const [title, setTitle] = useState(task?.text || '');
@@ -18,6 +50,12 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
   // whatever the task already carries (empty stays empty).
   const [assignee, setAssignee] = useState(task ? (task.assignee || '') : (currentUser || ''));
   const [tags, setTags] = useState((task?.tags || []).join(', '));
+  // Relations are stored by stable ref (comma-free, rename-proof) as a list, so
+  // a task can carry several dependencies. Kept as arrays here; entered
+  // titles/refs are resolved to refs on add and again on save.
+  const [dependsOn, setDependsOn] = useState(task?.dependsOn || []);
+  const [blockedBy, setBlockedBy] = useState(task?.blockedBy || []);
+  const [relatedTo, setRelatedTo] = useState(task?.relatedTo || []);
   const [defaultExpanded, setDefaultExpanded] = useState(!!task?.defaultExpanded);
   const [steps, setSteps] = useState((task?.steps || []).map((s) => ({ text: s.text, checked: s.checked })));
   const [notes, setNotes] = useState(task?.notes || '');
@@ -47,6 +85,19 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
     return [...names].sort((a, b) => a.localeCompare(b));
   }, [users, currentUser, task]);
 
+  // Relation lookup: resolve an entered title/ref to a stable ref, back to a
+  // title for the chip label, and tell whether a typed value matches a known
+  // task (so a datalist pick auto-commits).
+  const relLookup = useMemo(() => buildRelationLookup([
+    ...(taskRefs || []).map(({ ref, title: t }) => ({ ref, title: t })),
+    ...(taskTitles || []).map((t) => ({ title: t })),
+  ]), [taskRefs, taskTitles]);
+  const resolveRef = (v) => toRef(relLookup, v);
+  const relationLabel = (v) => relLabel(relLookup, v);
+  const isOption = (v) => isKnownOption(relLookup, v);
+  const addRel = (setter) => (raw) => { const tok = resolveRef(raw); setter((cur) => (cur.includes(tok) ? cur : [...cur, tok])); };
+  const removeRel = (setter) => (i) => setter((cur) => cur.filter((_, j) => j !== i));
+
   const submit = () => {
     if (!title.trim()) { setErr('A title is required'); return; }
     const spec = {
@@ -57,18 +108,20 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
       workload: workload.trim(),
       assignee: assignee.trim(),
       tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
+      dependsOn: dependsOn.map(resolveRef),
+      blockedBy: blockedBy.map(resolveRef),
+      relatedTo: relatedTo.map(resolveRef),
       defaultExpanded,
       steps: steps.map((s) => ({ text: s.text.trim(), checked: !!s.checked })).filter((s) => s.text),
       notes: notes.replace(/\s+$/, ''),
     };
-    onSave(spec, isNew ? note.trim() : task.path);
+    Promise.resolve(onSave(spec, isNew ? note.trim() : task.path)).catch((e) => setErr(e?.message || 'Failed to save task'));
   };
 
   return (
     <div className="tb-modal-backdrop" onClick={onCancel}>
       <div className="tb-modal tb-editor" onClick={(e) => e.stopPropagation()}>
         <h3>{isNew ? 'New task' : 'Edit task'}</h3>
-        {err && <div className="tb-error">{err}</div>}
 
         <label className="tb-modal-field">Title
           <input className="tb-col-title" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} />
@@ -141,6 +194,21 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
           Expanded by default
         </label>
 
+        <div className="tb-modal-field">Relations
+          <datalist id="tb-editor-tasks">
+            {(taskTitles || []).map((t) => <option key={t} value={t} />)}
+            {(taskRefs || []).map(({ ref, title: t }) => <option key={'r-' + ref} value={ref}>{t}</option>)}
+          </datalist>
+          <div className="tb-editor-rels">
+            <RelationField icon="⬆" label="Depends on" values={dependsOn} listId="tb-editor-tasks"
+              isOption={isOption} labelFor={relationLabel} onAdd={addRel(setDependsOn)} onRemove={removeRel(setDependsOn)} />
+            <RelationField icon="⛔" label="Blocked by" values={blockedBy} listId="tb-editor-tasks"
+              isOption={isOption} labelFor={relationLabel} onAdd={addRel(setBlockedBy)} onRemove={removeRel(setBlockedBy)} />
+            <RelationField icon="🔗" label="Related to" values={relatedTo} listId="tb-editor-tasks"
+              isOption={isOption} labelFor={relationLabel} onAdd={addRel(setRelatedTo)} onRemove={removeRel(setRelatedTo)} />
+          </div>
+        </div>
+
         <div className="tb-modal-field">Steps
           <div className="tb-editor-steps">
             {steps.map((s, i) => (
@@ -158,6 +226,7 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
           <textarea rows={4} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </label>
 
+        {err && <div className="tb-error">{err}</div>}
         <div className="tb-modal-actions">
           <button onClick={onCancel}>Cancel</button>
           <button className="primary" onClick={submit}>{isNew ? 'Create' : 'Save'}</button>

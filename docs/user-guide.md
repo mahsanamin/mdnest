@@ -281,6 +281,19 @@ graph TD
 
 This renders as an interactive diagram in the preview pane. Mermaid supports many diagram types including flowcharts, sequence diagrams, Gantt charts, class diagrams, and more. Refer to the [Mermaid documentation](https://mermaid.js.org/intro/) for the full syntax reference.
 
+### Getting the text back out
+
+A rendered diagram's labels are still text, and you can take them with you
+(v4.1.3+):
+
+- **Select them.** Drag across a label in the preview or in the fullscreen
+  viewer. In fullscreen, a drag that *starts* on a label selects it; a drag
+  starting anywhere else still pans the diagram.
+- **Copy all of it.** Hover a diagram and click **Copy text** (next to the
+  expand button), or use the **Copy text** button in the fullscreen viewer's
+  toolbar. Every label lands on the clipboard, one per line, in diagram order —
+  faster than selecting by hand on a zoomed or panned diagram.
+
 ---
 
 ## Live Collaboration
@@ -293,7 +306,7 @@ When live collab is on, mdnest opens a WebSocket from your browser to the backen
 - **Cursors.** When a teammate is editing the same note in **Live** mode, you see their cursor as a thin coloured caret with their name on it. Cursor positions update in real time.
 - **Typing indicator.** When someone is actively typing, their avatar in the presence stack pulses faintly so you know to expect changes.
 - **Conflict banner.** If two people save the same note within the auto-save window, the second save shows a "your edit is based on a stale copy" banner with a one-click reload. This rarely fires — the cursor sharing usually keeps people out of each other's way.
-- **Tree refresh.** When someone else creates / renames / deletes a file in your namespace, your sidebar updates within a second without a manual refresh.
+- **Tree refresh.** When someone else creates / renames / deletes a file in your namespace, your sidebar updates within a second without a manual refresh. This covers changes made *through mdnest*; a write that lands straight on the filesystem (a git-sync pull, an editor on the host) sends no event, and is picked up by the sidebar's own 30-second refresh instead — that refresh runs whether or not live collab is on.
 
 Live collab is gated on the WebSocket hub being up. If `/api/ws` is unreachable (server restart, proxy hiccup), the editor still works — you just lose the presence + cursor + auto-tree-refresh features until the connection reconnects (the app retries with backoff).
 
@@ -363,6 +376,10 @@ Checkboxes are also the atoms of the **[Task Board](#task-board)**: any checkbox
 > drafted the idea in is the deck you present from. Also opt-in
 > (`ENABLE_MARP=true`); notes without `marp: true` are unaffected.
 
+> Drawings: a `.excalidraw.md` note opens on a full Excalidraw canvas, and any
+> note can embed one read-only with `![alt](path.excalidraw.md)`. Opt-in
+> (`ENABLE_EXCALIDRAW=true`); see [Excalidraw](excalidraw.md).
+
 > Opt-in: the board appears only when the operator sets `ENABLE_TASK_BOARD=true`
 > (see [setup](setup.md)). If you don't see the board button, that's why.
 
@@ -373,7 +390,15 @@ The task board gathers every task-list item in a namespace and presents it as a 
 **Views.**
 
 - **Kanban / List** -- a toggle at the top left. Kanban shows one column per board column (drag a card between columns to change its status); List shows tasks grouped by note with quick checkboxes.
-- **Workspace / This note** -- when a note is open, scope the board to the whole namespace or just the current note.
+- **Workspace / This note / All workspaces** -- when a note is open, scope the board to the whole namespace, just the current note, or *(v4.2.0+)* every workspace you can access. In the cross-workspace view each card shows which workspace it came from; creating tasks and editing columns are hidden there, since both belong to one specific workspace.
+
+**Filtering** *(v4.2.0+).* A filter bar narrows the loaded tasks by title text, tags (click chips to toggle; matching is OR) and assignee (**All / Me / Unassigned / a member**). It applies to every scope and both views, and filters before grouping, so it's instant with no extra round-trip.
+
+**Assignees** *(v4.2.0+).* A task can carry an `assignee`, picked from the workspace's members in the task editor. New tasks default to you. In single mode, where there's no member list, it's a free-choice field.
+
+**Relations** *(v4.2.0+).* A task can declare `depends-on`, `blocked-by` and `related-to` links to other tasks, shown on the card and resolved by each task's stable `ref`.
+
+**Sub-tasks gate closing** *(v4.2.0+).* A task with unresolved sub-steps can't be closed — checking it done, dragging it to a Done column, and saving an edit into one are all refused, with the reason shown. Tick the remaining steps first. This is enforced by the server, so it holds however you reach it.
 
 **Cards.** Each card shows the title, a priority badge, the due date (red when overdue), tags, workload and a step progress bar. **More** expands the steps (tick them off individually) and the description.
 
@@ -434,6 +459,7 @@ The context menu provides quick actions for files and folders in the sidebar.
 
 - Rename -- rename the file
 - Delete -- remove the file
+- Attribution *(v4.2.0+, multi mode)* -- who created the note, who last edited it, and everyone who has contributed. Built from an activity trail of every save, cross-checked against the note's git history so edits made outside the app are still credited. Single-mode installs have no user identities to attribute, so the entry is hidden.
 
 **Toolbar actions** (appear when a file is open):
 
@@ -452,7 +478,7 @@ mdnest is designed to work on mobile browsers.
 - **Moving files:** Long-press → **Move to…** opens a destination picker. HTML5 drag-and-drop is disabled on touch (it interferes with scrolling), so this is the touch-friendly path for moves.
 - **Show full names:** Tree labels ellipsize by default to keep the visual rhythm consistent. Tap the lines icon in the tree control bar to switch to wrap mode and read long file/folder names in full. The choice is remembered across visits.
 - **Loading state:** A centered spinner shows while the tree loads on a slow connection; a thin animated bar appears at the top of the tree during a refresh so silence on the network never looks like an empty namespace.
-- **Refresh tree:** A refresh icon sits in the tree-control row at the top of the sidebar. Tap it to reload the tree — useful for files created outside the browser (via the `mdnest` CLI, MCP, or git-sync) when live-collab isn't enabled or no file is open to keep the WebSocket alive.
+- **Refresh tree:** A refresh icon sits in the tree-control row at the top of the sidebar. Tap it to reload the tree on demand. You shouldn't often need to — the tree re-reads itself every 30 seconds while the tab is visible, and again the moment you switch back to a backgrounded tab (v4.1.3+), which is what picks up files created outside the browser via the `mdnest` CLI, MCP, or a git-sync pull. That automatic refresh is deliberately silent: no spinner or progress bar for a reload you didn't ask for.
 - **Toolbar path:** The currently-open file's basename always stays visible — only the parent path gets ellipsized when the toolbar is cramped.
 
 ---

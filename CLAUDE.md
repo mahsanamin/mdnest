@@ -57,6 +57,12 @@ backend/
     sso.go                   # GET /api/auth/sso/{start,callback} (USER_PROVIDER=sso only)
     tasks.go                 # GET/POST/PATCH /api/tasks, /api/board — task board (v4.0.0+, ENABLE_TASK_BOARD)
     workspaces.go            # /api/admin/workspaces, /api/me/workspace — per-workspace git remotes (v4.0.0+, multi mode)
+    tasks_markdown.go        # v4.2.0+ — the PURE markdown half of the task board (parse a task line + its detail block, resolve columns, render a spec back to markdown, generate stable refs). Split out of tasks.go by a verified pure move; tasks.go is request handling only. Put new parsing/rendering here, not in the handler.
+    team.go                  # GET /api/namespace/users — namespace members for the assignee picker (v4.2.0+, multi mode). Uses a narrow interface, deliberately NOT on GrantStore, so existing fakes are untouched.
+    groups.go                # /api/admin/groups(/members|/grants) — role-based access Groups (v4.2.0+). Superadmin-only; multi mode only.
+    attribution.go           # GET /api/note/attribution (v4.2.0+). Route is NOT registered without a DB — single mode has no identities to attribute.
+    marp_themes.go           # GET/PUT/DELETE /api/marp/themes (v4.2.0+, ENABLE_MARP_THEMES). GET is any authenticated user (any deck must resolve its theme); PUT/DELETE superadmin.
+    marp_starter.css         # Seeded once into the empty theme catalog.
   firebase/                  # Firebase Auth + Firestore (USER_PROVIDER=firebase only)
     client.go                # Admin SDK wrapper (VerifyIDToken)
     totp_store.go            # Firestore-backed store.TOTPStore impl
@@ -68,7 +74,8 @@ backend/
     git.go                   # STORAGE_BACKEND=git — in-process git history, idle-debounced commits
     gitremote.go             # Per-namespace remote resolution + push plan (askpass / GIT_SSH_COMMAND)
     queued.go                # MDNEST_ROLE=app — writes go to the working set + durability queue
-    writer.go                # MDNEST_ROLE=writer — drains the queue, owns the git tree
+    writer.go                # MDNEST_ROLE=writer — drains the queue, owns the git tree. NOTE (v4.2.0): OpRename must RE-CACHE the destination from the durable tree, not delete it — app replicas can't re-hydrate on a cache miss, so evicting both ends made a move look like data loss until the next full hydrate. `recacheDest` handles a file and a moved subtree; both are pinned by tests.
+    system.go                # Reserved, hidden namespaces (names start with "."), excluded from every listing and picker. Currently .marp-themes. The writer hydrates these explicitly.
     workingset.go            # Redis-backed coherence tier (the shared read path)
     leader.go                # Writer leader election
     factory.go               # FromEnv — local (default) | git [+ REDIS_URL -> coherent]
@@ -81,9 +88,11 @@ backend/
     checker.go               # 24h GitHub releases poll, served on /api/config as latestRelease
   store/
     db.go                    # Postgres connection pool (multi mode only)
-    migrate.go               # Auto-migration: schema_migrations, users, access_grants, firebase_uid (005), avatar_url (006), namespace_admins (007)
+    migrate.go               # Auto-migration: schema_migrations, users, access_grants, firebase_uid (005), avatar_url (006), namespace_admins (007), access_groups (013), note_activity (014). **Applied by full NAME, not the numeric prefix** — two migrations sharing a number both run, so a duplicate prefix is a merge conflict and a readability problem, never a silent skip.
     users.go                 # UserStore (Postgres) + UpsertFirebaseUser / PromoteToSuperAdmin
     namespace_admins.go      # NamespaceAdminStore — per-namespace admin scope (v3.5.0+)
+    access_groups.go         # GroupStore (v4.2.0+) — groups, members (user_id XOR oidc_group, DB CHECK), group grants. Direct membership resolves LIVE; OIDC membership comes from the token claim.
+    note_activity.go         # NoteActivityStore (v4.2.0+) — per-note save trail behind the Attribution panel
     totp_store.go            # TOTPStore interface + PostgresTOTPStore
 
 frontend/
@@ -91,10 +100,20 @@ frontend/
     App.jsx                  # Root: auth, namespace/tree state, context menu, URL routing
     api.js                   # All API calls (fetch wrapper with JWT + 401 handling)
     wikilink.js              # Obsidian [[wikilink]] support (v3.11.5+) — pure module: parse/resolve, marked inline extension, relative-.md-link resolver, restoreWikilinks() serializer-unescape. No React imports (unit-tested standalone).
-    sanitize.js              # DOMPurify wrappers (v3.11.7+): sanitizeHtml for marked output + release notes, sanitizeSvg for mermaid. sanitizeSvg MUST keep ADD_TAGS:['foreignObject'] or every flowchart label renders blank.
-    __tests__/sanitize.test.js # Pins both directions — labels survive, payloads don't
+    sanitize.js              # DOMPurify wrappers (v3.11.7+): sanitizeHtml for marked output + release notes, sanitizeSvg for mermaid AND Excalidraw embeds. sanitizeSvg MUST keep ADD_TAGS:['foreignObject'] or every flowchart label renders blank. v4.2.0+ it also allows `use` — Excalidraw paints an embedded image as a <symbol> in <defs> painted by <use href="#…">, so without it the image sits in <defs> and silently never renders. `use` is ONLY safe paired with the afterSanitizeAttributes hook that drops any href/xlink:href not starting with '#' (an off-document <use href> is a classic SVG exfil vector — that pairing is why DOMPurify drops the tag by default). Never add one half without the other.
+    __tests__/sanitize.test.js # Pins both directions — labels survive, payloads don't, same-document <use> survives, off-document <use> is dropped
+    marpExport.js            # v4.2.0+ — standalone Marp deck export (render -> inline assets -> Blob download; never rendered in-app, so no sanitize call is needed on the output). The auth token is attached ONLY for same-origin asset URLs: deck content is user-authored and shared, so `![](https://evil/x.png)` would otherwise send the exporter's JWT to that host. Cross-origin images are still fetched, just without credentials.
+    __tests__/marpExport-token.test.js # Pins that the JWT never goes cross-origin (absolute, protocol-relative, xlink) and still goes same-origin
+    marpBespoke.js           # Wraps exported slides in marp-cli's vendored bespoke player (src/vendor/marp-bespoke, MIT) — no npm dep, nothing added to the backend image
+    excalidraw.js            # v4.2.0+ — pure module: isExcalidrawDoc / parseExcalidraw / serializeExcalidraw / noteRelativePath. The .excalidraw.md format is Obsidian-compatible (scene JSON + a mirrored `## Text Elements` section so drawing text stays searchable)
+    relations.js             # v4.2.0+ — pure module: task depends-on / blocked-by / related-to resolution by stable ref
+    cardKey.js               # v4.2.0+ — stable board card identity (namespace + path + ref), so the cross-workspace view can't collide two tasks
     echo-gate.js             # v4.1.1+ — pure module (no React): suppresses the file-changed echo of a tab's own save. In-flight-save window + epoch token: broadcasts arriving before the PUT response resolves are deferred and re-checked once the save settles; reset() on note switch invalidates the window. Closes the self-conflict-banner race (issue #82).
     __tests__/echo-gate.test.js # Pins the echo-beats-response race, late echoes, note-switch epochs
+    tree-refresh.js          # v4.1.3+ — pure module: when the sidebar tree re-reads itself (TREE_POLL_MS + shouldPollTree). The live-collab websocket is deliberately NOT an input — `tree-changed` only fires for API writes, so gating the poll on it left git-sync/filesystem writes invisible until a manual Refresh.
+    __tests__/tree-refresh.test.js # Pins that collab state is ignored and the cadence stays sub-minute
+    mermaid-text.js          # v4.1.3+ — pure module: extractDiagramText (labels live in BOTH svg <text> and <foreignObject>, depending on diagram type) + copyPlainText (hidden-textarea/execCommand, since mdnest is often reached over plain HTTP where navigator.clipboard is unavailable)
+    __tests__/mermaid-text.test.js # Pins extraction per diagram shape, dedupe, whitespace collapse
     mermaid-config.js         # Shared mermaid init, theme, and fixMermaidTextColors()
     firebase-config.js       # Firebase SDK lazy init (USER_PROVIDER=firebase only)
     components/
@@ -113,9 +132,13 @@ frontend/
       ContextMenu.jsx        # Right-click / long-press floating menu
       CommentSidebar.jsx     # Inline comments: slide-out panel, threads, replies, Go To
       HistoryModal.jsx       # Per-file git-sync history viewer + restore (v3.7.0+)
-      TaskBoard.jsx          # Kanban board over note checkboxes (v4.0.0+); lazy-loaded
+      TaskBoard.jsx          # Kanban board over note checkboxes (v4.0.0+); lazy-loaded. v4.2.0+ adds the filter bar and the "All workspaces" scope
+      TaskCard.jsx           # v4.2.0+ — one card (title on its own full-width line, badges, relations, steps)
+      BoardColumn.jsx        # v4.2.0+ — one kanban column + drop target
       TaskEditor.jsx         # Rich task create/edit form used by the board
       BoardColumnsEditor.jsx # Per-namespace column layout (.mdnest/board.json)
+      ExcalidrawEditor.jsx   # v4.2.0+ — the drawing canvas for a .excalidraw.md note. React.lazy()'d, and Preview.jsx dynamic-imports the engine only when an embed is present, so the entry bundle grows ~1.8 KB gzipped rather than ~1.5 MB
+      AttributionModal.jsx   # v4.2.0+ — created / last-edited / contributors, from the note context menu (multi mode only)
       MoveToModal.jsx        # Touch-friendly destination picker for "Move to…" context action (v3.8.0+)
       EditorErrorBoundary.jsx # React error boundary around Live editor — catches Milkdown crashes and flips to Basic (v3.8.0+)
 
@@ -138,7 +161,7 @@ deploy/
   release.yml                # (v3.11.7+) on v* tags: push images + chart to ghcr.io/<owner>/
 
 mdnest                       # Client CLI (login, note read/write/append, works from any machine)
-mdnest-server                # Server management CLI (start, stop, rebuild, reset-password, runs from project dir)
+mdnest-server                # Server management CLI (start, stop, rebuild, reset-password, runs from project dir). `MDNEST_SERVER_LIB=1 source ./mdnest-server` loads its functions without dispatching, mirroring the client CLI's MDNEST_LIB hook (v4.1.3+)
 setup.sh                     # Reads mdnest.conf, generates docker-compose.yml + .env
 mdnest.conf.sample           # Template config with MOUNT_ entries
 ```
@@ -151,6 +174,8 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 - Two auth modes: `AUTH_MODE=single` (file-based, no DB) or `AUTH_MODE=multi` (Postgres)
 - Three identity providers (multi-mode only): `USER_PROVIDER=local` (default, username/password), `USER_PROVIDER=firebase` (Firebase Auth + Firestore TOTP), `USER_PROVIDER=sso` (generic OIDC). Exclusive; chosen at startup. In `sso` mode 2FA is skipped entirely (IdP owns MFA) and local password endpoints are unused. See `docs/sso-setup.md` and `docs/firebase-setup.md`.
 - **Three role values** (v3.5.0+): `superadmin` (global), `admin` (namespace-scoped via the `namespace_admins` table), `collaborator` (per-grant only). Pre-v3.5.0 `admin` is migrated to `superadmin` by migration 007. `ADMIN_EMAILS` auto-promotes to `superadmin`. Permission checks go through `middleware.PermissionChecker.hasAdminScope(uc, ns)` — superadmin bypasses everywhere; admin only for `namespace_admins` rows; everyone else falls through to grants. API tokens follow the same precedence chain (no admin bypass for tokens).
+- **Access Groups are a second grant source, unioned in** (v4.2.0+): effective access = own grants ∪ every group's grants. Consulted only after direct grants fail, and a nil `groupStore` disables the layer (single mode / no DB). The two member kinds have *different revocation latency* and that asymmetry is deliberate but must stay documented: a `user_id` member resolves live per request, while an `oidc_group` member is matched against the `groups` claim snapshotted into the JWT at login. That is why SSO sessions use `ssoJWTTTL` (12h) instead of the year-long remember-me TTL — it bounds how long a stale IdP snapshot outlives a change. Note `uc.Role` is read from the token too, so role changes are equally deferred; that is pre-existing, not new.
+- **An access filter passed as a function must be required, not optional.** `/api/tasks/all` is access-controlled *solely* by its namespace filter and deliberately skips `RequireNsAccess` (it isn't scoped to one namespace). The filter is a mandatory `NewTaskHandler` argument, and `HandleGlobalTasks` treats nil as deny-all — so forgetting to wire it is a compile error, and if one ever slips through the endpoint serves nothing instead of every namespace. When a test pins a guard, mutate the *call site* too: a nil-means-permissive default is invisible to a predicate test.
 - In single mode, the store/ package is not initialized — zero DB dependency
 - All handlers take `notesDir` (absolute path) in constructor
 - All file APIs require `ns` query param (namespace = top-level dir under NOTES_DIR)
@@ -180,6 +205,7 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 - Wikilinks (v3.11.5+, `wikilink.js`): resolution runs against the current namespace tree only (built via `buildPathIndex(tree)` and memoized in `App.jsx`, shared by `Preview.jsx` and the Live editor). Round-trip fidelity is the hard requirement — the Live editor stores literal `[[...]]`, but Milkdown's serializer escapes `[[`→`\[\[` in plain text, so `markdownUpdated` routes every serialized doc through `restoreWikilinks()` before `onChange`. Don't add a wikilink node to the schema — the decoration + serializer-unescape approach is deliberate so bytes never change.
 - Mermaid: `LiveEditorCrepe.jsx` defines an inline `mermaidNodeView` that renders the `MermaidBlock` React component for `code_block` nodes where `language === 'mermaid'`. The compose-mermaid plugin runs after `SchemaReady`, reads Crepe's existing `code_block` factory from `nodeViewCtx`, and writes a wrapper that delegates to it for non-mermaid blocks — so Crepe's CodeMirror UI still works for other code languages AND mermaid renders via our React component.
 - Image upload: Crepe's `image-block` `onUpload` calls `uploadImage()` in `api.js`. `proxyDomURL` resolves the bare-filename markdown src (e.g. `![](photo.png)`) into `/api/files/<ns>/<dir>/<file>?token=<jwt>` for rendering — the `?token=` query param is the auth-fallback the middleware accepts for `<img>` GETs that can't carry an `Authorization` header.
+- **The tree must refresh for writes that never touched the API** (v4.1.3+, `tree-refresh.js`). `tree-changed` is broadcast from the mutating-HTTP wrapper in `main.go`, so it fires *only* for changes that came through the API — git-sync pulling another machine's commits, a host-side editor, or a restored backup produce nothing. Do not gate the poll on `appConfig.liveCollab`: a connected websocket is not evidence the tree is current, and that gate meant installs running both collab and git-sync got no automatic update at all. Automatic refreshes pass `{ soft: true }` so they skip `treeLoading` — the sidebar draws an indicator bar whenever that's set, which is right for a user-initiated Refresh and pure noise on a timer.
 - Per-namespace last-file memory: `localStorage` key `mdnest_last_path:<ns>` records the path of whichever note was last opened in each namespace. Restored on namespace switch and on initial load when there's no URL hash. URL hashes still win for explicit navigation. Per-file scroll position lives in `mdnest_file_prefs:<ns>/<path>.scrollPct` (existing pre-v3.10 mechanism).
 - Crepe nodeView composition: when overriding a node view that Crepe registers (e.g. `code_block` for mermaid, `table` for the click-to-cursor fix), the pattern is to wait for `SchemaReady`, read the existing entry from `nodeViewCtx`, then append a new entry with the same node-type id. `Object.fromEntries(nodeViewCtx)` keeps the last entry for duplicate keys, so ours wins; we keep a reference to the original factory and delegate to it for cases we don't want to override.
 - Both editor implementations share the same onChange/content props — Crepe is now the only Live editor, but `App.jsx` keeps its lazy import named `LiveEditor` so the JSX call site stays editor-agnostic.
@@ -190,6 +216,7 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 - `setup.sh` generates docker-compose.yml volume mounts from these
 - Backend sees them as subdirectories under NOTES_DIR
 - GET /api/namespaces lists them (reads top-level dirs)
+- **App-managed data that is NOT user notes needs its own declared volume.** `/data/notes` is not itself a volume — `setup.sh` bind-mounts each `MOUNT_` namespace *individually* — so anything the backend creates under `NOTES_DIR` at runtime lands in the container's writable layer and is destroyed by `./mdnest-server rebuild` (`compose up --force-recreate`). v4.2.0's Marp theme catalog hit exactly this in review: `.marp-themes` is a reserved system namespace created at runtime and deliberately never mirrored to a git remote, so a rebuild would have wiped every custom theme with no copy anywhere. The fix is the pattern `mdnest-secrets` already uses — `setup.sh` emits a **named volume** (`mdnest-marp-themes:/data/notes/.marp-themes`) when the feature is on, and `tests/setup-marp-themes.sh` pins that the generated compose both mounts *and declares* it. The Helm chart is unaffected: it mounts all of `/data/notes` as a PVC. If you add another system namespace, add its volume in the same change.
 
 ### Client CLI (`mdnest`, bash)
 - Runs under `set -e` — a helper used as a bare statement must `return 0` on its success path or it aborts the script. (This also leaks into anything that *sources* the CLI: `tests/cli-unit.sh` does `set +e` right after the `MDNEST_LIB=1 source` for exactly this reason.)
@@ -198,6 +225,8 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 - **Human-facing output is rendered in awk only** — `format_tree` / `format_namespaces` for `mdnest list` have deliberately no python3/jq tier, so a listing is byte-identical on every machine and a broken python can't garble it. Verified on gawk, mawk and busybox awk. Raw API JSON stays available behind `--json` / `MDNEST_JSON=1` for scripts; don't make raw JSON the default output of a command again.
 - Adding a command means three edits: the `case` dispatch, the help **Commands** list, and the help **Examples** block (`grep -c '<cmd>' mdnest` ≥ 3).
 - `mdnest update` self-updates from `raw.githubusercontent.com/.../main` — so a CLI fix reaches users when it lands on `main`, independent of the tag/Release (those drive the in-app *server* update banner). Corollary: the CLI installed on this machine lags `develop`, so test with `./mdnest`, not `mdnest`.
+- **Never print `<angle brackets>` inside a command you tell the user to RUN** (v4.1.3+). `<name>` is a shell redirection, so a hint like `mdnest login @<name> ...` errors in zsh and bash the moment it's pasted — the recovery instruction became a second error. Use literal placeholder words (`@myserver`, `mdnest_yourtoken`) whenever real values are being substituted in. Bracket notation is still fine in `Usage:`/`--help` *synopses*, which nobody pastes. `tests/cli-unit.sh` asserts no suggested command contains a bracket.
+- **Validate before you conclude, and before you persist.** Two failures of the same shape shipped together in `login`: reporting "this server has no SERVER_ALIAS configured" for a host we never reached (the curl exit code was thrown away, so "couldn't connect" and "connected, no alias" were one empty string), and saving a non-URL to disk — where it became the *default* server. Keep curl's exit status when the reason matters (`fetch_server_config` + `curl_reason`), and never write config you haven't validated.
 
 ### Docker
 - Backend: golang:1.24-alpine build, alpine runtime
@@ -316,6 +345,20 @@ override: `MDNEST_SKIP_E2E=1`.
     someone else's traceback — because of the machine's python rather than ours.
     The rendering checks run in the with- and without-parser passes and must
     agree, which is what keeps a python3/jq tier from creeping back into output.
+    Also carries a **login argument-handling suite** (v4.1.3+) that runs the real
+    CLI as a subprocess against a throwaway `HOME`: it pins the exit status, that
+    a rejected login leaves *nothing* on disk, that the unreachable path never
+    mentions `SERVER_ALIAS`, and that no suggested command contains an angle
+    bracket. (Run those via `login_run`, never inside `$(…)` — a command
+    substitution is a subshell, so the `HOME` and status it sets are lost and the
+    assertions pass vacuously.)
+  - `tests/server-unit.sh` — **new in v4.1.3.** Pure-function checks of
+    `mdnest-server`, loaded through its `MDNEST_SERVER_LIB=1 source` hook (the
+    mirror of the client CLI's `MDNEST_LIB`). Currently covers namespace-drift
+    reporting — `namespace_drift_report` is split out from the Docker-querying
+    `namespace_drift` precisely so it can be tested with no Docker and no running
+    stack. Assertions run against whitespace-normalized output so they pin the
+    words, not the column padding.
     Uses the CLI's `MDNEST_LIB=1 source mdnest` hook to load the real functions.
   - Plus the existing builds, `npm test`, audits, version consistency, shellcheck.
 - **CLI smoke test**: `tests/cli-smoke-test.sh` exercises every `mdnest` note

@@ -4,6 +4,142 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v4.2.0 — Drawings, access groups, and per-note authorship
+
+The largest release since v4.0.0, and almost all of it is contributed work. Three
+new opt-in capabilities — Excalidraw drawings, a centralized Marp theme catalog,
+and role-based access Groups — plus per-note authorship, a task board grown up
+enough to run a week on, and an MCP server that can now edit slides, tasks and
+drawings rather than only note bodies.
+
+Every new capability is off by default. An operator who wants none of them carries
+no new service, no new required env var, and ~1.8 KB more in the frontend entry
+bundle; the drawing engine and the deck exporter are code-split and download only
+when something actually needs them.
+
+One fix here matters more than its size suggests: in the git-native HA topology a
+**move could look like data loss**. See below.
+
+### Added
+
+- **Excalidraw drawings (opt-in — `ENABLE_EXCALIDRAW=true`).** A `.excalidraw.md`
+  note opens on a full [Excalidraw](https://excalidraw.com/) canvas, and any note
+  can embed a drawing read-only with an `![alt](path.excalidraw.md)` image embed.
+  The file is Obsidian-compatible: the scene is stored as a JSON block and the
+  drawing's text is mirrored into a `## Text Elements` section so it stays
+  searchable and readable, so drawings reuse the same history, restore, comments
+  and search as any note. Off by default; the (large) editor bundle is code-split
+  and only loads when a drawing is opened. Operators can preload organisation-wide
+  shape libraries via `EXCALIDRAW_LIBRARIES` (Helm `excalidraw.libraries`), a list
+  of `.excalidrawlib` URLs. Concurrent editing is last-write-wins with a conflict
+  warning. See [docs/excalidraw.md](docs/excalidraw.md).
+- **Centralized Marp themes (opt-in — `ENABLE_MARP_THEMES=true`, on top of
+  `ENABLE_MARP`).** Decks can reference a shared theme by name (`theme: <name>`
+  in the frontmatter) instead of embedding a large per-deck `style:` block, so
+  presentation styles are managed and evolve in one place. Themes live in a
+  reserved, hidden namespace (auto-created, git-versioned locally, and never
+  mirrored to a per-workspace git remote), are readable by every deck in any
+  namespace, and are edited by superadmins from a new **Marp Themes** admin tab.
+  A neutral `starter` theme is seeded on first start when the catalog is empty.
+- **Export a Marp deck as a real, standalone presentation.** From the deck view,
+  export to a single self-contained `.html`: a genuine Marp *bespoke* deck
+  (keyboard/touch navigation, fullscreen and presenter view) that opens offline
+  in any browser. Rendered entirely in the browser with marp-core and wrapped in
+  marp-cli's bespoke player (vendored, MIT) — no server dependency and nothing
+  added to the backend image. Centralized themes are resolved and images inlined,
+  so the file is fully self-contained.
+- **Role-based access "Groups" (multi mode).** A new superadmin-managed
+  **Groups** admin tab lets you define named groups whose members are mdnest
+  users and/or IdP (OIDC) group IDs, and grant those groups read/write access
+  to namespaces (with the same path scoping as per-user grants). A user's
+  effective access is the **union** of their own grants and the grants of every
+  group they belong to — directly, or through an OIDC group ID carried in their
+  login token. OIDC-group membership is read from a configurable ID-token claim
+  (`OIDC_GROUPS_CLAIM`, e.g. `groups` on Entra ID) and snapshotted at login, so
+  a change at the IdP applies on the member's next sign-in. **Note for
+  operators:** because the OIDC-group snapshot lives in the session token,
+  removing a user from an IdP group (e.g. offboarding) does not revoke their
+  mdnest access until that token expires — bounded to the SSO session lifetime
+  (12 hours). Direct user membership, by contrast, takes effect immediately
+  (added and revoked live).
+  Each OIDC-group member can carry an
+  optional display label (reference only — matching is always on the group ID).
+  Fully additive and opt-in: with no groups defined and `OIDC_GROUPS_CLAIM`
+  unset, behaviour is unchanged.
+- **Per-note authorship attribution (multi mode).** A note now carries an
+  internal activity trail — who created it, who last edited it, and everyone who
+  has contributed — surfaced from the note's context menu as an **Attribution**
+  panel. Every save is recorded in a Postgres-backed `note_activity` table
+  (migration `014`), and contributors are cross-checked against the note's git
+  history so authorship stays accurate even for edits made outside the app.
+  Multi mode only and fully nil-safe: a single-mode install has no user
+  identities to attribute, so nothing is recorded, the `/api/note/attribution`
+  route is never registered, and the UI entry stays hidden.
+- **Task relations, filters and a cross-workspace board.** Tasks can declare
+  `depends-on`, `blocked-by` and `related-to` relations (rendered on the card and
+  resolvable to other tasks by their stable `ref`), carry an `assignee`, and be
+  narrowed with a filter bar over title, tags and assignee (All / Me /
+  Unassigned / a member). A new **All workspaces** scope aggregates tasks from
+  every workspace you can access, each card showing where it came from — access
+  is enforced per request, and the view serves nothing rather than everything if
+  its namespace filter is ever left unwired. Plus board polish: a mobile layout,
+  task delete, manual refresh, and cards whose title gets its own full-width
+  line.
+- **Closing a task is blocked while its sub-tasks are unresolved.** Checking a
+  parent done, dragging it into a Done column, or saving an edit that moves it
+  there are all refused (HTTP 422) until every sub-step is ticked, with the
+  reason surfaced in the UI rather than failing silently. Enforced in the
+  backend, so it holds for API and MCP callers too, not just the board.
+- **MCP: subject-level CRUD for tasks, Marp decks and drawings.** The MCP server
+  now manages the things inside a note, not just note bodies: full task CRUD
+  (including relations, assignee, the close guard and cross-workspace search),
+  per-slide Marp operations (list/read/edit/delete/move/insert, with slide
+  splitting that ignores a `---` inside a fenced code block), and Excalidraw
+  authoring — compile a high-level `nodes`+`edges` spec into a real scene with
+  bound labels and connected arrows, then read and edit individual elements with
+  cascade delete and automatic re-flow. Tools are registered based on the
+  backend's enabled features, so a notes-only deployment exposes only the
+  note/tree/search tools.
+
+### Fixed
+
+- **A move no longer looks like data loss on HA replicas.** In the git-native HA
+  topology (stateless app replicas + a single durability writer), app replicas
+  read exclusively from the Redis working set. The writer applied a rename to the
+  durable tree and then evicted **both** ends from the working set — the source
+  correctly, the destination wrongly — and never re-populated it. Because a
+  replica cannot re-hydrate from the durable tree on a cache miss, and the
+  enqueuing replica had already dropped the source, every read of the moved file
+  (or the moved directory's whole subtree) returned 404 until the next full
+  hydrate: `POST /api/move` reported success and the note then appeared to be
+  gone. The destination is now re-hydrated from the durable tree after the
+  rename, for both a single file and a moved subtree. Single-box installs were
+  never affected.
+
+- **The Marp theme editor's Save button is styled** to match the rest of the
+  admin panel (a primary button with a proper disabled state) instead of the
+  default browser control.
+
+### Security
+
+- **Go 1.26.6 and refreshed `golang.org/x/*`.** The backend image built on
+  go1.26.5, whose standard library carried reachable advisories in `crypto/tls`,
+  `net/http`, `encoding/asn1` and `net`; `golang.org/x/text` v0.38.0 was also
+  reachable, from `HandleNoteAt` through `ReverseProxy` into `norm.Form`. The go
+  directive and the builder image move to **1.26.6**, `x/net` to v0.56.0 and
+  `x/text` to v0.39.0. `govulncheck` reports zero vulnerabilities affecting
+  mdnest's code.
+- **Frontend dependency advisories cleared.** v4.1.3 bundled `nanoid` 3.3.16
+  (high — GHSA-28wg-ghj8-5hjv, GHSA-2v37-7h3g-55p8) plus moderate advisories in
+  `mermaid` 11.15.0 and `dompurify` 3.4.12. All are transitive, none were
+  reachable from a code path mdnest calls directly, but they are gone: `nanoid`
+  → 5.1.16, `mermaid` → 11.16.1, `dompurify` → 3.4.13, and `npm audit` reports
+  zero for both the frontend and the MCP server. The new Excalidraw dependency
+  pulled its own vulnerable `nanoid` and `lodash-es` copies in transitively;
+  those are pinned up via `overrides` rather than shipped.
+
+---
+
 ## v4.1.3 — comments, Marp safety, and four papercuts that made mdnest look broken
 
 Alongside the comment-editing and Marp work, this release clears a batch of
@@ -108,6 +244,17 @@ couldn't be copied at all.
   stalled with a perpetual out-of-sync diff. The claim templates now carry only
   the release-invariant `mdnest.selectorLabels`, so upgrades apply cleanly.
   Chart version bumped to 0.3.1 (template-only change).
+
+---
+- **Per-note authorship attribution (multi mode).** A note now carries an
+  internal activity trail — who created it, who last edited it, and everyone
+  who has contributed — surfaced from the note's context menu as an
+  **Attribution** panel. Every save is recorded in a Postgres-backed
+  `note_activity` table (migration `014`), and contributors are cross-checked
+  against the note's git history (blame) so authorship is accurate even for
+  edits made outside the app. Multi mode only and fully nil-safe: single-mode
+  installs have no user identities to attribute, so nothing is recorded, the
+  `/api/note/attribution` route is not registered, and the UI entry is hidden.
 
 ---
 

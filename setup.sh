@@ -72,6 +72,9 @@ while IFS= read -r line; do
     ENABLE_LIVE_COLLAB) ENABLE_LIVE_COLLAB="$value" ;;
     ENABLE_TASK_BOARD) ENABLE_TASK_BOARD="$value" ;;
     ENABLE_MARP) ENABLE_MARP="$value" ;;
+    ENABLE_MARP_THEMES) ENABLE_MARP_THEMES="$value" ;;
+    ENABLE_EXCALIDRAW) ENABLE_EXCALIDRAW="$value" ;;
+    EXCALIDRAW_LIBRARIES) EXCALIDRAW_LIBRARIES="$value" ;;
     REQUIRE_2FA) REQUIRE_2FA="$value" ;;
     TOTP_ISSUER) TOTP_ISSUER="$value" ;;
     CADDY_DOMAIN) CADDY_DOMAIN="$value" ;;
@@ -229,6 +232,9 @@ AUTH_MODE=${AUTH_MODE}
 ENABLE_LIVE_COLLAB=${ENABLE_LIVE_COLLAB:-false}
 ENABLE_TASK_BOARD=${ENABLE_TASK_BOARD:-false}
 ENABLE_MARP=${ENABLE_MARP:-false}
+ENABLE_MARP_THEMES=${ENABLE_MARP_THEMES:-false}
+ENABLE_EXCALIDRAW=${ENABLE_EXCALIDRAW:-false}
+EXCALIDRAW_LIBRARIES=${EXCALIDRAW_LIBRARIES:-}
 REQUIRE_2FA=${REQUIRE_2FA:-false}
 TOTP_ISSUER=${TOTP_ISSUER:-mdnest}
 SERVER_ALIAS=${SERVER_ALIAS:-}
@@ -313,6 +319,19 @@ if [ "$USER_PROVIDER" = "firebase" ]; then
   BACKEND_VOLUMES="${BACKEND_VOLUMES}      - ${FIREBASE_SERVICE_ACCOUNT}:/etc/mdnest/firebase-service-account.json:ro
       - ${FIREBASE_WEB_CONFIG}:/etc/mdnest/firebase-web-config.json:ro
 "
+fi
+
+# Marp theme catalog: app-managed data that is NOT user notes. NOTES_DIR itself
+# is not a volume here (each MOUNT_ namespace is bind-mounted individually), so
+# the catalog would land in the container's writable layer and be discarded by
+# `mdnest-server rebuild` (compose up --force-recreate). Back it with a named
+# volume declared up front — same pattern as mdnest-secrets — so it survives a
+# rebuild. Only emitted when the theme catalog is enabled.
+MARP_THEMES_NAMED_VOLUME=""
+if [ "$ENABLE_MARP_THEMES" = "true" ]; then
+  BACKEND_VOLUMES="${BACKEND_VOLUMES}      - mdnest-marp-themes:/data/notes/.marp-themes
+"
+  MARP_THEMES_NAMED_VOLUME="  mdnest-marp-themes:"
 fi
 
 # SSH key for git pull/push (backend sync button + git-sync sidecar)
@@ -534,6 +553,7 @@ ${GITSYNC_VOLUMES}      - ./git-sync/sync.sh:/sync.sh:ro
 ${MCP_SERVICE}
 volumes:
   mdnest-secrets:
+${MARP_THEMES_NAMED_VOLUME}
 ${EXTRA_VOLUMES}
 ${CADDY_VOLUMES}
 EOF

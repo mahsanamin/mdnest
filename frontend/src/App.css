@@ -22,6 +22,40 @@
   position: relative;
 }
 
+/* Excalidraw fills the whole content area; the library canvas needs a sized,
+   positioned host. */
+.excalidraw-wrapper {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+.excalidraw-host {
+  position: absolute;
+  inset: 0;
+}
+
+/* A drawing embedded read-only inside a normal note's preview. */
+.excalidraw-embed {
+  margin: 12px 0;
+  padding: 8px;
+  border: 1px solid #313244;
+  border-radius: 8px;
+  background: #ffffff;
+  overflow: auto;
+  text-align: center;
+}
+.excalidraw-embed.excalidraw-embed-msg {
+  background: #181825;
+  color: #6c7086;
+  font-size: 13px;
+}
+.excalidraw-embed svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
 .editor-wrapper {
   flex: 1;
   display: flex;
@@ -305,6 +339,20 @@
 
 .toolbar button:hover {
   background: #45475a;
+}
+
+/* Narrow / mobile: let the top toolbar wrap so the editor-mode (Basic/Live/
+   Board) and view-mode (Editor/Split/Preview) button groups never overlap.
+   The file path drops onto its own line below the controls. */
+@media (max-width: 900px) {
+  .toolbar {
+    flex-wrap: wrap;
+    row-gap: 0.4rem;
+  }
+  .toolbar-path {
+    order: 99;
+    flex-basis: 100%;
+  }
 }
 
 /* Sidebar */
@@ -2190,6 +2238,12 @@ pre:hover .code-copy-btn {
 
 .modal-btn-primary:hover {
   background: #74c7ec;
+}
+
+.modal-btn-primary:disabled {
+  background: #45475a;
+  color: #6c7086;
+  cursor: not-allowed;
 }
 
 .modal-wide {
@@ -4404,6 +4458,56 @@ pre:hover .code-copy-btn {
   opacity: 0.9;
 }
 
+/* ===== Authors / attribution modal ===== */
+.attribution-modal {
+  max-width: 520px;
+  width: 100%;
+}
+.attribution-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0;
+}
+.attribution-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.attribution-label {
+  color: var(--text-secondary, #9399b2);
+  font-size: 0.85em;
+  min-width: 92px;
+}
+.attribution-user {
+  font-weight: 600;
+}
+.attribution-when {
+  color: var(--text-secondary, #9399b2);
+  font-size: 0.85em;
+}
+.attribution-contributors {
+  margin: 12px 0;
+}
+.attribution-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.attribution-chip {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--bg-tertiary, #313244);
+  font-size: 0.85em;
+}
+.attribution-note {
+  margin-top: 12px;
+  font-style: italic;
+}
+
 /* ===== History modal (v3.7.0+) ===== */
 .history-modal {
   width: min(900px, 92vw);
@@ -5195,4 +5299,76 @@ pre:hover .code-copy-btn {
 .grants-add-row button:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* Marp Themes admin tab */
+.marp-themes-tab {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px;
+  box-sizing: border-box;
+}
+.marp-themes-layout { display:flex; gap:16px; margin-top:12px; align-items:flex-start; }
+.marp-themes-list { list-style:none; margin:0; padding:0; width:200px; flex:0 0 200px; border:1px solid #313244; border-radius:6px; overflow:hidden; }
+.marp-themes-list li { display:flex; align-items:center; justify-content:space-between; padding:6px 10px; border-bottom:1px solid #313244; cursor:pointer; font-size:0.85rem; }
+.marp-themes-list li.active { background:#313244; }
+.marp-themes-list li .marp-theme-name { flex:1; color:#cdd6f4; }
+.marp-themes-list li .danger { background:transparent; border:none; color:#6c7086; cursor:pointer; }
+.marp-themes-list li .danger:hover { color:#f38ba8; }
+.marp-theme-editor { flex:1; display:flex; flex-direction:column; gap:8px; min-width:0; }
+.marp-theme-name-field { display:flex; flex-direction:column; gap:4px; font-size:0.8rem; color:#a6adc8; }
+.marp-theme-name-field input { background:#1e1e2e; border:1px solid #313244; border-radius:4px; color:#cdd6f4; padding:6px 8px; }
+.marp-theme-css { width:100%; box-sizing:border-box; background:#181825; color:#cdd6f4; border:1px solid #313244; border-radius:6px; padding:10px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:0.78rem; line-height:1.45; resize:vertical; }
+.marp-theme-actions { display:flex; justify-content:flex-end; }
+
+/* ===== Access "Groups" admin tab ===== */
+/* Separate the create form from the intro above and the group list below. */
+.admin-section > .grants-add-form {
+  margin-bottom: 18px;
+}
+
+/* Create form: let the name + description inputs fill the available width. */
+.admin-section > .grants-add-form .grants-add-row input {
+  width: auto;
+  flex: 1;
+}
+
+/* Sections inside an expanded group card (Members / Namespace access). */
+.group-members,
+.group-grants {
+  margin-top: 18px;
+}
+
+.grants-user-body > .group-members:first-child {
+  margin-top: 14px;
+}
+
+.group-members h4,
+.group-grants h4 {
+  margin: 0 0 8px 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #a6adc8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Stacked add-rows (user row, then the OIDC id/label row) must not touch. */
+.group-members .grants-add-row,
+.group-grants .grants-add-row {
+  margin-top: 8px;
+}
+
+/* The OIDC id + display-name inputs should share the width evenly. */
+.group-members .grants-add-row input {
+  width: auto;
+  flex: 1;
+}
+
+/* Set the Delete-group action apart from the sections above it. */
+.group-delete-row {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px dashed #313244;
 }

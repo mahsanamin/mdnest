@@ -1155,6 +1155,60 @@ curl -X POST "http://localhost:8286/api/move?ns=personal&from=drafts&to=archive/
 
 ---
 
+## Access Groups *(v4.2.0+)*
+
+Superadmin-managed named sets whose members are mdnest users and/or IdP (OIDC)
+group IDs, carrying namespace grants that mirror per-user grants. A user's
+effective access is the **union** of their own grants and the grants of every
+group they belong to.
+
+Multi mode only. All three routes are `RequireSuperAdmin`. With no groups defined
+and `OIDC_GROUPS_CLAIM` unset, behaviour is identical to before.
+
+| Route | Methods | Purpose |
+|---|---|---|
+| `/api/admin/groups` | GET, POST, PATCH, DELETE | List / create / rename / delete a group |
+| `/api/admin/groups/members` | GET, POST, DELETE | Add or remove a member (a `user_id` **XOR** an `oidc_group` id) |
+| `/api/admin/groups/grants` | GET, POST, DELETE | Grant or revoke a namespace/path/permission for a group |
+
+A member row is either a mdnest user or an OIDC group id, never both — enforced
+by a database `CHECK`. An OIDC-group member may carry a display label, which is
+for the operator's reference only: matching is always on the group id.
+
+**Revocation semantics differ by member kind**, and this matters operationally:
+direct user membership is resolved live on every request, so removing a user
+takes effect immediately; OIDC-group membership comes from a claim snapshotted
+into the session token at login, so a change at the IdP applies at the member's
+next sign-in. See `docs/security.md`.
+
+## Attribution *(v4.2.0+)*
+
+### GET /api/note/attribution
+
+Who created a note, who last edited it, and everyone who contributed. Requires
+read access to the namespace.
+
+Multi mode only — the route is **not registered** without a database, because a
+single-mode install has no user identities to attribute. Backed by the
+`note_activity` table (migration `014`), cross-checked against the note's git
+history so edits made outside the app are still attributed.
+
+**Query parameters:** `ns`, `path` (both required).
+
+## Marp Themes *(v4.2.0+)*
+
+### GET / PUT / DELETE /api/marp/themes
+
+The centralized Marp theme catalog. Requires `ENABLE_MARP_THEMES=true` on top of
+`ENABLE_MARP`; the routes are not registered otherwise.
+
+`GET` is available to any authenticated user (a deck in any namespace has to be
+able to resolve its theme). `PUT` and `DELETE` are superadmin-only.
+
+Themes are stored one `<name>.css` per theme in the reserved, hidden
+`.marp-themes` namespace, which is excluded from every namespace listing and from
+the grant and admin pickers, and is never mirrored to a per-workspace git remote.
+
 ## Comments
 
 > **Requires multi-user mode with live collab enabled** (`AUTH_MODE=multi` and `ENABLE_LIVE_COLLAB=true`). The `/api/comments` route is only registered under that combination; in any other mode the endpoints return 404. All endpoints require a valid JWT.
@@ -1297,11 +1351,50 @@ Aggregate the tasks of a namespace (or of a single note).
 
 **Response:** `{ "board": <BoardConfig>, "tasks": [<Task>, ...] }`, where a
 `Task` carries `id, path, line, raw, text, checked, column` and, when present,
-`status, due, priority, workload, tags[], defaultExpanded, steps[], notes`.
+`status, due, priority, workload, assignee, tags[], defaultExpanded, steps[],
+notes`, plus the relation lists `dependsOn[], blockedBy[], relatedTo[]` and a
+stable `ref` *(v4.2.0+)*. In the cross-namespace view each task also carries
+`namespace`.
 
 ```bash
 curl "http://localhost:8286/api/tasks?ns=work" -H "Authorization: Bearer $TOKEN"
 ```
+
+**Closing a task with unresolved sub-tasks is refused** *(v4.2.0+)*: checking a
+parent done, moving it to a `done` column, or saving an edit into one returns
+`422 Unprocessable Entity` with `{"error":"resolve all sub-tasks before closing
+this task"}` until every nested step is checked. Enforced server-side, so it
+applies to API and MCP callers as well as the board UI.
+
+### GET /api/tasks/all *(v4.2.0+)*
+
+Aggregate tasks across **every namespace the caller can read** — the board's "All
+workspaces" scope. Takes no `ns`.
+
+Access is enforced inside the handler rather than by the namespace middleware
+(the request isn't scoped to one namespace), using the same filter that backs
+`GET /api/namespaces`. A namespace the caller cannot read can never appear. If
+that filter is ever left unwired the endpoint serves **nothing** rather than
+everything.
+
+**Response:** same shape as `GET /api/tasks`; every task carries `namespace`, and
+`board` is the union of the per-namespace column layouts (default columns first,
+then any extra columns contributed by a namespace).
+
+```bash
+curl "http://localhost:8286/api/tasks/all" -H "Authorization: Bearer $TOKEN"
+```
+
+### GET /api/namespace/users *(v4.2.0+)*
+
+List the users who hold a grant on a namespace, to populate the assignee picker.
+Requires read access to the namespace: anyone who can see it may see who else is
+on it. Multi mode only — the route is not registered in single mode, and the
+frontend degrades to a free-choice list.
+
+**Response:** `[{ "id": 1, "username": "sam" }, ...]` — usernames only, ordered
+for a stable picker. Emails are never returned. Namespace admins appear (they
+hold grants); superadmins do not (they have no grant rows).
 
 ### POST /api/tasks
 

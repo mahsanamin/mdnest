@@ -5,6 +5,9 @@ import MermaidViewer from './MermaidViewer.jsx';
 import { resolveWikiLink, wikiLinkExtension, internalMdLinkHtml } from '../wikilink.js';
 import { sanitizeHtml, sanitizeSvg } from '../sanitize.js';
 import { extractDiagramText, copyPlainText } from '../mermaid-text.js';
+import { isExcalidrawDoc, noteRelativePath } from '../excalidraw.js';
+import { getNote } from '../api.js';
+
 
 // Safety net for any render-time exception inside Preview (mostly marked, but
 // also mermaid rendering, task-checkbox DOM work, etc.). Without this, a
@@ -117,6 +120,12 @@ function renderMarkdownUnsafe(source, ns, notePath, pathIndex) {
         return `<a href="${href}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`;
       },
       image({ href, title, text }) {
+        // An Excalidraw drawing embeds as a rendered, read-only SVG (loaded
+        // lazily post-render), not an <img>.
+        if (isExcalidrawDoc(href)) {
+          const p = noteRelativePath(notePath, href);
+          return `<div class="excalidraw-embed" data-excalidraw-src="${encodeURIComponent(p)}">Loading drawing…</div>`;
+        }
         let src = href || '';
         if (src && !src.startsWith('http') && !src.startsWith('data:') && !src.startsWith('/')) {
           src = baseDir + src;
@@ -430,6 +439,59 @@ function Preview({ content, currentPath, ns, onCheckboxToggle, pathIndex, onWiki
       return () => { cancelled = true; };
     }
   }, [html, content, onCheckboxToggle, currentPath, onWikiLink]);
+
+  // Render embedded Excalidraw drawings (`![alt](x.excalidraw.md)`) as read-only
+  // SVG. Kept in its own effect (the mermaid pass returns early) and lazy: the
+  // Excalidraw export bundle only loads when a note actually embeds a drawing.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return undefined;
+    const embeds = el.querySelectorAll('.excalidraw-embed:not(.done)');
+    if (embeds.length === 0) return undefined;
+    let cancelled = false;
+    (async () => {
+      const [{ parseExcalidraw }, mod] = await Promise.all([
+        import('../excalidraw.js'),
+        import('@excalidraw/excalidraw'),
+      ]);
+      if (cancelled) return;
+      for (const d of embeds) {
+        if (cancelled) return;
+        d.classList.add('done');
+        const path = decodeURIComponent(d.dataset.excalidrawSrc || '');
+        try {
+          const { text } = await getNote(ns, path);
+          if (cancelled) return;
+          const scene = parseExcalidraw(text);
+          if (!scene || scene.elements.length === 0) {
+            d.textContent = 'Empty drawing';
+            d.classList.add('excalidraw-embed-msg');
+            continue;
+          }
+          const svg = await mod.exportToSvg({
+            elements: scene.elements,
+            files: scene.files,
+            appState: { ...scene.appState, exportBackground: true },
+          });
+          if (cancelled) return;
+          d.innerHTML = sanitizeSvg(svg.outerHTML);
+          const svgEl = d.querySelector('svg');
+          if (svgEl) {
+            svgEl.removeAttribute('width');
+            svgEl.removeAttribute('height');
+            svgEl.style.maxWidth = '100%';
+            svgEl.style.height = 'auto';
+          }
+          d.classList.add('loaded');
+        } catch {
+          if (cancelled) return;
+          d.textContent = 'Could not load drawing';
+          d.classList.add('excalidraw-embed-msg');
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [html, ns]);
 
   const handleExportPdf = useCallback(() => {
     const el = containerRef.current;

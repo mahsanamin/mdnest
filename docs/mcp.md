@@ -16,12 +16,20 @@ transports**:
 > **Available tools:** `list_namespaces`, `list_tree`, `read_note`,
 > `write_note`, `append_note`, `prepend_note`, `create_note`, `create_folder`,
 > `delete_item`, `move_item`, `search_notes`, `list_tasks`, `create_task`,
-> `move_task`, `edit_task`.
+> `move_task`, `edit_task`, `set_task_field`, `toggle_task`, `delete_task`,
+> `search_tasks`, `create_excalidraw`, `draw_excalidraw`, `read_excalidraw`,
+> `edit_excalidraw_node`, `edit_excalidraw_edge`, `delete_excalidraw_element`,
+> `create_marp`, `add_marp_slide`, `list_marp_slides`, `read_marp_slide`,
+> `edit_marp_slide`, `delete_marp_slide`, `move_marp_slide`.
 >
 > The `*_task` tools drive the [task board](tasks.md): `list_tasks` returns the
 > board columns and every task (with the `path`/`line`/`raw` needed to mutate
-> one); `create_task`/`edit_task` author a whole task (title, column, due,
-> priority, workload, tags, steps, notes); `move_task` changes a task's column.
+> one); `create_task`/`edit_task` author a whole task (title, column, status,
+> due, priority, workload, assignee, tags, relations, steps, notes);
+> `set_task_field` edits one field, `toggle_task` checks/unchecks, `move_task`
+> changes a task's column, `delete_task` removes it and `search_tasks` filters
+> across a namespace (or all of them). `create_excalidraw`, `create_marp` and
+> `add_marp_slide` scaffold drawing and slide-deck notes.
 
 ---
 
@@ -241,13 +249,75 @@ and rewrite that markdown.
 | Tool | Purpose | Key inputs |
 |------|---------|------------|
 | `list_tasks` | Board columns + every task in a namespace (or one note). Returns each task's `path`, `line` and `raw` — needed to mutate it. | `namespace`, `note?` |
-| `create_task` | Append a whole task to a note (the note, else the board's default note; created if missing). | `namespace`, `title`, `note?`, `column?`, `due?`, `priority?`, `workload?`, `tags?`, `notes?`, `steps?`, `defaultExpanded?` |
+| `create_task` | Append a whole task to a note (the note, else the board's default note; created if missing). | `namespace`, `title`, `note?`, `column?`, `status?`, `due?`, `priority?`, `workload?`, `assignee?`, `tags?`, `dependsOn?`, `blockedBy?`, `relatedTo?`, `notes?`, `steps?`, `defaultExpanded?` |
 | `move_task` | Move a task to a column (sets its status; checks the box for the Done column). | `namespace`, `path`, `line`, `raw`, `column` |
-| `edit_task` | Replace a task's whole definition (omitted fields are cleared). | `namespace`, `path`, `line`, `raw`, `title`, `column?`, `due?`, `priority?`, `workload?`, `tags?`, `notes?`, `steps?`, `defaultExpanded?` |
+| `edit_task` | Replace a task's whole definition (omitted fields are cleared; pass `ref` to keep the stable id). | `namespace`, `path`, `line`, `raw`, `title`, `ref?`, `column?`, `status?`, `due?`, `priority?`, `workload?`, `assignee?`, `tags?`, `dependsOn?`, `blockedBy?`, `relatedTo?`, `notes?`, `steps?`, `defaultExpanded?` |
+| `set_task_field` | Set or clear a single field without resending the whole task. | `namespace`, `path`, `line`, `raw`, `key`, `value` |
+| `toggle_task` | Check/uncheck a task or one of its steps (blocked with `422` if closing over open steps). | `namespace`, `path`, `line`, `raw`, `checked` |
+| `delete_task` | Delete a task (checkbox + detail block). | `namespace`, `path`, `line`, `raw` |
+| `search_tasks` | Filter tasks in a namespace, or across all of them with `global`. Filters are ANDed. | `namespace?`, `global?`, `note?`, `text?`, `column?`, `status?`, `priority?`, `assignee?`, `tags?`, `checked?`, `relatesTo?`, `dueBefore?` |
+
+Relations (`dependsOn` / `blockedBy` / `relatedTo`) reference other tasks by
+their stable `ref` (shown by `list_tasks`). `set_task_field` takes those same
+keys as `depends-on` / `blocked-by` / `related-to` with a comma-separated value.
 
 **Workflow.** Call `list_tasks` first to read the column ids and each task's
-`path`/`line`/`raw`; pass those back to `move_task` / `edit_task`. The mutations
+`path`/`line`/`raw`; pass those back to `move_task` / `edit_task` /
+`set_task_field` / `toggle_task` / `delete_task`. The mutations
 are optimistically concurrent — a `409` means the note changed under you, so
 re-run `list_tasks` and retry. See the [task model](tasks.md) for the markdown a
 task compiles to and the [API reference](api.md#task-board) for the underlying
 endpoints.
+
+## 9. Drawing & slide tools
+
+Excalidraw drawings and Marp decks are ordinary notes with a specific layout, so
+these tools scaffold a valid file that the app then renders.
+
+| Tool | Purpose | Key inputs |
+|------|---------|------------|
+| `create_excalidraw` | Create an empty, valid Obsidian-compatible `.excalidraw.md` drawing (suffix added if missing). | `namespace`, `path`, `background?` |
+| `draw_excalidraw` | Author/edit a diagram from a high-level spec: `nodes` (labelled shapes) + `edges` (arrows). Compiles to a valid scene with bound labels and connected arrows. `replace` (default) or `append`. | `namespace`, `path`, `nodes?`, `edges?`, `mode?`, `background?` |
+| `read_excalidraw` | Read a drawing back as `{ nodes, edges }` (with stable element ids) so an agent can inspect before editing. | `namespace`, `path` |
+| `edit_excalidraw_node` | Edit one shape by element id (label, shape kind, position, size, colours); connected arrows re-flow. | `namespace`, `path`, `id`, `text?`, `shape?`, `x?`, `y?`, `width?`, `height?`, `strokeColor?`, `backgroundColor?`, `fillStyle?` |
+| `edit_excalidraw_edge` | Edit one arrow by element id (label, dashed, arrowhead, colour). | `namespace`, `path`, `id`, `text?`, `dashed?`, `arrowhead?`, `strokeColor?` |
+| `delete_excalidraw_element` | Delete one element by id (a shape takes its label + connected arrows; an arrow takes its label). | `namespace`, `path`, `id` |
+| `create_marp` | Create a Marp deck note (`marp: true` frontmatter + `---`-separated slides). | `namespace`, `path`, `title?`, `theme?`, `paginate?`, `slides?` |
+| `list_marp_slides` | List a deck's slides (1-based index, first line, length) + its frontmatter. | `namespace`, `path` |
+| `read_marp_slide` | Read one slide's markdown by index. | `namespace`, `path`, `index` |
+| `add_marp_slide` | Add a slide — appended, or inserted before a 1-based `index`. | `namespace`, `path`, `content`, `index?` |
+| `edit_marp_slide` | Replace one slide's markdown by index (frontmatter + other slides untouched). | `namespace`, `path`, `index`, `content` |
+| `delete_marp_slide` | Delete one slide by index. | `namespace`, `path`, `index` |
+| `move_marp_slide` | Reorder: move the slide at `from` to `to`. | `namespace`, `path`, `from`, `to` |
+
+**Slides are CRUD.** A Marp deck is a note whose subject is a list of slides, so
+the deck is editable both as a whole (the note tools) and per slide: `list_/
+read_marp_slide` to inspect, `add_/edit_/delete_/move_marp_slide` to change one
+slide by its 1-based index. Slide boundaries follow the same rule as the app's
+preview (a blank-line-preceded `---` outside fenced code), so a `---` inside a
+code block never splits a slide.
+
+**Diagrams.** `draw_excalidraw` lets an agent build or edit a drawing without
+touching Excalidraw's raw element schema: describe `nodes` (each with an `id`,
+optional `text`, `shape`, position/size and colours) and `edges`
+(`from`/`to` node ids, optional `text`/`dashed`/`arrowhead`). The server emits a
+valid scene — shapes with centred labels, arrows bound to their endpoints, and
+the searchable `## Text Elements` mirror. In `append` mode an edge may connect a
+new node to an existing shape by the element id reported by `read_excalidraw`.
+Omit `x`/`y` to auto-lay-out on a grid. For surgical changes, `read_excalidraw`
+exposes each node's and arrow's stable element id, which `edit_excalidraw_node`,
+`edit_excalidraw_edge` and `delete_excalidraw_element` target directly — so a
+drawing is CRUD per element, not only redraw-in-full.
+
+Both features are gated in the app by `ENABLE_EXCALIDRAW` / `ENABLE_MARP`; the
+notes are still created and editable as plain markdown when a feature is off.
+Edit an existing drawing/deck through `read_note` + `write_note` (keep the
+`.excalidraw.md` scene block or the `marp: true` frontmatter intact).
+
+> **Feature-gating.** At startup the server reads the backend's unauthenticated
+> `GET /api/config` and only registers the tools for features mdnest has
+> enabled: the `*_task` tools appear only when the task board is on, the Marp
+> tools only when Marp is on, and `create_excalidraw` only when Excalidraw is
+> on. A notes-only mdnest therefore exposes just the note/tree/search tools. If
+> `/api/config` can't be read the server stays permissive and exposes
+> everything. (Restart the MCP server after toggling a backend feature.)

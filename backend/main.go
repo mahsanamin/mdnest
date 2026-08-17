@@ -304,6 +304,7 @@ func main() {
 				RedirectURL:    redirect,
 				AllowedDomains: domains,
 				CookieSecret:   []byte(jwtSecret),
+				GroupsClaim:    env("OIDC_GROUPS_CLAIM", ""),
 			})
 			if err != nil {
 				log.Fatalf("failed to init SSO client: %v", err)
@@ -344,11 +345,15 @@ func main() {
 	var perms *middleware.PermissionChecker
 	var grantStore store.GrantStore
 	var nsAdminStore store.NamespaceAdminStore
+	var groupStore store.GroupStore
 	var workspaceStore store.WorkspaceStore
+	var noteActivityStore store.NoteActivityStore
 	if multiMode {
 		grantStore = store.NewPostgresGrantStore(db)
 		nsAdminStore = store.NewPostgresNamespaceAdminStore(db)
-		perms = middleware.NewPermissionChecker(grantStore, nsAdminStore)
+		groupStore = store.NewPostgresGroupStore(db)
+		perms = middleware.NewPermissionChecker(grantStore, nsAdminStore, groupStore)
+		noteActivityStore = store.NewPostgresNoteActivityStore(db)
 
 		// Per-workspace git remote overrides: the store decrypts credentials and
 		// this adapter feeds the git committer, overriding the coarse
@@ -413,6 +418,13 @@ func main() {
 	// a note whose frontmatter says `marp: true` as a slide deck in the Live view
 	// instead of the editor; when disabled it never loads the Marp engine chunk.
 	enableMarp := env("ENABLE_MARP", "false") == "true"
+	// ENABLE_MARP_THEMES is a separate opt-in on top of ENABLE_MARP: the
+	// centralized theme catalog (reserved namespace, seed, /api/marp/themes,
+	// admin editor). Off by default so plain-Marp operators are unaffected.
+	enableMarpThemes := enableMarp && env("ENABLE_MARP_THEMES", "false") == "true"
+	// ENABLE_EXCALIDRAW opens .excalidraw.md files in the drawing editor. Off by
+	// default so an operator who just wants notes carries none of its chunk.
+	enableExcalidraw := env("ENABLE_EXCALIDRAW", "false") == "true"
 
 	// Live collaboration hub (optional, multi mode only)
 	enableCollab := multiMode && env("ENABLE_LIVE_COLLAB", "false") == "true"
@@ -436,7 +448,16 @@ func main() {
 	if collabHub != nil {
 		noteHandler.SetCollabHub(collabHub)
 	}
-	treeHandler := handlers.NewTreeHandler(stg, grantStore)
+	// Per-note attribution (multi mode): trail every save and resolve git
+	// author identities for enriched, co-authored commits. The endpoint that
+	// reads the trail is registered in the multi-mode route block below.
+	var attributionHandler *handlers.AttributionHandler
+	if noteActivityStore != nil {
+		noteHandler.SetActivity(noteActivityStore)
+		noteHandler.SetIdentityResolver(handlers.NewCachedIdentityResolver(userStore))
+		attributionHandler = handlers.NewAttributionHandler(stg, noteActivityStore)
+	}
+	treeHandler := handlers.NewTreeHandler(stg, grantStore, groupStore)
 	uploadHandler := handlers.NewUploadHandler(stg, perms)
 	// Stateless app replicas own no attachment bytes: proxy attachment traffic
 	// (upload + serve) to the writer, which owns the git tree, when WRITER_URL is
@@ -475,7 +496,16 @@ func main() {
 	} else {
 		taskNsFilter = func(_ *http.Request, namespaces []string) []string { return namespaces }
 	}
-	taskHandler := handlers.NewTaskHandler(stg, taskNsFilter)
+	// create writes to a note named in the request body, past the path-based
+	// route guard, so the handler re-checks write access on that real target.
+	// Multi mode uses per-user grants; single mode's one owner may write anywhere.
+	var taskCanWrite func(r *http.Request, ns, path string) bool
+	if perms != nil {
+		taskCanWrite = perms.CheckWrite
+	} else {
+		taskCanWrite = func(_ *http.Request, _, _ string) bool { return true }
+	}
+	taskHandler := handlers.NewTaskHandler(stg, taskNsFilter, taskCanWrite)
 	// API tokens live in Postgres in multi mode (shared across replicas, no
 	// ReadWriteMany secrets volume) and in the tokens.json file in single mode
 	// (no database dependency for a single-box install).
@@ -553,6 +583,19 @@ func main() {
 	configHandler.SetGrantMaxDepth(grantMaxDepth)
 	configHandler.SetTaskBoard(enableTaskBoard)
 	configHandler.SetMarp(enableMarp)
+	configHandler.SetMarpThemes(enableMarpThemes)
+	configHandler.SetExcalidraw(enableExcalidraw)
+	if enableExcalidraw {
+		// Operator-provided default Excalidraw libraries: comma-separated URLs to
+		// .excalidrawlib files preloaded into every drawing (org shape set).
+		var excalidrawLibs []string
+		for _, u := range strings.Split(env("EXCALIDRAW_LIBRARIES", ""), ",") {
+			if u = strings.TrimSpace(u); u != "" {
+				excalidrawLibs = append(excalidrawLibs, u)
+			}
+		}
+		configHandler.SetExcalidrawLibraries(excalidrawLibs)
+	}
 
 	// Update-availability check — opt out by setting DISABLE_UPDATE_CHECK=true.
 	// One HTTPS GET to api.github.com per server every hour; failures are
@@ -646,6 +689,9 @@ func main() {
 		// can read the file can see its version history).
 		mux.Handle("/api/note/history", authMiddleware.Wrap(perms.RequireNsAccess(http.HandlerFunc(historyHandler.HandleHistory))))
 		mux.Handle("/api/note/at", authMiddleware.Wrap(perms.RequireNsAccess(http.HandlerFunc(historyHandler.HandleNoteAt))))
+		if attributionHandler != nil {
+			mux.Handle("/api/note/attribution", authMiddleware.Wrap(perms.RequireNsAccess(http.HandlerFunc(attributionHandler.HandleAttribution))))
+		}
 		if commentsHandler != nil {
 			mux.Handle("/api/comments", authMiddleware.Wrap(perms.RequireNsAccess(http.HandlerFunc(commentsHandler.Handle))))
 		}
@@ -694,10 +740,25 @@ func main() {
 		mux.Handle("/api/files/", authMiddleware.Wrap(http.HandlerFunc(uploadHandler.HandleServeFile)))
 	}
 
+	// Centralized Marp themes: a global, read-for-all / write-for-superadmin
+	// catalog stored in a reserved hidden namespace. Decks reference a theme by
+	// name (`theme: <name>`) instead of embedding a per-deck style block. Opt-in
+	// via ENABLE_MARP_THEMES (on top of ENABLE_MARP); available in both modes.
+	if enableMarpThemes {
+		marpThemeHandler := handlers.NewMarpThemeHandler(stg)
+		mux.Handle("/api/marp/themes", authMiddleware.Wrap(http.HandlerFunc(marpThemeHandler.Handle)))
+		// Seed the neutral starter theme once, from the node that owns the tree
+		// (single or writer). App replicas read it from the coherence tier after
+		// the writer hydrates the reserved namespace.
+		if env("MDNEST_ROLE", "single") != "app" {
+			marpThemeHandler.SeedDefault(context.Background())
+		}
+	}
+
 	// Multi-mode routes (require admin role for /admin/*, authenticated for /me)
 	if multiMode {
 		adminHandler := handlers.NewAdminHandler(userStore, grantStore, nsAdminStore, collabHub, userProvider, grantMaxDepth)
-		meHandler := handlers.NewMeHandler(userStore, grantStore, nsAdminStore)
+		meHandler := handlers.NewMeHandler(userStore, grantStore, nsAdminStore, groupStore)
 		// Per-workspace git remote config: superadmin CRUD over shared/team
 		// workspaces, plus each user's own personal workspace. The optional
 		// GIT_REMOTE_ALLOWED_HOSTS restricts remote hosts (defence-in-depth for
@@ -723,6 +784,13 @@ func main() {
 		mux.Handle("/api/admin/workspaces", authMiddleware.Wrap(middleware.RequireSuperAdmin(http.HandlerFunc(workspaceHandler.HandleAdmin))))
 		mux.Handle("/api/admin/workspace-groups", authMiddleware.Wrap(middleware.RequireSuperAdmin(http.HandlerFunc(workspaceHandler.HandleGroups))))
 		mux.Handle("/api/me/workspace", authMiddleware.Wrap(http.HandlerFunc(workspaceHandler.HandleMine)))
+
+		// Role-based access "Groups": superadmin-only management of named sets
+		// (users + OIDC group IDs) and their namespace grants.
+		groupsHandler := handlers.NewGroupsHandler(groupStore)
+		mux.Handle("/api/admin/groups", authMiddleware.Wrap(middleware.RequireSuperAdmin(http.HandlerFunc(groupsHandler.HandleGroups))))
+		mux.Handle("/api/admin/groups/members", authMiddleware.Wrap(middleware.RequireSuperAdmin(http.HandlerFunc(groupsHandler.HandleMembers))))
+		mux.Handle("/api/admin/groups/grants", authMiddleware.Wrap(middleware.RequireSuperAdmin(http.HandlerFunc(groupsHandler.HandleGrants))))
 
 		// Users endpoint: GET is RequireAdmin (handler scopes the list);
 		// PUT/DELETE (role change, user delete) are SuperAdmin-only —

@@ -279,6 +279,20 @@ taskBoard:
 marp:
   # -- Enable Marp slide rendering (`ENABLE_MARP`). Off by default; renders `marp: true` notes as a slide deck in the Live view. Independent of `auth.mode`.
   enabled: false
+  themes:
+    # -- Enable the centralized Marp theme catalog + superadmin editor (`ENABLE_MARP_THEMES`). A separate opt-in on top of `marp.enabled`. Off by default; when off the theme routes are not registered, nothing is seeded, and the admin tab is hidden. Themes live in a reserved, hidden namespace (never mirrored to a git remote).
+    enabled: false
+
+# -----------------------------------------------------------------------------
+# Excalidraw drawings (optional). `.excalidraw.md` files open in a drawing
+# editor; the markdown file stays the source of truth. Independent of
+# `auth.mode`.
+# -----------------------------------------------------------------------------
+excalidraw:
+  # -- Enable the Excalidraw drawing editor (`ENABLE_EXCALIDRAW`). Off by default; when off `.excalidraw.md` files open as plain text and the (large) editor chunk is never loaded.
+  enabled: false
+  # -- Operator-provided default Excalidraw libraries (`EXCALIDRAW_LIBRARIES`): a list of URLs to `.excalidrawlib` files, preloaded into every drawing so an organisation can ship a shared shape set. The URLs must be reachable by the browser (CORS-enabled or same-origin).
+  libraries: []
 
 # -----------------------------------------------------------------------------
 # SSO / OIDC (optional). Only rendered when sso.enabled=true.
@@ -294,6 +308,13 @@ sso:
   redirectUrl: ""
   # -- Comma-separated list of allowed email domains.
   allowedDomains: ""
+  # -- ID-token claim carrying the user's IdP group IDs, enabling access
+  # "Groups" membership via OIDC groups (e.g. "groups" on Entra ID). Empty
+  # disables OIDC-group resolution; direct user membership still works.
+  # Note: OIDC-group membership is snapshotted at login, so IdP group changes
+  # (e.g. offboarding) only apply at next login, bounded to the SSO session
+  # lifetime (12h); direct user membership is revoked immediately.
+  groupsClaim: ""
   # -- Label shown on the SSO login button.
   providerLabel: "SSO"
   # -- Comma-separated emails auto-promoted to superadmin.

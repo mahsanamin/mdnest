@@ -95,4 +95,31 @@ describe('sanitizeSvg', () => {
     );
     expect(out).not.toMatch(/onclick/i);
   });
+
+  // Regression: DOMPurify drops <use> by default, but Excalidraw paints an
+  // embedded image as a <symbol> in <defs> referenced by a same-document
+  // <use href="#…"> — without it the image sits in <defs> and never renders.
+  const EXCALIDRAW_IMAGE = [
+    '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">',
+    '<defs><symbol id="image-1"><image href="data:image/png;base64,AAAA" width="10" height="10"></image></symbol></defs>',
+    '<use href="#image-1" x="0" y="0"></use>',
+    '</svg>',
+  ].join('');
+
+  it('keeps a same-document <use> so embedded Excalidraw images render', () => {
+    const out = sanitizeSvg(EXCALIDRAW_IMAGE);
+    expect(out).toMatch(/<use/i);
+    expect(out).toMatch(/href="#image-1"/i);
+    expect(out).toMatch(/<symbol/i);
+    expect(out).toMatch(/<image/i);
+    expect(out).toMatch(/data:image\/png/i);
+  });
+
+  it('drops an off-document <use href> (SVG exfil/XSS vector)', () => {
+    const out = sanitizeSvg(
+      '<svg xmlns="http://www.w3.org/2000/svg"><use href="https://evil.example/x#a"></use></svg>',
+    );
+    expect(out).not.toMatch(/<use/i);
+    expect(out).not.toMatch(/evil\.example/i);
+  });
 });

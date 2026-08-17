@@ -28,6 +28,10 @@ type UserContext struct {
 	ID       int
 	Username string
 	Role     string
+	// Groups holds the IdP (OIDC) group IDs carried in the JWT, snapshotted at
+	// login. Used to resolve access-group membership. Empty for local users or
+	// when the IdP emits no groups claim.
+	Groups []string
 }
 
 // WithUser attaches a UserContext to the request context.

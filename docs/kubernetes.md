@@ -53,6 +53,7 @@ helm install mdnest oci://ghcr.io/mahsanamin/charts/mdnest \
 - `single` and `multi` mode, ingress, and TLS.
 - Live collaboration, with an optional **Redis backplane** for active/active — multiple backend replicas whose presence and edits stay in sync.
 - **Task board** (opt-in) — set `taskBoard.enabled=true` to enable the per-namespace kanban (`ENABLE_TASK_BOARD`). Off by default and independent of `auth.mode`; while off the board routes are not registered and the UI chunk is never loaded.
+- **Excalidraw drawings** (opt-in) — set `excalidraw.enabled=true` to open `.excalidraw.md` notes on a drawing canvas (`ENABLE_EXCALIDRAW`). Off by default and independent of `auth.mode`; while off the editor chunk is never loaded. Preload shared shape libraries with `excalidraw.libraries` (a list of `.excalidrawlib` URLs). See [docs/excalidraw.md](excalidraw.md).
 - Storage backends: **`local`** (default — the notes PVC) and **`git`** (in-process git history, one repo per namespace). Add `REDIS_URL` to the `git` backend for the horizontally-scaled [git-native HA topology](#git-native-ha-and-durability-rpo).
 - **MCP server** over streamable-HTTP with optional per-user OAuth.
 - **git-sync** sidecar — mutually exclusive with `storage.backend=git` (both commit to the working tree, so the chart makes you pick one).

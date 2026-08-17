@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"testing"
+	"time"
 
 	"github.com/lib/pq"
 	"github.com/mdnest/mdnest/backend/store"
@@ -15,6 +16,21 @@ import (
 // frontend regardless of what a caller passes.
 
 const testFrontend = "https://notes.example.com"
+
+// SSO tokens snapshot IdP group membership, which drives access-group
+// authorization, so their lifetime bounds how long a revoked IdP group can
+// still grant access. Pin that the SSO TTL stays short and well under the
+// "remember me" lifetime, so it can't be quietly bumped back to the year-long
+// token and silently widen the offboarding window.
+func TestSSOJWTTTLIsShortLived(t *testing.T) {
+	ttl := ssoJWTTTL()
+	if ttl <= 0 || ttl > 24*time.Hour {
+		t.Fatalf("SSO token TTL must be short (<=24h) to bound stale group snapshots, got %s", ttl)
+	}
+	if ttl >= jwtTTL(true) {
+		t.Fatalf("SSO token TTL (%s) must be far shorter than the remember-me TTL (%s)", ttl, jwtTTL(true))
+	}
+}
 
 func TestReturnOriginAllowed_EmptyAllowlist(t *testing.T) {
 	// No SSO_ALLOWED_RETURN_ORIGINS configured — the default for every existing

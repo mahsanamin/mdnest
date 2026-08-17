@@ -86,6 +86,26 @@ GIT_AUTHOR_EMAIL=you@example.com
 # frontend never loads the Marp engine chunk.
 # ENABLE_MARP=false
 
+# Centralized Marp themes (optional, requires ENABLE_MARP=true). A separate
+# opt-in that adds a shared theme catalog decks reference by name (theme:
+# <name>) plus a superadmin editor. Themes live in a reserved, hidden
+# namespace (auto-created, git-versioned locally, never mirrored to a remote).
+# Off by default.
+# ENABLE_MARP_THEMES=false
+
+# Excalidraw drawings (optional). `.excalidraw.md` files open in a drawing
+# editor instead of the text editor; the markdown file stays the source of
+# truth (the scene is a fenced JSON block and text is mirrored for search).
+# Off by default — when off those files open as plain text and the frontend
+# never loads the (large) Excalidraw chunk.
+# ENABLE_EXCALIDRAW=false
+
+# Operator-provided default Excalidraw libraries (requires ENABLE_EXCALIDRAW).
+# Comma-separated URLs to .excalidrawlib files, preloaded into every drawing so
+# an organisation can ship a shared shape set. The URLs must be reachable by
+# the browser (CORS-enabled or same-origin).
+# EXCALIDRAW_LIBRARIES=
+
 # ==========================================================================
 # Federated identity via Firebase (optional, requires AUTH_MODE=multi)
 # ==========================================================================
@@ -134,6 +154,16 @@ GIT_AUTHOR_EMAIL=you@example.com
 #
 # Optional — restrict sign-in to specific corporate domains:
 # SSO_ALLOWED_DOMAINS=yourorg.com
+#
+# Optional — ID-token claim holding the user's IdP group IDs. Set it to enable
+# access "Groups" membership via OIDC groups (e.g. "groups" on Microsoft Entra
+# ID; emit only groups assigned to the app to avoid the token overage limit).
+# Empty disables OIDC-group resolution; direct user membership still works.
+# Note: OIDC-group membership is snapshotted into the login token, so changing a
+# user's IdP groups (e.g. offboarding) only takes effect at their next login,
+# bounded to the SSO session lifetime (12h); direct user membership is revoked
+# immediately.
+# OIDC_GROUPS_CLAIM=groups
 #
 # Optional — override the button label shown on the sign-in page:
 # SSO_PROVIDER_LABEL=Google

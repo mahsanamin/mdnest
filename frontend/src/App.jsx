@@ -19,6 +19,9 @@ const TaskBoard = lazy(() => import('./components/TaskBoard.jsx'));
 // Lazy Marp slide-deck renderer: pulls in the Marp engine, off by default
 // (ENABLE_MARP), so an install that doesn't use it never carries the chunk.
 const MarpDeck = lazy(() => import('./components/MarpDeck.jsx'));
+// Lazy Excalidraw drawing editor: pulls in the (large) Excalidraw bundle, off
+// by default (ENABLE_EXCALIDRAW), so notes-only installs never carry the chunk.
+const ExcalidrawEditor = lazy(() => import('./components/ExcalidrawEditor.jsx'));
 import Preview from './components/Preview.jsx';
 import ContextMenu from './components/ContextMenu.jsx';
 import Settings from './components/Settings.jsx';
@@ -27,10 +30,12 @@ import PresenceBar from './components/PresenceBar.jsx';
 import CommentSidebar from './components/CommentSidebar.jsx';
 import ShareDialog from './components/ShareDialog.jsx';
 import HistoryModal from './components/HistoryModal.jsx';
+import AttributionModal from './components/AttributionModal.jsx';
 import MoveToModal from './components/MoveToModal.jsx';
 import ReleaseNotesModal from './components/ReleaseNotesModal.jsx';
 import CollabClient from './collab.js';
 import { isMarpDoc, effectiveEditorMode } from './marp.js';
+import { isExcalidrawDoc } from './excalidraw.js';
 import { TREE_POLL_MS, shouldPollTree } from './tree-refresh.js';
 import {
   getToken,
@@ -238,7 +243,11 @@ function App() {
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [comments, setComments] = useState([]);
   const [showComments, setShowComments] = useState(false);
-  const [showTaskBoard, setShowTaskBoard] = useState(false);  const [pendingCommentSelection, setPendingCommentSelection] = useState(null);
+  const [showTaskBoard, setShowTaskBoard] = useState(false);
+  // Bumped by the toolbar Refresh so the task board reloads its tasks too
+  // (the board isn't part of the note/tree refresh path).
+  const [boardRefreshNonce, setBoardRefreshNonce] = useState(0);
+  const [pendingCommentSelection, setPendingCommentSelection] = useState(null);
   const [highlightedCommentId, setHighlightedCommentId] = useState(null);
   const goToCommentRef = useRef(null);
   const editorWrapperRef = useRef(null);
@@ -286,6 +295,10 @@ function App() {
   // markdown and corrupts the frontmatter and slide breaks. Force Basic (raw)
   // editing for them, regardless of the user's editor-mode preference.
   const editorModeForNote = effectiveEditorMode(editorMode, marpActive);
+  // `.excalidraw.md` files open in the drawing editor (opt-in ENABLE_EXCALIDRAW),
+  // bypassing the text editor/preview entirely.
+  const excalidrawEnabled = !!appConfig?.excalidraw;
+  const excalidrawActive = excalidrawEnabled && isExcalidrawDoc(currentPath);
   // Editor scroll ratio (0..1), mirrored to the Marp deck's current slide in
   // split view. The deck is paginated (not scrollable), so unlike the plain
   // Preview it can't share a scrollTop — we map the ratio to a slide instead.
@@ -296,6 +309,11 @@ function App() {
   const [remoteCursors, setRemoteCursors] = useState({});
   const [typingUsers, setTypingUsers] = useState({}); // {userId: username}
   const [conflictBanner, setConflictBanner] = useState(null); // {username, etag}
+  // Bumped only on remote-driven reloads (another user's save/restore, or an
+  // explicit Reload). The Excalidraw editor is keyed on it so its canvas remounts
+  // with the fresh scene — otherwise a drawing would keep the stale scene and
+  // the next stroke would silently overwrite the remote change (LWW).
+  const [drawingReloadKey, setDrawingReloadKey] = useState(0);
   // restoreBanner is shown when another user used the History modal to
   // restore an older version of the current file. It's deliberately a
   // separate state from conflictBanner because a restore is an
@@ -304,6 +322,8 @@ function App() {
   const [restoreBanner, setRestoreBanner] = useState(null); // {username, ref, etag}
   // historyModal is { ns, path } when the History modal is open, null otherwise.
   const [historyModal, setHistoryModal] = useState(null);
+  // attributionModal is { ns, path } when the Authors modal is open, null otherwise.
+  const [attributionModal, setAttributionModal] = useState(null);
   // moveModal is { ns, target } when the Move-to picker is open. The
   // picker replaces drag-and-drop on touch devices (where draggable is
   // false on tree rows) and is also available from the context menu on
@@ -438,6 +458,9 @@ function App() {
             setContent(text);
             setSavedContent(text);
             etagRef.current = etag;
+            // Remount the drawing canvas so it shows the remote scene, not the
+            // stale one it was mounted with.
+            setDrawingReloadKey((k) => k + 1);
             if (isRestore) {
               // Show a brief info banner so the user knows their
               // content updated because of an explicit restore by
@@ -862,7 +885,8 @@ function App() {
   }, [getScrollables, getFilePrefs]);
 
   const openNoteDirect = useCallback(async (ns, path) => {
-    setShowTaskBoard(false);
+    // Board stays open across note navigation so the chosen view persists; the
+    // board's own "open source note" action closes it explicitly.
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
     try {
       const { text, etag } = await getNote(ns, path);
@@ -880,7 +904,9 @@ function App() {
   }, [restoreScrollPosition, commentsEnabled]);
 
   const handleSelectNs = useCallback((ns) => {
-    setShowTaskBoard(false);
+    // Keep the task board open when switching workspace so the chosen view is
+    // preserved — it re-scopes to the new namespace. Note navigation keeps it
+    // open too (see openNote/openNoteDirect).
     setSelectedNs(ns);
     // Restore the last file the user had open in the namespace they're
     // switching TO. If they've never opened anything there (or whatever
@@ -907,7 +933,8 @@ function App() {
 
   const openNote = useCallback(async (path) => {
     if (!selectedNs) return;
-    setShowTaskBoard(false);
+    // Board stays open across note navigation so the chosen view persists; the
+    // board's own "open source note" action closes it explicitly.
     // Clear any pending save timer from the previous file
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
     try {
@@ -1074,6 +1101,23 @@ function App() {
     }
   }, [selectedNs, getTargetDir, refreshTree, openNote]);
 
+  // Create an empty Excalidraw drawing and open it in the drawing editor.
+  const doCreateDrawing = useCallback(async (target) => {
+    if (!selectedNs) return;
+    let name = prompt('Drawing name (e.g. sketch.excalidraw.md):');
+    if (!name) return;
+    if (!isExcalidrawDoc(name)) name += '.excalidraw.md';
+    const dir = getTargetDir(target);
+    const path = dir + name.replace(/^\/+/, '');
+    try {
+      await createNote(selectedNs, path);
+      await refreshTree(undefined, { broadcast: true });
+      openNote(path);
+    } catch (e) {
+      alert('Failed to create drawing: ' + e.message);
+    }
+  }, [selectedNs, getTargetDir, refreshTree, openNote]);
+
   const doCreateFolder = useCallback(async (target) => {
     if (!selectedNs) return;
     const name = prompt('Folder name:');
@@ -1091,6 +1135,7 @@ function App() {
   const handleContextAction = useCallback(async (action, target) => {
     switch (action) {
       case 'new-note': await doCreateNote(target); break;
+      case 'new-drawing': await doCreateDrawing(target); break;
       case 'new-folder': await doCreateFolder(target); break;
       case 'delete-file': {
         if (!target || !selectedNs) return;
@@ -1115,6 +1160,11 @@ function App() {
           await openNote(target.path);
         }
         setHistoryModal({ ns: selectedNs, path: target.path });
+        break;
+      }
+      case 'authors': {
+        if (!target || !selectedNs) return;
+        setAttributionModal({ ns: selectedNs, path: target.path });
         break;
       }
       case 'move': {
@@ -1207,7 +1257,7 @@ function App() {
         break;
       }
     }
-  }, [selectedNs, currentPath, refreshTree, doCreateNote, doCreateFolder, getLastPath, setLastPath]);
+  }, [selectedNs, currentPath, refreshTree, doCreateNote, doCreateDrawing, doCreateFolder, getLastPath, setLastPath]);
 
   const handleTreeDrop = useCallback(async (fromPath, toFolderPath) => {
     if (!selectedNs) return;
@@ -1313,6 +1363,9 @@ function App() {
 
   const handleRefresh = useCallback(async () => {
     if (!authenticated || !selectedNs) return;
+    // When the board overlay is up, Refresh should reload its tasks — bump the
+    // nonce the board watches (the note/tree refresh below doesn't touch it).
+    if (showTaskBoard) setBoardRefreshNonce((n) => n + 1);
     // broadcast: this is the Sidebar's manual Refresh AND the git-sync button
     // (both call onRefreshTree), so tell other tabs to refresh too.
     await refreshTree(selectedNs, { broadcast: true });
@@ -1327,7 +1380,7 @@ function App() {
         // Note may have been deleted
       }
     }
-  }, [authenticated, selectedNs, currentPath, refreshTree]);
+  }, [authenticated, selectedNs, currentPath, refreshTree, showTaskBoard]);
 
   // Reload note content (used by conflict banner)
   const handleReloadNote = useCallback(async () => {
@@ -1337,6 +1390,7 @@ function App() {
       setContent(text);
       setSavedContent(text);
       etagRef.current = etag;
+      setDrawingReloadKey((k) => k + 1);
       setConflictBanner(null);
     } catch (e) {
       console.error('Failed to reload:', e);
@@ -1386,6 +1440,7 @@ function App() {
       adminNamespaces={adminNamespaces}
       userProvider={appConfig?.userProvider || 'local'}
       grantMaxDepth={appConfig?.grantMaxDepth || 0}
+      marpThemesEnabled={!!appConfig?.marpThemes}
     />;
   }
 
@@ -1424,6 +1479,7 @@ function App() {
         onLogout={logout}
         onAdminPanel={isAdmin && isMulti ? () => setShowAdminPanel(true) : null}
         onNewNote={canWrite('') ? () => doCreateNote(null) : null}
+        onNewDrawing={excalidrawEnabled && canWrite('') ? () => doCreateDrawing(null) : null}
         onNewFolder={canWrite('') ? () => doCreateFolder(null) : null}
         onRefreshTree={handleRefresh}
         isAdmin={isAdmin}
@@ -1551,11 +1607,30 @@ function App() {
                 canWrite={canWrite('')}
                 currentPath={currentPath}
                 currentUser={userInfo?.username}
+                refreshSignal={boardRefreshNonce}
                 onOpenNote={(p) => { setShowTaskBoard(false); openNote(p); }}
                 onClose={() => setShowTaskBoard(false)}
               />
             </Suspense>
           ) : currentPath ? (
+            excalidrawActive ? (
+              <div className="excalidraw-wrapper">
+                {content === null ? (
+                  <div className="editor-loading">Loading drawing…</div>
+                ) : (
+                  <Suspense fallback={<div className="editor-loading">Loading drawing editor…</div>}>
+                    <ExcalidrawEditor
+                      key={`${selectedNs}/${currentPath}#${drawingReloadKey}`}
+                      content={content}
+                      docPath={`${selectedNs}/${currentPath}#${drawingReloadKey}`}
+                      onChange={canWriteCurrent ? handleContentChange : null}
+                      readOnly={!canWriteCurrent}
+                      libraries={appConfig?.excalidrawLibraries}
+                    />
+                  </Suspense>
+                )}
+              </div>
+            ) : (
             <>
               <div className="mobile-view-toggle">
                 <button className={mobileView === 'editor' ? 'active' : ''} onClick={() => { setMobileView('editor'); localStorage.setItem('mdnest_mobile_view', 'editor'); }}>Edit</button>
@@ -1661,7 +1736,7 @@ function App() {
                 >
                   {marpEnabled && isMarpDoc(content) ? (
                     <Suspense fallback={<div className="editor-loading">Loading slides…</div>}>
-                      <MarpDeck content={content || ''} scrollPct={viewMode === 'split' && !isMobile ? marpScrollPct : undefined} />
+                      <MarpDeck content={content || ''} title={currentPath} scrollPct={viewMode === 'split' && !isMobile ? marpScrollPct : undefined} />
                     </Suspense>
                   ) : (
                     <Preview content={content || ''} currentPath={currentPath} ns={selectedNs} onCheckboxToggle={canWriteCurrent ? handleCheckboxToggle : null} pathIndex={wikiIndex} onWikiLink={openNote} />
@@ -1669,6 +1744,7 @@ function App() {
                 </div>
               )}
             </>
+            )
           ) : (
             <div className="empty-state">
               <p>{namespaces.length === 0 ? 'No namespaces found. Check your mdnest.conf mounts.' : 'Select a note or create one to get started.'}</p>
@@ -1707,6 +1783,13 @@ function App() {
           }}
         />
       )}
+      {attributionModal && (
+        <AttributionModal
+          ns={attributionModal.ns}
+          path={attributionModal.path}
+          onClose={() => setAttributionModal(null)}
+        />
+      )}
       {moveModal && (
         <MoveToModal
           namespace={moveModal.ns}
@@ -1734,6 +1817,7 @@ function App() {
         canWrite={canWrite}
         isAdmin={isAdmin && isMulti}
         selectedNs={selectedNs}
+        excalidraw={excalidrawEnabled}
       />
       {showReleaseNotes && appConfig?.latestRelease && (
         <ReleaseNotesModal

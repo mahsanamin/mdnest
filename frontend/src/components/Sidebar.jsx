@@ -87,6 +87,7 @@ function Sidebar({
   onLogout,
   onAdminPanel,
   onNewNote,
+  onNewDrawing,
   onNewFolder,
   onRefreshTree,
   isAdmin,
@@ -468,6 +469,7 @@ function Sidebar({
         {(onNewNote || onNewFolder) && (
           <div className="sidebar-actions">
             {onNewNote && <button className="sidebar-action-btn" onClick={onNewNote}>+ Note</button>}
+            {onNewDrawing && <button className="sidebar-action-btn" onClick={onNewDrawing}>+ Drawing</button>}
             {onNewFolder && <button className="sidebar-action-btn" onClick={onNewFolder}>+ Folder</button>}
           </div>
         )}

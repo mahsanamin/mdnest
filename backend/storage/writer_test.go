@@ -91,6 +91,11 @@ func TestWriterApplyAllKinds(t *testing.T) {
 	if _, ok, _ := ws.Get(ctx, "ns", "old.md"); ok {
 		t.Fatal("rename left source in working set")
 	}
+	// The destination must be re-cached so app replicas (working-set-only reads)
+	// see it immediately after the rename.
+	if data, ok, _ := ws.Get(ctx, "ns", "new.md"); !ok || string(data) != "v" {
+		t.Fatalf("rename dest not in working set: ok=%v data=%q", ok, data)
+	}
 
 	must(DurabilityOp{Kind: OpWrite, NS: "ns", Path: "dir/x.md", Data: []byte("x")})
 	must(DurabilityOp{Kind: OpRemoveAll, NS: "ns", Path: "dir"})
@@ -112,6 +117,44 @@ func TestWriterApplyIdempotent(t *testing.T) {
 	w, _, _, _ := newTestWriter(t)
 	if err := w.apply(ctx, DurabilityOp{Kind: OpRemove, NS: "ns", Path: "never.md"}); err != nil {
 		t.Fatalf("removing an absent file should be a no-op, got %v", err)
+	}
+}
+
+// TestWriterRenameRecachesDestination is the regression for the move data-loss
+// bug: app replicas read only from the working set, so after a rename the writer
+// must re-hydrate the destination into it — for a single file and for a moved
+// directory subtree — rather than deleting it.
+func TestWriterRenameRecachesDestination(t *testing.T) {
+	ctx := context.Background()
+	w, _, ws, _ := newTestWriter(t)
+	apply := func(op DurabilityOp) {
+		if err := w.apply(ctx, op); err != nil {
+			t.Fatalf("apply %s: %v", op.Kind, err)
+		}
+	}
+
+	// File rename: destination body must be readable from the working set.
+	apply(DurabilityOp{Kind: OpWrite, NS: "ns", Path: "note1.md", Data: []byte("body1")})
+	apply(DurabilityOp{Kind: OpRename, NS: "ns", Path: "note1.md", To: "sub/note2.md"})
+	if data, ok, _ := ws.Get(ctx, "ns", "sub/note2.md"); !ok || string(data) != "body1" {
+		t.Fatalf("file rename dest not in working set: ok=%v data=%q", ok, data)
+	}
+	if _, ok, _ := ws.Get(ctx, "ns", "note1.md"); ok {
+		t.Fatal("file rename left source in working set")
+	}
+
+	// Directory rename: every moved file must be re-cached under the new prefix.
+	apply(DurabilityOp{Kind: OpWrite, NS: "ns", Path: "d1/a.md", Data: []byte("a")})
+	apply(DurabilityOp{Kind: OpWrite, NS: "ns", Path: "d1/nested/b.md", Data: []byte("b")})
+	apply(DurabilityOp{Kind: OpRename, NS: "ns", Path: "d1", To: "d2"})
+	if data, ok, _ := ws.Get(ctx, "ns", "d2/a.md"); !ok || string(data) != "a" {
+		t.Fatalf("dir rename dest d2/a.md not in working set: ok=%v data=%q", ok, data)
+	}
+	if data, ok, _ := ws.Get(ctx, "ns", "d2/nested/b.md"); !ok || string(data) != "b" {
+		t.Fatalf("dir rename dest d2/nested/b.md not in working set: ok=%v data=%q", ok, data)
+	}
+	if _, ok, _ := ws.Get(ctx, "ns", "d1/a.md"); ok {
+		t.Fatal("dir rename left source subtree in working set")
 	}
 }
 

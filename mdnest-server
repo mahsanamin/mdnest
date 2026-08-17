@@ -879,6 +879,7 @@ When AUTH_MODE=multi, setup automatically adds a Postgres container.
 Examples:
   mdnest-server setup           # first-time setup
   mdnest-server start           # start everything
+  mdnest-server status          # what's running + whether mdnest.conf needs a reload
   mdnest-server reload          # after editing mdnest.conf (no image rebuild, ~10s)
   mdnest-server rebuild         # after pulling new code (rebuilds + recreates)
   mdnest-server rebuild --full  # nuke and recreate all containers (rare)

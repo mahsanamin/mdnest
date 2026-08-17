@@ -95,7 +95,22 @@ mdnest/
                                # Scoped to caller's admin namespaces in multi mode.
       admin.go                 # User management + grants + namespace-admin assignments.
                                # Three-tier role hierarchy: superadmin / admin / collaborator.
-      me.go                    # GET /api/me — current user + grants + admin scope.
+      me.go                    # GET /api/me — current user + grants (incl. group-inherited,
+                               # v4.2.0+) + admin scope.
+      groups.go                # /api/admin/groups(/members|/grants) — role-based access
+                               # Groups (v4.2.0+). Superadmin-only, multi mode only.
+      tasks.go                 # /api/tasks, /api/tasks/all, /api/board — task board request
+                               # handling. Behind ENABLE_TASK_BOARD.
+      tasks_markdown.go        # Pure markdown helpers for tasks: parse a task line and its
+                               # detail block, resolve columns, render a spec back to
+                               # markdown, generate stable refs. Split out of tasks.go so the
+                               # handler file stays request handling (v4.2.0+).
+      team.go                  # GET /api/namespace/users — namespace members, for the
+                               # assignee picker (v4.2.0+).
+      attribution.go           # GET /api/note/attribution — created / last-edited /
+                               # contributors (v4.2.0+). Not registered without a DB.
+      marp_themes.go           # GET/PUT/DELETE /api/marp/themes — centralized theme catalog
+                               # in the reserved .marp-themes namespace (v4.2.0+).
       config.go                # GET /api/config — unauthenticated. Tells the frontend
                                # which mode + provider + flags are live.
       ws.go                    # /api/ws WebSocket handler for live collab. Verifies JWT.
@@ -109,13 +124,19 @@ mdnest/
                                # precedence chain. RequireRead/Write/Move/NsAccess wrappers.
     store/
       db.go                    # PostgreSQL connection pool. Multi mode only.
-      migrate.go               # Auto-migration. Currently 7 migrations; idempotent on
-                               # every startup. See "Database schema" below.
+      migrate.go               # Auto-migration. Currently 14 migrations; idempotent on
+                               # every startup. Keyed on the full migration NAME, not the
+                               # numeric prefix. See "Database schema" below.
       users.go                 # UserStore interface + PostgresUserStore. CreateUser,
                                # UpdateRole, BackfillSSOProfile (avatar + name from IdP),
                                # PromoteToSuperAdmin (ADMIN_EMAILS reconcile).
       grants.go                # GrantStore + PathDepth (used by GRANT_MAX_DEPTH ceiling).
       namespace_admins.go      # NamespaceAdminStore (v3.5.0+) — per-namespace admin scope.
+      access_groups.go         # GroupStore (v4.2.0+) — groups, members (user XOR oidc_group)
+                               # and group grants. CheckGroupAccess resolves direct
+                               # membership live and OIDC membership from the token claim.
+      note_activity.go         # NoteActivityStore (v4.2.0+) — per-note save trail backing
+                               # the Attribution panel.
       totp_store.go            # TOTPStore interface + Postgres impl.
     sso/
       client.go                # OIDC relying-party with PKCE + signed state cookie.

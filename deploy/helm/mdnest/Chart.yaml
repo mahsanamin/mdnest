@@ -8,14 +8,14 @@ description: |
 type: application
 
 # Chart version — bump on chart changes (SemVer).
-version: 0.3.1
+version: 0.4.0
 
 # Version of mdnest this chart deploys by default (image tag fallback).
 # Tracks the same version as backend/handlers/config.go, frontend/package.json
 # and the mdnest CLI — carries the -dev suffix on develop, plain X.Y.Z on a
 # release branch. The release workflow also passes --app-version at package
 # time, so a published chart is stamped from the tag regardless.
-appVersion: "4.1.3"
+appVersion: "4.2.0"
 
 home: https://github.com/mahsanamin/mdnest
 sources:

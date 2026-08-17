@@ -48,6 +48,31 @@ mdnest login https://work-server:3236 <token>
 
 If the server doesn't advertise a `SERVER_ALIAS`, the CLI refuses — you'll be told to either pass `@alias` explicitly or configure `SERVER_ALIAS` on the server. (There is no more silent `@default` — that hid which server was which.)
 
+### When login refuses
+
+Every failure names the actual cause and prints a command you can paste as-is.
+
+**"Couldn't reach ... to ask what it calls itself"** — the server never answered,
+so nothing about its config is known yet. The message says why (DNS, connection
+refused, timeout, TLS) and offers to name the server yourself instead. This is
+distinct from the server answering and having no `SERVER_ALIAS` set; only the
+latter is a reason to go and edit the server's `mdnest.conf`.
+
+**"'x' is not a URL — an alias needs a leading `@`"** — the most common slip.
+Without the `@`, every argument shifts along: your URL is read as the token and
+your token is dropped. The fix is printed back with that one character added:
+
+```bash
+$ mdnest login work https://work-server:3236 mdnest_abc123
+Error: 'work' is not a URL — an alias needs a leading '@'.
+
+Run:
+  mdnest login @work https://work-server:3236 mdnest_abc123
+```
+
+Nothing is written to disk when login is refused — an unusable URL can never
+become your saved default server.
+
 ### Rename an existing alias
 
 If you have an older `@default` alias from a previous CLI version, rename it:
