@@ -4,6 +4,12 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## Unreleased
+
+_Nothing yet — `develop` is at `4.2.1-dev`._
+
+---
+
 ## v4.2.0 — Drawings, access groups, and per-note authorship
 
 The largest release since v4.0.0, and almost all of it is contributed work. Three
