@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 
-function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePassword, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh, wsStatus, commentCount, onToggleComments, onOpenBoard, boardActive, marpLocked, drawingDoc, drawingSource, onDrawingSourceChange }) {
+function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePassword, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh, wsStatus, commentCount, onToggleComments, boardActive, marpLocked, drawingDoc, drawingSource, onDrawingSourceChange }) {
   const [refreshing, setRefreshing] = useState(false);
   const handleRefresh = useCallback(() => {
     if (refreshing || !onRefresh) return;
@@ -19,7 +19,7 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
       <button className="toolbar-hamburger" onClick={onToggleSidebar} title="Toggle sidebar">
         &#9776;
       </button>
-      {(showEditorToggle || onOpenBoard) && (
+      {showEditorToggle && (
         <div className="editor-mode-toggle">
           {/* A drawing is still a markdown file, so the toggle offers its two
               real views: the canvas, or the source behind it. Live is not one
@@ -52,13 +52,6 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
                 title={marpLocked ? 'Disabled for Marp slides — the rich editor would reformat and break the deck' : 'Live rich editor'}
               >Live</button>
             </>
-          )}
-          {onOpenBoard && (
-            <button
-              className={boardActive ? 'active' : ''}
-              onClick={onOpenBoard}
-              title="Namespace task board"
-            >Board</button>
           )}
         </div>
       )}

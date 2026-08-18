@@ -89,6 +89,8 @@ function Sidebar({
   onNewNote,
   onNewDrawing,
   onNewFolder,
+  onOpenBoard,
+  boardActive,
   onRefreshTree,
   isAdmin,
   width,
@@ -493,6 +495,25 @@ function Sidebar({
         )}
 
         {searching && <div className="search-status">Searching...</div>}
+
+        {/* The task board is a namespace-level destination, not a way of
+            viewing the open file, so it belongs with the namespace and its
+            tree rather than in the toolbar's Basic/Live control — those are
+            mutually exclusive editor modes for one note, and mixing the two
+            axes in one segmented control made all three buttons read as the
+            same kind of choice. */}
+        {onOpenBoard && (
+          <div className="sidebar-board">
+            <button
+              className={`sidebar-board-btn${boardActive ? ' active' : ''}`}
+              onClick={onOpenBoard}
+              title="Namespace task board"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+              <span>Task Board</span>
+            </button>
+          </div>
+        )}
 
         <div
           className={`sidebar-tree${fullNames ? ' full-names' : ''}`}
