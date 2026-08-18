@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lib/pq"
 )
 
 // AccessGroup is a named, superadmin-managed set used for role-based access.
@@ -293,7 +292,7 @@ func (s *PostgresGroupStore) MemberGroupGrants(userID int, oidcGroups []string, 
 		     SELECT group_id FROM access_group_members
 		     WHERE user_id = $2 OR oidc_group = ANY($3)
 		   )`,
-		namespace, userID, pq.Array(oidcGroups),
+		namespace, userID, oidcGroups,
 	)
 	if err != nil {
 		return nil, err
@@ -345,7 +344,7 @@ func (s *PostgresGroupStore) GetAccessibleNamespacesForGroups(userID int, oidcGr
 		   WHERE user_id = $1 OR oidc_group = ANY($2)
 		 )
 		 ORDER BY gg.namespace`,
-		userID, pq.Array(oidcGroups),
+		userID, oidcGroups,
 	)
 	if err != nil {
 		return nil, err

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/lib/pq"
+	"github.com/jackc/pgx/v5/pgconn"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -74,9 +74,9 @@ func NewPostgresUserStore(db *DB) *PostgresUserStore {
 // IsUniqueViolation reports whether err is a Postgres unique-constraint
 // violation (SQLSTATE 23505), e.g. inserting a duplicate username or email.
 func IsUniqueViolation(err error) bool {
-	var pqErr *pq.Error
-	if errors.As(err, &pqErr) {
-		return pqErr.Code == "23505"
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23505"
 	}
 	return false
 }
