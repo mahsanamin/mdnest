@@ -1,7 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Excalidraw } from '@excalidraw/excalidraw';
 import '@excalidraw/excalidraw/index.css';
 import { parseExcalidraw, serializeExcalidraw } from '../excalidraw';
+
+// Viewer-side theme preference for the drawing canvas (never stored in the note).
+const THEME_KEY = 'mdnest_drawing_theme';
 
 // loadLibraries fetches operator-configured .excalidrawlib URLs and flattens
 // them into Excalidraw library items (supporting both the v2 `libraryItems`
@@ -94,11 +97,42 @@ export default function ExcalidrawEditor({ content, onChange, readOnly, docPath,
   // content at it.
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 
+  // mdnest is a dark app, so a drawing opens dark rather than as a white sheet
+  // in the middle of it. This is a *viewing* preference and is deliberately not
+  // written into the note: the file stays portable (Obsidian reads the same
+  // bytes) and two people can view one drawing with different themes.
+  // Excalidraw renders the canvas dark from this prop; the stored
+  // viewBackgroundColor is untouched.
+  const [theme, setTheme] = useState(() => {
+    try { return localStorage.getItem(THEME_KEY) || 'dark'; } catch { return 'dark'; }
+  });
+  const toggleTheme = useCallback(() => {
+    setTheme((t) => {
+      const next = t === 'dark' ? 'light' : 'dark';
+      try { localStorage.setItem(THEME_KEY, next); } catch { /* private mode */ }
+      return next;
+    });
+  }, []);
+
   return (
     <div className="excalidraw-host">
+      <button
+        type="button"
+        className="excalidraw-theme-toggle"
+        onClick={toggleTheme}
+        title={theme === 'dark' ? 'Switch this drawing to light mode' : 'Switch this drawing to dark mode'}
+        aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+      >
+        {theme === 'dark' ? (
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M6.3 17.7l-1.4 1.4M19.1 4.9l-1.4 1.4"/></svg>
+        ) : (
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+        )}
+      </button>
       <Excalidraw
         initialData={initialData}
         viewModeEnabled={!!readOnly}
+        theme={theme}
         onChange={readOnly ? undefined : handleChange}
       />
     </div>
