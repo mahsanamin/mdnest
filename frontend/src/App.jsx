@@ -1537,6 +1537,8 @@ function App() {
         onAdminPanel={isAdmin && isMulti ? () => setShowAdminPanel(true) : null}
         onNewNote={canWrite('') ? () => doCreateNote(null) : null}
         onNewDrawing={excalidrawEnabled && canWrite('') ? () => doCreateDrawing(null) : null}
+        onOpenBoard={taskBoardEnabled && selectedNs ? () => setShowTaskBoard(true) : null}
+        boardActive={showTaskBoard}
         onNewFolder={canWrite('') ? () => doCreateFolder(null) : null}
         onRefreshTree={handleRefresh}
         isAdmin={isAdmin}
@@ -1600,7 +1602,6 @@ function App() {
             }
           }}
           onRefresh={handleRefresh}
-          onOpenBoard={taskBoardEnabled && selectedNs ? () => setShowTaskBoard(true) : null}
           commentCount={commentsEnabled ? comments.filter(c => !c.parentId && !c.resolved).length : 0}
           onToggleComments={!commentsEnabled ? null : () => {
             // A plain toggle: the panel is usable in any view mode (including

@@ -5415,3 +5415,36 @@ pre:hover .code-copy-btn {
 .chunk-error-actions button:hover {
   filter: brightness(1.1);
 }
+
+/* Task board entry — a namespace-level destination, so it sits with the
+   namespace and its tree rather than in the toolbar's editor-mode control. */
+.sidebar-board {
+  padding: 0 0.5rem 0.4rem;
+  border-bottom: 1px solid #313244;
+  margin-bottom: 0.35rem;
+}
+.sidebar-board-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  padding: 0.4rem 0.5rem;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #cdd6f4;
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: pointer;
+}
+.sidebar-board-btn:hover {
+  background: #313244;
+}
+.sidebar-board-btn.active {
+  background: #45475a;
+  color: #89b4fa;
+}
+.sidebar-board-btn svg {
+  flex-shrink: 0;
+  opacity: 0.85;
+}
