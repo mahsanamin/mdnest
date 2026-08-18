@@ -7,7 +7,11 @@ import (
 	"os"
 	"time"
 
-	_ "github.com/lib/pq"
+	// pgx's database/sql driver. Replaces lib/pq, which is in maintenance mode
+	// and carries unfixed advisories (GO-2026-6166/6168/6170..6173, all
+	// "Fixed in: N/A"). The keyword/value DSN below is parsed by pgx too, so the
+	// connection string is unchanged.
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 // DB holds the Postgres connection pool. Nil in single-user mode.
@@ -29,7 +33,7 @@ func Connect() (*DB, error) {
 		host, port, user, password, dbname,
 	)
 
-	db, err := sql.Open("postgres", dsn)
+	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}

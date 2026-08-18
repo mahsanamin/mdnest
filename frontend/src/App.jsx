@@ -8,20 +8,22 @@ import Toolbar from './components/Toolbar.jsx';
 import { lazy, Suspense } from 'react';
 import Editor from './components/Editor.jsx';
 import EditorErrorBoundary from './components/EditorErrorBoundary.jsx';
+import ChunkErrorBoundary from './components/ChunkErrorBoundary.jsx';
+import { loadWithRetry } from './lazyWithRetry.js';
 // Live (rich) editor — Crepe-based since v3.10.0. Lazy-loaded so the
 // ~217 KB-gzipped chunk only downloads when the user actually opens
 // Live mode.
-const LiveEditor = lazy(() => import('./components/LiveEditorCrepe.jsx'));
+const LiveEditor = lazy(() => loadWithRetry(() => import('./components/LiveEditorCrepe.jsx')));
 // Lazy like the Live editor: the board pulls in @dnd-kit and its own CSS, and
 // it is off by default (ENABLE_TASK_BOARD), so an install that doesn't use it
 // must not carry the chunk on first paint.
-const TaskBoard = lazy(() => import('./components/TaskBoard.jsx'));
+const TaskBoard = lazy(() => loadWithRetry(() => import('./components/TaskBoard.jsx')));
 // Lazy Marp slide-deck renderer: pulls in the Marp engine, off by default
 // (ENABLE_MARP), so an install that doesn't use it never carries the chunk.
-const MarpDeck = lazy(() => import('./components/MarpDeck.jsx'));
+const MarpDeck = lazy(() => loadWithRetry(() => import('./components/MarpDeck.jsx')));
 // Lazy Excalidraw drawing editor: pulls in the (large) Excalidraw bundle, off
 // by default (ENABLE_EXCALIDRAW), so notes-only installs never carry the chunk.
-const ExcalidrawEditor = lazy(() => import('./components/ExcalidrawEditor.jsx'));
+const ExcalidrawEditor = lazy(() => loadWithRetry(() => import('./components/ExcalidrawEditor.jsx')));
 import Preview from './components/Preview.jsx';
 import ContextMenu from './components/ContextMenu.jsx';
 import Settings from './components/Settings.jsx';
@@ -173,6 +175,34 @@ function App() {
   });
   const [savedContent, setSavedContent] = useState('');
   const saveTimerRef = useRef(null);
+  // The queued autosave itself, so navigating away can RUN it instead of
+  // dropping it. Cleared as soon as it executes.
+  const pendingSaveRef = useRef(null);
+  // An editor that debounces internally (the drawing canvas) registers a
+  // callback here so its unsaved scene can be drained before we navigate.
+  const editorFlushRef = useRef(null);
+  const registerEditorFlush = useCallback((fn) => { editorFlushRef.current = fn; }, []);
+  // Run a queued autosave now rather than discarding it.
+  //
+  // Opening another note used to just clearTimeout() the previous file's
+  // pending save, so every edit made inside the debounce window was silently
+  // lost. Drawings hit this on almost every switch: the canvas debounces its
+  // own changes for 500ms before calling onChange, so the app-level timer had
+  // barely started when the click landed on the next file.
+  //
+  // Callers must flush BEFORE loading the next note: etagRef is shared, so a
+  // save that ran afterwards would send the new file's etag with the old
+  // file's content.
+  const flushPendingSave = useCallback(async () => {
+    // First let the active editor hand over anything it is still debouncing.
+    // It calls handleContentChange synchronously, which queues the save we
+    // then run below — so this has to come first.
+    if (editorFlushRef.current) editorFlushRef.current();
+    if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
+    const pending = pendingSaveRef.current;
+    pendingSaveRef.current = null;
+    if (pending) await pending();
+  }, []);
   const [sidebarVisible, setSidebarVisible] = useState(false);
   // Bumped by the toolbar "reveal in tree" button; Sidebar watches it to expand
   // ancestors, scroll the active row into view, and flash it.
@@ -287,18 +317,29 @@ function App() {
   // not registered at all, so the button must not be offered.
   const taskBoardEnabled = !!appConfig?.taskBoard;
 
+  // "Basic" on a drawing shows the file's markdown source rather than the
+  // canvas. Per-note and not persisted: a drawing should open as a drawing, so
+  // this resets whenever the open note changes (see the effect below).
+  const [drawingSource, setDrawingSource] = useState(false);
+
   // ENABLE_MARP on the backend. When on, a note whose frontmatter says
   // `marp: true` is shown as a slide deck in the Live view instead of the editor.
   const marpEnabled = !!appConfig?.marp;
   const marpActive = marpEnabled && isMarpDoc(content);
   // Marp decks must never go through the Live/WYSIWYG editor — it reformats the
   // markdown and corrupts the frontmatter and slide breaks. Force Basic (raw)
-  // editing for them, regardless of the user's editor-mode preference.
-  const editorModeForNote = effectiveEditorMode(editorMode, marpActive);
+  // editing for them, regardless of the user's editor-mode preference. A
+  // drawing opened as source is raw scene JSON and carries the same hazard.
+  const editorModeForNote = effectiveEditorMode(editorMode, marpActive || drawingSource);
   // `.excalidraw.md` files open in the drawing editor (opt-in ENABLE_EXCALIDRAW),
   // bypassing the text editor/preview entirely.
   const excalidrawEnabled = !!appConfig?.excalidraw;
-  const excalidrawActive = excalidrawEnabled && isExcalidrawDoc(currentPath);
+  // A .excalidraw.md is a real markdown file, so "Basic" has to mean something
+  // on it: it shows the underlying source (the scene JSON plus the mirrored
+  // text elements) instead of the canvas. Previously the canvas short-circuited
+  // the whole editor branch and the Basic/Live buttons were simply inert.
+  const isDrawingDoc = excalidrawEnabled && isExcalidrawDoc(currentPath);
+  const excalidrawActive = isDrawingDoc && !drawingSource;
   // Editor scroll ratio (0..1), mirrored to the Marp deck's current slide in
   // split view. The deck is paginated (not scrollable), so unlike the plain
   // Preview it can't share a scrollTop — we map the ratio to a slide instead.
@@ -314,6 +355,18 @@ function App() {
   // with the fresh scene — otherwise a drawing would keep the stale scene and
   // the next stroke would silently overwrite the remote change (LWW).
   const [drawingReloadKey, setDrawingReloadKey] = useState(0);
+
+  // Where the sidebar's "+ Note" / "+ Drawing" / "+ Folder" buttons create.
+  // Clicking a folder aims them at it; otherwise they follow the open note's
+  // folder, and fall back to the namespace root. They used to always create at
+  // the root, so with a folder open in front of you the new file appeared
+  // outside it.
+  const [pickedFolder, setPickedFolder] = useState(null);
+
+  // Source view is a per-file choice, not a preference: a drawing always opens
+  // as a drawing, even if the last one was left showing its markdown.
+  useEffect(() => { setDrawingSource(false); }, [selectedNs, currentPath]);
+  useEffect(() => { setPickedFolder(null); }, [selectedNs]);
   // restoreBanner is shown when another user used the History modal to
   // restore an older version of the current file. It's deliberately a
   // separate state from conflictBanner because a restore is an
@@ -887,7 +940,9 @@ function App() {
   const openNoteDirect = useCallback(async (ns, path) => {
     // Board stays open across note navigation so the chosen view persists; the
     // board's own "open source note" action closes it explicitly.
-    if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
+    // Write out the file we're leaving before loading the next one — see
+    // flushPendingSave. Must happen before getNote(), which replaces etagRef.
+    await flushPendingSave();
     try {
       const { text, etag } = await getNote(ns, path);
       setCurrentPath(path);
@@ -901,12 +956,15 @@ function App() {
     } catch (e) {
       console.error('Failed to open note:', e);
     }
-  }, [restoreScrollPosition, commentsEnabled]);
+  }, [restoreScrollPosition, commentsEnabled, flushPendingSave]);
 
   const handleSelectNs = useCallback((ns) => {
     // Keep the task board open when switching workspace so the chosen view is
     // preserved — it re-scopes to the new namespace. Note navigation keeps it
     // open too (see openNote/openNoteDirect).
+    // Flush before any state changes so the queued save still lands on the
+    // file the user was actually editing.
+    flushPendingSave();
     setSelectedNs(ns);
     // Restore the last file the user had open in the namespace they're
     // switching TO. If they've never opened anything there (or whatever
@@ -928,15 +986,15 @@ function App() {
       setHash(ns, null);
     }
     setTree([]);
-    if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
-  }, [getLastPath]);
+  }, [getLastPath, flushPendingSave]);
 
   const openNote = useCallback(async (path) => {
     if (!selectedNs) return;
     // Board stays open across note navigation so the chosen view persists; the
     // board's own "open source note" action closes it explicitly.
-    // Clear any pending save timer from the previous file
-    if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
+    // Write out the previous file's pending edits instead of dropping them.
+    // Must happen before getNote(), which replaces the shared etagRef.
+    await flushPendingSave();
     try {
       const { text, etag } = await getNote(selectedNs, path);
       setCurrentPath(path);
@@ -960,7 +1018,7 @@ function App() {
         console.error('Failed to open note:', e);
       }
     }
-  }, [selectedNs, restoreScrollPosition, commentsEnabled, setLastPath]);
+  }, [selectedNs, restoreScrollPosition, commentsEnabled, setLastPath, flushPendingSave]);
 
   const refreshComments = useCallback(() => {
     if (selectedNs && currentPath) {
@@ -979,7 +1037,12 @@ function App() {
     if (collabRef.current) collabRef.current.sendContent(newContent);
 
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    const timer = setTimeout(async () => {
+    // Named so flushPendingSave() can run it immediately when the user
+    // navigates away before the debounce elapses. It closes over the path,
+    // namespace and content of the edit that scheduled it, so running it late
+    // still writes to the right file.
+    const runSave = async () => {
+      pendingSaveRef.current = null;
       if (!currentPath || !selectedNs) return;
       // Safety against destructive autosave: never write empty content
       // when we know the file had content when we loaded it. This is the
@@ -1012,9 +1075,11 @@ function App() {
         // is closed and endSave returns nothing.)
         echoGate.endSave(saveToken).forEach(handleFileChanged);
       }
-    }, 800);
-    saveTimerRef.current = timer;
+    };
+    pendingSaveRef.current = runSave;
+    saveTimerRef.current = setTimeout(runSave, 800);
   }, [currentPath, selectedNs]);
+
 
   // Send cursor position to collab
   const handleCursorChange = useCallback((line, ch) => {
@@ -1073,8 +1138,14 @@ function App() {
   }, []);
 
   const getTargetDir = useCallback((target) => {
+    // No explicit target means the sidebar buttons (the context menu always
+    // passes the node it was opened on). Use the folder the user last clicked,
+    // else the open note's folder, else the namespace root.
     if (!target) {
-      return '';
+      const dir = pickedFolder !== null
+        ? pickedFolder
+        : (currentPath && currentPath.includes('/') ? currentPath.slice(0, currentPath.lastIndexOf('/')) : '');
+      return dir ? dir.replace(/\/$/, '') + '/' : '';
     }
     if (target.type === 'folder') {
       const p = target.path || target.name;
@@ -1083,7 +1154,7 @@ function App() {
     const parts = (target.path || '').split('/');
     parts.pop();
     return parts.length > 0 ? parts.join('/') + '/' : '';
-  }, [currentPath]);
+  }, [currentPath, pickedFolder]);
 
   const doCreateNote = useCallback(async (target) => {
     if (!selectedNs) return;
@@ -1466,7 +1537,10 @@ function App() {
       <Sidebar
         tree={tree}
         treeLoading={treeLoading}
-        onSelect={openNote}
+        // Opening a file hands the create-target back to that file's folder,
+        // so it tracks where you actually are rather than the last folder
+        // you happened to expand.
+        onSelect={(p) => { setPickedFolder(null); openNote(p); }}
         currentPath={currentPath}
         namespaces={namespaces}
         selectedNs={selectedNs}
@@ -1480,6 +1554,10 @@ function App() {
         onAdminPanel={isAdmin && isMulti ? () => setShowAdminPanel(true) : null}
         onNewNote={canWrite('') ? () => doCreateNote(null) : null}
         onNewDrawing={excalidrawEnabled && canWrite('') ? () => doCreateDrawing(null) : null}
+        onOpenBoard={taskBoardEnabled && selectedNs ? () => setShowTaskBoard(true) : null}
+        boardActive={showTaskBoard}
+        pickedFolder={pickedFolder}
+        onPickFolder={setPickedFolder}
         onNewFolder={canWrite('') ? () => doCreateFolder(null) : null}
         onRefreshTree={handleRefresh}
         isAdmin={isAdmin}
@@ -1524,6 +1602,9 @@ function App() {
           }}
           editorMode={editorModeForNote}
           marpLocked={marpActive}
+          drawingDoc={isDrawingDoc}
+          drawingSource={drawingSource}
+          onDrawingSourceChange={setDrawingSource}
           boardActive={showTaskBoard}
           onEditorModeChange={(mode) => {
             // Marp decks are locked to Basic — ignore attempts to switch to the
@@ -1540,7 +1621,6 @@ function App() {
             }
           }}
           onRefresh={handleRefresh}
-          onOpenBoard={taskBoardEnabled && selectedNs ? () => setShowTaskBoard(true) : null}
           commentCount={commentsEnabled ? comments.filter(c => !c.parentId && !c.resolved).length : 0}
           onToggleComments={!commentsEnabled ? null : () => {
             // A plain toggle: the panel is usable in any view mode (including
@@ -1601,6 +1681,12 @@ function App() {
         )}
         <div className="split-view">
           {showTaskBoard && taskBoardEnabled && selectedNs ? (
+            <ChunkErrorBoundary
+              label="the task board"
+              resetKey={selectedNs}
+              onDismiss={() => setShowTaskBoard(false)}
+              dismissLabel="Close board"
+            >
             <Suspense fallback={<div className="editor-loading">Loading task board...</div>}>
               <TaskBoard
                 ns={selectedNs}
@@ -1612,12 +1698,17 @@ function App() {
                 onClose={() => setShowTaskBoard(false)}
               />
             </Suspense>
+            </ChunkErrorBoundary>
           ) : currentPath ? (
             excalidrawActive ? (
               <div className="excalidraw-wrapper">
                 {content === null ? (
                   <div className="editor-loading">Loading drawing…</div>
                 ) : (
+                  <ChunkErrorBoundary
+                    label="the drawing editor"
+                    resetKey={`${selectedNs}/${currentPath}`}
+                  >
                   <Suspense fallback={<div className="editor-loading">Loading drawing editor…</div>}>
                     <ExcalidrawEditor
                       key={`${selectedNs}/${currentPath}#${drawingReloadKey}`}
@@ -1626,8 +1717,10 @@ function App() {
                       onChange={canWriteCurrent ? handleContentChange : null}
                       readOnly={!canWriteCurrent}
                       libraries={appConfig?.excalidrawLibraries}
+                      registerFlush={registerEditorFlush}
                     />
                   </Suspense>
+                  </ChunkErrorBoundary>
                 )}
               </div>
             ) : (
@@ -1735,9 +1828,11 @@ function App() {
                   style={!isMobile && viewMode === 'split' ? { flex: `0 0 ${100 - splitRatio}%` } : undefined}
                 >
                   {marpEnabled && isMarpDoc(content) ? (
-                    <Suspense fallback={<div className="editor-loading">Loading slides…</div>}>
-                      <MarpDeck content={content || ''} title={currentPath} scrollPct={viewMode === 'split' && !isMobile ? marpScrollPct : undefined} />
-                    </Suspense>
+                    <ChunkErrorBoundary label="the slide renderer" resetKey={`${selectedNs}/${currentPath}`}>
+                      <Suspense fallback={<div className="editor-loading">Loading slides…</div>}>
+                        <MarpDeck content={content || ''} title={currentPath} scrollPct={viewMode === 'split' && !isMobile ? marpScrollPct : undefined} />
+                      </Suspense>
+                    </ChunkErrorBoundary>
                   ) : (
                     <Preview content={content || ''} currentPath={currentPath} ns={selectedNs} onCheckboxToggle={canWriteCurrent ? handleCheckboxToggle : null} pathIndex={wikiIndex} onWikiLink={openNote} />
                   )}

@@ -3,6 +3,15 @@
 .tb-panel {
   position: relative;
   flex: 1 1 auto;
+  /* min-width is NOT decoration. .tb-panel is a flex item of .split-view (a
+     flex row with overflow:hidden), and a flex item defaults to
+     min-width:auto — it refuses to shrink below its content's intrinsic
+     width. The board's content is N fixed-width columns, so with enough
+     columns the panel grew wider than the viewport and .split-view simply
+     clipped the right-hand ones: .tb-board's overflow-x never engaged
+     because its parent was never too small. 0 lets the panel be bounded by
+     the viewport, which is what hands the overflow to .tb-board. */
+  min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -117,6 +126,9 @@
 .tb-board {
   flex: 1 1 auto;
   min-height: 0;
+  /* Same reason as .tb-panel above — without this the scroll container can
+     itself be sized by its content instead of by its parent. */
+  min-width: 0;
   display: flex;
   gap: 14px;
   padding: 16px;

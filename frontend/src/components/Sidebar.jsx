@@ -89,6 +89,10 @@ function Sidebar({
   onNewNote,
   onNewDrawing,
   onNewFolder,
+  onOpenBoard,
+  boardActive,
+  pickedFolder,
+  onPickFolder,
   onRefreshTree,
   isAdmin,
   width,
@@ -333,6 +337,16 @@ function Sidebar({
 
   const showContentResults = contentResults && contentResults.length > 0 && searchQuery.trim().length >= 2;
 
+  const [rootDragOver, setRootDragOver] = useState(false);
+
+  // Say where the create buttons will put things. The destination is not
+  // otherwise visible, which is what made "+ Note" landing at the root while a
+  // folder was open feel arbitrary.
+  const createDir = pickedFolder !== null
+    ? pickedFolder
+    : (currentPath && currentPath.includes('/') ? currentPath.slice(0, currentPath.lastIndexOf('/')) : '');
+  const createHint = createDir ? `in ${createDir}/` : 'in the namespace root';
+
   return (
     <>
       {visible && <div className="sidebar-backdrop" onClick={onClose} />}
@@ -468,9 +482,9 @@ function Sidebar({
         </div>
         {(onNewNote || onNewFolder) && (
           <div className="sidebar-actions">
-            {onNewNote && <button className="sidebar-action-btn" onClick={onNewNote}>+ Note</button>}
-            {onNewDrawing && <button className="sidebar-action-btn" onClick={onNewDrawing}>+ Drawing</button>}
-            {onNewFolder && <button className="sidebar-action-btn" onClick={onNewFolder}>+ Folder</button>}
+            {onNewNote && <button className="sidebar-action-btn" onClick={onNewNote} title={`New note ${createHint}`}>+ Note</button>}
+            {onNewDrawing && <button className="sidebar-action-btn" onClick={onNewDrawing} title={`New drawing ${createHint}`}>+ Drawing</button>}
+            {onNewFolder && <button className="sidebar-action-btn" onClick={onNewFolder} title={`New folder ${createHint}`}>+ Folder</button>}
           </div>
         )}
 
@@ -494,6 +508,25 @@ function Sidebar({
 
         {searching && <div className="search-status">Searching...</div>}
 
+        {/* The task board is a namespace-level destination, not a way of
+            viewing the open file, so it belongs with the namespace and its
+            tree rather than in the toolbar's Basic/Live control — those are
+            mutually exclusive editor modes for one note, and mixing the two
+            axes in one segmented control made all three buttons read as the
+            same kind of choice. */}
+        {onOpenBoard && (
+          <div className="sidebar-board">
+            <button
+              className={`sidebar-board-btn${boardActive ? ' active' : ''}`}
+              onClick={onOpenBoard}
+              title="Namespace task board"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+              <span>Task Board</span>
+            </button>
+          </div>
+        )}
+
         <div
           className={`sidebar-tree${fullNames ? ' full-names' : ''}`}
           ref={treeAreaRef}
@@ -510,6 +543,40 @@ function Sidebar({
             } catch (err) { /* ignore */ }
           }}
         >
+          {/* The namespace root, as a real row.
+              Selecting a folder aims "+ Note"/"+ Drawing"/"+ Folder" at it, and
+              that stuck: there was no way back to the top level short of
+              opening a root file, and no visible drop target for the root
+              either — the only one was whatever blank space happened to be left
+              under the tree, which is none once the tree fills the panel. This
+              row is both: click it to create at the root, drop onto it to move
+              something there. */}
+          <div
+            className={`tree-row tree-root-row${createDir === '' ? ' folder-target' : ''}${rootDragOver ? ' drag-over' : ''}`}
+            style={{ '--tree-depth': 0 }}
+            onClick={() => onPickFolder && onPickFolder('')}
+            title={`${selectedNs || 'Namespace'} root — new items are created here`}
+            onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setRootDragOver(true); }}
+            onDragLeave={() => setRootDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setRootDragOver(false);
+              try {
+                const data = JSON.parse(e.dataTransfer.getData('text/plain'));
+                // Already at the root? Nothing to do.
+                if (data.path && data.path.includes('/') && onDrop) onDrop(data.path, '');
+              } catch (err) { /* ignore */ }
+            }}
+          >
+            <span className="tree-arrow-spacer" />
+            <span className="tree-icon-svg folder-open" />
+            {/* Labelled "root", not the namespace name: the header already
+                shows the namespace two rows above, so repeating it here is
+                redundant and makes the same text appear twice in the sidebar.
+                The namespace is named in the row's tooltip instead. */}
+            <span className="tree-label">root</span>
+          </div>
           {Array.isArray(filteredTree) && filteredTree.map((node) => (
             <TreeNode
               key={node.path || node.name}
@@ -522,6 +589,8 @@ function Sidebar({
               expandedPaths={expandedPaths}
               onToggleExpand={toggleExpand}
               forceExpand={!!searchQuery.trim()}
+              pickedFolder={pickedFolder}
+              onPickFolder={onPickFolder}
             />
           ))}
           {searchQuery.trim() && filteredTree.length === 0 && !showContentResults && !searching && (
