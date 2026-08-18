@@ -2,7 +2,7 @@ import { useState, useRef, useCallback } from 'react';
 
 const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 
-function TreeNode({ node, onSelect, currentPath, depth, onContextMenu, onDrop, expandedPaths, onToggleExpand, forceExpand }) {
+function TreeNode({ node, onSelect, currentPath, depth, onContextMenu, onDrop, expandedPaths, onToggleExpand, forceExpand, pickedFolder, onPickFolder }) {
   const isFolder = node.type === 'folder' || node.type === 'directory';
   const isActive = currentPath === node.path;
   const longPressTimer = useRef(null);
@@ -19,8 +19,15 @@ function TreeNode({ node, onSelect, currentPath, depth, onContextMenu, onDrop, e
   const expanded = isFolder && (forceExpand || expandedPaths.has(node.path));
 
   const handleClick = () => {
-    if (isFolder) onToggleExpand(node.path);
-    else onSelect(node.path);
+    if (isFolder) {
+      onToggleExpand(node.path);
+      // Clicking a folder also aims the sidebar's "+ Note" / "+ Drawing" /
+      // "+ Folder" buttons at it. They used to always create at the namespace
+      // root, which is never what you want with a folder open in front of you.
+      if (onPickFolder) onPickFolder(node.path);
+    } else {
+      onSelect(node.path);
+    }
   };
 
   const handleRightClick = useCallback((e) => {
@@ -78,10 +85,15 @@ function TreeNode({ node, onSelect, currentPath, depth, onContextMenu, onDrop, e
   const handleDragLeave = useCallback((e) => { e.stopPropagation(); setDragOver(false); }, []);
 
   const handleDrop = useCallback((e) => {
+    // A file row is not a drop target. Bail BEFORE preventDefault/stopPropagation
+    // so the event keeps bubbling: dropping on a file inside an open folder then
+    // reaches that folder's children container and means "put it in here", which
+    // is what the gesture looks like. Swallowing it here made such a drop a
+    // silent no-op.
+    if (!isFolder || !onDrop) return;
     e.preventDefault();
     e.stopPropagation();
     setDragOver(false);
-    if (!isFolder || !onDrop) return;
     try {
       const data = JSON.parse(e.dataTransfer.getData('text/plain'));
       if (data.path && data.path !== node.path) {
@@ -96,6 +108,34 @@ function TreeNode({ node, onSelect, currentPath, depth, onContextMenu, onDrop, e
     } catch (err) { /* ignore */ }
   }, [isFolder, node, onDrop]);
 
+  // An expanded folder's contents are part of that folder as far as a drag is
+  // concerned: dropping onto the space below its rows, or onto a file inside
+  // it, means "put this in here". Without handlers on the children container
+  // such a drop bubbled all the way to .sidebar-tree, which treats a drop as
+  // "move to the namespace root" — so aiming carefully at an open folder
+  // silently moved the file OUT to the root instead.
+  const handleChildrenDragOver = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOver(true);
+  }, []);
+
+  const handleChildrenDrop = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+    if (!onDrop) return;
+    try {
+      const data = JSON.parse(e.dataTransfer.getData('text/plain'));
+      if (!data.path || data.path === node.path) return;
+      if (node.path && node.path.startsWith(data.path + '/')) return;
+      const fromParent = data.path.includes('/') ? data.path.substring(0, data.path.lastIndexOf('/')) : '';
+      if (node.path === fromParent) return;
+      onDrop(data.path, node.path);
+    } catch (err) { /* ignore */ }
+  }, [node, onDrop]);
+
   const name = node.name || node.path.split('/').filter(Boolean).pop() || node.path;
 
   const hasChildren = isFolder && node.children && node.children.length > 0;
@@ -103,7 +143,7 @@ function TreeNode({ node, onSelect, currentPath, depth, onContextMenu, onDrop, e
   return (
     <div className="tree-node">
       <div
-        className={`tree-row${isActive ? ' active' : ''}${dragOver ? ' drag-over' : ''}`}
+        className={`tree-row${isActive ? ' active' : ''}${dragOver ? ' drag-over' : ''}${isFolder && pickedFolder === node.path ? ' folder-target' : ''}`}
         // CSS variable so .tree-row can compute its padding differently
         // per breakpoint (desktop: 0.75rem/level, mobile: 0.4rem/level).
         // See .tree-row in App.css.
@@ -131,7 +171,12 @@ function TreeNode({ node, onSelect, currentPath, depth, onContextMenu, onDrop, e
         <span className={`tree-label${isFolder && !hasChildren ? ' empty-folder' : ''}`}>{name}</span>
       </div>
       {isFolder && expanded && node.children && (
-        <div className="tree-children">
+        <div
+          className="tree-children"
+          onDragOver={handleChildrenDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleChildrenDrop}
+        >
           {node.children.map((child) => (
             <TreeNode
               key={child.path || child.name}
@@ -144,6 +189,8 @@ function TreeNode({ node, onSelect, currentPath, depth, onContextMenu, onDrop, e
               expandedPaths={expandedPaths}
               onToggleExpand={onToggleExpand}
               forceExpand={forceExpand}
+              pickedFolder={pickedFolder}
+              onPickFolder={onPickFolder}
             />
           ))}
         </div>

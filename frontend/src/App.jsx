@@ -356,9 +356,17 @@ function App() {
   // the next stroke would silently overwrite the remote change (LWW).
   const [drawingReloadKey, setDrawingReloadKey] = useState(0);
 
+  // Where the sidebar's "+ Note" / "+ Drawing" / "+ Folder" buttons create.
+  // Clicking a folder aims them at it; otherwise they follow the open note's
+  // folder, and fall back to the namespace root. They used to always create at
+  // the root, so with a folder open in front of you the new file appeared
+  // outside it.
+  const [pickedFolder, setPickedFolder] = useState(null);
+
   // Source view is a per-file choice, not a preference: a drawing always opens
   // as a drawing, even if the last one was left showing its markdown.
   useEffect(() => { setDrawingSource(false); }, [selectedNs, currentPath]);
+  useEffect(() => { setPickedFolder(null); }, [selectedNs]);
   // restoreBanner is shown when another user used the History modal to
   // restore an older version of the current file. It's deliberately a
   // separate state from conflictBanner because a restore is an
@@ -1130,8 +1138,14 @@ function App() {
   }, []);
 
   const getTargetDir = useCallback((target) => {
+    // No explicit target means the sidebar buttons (the context menu always
+    // passes the node it was opened on). Use the folder the user last clicked,
+    // else the open note's folder, else the namespace root.
     if (!target) {
-      return '';
+      const dir = pickedFolder !== null
+        ? pickedFolder
+        : (currentPath && currentPath.includes('/') ? currentPath.slice(0, currentPath.lastIndexOf('/')) : '');
+      return dir ? dir.replace(/\/$/, '') + '/' : '';
     }
     if (target.type === 'folder') {
       const p = target.path || target.name;
@@ -1140,7 +1154,7 @@ function App() {
     const parts = (target.path || '').split('/');
     parts.pop();
     return parts.length > 0 ? parts.join('/') + '/' : '';
-  }, [currentPath]);
+  }, [currentPath, pickedFolder]);
 
   const doCreateNote = useCallback(async (target) => {
     if (!selectedNs) return;
@@ -1523,7 +1537,10 @@ function App() {
       <Sidebar
         tree={tree}
         treeLoading={treeLoading}
-        onSelect={openNote}
+        // Opening a file hands the create-target back to that file's folder,
+        // so it tracks where you actually are rather than the last folder
+        // you happened to expand.
+        onSelect={(p) => { setPickedFolder(null); openNote(p); }}
         currentPath={currentPath}
         namespaces={namespaces}
         selectedNs={selectedNs}
@@ -1539,6 +1556,8 @@ function App() {
         onNewDrawing={excalidrawEnabled && canWrite('') ? () => doCreateDrawing(null) : null}
         onOpenBoard={taskBoardEnabled && selectedNs ? () => setShowTaskBoard(true) : null}
         boardActive={showTaskBoard}
+        pickedFolder={pickedFolder}
+        onPickFolder={setPickedFolder}
         onNewFolder={canWrite('') ? () => doCreateFolder(null) : null}
         onRefreshTree={handleRefresh}
         isAdmin={isAdmin}
