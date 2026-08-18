@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 
-function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePassword, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh, wsStatus, commentCount, onToggleComments, onOpenBoard, boardActive, marpLocked }) {
+function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePassword, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh, wsStatus, commentCount, onToggleComments, onOpenBoard, boardActive, marpLocked, drawingDoc, drawingSource, onDrawingSourceChange }) {
   const [refreshing, setRefreshing] = useState(false);
   const handleRefresh = useCallback(() => {
     if (refreshing || !onRefresh) return;
@@ -21,7 +21,24 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
       </button>
       {(showEditorToggle || onOpenBoard) && (
         <div className="editor-mode-toggle">
-          {showEditorToggle && (
+          {/* A drawing is still a markdown file, so the toggle offers its two
+              real views: the canvas, or the source behind it. Live is not one
+              of them — the rich editor would reformat the scene JSON. */}
+          {showEditorToggle && drawingDoc && (
+            <>
+              <button
+                className={!boardActive && !drawingSource ? 'active' : ''}
+                onClick={() => onDrawingSourceChange(false)}
+                title="Drawing canvas"
+              >Drawing</button>
+              <button
+                className={!boardActive && drawingSource ? 'active' : ''}
+                onClick={() => onDrawingSourceChange(true)}
+                title="Markdown source behind this drawing"
+              >Basic</button>
+            </>
+          )}
+          {showEditorToggle && !drawingDoc && (
             <>
               <button
                 className={!boardActive && editorMode === 'basic' ? 'active' : ''}
