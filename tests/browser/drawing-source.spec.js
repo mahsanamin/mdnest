@@ -38,11 +38,16 @@ test('a drawing can be switched between canvas and markdown source', async ({ pa
   await page.mouse.up();
   await page.waitForTimeout(1200);
 
-  // The toggle offers Drawing/Basic, and never Live for this file type.
+  // The toggle offers Basic/Drawing, and never Live for this file type.
   const toggle = page.locator('.editor-mode-toggle');
   await expect(toggle.locator('button:has-text("Drawing")')).toBeVisible();
   await expect(toggle.locator('button:has-text("Basic")')).toBeVisible();
   await expect(toggle.locator('button:has-text("Live")')).toHaveCount(0);
+
+  // Order must match the normal Basic|Live pair — raw on the left, rich on the
+  // right — so "Basic" doesn't move depending on the file you opened.
+  const labels = (await toggle.locator('button').allInnerTexts()).map((t) => t.trim());
+  expect(labels).toEqual(['Basic', 'Drawing']);
 
   // Basic reveals the markdown, not a blank pane.
   await toggle.locator('button:has-text("Basic")').click();

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Excalidraw } from '@excalidraw/excalidraw';
+import { Excalidraw, Footer } from '@excalidraw/excalidraw';
 import '@excalidraw/excalidraw/index.css';
 import { parseExcalidraw, serializeExcalidraw } from '../excalidraw';
 
@@ -116,25 +116,35 @@ export default function ExcalidrawEditor({ content, onChange, readOnly, docPath,
 
   return (
     <div className="excalidraw-host">
-      <button
-        type="button"
-        className="excalidraw-theme-toggle"
-        onClick={toggleTheme}
-        title={theme === 'dark' ? 'Switch this drawing to light mode' : 'Switch this drawing to dark mode'}
-        aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-      >
-        {theme === 'dark' ? (
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M6.3 17.7l-1.4 1.4M19.1 4.9l-1.4 1.4"/></svg>
-        ) : (
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
-        )}
-      </button>
       <Excalidraw
         initialData={initialData}
         viewModeEnabled={!!readOnly}
         theme={theme}
         onChange={readOnly ? undefined : handleChange}
-      />
+      >
+        {/* Render inside Excalidraw's own Footer slot rather than floating a
+            button over the canvas. An absolutely-positioned control has to
+            guess at free space and gets it wrong: the first attempt sat on top
+            of their help button in the bottom-right corner. The slot is laid
+            out by Excalidraw next to the zoom controls, so it cannot collide,
+            and it keeps working if they rearrange their chrome. Excalidraw's
+            own menu has no theme item, so this control has to exist. */}
+        <Footer>
+          <button
+            type="button"
+            className="excalidraw-theme-toggle"
+            onClick={toggleTheme}
+            title={theme === 'dark' ? 'Switch this drawing to light mode' : 'Switch this drawing to dark mode'}
+            aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          >
+            {theme === 'dark' ? (
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M6.3 17.7l-1.4 1.4M19.1 4.9l-1.4 1.4"/></svg>
+            ) : (
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+            )}
+          </button>
+        </Footer>
+      </Excalidraw>
     </div>
   );
 }

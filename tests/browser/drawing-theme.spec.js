@@ -27,6 +27,22 @@ test('a drawing opens in dark mode and can be switched to light', async ({ page 
   await expect(page.locator('.excalidraw canvas').first()).toBeVisible({ timeout: 30_000 });
   await expect(canvas).toHaveClass(/theme--dark/);
 
+  // It must not sit on top of Excalidraw's own chrome. The first attempt at
+  // this control was absolutely positioned bottom-right and landed exactly on
+  // their help button; it now lives in their Footer slot, which they lay out.
+  const toggleBox = await page.locator('.excalidraw-theme-toggle').boundingBox();
+  for (const other of ['.help-icon', '.disable-zen-mode']) {
+    const el = page.locator(other).first();
+    if (!(await el.count())) continue;
+    const b = await el.boundingBox();
+    if (!b) continue;
+    const overlaps = toggleBox.x < b.x + b.width && b.x < toggleBox.x + toggleBox.width
+      && toggleBox.y < b.y + b.height && b.y < toggleBox.y + toggleBox.height;
+    expect(overlaps, `theme toggle overlaps ${other}`).toBe(false);
+  }
+  // And it must be clickable rather than buried under something.
+  await expect(page.locator('.excalidraw-theme-toggle')).toBeVisible();
+
   // Toggle to light...
   await page.locator('.excalidraw-theme-toggle').click();
   await expect(canvas).not.toHaveClass(/theme--dark/);

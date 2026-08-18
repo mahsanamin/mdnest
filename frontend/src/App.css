@@ -5457,27 +5457,25 @@ pre:hover .code-copy-btn {
   font-weight: 600;
 }
 
-/* Light/dark switch for the drawing canvas. Bottom-right is the one corner
-   Excalidraw's own UI leaves free (menu top-left, tools top-centre, library
-   top-right, zoom bottom-left). */
+/* Light/dark switch for the drawing canvas. Lives in Excalidraw's Footer slot
+   (beside the zoom controls) rather than floating over the canvas — a
+   free-floating button has to guess at empty space, and the first attempt
+   landed on top of their help button. Sized to match their footer buttons. */
 .excalidraw-theme-toggle {
-  position: absolute;
-  right: 12px;
-  bottom: 12px;
-  z-index: 5;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
+  margin-left: 8px;
   padding: 0;
-  border: 1px solid #313244;
+  border: none;
   border-radius: 8px;
-  background: #181825;
-  color: #cdd6f4;
+  background: var(--island-bg-color, #181825);
+  color: var(--icon-fill-color, #cdd6f4);
+  box-shadow: var(--shadow-island);
   cursor: pointer;
 }
 .excalidraw-theme-toggle:hover {
-  background: #313244;
-  color: #89b4fa;
+  background: var(--button-hover-bg, #313244);
 }
