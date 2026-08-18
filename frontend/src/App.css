@@ -5479,3 +5479,24 @@ pre:hover .code-copy-btn {
 .excalidraw-theme-toggle:hover {
   background: var(--button-hover-bg, #313244);
 }
+
+/* The namespace root as a tree row: the create target and drop target for the
+   top level. Without it, selecting a folder was a one-way trip — nothing aimed
+   the create buttons back at the root, and the only place to drop a file to
+   move it to the top level was blank space under the tree, which doesn't exist
+   once the tree fills the panel. */
+.tree-root-row {
+  border-bottom: 1px solid #313244;
+  margin-bottom: 2px;
+  opacity: 0.9;
+}
+.tree-root-row .tree-label {
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+  text-transform: lowercase;
+  color: #a6adc8;
+}
+.tree-root-row.folder-target .tree-label {
+  color: #89b4fa;
+  font-weight: 600;
+}

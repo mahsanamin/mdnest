@@ -99,3 +99,62 @@ test("dropping onto an open folder's contents moves the file in, not to the root
   expect((after.children || []).map((c) => c.name), 'file was moved to the root instead')
     .not.toContain(stray);
 });
+
+test('the root row aims creation back at the top level', async ({ page }) => {
+  test.setTimeout(120_000);
+  await login(page);
+
+  // Select a folder first — this is the state that used to be a one-way trip.
+  const folder = `rootback-${Date.now()}`;
+  await create(page, '+ Folder', folder);
+  const folderRow = page.locator('.tree-row', { hasText: folder }).first();
+  await expect(folderRow).toBeVisible({ timeout: 20_000 });
+  await folderRow.click();
+  await expect(btn(page, '+ Note')).toHaveAttribute('title', new RegExp(`in ${folder}/`));
+
+  // Click the root row to aim back at the top level.
+  await page.locator('.tree-root-row').click();
+  await expect(page.locator('.tree-root-row')).toHaveClass(/folder-target/);
+  await expect(btn(page, '+ Note')).toHaveAttribute('title', /namespace root/);
+
+  const note = `atroot-${Date.now()}.md`;
+  await create(page, '+ Note', note);
+  await expect(page.locator('.toolbar-path')).toContainText(note, { timeout: 20_000 });
+
+  const t = await readTree(page);
+  expect((t.children || []).map((c) => c.name), 'note was not created at the root')
+    .toContain(note);
+  const f = (t.children || []).find((c) => c.name === folder);
+  expect((f?.children || []).map((c) => c.name), 'note leaked into the selected folder')
+    .not.toContain(note);
+});
+
+test('a file can be dragged out of a folder back to the root', async ({ page }) => {
+  test.setTimeout(120_000);
+  await login(page);
+
+  // Put a file inside a folder.
+  const folder = `outbound-${Date.now()}`;
+  await create(page, '+ Folder', folder);
+  const folderRow = page.locator('.tree-row', { hasText: folder }).first();
+  await expect(folderRow).toBeVisible({ timeout: 20_000 });
+  await folderRow.click();
+  const note = `escape-${Date.now()}.md`;
+  await create(page, '+ Note', note);
+  await expect(page.locator('.toolbar-path')).toContainText(note, { timeout: 20_000 });
+
+  // Drag it onto the root row.
+  const noteRow = page.locator('.tree-row', { hasText: note }).first();
+  await expect(noteRow).toBeVisible({ timeout: 20_000 });
+  await noteRow.dragTo(page.locator('.tree-root-row'));
+
+  await expect.poll(async () => {
+    const t = await readTree(page);
+    return (t.children || []).map((c) => c.name).includes(note);
+  }, { timeout: 20_000, message: 'file did not move to the root' }).toBe(true);
+
+  const after = await readTree(page);
+  const f = (after.children || []).find((c) => c.name === folder);
+  expect((f?.children || []).map((c) => c.name), 'file is still in the folder')
+    .not.toContain(note);
+});
