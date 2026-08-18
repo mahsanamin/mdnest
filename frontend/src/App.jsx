@@ -175,6 +175,34 @@ function App() {
   });
   const [savedContent, setSavedContent] = useState('');
   const saveTimerRef = useRef(null);
+  // The queued autosave itself, so navigating away can RUN it instead of
+  // dropping it. Cleared as soon as it executes.
+  const pendingSaveRef = useRef(null);
+  // An editor that debounces internally (the drawing canvas) registers a
+  // callback here so its unsaved scene can be drained before we navigate.
+  const editorFlushRef = useRef(null);
+  const registerEditorFlush = useCallback((fn) => { editorFlushRef.current = fn; }, []);
+  // Run a queued autosave now rather than discarding it.
+  //
+  // Opening another note used to just clearTimeout() the previous file's
+  // pending save, so every edit made inside the debounce window was silently
+  // lost. Drawings hit this on almost every switch: the canvas debounces its
+  // own changes for 500ms before calling onChange, so the app-level timer had
+  // barely started when the click landed on the next file.
+  //
+  // Callers must flush BEFORE loading the next note: etagRef is shared, so a
+  // save that ran afterwards would send the new file's etag with the old
+  // file's content.
+  const flushPendingSave = useCallback(async () => {
+    // First let the active editor hand over anything it is still debouncing.
+    // It calls handleContentChange synchronously, which queues the save we
+    // then run below — so this has to come first.
+    if (editorFlushRef.current) editorFlushRef.current();
+    if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
+    const pending = pendingSaveRef.current;
+    pendingSaveRef.current = null;
+    if (pending) await pending();
+  }, []);
   const [sidebarVisible, setSidebarVisible] = useState(false);
   // Bumped by the toolbar "reveal in tree" button; Sidebar watches it to expand
   // ancestors, scroll the active row into view, and flash it.
@@ -889,7 +917,9 @@ function App() {
   const openNoteDirect = useCallback(async (ns, path) => {
     // Board stays open across note navigation so the chosen view persists; the
     // board's own "open source note" action closes it explicitly.
-    if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
+    // Write out the file we're leaving before loading the next one — see
+    // flushPendingSave. Must happen before getNote(), which replaces etagRef.
+    await flushPendingSave();
     try {
       const { text, etag } = await getNote(ns, path);
       setCurrentPath(path);
@@ -903,12 +933,15 @@ function App() {
     } catch (e) {
       console.error('Failed to open note:', e);
     }
-  }, [restoreScrollPosition, commentsEnabled]);
+  }, [restoreScrollPosition, commentsEnabled, flushPendingSave]);
 
   const handleSelectNs = useCallback((ns) => {
     // Keep the task board open when switching workspace so the chosen view is
     // preserved — it re-scopes to the new namespace. Note navigation keeps it
     // open too (see openNote/openNoteDirect).
+    // Flush before any state changes so the queued save still lands on the
+    // file the user was actually editing.
+    flushPendingSave();
     setSelectedNs(ns);
     // Restore the last file the user had open in the namespace they're
     // switching TO. If they've never opened anything there (or whatever
@@ -930,15 +963,15 @@ function App() {
       setHash(ns, null);
     }
     setTree([]);
-    if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
-  }, [getLastPath]);
+  }, [getLastPath, flushPendingSave]);
 
   const openNote = useCallback(async (path) => {
     if (!selectedNs) return;
     // Board stays open across note navigation so the chosen view persists; the
     // board's own "open source note" action closes it explicitly.
-    // Clear any pending save timer from the previous file
-    if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
+    // Write out the previous file's pending edits instead of dropping them.
+    // Must happen before getNote(), which replaces the shared etagRef.
+    await flushPendingSave();
     try {
       const { text, etag } = await getNote(selectedNs, path);
       setCurrentPath(path);
@@ -962,7 +995,7 @@ function App() {
         console.error('Failed to open note:', e);
       }
     }
-  }, [selectedNs, restoreScrollPosition, commentsEnabled, setLastPath]);
+  }, [selectedNs, restoreScrollPosition, commentsEnabled, setLastPath, flushPendingSave]);
 
   const refreshComments = useCallback(() => {
     if (selectedNs && currentPath) {
@@ -981,7 +1014,12 @@ function App() {
     if (collabRef.current) collabRef.current.sendContent(newContent);
 
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    const timer = setTimeout(async () => {
+    // Named so flushPendingSave() can run it immediately when the user
+    // navigates away before the debounce elapses. It closes over the path,
+    // namespace and content of the edit that scheduled it, so running it late
+    // still writes to the right file.
+    const runSave = async () => {
+      pendingSaveRef.current = null;
       if (!currentPath || !selectedNs) return;
       // Safety against destructive autosave: never write empty content
       // when we know the file had content when we loaded it. This is the
@@ -1014,9 +1052,11 @@ function App() {
         // is closed and endSave returns nothing.)
         echoGate.endSave(saveToken).forEach(handleFileChanged);
       }
-    }, 800);
-    saveTimerRef.current = timer;
+    };
+    pendingSaveRef.current = runSave;
+    saveTimerRef.current = setTimeout(runSave, 800);
   }, [currentPath, selectedNs]);
+
 
   // Send cursor position to collab
   const handleCursorChange = useCallback((line, ch) => {
@@ -1639,6 +1679,7 @@ function App() {
                       onChange={canWriteCurrent ? handleContentChange : null}
                       readOnly={!canWriteCurrent}
                       libraries={appConfig?.excalidrawLibraries}
+                      registerFlush={registerEditorFlush}
                     />
                   </Suspense>
                   </ChunkErrorBoundary>

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { Excalidraw } from '@excalidraw/excalidraw';
 import '@excalidraw/excalidraw/index.css';
 import { parseExcalidraw, serializeExcalidraw } from '../excalidraw';
@@ -33,7 +33,7 @@ async function loadLibraries(urls) {
 // remounted per note via a key upstream), and scene changes are debounced and
 // serialized back to the same markdown, so save/history/comments all reuse the
 // normal note machinery. `libraries` are operator-provided default library URLs.
-export default function ExcalidrawEditor({ content, onChange, readOnly, docPath, libraries }) {
+export default function ExcalidrawEditor({ content, onChange, readOnly, docPath, libraries, registerFlush }) {
   const initialData = useMemo(() => {
     const libraryItems = libraries && libraries.length ? loadLibraries(libraries) : undefined;
     const scene = parseExcalidraw(content);
@@ -50,13 +50,49 @@ export default function ExcalidrawEditor({ content, onChange, readOnly, docPath,
   }, [docPath]);
 
   const timer = useRef(null);
+  // The most recent scene the debounce has not yet handed to onChange. Kept so
+  // the parent can drain it before navigating away.
+  const pending = useRef(null);
+
   const handleChange = useCallback((elements, appState, files) => {
     if (!onChange) return;
+    pending.current = { elements, appState, files };
     clearTimeout(timer.current);
     timer.current = setTimeout(() => {
-      onChange(serializeExcalidraw({ elements, appState, files }));
+      timer.current = null;
+      const scene = pending.current;
+      pending.current = null;
+      if (scene) onChange(serializeExcalidraw(scene));
     }, 500);
   }, [onChange]);
+
+  // Hand the debounced-but-unsaved scene to the parent on demand.
+  //
+  // Switching notes used to lose the last strokes: this component debounces
+  // for 500ms before calling onChange, and the app dropped the file's queued
+  // save on navigation — so a click on another file within that window threw
+  // the work away. A new drawing could stay 0 bytes on disk.
+  //
+  // The parent calls this BEFORE it changes currentPath. Flushing from the
+  // unmount cleanup instead would be actively harmful: by then the app has
+  // moved on, and this scene's markdown would be applied to the next file.
+  const flush = useCallback(() => {
+    if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+    const scene = pending.current;
+    pending.current = null;
+    if (scene && onChange) onChange(serializeExcalidraw(scene));
+  }, [onChange]);
+
+  useEffect(() => {
+    if (!registerFlush) return undefined;
+    registerFlush(flush);
+    return () => registerFlush(null);
+  }, [registerFlush, flush]);
+
+  // Drop a still-pending debounce on unmount. Without this the stray timer
+  // fires after the app has opened another note and pushes this drawing's
+  // content at it.
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 
   return (
     <div className="excalidraw-host">
