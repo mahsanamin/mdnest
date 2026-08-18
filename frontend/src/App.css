@@ -5456,3 +5456,28 @@ pre:hover .code-copy-btn {
   color: #89b4fa;
   font-weight: 600;
 }
+
+/* Light/dark switch for the drawing canvas. Bottom-right is the one corner
+   Excalidraw's own UI leaves free (menu top-left, tools top-centre, library
+   top-right, zoom bottom-left). */
+.excalidraw-theme-toggle {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid #313244;
+  border-radius: 8px;
+  background: #181825;
+  color: #cdd6f4;
+  cursor: pointer;
+}
+.excalidraw-theme-toggle:hover {
+  background: #313244;
+  color: #89b4fa;
+}
