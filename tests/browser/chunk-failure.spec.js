@@ -57,7 +57,9 @@ test('a failed task-board chunk leaves the rest of the app usable', async ({ pag
   await breakChunk(page, '**/assets/TaskBoard-*.js*');
 
   const boardBtn = page.locator('.sidebar-board-btn');
-  if (!(await boardBtn.count())) test.skip(true, 'task board disabled (ENABLE_TASK_BOARD)');
+  const available = await boardBtn.waitFor({ state: 'visible', timeout: 15_000 })
+    .then(() => true).catch(() => false);
+  if (!available) test.skip(true, 'task board disabled (ENABLE_TASK_BOARD)');
   await boardBtn.first().click();
 
   await expect(page.locator('.chunk-error')).toBeVisible({ timeout: 15_000 });
