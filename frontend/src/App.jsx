@@ -317,18 +317,29 @@ function App() {
   // not registered at all, so the button must not be offered.
   const taskBoardEnabled = !!appConfig?.taskBoard;
 
+  // "Basic" on a drawing shows the file's markdown source rather than the
+  // canvas. Per-note and not persisted: a drawing should open as a drawing, so
+  // this resets whenever the open note changes (see the effect below).
+  const [drawingSource, setDrawingSource] = useState(false);
+
   // ENABLE_MARP on the backend. When on, a note whose frontmatter says
   // `marp: true` is shown as a slide deck in the Live view instead of the editor.
   const marpEnabled = !!appConfig?.marp;
   const marpActive = marpEnabled && isMarpDoc(content);
   // Marp decks must never go through the Live/WYSIWYG editor — it reformats the
   // markdown and corrupts the frontmatter and slide breaks. Force Basic (raw)
-  // editing for them, regardless of the user's editor-mode preference.
-  const editorModeForNote = effectiveEditorMode(editorMode, marpActive);
+  // editing for them, regardless of the user's editor-mode preference. A
+  // drawing opened as source is raw scene JSON and carries the same hazard.
+  const editorModeForNote = effectiveEditorMode(editorMode, marpActive || drawingSource);
   // `.excalidraw.md` files open in the drawing editor (opt-in ENABLE_EXCALIDRAW),
   // bypassing the text editor/preview entirely.
   const excalidrawEnabled = !!appConfig?.excalidraw;
-  const excalidrawActive = excalidrawEnabled && isExcalidrawDoc(currentPath);
+  // A .excalidraw.md is a real markdown file, so "Basic" has to mean something
+  // on it: it shows the underlying source (the scene JSON plus the mirrored
+  // text elements) instead of the canvas. Previously the canvas short-circuited
+  // the whole editor branch and the Basic/Live buttons were simply inert.
+  const isDrawingDoc = excalidrawEnabled && isExcalidrawDoc(currentPath);
+  const excalidrawActive = isDrawingDoc && !drawingSource;
   // Editor scroll ratio (0..1), mirrored to the Marp deck's current slide in
   // split view. The deck is paginated (not scrollable), so unlike the plain
   // Preview it can't share a scrollTop — we map the ratio to a slide instead.
@@ -344,6 +355,10 @@ function App() {
   // with the fresh scene — otherwise a drawing would keep the stale scene and
   // the next stroke would silently overwrite the remote change (LWW).
   const [drawingReloadKey, setDrawingReloadKey] = useState(0);
+
+  // Source view is a per-file choice, not a preference: a drawing always opens
+  // as a drawing, even if the last one was left showing its markdown.
+  useEffect(() => { setDrawingSource(false); }, [selectedNs, currentPath]);
   // restoreBanner is shown when another user used the History modal to
   // restore an older version of the current file. It's deliberately a
   // separate state from conflictBanner because a restore is an
@@ -1566,6 +1581,9 @@ function App() {
           }}
           editorMode={editorModeForNote}
           marpLocked={marpActive}
+          drawingDoc={isDrawingDoc}
+          drawingSource={drawingSource}
+          onDrawingSourceChange={setDrawingSource}
           boardActive={showTaskBoard}
           onEditorModeChange={(mode) => {
             // Marp decks are locked to Basic — ignore attempts to switch to the
