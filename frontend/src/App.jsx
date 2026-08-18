@@ -8,20 +8,22 @@ import Toolbar from './components/Toolbar.jsx';
 import { lazy, Suspense } from 'react';
 import Editor from './components/Editor.jsx';
 import EditorErrorBoundary from './components/EditorErrorBoundary.jsx';
+import ChunkErrorBoundary from './components/ChunkErrorBoundary.jsx';
+import { loadWithRetry } from './lazyWithRetry.js';
 // Live (rich) editor — Crepe-based since v3.10.0. Lazy-loaded so the
 // ~217 KB-gzipped chunk only downloads when the user actually opens
 // Live mode.
-const LiveEditor = lazy(() => import('./components/LiveEditorCrepe.jsx'));
+const LiveEditor = lazy(() => loadWithRetry(() => import('./components/LiveEditorCrepe.jsx')));
 // Lazy like the Live editor: the board pulls in @dnd-kit and its own CSS, and
 // it is off by default (ENABLE_TASK_BOARD), so an install that doesn't use it
 // must not carry the chunk on first paint.
-const TaskBoard = lazy(() => import('./components/TaskBoard.jsx'));
+const TaskBoard = lazy(() => loadWithRetry(() => import('./components/TaskBoard.jsx')));
 // Lazy Marp slide-deck renderer: pulls in the Marp engine, off by default
 // (ENABLE_MARP), so an install that doesn't use it never carries the chunk.
-const MarpDeck = lazy(() => import('./components/MarpDeck.jsx'));
+const MarpDeck = lazy(() => loadWithRetry(() => import('./components/MarpDeck.jsx')));
 // Lazy Excalidraw drawing editor: pulls in the (large) Excalidraw bundle, off
 // by default (ENABLE_EXCALIDRAW), so notes-only installs never carry the chunk.
-const ExcalidrawEditor = lazy(() => import('./components/ExcalidrawEditor.jsx'));
+const ExcalidrawEditor = lazy(() => loadWithRetry(() => import('./components/ExcalidrawEditor.jsx')));
 import Preview from './components/Preview.jsx';
 import ContextMenu from './components/ContextMenu.jsx';
 import Settings from './components/Settings.jsx';
@@ -1601,6 +1603,12 @@ function App() {
         )}
         <div className="split-view">
           {showTaskBoard && taskBoardEnabled && selectedNs ? (
+            <ChunkErrorBoundary
+              label="the task board"
+              resetKey={selectedNs}
+              onDismiss={() => setShowTaskBoard(false)}
+              dismissLabel="Close board"
+            >
             <Suspense fallback={<div className="editor-loading">Loading task board...</div>}>
               <TaskBoard
                 ns={selectedNs}
@@ -1612,12 +1620,17 @@ function App() {
                 onClose={() => setShowTaskBoard(false)}
               />
             </Suspense>
+            </ChunkErrorBoundary>
           ) : currentPath ? (
             excalidrawActive ? (
               <div className="excalidraw-wrapper">
                 {content === null ? (
                   <div className="editor-loading">Loading drawing…</div>
                 ) : (
+                  <ChunkErrorBoundary
+                    label="the drawing editor"
+                    resetKey={`${selectedNs}/${currentPath}`}
+                  >
                   <Suspense fallback={<div className="editor-loading">Loading drawing editor…</div>}>
                     <ExcalidrawEditor
                       key={`${selectedNs}/${currentPath}#${drawingReloadKey}`}
@@ -1628,6 +1641,7 @@ function App() {
                       libraries={appConfig?.excalidrawLibraries}
                     />
                   </Suspense>
+                  </ChunkErrorBoundary>
                 )}
               </div>
             ) : (
@@ -1735,9 +1749,11 @@ function App() {
                   style={!isMobile && viewMode === 'split' ? { flex: `0 0 ${100 - splitRatio}%` } : undefined}
                 >
                   {marpEnabled && isMarpDoc(content) ? (
-                    <Suspense fallback={<div className="editor-loading">Loading slides…</div>}>
-                      <MarpDeck content={content || ''} title={currentPath} scrollPct={viewMode === 'split' && !isMobile ? marpScrollPct : undefined} />
-                    </Suspense>
+                    <ChunkErrorBoundary label="the slide renderer" resetKey={`${selectedNs}/${currentPath}`}>
+                      <Suspense fallback={<div className="editor-loading">Loading slides…</div>}>
+                        <MarpDeck content={content || ''} title={currentPath} scrollPct={viewMode === 'split' && !isMobile ? marpScrollPct : undefined} />
+                      </Suspense>
+                    </ChunkErrorBoundary>
                   ) : (
                     <Preview content={content || ''} currentPath={currentPath} ns={selectedNs} onCheckboxToggle={canWriteCurrent ? handleCheckboxToggle : null} pathIndex={wikiIndex} onWikiLink={openNote} />
                   )}

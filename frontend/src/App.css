@@ -5372,3 +5372,46 @@ pre:hover .code-copy-btn {
   padding-top: 12px;
   border-top: 1px dashed #313244;
 }
+
+/* Fallback shown when a code-split chunk fails to download. Sized and
+   coloured like the rest of the editor surface so it reads as part of the
+   app rather than a browser error page. */
+.chunk-error {
+  margin: auto;
+  padding: 2rem;
+  max-width: 32rem;
+  text-align: center;
+  color: #cdd6f4;
+}
+.chunk-error h3 {
+  margin: 0 0 0.75rem;
+  color: #f38ba8;
+  font-size: 1.05rem;
+}
+.chunk-error p {
+  margin: 0 0 1.25rem;
+  color: #a6adc8;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+.chunk-error-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+}
+.chunk-error-actions button {
+  padding: 0.45rem 0.9rem;
+  border: 1px solid #45475a;
+  border-radius: 4px;
+  background: #89b4fa;
+  color: #1e1e2e;
+  font-weight: 600;
+  cursor: pointer;
+}
+.chunk-error-actions button.secondary {
+  background: #313244;
+  color: #cdd6f4;
+}
+.chunk-error-actions button:hover {
+  filter: brightness(1.1);
+}
