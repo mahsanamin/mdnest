@@ -30,7 +30,9 @@ async function openSeedNote(page) {
 
 test('login loads the workspace and its tree', async ({ page }) => {
   await login(page);
-  await expect(page.getByText('testing_workspace')).toBeVisible();
+  // Target the namespace label specifically — a bare text match also picks up
+  // any other element that happens to contain the namespace name.
+  await expect(page.locator('.ns-label, .ns-select')).toContainText('testing_workspace');
   await expect(page.locator('.tree-label', { hasText: SEED_FILE })).toBeVisible({ timeout: 20_000 });
 });
 

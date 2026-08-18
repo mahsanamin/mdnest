@@ -5372,3 +5372,131 @@ pre:hover .code-copy-btn {
   padding-top: 12px;
   border-top: 1px dashed #313244;
 }
+
+/* Fallback shown when a code-split chunk fails to download. Sized and
+   coloured like the rest of the editor surface so it reads as part of the
+   app rather than a browser error page. */
+.chunk-error {
+  margin: auto;
+  padding: 2rem;
+  max-width: 32rem;
+  text-align: center;
+  color: #cdd6f4;
+}
+.chunk-error h3 {
+  margin: 0 0 0.75rem;
+  color: #f38ba8;
+  font-size: 1.05rem;
+}
+.chunk-error p {
+  margin: 0 0 1.25rem;
+  color: #a6adc8;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+.chunk-error-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+}
+.chunk-error-actions button {
+  padding: 0.45rem 0.9rem;
+  border: 1px solid #45475a;
+  border-radius: 4px;
+  background: #89b4fa;
+  color: #1e1e2e;
+  font-weight: 600;
+  cursor: pointer;
+}
+.chunk-error-actions button.secondary {
+  background: #313244;
+  color: #cdd6f4;
+}
+.chunk-error-actions button:hover {
+  filter: brightness(1.1);
+}
+
+/* Task board entry — a namespace-level destination, so it sits with the
+   namespace and its tree rather than in the toolbar's editor-mode control. */
+.sidebar-board {
+  padding: 0 0.5rem 0.4rem;
+  border-bottom: 1px solid #313244;
+  margin-bottom: 0.35rem;
+}
+.sidebar-board-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  padding: 0.4rem 0.5rem;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #cdd6f4;
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: pointer;
+}
+.sidebar-board-btn:hover {
+  background: #313244;
+}
+.sidebar-board-btn.active {
+  background: #45475a;
+  color: #89b4fa;
+}
+.sidebar-board-btn svg {
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+/* The folder new notes/drawings/folders will be created in. Deliberately
+   quieter than .active (which marks the open file) — it's a target, not a
+   selection. */
+.tree-row.folder-target > .tree-label {
+  color: #89b4fa;
+  font-weight: 600;
+}
+
+/* Light/dark switch for the drawing canvas. Lives in Excalidraw's Footer slot
+   (beside the zoom controls) rather than floating over the canvas — a
+   free-floating button has to guess at empty space, and the first attempt
+   landed on top of their help button. Sized to match their footer buttons. */
+.excalidraw-theme-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin-left: 8px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: var(--island-bg-color, #181825);
+  color: var(--icon-fill-color, #cdd6f4);
+  box-shadow: var(--shadow-island);
+  cursor: pointer;
+}
+.excalidraw-theme-toggle:hover {
+  background: var(--button-hover-bg, #313244);
+}
+
+/* The namespace root as a tree row: the create target and drop target for the
+   top level. Without it, selecting a folder was a one-way trip — nothing aimed
+   the create buttons back at the root, and the only place to drop a file to
+   move it to the top level was blank space under the tree, which doesn't exist
+   once the tree fills the panel. */
+.tree-root-row {
+  border-bottom: 1px solid #313244;
+  margin-bottom: 2px;
+  opacity: 0.9;
+}
+.tree-root-row .tree-label {
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+  text-transform: lowercase;
+  color: #a6adc8;
+}
+.tree-root-row.folder-target .tree-label {
+  color: #89b4fa;
+  font-weight: 600;
+}

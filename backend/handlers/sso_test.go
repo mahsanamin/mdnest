@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lib/pq"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/mdnest/mdnest/backend/store"
 )
 
@@ -146,7 +146,7 @@ func newFakeUserStore() *fakeUserStore {
 
 func (f *fakeUserStore) CreateUser(email, username, password, role string, invitedBy *int) (*store.User, error) {
 	if f.taken[username] {
-		return nil, &pq.Error{Code: "23505", Message: "duplicate key value violates unique constraint \"users_username_key\""}
+		return nil, &pgconn.PgError{Code: "23505", Message: "duplicate key value violates unique constraint \"users_username_key\""}
 	}
 	f.taken[username] = true
 	f.nextID++

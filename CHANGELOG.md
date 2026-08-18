@@ -4,6 +4,104 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## Unreleased
+
+_Nothing yet — `develop` is at `4.2.2-dev`._
+
+---
+
+## v4.2.1 — Nothing silently disappears
+
+A bug-fix release with one theme: mdnest should never lose your work or hide it
+somewhere you can't reach. Every fix here is something that failed quietly —
+no error, no indication anything had gone wrong.
+
+### Fixed
+
+- **A drawing no longer loses its last strokes when you switch files.** Opening
+  another note cancelled the previous file's queued autosave outright, so any
+  edit made inside the debounce window was discarded. Drawings hit this on
+  almost every switch: the canvas debounces its own scene for 500ms before
+  handing it to the app, and you stop drawing at exactly the moment you reach
+  for the next file — a newly created drawing could stay 0 bytes on disk. The
+  pending save is now flushed rather than dropped, before the next note loads
+  (the etag is shared, so the order matters). The drawing canvas hands over its
+  own debounced scene at the same point, and a stray post-unmount timer that
+  could push one file's content at another is cleared.
+- **A failed code-split chunk no longer blanks the whole app.** A lazily-loaded
+  editor whose chunk didn't download threw during render, reached React's root
+  and unmounted everything — no sidebar, no toolbar, no way to open another
+  note. Only the Live editor was guarded; drawings, the task board and the slide
+  renderer had a bare `<Suspense>`, which handles a *pending* import but not a
+  *rejected* one. They now show an error with a way out, and a failed import is
+  retried — the last attempt with a cache-busting query, which recovers from a
+  proxy that cached an error response for an immutable asset URL.
+- **Dropping a file into an open folder puts it in that folder.** Only the
+  folder's own row accepted a drop; its expanded contents area had no handlers,
+  so a drop there bubbled up and was treated as "move to the namespace root" —
+  aiming carefully *inside* a folder moved the file out of it. Dropping onto a
+  file did nothing at all, because a file row swallowed the event before
+  bailing.
+- **The task board scrolls sideways instead of hiding columns.** With enough
+  columns the right-hand ones became unreachable, with no scrollbar. The board
+  panel had no `min-width`, so it refused to shrink below the intrinsic width of
+  its columns, grew past the viewport, and was clipped by its container — the
+  scroll container was never smaller than its own contents.
+
+### Changed
+
+- **"+ Note", "+ Drawing" and "+ Folder" create where you are.** They always
+  created at the namespace root, however deep in the tree you were. Clicking a
+  folder now aims them at it — shown in the tree and named in each button's
+  tooltip, since the destination was otherwise invisible — and opening a file
+  hands the target back to that file's folder.
+- **"Basic" now does something on a drawing.** A `.excalidraw.md` is a real
+  markdown file, but the canvas short-circuited the editor entirely and the
+  Basic/Live buttons sat there inert. The toggle now offers the two views a
+  drawing actually has: the canvas, or the markdown behind it. Live is
+  deliberately not offered — the rich editor would reformat the scene JSON, the
+  same hazard that already forces Marp decks to raw editing.
+- **Drawings open in dark mode**, matching the rest of the app, with a toggle to
+  light. Theme is a viewing preference: it is stored per browser and never
+  written into the note, so the file stays portable and two people can view one
+  drawing differently.
+- **The task board moved out of the toolbar's Basic/Live control into the
+  sidebar.** Those are two different things — Basic/Live is how you edit the
+  open file, the board is a namespace-level destination — and sharing one
+  segmented control made all three read as the same kind of choice.
+
+### Security
+
+- **Replaced `github.com/lib/pq` with `pgx`.** govulncheck reports seven
+  advisories against lib/pq (GO-2026-6166, 6168, 6170–6173) — a malformed-frame
+  panic, unbounded SCRAM iteration, and GSS authentication completing without
+  mutual proof. All are `Fixed in: N/A`: v1.12.3 is affected too, so there is no
+  patched release to move to, and lib/pq is in maintenance mode. Only the
+  Postgres driver changes; the connection string, the SQL, and single mode
+  (which never opens a database) are untouched. `golang.org/x/text` is bumped to
+  v0.39.0 to clear the one transitive advisory pgx introduced. The backend now
+  scans clean.
+
+### Fixed (continued)
+
+- **The namespace root is a row in the tree.** Aiming the create buttons at the
+  selected folder (above) made selecting one a one-way trip — nothing pointed
+  them back at the top level — and left the root with no drop target beyond
+  whatever blank space remained under the tree, which is none once the tree
+  fills the panel. Click the root row to create at the top level, or drop onto
+  it to move something there.
+
+### Testing
+
+- Browser regression specs for every fix above, each written to fail on the
+  previous build.
+- The E2E stack now enables drawings (`ENABLE_EXCALIDRAW`). It only set
+  `ENABLE_TASK_BOARD`, so every drawing spec skipped — including the one pinning
+  the data-loss bug. A regression test that never runs in the gate is not a
+  gate.
+
+---
+
 ## v4.2.0 — Drawings, access groups, and per-note authorship
 
 The largest release since v4.0.0, and almost all of it is contributed work. Three
