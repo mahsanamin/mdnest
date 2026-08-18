@@ -5448,3 +5448,11 @@ pre:hover .code-copy-btn {
   flex-shrink: 0;
   opacity: 0.85;
 }
+
+/* The folder new notes/drawings/folders will be created in. Deliberately
+   quieter than .active (which marks the open file) — it's a target, not a
+   selection. */
+.tree-row.folder-target > .tree-label {
+  color: #89b4fa;
+  font-weight: 600;
+}

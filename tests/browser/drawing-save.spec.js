@@ -56,7 +56,13 @@ test('a drawing survives switching to another file immediately after drawing', a
   await page.mouse.up();
 
   // Immediately switch away — this is the race that used to lose the work.
-  const other = page.locator('.tree-label').filter({ hasNot: page.locator(`text=${name}`) }).first();
+  // Must be a FILE: clicking a folder only expands it, so the app would never
+  // navigate and the test would pass or fail for the wrong reason.
+  const other = page.locator('.tree-row')
+    .filter({ has: page.locator('.tree-icon-svg.file') })
+    .filter({ hasNotText: name })
+    .first();
+  await expect(other).toBeVisible({ timeout: 20_000 });
   await other.click();
   await expect(page.locator('.toolbar-path')).not.toContainText(name, { timeout: 20_000 });
 

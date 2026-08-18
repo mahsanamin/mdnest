@@ -91,6 +91,8 @@ function Sidebar({
   onNewFolder,
   onOpenBoard,
   boardActive,
+  pickedFolder,
+  onPickFolder,
   onRefreshTree,
   isAdmin,
   width,
@@ -335,6 +337,14 @@ function Sidebar({
 
   const showContentResults = contentResults && contentResults.length > 0 && searchQuery.trim().length >= 2;
 
+  // Say where the create buttons will put things. The destination is not
+  // otherwise visible, which is what made "+ Note" landing at the root while a
+  // folder was open feel arbitrary.
+  const createDir = pickedFolder !== null
+    ? pickedFolder
+    : (currentPath && currentPath.includes('/') ? currentPath.slice(0, currentPath.lastIndexOf('/')) : '');
+  const createHint = createDir ? `in ${createDir}/` : 'in the namespace root';
+
   return (
     <>
       {visible && <div className="sidebar-backdrop" onClick={onClose} />}
@@ -470,9 +480,9 @@ function Sidebar({
         </div>
         {(onNewNote || onNewFolder) && (
           <div className="sidebar-actions">
-            {onNewNote && <button className="sidebar-action-btn" onClick={onNewNote}>+ Note</button>}
-            {onNewDrawing && <button className="sidebar-action-btn" onClick={onNewDrawing}>+ Drawing</button>}
-            {onNewFolder && <button className="sidebar-action-btn" onClick={onNewFolder}>+ Folder</button>}
+            {onNewNote && <button className="sidebar-action-btn" onClick={onNewNote} title={`New note ${createHint}`}>+ Note</button>}
+            {onNewDrawing && <button className="sidebar-action-btn" onClick={onNewDrawing} title={`New drawing ${createHint}`}>+ Drawing</button>}
+            {onNewFolder && <button className="sidebar-action-btn" onClick={onNewFolder} title={`New folder ${createHint}`}>+ Folder</button>}
           </div>
         )}
 
@@ -543,6 +553,8 @@ function Sidebar({
               expandedPaths={expandedPaths}
               onToggleExpand={toggleExpand}
               forceExpand={!!searchQuery.trim()}
+              pickedFolder={pickedFolder}
+              onPickFolder={onPickFolder}
             />
           ))}
           {searchQuery.trim() && filteredTree.length === 0 && !showContentResults && !searching && (
