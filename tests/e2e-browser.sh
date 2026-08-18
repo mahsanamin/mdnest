@@ -66,6 +66,7 @@ docker run -d --name "$BE" --network "$NET" --network-alias backend \
   -e NOTES_DIR=/notes \
   -e FRONTEND_ORIGIN=http://localhost \
   -e ENABLE_TASK_BOARD=true \
+  -e ENABLE_EXCALIDRAW=true \
   -v "$NOTES_DIR:/notes" "$BE_IMAGE" >/dev/null
 
 log "Starting frontend (nginx) on an ephemeral host port"
