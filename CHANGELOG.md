@@ -10,6 +10,22 @@ _`develop` is at `4.2.2-dev`._
 
 ### Fixed
 
+- **The task scan is cached, so the board stops re-reading every note.** Every
+  board request read and parsed every note in the namespace. Measured on 420
+  notes holding ~12,000 checkboxes: walking the tree costs ~6 ms while reading
+  and parsing costs ~100 ms, so the parse is now remembered and only the walk
+  repeats — a warm request drops from ~130 ms to ~20 ms, and "All workspaces"
+  to ~18 ms. It cannot go stale on its own: every request still walks the
+  namespace and a cached answer is used only when the file set, sizes, newest
+  timestamp and column layout are all unchanged, so an edit from the API, the
+  CLI, git-sync or an editor on the host invalidates it without being told.
+  Refresh sends `refresh=1` and re-scans regardless. The cache lives in memory,
+  not in a file under your notes — a cache file there would be synced by
+  git-sync and destroyed by a rebuild.
+- **"All workspaces" asks before it scans.** It reads every note in every
+  workspace you can see, which is the one board action that can visibly pause
+  on a large install. It now explains that before starting, with a *Don't show
+  this again* that is remembered.
 - **Presence no longer flickers, and no longer moves your work.** With more
   than one person on a note, collaborators appeared and disappeared repeatedly.
   Two separate faults. Departures were applied the instant they arrived, so any
