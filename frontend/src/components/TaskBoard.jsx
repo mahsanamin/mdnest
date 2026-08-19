@@ -319,7 +319,15 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
     () => buildRelationLookup(tasks.map((t) => ({ ref: t.ref, title: t.text, task: t }))),
     [tasks],
   );
-  const resolveRelation = useCallback((value) => resolveTask(relationLookup, value), [relationLookup]);
+  // Identity-stable on purpose. The lookup itself is rebuilt whenever `tasks`
+  // changes — it has to be, it resolves against them — but this function is
+  // handed to every (memoised) card, so tying its identity to the lookup meant
+  // that ticking one checkbox re-rendered every card on the board. Reading the
+  // latest lookup through a ref keeps the behaviour current while the identity
+  // stays put.
+  const relationLookupRef = useRef(relationLookup);
+  relationLookupRef.current = relationLookup;
+  const resolveRelation = useCallback((value) => resolveTask(relationLookupRef.current, value), []);
   // {ref, title} pairs so the relations editor can search/pick a task by its
   // stable ref or its title, then store the ref (comma-free, rename-proof).
   const taskRefs = useMemo(() => {
