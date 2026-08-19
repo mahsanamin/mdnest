@@ -341,6 +341,54 @@
   background: var(--surface-3);
 }
 
+/* Theme toggle. Icon-only like the comments button next to it, so it reads as
+   part of that trailing group rather than as another labelled action. */
+.toolbar-theme {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.35rem 0.5rem;
+  flex-shrink: 0;
+}
+
+/* Appearance tab: one row per choice, because the third option ("match
+   system") has an explanation and does not fit a two-state switch. */
+.theme-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+}
+.theme-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  cursor: pointer;
+  text-align: left;
+}
+.theme-option:hover {
+  background: var(--surface-3);
+}
+.theme-option.active {
+  border-color: var(--accent);
+  background: var(--accent-wash);
+}
+.theme-option-label {
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+.theme-option-hint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
 /* Narrow / mobile: let the top toolbar wrap so the editor-mode (Basic/Live/
    Board) and view-mode (Editor/Split/Preview) button groups never overlap.
    The file path drops onto its own line below the controls. */

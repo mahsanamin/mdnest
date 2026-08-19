@@ -538,7 +538,7 @@ func main() {
 	} else {
 		preferenceStore = store.NewFilePreferenceStore(secretsDir)
 	}
-	preferencesHandler := handlers.NewPreferencesHandler(preferenceStore)
+	preferencesHandler := handlers.NewPreferencesHandler(preferenceStore, multiMode)
 	// Comments require both a real user identity and the WebSocket hub for
 	// live refresh on other clients, so we gate on enableCollab (which
 	// itself implies multiMode). In single mode or collab-off deployments

@@ -154,3 +154,123 @@
 
   color-scheme: dark;
 }
+
+/* ---------------------------------------------------------------------------
+   Light theme — Catppuccin Latte
+   ---------------------------------------------------------------------------
+   Applied by [data-theme="light"] on <html>, set from theme.js. There is no
+   prefers-color-scheme block here on purpose: "follow the OS" is resolved in
+   JS, because the OS is only ONE of four inputs (user preference, then the
+   operator's DEFAULT_THEME, then auto, then the OS). A media query would
+   quietly outrank a user who chose dark on a light desktop.
+
+   Most semantics just re-point at the Latte primitive of the same name. The
+   ones that do NOT are the interesting part, and each is called out below.
+
+   Five accent hues deviate from stock Latte, measured rather than eyeballed.
+   Latte tunes its accents to sit on white as ACCENTS — icons, fills, large
+   type — but mdnest uses them overwhelmingly as body text (--warning appears
+   as `color` 8 times and as `background` twice). Stock Latte yellow on the
+   base measures 2.31:1 and green 2.96:1, both well under the 4.5:1 AA floor
+   and unreadable at 13px. Each is darkened to the first step that clears AA
+   both as text on the page AND under white, since these tokens double as
+   filled-badge backgrounds. Dark mode is untouched — Mocha already measures
+   7:1 or better on every one.
+   --------------------------------------------------------------------------- */
+
+:root[data-theme="light"] {
+  --ctp-base: #eff1f5;
+  --ctp-mantle: #e6e9ef;
+  --ctp-crust: #dce0e8;
+  --ctp-surface0: #ccd0da;
+  --ctp-surface1: #bcc0cc;
+  --ctp-surface2: #acb0be;
+  --ctp-overlay0: #9ca0b0;
+  --ctp-overlay1: #8c8fa1;
+  --ctp-overlay2: #7c7f93;
+  --ctp-subtext0: #6c6f85;
+  --ctp-subtext1: #5c5f77;
+  --ctp-text: #4c4f69;
+  --ctp-blue: #1550c4;      /* Latte #1e66f5 -> 4.34:1 on base, 3.18 on a raised surface */
+  --ctp-red: #d20f39;       /* 4.80:1 — stock Latte already clears AA */
+  --ctp-green: #2f7d20;     /* Latte #40a02b -> 2.96:1 */
+  --ctp-yellow: #8f5606;    /* Latte #df8e1d -> 2.31:1 */
+  --ctp-peach: #c2410c;     /* Latte #fe640b -> 2.64:1 */
+  --ctp-sapphire: #0e7490;  /* Latte #209fb5 -> 2.78:1 */
+  --ctp-mauve: #8839ef;     /* 4.79:1 — stock Latte already clears AA */
+  --ctp-lavender: #7287fd;
+  --ctp-pink: #ea76cb;
+
+  /* Surfaces. In Latte the page is the LIGHTEST value and each raised layer
+     gets darker, the exact inverse of Mocha — but the token names mean the
+     same thing in both, so nothing that uses them has to know. */
+  --surface-tint: #e9ebf1;
+  --surface-drop: #dfe3ec;
+
+  /* Borders diverge from surfaces here, which is the reason the semantic
+     layer exists. In Mocha --border and --surface-2 are both surface0: a
+     border and a raised panel can share a value because both read as
+     "lighter than the page". In Latte a border must be DARKER than the
+     surface it encloses, so it moves down a step while --surface-2 does not.
+     Point these at the same primitive and every panel edge disappears. */
+  --border: var(--ctp-surface1);
+  --border-strong: var(--ctp-surface2);
+  --border-subtle: #dfe2ea;
+
+  /* Text-on-accent. --text-inverse is the label on a filled blue button. By
+     value it was the dark page background; by role it is "whatever is legible
+     on a saturated accent", and Latte's accents are dark enough that the
+     answer is still near-white. This is the token that would have produced
+     white-on-pale-blue if the palette had been swapped by value. */
+  --text-inverse: #ffffff;
+  --text-inverse-deep: #ffffff;
+
+  /* Muted text has to move further than a straight primitive swap gives. Latte
+     overlay0 (#9ca0b0) on the base reaches only ~2.3:1, under the 4.5:1 AA
+     floor for body text, so the muted ramp shifts one step darker. */
+  --text-secondary: var(--ctp-subtext1);  /* 5.53:1 — subtext0 gives 4.37 */
+  --text-muted: #64677d;                  /* 4.92:1 on base, 4.57:1 on surface */
+  --text-faint: var(--ctp-subtext0);      /* overlay2 gives only 3.49:1 */
+  --text-fainter: var(--ctp-subtext0);
+  --text-dim: var(--ctp-overlay1);
+  --text-faintest: var(--ctp-overlay1);
+
+  /* Washes need more alpha on a light ground: the same 13% tint that reads
+     clearly over #1e1e2e is nearly invisible over #eff1f5. */
+  --accent-wash: #1550c41f;
+  --accent-wash-2: #1550c42e;
+  --accent-wash-3: #1550c43d;
+  --accent-wash-4: #1550c44d;
+  --danger-wash-0: #d20f3914;
+  --danger-wash: #d20f391f;
+  --danger-wash-3: #d20f393d;
+  --danger-wash-4: #d20f394d;
+  --success-wash: #2f7d201f;
+  --success-wash-3: #2f7d203d;
+  --warning-wash: #8f56061f;
+  --warning-wash-3: #8f56063d;
+  --orange-wash: #c2410c1f;
+  --orange-wash-3: #c2410c3d;
+
+  /* Status tints: solid backgrounds, so they invert rather than re-alpha. */
+  --danger-tint: #fce4e8;
+  --danger-tint-text: #8c0f28;
+  --danger-tint-strong: #f7cdd6;
+
+  /* Search highlight stays a bright yellow in both themes — it is a transient
+     marker that has to out-shout everything else on screen — but the pulse
+     backgrounds flip from dark-olive to pale-yellow so the animation reads. */
+  --highlight: #fde047;
+  --highlight-ring: #d97706;
+  --highlight-soft: #fef9c3;
+  --highlight-pulse-a: #fef08a;
+  --highlight-pulse-b: #fefce8;
+
+  /* Scrims stay black — a dim behind a modal is black on any ground — but
+     shadows lighten, because a shadow tuned for a dark UI reads as a smudge
+     on white. */
+  --shadow-color: rgba(0, 0, 0, 0.10);
+  --shadow-color-strong: rgba(0, 0, 0, 0.16);
+
+  color-scheme: light;
+}

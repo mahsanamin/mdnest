@@ -23,7 +23,7 @@ func req(t *testing.T, method, body string, userID int) *httptest.ResponseRecord
 	}
 	r = middleware.WithUser(r, &middleware.UserContext{ID: userID, Username: "u", Role: "collaborator"})
 	w := httptest.NewRecorder()
-	NewPreferencesHandler(store.NewFilePreferenceStore(t.TempDir())).Handle(w, r)
+	NewPreferencesHandler(store.NewFilePreferenceStore(t.TempDir()), true).Handle(w, r)
 	return w
 }
 
@@ -38,7 +38,7 @@ func handlerOn(s store.PreferenceStore, method, body string, userID int) *httpte
 	}
 	r = middleware.WithUser(r, &middleware.UserContext{ID: userID, Username: "u", Role: "collaborator"})
 	w := httptest.NewRecorder()
-	NewPreferencesHandler(s).Handle(w, r)
+	NewPreferencesHandler(s, true).Handle(w, r)
 	return w
 }
 
@@ -199,5 +199,43 @@ func TestConfigDefaultThemeAlwaysPresent(t *testing.T) {
 	json.Unmarshal(w.Body.Bytes(), &got)
 	if got["defaultTheme"] != "auto" {
 		t.Fatalf("unset DEFAULT_THEME should serve auto, got %v", got["defaultTheme"])
+	}
+}
+
+// Single mode reaches this handler with NO user context: the auth middleware
+// only attaches one in multi mode, because single mode has no user identities
+// to attach. Every test above injects a context by hand, so all of them passed
+// while every real single-mode request failed with a 500 and no preference was
+// ever stored. This is the test that would have caught it — it calls the
+// handler the way the middleware actually does.
+func TestPreferencesWorkWithoutAUserContext(t *testing.T) {
+	s := store.NewFilePreferenceStore(t.TempDir())
+	h := NewPreferencesHandler(s, false) // single mode
+
+	w := httptest.NewRecorder()
+	h.Handle(w, httptest.NewRequest(http.MethodPatch, "/api/preferences",
+		strings.NewReader(`{"theme":"light"}`)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("single-mode PATCH got %d, want 200 (%s)", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	h.Handle(w, httptest.NewRequest(http.MethodGet, "/api/preferences", nil))
+	var got map[string]string
+	json.Unmarshal(w.Body.Bytes(), &got)
+	if got["theme"] != "light" {
+		t.Fatalf("single-mode preference did not persist: %v", got)
+	}
+}
+
+// In multi mode a missing context means an authenticated API token the
+// resolver could not map to a user. Pooling those into one bucket would be
+// wrong, so it is refused rather than silently accepted.
+func TestPreferencesRefuseAnUnattributableMultiModeRequest(t *testing.T) {
+	h := NewPreferencesHandler(store.NewFilePreferenceStore(t.TempDir()), true)
+	w := httptest.NewRecorder()
+	h.Handle(w, httptest.NewRequest(http.MethodGet, "/api/preferences", nil))
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("got %d, want 500 for a multi-mode request with no user context", w.Code)
 	}
 }
