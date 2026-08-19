@@ -362,6 +362,15 @@ Notes are plain files — back them up with `rsync`, `git`, or whatever tool alr
 
 ### Docker image freshness
 
+The Postgres driver is `jackc/pgx/v5` *(since v4.2.1)*. It replaced
+`github.com/lib/pq`, which is in maintenance mode and carries seven advisories
+that will not be fixed (GO-2026-6166/6168/6170–6173, every one `Fixed in: N/A`,
+including a malformed-frame panic and GSS authentication completing without
+mutual proof). Because `Backend (govulncheck)` is a required check on `main`
+with no bypass actors, an unfixable advisory in a direct dependency blocks every
+release until the dependency is replaced — which is the intended behaviour of
+that gate, not an obstacle to route around.
+
 Both base images are pinned to moving tags (`golang:1.26-alpine`, `node:20-alpine`, `nginx:alpine`, `postgres:16-alpine`, `alpine:latest`) so a `./mdnest-server rebuild` pulls the latest patch automatically. The CI workflow's `Backend (govulncheck)` job runs against `go-version-file: backend/go.mod` so it tracks whatever the build image is using.
 
 ---

@@ -26,9 +26,23 @@ so drawings created in either tool open in the other.
 - Any file whose name ends in `.excalidraw.md` (or `.excalidraw`) opens in the
   drawing editor instead of the text editor.
 - Changes are auto-saved back to the note (debounced), so history, restore and
-  comments work exactly as they do for text notes.
+  comments work exactly as they do for text notes. Switching to another file
+  flushes whatever the canvas has not written yet, so the last strokes before
+  you click away are kept *(fixed in v4.2.1; they used to be discarded)*.
 - Read-only when you lack write access to the note: the canvas opens in view
   mode.
+- **Canvas or source** *(v4.2.1+)* — a drawing is a real markdown file, so the
+  toolbar offers **Basic · Drawing**. **Drawing** is the canvas; **Basic** shows
+  the markdown behind it, which is useful for inspecting the scene, fixing a
+  corrupted file by hand, or copying the mirrored text elements. Live is not
+  offered for drawings: the rich editor re-serializes its document model on
+  every change and would reformat the scene JSON, the same hazard that forces
+  Marp decks to raw editing.
+- **Dark by default** *(v4.2.1+)* — the canvas matches the app rather than
+  opening as a white sheet, with a light/dark toggle in the canvas footer. The
+  theme is a per-browser viewing preference and is **never written into the
+  note**, so the file stays portable (Obsidian reads the same bytes) and two
+  people can view the same drawing with different themes.
 
 ---
 
