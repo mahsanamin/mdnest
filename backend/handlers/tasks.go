@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"path"
 	"regexp"
@@ -32,6 +33,9 @@ import (
 // default To Do / Doing / Done board is used.
 type TaskHandler struct {
 	store storage.Storage
+	// cache remembers a namespace's parsed tasks, keyed by a signature derived
+	// from the (cheap) directory walk. See tasks_cache.go.
+	cache *taskCache
 	// nsFilter narrows a list of namespaces to those the request's user may
 	// read. Supplied at construction (multi mode: perms.FilterNamespaces;
 	// single mode: an explicit all-access pass-through). The global
@@ -53,7 +57,7 @@ type TaskHandler struct {
 // (the single user owns every namespace). A nil filter makes the global view
 // serve nothing rather than leak every namespace.
 func NewTaskHandler(store storage.Storage, nsFilter func(r *http.Request, namespaces []string) []string, canWrite func(r *http.Request, ns, path string) bool) *TaskHandler {
-	return &TaskHandler{store: store, nsFilter: nsFilter, canWrite: canWrite}
+	return &TaskHandler{store: store, nsFilter: nsFilter, canWrite: canWrite, cache: newTaskCache(32)}
 }
 
 // BoardColumn is a single kanban column. Status is the value written to a task's
@@ -355,11 +359,16 @@ func (h *TaskHandler) aggregate(w http.ResponseWriter, r *http.Request) {
 		if rel, ok := SafeRelPath(p); ok {
 			files = []string{rel}
 		}
-	} else {
-		files = h.namespaceMdFiles(ctx, ns)
 	}
 
-	tasks := h.collectTasks(ctx, ns, files, board)
+	var tasks []Task
+	if files == nil {
+		// Whole namespace: cacheable.
+		tasks = h.namespaceTasks(ctx, ns, board, r.URL.Query().Get("refresh") == "1")
+	} else {
+		// A single note was named — one file, nothing worth caching.
+		tasks = h.collectTasks(ctx, ns, files, board)
+	}
 	sort.SliceStable(tasks, func(i, j int) bool {
 		if tasks[i].Path != tasks[j].Path {
 			return tasks[i].Path < tasks[j].Path
@@ -369,6 +378,32 @@ func (h *TaskHandler) aggregate(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(TasksResponse{Board: board, Tasks: tasks})
+}
+
+// namespaceTasks returns every task in a namespace, using the cache when the
+// namespace is unchanged since it was last scanned. `force` (refresh=1) skips
+// the cache — the board's Refresh button, and the escape hatch for the one
+// change a signature cannot see (a write that preserves size and mtime).
+func (h *TaskHandler) namespaceTasks(ctx context.Context, ns string, board BoardConfig, force bool) []Task {
+	files, sig := h.scanSignature(ctx, ns, boardSignature(board))
+	if !force {
+		if cached, ok := h.cache.get(ns, sig); ok {
+			return cached
+		}
+	}
+	tasks := h.collectTasks(ctx, ns, files, board)
+	h.cache.put(ns, sig, tasks)
+	return tasks
+}
+
+// boardSignature reduces a column layout to a string, so renaming a column or
+// moving the Done marker invalidates the cache the same way an edit does.
+func boardSignature(b BoardConfig) string {
+	var sb strings.Builder
+	for _, c := range b.Columns {
+		fmt.Fprintf(&sb, "%s|%s|%s|%t;", c.ID, c.Title, c.Status, c.Done)
+	}
+	return sb.String()
 }
 
 // namespaceMdFiles lists every .md file in a namespace (skipping dot-dirs).
@@ -448,6 +483,7 @@ func (h *TaskHandler) HandleGlobalTasks(w http.ResponseWriter, r *http.Request) 
 		names = h.nsFilter(r, names)
 	}
 
+	force := r.URL.Query().Get("refresh") == "1"
 	var (
 		mu       sync.Mutex
 		allTasks []Task
@@ -462,7 +498,7 @@ func (h *TaskHandler) HandleGlobalTasks(w http.ResponseWriter, r *http.Request) 
 			defer wg.Done()
 			defer func() { <-sem }()
 			board := h.loadBoard(ctx, ns)
-			ts := h.collectTasks(ctx, ns, h.namespaceMdFiles(ctx, ns), board)
+			ts := h.namespaceTasks(ctx, ns, board, force)
 			mu.Lock()
 			allTasks = append(allTasks, ts...)
 			boards = append(boards, board)

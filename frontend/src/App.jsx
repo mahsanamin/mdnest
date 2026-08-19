@@ -10,6 +10,7 @@ import Editor from './components/Editor.jsx';
 import EditorErrorBoundary from './components/EditorErrorBoundary.jsx';
 import ChunkErrorBoundary from './components/ChunkErrorBoundary.jsx';
 import { loadWithRetry } from './lazyWithRetry.js';
+import { createPresenceHold } from './presence-hold.js';
 // Live (rich) editor — Crepe-based since v3.10.0. Lazy-loaded so the
 // ~217 KB-gzipped chunk only downloads when the user actually opens
 // Live mode.
@@ -347,6 +348,24 @@ function App() {
 
   // Live collaboration state
   const [presenceUsers, setPresenceUsers] = useState([]);
+  // Presence is held for a few seconds before a departure is believed, so a
+  // reconnect or a snapshot racing a join doesn't flicker someone out and
+  // straight back in. See presence-hold.js.
+  const presenceHold = useRef(null);
+  if (!presenceHold.current) presenceHold.current = createPresenceHold();
+  const presenceTimer = useRef(null);
+  const applyPresence = useCallback(() => {
+    setPresenceUsers(presenceHold.current.visible());
+    if (presenceTimer.current) { clearTimeout(presenceTimer.current); presenceTimer.current = null; }
+    const next = presenceHold.current.msUntilNextChange();
+    // One timer, set to the earliest expiry — no polling.
+    if (next !== null) {
+      presenceTimer.current = setTimeout(() => {
+        presenceTimer.current = null;
+        setPresenceUsers(presenceHold.current.visible());
+      }, next + 50);
+    }
+  }, []);
   const [remoteCursors, setRemoteCursors] = useState({});
   const [typingUsers, setTypingUsers] = useState({}); // {userId: username}
   const [conflictBanner, setConflictBanner] = useState(null); // {username, etag}
@@ -536,7 +555,8 @@ function App() {
     const client = new CollabClient((msg) => {
       switch (msg.type) {
         case 'presence':
-          setPresenceUsers(msg.users || []);
+          presenceHold.current.setAll(msg.users || []);
+          applyPresence();
           break;
         case 'cursor':
           setRemoteCursors((prev) => ({ ...prev, [msg.userId]: { ...msg, type: 'cursor' } }));
@@ -547,7 +567,8 @@ function App() {
         case 'leave':
           setRemoteCursors((prev) => { const n = { ...prev }; delete n[msg.userId]; return n; });
           setTypingUsers((prev) => { const n = { ...prev }; delete n[msg.userId]; return n; });
-          setPresenceUsers((prev) => prev.filter((u) => u.id !== msg.userId));
+          presenceHold.current.remove(msg.userId);
+          applyPresence();
           break;
         case 'content':
           // Mark user as typing
@@ -595,6 +616,7 @@ function App() {
   useEffect(() => {
     if (!collabRef.current || !selectedNs || !currentPath) {
       if (collabRef.current) collabRef.current.disconnect();
+      presenceHold.current.reset();
       setPresenceUsers([]);
       setRemoteCursors({});
       setConflictBanner(null);
@@ -602,6 +624,7 @@ function App() {
       return;
     }
     collabRef.current.connect(selectedNs, currentPath);
+    presenceHold.current.reset();
     setPresenceUsers([]);
     setRemoteCursors({});
     setTypingUsers({});
@@ -1019,6 +1042,12 @@ function App() {
       }
     }
   }, [selectedNs, restoreScrollPosition, commentsEnabled, setLastPath, flushPendingSave]);
+
+  // Stable identity on purpose: this is handed to every task card, which is
+  // memoised. An inline arrow here would be a new function on every App
+  // render, so every card would re-render and the memo would buy nothing.
+  const openNoteFromBoard = useCallback((p) => { setShowTaskBoard(false); openNote(p); }, [openNote]);
+
 
   const refreshComments = useCallback(() => {
     if (selectedNs && currentPath) {
@@ -1554,8 +1583,6 @@ function App() {
         onAdminPanel={isAdmin && isMulti ? () => setShowAdminPanel(true) : null}
         onNewNote={canWrite('') ? () => doCreateNote(null) : null}
         onNewDrawing={excalidrawEnabled && canWrite('') ? () => doCreateDrawing(null) : null}
-        onOpenBoard={taskBoardEnabled && selectedNs ? () => setShowTaskBoard(true) : null}
-        boardActive={showTaskBoard}
         pickedFolder={pickedFolder}
         onPickFolder={setPickedFolder}
         onNewFolder={canWrite('') ? () => doCreateFolder(null) : null}
@@ -1602,6 +1629,7 @@ function App() {
           }}
           editorMode={editorModeForNote}
           marpLocked={marpActive}
+          onSetBoardActive={taskBoardEnabled && selectedNs ? setShowTaskBoard : null}
           drawingDoc={isDrawingDoc}
           drawingSource={drawingSource}
           onDrawingSourceChange={setDrawingSource}
@@ -1632,9 +1660,6 @@ function App() {
           }}
           wsStatus={appConfig?.liveCollab ? wsStatus : null}
         />
-        {appConfig?.liveCollab && presenceUsers.length > 1 && (
-          <PresenceBar users={presenceUsers} currentUserId={userInfo?.id} typingUsers={typingUsers} />
-        )}
         {updateAvailable && (
           <div className="update-banner">
             New version available: <strong>v{updateAvailable.current}</strong> → <strong>v{updateAvailable.latest}</strong>
@@ -1680,6 +1705,13 @@ function App() {
           </div>
         )}
         <div className="split-view">
+          {/* Rendered inside the content area, not above it: this is an overlay
+              and .split-view is the box it should be positioned against.
+              Placed in .main it floated over the toolbar and covered the
+              view-mode and settings buttons. */}
+          {appConfig?.liveCollab && presenceUsers.length > 1 && (
+            <PresenceBar users={presenceUsers} currentUserId={userInfo?.id} typingUsers={typingUsers} />
+          )}
           {showTaskBoard && taskBoardEnabled && selectedNs ? (
             <ChunkErrorBoundary
               label="the task board"
@@ -1694,7 +1726,7 @@ function App() {
                 currentPath={currentPath}
                 currentUser={userInfo?.username}
                 refreshSignal={boardRefreshNonce}
-                onOpenNote={(p) => { setShowTaskBoard(false); openNote(p); }}
+                onOpenNote={openNoteFromBoard}
                 onClose={() => setShowTaskBoard(false)}
               />
             </Suspense>

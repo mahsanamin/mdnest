@@ -56,7 +56,7 @@ test('a failed task-board chunk leaves the rest of the app usable', async ({ pag
   await login(page);
   await breakChunk(page, '**/assets/TaskBoard-*.js*');
 
-  const boardBtn = page.locator('.sidebar-board-btn');
+  const boardBtn = page.locator('.toolbar-view-board');
   const available = await boardBtn.waitFor({ state: 'visible', timeout: 15_000 })
     .then(() => true).catch(() => false);
   if (!available) test.skip(true, 'task board disabled (ENABLE_TASK_BOARD)');
@@ -68,4 +68,22 @@ test('a failed task-board chunk leaves the rest of the app usable', async ({ pag
   await page.locator('.chunk-error-actions button.secondary').click();
   await expect(page.locator('.chunk-error')).toHaveCount(0);
   await expect(page.locator('.sidebar')).toBeVisible();
+});
+
+test('a missing build asset 404s instead of being served index.html', async ({ request, baseURL }) => {
+  // The SPA fallback used to answer /assets/<gone>.js with index.html and a
+  // 200. A tab loaded before a redeploy then tried to parse HTML as an ES
+  // module: the app broke in a confusing way rather than failing cleanly, and
+  // the retry helper's cache-bust could not rescue it because every URL
+  // returned the same HTML.
+  const res = await request.get(`${baseURL}/assets/ExcalidrawEditor-gone12345.js`);
+  expect(res.status(), 'a missing asset must 404, not fall back to index.html').toBe(404);
+  // nginx's own 404 page is HTML, so the content type proves nothing — what
+  // matters is that the body is not the app shell being passed off as a module.
+  expect(await res.text()).not.toContain('<div id="root"');
+
+  // The app's own entry point must still be served for unknown *routes*.
+  const spa = await request.get(`${baseURL}/some/deep/route`);
+  expect(spa.status()).toBe(200);
+  expect(spa.headers()['content-type'] || '').toContain('text/html');
 });

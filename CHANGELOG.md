@@ -6,7 +6,97 @@ All notable changes to mdnest are documented here.
 
 ## Unreleased
 
-_Nothing yet — `develop` is at `4.2.2-dev`._
+_Nothing yet._
+
+---
+
+## v4.2.2 — A board you can actually use
+
+Almost all of this release came out of running the task board on a real project
+with roughly 12,000 checkboxes, where it went from useful to unusable. None of
+it was where it looked: the server answered in ~100 ms, and the cost was the
+browser being handed every card at once.
+
+The rest is the board finally saying what it is. It has been a third button
+inside the Basic/Live control, then a row in the sidebar, and is now one button
+that names where it takes you — with no way out of it until this release, which
+is the part that should not have shipped in the first place.
+
+### Fixed
+
+- **One toolbar button now swaps between your note and the board.** On a note
+  it reads **Board**; on the board it reads **Editor** and brings you back — the
+  label always names where it will take you. Previously the board was a third
+  button inside the Basic/Live control, where all three read as one choice,
+  even though Basic and Live are ways of editing the file you have open while
+  the board leaves the file entirely. Basic/Live are hidden while the board is
+  open, since there is no note on screen for them to act on, and so is the "No
+  file selected" placeholder. The board's own header still starts with a back
+  button naming the note you came from. The sidebar is now purely your files.
+- **The sidebar's create buttons read Folder, Note, Drawing** — containers
+  before the things that go inside them.
+- **Card order is now yours to choose, which matters once a column pages.**
+  Tasks arrive in note order, so with a column painting 100 cards at a time an
+  overdue task in a late-alphabet file sat on page 64 with no way to know it was
+  there. A *Sort* control in the filter bar offers **due date, then priority**,
+  and remembers the choice. The default stays note order deliberately: it is
+  what the board has always shown, it mirrors the files the tasks live in, and
+  most boards never page at all — quietly reshuffling them would be its own kind
+  of broken. Sorting adds no measurable cost (typing measured at 86 ms in note
+  order and 74 ms by urgency on a 12,000-task board).
+- **The task scan is cached, so the board stops re-reading every note.** Every
+  board request read and parsed every note in the namespace. Measured on 420
+  notes holding ~12,000 checkboxes: walking the tree costs ~6 ms while reading
+  and parsing costs ~100 ms, so the parse is now remembered and only the walk
+  repeats — a warm request drops from ~130 ms to ~20 ms, and "All workspaces"
+  to ~18 ms. It cannot go stale on its own: every request still walks the
+  namespace and a cached answer is used only when the file set, sizes, newest
+  timestamp and column layout are all unchanged, so an edit from the API, the
+  CLI, git-sync or an editor on the host invalidates it without being told.
+  Refresh sends `refresh=1` and re-scans regardless. The cache lives in memory,
+  not in a file under your notes — a cache file there would be synced by
+  git-sync and destroyed by a rebuild.
+- **"All workspaces" asks before it scans.** It reads every note in every
+  workspace you can see, which is the one board action that can visibly pause
+  on a large install. It now explains that before starting, with a *Don't show
+  this again* that is remembered.
+- **Presence no longer flickers, and no longer moves your work.** With more
+  than one person on a note, collaborators appeared and disappeared repeatedly.
+  Two separate faults. Departures were applied the instant they arrived, so any
+  momentary gap — a reconnect, a presence snapshot racing a join — read as
+  someone leaving and immediately returning; a departure is now held for a few
+  seconds and cancelled outright if they come back, so a blip never reaches the
+  screen while a real exit still registers. And the presence bar sat in the
+  document flow as a full-width strip, so each of those blips reflowed
+  everything below it — the editor, a Mermaid diagram, a drawing canvas all
+  jumped. It is now an overlay pinned inside the content area, so presence can
+  come and go without the page moving. This affected every note, not just
+  drawings.
+- **The task board stays usable on a big project.** Enabling the board on a
+  namespace with ~12,000 checkboxes made it crawl. The server was not the
+  problem (it answers in ~100 ms); the browser was being handed every card at
+  once. A column rendered its entire contents, so ~6,300 cards and **50,649 DOM
+  nodes** went onto the page, and every keystroke in the filter box re-filtered
+  and re-rendered the lot — **456 ms per key**. Columns now paint 100 cards at a
+  time with a *Show more* button, cards are memoised so one change no longer
+  re-renders its neighbours, and filtering follows a deferred value so typing
+  stays responsive. The column header still reports the true total, so nothing
+  is hidden silently. Measured on the same 11,994-task namespace: board opens
+  **1,802 ms → 844 ms**, DOM **50,649 → 950 nodes**, filter keystroke
+  **456 ms → 87 ms**.
+- **The task board has a visible way out.** It replaces the editor pane, and its
+  `onClose` was accepted but never rendered — so once you were on the board, the
+  only way back to your note was the toolbar's Basic/Live pair, which says
+  nothing about the board. The header now starts with a back button naming the
+  note you came from, and the sidebar entry toggles the board closed again.
+- **A missing build asset now 404s instead of being served the app shell.** The
+  SPA fallback also caught `/assets/`, so a content-hashed chunk that no longer
+  existed was answered with `index.html` and a `200`. A tab still running a
+  previous deploy asked for filenames that had been replaced, received HTML
+  where it expected a JavaScript module, and broke in a confusing half-alive way
+  instead of failing cleanly — and the chunk retry could not rescue it, because
+  the cache-busted URL returned the same HTML. Unknown *routes* still serve the
+  app shell; only `/assets/` is strict.
 
 ---
 
