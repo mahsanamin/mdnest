@@ -1,0 +1,156 @@
+/* ---------------------------------------------------------------------------
+   mdnest design tokens
+   ---------------------------------------------------------------------------
+   Two layers, deliberately:
+
+     1. PRIMITIVES (--ctp-*) — the raw palette, one block per theme. These are
+        Catppuccin Mocha (dark) and Catppuccin Latte (light), used verbatim.
+        Nothing in the app's CSS may reference a primitive directly.
+     2. SEMANTICS (--bg, --border, --text, ...) — what every stylesheet
+        actually uses. Each one points at a primitive, and a theme is free to
+        point it somewhere different.
+
+   The second layer is not ceremony; it is the whole reason light mode works.
+   In a dark theme a raised surface and a border can be the SAME value — both
+   are lighter than the page. In a light theme they must diverge, because a
+   border has to be *darker* than the surface it encloses while the surface
+   stays lighter than the page. mdnest used #313244 as a background 78 times
+   and as a border 102 times; a flat find-and-replace to one token would have
+   made every border in light mode either invisible or a grey slab.
+
+   The same trap, sharper: #1e1e2e (the dark page background) was also used as
+   a *text* colour 33 times — the label on a filled accent button. Renaming by
+   value would have set that text to the light page background in light mode,
+   i.e. white text on a light-blue button. It is --text-inverse here, and in
+   light mode it stays light on purpose.
+
+   Adding a colour: add the semantic token to BOTH blocks below, then use it.
+   Never write a hex literal into App.css / TaskBoard.css / index.css again.
+   --------------------------------------------------------------------------- */
+
+:root {
+  /* --- Primitives: Catppuccin Mocha ------------------------------------ */
+  --ctp-base: #1e1e2e;
+  --ctp-mantle: #181825;
+  --ctp-crust: #11111b;
+  --ctp-surface0: #313244;
+  --ctp-surface1: #45475a;
+  --ctp-surface2: #585b70;
+  --ctp-overlay0: #6c7086;
+  --ctp-overlay1: #7f849c;
+  --ctp-overlay2: #9399b2;
+  --ctp-subtext0: #a6adc8;
+  --ctp-subtext1: #bac2de;
+  --ctp-text: #cdd6f4;
+  --ctp-blue: #89b4fa;
+  --ctp-red: #f38ba8;
+  --ctp-green: #a6e3a1;
+  --ctp-yellow: #f9e2af;
+  --ctp-peach: #fab387;
+  --ctp-sapphire: #74c7ec;
+  --ctp-mauve: #cba6f7;
+  --ctp-lavender: #b4befe;
+  --ctp-pink: #f5c2e7;
+
+  /* --- Semantics: surfaces --------------------------------------------- */
+  --bg: var(--ctp-base);
+  --bg-deep: var(--ctp-crust);
+  --surface: var(--ctp-mantle);
+  --surface-2: var(--ctp-surface0);
+  --surface-3: var(--ctp-surface1);
+  --surface-4: var(--ctp-surface2);
+  --surface-tint: #1e2030;
+  --surface-drop: #1c1c2a;
+
+  /* --- Semantics: borders ---------------------------------------------- */
+  --border: var(--ctp-surface0);
+  --border-strong: var(--ctp-surface1);
+  --border-subtle: #232334;
+
+  /* --- Semantics: text -------------------------------------------------- */
+  --text: var(--ctp-text);
+  --text-2: var(--ctp-subtext1);
+  --text-secondary: var(--ctp-subtext0);
+  --text-muted: var(--ctp-overlay0);
+  --text-faint: var(--ctp-overlay1);
+  --text-fainter: var(--ctp-overlay2);
+  --text-dim: var(--ctp-surface2);
+  --text-faintest: var(--ctp-surface1);
+  /* Text that sits ON a filled accent/status colour. Stays dark in dark mode
+     and light in light mode — it tracks the accent, not the page. */
+  --text-inverse: var(--ctp-base);
+  --text-inverse-deep: var(--ctp-crust);
+
+  /* --- Semantics: hues -------------------------------------------------- */
+  --accent: var(--ctp-blue);
+  --danger: var(--ctp-red);
+  --success: var(--ctp-green);
+  --warning: var(--ctp-yellow);
+  --orange: var(--ctp-peach);
+  --info: var(--ctp-sapphire);
+  --purple: var(--ctp-mauve);
+  --lavender: var(--ctp-lavender);
+  --pink: var(--ctp-pink);
+
+  /* --- Semantics: translucent washes ------------------------------------
+     Hex-with-alpha in dark mode. Light mode redefines these rather than
+     reusing them: the same 13% wash that reads as a tint over #1e1e2e is
+     nearly invisible over #eff1f5. */
+  --accent-wash: #89b4fa22;
+  --accent-wash-2: #89b4fa33;
+  --accent-wash-3: #89b4fa44;
+  --accent-wash-4: #89b4fa55;
+  --danger-wash-0: #f38ba811;
+  --danger-wash: #f38ba822;
+  --danger-wash-3: #f38ba844;
+  --danger-wash-4: #f38ba855;
+  --success-wash: #a6e3a122;
+  --success-wash-3: #a6e3a144;
+  --warning-wash: #f9e2af22;
+  --warning-wash-3: #f9e2af44;
+  --orange-wash: #fab38722;
+  --orange-wash-3: #fab38744;
+
+  /* --- Semantics: status tints (solid backgrounds) ---------------------- */
+  --danger-tint: #2a1d24;
+  --danger-tint-text: #f5c2c7;
+  --danger-tint-strong: #45283a;
+
+  /* --- Semantics: search highlight --------------------------------------
+     Deliberately NOT the warning hue: a search hit is a transient marker and
+     needs to out-shout every other yellow on screen. */
+  --highlight: #fde047;
+  --highlight-ring: #facc15;
+  --highlight-soft: #fef08a;
+  --highlight-pulse-a: #3b3720;
+  --highlight-pulse-b: #2c2a1e;
+
+  /* --- Semantics: scrims and shadows ------------------------------------ */
+  --scrim: #00000080;
+  --scrim-strong: #000000a6;
+  --scrim-solid: #222222d9;
+  --shadow-color: rgba(0, 0, 0, 0.3);
+  --shadow-color-strong: rgba(0, 0, 0, 0.4);
+
+  /* --- Spacing scale (4 / 8) --------------------------------------------
+     Applied incrementally; existing rules keep their literal values until
+     they are revisited. New rules use these. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  /* Gap between items INSIDE one control group vs. BETWEEN groups. The
+     toolbar read as cramped because it used a single gap for both, so
+     "Rename / Delete" sat exactly as far apart as two unrelated groups. */
+  --gap-within: var(--space-1);
+  --gap-between: var(--space-4);
+
+  --radius-sm: 4px;
+  --radius: 6px;
+  --radius-lg: 10px;
+
+  color-scheme: dark;
+}
