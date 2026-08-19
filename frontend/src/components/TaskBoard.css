@@ -752,3 +752,24 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Extras for the "search every workspace?" confirmation. It reuses the shared
+   .tb-modal shell (columns editor, task editor) rather than redefining it —
+   an earlier version of this block overrode that shell's width, padding and
+   z-index, which would have altered both of those dialogs too. */
+.tb-modal-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 14px;
+  font-size: 13px;
+  color: #a6adc8;
+  cursor: pointer;
+}
+.tb-modal-body { font-size: 13px; line-height: 1.6; color: #a6adc8; margin-bottom: 12px; }
+.tb-btn.primary {
+  background: #89b4fa;
+  border-color: #89b4fa;
+  color: #1e1e2e;
+  font-weight: 600;
+}

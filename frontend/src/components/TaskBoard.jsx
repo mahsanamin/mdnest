@@ -77,8 +77,8 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
     if (!opts.silent) setError(null);
     try {
       const data = isGlobal
-        ? await getAllTasks()
-        : await getTasks(ns, effectiveScope === 'note' ? currentPath : undefined);
+        ? await getAllTasks(opts.force)
+        : await getTasks(ns, effectiveScope === 'note' ? currentPath : undefined, opts.force);
       setBoard(data.board);
       setTasks(data.tasks || []);
       setError(null);
@@ -143,6 +143,28 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
     setScope(s);
     localStorage.setItem('mdnest_taskboard_scope', s);
   }, []);
+
+  // "All workspaces" scans every workspace you can read, which on a large
+  // install is the one action here that can take a noticeable moment. Warn
+  // before doing it rather than appearing to hang — but let people who know
+  // what it costs turn the warning off for good.
+  const [confirmGlobal, setConfirmGlobal] = useState(false);
+  const [dontWarnAgain, setDontWarnAgain] = useState(false);
+  const GLOBAL_WARN_KEY = 'mdnest_taskboard_skip_global_warning';
+  const chooseGlobalScope = useCallback(() => {
+    let skip = false;
+    try { skip = localStorage.getItem(GLOBAL_WARN_KEY) === '1'; } catch { /* private mode */ }
+    if (skip) { setScopePersist('global'); return; }
+    setDontWarnAgain(false);
+    setConfirmGlobal(true);
+  }, [setScopePersist]);
+  const acceptGlobalScope = useCallback(() => {
+    if (dontWarnAgain) {
+      try { localStorage.setItem(GLOBAL_WARN_KEY, '1'); } catch { /* private mode */ }
+    }
+    setConfirmGlobal(false);
+    setScopePersist('global');
+  }, [dontWarnAgain, setScopePersist]);
 
   // Per-column collapse state, persisted per namespace. null = not yet
   // initialised, so the Done column can be collapsed by default on first show.
@@ -434,7 +456,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
             {currentPath && (
               <button className={effectiveScope === 'note' ? 'active' : ''} onClick={() => setScopePersist('note')} title="Only the current note">This note</button>
             )}
-            <button className={effectiveScope === 'global' ? 'active' : ''} onClick={() => setScopePersist('global')} title="Tasks across every workspace you can access">All workspaces</button>
+            <button className={effectiveScope === 'global' ? 'active' : ''} onClick={chooseGlobalScope} title="Tasks across every workspace you can access">All workspaces</button>
           </div>
         </div>
         <div className="tb-header-right">
@@ -449,7 +471,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
             {canWrite && !isGlobal && (
               <button className="tb-btn" onClick={() => { setActionsOpen(false); openCreate(); }} title="New task">+ New task</button>
             )}
-            <button className="tb-btn" onClick={() => { setActionsOpen(false); reload(); }} title="Refresh">&#8635;</button>
+            <button className="tb-btn" onClick={() => { setActionsOpen(false); reload({ force: true }); }} title="Re-scan every note now">&#8635;</button>
             {canWrite && !isGlobal && (
               <button className="tb-btn" onClick={() => { setActionsOpen(false); setEditingColumns(true); }} title="Edit columns">Columns…</button>
             )}
@@ -630,6 +652,31 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
               </ul>
             </div>
           ))}
+        </div>
+      )}
+
+      {confirmGlobal && (
+        <div className="tb-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="tb-global-title">
+          <div className="tb-modal">
+            <h3 id="tb-global-title">Search every workspace?</h3>
+            <p className="tb-modal-body">
+              This reads every note in every workspace you have access to. On a
+              large install it can take a few seconds the first time — after
+              that it is fast until your notes change.
+            </p>
+            <label className="tb-modal-check">
+              <input
+                type="checkbox"
+                checked={dontWarnAgain}
+                onChange={(e) => setDontWarnAgain(e.target.checked)}
+              />
+              <span>Don&rsquo;t show this again</span>
+            </label>
+            <div className="tb-modal-actions">
+              <button type="button" className="tb-btn" onClick={() => setConfirmGlobal(false)}>Cancel</button>
+              <button type="button" className="tb-btn primary" onClick={acceptGlobalScope}>Search all workspaces</button>
+            </div>
+          </div>
         </div>
       )}
 
