@@ -279,6 +279,25 @@ var migrations = []struct {
 			CREATE INDEX IF NOT EXISTS idx_note_activity_user ON note_activity(user_id);
 		`,
 	},
+	{
+		// Per-user UI preferences (currently just the theme). Deliberately a
+		// key/value table rather than a column per setting: these are opaque
+		// client-owned strings, so a new one must not need a migration. The
+		// server still enforces a key allowlist and a length cap in
+		// store.ValidPreference — the schema is open, the endpoint is not.
+		// CASCADE on user deletion: a preference has no meaning without its
+		// user, unlike note_activity which is deliberately kept.
+		name: "015_create_user_preferences",
+		sql: `
+			CREATE TABLE IF NOT EXISTS user_preferences (
+				user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+				key        TEXT NOT NULL,
+				value      TEXT NOT NULL,
+				updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+				PRIMARY KEY (user_id, key)
+			);
+		`,
+	},
 }
 
 // Migrate runs all pending migrations. Safe to call on every startup.

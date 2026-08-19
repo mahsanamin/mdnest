@@ -43,6 +43,7 @@ data:
   SERVER_ALIAS: {{ .Values.backend.serverAlias | quote }}
   {{- end }}
   DISABLE_UPDATE_CHECK: {{ .Values.backend.disableUpdateCheck | ternary "true" "false" | quote }}
+  DEFAULT_THEME: {{ .Values.ui.defaultTheme | quote }}
   ENABLE_TASK_BOARD: {{ .Values.taskBoard.enabled | ternary "true" "false" | quote }}
   ENABLE_MARP: {{ .Values.marp.enabled | ternary "true" "false" | quote }}
   ENABLE_MARP_THEMES: {{ .Values.marp.themes.enabled | ternary "true" "false" | quote }}

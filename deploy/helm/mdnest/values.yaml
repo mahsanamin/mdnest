@@ -271,6 +271,14 @@ taskBoard:
   enabled: false
 
 # -----------------------------------------------------------------------------
+# Appearance. The theme a user sees before they have chosen one for themselves.
+# A per-user choice is stored server-side and always wins over this.
+# -----------------------------------------------------------------------------
+ui:
+  # -- Theme for users who have not chosen one (`DEFAULT_THEME`): `auto` follows the viewer's OS setting, `dark` and `light` pin it. A per-user choice is stored server-side and overrides this.
+  defaultTheme: auto
+
+# -----------------------------------------------------------------------------
 # Marp slides (optional). When enabled, a note whose frontmatter declares
 # `marp: true` is rendered as a slide deck in the Live view instead of the
 # editor. Off by default; when off the frontend never loads the Marp engine

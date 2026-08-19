@@ -74,6 +74,19 @@ else
   FAILED=1
 fi
 
+# 2d. setup.sh generation tests: assert that config knobs actually reach the
+# generated .env / docker-compose.yml. The backend ignores env it does not
+# read, so a knob whose plumbing breaks does not fail — it silently reverts to
+# a default and nothing reports it. Fast and Docker-free.
+echo -n "setup.sh generation tests... "
+if bash tests/setup-default-theme.sh > /dev/null 2>&1 && bash tests/setup-marp-themes.sh > /dev/null 2>&1; then
+  echo "OK"
+else
+  echo "FAILED"
+  echo "  Run: bash tests/setup-default-theme.sh; bash tests/setup-marp-themes.sh"
+  FAILED=1
+fi
+
 # 3. Frontend: npm audit
 echo -n "Frontend security (npm audit)... "
 if (cd frontend && npm audit --audit-level=high) > /dev/null 2>&1; then
