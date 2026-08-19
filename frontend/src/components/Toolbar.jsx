@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 
-function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePassword, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh, wsStatus, commentCount, onToggleComments, onOpenBoard, boardActive, marpLocked, drawingDoc, drawingSource, onDrawingSourceChange }) {
+function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePassword, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh, wsStatus, commentCount, onToggleComments, onSetBoardActive, boardActive, marpLocked, drawingDoc, drawingSource, onDrawingSourceChange }) {
   const [refreshing, setRefreshing] = useState(false);
   const handleRefresh = useCallback(() => {
     if (refreshing || !onRefresh) return;
@@ -24,6 +24,30 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
       <button className="toolbar-hamburger" onClick={onToggleSidebar} title="Toggle sidebar">
         &#9776;
       </button>
+      {/* The main-pane view switch.
+          Two things you can be looking at, so a segmented pair is the honest
+          shape — unlike the original Basic|Live|Board, which put an editor
+          mode and a destination in one control. The editor's own modes
+          (Basic/Live) live in a separate group and only appear while the
+          Editor half is selected, which keeps the two questions apart: what am
+          I looking at, and how am I editing it. */}
+      {onSetBoardActive && (
+        <div className="toolbar-view-switch" role="group" aria-label="Main view">
+          <button
+            className={`toolbar-view-editor${!boardActive ? ' active' : ''}`}
+            onClick={() => onSetBoardActive(false)}
+            aria-pressed={!boardActive}
+            title="The note you have open"
+          >Editor</button>
+          <button
+            className={`toolbar-view-board${boardActive ? ' active' : ''}`}
+            onClick={() => onSetBoardActive(true)}
+            aria-pressed={!!boardActive}
+            title="Task board for this workspace"
+          >Board</button>
+        </div>
+      )}
+
       {showEditorToggle && (
         <div className="editor-mode-toggle">
           {/* A drawing is still a markdown file, so the toggle offers its two
@@ -63,27 +87,6 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
           )}
         </div>
       )}
-      {/* The board, as its own control.
-          It belongs near the pane it replaces, but NOT inside the Basic/Live
-          group: those two are mutually-exclusive ways of editing the open
-          file, while this leaves the file entirely. It sat inside that group
-          once (all three read as one choice) and in the sidebar once (it read
-          as the first row of the file tree, especially next to the root row).
-          A separate, labelled button beside them is the honest shape: related
-          enough to find, separate enough not to be mistaken for an editor
-          mode. */}
-      {onOpenBoard && (
-        <button
-          className={`toolbar-board-btn${boardActive ? ' active' : ''}`}
-          onClick={onOpenBoard}
-          title={boardActive ? 'Close the board and go back to your note' : 'Task board for this workspace'}
-          aria-pressed={!!boardActive}
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
-          <span>Board</span>
-        </button>
-      )}
-
       {/* Path display splits dir + basename so the filename never gets
           ellipsized away on narrow screens. .toolbar-path-dir shrinks
           and ellipsizes; .toolbar-path-base has flex-shrink: 0 so it

@@ -5435,37 +5435,42 @@ pre:hover .code-copy-btn {
   filter: brightness(1.1);
 }
 
-/* The board button. Deliberately styled as its own control rather than as a
-   segment of the Basic/Live group beside it: those two are editor modes for
-   the open file, this leaves the file entirely. A gap and a border carry that
-   distinction — it has been mistaken for an editor mode (when it lived inside
-   that group) and for a file-tree row (when it lived in the sidebar). */
-.toolbar-board-btn {
+/* The main-pane view switch: Editor or Board.
+   Two genuinely exclusive views, so a segmented pair is honest here — which is
+   exactly what the old Basic|Live|Board control was not, since it mixed an
+   editor mode with a destination. Styled like .editor-mode-toggle so they read
+   as the same kind of control, but placed first and separated by a divider,
+   because it answers the higher-level question: what am I looking at, before
+   how am I editing it. */
+.toolbar-view-switch {
   display: flex;
-  align-items: center;
-  gap: 5px;
-  flex-shrink: 0;
-  margin-left: 10px;
-  padding: 4px 10px;
+  gap: 0;
+  background: #181825;
   border: 1px solid #313244;
   border-radius: 6px;
-  background: #181825;
-  color: #a6adc8;
-  font-size: 0.78rem;
+  overflow: hidden;
+  flex-shrink: 0;
+  margin-right: 10px;
+  padding-right: 0;
+}
+.toolbar-view-switch button {
+  padding: 3px 10px;
+  background: transparent;
+  color: #6c7086;
+  border: none;
+  font-size: 0.72rem;
+  font-weight: 600;
   cursor: pointer;
+  transition: all 0.15s;
 }
-.toolbar-board-btn:hover { background: #313244; color: #cdd6f4; }
-.toolbar-board-btn.active {
-  background: #45475a;
-  border-color: #89b4fa;
-  color: #89b4fa;
-}
-.toolbar-board-btn svg { flex-shrink: 0; opacity: 0.9; }
+.toolbar-view-switch button:hover:not(.active) { color: #cdd6f4; background: #313244; }
+.toolbar-view-switch button.active { background: #89b4fa; color: #1e1e2e; }
 
-/* Below the mobile breakpoint the toolbar is tight; the icon carries it. */
-@media (max-width: 768px) {
-  .toolbar-board-btn span { display: none; }
-  .toolbar-board-btn { padding: 4px 8px; margin-left: 6px; }
+/* A hairline between the two groups, so the view switch and the editor modes
+   don't read as one six-button strip. */
+.toolbar-view-switch + .editor-mode-toggle {
+  margin-left: 0;
+  border-left: 1px solid #313244;
 }
 
 /* The folder new notes/drawings/folders will be created in. Deliberately

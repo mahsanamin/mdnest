@@ -53,13 +53,13 @@ function tasksFromApi(page) {
   }, { ns: NS, file: BOARD_FILE });
 }
 
-// The board has its own button in the toolbar. It is deliberately NOT part of
-// the Basic/Live control beside it: those are two ways of editing the open
-// file, while the board leaves the file entirely.
+// The board is one half of the toolbar's Editor|Board view switch. That pair
+// is deliberately separate from the Basic/Live control beside it: Editor|Board
+// is what you are looking at, Basic/Live is how you are editing it.
 test('the Board button appears when the board is enabled', async ({ page }) => {
   await login(page);
   await openBoardNote(page);
-  await expect(page.locator('.toolbar-board-btn')).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('.toolbar-view-board')).toBeVisible({ timeout: 10_000 });
   // ...and not back inside the editor-mode control it once shared with
   // Basic/Live, nor back in the sidebar where it read as a file-tree row.
   await expect(page.locator('.editor-mode-toggle button:has-text("Board")')).toHaveCount(0);
@@ -69,7 +69,7 @@ test('the Board button appears when the board is enabled', async ({ page }) => {
 test('the board renders the note\'s tasks as cards', async ({ page }) => {
   await login(page);
   await openBoardNote(page);
-  await page.click('.toolbar-board-btn');
+  await page.click('.toolbar-view-board');
   // The seeded task must appear somewhere on the board.
   await expect(page.getByText(BOARD_TASK).first()).toBeVisible({ timeout: 20_000 });
 });

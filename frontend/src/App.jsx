@@ -1629,7 +1629,7 @@ function App() {
           }}
           editorMode={editorModeForNote}
           marpLocked={marpActive}
-          onOpenBoard={taskBoardEnabled && selectedNs ? () => setShowTaskBoard((v) => !v) : null}
+          onSetBoardActive={taskBoardEnabled && selectedNs ? setShowTaskBoard : null}
           drawingDoc={isDrawingDoc}
           drawingSource={drawingSource}
           onDrawingSourceChange={setDrawingSource}
