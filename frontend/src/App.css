@@ -276,11 +276,30 @@
 .toolbar {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 1rem;
+  /* Between GROUPS. Controls that belong together live in a .toolbar-group
+     and sit --gap-within apart instead. A single gap for both was what made
+     this bar read as cramped: with everything equidistant there was nothing
+     to tell the eye which buttons were related, so it scanned as one long
+     undifferentiated run of controls. */
+  gap: var(--gap-between);
+  padding: var(--space-2) var(--space-4);
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   min-height: 44px;
+}
+
+.toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-within);
+  flex-shrink: 0;
+}
+
+/* App-level controls rather than actions on the open file. The divider says
+   so; without it the group still reads as related, but not as *separate*. */
+.toolbar-utility {
+  padding-left: var(--space-4);
+  border-left: 1px solid var(--border);
 }
 
 .toolbar-hamburger {
@@ -1668,7 +1687,6 @@ pre:hover .code-copy-btn {
   border: 1px solid var(--border-strong);
   border-radius: 6px;
   overflow: hidden;
-  margin-right: 8px;
 }
 
 .toolbar-view-toggle button {
@@ -2332,6 +2350,12 @@ pre:hover .code-copy-btn {
   gap: 2px;
   margin-bottom: 1rem;
   border-bottom: 1px solid var(--border);
+  /* Seven tabs already filled the 500px modal exactly; adding Appearance
+     pushed "Credentials" past the edge and wrapped two labels onto a second
+     line inside their own button. Wrapping the ROW keeps every tab reachable
+     and readable as the set grows, which a horizontal scroller would not — a
+     tab you have to discover by dragging is a hidden tab. */
+  flex-wrap: wrap;
 }
 
 .settings-tabs button {
@@ -2342,6 +2366,8 @@ pre:hover .code-copy-btn {
   border-bottom: 2px solid transparent;
   font-size: 0.85rem;
   cursor: pointer;
+  /* Never break a label across lines; the row wraps instead. */
+  white-space: nowrap;
 }
 
 .settings-tabs button.active {
@@ -3061,7 +3087,6 @@ pre:hover .code-copy-btn {
   border-radius: 6px;
   overflow: hidden;
   flex-shrink: 0;
-  margin-right: 6px;
 }
 
 .editor-mode-toggle button {
@@ -4191,7 +4216,15 @@ pre:hover .code-copy-btn {
 
 /* ===== Toolbar inline file actions ===== */
 .toolbar-path-actions {
-  margin-left: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-within);
+  /* Detached from the path text and its two icon buttons: these two DO things
+     to the file, the icons only navigate to it. At a uniform gap "Delete" sat
+     as close to the filename as it did to "Rename". */
+  margin-left: var(--space-4);
+  padding-left: var(--space-3);
+  border-left: 1px solid var(--border);
 }
 
 .toolbar-inline-refresh {
@@ -4200,8 +4233,8 @@ pre:hover .code-copy-btn {
   color: var(--text-muted);
   cursor: pointer;
   font-size: 0.9rem;
-  padding: 0 4px;
-  margin-left: 4px;
+  padding: 0 var(--space-1);
+  margin-left: var(--gap-within);
   vertical-align: middle;
 }
 
@@ -4220,8 +4253,8 @@ pre:hover .code-copy-btn {
   border: none;
   color: var(--text-muted);
   cursor: pointer;
-  padding: 0 4px;
-  margin-left: 4px;
+  padding: 0 var(--space-1);
+  margin-left: var(--space-3);
   display: inline-flex;
   align-items: center;
   vertical-align: middle;
@@ -5509,7 +5542,7 @@ pre:hover .code-copy-btn {
 /* Narrow screens: the icons carry the pair, the labels drop. */
 @media (max-width: 768px) {
   .toolbar-view-btn span { display: none; }
-  .toolbar-view-btn { padding: 4px 8px; margin-right: 6px; }
+  .toolbar-view-btn { padding: 4px 8px; }
 }
 
 /* The folder new notes/drawings/folders will be created in. Deliberately

@@ -21,9 +21,17 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
 
   return (
     <div className="toolbar">
-      <button className="toolbar-hamburger" onClick={onToggleSidebar} title="Toggle sidebar">
-        &#9776;
-      </button>
+      {/* Groups, not a flat row. Every control used to sit the same 0.5rem
+          from its neighbour, so "Rename / Delete" read as no more related to
+          each other than to the file path beside them, and the trailing icons
+          read as a fourth unrelated thing. Related controls are now a
+          .toolbar-group at --gap-within; the groups themselves are separated
+          by --gap-between, four times wider. Nothing is added to the screen —
+          the same buttons just stop competing for the eye. */}
+      <div className="toolbar-group">
+        <button className="toolbar-hamburger" onClick={onToggleSidebar} title="Toggle sidebar">
+          &#9776;
+        </button>
       {/* One button that swaps to name where it takes you: on a note it says
           Board, on the board it says Editor. A pair of buttons showed the
           inactive half permanently greyed for no benefit, and a single
@@ -52,6 +60,7 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
           </button>
         )
       )}
+      </div>
 
       {showEditorToggle && (
         <div className="editor-mode-toggle">
@@ -174,6 +183,9 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
           </button>
         </div>
       )}
+      {/* Status and app-level utilities: not file actions, so they are their
+          own group and carry a divider. */}
+      <div className="toolbar-group toolbar-utility">
       {wsStatus && currentPath && (
         <span className={`ws-status ${wsStatus}`}>
           <span className={`ws-status-dot ${wsStatus}`} />
@@ -211,6 +223,7 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
       <button className="toolbar-settings" onClick={onChangePassword} title="Settings">
         &#9881;
       </button>
+      </div>
     </div>
   );
 }
