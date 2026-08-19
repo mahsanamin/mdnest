@@ -217,7 +217,7 @@ mdnest/
 
 ### Language and Framework
 
-The backend is written in Go using only the standard library's `net/http` package. There are no third-party web frameworks. External dependencies are minimal: `github.com/golang-jwt/jwt/v5` for JWT tokens, `github.com/lib/pq` for PostgreSQL (multi-user mode), and `golang.org/x/crypto` for bcrypt password hashing.
+The backend is written in Go using only the standard library's `net/http` package. There are no third-party web frameworks. External dependencies are minimal: `github.com/golang-jwt/jwt/v5` for JWT tokens, `github.com/jackc/pgx/v5` for PostgreSQL (multi-user mode), and `golang.org/x/crypto` for bcrypt password hashing.
 
 ### Routing
 
