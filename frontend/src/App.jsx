@@ -1554,7 +1554,7 @@ function App() {
         onAdminPanel={isAdmin && isMulti ? () => setShowAdminPanel(true) : null}
         onNewNote={canWrite('') ? () => doCreateNote(null) : null}
         onNewDrawing={excalidrawEnabled && canWrite('') ? () => doCreateDrawing(null) : null}
-        onOpenBoard={taskBoardEnabled && selectedNs ? () => setShowTaskBoard(true) : null}
+        onOpenBoard={taskBoardEnabled && selectedNs ? () => setShowTaskBoard((v) => !v) : null}
         boardActive={showTaskBoard}
         pickedFolder={pickedFolder}
         onPickFolder={setPickedFolder}

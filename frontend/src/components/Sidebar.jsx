@@ -519,7 +519,8 @@ function Sidebar({
             <button
               className={`sidebar-board-btn${boardActive ? ' active' : ''}`}
               onClick={onOpenBoard}
-              title="Namespace task board"
+              title={boardActive ? 'Close the task board and go back to your note' : 'Namespace task board'}
+              aria-pressed={!!boardActive}
             >
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
               <span>Task Board</span>

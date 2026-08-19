@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import { cardKey } from './cardKey';
 
@@ -13,7 +13,7 @@ const REL_ICON = { 'depends-on': '⬆', 'blocked-by': '⛔', 'related-to': '🔗
 // TaskCard renders one task as a draggable kanban card: id/priority/blocked
 // badges, meta chips, tags, relation chips (resolved to their live task), a
 // progress bar and an expandable detail block, plus edit/delete/open actions.
-export default function TaskCard({ task, canWrite, onOpen, onToggleStep, onEdit, resolve, onDelete }) {
+function TaskCard({ task, canWrite, onOpen, onToggleStep, onEdit, resolve, onDelete }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: cardKey(task),
     data: { task },
@@ -134,3 +134,9 @@ export default function TaskCard({ task, canWrite, onOpen, onToggleStep, onEdit,
     </div>
   );
 }
+
+// Memoized: a board can hold thousands of cards, and without this every card
+// re-renders whenever anything on the board changes — a filter keystroke, a
+// drag, a single checkbox. The props are stable values plus callbacks the
+// board already memoizes, so a card only re-renders when its own task changes.
+export default memo(TaskCard);
