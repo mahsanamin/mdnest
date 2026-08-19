@@ -7,6 +7,7 @@ import {
   useSensors,
 } from '@dnd-kit/core';
 import { getTasks, patchTask, saveBoard, createTask, getNamespaceUsers, getAllTasks, deleteTask } from '../api';
+import { sortTasks, SORT_MODES } from '../task-sort.js';
 import { matchesTaskFilters } from '../taskFilters';
 import { buildRelationLookup, resolveTask } from '../relations';
 import { cardKey } from './cardKey';
@@ -33,6 +34,10 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
   const activeTaskRef = useRef(null);
   useEffect(() => { activeTaskRef.current = activeTask; }, [activeTask]);
   const [scope, setScope] = useState(() => localStorage.getItem('mdnest_taskboard_scope') || 'workspace');
+  // Default 'note' deliberately: the board has always shown tasks in the order
+  // they appear in your notes, and most boards are small enough that paging
+  // never applies. See task-sort.js.
+  const [sortMode, setSortMode] = useState(() => localStorage.getItem('mdnest_taskboard_sort') || 'note');
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorTask, setEditorTask] = useState(null);
   // Namespace members, to populate the assignee picker. Empty in single mode
@@ -407,18 +412,22 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
     localStorage.setItem(collapseKey, JSON.stringify([...done]));
   }, [columns, collapsedCols, collapseKey]);
 
+  // Ordering matters more than it looks: a column paints a page at a time, so
+  // the sort decides which cards are on the first page.
+  const orderedTasks = useMemo(() => sortTasks(filteredTasks, sortMode), [filteredTasks, sortMode]);
+
   const tasksByColumn = useMemo(() => {
     const map = {};
     for (const c of columns) map[c.id] = [];
-    for (const t of filteredTasks) {
+    for (const t of orderedTasks) {
       (map[t.column] || (map[t.column] = [])).push(t);
     }
     return map;
-  }, [columns, filteredTasks]);
+  }, [columns, orderedTasks]);
 
   const tasksByNote = useMemo(() => {
     const groups = new Map();
-    for (const t of filteredTasks) {
+    for (const t of orderedTasks) {
       // Global view can hold the same note path in two namespaces, so key the
       // group by namespace + path and label it with the namespace.
       const key = t.namespace ? `${t.namespace}\u0000${t.path}` : t.path;
@@ -426,7 +435,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
       groups.get(key).items.push(t);
     }
     return [...groups.values()].sort((a, b) => (a.ns + a.path).localeCompare(b.ns + b.path));
-  }, [filteredTasks]);
+  }, [orderedTasks]);
 
   return (
     <div className="tb-panel" role="region" aria-label="Task board">
@@ -547,6 +556,20 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
                 <option value="month">Due in 30 days</option>
                 <option value="has">Has a due date</option>
                 <option value="none">No due date</option>
+              </select>
+              <select
+                className="tb-filter-priority tb-filter-sort"
+                value={sortMode}
+                onChange={(e) => {
+                  setSortMode(e.target.value);
+                  try { localStorage.setItem('mdnest_taskboard_sort', e.target.value); } catch { /* private mode */ }
+                }}
+                title="Card order. On a large board this decides which cards are on the first page of a column."
+                aria-label="Sort order"
+              >
+                {SORT_MODES.map((m) => (
+                  <option key={m.id} value={m.id}>{`Sort: ${m.label}`}</option>
+                ))}
               </select>
               <label className="tb-filter-showdone" title="Include tasks in Done columns (list view)">
                 <input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} disabled={mode === 'board'} />
