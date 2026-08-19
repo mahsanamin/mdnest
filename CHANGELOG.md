@@ -10,6 +10,15 @@ _`develop` is at `4.2.2-dev`._
 
 ### Fixed
 
+- **Card order is now yours to choose, which matters once a column pages.**
+  Tasks arrive in note order, so with a column painting 100 cards at a time an
+  overdue task in a late-alphabet file sat on page 64 with no way to know it was
+  there. A *Sort* control in the filter bar offers **due date, then priority**,
+  and remembers the choice. The default stays note order deliberately: it is
+  what the board has always shown, it mirrors the files the tasks live in, and
+  most boards never page at all — quietly reshuffling them would be its own kind
+  of broken. Sorting adds no measurable cost (typing measured at 86 ms in note
+  order and 74 ms by urgency on a 12,000-task board).
 - **The task scan is cached, so the board stops re-reading every note.** Every
   board request read and parsed every note in the namespace. Measured on 420
   notes holding ~12,000 checkboxes: walking the tree costs ~6 ms while reading
