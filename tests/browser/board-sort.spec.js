@@ -37,7 +37,7 @@ async function openBoard(page) {
   await page.fill('input[name=username]', USER);
   await page.fill('input[name=password]', PASS);
   await page.click('button:has-text("Sign in")');
-  const btn = page.locator('.sidebar-board-btn');
+  const btn = page.locator('.toolbar-board-btn');
   const ok = await btn.waitFor({ state: 'visible', timeout: 15_000 }).then(() => true).catch(() => false);
   if (!ok) test.skip(true, 'task board disabled (ENABLE_TASK_BOARD)');
   await btn.click();
@@ -81,7 +81,7 @@ test('sorting by urgency brings an overdue task onto the first page', async ({ p
   await expect(page.locator('.ns-label, .ns-select')).toBeVisible({ timeout: 20_000 });
   const bigEnough = await selectBusiestNamespace(page, 101);
   if (!bigEnough) test.skip(true, 'no namespace here has a column bigger than one page');
-  const boardBtn = page.locator('.sidebar-board-btn');
+  const boardBtn = page.locator('.toolbar-board-btn');
   const ok = await boardBtn.waitFor({ state: 'visible', timeout: 15_000 }).then(() => true).catch(() => false);
   if (!ok) test.skip(true, 'task board disabled');
   await boardBtn.click();
@@ -122,7 +122,7 @@ test('the sort choice is remembered', async ({ page }) => {
   await page.locator('.tb-filter-sort').selectOption('urgency');
   expect(await page.evaluate(() => localStorage.getItem('mdnest_taskboard_sort'))).toBe('urgency');
   await page.reload();
-  await page.locator('.sidebar-board-btn').click();
+  await page.locator('.toolbar-board-btn').click();
   await expect(page.locator('.tb-panel')).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('.tb-filter-sort')).toHaveValue('urgency');
   // put it back so the other specs see the default

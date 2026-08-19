@@ -10,6 +10,16 @@ _`develop` is at `4.2.2-dev`._
 
 ### Fixed
 
+- **The board has its own button in the toolbar.** It has moved twice, so here
+  is the reasoning: it started *inside* the Basic/Live control, where all three
+  read as one choice; it then moved to the sidebar, where it sat directly above
+  the file tree's root row and read as the first row of the tree. Neither
+  location said what it is. It is now a labelled button of its own in the
+  toolbar — beside the editor modes, deliberately not part of them — because
+  the board replaces the main pane and that is where you look to change the
+  main pane. While the board is open, Basic and Live are hidden rather than
+  left visible and inert: they change how the open *file* is edited, and the
+  board has replaced it. The sidebar is now purely your files.
 - **Card order is now yours to choose, which matters once a column pages.**
   Tasks arrive in note order, so with a column painting 100 cards at a time an
   overdue task in a late-alphabet file sat on page 64 with no way to know it was
