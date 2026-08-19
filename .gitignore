@@ -18,3 +18,4 @@ tests/browser/test-results/
 tests/browser/playwright-report/
 .playwright/
 .demo_workspace/
+.bigproject/

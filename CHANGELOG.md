@@ -10,6 +10,23 @@ _`develop` is at `4.2.2-dev`._
 
 ### Fixed
 
+- **The task board stays usable on a big project.** Enabling the board on a
+  namespace with ~12,000 checkboxes made it crawl. The server was not the
+  problem (it answers in ~100 ms); the browser was being handed every card at
+  once. A column rendered its entire contents, so ~6,300 cards and **50,649 DOM
+  nodes** went onto the page, and every keystroke in the filter box re-filtered
+  and re-rendered the lot — **456 ms per key**. Columns now paint 100 cards at a
+  time with a *Show more* button, cards are memoised so one change no longer
+  re-renders its neighbours, and filtering follows a deferred value so typing
+  stays responsive. The column header still reports the true total, so nothing
+  is hidden silently. Measured on the same 11,994-task namespace: board opens
+  **1,802 ms → 844 ms**, DOM **50,649 → 950 nodes**, filter keystroke
+  **456 ms → 87 ms**.
+- **The task board has a visible way out.** It replaces the editor pane, and its
+  `onClose` was accepted but never rendered — so once you were on the board, the
+  only way back to your note was the toolbar's Basic/Live pair, which says
+  nothing about the board. The header now starts with a back button naming the
+  note you came from, and the sidebar entry toggles the board closed again.
 - **A missing build asset now 404s instead of being served the app shell.** The
   SPA fallback also caught `/assets/`, so a content-hashed chunk that no longer
   existed was answered with `index.html` and a `200`. A tab still running a

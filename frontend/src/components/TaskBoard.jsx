@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, useDeferredValue } from 'react';
 import {
   DndContext,
   DragOverlay,
@@ -353,12 +353,19 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
   const effectiveShowDone = mode === 'board' ? true : showDone;
 
   // Tasks after filters — every downstream view derives from this.
+  // Filtering scans every task in the namespace, and a big project has tens of
+  // thousands. Driving it straight off `search` re-ran the scan and re-rendered
+  // every card on each keystroke — measured at ~456ms per key with ~12k tasks,
+  // which makes the box feel broken. The input stays controlled by `search` so
+  // typing is instant; the expensive pass follows the deferred value, so React
+  // can drop superseded work while you are still typing.
+  const deferredSearch = useDeferredValue(search);
   const filteredTasks = useMemo(
     () => tasks.filter((t) => matchesTaskFilters(t, {
-      search, tags: tagFilter, assignee: assigneeFilter, priority: priorityFilter,
+      search: deferredSearch, tags: tagFilter, assignee: assigneeFilter, priority: priorityFilter,
       relation: relationFilter, due: dueFilter, showDone: effectiveShowDone, doneColumns: doneColumnIds, currentUser,
     })),
-    [tasks, search, tagFilter, assigneeFilter, priorityFilter, relationFilter, dueFilter, effectiveShowDone, doneColumnIds, currentUser],
+    [tasks, deferredSearch, tagFilter, assigneeFilter, priorityFilter, relationFilter, dueFilter, effectiveShowDone, doneColumnIds, currentUser],
   );
 
   // First time a board is shown (no stored collapse state), collapse the Done
@@ -395,6 +402,21 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
     <div className="tb-panel" role="region" aria-label="Task board">
       <div className="tb-header">
         <div className="tb-header-left">
+          {/* The way out, first thing in the header.
+              The board replaces the editor pane, and onClose existed but was
+              never rendered — so once you were on the board the only exit was
+              the toolbar's Basic/Live pair, which says nothing about the board
+              and reads as an editor setting. Naming the note you came from
+              makes it obvious what the button does and where it lands. */}
+          {onClose && (
+            <button type="button" className="tb-back" onClick={onClose}
+              title={currentPath ? `Back to ${currentPath}` : 'Close the board'}>
+              <span aria-hidden="true">&#8592;</span>
+              {currentPath
+                ? <span className="tb-back-label">{currentPath.split('/').pop()}</span>
+                : <span className="tb-back-label">Close board</span>}
+            </button>
+          )}
           <div className="tb-mode-toggle">
             <button className={mode === 'list' ? 'active' : ''} onClick={() => setModePersist('list')}>List</button>
             <button className={mode === 'board' ? 'active' : ''} onClick={() => setModePersist('board')}>Kanban</button>
