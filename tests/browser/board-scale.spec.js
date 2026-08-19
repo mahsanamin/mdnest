@@ -23,7 +23,7 @@ async function login(page) {
 }
 
 async function openBoard(page) {
-  const btn = page.locator('.toolbar-board-btn');
+  const btn = page.locator('.toolbar-view-board');
   const ok = await btn.waitFor({ state: 'visible', timeout: 15_000 }).then(() => true).catch(() => false);
   if (!ok) test.skip(true, 'task board disabled (ENABLE_TASK_BOARD)');
   await btn.click();
@@ -63,19 +63,21 @@ test('the board offers a visible way back to the note', async ({ page }) => {
   await expect(page.locator('.toolbar-path')).toContainText(name);
 });
 
-test('the board button toggles the board closed again', async ({ page }) => {
+test('the Editor half of the view switch returns you to the note', async ({ page }) => {
   test.setTimeout(120_000);
   await login(page);
   await openBoard(page);
-  await expect(page.locator('.toolbar-board-btn')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.toolbar-view-board')).toHaveAttribute('aria-pressed', 'true');
 
   // Basic/Live edit the open file, which the board has replaced — so they are
   // hidden rather than left visible and inert.
   await expect(page.locator('.editor-mode-toggle'), 'editor modes should be hidden on the board')
     .toHaveCount(0);
-  await page.locator('.toolbar-board-btn').click();
+  // Click Editor — the explicit other half, not the same button again.
+  await page.locator('.toolbar-view-editor').click();
   await expect(page.locator('.tb-panel')).toHaveCount(0);
-  await expect(page.locator('.toolbar-board-btn')).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('.toolbar-view-board')).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('.toolbar-view-editor')).toHaveAttribute('aria-pressed', 'true');
   // ...and they come back when the file does.
   await expect(page.locator('.editor-mode-toggle')).toBeVisible();
 });

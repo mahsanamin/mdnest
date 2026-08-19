@@ -23,7 +23,7 @@ test('the board scrolls sideways instead of hiding columns', async ({ page }) =>
 
   // The button only renders once /api/config has told the app the board is
   // enabled, which lands after the sidebar does — so wait, don't sample.
-  const board = page.locator('.toolbar-board-btn');
+  const board = page.locator('.toolbar-view-board');
   const boardAvailable = await board.waitFor({ state: 'visible', timeout: 15_000 })
     .then(() => true).catch(() => false);
   if (!boardAvailable) test.skip(true, 'task board disabled (ENABLE_TASK_BOARD)');

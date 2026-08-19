@@ -10,16 +10,16 @@ _`develop` is at `4.2.2-dev`._
 
 ### Fixed
 
-- **The board has its own button in the toolbar.** It has moved twice, so here
-  is the reasoning: it started *inside* the Basic/Live control, where all three
-  read as one choice; it then moved to the sidebar, where it sat directly above
-  the file tree's root row and read as the first row of the tree. Neither
-  location said what it is. It is now a labelled button of its own in the
-  toolbar — beside the editor modes, deliberately not part of them — because
-  the board replaces the main pane and that is where you look to change the
-  main pane. While the board is open, Basic and Live are hidden rather than
-  left visible and inert: they change how the open *file* is edited, and the
-  board has replaced it. The sidebar is now purely your files.
+- **The toolbar now has an `Editor · Board` switch**, and the board is one half
+  of it. Previously the board was a third button inside the Basic/Live control,
+  where all three read as one choice — but Basic and Live are ways of editing
+  the file you have open, while the board leaves the file entirely. Splitting
+  them makes the toolbar answer two separate questions in order: *what am I
+  looking at* (Editor or Board), then *how am I editing it* (Basic or Live).
+  The second switch only appears while Editor is selected, since it has nothing
+  to act on once the board has replaced the note. The board's own header also
+  keeps a back button naming the note you came from, so there are two obvious
+  ways back. The sidebar is now purely your files.
 - **Card order is now yours to choose, which matters once a column pages.**
   Tasks arrive in note order, so with a column painting 100 cards at a time an
   overdue task in a late-alphabet file sat on page 64 with no way to know it was
