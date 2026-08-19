@@ -5553,28 +5553,6 @@ pre:hover .code-copy-btn {
   font-weight: 600;
 }
 
-/* Light/dark switch for the drawing canvas. Lives in Excalidraw's Footer slot
-   (beside the zoom controls) rather than floating over the canvas — a
-   free-floating button has to guess at empty space, and the first attempt
-   landed on top of their help button. Sized to match their footer buttons. */
-.excalidraw-theme-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  margin-left: 8px;
-  padding: 0;
-  border: none;
-  border-radius: 8px;
-  background: var(--island-bg-color, var(--surface));
-  color: var(--icon-fill-color, var(--text));
-  box-shadow: var(--shadow-island);
-  cursor: pointer;
-}
-.excalidraw-theme-toggle:hover {
-  background: var(--button-hover-bg, var(--surface-2));
-}
 
 /* The namespace root as a tree row: the create target and drop target for the
    top level. Without it, selecting a folder was a one-way trip — nothing aimed
