@@ -10,6 +10,18 @@ _`develop` is at `4.2.2-dev`._
 
 ### Fixed
 
+- **Presence no longer flickers, and no longer moves your work.** With more
+  than one person on a note, collaborators appeared and disappeared repeatedly.
+  Two separate faults. Departures were applied the instant they arrived, so any
+  momentary gap — a reconnect, a presence snapshot racing a join — read as
+  someone leaving and immediately returning; a departure is now held for a few
+  seconds and cancelled outright if they come back, so a blip never reaches the
+  screen while a real exit still registers. And the presence bar sat in the
+  document flow as a full-width strip, so each of those blips reflowed
+  everything below it — the editor, a Mermaid diagram, a drawing canvas all
+  jumped. It is now an overlay pinned inside the content area, so presence can
+  come and go without the page moving. This affected every note, not just
+  drawings.
 - **The task board stays usable on a big project.** Enabling the board on a
   namespace with ~12,000 checkboxes made it crawl. The server was not the
   problem (it answers in ~100 ms); the browser was being handed every card at

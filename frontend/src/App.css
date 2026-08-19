@@ -4219,17 +4219,36 @@ pre:hover .code-copy-btn {
 }
 
 /* ===== Presence bar ===== */
+/* Presence floats over the content instead of sitting in the flow.
+   It used to be a full-width strip between the toolbar and the editor, so
+   every join and leave reflowed everything below it — the editor, a Mermaid
+   diagram, a drawing canvas all jumped by the height of the bar. Ambient
+   information must never move the thing you are working on, so this is
+   positioned like a toast: it appears and disappears without the document
+   noticing. pointer-events stay on the pill itself so its tooltips work,
+   while the strip around it doesn't swallow clicks meant for the editor. */
 .presence-bar {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  z-index: 20;
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 12px;
+  max-width: calc(100% - 24px);
+  padding: 4px 10px;
   background: #181825;
-  border-bottom: 1px solid #313244;
+  border: 1px solid #313244;
+  border-radius: 999px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
   font-size: 0.78rem;
   color: #6c7086;
-  flex-shrink: 0;
+  pointer-events: auto;
 }
+
+/* .split-view is already position:relative, so it is the containing block —
+   which is what keeps the overlay inside the content area and off the
+   toolbar. */
 
 .presence-dot {
   width: 22px;
