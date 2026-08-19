@@ -565,11 +565,9 @@ is what decides.)
 administrator can set in `mdnest.conf`; if that is `auto` (the default), it
 follows your operating system.
 
-**Drawings** open in the app's theme. The sun/moon button on the drawing canvas
-overrides that for the drawing you are looking at, without changing the app or
-touching the file -- so a diagram can be read light inside a dark mdnest, and the
-`.excalidraw.md` stays portable. The override is per-view and resets when you
-reopen the drawing.
+**Drawings** follow the app theme, and repaint straight away when you change it.
+The theme is never written into the drawing file, so an `.excalidraw.md` stays
+portable and two people can view the same drawing in different themes.
 
 **Slide decks keep their own theme.** A Marp deck is something you authored to
 look a particular way, and it renders that way regardless of your app theme.
