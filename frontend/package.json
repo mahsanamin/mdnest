@@ -16,6 +16,7 @@
     "@excalidraw/excalidraw": "^0.18.1",
     "@marp-team/marp-core": "^4.4.0",
     "@milkdown/core": "^7.20.0",
+    "@milkdown/crepe": "^7.20.0",
     "@milkdown/ctx": "^7.20.0",
     "@milkdown/plugin-clipboard": "^7.20.0",
     "@milkdown/plugin-history": "^7.20.0",
