@@ -41,11 +41,11 @@ equally-spaced buttons.
 
 ### Changed
 
-- **Drawings follow the app theme** instead of remembering their own. The
-  sun/moon button on the canvas still overrides it for the drawing you're
-  looking at, without touching the file or the app — but the override is now
-  per-view rather than remembered, so switching mdnest to light no longer leaves
-  drawings stuck dark with nothing explaining why.
+- **Drawings follow the app theme** instead of remembering their own, and
+  repaint as soon as you change it. The canvas had its own light/dark button,
+  which existed because mdnest was dark-only and a drawing had no other way to
+  be light. Now that the app has a theme, that button was a second control
+  doing almost the same job a few centimetres from the first, so it is gone.
 - **The toolbar groups its controls.** Every button used to sit the same 8px
   from its neighbour, so "Rename" was no more visibly related to "Delete" than
   to the filename beside it. Related controls now sit close together with wider
