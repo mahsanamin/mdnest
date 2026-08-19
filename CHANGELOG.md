@@ -6,7 +6,21 @@ All notable changes to mdnest are documented here.
 
 ## Unreleased
 
-_`develop` is at `4.2.2-dev`._
+_Nothing yet — `develop` is at `4.2.3-dev`._
+
+---
+
+## v4.2.2 — A board you can actually use
+
+Almost all of this release came out of running the task board on a real project
+with roughly 12,000 checkboxes, where it went from useful to unusable. None of
+it was where it looked: the server answered in ~100 ms, and the cost was the
+browser being handed every card at once.
+
+The rest is the board finally saying what it is. It has been a third button
+inside the Basic/Live control, then a row in the sidebar, and is now one button
+that names where it takes you — with no way out of it until this release, which
+is the part that should not have shipped in the first place.
 
 ### Fixed
 
