@@ -5435,42 +5435,32 @@ pre:hover .code-copy-btn {
   filter: brightness(1.1);
 }
 
-/* The main-pane view switch: Editor or Board.
-   Two genuinely exclusive views, so a segmented pair is honest here — which is
-   exactly what the old Basic|Live|Board control was not, since it mixed an
-   editor mode with a destination. Styled like .editor-mode-toggle so they read
-   as the same kind of control, but placed first and separated by a divider,
-   because it answers the higher-level question: what am I looking at, before
-   how am I editing it. */
-.toolbar-view-switch {
+/* The main-pane switch: one button naming where it takes you (Board from a
+   note, Editor from the board). Not a segmented pair — the Basic/Live group
+   beside it is already segmented, and a second one read as one long strip of
+   pills; and not a pressed/unpressed toggle, which never says what pressing
+   it will do. */
+.toolbar-view-btn {
+  margin-right: 10px;
   display: flex;
-  gap: 0;
-  background: #181825;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
   border: 1px solid #313244;
   border-radius: 6px;
-  overflow: hidden;
-  flex-shrink: 0;
-  margin-right: 10px;
-  padding-right: 0;
-}
-.toolbar-view-switch button {
-  padding: 3px 10px;
-  background: transparent;
-  color: #6c7086;
-  border: none;
-  font-size: 0.72rem;
-  font-weight: 600;
+  background: #181825;
+  color: #a6adc8;
+  font-size: 0.78rem;
   cursor: pointer;
   transition: all 0.15s;
 }
-.toolbar-view-switch button:hover:not(.active) { color: #cdd6f4; background: #313244; }
-.toolbar-view-switch button.active { background: #89b4fa; color: #1e1e2e; }
+.toolbar-view-btn:hover { background: #313244; color: #cdd6f4; border-color: #45475a; }
+.toolbar-view-btn svg { flex-shrink: 0; opacity: 0.9; }
 
-/* A hairline between the two groups, so the view switch and the editor modes
-   don't read as one six-button strip. */
-.toolbar-view-switch + .editor-mode-toggle {
-  margin-left: 0;
-  border-left: 1px solid #313244;
+/* Narrow screens: the icons carry the pair, the labels drop. */
+@media (max-width: 768px) {
+  .toolbar-view-btn span { display: none; }
+  .toolbar-view-btn { padding: 4px 8px; margin-right: 6px; }
 }
 
 /* The folder new notes/drawings/folders will be created in. Deliberately

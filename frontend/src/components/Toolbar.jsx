@@ -24,28 +24,33 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
       <button className="toolbar-hamburger" onClick={onToggleSidebar} title="Toggle sidebar">
         &#9776;
       </button>
-      {/* The main-pane view switch.
-          Two things you can be looking at, so a segmented pair is the honest
-          shape — unlike the original Basic|Live|Board, which put an editor
-          mode and a destination in one control. The editor's own modes
-          (Basic/Live) live in a separate group and only appear while the
-          Editor half is selected, which keeps the two questions apart: what am
-          I looking at, and how am I editing it. */}
+      {/* One button that swaps to name where it takes you: on a note it says
+          Board, on the board it says Editor. A pair of buttons showed the
+          inactive half permanently greyed for no benefit, and a single
+          pressed/unpressed toggle never said what pressing it would do.
+          The class follows the destination too (.toolbar-view-board takes you
+          to the board, .toolbar-view-editor brings you back), so the name is
+          about intent rather than which half is lit. */}
       {onSetBoardActive && (
-        <div className="toolbar-view-switch" role="group" aria-label="Main view">
+        boardActive ? (
           <button
-            className={`toolbar-view-editor${!boardActive ? ' active' : ''}`}
+            className="toolbar-view-btn toolbar-view-editor"
             onClick={() => onSetBoardActive(false)}
-            aria-pressed={!boardActive}
-            title="The note you have open"
-          >Editor</button>
+            title={currentPath ? `Back to ${currentPath}` : 'Back to the editor'}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>
+            <span>Editor</span>
+          </button>
+        ) : (
           <button
-            className={`toolbar-view-board${boardActive ? ' active' : ''}`}
+            className="toolbar-view-btn toolbar-view-board"
             onClick={() => onSetBoardActive(true)}
-            aria-pressed={!!boardActive}
             title="Task board for this workspace"
-          >Board</button>
-        </div>
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+            <span>Board</span>
+          </button>
+        )
       )}
 
       {showEditorToggle && (
@@ -93,7 +98,10 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
           stays visible even when the toolbar is cramped. Full path is
           on the title="" attribute for desktop hover reveal. */}
       <span className="toolbar-path" title={currentPath || ''}>
-        {!currentPath && 'No file selected'}
+        {/* "No file selected" is guidance for an empty editor. On the board
+            there is nothing to select a file for, so the prompt is just noise
+            — the board is showing the whole workspace. */}
+        {!currentPath && !boardActive && 'No file selected'}
         {currentPath && (() => {
           const idx = currentPath.lastIndexOf('/');
           const dir = idx >= 0 ? currentPath.substring(0, idx + 1) : '';

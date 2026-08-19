@@ -114,9 +114,9 @@ There are two ways to create notes and folders.
 
 At the top of the sidebar:
 
+- **+ Folder** -- creates a new folder. You will be prompted for a name.
 - **+ Note** -- creates a new markdown file. You will be prompted for a filename.
 - **+ Drawing** -- creates a new `.excalidraw.md` drawing (when drawings are enabled).
-- **+ Folder** -- creates a new folder. You will be prompted for a name.
 
 **Where new items are created** *(clarified in v4.2.1)*: click a folder in the
 tree to aim these buttons at it — the folder is highlighted, and each button's
@@ -171,7 +171,7 @@ mdnest has two editing modes, switchable from the toolbar when in editor-only vi
 
 Live Mode is only available in editor-only view (the pen icon). Split view always uses Basic Mode with a separate preview pane.
 
-**Editor · Board** — the toolbar's first switch decides *what you are looking at*: your note, or the [task board](#task-board) for the whole workspace. The Basic · Live switch beside it decides *how you edit* the note, so it only appears while **Editor** is selected. Pick **Board** to leave the note; pick **Editor** to come back.
+**Board / Editor** — the first button in the toolbar swaps to name where it takes you: on a note it says **Board** and opens the [task board](#task-board) for the whole workspace; on the board it says **Editor** and brings you back. The Basic · Live switch beside it decides *how you edit* the note, so it disappears while the board is open — there is no note on screen for it to act on.
 
 Changes are saved automatically in both modes. There is no manual save button -- your edits are sent to the backend as you type. As of v3.6.1, autosave will refuse to truncate a non-empty note to empty (a defensive guard against editor bugs that could otherwise wipe content); to deliberately empty a file, delete it via right-click → Delete.
 
@@ -403,9 +403,9 @@ Checkboxes are also the atoms of the **[Task Board](#task-board)**: any checkbox
 
 The task board gathers every task-list item in a namespace and presents it as a kanban board or a flat list. Because tasks live in your notes, the board is just a view of them -- editing on the board edits the note, and editing the note updates the board.
 
-**Opening it.** Click **Board** in the toolbar's **Editor · Board** switch. The board replaces the editor pane (the sidebar and header stay put) and is scoped to the current namespace.
+**Opening it.** Click **Board** in the toolbar. The board replaces the editor pane (the sidebar and header stay put) and is scoped to the current namespace.
 
-**Getting back.** Either works: click **Editor** in the same switch, or use the back button at the start of the board's own header, which names the note you came from (**← my-note.md**).
+**Getting back.** Either works: the same button now reads **Editor**, or use the back button at the start of the board's own header, which names the note you came from (**← my-note.md**).
 
 **Lots of columns.** The board scrolls horizontally when the columns don't fit, so a wide board stays reachable on a narrow window.
 

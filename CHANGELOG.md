@@ -10,16 +10,17 @@ _`develop` is at `4.2.2-dev`._
 
 ### Fixed
 
-- **The toolbar now has an `Editor · Board` switch**, and the board is one half
-  of it. Previously the board was a third button inside the Basic/Live control,
-  where all three read as one choice — but Basic and Live are ways of editing
-  the file you have open, while the board leaves the file entirely. Splitting
-  them makes the toolbar answer two separate questions in order: *what am I
-  looking at* (Editor or Board), then *how am I editing it* (Basic or Live).
-  The second switch only appears while Editor is selected, since it has nothing
-  to act on once the board has replaced the note. The board's own header also
-  keeps a back button naming the note you came from, so there are two obvious
-  ways back. The sidebar is now purely your files.
+- **One toolbar button now swaps between your note and the board.** On a note
+  it reads **Board**; on the board it reads **Editor** and brings you back — the
+  label always names where it will take you. Previously the board was a third
+  button inside the Basic/Live control, where all three read as one choice,
+  even though Basic and Live are ways of editing the file you have open while
+  the board leaves the file entirely. Basic/Live are hidden while the board is
+  open, since there is no note on screen for them to act on, and so is the "No
+  file selected" placeholder. The board's own header still starts with a back
+  button naming the note you came from. The sidebar is now purely your files.
+- **The sidebar's create buttons read Folder, Note, Drawing** — containers
+  before the things that go inside them.
 - **Card order is now yours to choose, which matters once a column pages.**
   Tasks arrive in note order, so with a column painting 100 cards at a time an
   overdue task in a late-alphabet file sat on page 64 with no way to know it was
