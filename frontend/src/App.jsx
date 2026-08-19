@@ -1043,6 +1043,12 @@ function App() {
     }
   }, [selectedNs, restoreScrollPosition, commentsEnabled, setLastPath, flushPendingSave]);
 
+  // Stable identity on purpose: this is handed to every task card, which is
+  // memoised. An inline arrow here would be a new function on every App
+  // render, so every card would re-render and the memo would buy nothing.
+  const openNoteFromBoard = useCallback((p) => { setShowTaskBoard(false); openNote(p); }, [openNote]);
+
+
   const refreshComments = useCallback(() => {
     if (selectedNs && currentPath) {
       listComments(selectedNs, currentPath).then(setComments).catch(() => setComments([]));
@@ -1721,7 +1727,7 @@ function App() {
                 currentPath={currentPath}
                 currentUser={userInfo?.username}
                 refreshSignal={boardRefreshNonce}
-                onOpenNote={(p) => { setShowTaskBoard(false); openNote(p); }}
+                onOpenNote={openNoteFromBoard}
                 onClose={() => setShowTaskBoard(false)}
               />
             </Suspense>
