@@ -5435,37 +5435,37 @@ pre:hover .code-copy-btn {
   filter: brightness(1.1);
 }
 
-/* Task board entry — a namespace-level destination, so it sits with the
-   namespace and its tree rather than in the toolbar's editor-mode control. */
-.sidebar-board {
-  padding: 0 0.5rem 0.4rem;
-  border-bottom: 1px solid #313244;
-  margin-bottom: 0.35rem;
-}
-.sidebar-board-btn {
+/* The board button. Deliberately styled as its own control rather than as a
+   segment of the Basic/Live group beside it: those two are editor modes for
+   the open file, this leaves the file entirely. A gap and a border carry that
+   distinction — it has been mistaken for an editor mode (when it lived inside
+   that group) and for a file-tree row (when it lived in the sidebar). */
+.toolbar-board-btn {
   display: flex;
   align-items: center;
-  gap: 0.45rem;
-  width: 100%;
-  padding: 0.4rem 0.5rem;
-  border: none;
-  border-radius: 4px;
-  background: transparent;
-  color: #cdd6f4;
-  font-size: 0.85rem;
-  text-align: left;
+  gap: 5px;
+  flex-shrink: 0;
+  margin-left: 10px;
+  padding: 4px 10px;
+  border: 1px solid #313244;
+  border-radius: 6px;
+  background: #181825;
+  color: #a6adc8;
+  font-size: 0.78rem;
   cursor: pointer;
 }
-.sidebar-board-btn:hover {
-  background: #313244;
-}
-.sidebar-board-btn.active {
+.toolbar-board-btn:hover { background: #313244; color: #cdd6f4; }
+.toolbar-board-btn.active {
   background: #45475a;
+  border-color: #89b4fa;
   color: #89b4fa;
 }
-.sidebar-board-btn svg {
-  flex-shrink: 0;
-  opacity: 0.85;
+.toolbar-board-btn svg { flex-shrink: 0; opacity: 0.9; }
+
+/* Below the mobile breakpoint the toolbar is tight; the icon carries it. */
+@media (max-width: 768px) {
+  .toolbar-board-btn span { display: none; }
+  .toolbar-board-btn { padding: 4px 8px; margin-left: 6px; }
 }
 
 /* The folder new notes/drawings/folders will be created in. Deliberately

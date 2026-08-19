@@ -171,7 +171,7 @@ mdnest has two editing modes, switchable from the toolbar when in editor-only vi
 
 Live Mode is only available in editor-only view (the pen icon). Split view always uses Basic Mode with a separate preview pane.
 
-**Board** — the [task board](#task-board) opens from **Task Board** in the sidebar, above the file tree *(moved there in v4.2.1; it used to sit in this toolbar switch)*. It belongs with the workspace rather than the toolbar because it is scoped to the whole namespace, not to the file you have open. It appears once a namespace is selected.
+**Board** — the [task board](#task-board) has its own **Board** button in the toolbar, just to the right of this Basic · Live switch. It is deliberately not part of that switch: Basic and Live are two ways of editing the file you have open, while the board leaves the file entirely and shows the whole workspace. It appears once a namespace is selected, and lights up while the board is open — click it again to come back.
 
 Changes are saved automatically in both modes. There is no manual save button -- your edits are sent to the backend as you type. As of v3.6.1, autosave will refuse to truncate a non-empty note to empty (a defensive guard against editor bugs that could otherwise wipe content); to deliberately empty a file, delete it via right-click → Delete.
 
@@ -403,9 +403,13 @@ Checkboxes are also the atoms of the **[Task Board](#task-board)**: any checkbox
 
 The task board gathers every task-list item in a namespace and presents it as a kanban board or a flat list. Because tasks live in your notes, the board is just a view of them -- editing on the board edits the note, and editing the note updates the board.
 
-**Opening it.** Click **Task Board** in the sidebar, above the file tree. The board replaces the editor pane (the sidebar and header stay put) and is scoped to the current namespace. *(Before v4.2.1 this was a third option in the toolbar's Basic · Live switch.)*
+**Opening it.** Click **Board** in the toolbar. The board replaces the editor pane (the sidebar and header stay put) and is scoped to the current namespace.
+
+**Getting back.** Two ways, either is fine: the board's header starts with a back button naming the note you came from (**← my-note.md**), or click the lit **Board** button again.
 
 **Lots of columns.** The board scrolls horizontally when the columns don't fit, so a wide board stays reachable on a narrow window.
+
+**Lots of tasks.** A column shows 100 cards at a time with a **Show more** button; the number beside the column name is always the true total. On a big board the **Sort** control matters, because it decides which cards are on that first page: leave it on *Note order* to see tasks in the order they appear in your notes, or switch to *Due date, then priority* to bring the urgent ones to the front. Your choice is remembered.
 
 **Views.**
 

@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 
-function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePassword, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh, wsStatus, commentCount, onToggleComments, boardActive, marpLocked, drawingDoc, drawingSource, onDrawingSourceChange }) {
+function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePassword, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh, wsStatus, commentCount, onToggleComments, onOpenBoard, boardActive, marpLocked, drawingDoc, drawingSource, onDrawingSourceChange }) {
   const [refreshing, setRefreshing] = useState(false);
   const handleRefresh = useCallback(() => {
     if (refreshing || !onRefresh) return;
@@ -12,7 +12,12 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
   // Live-mode crashed on the previous file can pre-switch to Basic before
   // opening the next one. Requires viewMode !== 'preview' (editor isn't
   // visible in preview-only mode anyway).
-  const showEditorToggle = viewMode !== 'preview' && onEditorModeChange;
+  //
+  // Hidden entirely while the board is open: they change how the open *file*
+  // is edited, and the board has replaced it, so there is nothing for them to
+  // act on. Leaving them visible-but-inert was the confusing part — they read
+  // as view switches for what is on screen.
+  const showEditorToggle = viewMode !== 'preview' && onEditorModeChange && !boardActive;
 
   return (
     <div className="toolbar">
@@ -30,12 +35,12 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
                   left, the rich one on the right. Basic means the same thing in
                   both — the plain text behind what you're looking at. */}
               <button
-                className={!boardActive && drawingSource ? 'active' : ''}
+                className={drawingSource ? 'active' : ''}
                 onClick={() => onDrawingSourceChange(true)}
                 title="Markdown source behind this drawing"
               >Basic</button>
               <button
-                className={!boardActive && !drawingSource ? 'active' : ''}
+                className={!drawingSource ? 'active' : ''}
                 onClick={() => onDrawingSourceChange(false)}
                 title="Drawing canvas"
               >Drawing</button>
@@ -44,12 +49,12 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
           {showEditorToggle && !drawingDoc && (
             <>
               <button
-                className={!boardActive && editorMode === 'basic' ? 'active' : ''}
+                className={editorMode === 'basic' ? 'active' : ''}
                 onClick={() => onEditorModeChange('basic')}
                 title="Plain text editor"
               >Basic</button>
               <button
-                className={!boardActive && editorMode === 'live' ? 'active' : ''}
+                className={editorMode === 'live' ? 'active' : ''}
                 onClick={() => onEditorModeChange('live')}
                 disabled={marpLocked}
                 title={marpLocked ? 'Disabled for Marp slides — the rich editor would reformat and break the deck' : 'Live rich editor'}
@@ -58,6 +63,27 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
           )}
         </div>
       )}
+      {/* The board, as its own control.
+          It belongs near the pane it replaces, but NOT inside the Basic/Live
+          group: those two are mutually-exclusive ways of editing the open
+          file, while this leaves the file entirely. It sat inside that group
+          once (all three read as one choice) and in the sidebar once (it read
+          as the first row of the file tree, especially next to the root row).
+          A separate, labelled button beside them is the honest shape: related
+          enough to find, separate enough not to be mistaken for an editor
+          mode. */}
+      {onOpenBoard && (
+        <button
+          className={`toolbar-board-btn${boardActive ? ' active' : ''}`}
+          onClick={onOpenBoard}
+          title={boardActive ? 'Close the board and go back to your note' : 'Task board for this workspace'}
+          aria-pressed={!!boardActive}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+          <span>Board</span>
+        </button>
+      )}
+
       {/* Path display splits dir + basename so the filename never gets
           ellipsized away on narrow screens. .toolbar-path-dir shrinks
           and ellipsizes; .toolbar-path-base has flex-shrink: 0 so it

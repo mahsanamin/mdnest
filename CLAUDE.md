@@ -134,7 +134,7 @@ frontend/
       ContextMenu.jsx        # Right-click / long-press floating menu
       CommentSidebar.jsx     # Inline comments: slide-out panel, threads, replies, Go To
       HistoryModal.jsx       # Per-file git-sync history viewer + restore (v3.7.0+)
-      TaskBoard.jsx          # Kanban board over note checkboxes (v4.0.0+); lazy-loaded. v4.2.0+ adds the filter bar and the "All workspaces" scope
+      TaskBoard.jsx          # Kanban board over note checkboxes (v4.0.0+); lazy-loaded. v4.2.0+ adds the filter bar and the "All workspaces" scope. v4.2.2+: opened from its own toolbar button (NOT inside the Basic/Live control — those are editor modes for the open file, the board leaves the file; and not in the sidebar, where it read as a file-tree row). Columns paint 100 cards at a time; server-side task scans are cached (backend/handlers/tasks_cache.go).
       TaskCard.jsx           # v4.2.0+ — one card (title on its own full-width line, badges, relations, steps)
       BoardColumn.jsx        # v4.2.0+ — one kanban column + drop target
       TaskEditor.jsx         # Rich task create/edit form used by the board

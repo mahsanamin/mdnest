@@ -1583,8 +1583,6 @@ function App() {
         onAdminPanel={isAdmin && isMulti ? () => setShowAdminPanel(true) : null}
         onNewNote={canWrite('') ? () => doCreateNote(null) : null}
         onNewDrawing={excalidrawEnabled && canWrite('') ? () => doCreateDrawing(null) : null}
-        onOpenBoard={taskBoardEnabled && selectedNs ? () => setShowTaskBoard((v) => !v) : null}
-        boardActive={showTaskBoard}
         pickedFolder={pickedFolder}
         onPickFolder={setPickedFolder}
         onNewFolder={canWrite('') ? () => doCreateFolder(null) : null}
@@ -1631,6 +1629,7 @@ function App() {
           }}
           editorMode={editorModeForNote}
           marpLocked={marpActive}
+          onOpenBoard={taskBoardEnabled && selectedNs ? () => setShowTaskBoard((v) => !v) : null}
           drawingDoc={isDrawingDoc}
           drawingSource={drawingSource}
           onDrawingSourceChange={setDrawingSource}
