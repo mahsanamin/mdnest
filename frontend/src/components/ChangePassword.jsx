@@ -47,7 +47,7 @@ function ChangePassword({ onClose }) {
       <div className="modal-backdrop" onClick={onClose}>
         <div className="modal" onClick={(e) => e.stopPropagation()}>
           <h3>Credentials Updated</h3>
-          <p style={{ color: '#a6e3a1', margin: '1rem 0' }}>
+          <p style={{ color: 'var(--success)', margin: '1rem 0' }}>
             Password changed successfully. You will need to log in again with your new credentials.
           </p>
           <button

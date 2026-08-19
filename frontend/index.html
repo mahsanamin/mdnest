@@ -5,6 +5,31 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>mdnest</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <script>
+      // First-paint theme, inline and synchronous so it runs before the
+      // stylesheet paints anything. Without it a light-mode user gets a full
+      // dark flash on every load: the real answer lives on the server, and
+      // /api/preferences cannot resolve before the first frame.
+      //
+      // This reads the last resolved theme (a paint cache, never the
+      // preference) and falls back to the OS. The app overwrites it as soon as
+      // the server answers, so a wrong guess costs one repaint, not a wrong
+      // setting. Kept dependency-free and in a try/catch because it runs
+      // before any bundle and must never be the reason the page is blank.
+      (function () {
+        try {
+          var t = localStorage.getItem('mdnest_theme_paint');
+          if (t !== 'dark' && t !== 'light') {
+            t = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches
+              ? 'light' : 'dark';
+          }
+          document.documentElement.setAttribute('data-theme', t);
+          document.documentElement.style.colorScheme = t;
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

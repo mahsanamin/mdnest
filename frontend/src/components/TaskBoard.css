@@ -646,7 +646,7 @@
   font: inherit;
   font-size: 12px;
 }
-.tb-edit input[type="date"] { color-scheme: dark; }
+.tb-edit input[type="date"] { color-scheme: inherit; }
 
 .tb-new-task {
   display: flex;
@@ -693,7 +693,7 @@
   font: inherit;
   font-size: 13px;
 }
-.tb-modal-field input[type="date"] { color-scheme: dark; }
+.tb-modal-field input[type="date"] { color-scheme: inherit; }
 .tb-modal-field textarea { resize: vertical; }
 .tb-editor-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .tb-check-field { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-secondary); margin-bottom: 14px; }

@@ -53,6 +53,8 @@ import {
   moveItem,
   fetchConfig,
   fetchMe,
+  fetchPreferences,
+  savePreferences,
   logout as apiLogout,
   PermissionError,
 } from './api.js';
@@ -60,6 +62,13 @@ import { buildPathIndex } from './wikilink.js';
 import { createEchoGate } from './echo-gate.js';
 import { broadcastTabMessage, onTabMessage } from './tab-sync.js';
 import { initFirebase, signOutFirebase } from './firebase-config.js';
+import {
+  resolveTheme,
+  applyTheme,
+  osPrefersDark,
+  cacheTheme,
+  isTheme,
+} from './theme.js';
 import './App.css';
 
 // Top-level logout. In Firebase mode we also clear the local Google session
@@ -465,6 +474,76 @@ function App() {
       })
       .catch(() => setAppConfig({ authMode: 'single' }));
   }, []);
+
+  // --- Theme -----------------------------------------------------------
+  // themePreference is what the USER chose ('auto' | 'dark' | 'light');
+  // resolvedTheme is what is actually painted. They differ under 'auto'.
+  const [themePreference, setThemePreference] = useState('auto');
+  const [prefersDark, setPrefersDark] = useState(() => osPrefersDark());
+
+  // Follow the OS while the preference is 'auto'. Without this listener a
+  // user who flips their system theme mid-session sits on the stale one until
+  // a reload — which is exactly the case 'auto' exists to serve.
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return;
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const onChange = (e) => setPrefersDark(e.matches);
+    mq.addEventListener?.('change', onChange);
+    return () => mq.removeEventListener?.('change', onChange);
+  }, []);
+
+  // The stored preference lives on the server, so it can only be read once
+  // there is a session. Until then the boot script's cached guess stands.
+  const [prefsLoaded, setPrefsLoaded] = useState(false);
+  useEffect(() => {
+    if (!authenticated) return;
+    let cancelled = false;
+    fetchPreferences().then((prefs) => {
+      if (cancelled) return;
+      if (isTheme(prefs?.theme)) setThemePreference(prefs.theme);
+      setPrefsLoaded(true);
+    });
+    return () => { cancelled = true; };
+  }, [authenticated]);
+
+  const resolvedTheme = resolveTheme({
+    userPreference: themePreference,
+    serverDefault: appConfig?.defaultTheme,
+    prefersDark,
+  });
+
+  // Paint, and remember for the next first paint.
+  //
+  // The guard matters more than it looks. Until the answers arrive,
+  // themePreference is a placeholder 'auto' and appConfig is null, so
+  // resolveTheme returns whatever the OS says — which for a user whose stored
+  // preference disagrees with their OS is the WRONG theme. Painting it would
+  // overwrite the correct colour the boot script already put on screen and
+  // reintroduce exactly the flash that script exists to prevent, only now
+  // between two of our own paints. So wait for /api/config, and when there is
+  // a session, for /api/preferences too.
+  const themeReady = !!appConfig && (!authenticated || prefsLoaded);
+  useEffect(() => {
+    if (!themeReady) return;
+    applyTheme(resolvedTheme);
+    cacheTheme(resolvedTheme);
+  }, [themeReady, resolvedTheme]);
+
+  // Apply immediately, persist in the background. A theme change must feel
+  // instant; if the write fails the screen is still correct for this session
+  // and the next load falls back to the stored value.
+  const changeTheme = useCallback((next) => {
+    if (!isTheme(next)) return;
+    setThemePreference(next);
+    savePreferences({ theme: next }).catch(() => {});
+  }, []);
+
+  // The toolbar button flips between the two concrete themes. Choosing
+  // 'auto' is available in Settings — a single button cannot express three
+  // states without becoming a menu, and the common action is "not this one".
+  const toggleTheme = useCallback(() => {
+    changeTheme(resolvedTheme === 'dark' ? 'light' : 'dark');
+  }, [changeTheme, resolvedTheme]);
 
   // Browser tab title: include the server alias so multiple mdnest tabs
   // (different servers) are visually distinguishable. Falls back to the
@@ -1609,6 +1688,8 @@ function App() {
       >
         <Toolbar
           currentPath={currentPath}
+          theme={resolvedTheme}
+          onToggleTheme={toggleTheme}
           onToggleSidebar={() => setSidebarVisible((v) => !v)}
           onRevealInTree={revealInTree}
           onChangePassword={() => setShowChangePassword(true)}
@@ -1880,7 +1961,14 @@ function App() {
         </div>
       </div>
       {showChangePassword && (
-        <Settings onClose={() => setShowChangePassword(false)} userProvider={appConfig?.userProvider} />
+        <Settings
+          onClose={() => setShowChangePassword(false)}
+          userProvider={appConfig?.userProvider}
+          themePreference={themePreference}
+          resolvedTheme={resolvedTheme}
+          onChangeTheme={changeTheme}
+          serverDefaultTheme={appConfig?.defaultTheme}
+        />
       )}
       {shareTarget && (
         <ShareDialog

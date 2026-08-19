@@ -2,9 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Excalidraw, Footer } from '@excalidraw/excalidraw';
 import '@excalidraw/excalidraw/index.css';
 import { parseExcalidraw, serializeExcalidraw } from '../excalidraw';
+import { useTheme } from '../useTheme.js';
 
-// Viewer-side theme preference for the drawing canvas (never stored in the note).
-const THEME_KEY = 'mdnest_drawing_theme';
 
 // loadLibraries fetches operator-configured .excalidrawlib URLs and flattens
 // them into Excalidraw library items (supporting both the v2 `libraryItems`
@@ -97,22 +96,29 @@ export default function ExcalidrawEditor({ content, onChange, readOnly, docPath,
   // content at it.
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 
-  // mdnest is a dark app, so a drawing opens dark rather than as a white sheet
-  // in the middle of it. This is a *viewing* preference and is deliberately not
-  // written into the note: the file stays portable (Obsidian reads the same
-  // bytes) and two people can view one drawing with different themes.
-  // Excalidraw renders the canvas dark from this prop; the stored
-  // viewBackgroundColor is untouched.
-  const [theme, setTheme] = useState(() => {
-    try { return localStorage.getItem(THEME_KEY) || 'dark'; } catch { return 'dark'; }
-  });
+  // A drawing opens in the app's theme, so it does not arrive as a white sheet
+  // in the middle of a dark UI (or the reverse). This is a *viewing*
+  // preference and is deliberately not written into the note: the file stays
+  // portable (Obsidian reads the same bytes) and two people can view one
+  // drawing with different themes. Excalidraw paints the canvas from this
+  // prop; the stored viewBackgroundColor is untouched.
+  //
+  // The per-drawing override still exists — a dark diagram is sometimes worth
+  // reading light — but it is now an override OF the app theme rather than an
+  // independent setting, and it is not persisted. Before there was an app
+  // theme this had to remember its own choice; keeping that would mean a
+  // switch to light mode left drawings stuck dark with no obvious cause.
+  const appTheme = useTheme();
+  const [override, setOverride] = useState(null);
+  const theme = override || appTheme;
+
+  // Following the app again after it changes is the expected behaviour: the
+  // override is "show me this one differently", not "stop following".
+  useEffect(() => { setOverride(null); }, [appTheme]);
+
   const toggleTheme = useCallback(() => {
-    setTheme((t) => {
-      const next = t === 'dark' ? 'light' : 'dark';
-      try { localStorage.setItem(THEME_KEY, next); } catch { /* private mode */ }
-      return next;
-    });
-  }, []);
+    setOverride(theme === 'dark' ? 'light' : 'dark');
+  }, [theme]);
 
   return (
     <div className="excalidraw-host">
