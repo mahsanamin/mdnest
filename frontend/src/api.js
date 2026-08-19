@@ -170,6 +170,33 @@ export async function fetchMe() {
   return res.json();
 }
 
+// --- Preferences (both auth modes) ---
+
+// Per-user UI settings, stored server-side so they follow the person rather
+// than the browser. Both calls fail soft: a preference is a convenience, and
+// losing one must never block the app from loading or a setting from being
+// changed locally for the session.
+
+export async function fetchPreferences() {
+  try {
+    const res = await request('/preferences');
+    if (!res.ok) return {};
+    return await res.json();
+  } catch {
+    return {};
+  }
+}
+
+export async function savePreferences(prefs) {
+  const res = await request('/preferences', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(prefs),
+  });
+  if (!res.ok) throw new Error('Failed to save preferences');
+  return res.json();
+}
+
 // --- Namespaces & Files ---
 
 export async function getNamespaces() {

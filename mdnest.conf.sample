@@ -100,6 +100,17 @@ GIT_AUTHOR_EMAIL=you@example.com
 # never loads the (large) Excalidraw chunk.
 # ENABLE_EXCALIDRAW=false
 
+# Default theme (optional, works in both single and multi mode)
+# The theme a user sees before they have chosen one for themselves:
+#   auto  — follow the operating system's light/dark setting (default)
+#   dark  — always start dark
+#   light — always start light
+# This is a default, not a lock: once a user picks a theme it is stored against
+# their account (Postgres in multi mode, preferences.json in the secrets volume
+# in single mode) and follows them to any browser or device. Changing this
+# afterwards only affects people who have never chosen.
+# DEFAULT_THEME=auto
+
 # Operator-provided default Excalidraw libraries (requires ENABLE_EXCALIDRAW).
 # Comma-separated URLs to .excalidrawlib files, preloaded into every drawing so
 # an organisation can ship a shared shape set. The URLs must be reachable by

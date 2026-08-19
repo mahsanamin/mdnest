@@ -97,7 +97,7 @@ function ShareDialog({ namespace, path, onClose }) {
                   {grants.map((g) => (
                     <div key={g.id} className="share-grant-row">
                       <div className="share-grant-user">
-                        <div className="share-avatar" style={{ backgroundColor: '#89b4fa' }}>
+                        <div className="share-avatar" style={{ backgroundColor: 'var(--accent)' }}>
                           {g.username.slice(0, 1).toUpperCase()}
                         </div>
                         <span className="share-username">{g.username}</span>

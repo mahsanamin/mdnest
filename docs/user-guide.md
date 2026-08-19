@@ -540,6 +540,40 @@ When the server is updated to a new version, active browser sessions will see a 
 
 Click "Refresh Now" to reload and pick up the latest frontend. The check runs every 60 seconds.
 
+## Appearance *(v4.3.0+)*
+
+mdnest ships a light theme alongside the original dark one.
+
+**Switching:** the sun/moon button in the top-right toolbar flips between light
+and dark. The icon shows the theme you would switch *to*.
+
+**Three choices, in Settings -> Appearance:**
+
+| Choice | Behaviour |
+|---|---|
+| **Match system** | Follows your operating system's light/dark setting, and changes with it live -- no reload needed. |
+| **Light** | Always light, whatever your system is set to. |
+| **Dark** | Always dark. |
+
+**Your choice follows you, not your browser.** It is stored against your account
+on the server, so signing in on a phone, a different browser, or a fresh private
+window gives you the theme you picked. (mdnest keeps a copy in local storage too,
+but only so the first paint is the right colour instead of flashing -- the server
+is what decides.)
+
+**Before you choose**, mdnest uses the server's `DEFAULT_THEME` setting, which an
+administrator can set in `mdnest.conf`; if that is `auto` (the default), it
+follows your operating system.
+
+**Drawings** open in the app's theme. The sun/moon button on the drawing canvas
+overrides that for the drawing you are looking at, without changing the app or
+touching the file -- so a diagram can be read light inside a dark mdnest, and the
+`.excalidraw.md` stays portable. The override is per-view and resets when you
+reopen the drawing.
+
+**Slide decks keep their own theme.** A Marp deck is something you authored to
+look a particular way, and it renders that way regardless of your app theme.
+
 ## Per-File Preferences
 
 mdnest remembers your preferences for each file individually:
@@ -548,7 +582,9 @@ mdnest remembers your preferences for each file individually:
 - **Editor mode** — basic (textarea) or live (rich editor). New files default to Live mode.
 - **Scroll position** — where you left off. Switch between files and come back to the same spot.
 
-Preferences are stored in your browser's local storage and survive page refreshes.
+These are per-file and per-browser: they live in local storage and survive page
+refreshes, but do not follow you to another device. Your **theme** is different --
+it is stored on the server against your account (see Appearance above).
 
 ## Keyboard Shortcuts
 

@@ -600,6 +600,52 @@ Returns the current user's profile, role, access grants, and (v3.5.0+) the names
 
 ---
 
+## Preferences *(v4.3.0+)*
+
+### GET /api/preferences
+
+Returns the calling user's stored UI preferences. Requires authentication (any role). Available in **both** auth modes — unlike `/api/me`, which needs a user store and so does not exist in single mode.
+
+**Response** (200 OK):
+
+```json
+{"theme": "light"}
+```
+
+A user who has never set a preference gets `{}`. The frontend then falls back to `defaultTheme` from `/api/config`, and to the OS setting when that is `auto`.
+
+---
+
+### PATCH /api/preferences
+
+Merges the supplied keys into the caller's preferences and returns the merged result. `PATCH`, not `PUT`: the client sends only what changed, so one setting written in another tab is not wiped by a change here.
+
+**Request:**
+
+```json
+{"theme": "dark"}
+```
+
+**Response** (200 OK) — the full merged state:
+
+```json
+{"theme": "dark"}
+```
+
+**Errors:**
+
+- `400` — unknown key, value longer than 64 bytes, an empty object, or a body that is not a JSON object. The whole request is rejected rather than the valid subset stored, so a `200` never means "some of what you sent was saved".
+
+**Supported keys:**
+
+| Key | Values | Meaning |
+|---|---|---|
+| `theme` | `auto` \| `dark` \| `light` | Colour theme. Overrides the server's `DEFAULT_THEME`. |
+
+Preferences are stored server-side — Postgres (`user_preferences`) in multi mode, `preferences.json` in the secrets volume in single mode — so a theme follows the person across browsers and devices rather than living in one browser's local storage. The key set is an allowlist: this endpoint is writable by any authenticated user, so an open bag would be a per-user blob store anyone could fill.
+
+---
+
 ### GET /api/admin/sync-status?ns=\<namespace\>
 
 Report git-sync state for a namespace. Works in single mode (no user context → allowed) and multi mode (superadmin, or an admin of that namespace). Returns the repo/remote facts plus — when the git-sync daemon is running — its self-reported health, read from a git-excluded `.mdnest-sync-status.json` the daemon writes each cycle.

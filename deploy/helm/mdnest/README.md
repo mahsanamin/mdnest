@@ -384,6 +384,8 @@ All traffic goes to the frontend Service, which proxies `/api` and `/api/ws` (We
 | storage.git.remote.username | string | `"oauth2"` | HTTPS username (GitLab PAT: `oauth2`; GitHub PAT: `x-access-token`). |
 | taskBoard | object | `{"enabled":false}` | --------------------------------------------------------------------------- |
 | taskBoard.enabled | bool | `false` | Enable the task board (`ENABLE_TASK_BOARD`). Off by default; projects note checkboxes into a per-namespace kanban. Independent of `auth.mode`. |
+| ui | object | `{"defaultTheme":"auto"}` | --------------------------------------------------------------------------- |
+| ui.defaultTheme | string | `"auto"` | Theme for users who have not chosen one (`DEFAULT_THEME`): `auto` follows the viewer's OS setting, `dark` and `light` pin it. A per-user choice is stored server-side and overrides this. |
 | writer | object | `{"affinity":{},"nodeSelector":{},"resources":{},"tolerations":[]}` | --------------------------------------------------------------------------- |
 | writer.affinity | object | `{}` | Affinity rules for the writer pod. |
 | writer.nodeSelector | object | `{}` | Node selector for the writer pod. |

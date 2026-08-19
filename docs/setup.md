@@ -73,6 +73,7 @@ On first run, `setup.sh` copies `mdnest.conf.sample` to `mdnest.conf` and exits,
 | `ADMIN_EMAILS` | *(none)* | Comma-separated emails auto-promoted to `role=superadmin` on every startup (idempotent — removals are NOT auto-demoted). |
 | `REQUIRE_2FA` | `false` | Force TOTP enrollment on next login for all users (local + Firebase only — ignored in SSO mode). |
 | `ENABLE_LIVE_COLLAB` | `false` | Enable WebSocket-based live collaboration: presence, cursors, comments, real-time tree updates. Multi mode only. |
+| `DEFAULT_THEME` *(v4.3.0+)* | `auto` | Theme for users who have not chosen one: `auto` follows the viewer's operating system setting, `dark` and `light` pin it. A per-user choice is stored server-side and always overrides this, so changing it later only affects people who have never picked. Rejected at setup time if it is not one of the three values. |
 | `ENABLE_TASK_BOARD` *(v4.0.0+)* | `false` | Enable the kanban task board over note checkboxes, including task relations, filters and the cross-workspace "All workspaces" scope. Routes are not registered and the UI chunk is not loaded when off. |
 | `ENABLE_MARP` *(v4.1.0+)* | `false` | Render a note whose frontmatter declares `marp: true` as a slide deck in the Preview pane. The Marp engine chunk only downloads for a deck. |
 | `ENABLE_MARP_THEMES` *(v4.2.0+)* | `false` | Requires `ENABLE_MARP`. Adds a shared theme catalog decks reference by name (`theme: <name>`) plus a superadmin **Marp Themes** admin tab. Themes live in the reserved `.marp-themes` namespace; `setup.sh` backs it with the `mdnest-marp-themes` named volume so a rebuild doesn't wipe them, and the Helm chart already mounts all of `/data/notes`. |
@@ -534,6 +535,7 @@ These environment variables are set in the generated `.env` file and consumed by
 | `GIT_AUTHOR_NAME` | Name for git-sync commits |
 | `GIT_AUTHOR_EMAIL` | Email for git-sync commits |
 | `AUTH_MODE` | Auth mode: `single` or `multi` |
+| `DEFAULT_THEME` | Theme for users who have not chosen one: `auto`, `dark` or `light` |
 | `NOTES_DIR` | Path to the notes root inside the container (set to `/data/notes` in `docker-compose.yml`) |
 | `PORT` | Backend listen port inside the container (defaults to `8080`) |
 | `POSTGRES_HOST` | PostgreSQL host (multi mode only) |

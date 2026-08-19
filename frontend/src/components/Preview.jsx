@@ -1,6 +1,7 @@
 import { Component, useEffect, useRef, useMemo, useCallback, useState } from 'react';
 import { Marked } from 'marked';
-import mermaid, { fixMermaidTextColors } from '../mermaid-config.js';
+import mermaid, { fixMermaidTextColors, applyMermaidTheme } from '../mermaid-config.js';
+import { useTheme } from '../useTheme.js';
 import MermaidViewer from './MermaidViewer.jsx';
 import { resolveWikiLink, wikiLinkExtension, internalMdLinkHtml } from '../wikilink.js';
 import { sanitizeHtml, sanitizeSvg } from '../sanitize.js';
@@ -177,9 +178,13 @@ function Preview({ content, currentPath, ns, onCheckboxToggle, pathIndex, onWiki
     [content, ns, currentPath, pathIndex]
   );
 
+  // Diagrams are drawn imperatively into `el`, so a theme change has to be a
+  // dependency of this effect or they keep the previous palette.
+  const theme = useTheme();
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
+    applyMermaidTheme(theme);
     el.innerHTML = html;
 
     // Task checkbox handling. marked v15 emits GFM task lists as
@@ -429,7 +434,7 @@ function Preview({ content, currentPath, ns, onCheckboxToggle, pathIndex, onWiki
               // Render mermaid's error (which can echo the diagram source) as
               // text, not HTML, to avoid a second injection path.
               const pre = document.createElement('pre');
-              pre.style.color = '#f38ba8';
+              pre.style.color = 'var(--danger)';
               pre.textContent = `Mermaid error: ${err.message || String(err)}`;
               mEl.replaceChildren(pre);
             }
@@ -438,7 +443,7 @@ function Preview({ content, currentPath, ns, onCheckboxToggle, pathIndex, onWiki
       })();
       return () => { cancelled = true; };
     }
-  }, [html, content, onCheckboxToggle, currentPath, onWikiLink]);
+  }, [html, content, onCheckboxToggle, currentPath, onWikiLink, theme]);
 
   // Render embedded Excalidraw drawings (`![alt](x.excalidraw.md)`) as read-only
   // SVG. Kept in its own effect (the mermaid pass returns early) and lazy: the
@@ -532,6 +537,9 @@ function Preview({ content, currentPath, ns, onCheckboxToggle, pathIndex, onWiki
   .task-checkbox { margin-right: 0.4rem; }
   li.task-item { list-style: none; margin-left: -1.2rem; }
   .mermaid-container svg { max-width: 100%; height: auto; }
+  /* Force a dark-theme diagram onto white paper. These match the Mocha
+     fills mermaid emits in dark mode; in light mode they simply do not
+     match, which is correct — a Latte diagram already prints legibly. */
   .mermaid-container svg [fill="#313244"] { fill: #f8f9fa !important; }
   .mermaid-container svg [fill="#1e1e2e"] { fill: #ffffff !important; }
   .mermaid-container svg [stroke="#74c7ec"] { stroke: #2563eb !important; }

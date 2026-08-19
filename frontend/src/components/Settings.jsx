@@ -51,7 +51,7 @@ function CodeBlock({ code, label }) {
   );
 }
 
-function Settings({ onClose, userProvider }) {
+function Settings({ onClose, userProvider, themePreference, resolvedTheme, onChangeTheme, serverDefaultTheme }) {
   const [tab, setTab] = useState('tokens');
   // Hide Credentials + 2FA in any federated mode — identity lives with the
   // external provider (Firebase Auth / corporate SSO IdP), not in mdnest's
@@ -67,6 +67,7 @@ function Settings({ onClose, userProvider }) {
           <button className="modal-close-btn" onClick={onClose}>x</button>
         </div>
         <div className="settings-tabs">
+          <button className={tab === 'appearance' ? 'active' : ''} onClick={() => setTab('appearance')}>Appearance</button>
           <button className={tab === 'tokens' ? 'active' : ''} onClick={() => setTab('tokens')}>API Tokens</button>
           <button className={tab === 'cli' ? 'active' : ''} onClick={() => setTab('cli')}>CLI</button>
           <button className={tab === 'mcp' ? 'active' : ''} onClick={() => setTab('mcp')}>MCP</button>
@@ -76,6 +77,14 @@ function Settings({ onClose, userProvider }) {
             <button className={tab === 'password' ? 'active' : ''} onClick={() => setTab('password')}>Credentials</button>
           )}
         </div>
+        {tab === 'appearance' && (
+          <AppearanceTab
+            preference={themePreference}
+            resolved={resolvedTheme}
+            serverDefault={serverDefaultTheme}
+            onChange={onChangeTheme}
+          />
+        )}
         {tab === 'tokens' && <TokensTab />}
         {tab === 'cli' && <CliTab />}
         {tab === 'mcp' && <McpTab />}
@@ -83,6 +92,55 @@ function Settings({ onClose, userProvider }) {
         {tab === 'gitremote' && <GitRemoteTab />}
         {tab === 'password' && passwordEnabled && <PasswordTab />}
       </div>
+    </div>
+  );
+}
+
+// AppearanceTab owns the full three-way theme choice. The toolbar button only
+// flips between dark and light, because one button cannot express three states
+// without turning into a menu — so "follow my system" needs a home, and this is
+// it.
+function AppearanceTab({ preference, resolved, serverDefault, onChange }) {
+  const OPTIONS = [
+    { value: 'auto', label: 'Match system', hint: 'Follow your operating system setting' },
+    { value: 'light', label: 'Light', hint: null },
+    { value: 'dark', label: 'Dark', hint: null },
+  ];
+
+  return (
+    <div className="settings-tab">
+      <p className="settings-hint">
+        Your choice is saved to your account, not this browser, so it follows you
+        to any device you sign in from.
+      </p>
+      <div className="theme-options">
+        {OPTIONS.map((o) => (
+          <button
+            key={o.value}
+            type="button"
+            className={`theme-option${preference === o.value ? ' active' : ''}`}
+            onClick={() => onChange?.(o.value)}
+            aria-pressed={preference === o.value}
+          >
+            <span className="theme-option-label">{o.label}</span>
+            {o.hint && <span className="theme-option-hint">{o.hint}</span>}
+          </button>
+        ))}
+      </div>
+      {preference === 'auto' && (
+        // Without this the Match-system row gives no feedback at all: the
+        // screen may already be the colour the OS asked for, so clicking it
+        // looks like nothing happened.
+        <p className="settings-hint">
+          Your system is currently set to <strong>{resolved}</strong>.
+        </p>
+      )}
+      {serverDefault && serverDefault !== 'auto' && preference === 'auto' && (
+        <p className="settings-hint">
+          This server suggests <strong>{serverDefault}</strong> for people who have
+          not chosen; your setting overrides it.
+        </p>
+      )}
     </div>
   );
 }
@@ -161,11 +219,11 @@ function GitRemoteTab() {
   };
 
   if (loading) {
-    return <div className="settings-content"><p style={{ color: '#6c7086', fontSize: '0.85rem' }}>Loading...</p></div>;
+    return <div className="settings-content"><p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Loading...</p></div>;
   }
 
   const hasCredential = ws && ws.has_credential;
-  const fieldStyle = { display: 'block', marginTop: '0.6rem', fontSize: '0.85rem', color: '#a6adc8' };
+  const fieldStyle = { display: 'block', marginTop: '0.6rem', fontSize: '0.85rem', color: 'var(--text-secondary)' };
 
   return (
     <div className="settings-content">
@@ -176,18 +234,18 @@ function GitRemoteTab() {
         Use a repo-scoped credential (deploy token / fine-grained PAT / deploy
         key), never an account-wide secret.
       </p>
-      {err && <div style={{ color: '#f38ba8', fontSize: '0.85rem', marginBottom: '0.5rem' }}>{err}</div>}
-      {msg && <div style={{ color: '#a6e3a1', fontSize: '0.85rem', marginBottom: '0.5rem' }}>{msg}</div>}
+      {err && <div style={{ color: 'var(--danger)', fontSize: '0.85rem', marginBottom: '0.5rem' }}>{err}</div>}
+      {msg && <div style={{ color: 'var(--success)', fontSize: '0.85rem', marginBottom: '0.5rem' }}>{msg}</div>}
 
       {ws && ws.git_enabled && ws.last_sync_error && (
-        <div style={{ background: '#302028', border: '1px solid #f38ba8', borderRadius: '6px', padding: '0.5rem 0.7rem', marginBottom: '0.6rem' }}>
-          <div style={{ color: '#f38ba8', fontSize: '0.82rem', fontWeight: 600 }}>Last mirror sync failed</div>
-          <div style={{ color: '#f2cdcd', fontSize: '0.78rem', marginTop: '0.2rem', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{ws.last_sync_error}</div>
-          {ws.last_sync_at && <div style={{ color: '#9399b2', fontSize: '0.72rem', marginTop: '0.25rem' }}>at {new Date(ws.last_sync_at).toLocaleString()}</div>}
+        <div style={{ background: 'var(--danger-tint)', border: '1px solid var(--danger)', borderRadius: '6px', padding: '0.5rem 0.7rem', marginBottom: '0.6rem' }}>
+          <div style={{ color: 'var(--danger)', fontSize: '0.82rem', fontWeight: 600 }}>Last mirror sync failed</div>
+          <div style={{ color: 'var(--danger-tint-text)', fontSize: '0.78rem', marginTop: '0.2rem', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{ws.last_sync_error}</div>
+          {ws.last_sync_at && <div style={{ color: 'var(--text-fainter)', fontSize: '0.72rem', marginTop: '0.25rem' }}>at {new Date(ws.last_sync_at).toLocaleString()}</div>}
         </div>
       )}
       {ws && ws.git_enabled && !ws.last_sync_error && ws.last_sync_at && (
-        <div style={{ color: '#a6e3a1', fontSize: '0.78rem', marginBottom: '0.6rem' }}>
+        <div style={{ color: 'var(--success)', fontSize: '0.78rem', marginBottom: '0.6rem' }}>
           Last mirror sync OK — {new Date(ws.last_sync_at).toLocaleString()}
         </div>
       )}
@@ -326,9 +384,9 @@ function TokensTab() {
       </div>
 
       {loading ? (
-        <p style={{ color: '#6c7086', fontSize: '0.85rem' }}>Loading...</p>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Loading...</p>
       ) : tokens.length === 0 ? (
-        <p style={{ color: '#6c7086', fontSize: '0.85rem' }}>No tokens yet. Create one to connect CLI, MCP, or API clients.</p>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>No tokens yet. Create one to connect CLI, MCP, or API clients.</p>
       ) : (
         <div className="token-list">
           {tokens.map((t) => (
@@ -536,7 +594,7 @@ function PasswordTab() {
   if (success) {
     return (
       <div className="settings-content">
-        <p style={{ color: '#a6e3a1', margin: '1rem 0' }}>
+        <p style={{ color: 'var(--success)', margin: '1rem 0' }}>
           Credentials updated. You need to log in again.
         </p>
         <button

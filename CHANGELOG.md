@@ -4,9 +4,90 @@ All notable changes to mdnest are documented here.
 
 ---
 
-## Unreleased
+## v4.3.0 — Light mode
 
-_Nothing yet._
+mdnest has been dark-only since the first commit. Some people don't want that,
+and until now the only answer was "use a different app after sunrise".
+
+This release adds a light theme that follows your operating system by default,
+a toggle that takes one click, and — the part that matters more than it sounds —
+a choice that is stored against your **account** rather than your browser. Pick
+light on your laptop and your phone agrees.
+
+It also takes a pass at the top toolbar, which had quietly become a wall of
+equally-spaced buttons.
+
+### Added
+
+- **A light theme.** Catppuccin Latte alongside the existing Mocha, covering the
+  whole app: sidebar, editors, task board, drawings, diagrams, modals, and the
+  native scrollbars and date pickers the browser draws for us.
+- **It follows your system by default.** New installs start on `auto`, which
+  tracks your OS light/dark setting and changes with it live — no reload.
+- **A toggle in the toolbar.** The sun/moon button top-right flips light and
+  dark; the icon shows the theme you would switch *to*.
+- **Settings → Appearance** carries the full three-way choice — Match system,
+  Light, Dark — because "follow my system" is a third state one button cannot
+  express without becoming a menu.
+- **Your theme follows you, not your browser.** It is stored server-side: in
+  Postgres in multi-user mode, in the secrets volume in single mode. A new
+  browser, a phone, or a fresh private window gives you the theme you picked.
+- **`DEFAULT_THEME` in `mdnest.conf`** (`auto` | `dark` | `light`) sets the
+  starting point for people who have never chosen. It is a default, not a lock —
+  any user's own choice overrides it. Also available as `ui.defaultTheme` in the
+  Helm chart, and rejected at install time if it isn't one of the three.
+- **`GET`/`PATCH /api/preferences`** — per-user UI settings, available in both
+  auth modes.
+
+### Changed
+
+- **Drawings follow the app theme** instead of remembering their own. The
+  sun/moon button on the canvas still overrides it for the drawing you're
+  looking at, without touching the file or the app — but the override is now
+  per-view rather than remembered, so switching mdnest to light no longer leaves
+  drawings stuck dark with nothing explaining why.
+- **The toolbar groups its controls.** Every button used to sit the same 8px
+  from its neighbour, so "Rename" was no more visibly related to "Delete" than
+  to the filename beside it. Related controls now sit close together with wider
+  space between groups, and two dividers separate the actions that change a file
+  from the ones that just navigate to it. No buttons were added or removed.
+- **Slide decks keep their own theme.** A Marp deck is something you authored to
+  look a particular way, and it renders that way regardless of your app theme.
+
+### Fixed
+
+- **`@milkdown/crepe` is now a declared dependency.** The Live editor imported it
+  directly while it resolved only as a transitive dependency of
+  `@milkdown/react`. A lockfile regeneration or a Milkdown bump could have
+  removed it and broken the editor build with an error pointing at
+  `node_modules` rather than at the missing declaration.
+- **The Settings tab row wraps** instead of pushing "Credentials" off the edge of
+  the dialog.
+
+### Under the hood
+
+- Colour is now a **two-layer token system** (`frontend/src/theme.css`): a raw
+  palette, and semantic tokens that every stylesheet uses. 930 hex literals were
+  replaced. The indirection is what makes a second theme possible at all —
+  mdnest used `#313244` as a background 78 times and as a border 102 times, and
+  in a light theme those must diverge, since a border has to be darker than what
+  it encloses while a raised surface stays lighter than the page.
+- **The light palette is measured, not eyeballed.** Stock Latte tunes its accents
+  for use *as* accents; mdnest uses them as body text. Latte yellow measures
+  2.31:1 on the page background against a 4.5:1 AA floor. Five hues are darkened
+  to the first step that clears AA both as text and under white. 63 contrast
+  assertions run in the test suite, including one that light is never less
+  readable than dark for the same pair.
+- New tests: theme resolution and its precedence, the token layer's
+  completeness, contrast in both themes, that `setup.sh` actually delivers
+  `DEFAULT_THEME` to the container, and six browser specs — one of which clears
+  the browser entirely and proves the theme still comes back.
+- `tests/setup-marp-themes.sh`, added in v4.2.0 but never invoked by anything,
+  now runs in the pre-push hook alongside the new setup test.
+
+**Upgrading:** nothing to do. Existing installs keep dark unless a user chooses
+otherwise or you set `DEFAULT_THEME`. Multi-user installs pick up one new table
+(`user_preferences`) automatically on first start.
 
 ---
 
