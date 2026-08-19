@@ -114,8 +114,17 @@ There are two ways to create notes and folders.
 
 At the top of the sidebar:
 
-- **New Note** -- creates a new markdown file. You will be prompted for a filename. The file is created inside whichever folder is currently selected (or the root if none is selected).
-- **New Folder** -- creates a new folder. You will be prompted for a name.
+- **+ Folder** -- creates a new folder. You will be prompted for a name.
+- **+ Note** -- creates a new markdown file. You will be prompted for a filename.
+- **+ Drawing** -- creates a new `.excalidraw.md` drawing (when drawings are enabled).
+
+**Where new items are created** *(clarified in v4.2.1)*: click a folder in the
+tree to aim these buttons at it — the folder is highlighted, and each button's
+tooltip names the destination. Click the **root** row at the top of the tree to
+aim them back at the top level. With nothing selected they follow the folder of
+the note you have open, falling back to the workspace root. Creating from a
+folder's right-click menu always targets that folder, regardless of what is
+selected.
 
 ### Context Menu
 
@@ -162,7 +171,7 @@ mdnest has two editing modes, switchable from the toolbar when in editor-only vi
 
 Live Mode is only available in editor-only view (the pen icon). Split view always uses Basic Mode with a separate preview pane.
 
-**Board** — the same toolbar switch has a third option, **Board**, which opens the namespace [task board](#task-board) in the editor pane (the sidebar and header stay put). It appears once a namespace is selected.
+**Board / Editor** — the first button in the toolbar swaps to name where it takes you: on a note it says **Board** and opens the [task board](#task-board) for the whole workspace; on the board it says **Editor** and brings you back. The Basic · Live switch beside it decides *how you edit* the note, so it disappears while the board is open — there is no note on screen for it to act on.
 
 Changes are saved automatically in both modes. There is no manual save button -- your edits are sent to the backend as you type. As of v3.6.1, autosave will refuse to truncate a non-empty note to empty (a defensive guard against editor bugs that could otherwise wipe content); to deliberately empty a file, delete it via right-click → Delete.
 
@@ -379,13 +388,28 @@ Checkboxes are also the atoms of the **[Task Board](#task-board)**: any checkbox
 > Drawings: a `.excalidraw.md` note opens on a full Excalidraw canvas, and any
 > note can embed one read-only with `![alt](path.excalidraw.md)`. Opt-in
 > (`ENABLE_EXCALIDRAW=true`); see [Excalidraw](excalidraw.md).
+>
+> A drawing is still a markdown file, so the toolbar offers **Basic · Drawing**
+> *(v4.2.1+)*: **Drawing** is the canvas, **Basic** shows the markdown behind it
+> (the scene JSON plus the mirrored text elements). Live is deliberately not
+> offered for drawings — the rich editor would reformat the scene and corrupt
+> it, the same reason Marp decks are edited as raw text. Drawings open in dark
+> mode to match the app, with a light/dark toggle in the canvas footer; that
+> choice is per browser and is never written into the note, so the file stays
+> portable and two people can view one drawing differently.
 
 > Opt-in: the board appears only when the operator sets `ENABLE_TASK_BOARD=true`
 > (see [setup](setup.md)). If you don't see the board button, that's why.
 
 The task board gathers every task-list item in a namespace and presents it as a kanban board or a flat list. Because tasks live in your notes, the board is just a view of them -- editing on the board edits the note, and editing the note updates the board.
 
-**Opening it.** With a note open, the editor toolbar shows a **Basic · Live · Board** switch; pick **Board** to replace the editor pane with the board (the sidebar and header stay put). The board is scoped to the current namespace.
+**Opening it.** Click **Board** in the toolbar. The board replaces the editor pane (the sidebar and header stay put) and is scoped to the current namespace.
+
+**Getting back.** Either works: the same button now reads **Editor**, or use the back button at the start of the board's own header, which names the note you came from (**← my-note.md**).
+
+**Lots of columns.** The board scrolls horizontally when the columns don't fit, so a wide board stays reachable on a narrow window.
+
+**Lots of tasks.** A column shows 100 cards at a time with a **Show more** button; the number beside the column name is always the true total. On a big board the **Sort** control matters, because it decides which cards are on that first page: leave it on *Note order* to see tasks in the order they appear in your notes, or switch to *Due date, then priority* to bring the urgent ones to the front. Your choice is remembered.
 
 **Views.**
 
@@ -434,6 +458,10 @@ You can reorganize your notes by dragging items in the sidebar tree.
 
 - Drag a file onto a folder to move it into that folder.
 - Drag a folder onto another folder to nest it.
+- Drop onto an **open folder's contents** — the space below its rows, or one of
+  the files inside it — to move the item into that folder *(v4.2.1+)*.
+- Drop onto the **root** row at the top of the tree to move an item back to the
+  top level *(v4.2.1+)*.
 
 The move happens within the same namespace. Cross-namespace moves are not supported.
 

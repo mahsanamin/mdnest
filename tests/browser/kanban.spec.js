@@ -53,21 +53,23 @@ function tasksFromApi(page) {
   }, { ns: NS, file: BOARD_FILE });
 }
 
-// The board is reached from the sidebar: it is scoped to the namespace, not
-// to the open file, so it deliberately does not live in the toolbar's
-// Basic/Live editor-mode control.
+// The board is one half of the toolbar's Editor|Board view switch. That pair
+// is deliberately separate from the Basic/Live control beside it: Editor|Board
+// is what you are looking at, Basic/Live is how you are editing it.
 test('the Board button appears when the board is enabled', async ({ page }) => {
   await login(page);
   await openBoardNote(page);
-  await expect(page.locator('.sidebar-board-btn')).toBeVisible({ timeout: 10_000 });
-  // ...and not back in the editor-mode control it used to share with Basic/Live.
+  await expect(page.locator('.toolbar-view-board')).toBeVisible({ timeout: 10_000 });
+  // ...and not back inside the editor-mode control it once shared with
+  // Basic/Live, nor back in the sidebar where it read as a file-tree row.
   await expect(page.locator('.editor-mode-toggle button:has-text("Board")')).toHaveCount(0);
+  await expect(page.locator('.sidebar .sidebar-board-btn')).toHaveCount(0);
 });
 
 test('the board renders the note\'s tasks as cards', async ({ page }) => {
   await login(page);
   await openBoardNote(page);
-  await page.click('.sidebar-board-btn');
+  await page.click('.toolbar-view-board');
   // The seeded task must appear somewhere on the board.
   await expect(page.getByText(BOARD_TASK).first()).toBeVisible({ timeout: 20_000 });
 });

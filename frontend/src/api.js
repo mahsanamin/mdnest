@@ -326,9 +326,14 @@ export async function searchNotes(ns, query) {
 
 // Aggregate every markdown task-list item in the namespace plus the board
 // column layout. Returns { board: {version, columns}, tasks: [...] }.
-export async function getTasks(ns, path) {
+// `force` asks the server to re-scan instead of answering from its task cache.
+// The cache is validated against a directory walk, so it cannot serve stale
+// data on its own; force exists for the explicit Refresh button and the one
+// change a signature cannot see (a write that preserves size and mtime).
+export async function getTasks(ns, path, force) {
   const q = path ? `&path=${encodeURIComponent(path)}` : '';
-  const res = await request(`/tasks?ns=${encodeURIComponent(ns)}${q}`);
+  const f = force ? '&refresh=1' : '';
+  const res = await request(`/tasks?ns=${encodeURIComponent(ns)}${q}${f}`);
   if (!res.ok) throw new Error('Failed to load tasks');
   return res.json();
 }
@@ -336,8 +341,8 @@ export async function getTasks(ns, path) {
 // Aggregate tasks across every workspace the caller can access (the global
 // view). Each task carries its owning `namespace`; the board is the union of
 // the per-workspace column layouts.
-export async function getAllTasks() {
-  const res = await request('/tasks/all');
+export async function getAllTasks(force) {
+  const res = await request(`/tasks/all${force ? '?refresh=1' : ''}`);
   if (!res.ok) throw new Error('Failed to load tasks');
   return res.json();
 }

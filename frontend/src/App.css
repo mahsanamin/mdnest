@@ -4219,17 +4219,36 @@ pre:hover .code-copy-btn {
 }
 
 /* ===== Presence bar ===== */
+/* Presence floats over the content instead of sitting in the flow.
+   It used to be a full-width strip between the toolbar and the editor, so
+   every join and leave reflowed everything below it — the editor, a Mermaid
+   diagram, a drawing canvas all jumped by the height of the bar. Ambient
+   information must never move the thing you are working on, so this is
+   positioned like a toast: it appears and disappears without the document
+   noticing. pointer-events stay on the pill itself so its tooltips work,
+   while the strip around it doesn't swallow clicks meant for the editor. */
 .presence-bar {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  z-index: 20;
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 12px;
+  max-width: calc(100% - 24px);
+  padding: 4px 10px;
   background: #181825;
-  border-bottom: 1px solid #313244;
+  border: 1px solid #313244;
+  border-radius: 999px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
   font-size: 0.78rem;
   color: #6c7086;
-  flex-shrink: 0;
+  pointer-events: auto;
 }
+
+/* .split-view is already position:relative, so it is the containing block —
+   which is what keeps the overlay inside the content area and off the
+   toolbar. */
 
 .presence-dot {
   width: 22px;
@@ -5416,37 +5435,32 @@ pre:hover .code-copy-btn {
   filter: brightness(1.1);
 }
 
-/* Task board entry — a namespace-level destination, so it sits with the
-   namespace and its tree rather than in the toolbar's editor-mode control. */
-.sidebar-board {
-  padding: 0 0.5rem 0.4rem;
-  border-bottom: 1px solid #313244;
-  margin-bottom: 0.35rem;
-}
-.sidebar-board-btn {
+/* The main-pane switch: one button naming where it takes you (Board from a
+   note, Editor from the board). Not a segmented pair — the Basic/Live group
+   beside it is already segmented, and a second one read as one long strip of
+   pills; and not a pressed/unpressed toggle, which never says what pressing
+   it will do. */
+.toolbar-view-btn {
+  margin-right: 10px;
   display: flex;
   align-items: center;
-  gap: 0.45rem;
-  width: 100%;
-  padding: 0.4rem 0.5rem;
-  border: none;
-  border-radius: 4px;
-  background: transparent;
-  color: #cdd6f4;
-  font-size: 0.85rem;
-  text-align: left;
+  gap: 5px;
+  padding: 4px 10px;
+  border: 1px solid #313244;
+  border-radius: 6px;
+  background: #181825;
+  color: #a6adc8;
+  font-size: 0.78rem;
   cursor: pointer;
+  transition: all 0.15s;
 }
-.sidebar-board-btn:hover {
-  background: #313244;
-}
-.sidebar-board-btn.active {
-  background: #45475a;
-  color: #89b4fa;
-}
-.sidebar-board-btn svg {
-  flex-shrink: 0;
-  opacity: 0.85;
+.toolbar-view-btn:hover { background: #313244; color: #cdd6f4; border-color: #45475a; }
+.toolbar-view-btn svg { flex-shrink: 0; opacity: 0.9; }
+
+/* Narrow screens: the icons carry the pair, the labels drop. */
+@media (max-width: 768px) {
+  .toolbar-view-btn span { display: none; }
+  .toolbar-view-btn { padding: 4px 8px; margin-right: 6px; }
 }
 
 /* The folder new notes/drawings/folders will be created in. Deliberately

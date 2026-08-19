@@ -713,3 +713,63 @@
 }
 .tb-editor-step .danger { background: #313244; border: none; color: #cdd6f4; border-radius: 4px; padding: 4px 8px; cursor: pointer; }
 .tb-editor-step .danger:hover { background: #f38ba8; color: #11111b; }
+
+/* "Show N more" — a column paints a page of cards at a time so a namespace
+   with thousands of tasks doesn't put them all in the DOM at once. */
+.tb-column-more {
+  width: 100%;
+  margin-top: 4px;
+  padding: 8px 10px;
+  border: 1px dashed #45475a;
+  border-radius: 6px;
+  background: transparent;
+  color: #89b4fa;
+  font-size: 12px;
+  cursor: pointer;
+}
+.tb-column-more:hover { background: #313244; }
+.tb-column-more span { color: #6c7086; }
+
+/* Back out of the board. Deliberately the first control in the header: the
+   board replaces the editor, and without a visible exit people could not tell
+   how to get back to the note they were reading. */
+.tb-back {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 240px;
+  padding: 5px 12px;
+  border: 1px solid #45475a;
+  border-radius: 6px;
+  background: #1e1e2e;
+  color: #cdd6f4;
+  font-size: 13px;
+  cursor: pointer;
+}
+.tb-back:hover { background: #313244; border-color: #89b4fa; color: #89b4fa; }
+.tb-back-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Extras for the "search every workspace?" confirmation. It reuses the shared
+   .tb-modal shell (columns editor, task editor) rather than redefining it —
+   an earlier version of this block overrode that shell's width, padding and
+   z-index, which would have altered both of those dialogs too. */
+.tb-modal-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 14px;
+  font-size: 13px;
+  color: #a6adc8;
+  cursor: pointer;
+}
+.tb-modal-body { font-size: 13px; line-height: 1.6; color: #a6adc8; margin-bottom: 12px; }
+.tb-btn.primary {
+  background: #89b4fa;
+  border-color: #89b4fa;
+  color: #1e1e2e;
+  font-weight: 600;
+}

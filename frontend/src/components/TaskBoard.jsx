@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, useDeferredValue } from 'react';
 import {
   DndContext,
   DragOverlay,
@@ -7,6 +7,7 @@ import {
   useSensors,
 } from '@dnd-kit/core';
 import { getTasks, patchTask, saveBoard, createTask, getNamespaceUsers, getAllTasks, deleteTask } from '../api';
+import { sortTasks, SORT_MODES } from '../task-sort.js';
 import { matchesTaskFilters } from '../taskFilters';
 import { buildRelationLookup, resolveTask } from '../relations';
 import { cardKey } from './cardKey';
@@ -33,6 +34,10 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
   const activeTaskRef = useRef(null);
   useEffect(() => { activeTaskRef.current = activeTask; }, [activeTask]);
   const [scope, setScope] = useState(() => localStorage.getItem('mdnest_taskboard_scope') || 'workspace');
+  // Default 'note' deliberately: the board has always shown tasks in the order
+  // they appear in your notes, and most boards are small enough that paging
+  // never applies. See task-sort.js.
+  const [sortMode, setSortMode] = useState(() => localStorage.getItem('mdnest_taskboard_sort') || 'note');
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorTask, setEditorTask] = useState(null);
   // Namespace members, to populate the assignee picker. Empty in single mode
@@ -77,8 +82,8 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
     if (!opts.silent) setError(null);
     try {
       const data = isGlobal
-        ? await getAllTasks()
-        : await getTasks(ns, effectiveScope === 'note' ? currentPath : undefined);
+        ? await getAllTasks(opts.force)
+        : await getTasks(ns, effectiveScope === 'note' ? currentPath : undefined, opts.force);
       setBoard(data.board);
       setTasks(data.tasks || []);
       setError(null);
@@ -143,6 +148,28 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
     setScope(s);
     localStorage.setItem('mdnest_taskboard_scope', s);
   }, []);
+
+  // "All workspaces" scans every workspace you can read, which on a large
+  // install is the one action here that can take a noticeable moment. Warn
+  // before doing it rather than appearing to hang — but let people who know
+  // what it costs turn the warning off for good.
+  const [confirmGlobal, setConfirmGlobal] = useState(false);
+  const [dontWarnAgain, setDontWarnAgain] = useState(false);
+  const GLOBAL_WARN_KEY = 'mdnest_taskboard_skip_global_warning';
+  const chooseGlobalScope = useCallback(() => {
+    let skip = false;
+    try { skip = localStorage.getItem(GLOBAL_WARN_KEY) === '1'; } catch { /* private mode */ }
+    if (skip) { setScopePersist('global'); return; }
+    setDontWarnAgain(false);
+    setConfirmGlobal(true);
+  }, [setScopePersist]);
+  const acceptGlobalScope = useCallback(() => {
+    if (dontWarnAgain) {
+      try { localStorage.setItem(GLOBAL_WARN_KEY, '1'); } catch { /* private mode */ }
+    }
+    setConfirmGlobal(false);
+    setScopePersist('global');
+  }, [dontWarnAgain, setScopePersist]);
 
   // Per-column collapse state, persisted per namespace. null = not yet
   // initialised, so the Done column can be collapsed by default on first show.
@@ -319,7 +346,15 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
     () => buildRelationLookup(tasks.map((t) => ({ ref: t.ref, title: t.text, task: t }))),
     [tasks],
   );
-  const resolveRelation = useCallback((value) => resolveTask(relationLookup, value), [relationLookup]);
+  // Identity-stable on purpose. The lookup itself is rebuilt whenever `tasks`
+  // changes — it has to be, it resolves against them — but this function is
+  // handed to every (memoised) card, so tying its identity to the lookup meant
+  // that ticking one checkbox re-rendered every card on the board. Reading the
+  // latest lookup through a ref keeps the behaviour current while the identity
+  // stays put.
+  const relationLookupRef = useRef(relationLookup);
+  relationLookupRef.current = relationLookup;
+  const resolveRelation = useCallback((value) => resolveTask(relationLookupRef.current, value), []);
   // {ref, title} pairs so the relations editor can search/pick a task by its
   // stable ref or its title, then store the ref (comma-free, rename-proof).
   const taskRefs = useMemo(() => {
@@ -353,12 +388,19 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
   const effectiveShowDone = mode === 'board' ? true : showDone;
 
   // Tasks after filters — every downstream view derives from this.
+  // Filtering scans every task in the namespace, and a big project has tens of
+  // thousands. Driving it straight off `search` re-ran the scan and re-rendered
+  // every card on each keystroke — measured at ~456ms per key with ~12k tasks,
+  // which makes the box feel broken. The input stays controlled by `search` so
+  // typing is instant; the expensive pass follows the deferred value, so React
+  // can drop superseded work while you are still typing.
+  const deferredSearch = useDeferredValue(search);
   const filteredTasks = useMemo(
     () => tasks.filter((t) => matchesTaskFilters(t, {
-      search, tags: tagFilter, assignee: assigneeFilter, priority: priorityFilter,
+      search: deferredSearch, tags: tagFilter, assignee: assigneeFilter, priority: priorityFilter,
       relation: relationFilter, due: dueFilter, showDone: effectiveShowDone, doneColumns: doneColumnIds, currentUser,
     })),
-    [tasks, search, tagFilter, assigneeFilter, priorityFilter, relationFilter, dueFilter, effectiveShowDone, doneColumnIds, currentUser],
+    [tasks, deferredSearch, tagFilter, assigneeFilter, priorityFilter, relationFilter, dueFilter, effectiveShowDone, doneColumnIds, currentUser],
   );
 
   // First time a board is shown (no stored collapse state), collapse the Done
@@ -370,18 +412,22 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
     localStorage.setItem(collapseKey, JSON.stringify([...done]));
   }, [columns, collapsedCols, collapseKey]);
 
+  // Ordering matters more than it looks: a column paints a page at a time, so
+  // the sort decides which cards are on the first page.
+  const orderedTasks = useMemo(() => sortTasks(filteredTasks, sortMode), [filteredTasks, sortMode]);
+
   const tasksByColumn = useMemo(() => {
     const map = {};
     for (const c of columns) map[c.id] = [];
-    for (const t of filteredTasks) {
+    for (const t of orderedTasks) {
       (map[t.column] || (map[t.column] = [])).push(t);
     }
     return map;
-  }, [columns, filteredTasks]);
+  }, [columns, orderedTasks]);
 
   const tasksByNote = useMemo(() => {
     const groups = new Map();
-    for (const t of filteredTasks) {
+    for (const t of orderedTasks) {
       // Global view can hold the same note path in two namespaces, so key the
       // group by namespace + path and label it with the namespace.
       const key = t.namespace ? `${t.namespace}\u0000${t.path}` : t.path;
@@ -389,12 +435,27 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
       groups.get(key).items.push(t);
     }
     return [...groups.values()].sort((a, b) => (a.ns + a.path).localeCompare(b.ns + b.path));
-  }, [filteredTasks]);
+  }, [orderedTasks]);
 
   return (
     <div className="tb-panel" role="region" aria-label="Task board">
       <div className="tb-header">
         <div className="tb-header-left">
+          {/* The way out, first thing in the header.
+              The board replaces the editor pane, and onClose existed but was
+              never rendered — so once you were on the board the only exit was
+              the toolbar's Basic/Live pair, which says nothing about the board
+              and reads as an editor setting. Naming the note you came from
+              makes it obvious what the button does and where it lands. */}
+          {onClose && (
+            <button type="button" className="tb-back" onClick={onClose}
+              title={currentPath ? `Back to ${currentPath}` : 'Close the board'}>
+              <span aria-hidden="true">&#8592;</span>
+              {currentPath
+                ? <span className="tb-back-label">{currentPath.split('/').pop()}</span>
+                : <span className="tb-back-label">Close board</span>}
+            </button>
+          )}
           <div className="tb-mode-toggle">
             <button className={mode === 'list' ? 'active' : ''} onClick={() => setModePersist('list')}>List</button>
             <button className={mode === 'board' ? 'active' : ''} onClick={() => setModePersist('board')}>Kanban</button>
@@ -404,7 +465,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
             {currentPath && (
               <button className={effectiveScope === 'note' ? 'active' : ''} onClick={() => setScopePersist('note')} title="Only the current note">This note</button>
             )}
-            <button className={effectiveScope === 'global' ? 'active' : ''} onClick={() => setScopePersist('global')} title="Tasks across every workspace you can access">All workspaces</button>
+            <button className={effectiveScope === 'global' ? 'active' : ''} onClick={chooseGlobalScope} title="Tasks across every workspace you can access">All workspaces</button>
           </div>
         </div>
         <div className="tb-header-right">
@@ -419,7 +480,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
             {canWrite && !isGlobal && (
               <button className="tb-btn" onClick={() => { setActionsOpen(false); openCreate(); }} title="New task">+ New task</button>
             )}
-            <button className="tb-btn" onClick={() => { setActionsOpen(false); reload(); }} title="Refresh">&#8635;</button>
+            <button className="tb-btn" onClick={() => { setActionsOpen(false); reload({ force: true }); }} title="Re-scan every note now">&#8635;</button>
             {canWrite && !isGlobal && (
               <button className="tb-btn" onClick={() => { setActionsOpen(false); setEditingColumns(true); }} title="Edit columns">Columns…</button>
             )}
@@ -495,6 +556,20 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
                 <option value="month">Due in 30 days</option>
                 <option value="has">Has a due date</option>
                 <option value="none">No due date</option>
+              </select>
+              <select
+                className="tb-filter-priority tb-filter-sort"
+                value={sortMode}
+                onChange={(e) => {
+                  setSortMode(e.target.value);
+                  try { localStorage.setItem('mdnest_taskboard_sort', e.target.value); } catch { /* private mode */ }
+                }}
+                title="Card order. On a large board this decides which cards are on the first page of a column."
+                aria-label="Sort order"
+              >
+                {SORT_MODES.map((m) => (
+                  <option key={m.id} value={m.id}>{`Sort: ${m.label}`}</option>
+                ))}
               </select>
               <label className="tb-filter-showdone" title="Include tasks in Done columns (list view)">
                 <input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} disabled={mode === 'board'} />
@@ -600,6 +675,31 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
               </ul>
             </div>
           ))}
+        </div>
+      )}
+
+      {confirmGlobal && (
+        <div className="tb-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="tb-global-title">
+          <div className="tb-modal">
+            <h3 id="tb-global-title">Search every workspace?</h3>
+            <p className="tb-modal-body">
+              This reads every note in every workspace you have access to. On a
+              large install it can take a few seconds the first time — after
+              that it is fast until your notes change.
+            </p>
+            <label className="tb-modal-check">
+              <input
+                type="checkbox"
+                checked={dontWarnAgain}
+                onChange={(e) => setDontWarnAgain(e.target.checked)}
+              />
+              <span>Don&rsquo;t show this again</span>
+            </label>
+            <div className="tb-modal-actions">
+              <button type="button" className="tb-btn" onClick={() => setConfirmGlobal(false)}>Cancel</button>
+              <button type="button" className="tb-btn primary" onClick={acceptGlobalScope}>Search all workspaces</button>
+            </div>
+          </div>
         </div>
       )}
 
