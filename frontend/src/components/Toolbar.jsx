@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 
-function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePassword, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh, wsStatus, commentCount, onToggleComments, onSetBoardActive, boardActive, marpLocked, drawingDoc, drawingSource, onDrawingSourceChange }) {
+function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePassword, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh, wsStatus, commentCount, onToggleComments, onSetBoardActive, boardActive, marpLocked, drawingDoc, drawingSource, onDrawingSourceChange, theme, onToggleTheme }) {
   const [refreshing, setRefreshing] = useState(false);
   const handleRefresh = useCallback(() => {
     if (refreshing || !onRefresh) return;
@@ -21,9 +21,17 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
 
   return (
     <div className="toolbar">
-      <button className="toolbar-hamburger" onClick={onToggleSidebar} title="Toggle sidebar">
-        &#9776;
-      </button>
+      {/* Groups, not a flat row. Every control used to sit the same 0.5rem
+          from its neighbour, so "Rename / Delete" read as no more related to
+          each other than to the file path beside them, and the trailing icons
+          read as a fourth unrelated thing. Related controls are now a
+          .toolbar-group at --gap-within; the groups themselves are separated
+          by --gap-between, four times wider. Nothing is added to the screen —
+          the same buttons just stop competing for the eye. */}
+      <div className="toolbar-group">
+        <button className="toolbar-hamburger" onClick={onToggleSidebar} title="Toggle sidebar">
+          &#9776;
+        </button>
       {/* One button that swaps to name where it takes you: on a note it says
           Board, on the board it says Editor. A pair of buttons showed the
           inactive half permanently greyed for no benefit, and a single
@@ -52,6 +60,7 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
           </button>
         )
       )}
+      </div>
 
       {showEditorToggle && (
         <div className="editor-mode-toggle">
@@ -174,6 +183,9 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
           </button>
         </div>
       )}
+      {/* Status and app-level utilities: not file actions, so they are their
+          own group and carry a divider. */}
+      <div className="toolbar-group toolbar-utility">
       {wsStatus && currentPath && (
         <span className={`ws-status ${wsStatus}`}>
           <span className={`ws-status-dot ${wsStatus}`} />
@@ -190,9 +202,28 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
           {commentCount > 0 && <span className="comment-badge">{commentCount}</span>}
         </button>
       )}
+      {onToggleTheme && (
+        <button
+          className="toolbar-theme"
+          onClick={onToggleTheme}
+          title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+        >
+          {/* Shows the theme you would switch TO, which is what the button
+              does. Showing the current one reads as a status light and leaves
+              the click ambiguous. Choosing "follow my OS" is a third state a
+              single button cannot express — that lives in Settings. */}
+          {theme === 'dark' ? (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M6.3 17.7l-1.4 1.4M19.1 4.9l-1.4 1.4"/></svg>
+          ) : (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+          )}
+        </button>
+      )}
       <button className="toolbar-settings" onClick={onChangePassword} title="Settings">
         &#9881;
       </button>
+      </div>
     </div>
   );
 }

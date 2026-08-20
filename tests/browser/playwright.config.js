@@ -15,6 +15,12 @@ export default defineConfig({
   use: {
     baseURL: process.env.MDNEST_BASE_URL || 'http://127.0.0.1:8080',
     headless: true,
+    // Pin the emulated OS theme. mdnest's default is "auto", which follows
+    // prefers-color-scheme, and Playwright's default emulation is LIGHT — so
+    // without this every existing spec would silently start running against
+    // the light palette the moment themes landed. Specs that care about a
+    // theme set it themselves with page.emulateMedia().
+    colorScheme: 'dark',
     // Grant clipboard access so the Settings copy-button test can use the
     // async Clipboard API (127.0.0.1 is a secure context) without a prompt.
     permissions: ['clipboard-read', 'clipboard-write'],

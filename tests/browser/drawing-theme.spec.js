@@ -1,56 +1,67 @@
-// A drawing opens dark, matching the app, and the choice sticks.
+// A drawing follows the app theme.
 //
-// The canvas used to render as a white sheet in the middle of a dark UI. Theme
-// is a viewing preference, so it lives in localStorage and is deliberately NOT
-// written into the note — the .excalidraw.md stays portable and two people can
-// view the same drawing with different themes.
+// Behaviour changed in v4.3.0. The canvas used to keep its own theme in
+// localStorage and carry its own light/dark button, because mdnest was
+// dark-only and a drawing had no other way to be light. Now the app has a
+// theme, so the canvas follows it and the extra switch is gone — a second
+// control doing almost the same job as the toolbar one, a few centimetres
+// away, is a thing users have to stop and disambiguate.
+//
+// Theme is still a viewing preference and is still never written into the
+// note: the .excalidraw.md stays portable and two people can view one drawing
+// with different themes.
 import { test, expect } from '@playwright/test';
 
 const USER = process.env.MDNEST_USER || 'e2e';
 const PASS = process.env.MDNEST_PASSWORD || 'e2epass123';
 
-test('a drawing opens in dark mode and can be switched to light', async ({ page }) => {
-  test.setTimeout(120_000);
+async function signIn(page) {
   await page.goto('/');
   await page.fill('input[name=username]', USER);
   await page.fill('input[name=password]', PASS);
   await page.click('button:has-text("Sign in")');
   await expect(page.locator('.ns-label, .ns-select')).toBeVisible({ timeout: 20_000 });
+}
 
+async function newDrawing(page, name) {
   const drawingBtn = page.locator('button:has-text("+ Drawing")');
   if (!(await drawingBtn.count())) test.skip(true, 'drawings disabled (ENABLE_EXCALIDRAW)');
-  const name = `theme-${Date.now()}`;
   page.once('dialog', (d) => d.accept(name));
   await drawingBtn.click();
-
-  const canvas = page.locator('.excalidraw').first();
   await expect(page.locator('.excalidraw canvas').first()).toBeVisible({ timeout: 30_000 });
-  await expect(canvas).toHaveClass(/theme--dark/);
+}
 
-  // It must not sit on top of Excalidraw's own chrome. The first attempt at
-  // this control was absolutely positioned bottom-right and landed exactly on
-  // their help button; it now lives in their Footer slot, which they lay out.
-  const toggleBox = await page.locator('.excalidraw-theme-toggle').boundingBox();
-  for (const other of ['.help-icon', '.disable-zen-mode']) {
-    const el = page.locator(other).first();
-    if (!(await el.count())) continue;
-    const b = await el.boundingBox();
-    if (!b) continue;
-    const overlaps = toggleBox.x < b.x + b.width && b.x < toggleBox.x + toggleBox.width
-      && toggleBox.y < b.y + b.height && b.y < toggleBox.y + toggleBox.height;
-    expect(overlaps, `theme toggle overlaps ${other}`).toBe(false);
-  }
-  // And it must be clickable rather than buried under something.
-  await expect(page.locator('.excalidraw-theme-toggle')).toBeVisible();
+test('a drawing opens in the app theme and tracks it', async ({ page }) => {
+  test.setTimeout(120_000);
+  await signIn(page);
+  await newDrawing(page, `theme-${Date.now()}`);
 
-  // Toggle to light...
-  await page.locator('.excalidraw-theme-toggle').click();
-  await expect(canvas).not.toHaveClass(/theme--dark/);
+  // The config emulates a dark OS and no preference is stored, so the app —
+  // and therefore the canvas — is dark.
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await expect(page.locator('.excalidraw').first()).toHaveClass(/theme--dark/);
 
-  // ...and the preference survives a reload rather than snapping back.
-  await page.reload();
-  await expect(page.locator('.excalidraw canvas').first()).toBeVisible({ timeout: 30_000 });
+  // Flipping the APP theme repaints the open canvas. This is the assertion
+  // that matters now that the canvas has no switch of its own: without it a
+  // drawing would sit in the previous theme until it was reopened.
+  await page.locator('.toolbar-theme').click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
   await expect(page.locator('.excalidraw').first()).not.toHaveClass(/theme--dark/);
+
+  // And there is no second theme control on the canvas.
+  await expect(page.locator('.excalidraw-theme-toggle')).toHaveCount(0);
+
+  // Put the preference back. It is stored on the SERVER now, so a theme set
+  // here would otherwise follow the e2e user into every spec that runs after
+  // this one — the specs share an account, not just a browser profile.
+  await page.evaluate(async () => {
+    const t = localStorage.getItem('mdnest_token');
+    await fetch('/api/preferences', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t },
+      body: JSON.stringify({ theme: 'auto' }),
+    });
+  });
 
   // The note itself must not have gained a theme field.
   const body = await page.evaluate(async () => {
@@ -63,4 +74,14 @@ test('a drawing opens in dark mode and can be switched to light', async ({ page 
     return r.text();
   });
   expect(body).not.toContain('"theme"');
+});
+
+test('a drawing opens light when the app is light', async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.emulateMedia({ colorScheme: 'light' });
+  await signIn(page);
+  await newDrawing(page, `theme-light-${Date.now()}`);
+
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await expect(page.locator('.excalidraw').first()).not.toHaveClass(/theme--dark/);
 });

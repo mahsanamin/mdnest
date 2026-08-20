@@ -36,6 +36,7 @@ type ConfigHandler struct {
 	marpThemes      bool                   // ENABLE_MARP_THEMES is on — the centralized theme catalog + admin editor are available
 	excalidraw      bool                   // ENABLE_EXCALIDRAW is on — the frontend may open .excalidraw.md files in the drawing editor (loads its chunk)
 	excalidrawLibs  []string               // EXCALIDRAW_LIBRARIES — operator-provided .excalidrawlib URLs preloaded into every drawing
+	defaultTheme    string                 // DEFAULT_THEME — the theme a user sees before they pick one ("auto" | "dark" | "light")
 	updateChecker   *updates.Checker       // optional — polls GitHub releases so the frontend can hint when a newer mdnest is available
 }
 
@@ -130,6 +131,20 @@ func (h *ConfigHandler) SetUpdateChecker(c *updates.Checker) {
 	h.updateChecker = c
 }
 
+// SetDefaultTheme sets the theme served to a user who has not chosen one:
+// "auto" (follow the OS via prefers-color-scheme), "dark" or "light". This is
+// the operator's default, NOT an override — a stored per-user preference wins.
+// An unrecognised value falls back to "auto" rather than failing startup: a
+// typo in a cosmetic knob must not stop the server from booting.
+func (h *ConfigHandler) SetDefaultTheme(theme string) {
+	switch theme {
+	case "auto", "dark", "light":
+		h.defaultTheme = theme
+	default:
+		h.defaultTheme = "auto"
+	}
+}
+
 // HandleConfig handles GET /api/config (unauthenticated).
 func (h *ConfigHandler) HandleConfig(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -141,9 +156,10 @@ func (h *ConfigHandler) HandleConfig(w http.ResponseWriter, r *http.Request) {
 		"liveCollab":   h.liveCollab,
 		"require2FA":   h.require2FA,
 		"userProvider": h.userProvider,
-		"version":      "4.2.2",
+		"version":      "4.3.0",
 		"commit":       Commit,
 		"buildTime":    BuildTime,
+		"defaultTheme": h.defaultThemeOrAuto(),
 	}
 	if h.serverAlias != "" {
 		resp["serverAlias"] = h.serverAlias
@@ -199,4 +215,14 @@ func (h *ConfigHandler) HandleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+// defaultThemeOrAuto returns the configured default, or "auto" when the server
+// was built without one. Always emitted: the login screen renders before any
+// authenticated call, so it needs a theme with no user to ask about.
+func (h *ConfigHandler) defaultThemeOrAuto() string {
+	if h.defaultTheme == "" {
+		return "auto"
+	}
+	return h.defaultTheme
 }

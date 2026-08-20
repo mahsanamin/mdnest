@@ -526,6 +526,19 @@ func main() {
 		tokenStore = store.NewFileTokenStore(secretsDir)
 	}
 	tokenHandler := handlers.NewTokenHandler(tokenStore)
+
+	// UI preferences follow the same split as API tokens: Postgres in multi
+	// mode, a JSON file in the secrets dir in single mode. Both modes get the
+	// endpoint — a single-user install is exactly where a browser-local
+	// setting is most annoying, because it is usually reached from more than
+	// one device.
+	var preferenceStore store.PreferenceStore
+	if multiMode {
+		preferenceStore = store.NewPostgresPreferenceStore(db)
+	} else {
+		preferenceStore = store.NewFilePreferenceStore(secretsDir)
+	}
+	preferencesHandler := handlers.NewPreferencesHandler(preferenceStore, multiMode)
 	// Comments require both a real user identity and the WebSocket hub for
 	// live refresh on other clients, so we gate on enableCollab (which
 	// itself implies multiMode). In single mode or collab-off deployments
@@ -585,6 +598,7 @@ func main() {
 	configHandler.SetMarp(enableMarp)
 	configHandler.SetMarpThemes(enableMarpThemes)
 	configHandler.SetExcalidraw(enableExcalidraw)
+	configHandler.SetDefaultTheme(env("DEFAULT_THEME", "auto"))
 	if enableExcalidraw {
 		// Operator-provided default Excalidraw libraries: comma-separated URLs to
 		// .excalidrawlib files preloaded into every drawing (org shape set).
@@ -667,6 +681,7 @@ func main() {
 	mux.Handle("/api/auth/change-password", authMiddleware.Wrap(http.HandlerFunc(authHandler.ChangePassword)))
 	mux.HandleFunc("/api/auth/change-password-forced", authHandler.HandleForcedPasswordChange)
 	mux.Handle("/api/auth/tokens", authMiddleware.Wrap(http.HandlerFunc(tokenHandler.HandleTokens)))
+	mux.Handle("/api/preferences", authMiddleware.Wrap(http.HandlerFunc(preferencesHandler.Handle)))
 
 	// TOTP / 2FA routes (multi mode only, and not in SSO mode — the IdP owns MFA).
 	var totpHandler *handlers.TOTPHandler

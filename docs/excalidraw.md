@@ -38,11 +38,13 @@ so drawings created in either tool open in the other.
   offered for drawings: the rich editor re-serializes its document model on
   every change and would reformat the scene JSON, the same hazard that forces
   Marp decks to raw editing.
-- **Dark by default** *(v4.2.1+)* — the canvas matches the app rather than
-  opening as a white sheet, with a light/dark toggle in the canvas footer. The
-  theme is a per-browser viewing preference and is **never written into the
-  note**, so the file stays portable (Obsidian reads the same bytes) and two
-  people can view the same drawing with different themes.
+- **Follows the app theme** *(v4.3.0+)* — the canvas matches mdnest rather than
+  opening as a white sheet in a dark UI, and repaints as soon as you change the
+  app theme. The canvas carried its own light/dark button until v4.3.0, when the
+  app gained a theme of its own and that button became a near-duplicate of the
+  one in the toolbar. The theme is a viewing preference and is **never written
+  into the note**, so the file stays portable (Obsidian reads the same bytes) and
+  two people can view the same drawing with different themes.
 
 ---
 

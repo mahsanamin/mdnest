@@ -1,59 +1,122 @@
 import mermaid from 'mermaid';
+import { currentTheme } from './theme.js';
 
 // Shared mermaid configuration — imported by both Preview.jsx and MermaidBlock.jsx
 // to ensure consistent theme regardless of which component loads first.
-mermaid.initialize({
-  startOnLoad: false,
-  theme: 'base',
-  themeVariables: {
+//
+// mermaid.initialize() is global and applies at RENDER time, not at import
+// time, so switching theme means calling it again and re-rendering every
+// diagram already on screen. Diagrams are imperative SVG written into the DOM
+// by the two components above; nothing re-runs them on a React state change,
+// which is why applyMermaidTheme exists and why those components subscribe to
+// onThemeChange rather than reading a prop.
+
+const PALETTES = {
+  dark: {
     darkMode: true,
     background: '#1e1e2e',
-    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-
-    // Primary nodes — dark blue fill, light text
-    primaryColor: '#313244',
-    primaryTextColor: '#cdd6f4',
-    primaryBorderColor: '#74c7ec',
-
-    // Secondary nodes — muted green fill, light text
-    secondaryColor: '#2a4a3a',
-    secondaryTextColor: '#cdd6f4',
-    secondaryBorderColor: '#94e2d5',
-
-    // Tertiary nodes — muted purple fill, light text
-    tertiaryColor: '#3a2a4a',
-    tertiaryTextColor: '#cdd6f4',
-    tertiaryBorderColor: '#cba6f7',
-
-    // Global defaults
-    lineColor: '#7f849c',
-    textColor: '#cdd6f4',
-    mainBkg: '#313244',
+    node: '#313244',
+    nodeText: '#cdd6f4',
     nodeBorder: '#74c7ec',
-    nodeTextColor: '#cdd6f4',
-
-    // Clusters (subgraphs)
-    clusterBkg: '#181825',
+    secondary: '#2a4a3a',
+    secondaryBorder: '#94e2d5',
+    tertiary: '#3a2a4a',
+    tertiaryBorder: '#cba6f7',
+    line: '#7f849c',
+    cluster: '#181825',
     clusterBorder: '#585b70',
-
-    // Labels & misc
-    titleColor: '#cdd6f4',
-    edgeLabelBackground: '#313244',
-    noteBkgColor: '#313244',
-    noteTextColor: '#cdd6f4',
-    noteBorderColor: '#585b70',
-
-    // Sequence diagrams
-    actorTextColor: '#cdd6f4',
-    actorBkg: '#313244',
-    actorBorder: '#74c7ec',
-    signalColor: '#cdd6f4',
-    loopTextColor: '#cdd6f4',
-    labelBoxBkgColor: '#313244',
-    labelBoxBorderColor: '#585b70',
-    labelTextColor: '#cdd6f4',
   },
-});
+  light: {
+    darkMode: false,
+    background: '#eff1f5',
+    node: '#dce0e8',
+    nodeText: '#4c4f69',
+    nodeBorder: '#0e7490',
+    secondary: '#d7ead9',
+    secondaryBorder: '#179299',
+    tertiary: '#e4dcf4',
+    tertiaryBorder: '#8839ef',
+    line: '#7c7f93',
+    cluster: '#e6e9ef',
+    clusterBorder: '#acb0be',
+  },
+};
+
+function configFor(theme) {
+  const p = PALETTES[theme] || PALETTES.dark;
+  return {
+    startOnLoad: false,
+    theme: 'base',
+    themeVariables: {
+      darkMode: p.darkMode,
+      background: p.background,
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+
+      // Primary nodes
+      primaryColor: p.node,
+      primaryTextColor: p.nodeText,
+      primaryBorderColor: p.nodeBorder,
+
+      // Secondary nodes — muted green fill
+      secondaryColor: p.secondary,
+      secondaryTextColor: p.nodeText,
+      secondaryBorderColor: p.secondaryBorder,
+
+      // Tertiary nodes — muted purple fill
+      tertiaryColor: p.tertiary,
+      tertiaryTextColor: p.nodeText,
+      tertiaryBorderColor: p.tertiaryBorder,
+
+      // Global defaults
+      lineColor: p.line,
+      textColor: p.nodeText,
+      mainBkg: p.node,
+      nodeBorder: p.nodeBorder,
+      nodeTextColor: p.nodeText,
+
+      // Clusters (subgraphs)
+      clusterBkg: p.cluster,
+      clusterBorder: p.clusterBorder,
+
+      // Labels & misc
+      titleColor: p.nodeText,
+      edgeLabelBackground: p.node,
+      noteBkgColor: p.node,
+      noteTextColor: p.nodeText,
+      noteBorderColor: p.clusterBorder,
+
+      // Sequence diagrams
+      actorTextColor: p.nodeText,
+      actorBkg: p.node,
+      actorBorder: p.nodeBorder,
+      signalColor: p.nodeText,
+      loopTextColor: p.nodeText,
+      labelBoxBkgColor: p.node,
+      labelBoxBorderColor: p.clusterBorder,
+      labelTextColor: p.nodeText,
+    },
+  };
+}
+
+let activeTheme = currentTheme();
+mermaid.initialize(configFor(activeTheme));
+
+/**
+ * Re-initialise mermaid for a theme. Returns true when the theme actually
+ * changed, so callers can skip a re-render they do not need.
+ */
+export function applyMermaidTheme(theme) {
+  const next = PALETTES[theme] ? theme : 'dark';
+  if (next === activeTheme) return false;
+  activeTheme = next;
+  mermaid.initialize(configFor(next));
+  return true;
+}
+
+/** The theme mermaid is currently configured for. */
+export function mermaidTheme() {
+  return activeTheme;
+}
 
 // Post-process mermaid SVG: force readable text colors.
 // Mermaid calculates text color from theme, but user-defined fills
@@ -61,8 +124,11 @@ mermaid.initialize({
 // This walks all text elements, detects parent fill brightness, and forces
 // dark text on light fills or light text on dark fills.
 export function fixMermaidTextColors(svgEl) {
-  const lightText = '#cdd6f4';
-  const darkText = '#1e1e2e';
+  // The two extremes to choose between. They track the theme so the "dark
+  // text" picked for a pale user-supplied fill is the theme's ink rather than
+  // a near-black borrowed from the dark palette.
+  const lightText = activeTheme === 'light' ? '#ffffff' : '#cdd6f4';
+  const darkText = activeTheme === 'light' ? '#4c4f69' : '#1e1e2e';
 
   function getBrightness(color) {
     if (!color || color === 'none' || color === 'transparent') return -1;

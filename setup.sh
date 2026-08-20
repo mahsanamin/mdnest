@@ -74,6 +74,7 @@ while IFS= read -r line; do
     ENABLE_MARP) ENABLE_MARP="$value" ;;
     ENABLE_MARP_THEMES) ENABLE_MARP_THEMES="$value" ;;
     ENABLE_EXCALIDRAW) ENABLE_EXCALIDRAW="$value" ;;
+    DEFAULT_THEME) DEFAULT_THEME="$value" ;;
     EXCALIDRAW_LIBRARIES) EXCALIDRAW_LIBRARIES="$value" ;;
     REQUIRE_2FA) REQUIRE_2FA="$value" ;;
     TOTP_ISSUER) TOTP_ISSUER="$value" ;;
@@ -216,6 +217,14 @@ for i in "${!MOUNT_NAMES[@]}"; do
   fi
 done
 
+case "${DEFAULT_THEME:-auto}" in
+  auto|dark|light) ;;
+  *)
+    echo "Error: DEFAULT_THEME must be auto, dark or light (got '${DEFAULT_THEME}')."
+    exit 1
+    ;;
+esac
+
 # Generate .env
 cat > .env <<EOF
 MDNEST_USER=$MDNEST_USER
@@ -235,6 +244,7 @@ ENABLE_MARP=${ENABLE_MARP:-false}
 ENABLE_MARP_THEMES=${ENABLE_MARP_THEMES:-false}
 ENABLE_EXCALIDRAW=${ENABLE_EXCALIDRAW:-false}
 EXCALIDRAW_LIBRARIES=${EXCALIDRAW_LIBRARIES:-}
+DEFAULT_THEME=${DEFAULT_THEME:-auto}
 REQUIRE_2FA=${REQUIRE_2FA:-false}
 TOTP_ISSUER=${TOTP_ISSUER:-mdnest}
 SERVER_ALIAS=${SERVER_ALIAS:-}

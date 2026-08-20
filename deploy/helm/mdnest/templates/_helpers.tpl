@@ -177,6 +177,9 @@ Delete a guard in the same change that lands the capability behind it.
 {{- if not (has .Values.storage.backend (list "local" "git")) -}}
   {{- fail (printf "mdnest: storage.backend=%q is not a supported backend. Use `local` (notes on the PVC) or `git` (in-process git history; add REDIS_URL for the git-native HA topology)." .Values.storage.backend) -}}
 {{- end -}}
+{{- if not (has .Values.ui.defaultTheme (list "auto" "dark" "light")) -}}
+  {{- fail (printf "mdnest: ui.defaultTheme=%q is not valid. Use `auto` (follow the viewer's OS setting), `dark` or `light`." .Values.ui.defaultTheme) -}}
+{{- end -}}
 {{- if and (eq .Values.storage.backend "git") .Values.gitSync.enabled -}}
   {{- fail "mdnest: storage.backend=git maintains git history in-process, and gitSync.enabled runs a sidecar that also commits — the two would fight over the same working tree. Pick one: storage.backend=git (mdnest owns commits) or storage.backend=local + gitSync.enabled (the sidecar owns commits/push)." -}}
 {{- end -}}

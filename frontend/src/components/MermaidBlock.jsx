@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import mermaid, { fixMermaidTextColors } from '../mermaid-config.js';
+import mermaid, { fixMermaidTextColors, applyMermaidTheme } from '../mermaid-config.js';
+import { useTheme } from '../useTheme.js';
 
 function AutoSizeInput({ className, style, defaultValue, onConfirm, onCancel }) {
   const [value, setValue] = useState(defaultValue || '');
@@ -68,10 +69,17 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
   const currentSource = useRef(source);
   currentSource.current = source;
 
-  // Render mermaid diagram
+  // Render mermaid diagram. `theme` is in the dependency list because the SVG
+  // is imperative output — nothing re-runs this on a theme change otherwise,
+  // and the diagram would keep its old palette until the note is reopened.
+  const theme = useTheme();
   useEffect(() => {
     if (mode !== 'preview') return;
     if (!source?.trim()) { setSvgHtml(''); return; }
+    // Re-initialise before rendering rather than relying on a subscription
+    // elsewhere having fired first — mermaid's config is global and applies
+    // at render time.
+    applyMermaidTheme(theme);
 
     let cancelled = false;
     (async () => {
@@ -114,7 +122,7 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
       }
     })();
     return () => { cancelled = true; };
-  }, [source, mode]);
+  }, [source, mode, theme]);
 
   // Fix text colors after SVG renders. fixMermaidTextColors() is the single
   // authority: it sets each label's color from its OWN node fill brightness
