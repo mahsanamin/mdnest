@@ -2018,7 +2018,7 @@ pre:hover .code-copy-btn {
    Bright yellow so it reads clearly on both light and dark themes. */
 .comment-highlight {
   background-color: var(--highlight) !important;
-  color: var(--text-inverse) !important;
+  color: var(--highlight-ink) !important;
   border-radius: 2px;
   padding: 1px 1px;
   box-shadow: 0 0 0 1px var(--highlight-ring);
@@ -2030,7 +2030,7 @@ pre:hover .code-copy-btn {
 }
 
 .comment-highlight * {
-  color: var(--text-inverse) !important;
+  color: var(--highlight-ink) !important;
 }
 
 /* [[wikilink]] highlight in the Live editor (ProseMirror decoration:
@@ -2171,7 +2171,7 @@ pre:hover .code-copy-btn {
    user's eye is drawn to it, then fades out. */
 .comment-flash-active {
   background-color: var(--highlight) !important;
-  color: var(--text-inverse) !important;
+  color: var(--highlight-ink) !important;
   border-radius: 2px;
   animation: comment-flash-editor 1.8s ease;
 }
