@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { chooseShapeFill, inkFor } from '../mermaid-config.js';
+import { chooseShapeFill, inkFor, brightnessOver } from '../mermaid-config.js';
 
 // The bug this pins: a flowchart node styled with a pale `classDef fill:` got
 // light ink in dark mode, so every label was near-invisible on its own node.
@@ -57,5 +57,37 @@ describe('inkFor', () => {
     // Not the light ink unconditionally — white on a light canvas is invisible.
     expect(inkFor(-1, 'light')).toBe('#4c4f69');
     expect(inkFor(-1, 'dark')).toBe('#cdd6f4');
+  });
+});
+
+describe('brightnessOver', () => {
+  const MOCHA = [30, 30, 46];   // #1e1e2e
+  const LATTE = [239, 241, 245]; // #eff1f5
+
+  it('composites a translucent chip over the diagram ground', () => {
+    // Mermaid's edge-label background is rgba(49,50,68,.5). Judged at face
+    // value it reads as #313244 (luminance 52); over the dark ground what the
+    // eye sees is closer to 41. Either way the ink must be the light one, but
+    // the number has to describe the pixel, not the declaration.
+    const composited = brightnessOver([49, 50, 68, 0.5], MOCHA);
+    const opaque = brightnessOver([49, 50, 68, 1], MOCHA);
+    expect(composited).toBeLessThan(opaque);
+    expect(composited).toBeGreaterThan(35);
+    expect(inkFor(composited, 'dark')).toBe('#cdd6f4');
+  });
+
+  it('composites the same chip the other way over a light ground', () => {
+    const composited = brightnessOver([220, 224, 232, 0.5], LATTE);
+    expect(inkFor(composited, 'light')).toBe('#4c4f69');
+  });
+
+  it('treats a fully transparent colour as unknown, not as black', () => {
+    expect(brightnessOver([0, 0, 0, 0], MOCHA)).toBe(-1);
+    expect(brightnessOver(null, MOCHA)).toBe(-1);
+  });
+
+  it('leaves an opaque colour alone', () => {
+    expect(brightnessOver([255, 255, 255, 1], MOCHA)).toBeCloseTo(255, 5);
+    expect(brightnessOver([207, 228, 255], MOCHA)).toBeCloseTo(224.8, 1);
   });
 });
