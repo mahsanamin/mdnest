@@ -1,29 +1,58 @@
 # mdnest
 
-**Your notes, on your own server. Open to every device — and your AI.**
+**Your notes. On your server. Open in a browser, a terminal, or Claude.**
 
-mdnest keeps your notes as plain Markdown files on a server you run. Open them in your browser, your terminal, or straight from Claude and Cursor. One place for everything you (and your AI) want to remember.
+mdnest is a notes app you run yourself. Every note is an ordinary Markdown file
+in a folder you chose — so you can open it in mdnest, `grep` it from a terminal,
+or let an AI agent read and edit it, and it is always the same file.
 
-No cloud. No lock-in. Your files stay yours.
+No cloud account. No database to feed. Nothing leaves your machine.
 
-![mdnest live editor — Markdown turning into rich text as you type, with a Mermaid diagram](docs/images/hero-editor.jpg)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/dark-app.webp">
+  <img alt="The mdnest app: a folder tree on the left, and a note holding an editable table, a task list and a diagram, with a badge showing a colleague typing in the same note" src="docs/images/light-app.webp">
+</picture>
+
+### Three ways in, one set of files
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/interfaces-dark.webp">
+  <img alt="A browser, a terminal running the mdnest CLI, and an AI agent over MCP all connect to one mdnest server, which reads and writes plain .md files in your folder" src="docs/images/interfaces-light.webp">
+</picture>
+
+Most people find mdnest as a web app and never learn the rest. The **CLI** talks
+to *several servers at once* — `mdnest read @work/engineering/spec.md` and
+`mdnest append @home/journal/today.md "..."` from the same shell. The **MCP
+server** gives Claude or Cursor the same read and write access, so an agent has
+a memory that survives the session.
 
 ### What you get
 
-- 🤖 **Made for AI.** Claude, Cursor, and your scripts read and write your notes over MCP and a CLI. Your AI finally has a memory that sticks between runs.
-- 🛟 **Never lose a note.** Every change auto-saves to your own Git repo. Browse the full history and restore any version in one click.
-- 🌐 **Everywhere at once.** Browser, phone, terminal, API — the same notes, always in sync. Your laptop sleeps; your notes don't.
-- 📝 **Nice to write in.** A live editor where Markdown becomes rich text as you type — tables, diagrams, math, and drag-and-drop images. Or switch to plain text.
-- 🗂️ **Just files.** Every note is a `.md` file on disk. `cat`, `grep`, and `git` still work. Walk away anytime.
-- 👥 **A wiki when you grow.** Add SSO, roles, and comment threads for your team — a Confluence you can actually afford.
+- 📝 **A real editor.** Markdown turns into rich text as you type — tables you
+  edit like a spreadsheet, diagrams from a code fence, math, drag-and-drop
+  images. Or flip to plain text whenever you want.
+- 🗂️ **Folders, not one big pile.** Nest them as deep as you like, and keep
+  separate workspaces for work, home and side projects.
+- 👥 **Two people, one note.** See who else is in it, watch them type, and leave
+  comment threads anchored to the exact sentence.
+- 🤖 **Built for agents.** MCP and a CLI, both reading and writing the same
+  files you do.
+- ⚡ **Quick, because there is nothing in the way.** No import, no index to
+  rebuild. Search results and the task board are kept in memory.
+- 🛟 **Backs itself up.** Point a workspace at a git repo and mdnest commits and
+  pushes it on a schedule. Browse any note's history and restore a version from
+  inside the app.
+- 🚪 **No lock-in.** They are `.md` files. Walk away and take the folder.
 
 ### Is it for you?
 
-- **You run AI agents** and want them to remember things across runs and projects.
-- **You use more than one device** and want one set of notes everywhere, never lost.
-- **You're a small team** that wants a shared wiki without the Confluence bill.
+- **You run AI agents** and want them to remember things between runs.
+- **You use more than one device** and want one set of notes on all of them.
+- **You are a small team** that wants a shared wiki without the Confluence bill.
 
-> Just want a local vault on one Mac? [Obsidian](https://obsidian.md) is great. Pick mdnest when you want your notes on every device, backed up, and open to your AI.
+> Just want a local vault on one Mac? [Obsidian](https://obsidian.md) is great.
+> Pick mdnest when you want your notes on every device, backed up, and open to
+> your AI.
 
 <sub>Handles 1,000–5,000 notes out of the box. Bigger? Tune the [search settings](#search) — config only. Full feature list in [More features](#more-features).</sub>
 
@@ -88,34 +117,36 @@ Open `http://localhost:3236` (or your Tailscale URL) in any browser. Works on de
 
 ### CLI (terminal)
 
-Install the `mdnest` CLI on any machine (macOS / Linux):
+Install it on any machine (macOS / Linux):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/mahsanamin/mdnest/main/install-cli.sh | bash
 ```
 
-Then authenticate with a token from the web UI (Settings > API Tokens):
+Create a token in the web UI (Settings → API Tokens), then name your server
+whatever you like. **One machine can hold as many servers as you want** — that
+is the part most people miss:
 
 ```bash
-mdnest login https://your-server:3236 <your-api-token>
+mdnest login @work https://notes.company.com:3236 mdnest_abc123
+mdnest login @home https://mdnest.lan:3236        mdnest_def456
+mdnest servers -v          # every server, and the namespaces on each
 ```
 
-Now use it from anywhere:
+Paths read `@alias/namespace/path/to/file.md`, so one shell reaches all of them:
 
 ```bash
-mdnest note list                                    # list namespaces
-mdnest note list personal                           # list files in a namespace
-mdnest note read personal ideas.md                  # read a note
-mdnest note write personal ideas.md "New content"   # overwrite a note
-mdnest note append personal log.md "New entry"      # append to a note
-mdnest note prepend personal log.md "Top entry"     # prepend to a note
-mdnest note create personal new-note.md             # create a new note
-mdnest note delete personal old-note.md             # delete a note
-mdnest note search personal "search query"          # search notes
-echo "piped content" | mdnest note write personal draft.md -  # pipe from stdin
+mdnest read   @work/engineering/Specs/Offline\ sync.md
+mdnest search @work/engineering "offline sync"
+mdnest append @home/journal/today.md "- [ ] send the recap"
+mdnest list   @home/journal                    # a tree, not raw JSON
+mdnest create @home/ideas/new.md "First line"  # create = new file
+mdnest write  @home/ideas/new.md "Replaced"    # write = must already exist
+echo "piped" | mdnest append @home/log.md -    # stdin with -
 ```
 
-Run `mdnest note help` for the full list.
+Drop the `@alias` if you only configured one server. `mdnest --help` lists
+everything; `mdnest docs` prints the full reference.
 
 ### MCP Server (AI agents)
 
@@ -211,6 +242,15 @@ By default, mdnest runs in **single-user mode** — one user, file-based auth, n
 
 **Multi-user mode** adds a three-tier role hierarchy, per-namespace grants, optional 2FA, and your choice of three identity providers (corporate SSO, Firebase Auth, or local username/password). Set `AUTH_MODE=multi` in `mdnest.conf` and `setup.sh` adds a Postgres container automatically.
 
+It also turns on the parts that need more than one person. Open a note someone
+else has open and you can see them there, watch them type, and argue about a
+sentence in a thread pinned to that sentence:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/dark-collab.webp">
+  <img alt="Two people in one mdnest note: a badge reads alex is typing, a highlighted sentence is anchored to a comment thread in the right-hand panel, and a colleague has replied in the thread" src="docs/images/light-collab.webp">
+</picture>
+
 ```ini
 AUTH_MODE=multi
 POSTGRES_PASSWORD=a-secure-password
@@ -267,7 +307,20 @@ See [docs/setup.md](docs/setup.md) for the full multi-user walkthrough, [docs/ss
 
 Each `MOUNT_<name>=<host_path>` entry in `mdnest.conf` mounts a host directory as a namespace. Namespaces are isolated -- separate trees, separate files. Add or remove by editing `mdnest.conf` and running `./mdnest-server rebuild`.
 
+Inside one, nest folders as deep as you like. What you see in the sidebar is
+exactly what is on disk:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/dark-tree.webp">
+  <img alt="The mdnest sidebar with a workspace picker and a nested tree: Engineering containing Runbooks and Specs, Meetings containing a 2026 folder of dated notes, and Product" src="docs/images/light-tree.webp" width="700">
+</picture>
+
 ## Git Sync (Optional)
+
+**If a namespace is a git repo, mdnest keeps it committed and pushed for you.**
+You write; it saves the history. That gives you an off-box backup, a full
+version history for every note, and a restore button inside the app — and the
+backup is an ordinary git repo you can clone, `grep` and read without mdnest.
 
 Your notes are private by default. Nothing leaves your machine unless you choose to enable sync.
 
@@ -342,6 +395,12 @@ Beyond the core editor and the three access interfaces, mdnest includes:
 - **Inline comments with threads.** Highlight any text and leave a comment; commented passages stay highlighted in yellow, and reviewers reply in a thread. Click a highlight to jump to the conversation. Comments are anchored to invisible UUIDs, so moving or renaming files keeps them attached.
 - **Live collaboration.** Multiple people editing the same note see each other's cursors and changes in real time over WebSocket. Toggle with `ENABLE_LIVE_COLLAB=true`.
 - **Task board from your notes.** Every `- [ ]` checkbox becomes a card on a per-namespace kanban board — with due dates, priorities, tags, sub-steps and descriptions written as an indented block in the note itself. Drag between columns, create and edit whole tasks from the board, scope it to one note or the whole workspace — and it's still just markdown on disk. Enable with `ENABLE_TASK_BOARD=true`. See [docs/tasks.md](docs/tasks.md).
+
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/dark-board.webp">
+    <img alt="The mdnest kanban board with To Do and Doing columns; each card shows a priority tag, a due date, an assignee and sub-step progress" src="docs/images/light-board.webp" width="760">
+  </picture>
+
 - **Excalidraw drawings.** Open a `.excalidraw.md` note on a full Excalidraw canvas, or embed a drawing read-only inside any note. Obsidian-compatible on disk (the scene is a JSON block, the text is mirrored so it stays searchable), so it reuses the same history, restore, comments and search as any note. Opt-in with `ENABLE_EXCALIDRAW=true`; operators can preload shared shape libraries. See [docs/excalidraw.md](docs/excalidraw.md).
 - **Interactive mermaid diagrams.** Diagrams render in-place with a Source/Preview/zoom toolbar and click-to-edit labels — edit node text directly on the diagram without touching the code.
 - **In-app version history.** With git-sync enabled, right-click any note → **History** to browse past versions, compare any two as a diff, and one-click restore. Restoration is itself versioned and undoable through the same modal.
