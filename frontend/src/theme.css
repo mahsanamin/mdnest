@@ -124,6 +124,11 @@
   --highlight-soft: #fef08a;
   --highlight-pulse-a: #3b3720;
   --highlight-pulse-b: #2c2a1e;
+  /* Ink for text sitting ON the highlight. It cannot be --text-inverse: that
+     token means "text on the accent", which is white in light mode and would
+     put white on this yellow. The highlight is bright in BOTH themes, so its
+     ink is near-black in both. */
+  --highlight-ink: #1e1e2e;
 
   /* --- Semantics: scrims and shadows ------------------------------------ */
   --scrim: #00000080;
@@ -265,6 +270,7 @@
   --highlight-soft: #fef9c3;
   --highlight-pulse-a: #fef08a;
   --highlight-pulse-b: #fefce8;
+  --highlight-ink: #1e1e2e;
 
   /* Scrims stay black — a dim behind a modal is black on any ground — but
      shadows lighten, because a shadow tuned for a dark UI reads as a smudge
