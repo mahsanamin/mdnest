@@ -115,13 +115,14 @@ pass "seeded $SEED_FILE (token $SEED_TOKEN)"
 MERMAID_FILE="e2e-mermaid.md"
 MERMAID_LABEL="zzm${SFX}label"
 MERMAID_PALE="zzp${SFX}pale"
+MERMAID_EDGE="zze${SFX}edge"
 curl -fsS -X POST "$BASE_URL/api/note?ns=testing_workspace&path=$MERMAID_FILE" \
   -H "Authorization: Bearer $TOKEN" \
   --data "# Mermaid render check
 
 \`\`\`mermaid
 flowchart TD
-  A[$MERMAID_LABEL] --> B[Second Node]
+  A[$MERMAID_LABEL] -->|\"$MERMAID_EDGE\"| B[Second Node]
   B --> C[$MERMAID_PALE]
   classDef pale fill:#cfe4ff,stroke:#2557d6,stroke-width:2px;
   class C pale;
@@ -180,7 +181,7 @@ if ( cd tests/browser && \
      MDNEST_USER=e2e MDNEST_PASSWORD=e2epass123 \
      MDNEST_SEED_FILE="$SEED_FILE" MDNEST_SEED_TOKEN="$SEED_TOKEN" \
      MDNEST_MERMAID_FILE="$MERMAID_FILE" MDNEST_MERMAID_LABEL="$MERMAID_LABEL" \
-     MDNEST_MERMAID_PALE="$MERMAID_PALE" \
+     MDNEST_MERMAID_PALE="$MERMAID_PALE" MDNEST_MERMAID_EDGE="$MERMAID_EDGE" \
      MDNEST_BOARD_FILE="$BOARD_FILE" MDNEST_BOARD_TASK="$BOARD_TASK" \
      MDNEST_NOTES_DIR="$NOTES_DIR" \
      npx playwright test ); then

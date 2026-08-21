@@ -144,6 +144,19 @@ export function chooseShapeFill(shapes) {
   return null;
 }
 
+// Perceived brightness of an [r, g, b, a] colour, composited over `ground`
+// when it is not opaque. Mermaid's edge-label chip is a half-transparent
+// background-color, and judging it at face value reads it as lighter (or
+// darker) than what the eye actually sees over the diagram.
+// Exported for tests.
+export function brightnessOver(rgba, ground) {
+  if (!rgba) return -1;
+  const a = rgba.length > 3 && rgba[3] != null ? rgba[3] : 1;
+  if (a === 0) return -1;
+  const [r, g, b] = [0, 1, 2].map((i) => (a >= 1 ? rgba[i] : rgba[i] * a + ground[i] * (1 - a)));
+  return (r * 299 + g * 587 + b * 114) / 1000;
+}
+
 // The ink for a label sitting on a fill of the given brightness. The two
 // extremes track the theme, so the "dark ink" chosen for a pale user fill is
 // the theme's own ink rather than a near-black borrowed from the dark palette.
@@ -164,17 +177,27 @@ export function fixMermaidTextColors(svgEl) {
   // text" picked for a pale user-supplied fill is the theme's ink rather than
   // a near-black borrowed from the dark palette.
 
-  function getBrightness(color) {
-    if (!color || color === 'none' || color === 'transparent') return -1;
+  // The diagram's own ground, for compositing anything translucent.
+  const groundHex = (PALETTES[activeTheme] || PALETTES.dark).background;
+  const ground = [1, 3, 5].map((i) => parseInt(groundHex.slice(i, i + 2), 16));
+
+  function toRGBA(color) {
+    if (!color || color === 'none' || color === 'transparent') return null;
     try {
+      // The canvas normalises any CSS colour to #rrggbb or rgba(...).
       const ctx = document.createElement('canvas').getContext('2d');
       ctx.fillStyle = color;
-      const hex = ctx.fillStyle;
-      const r = parseInt(hex.slice(1, 3), 16);
-      const g = parseInt(hex.slice(3, 5), 16);
-      const b = parseInt(hex.slice(5, 7), 16);
-      return (r * 299 + g * 587 + b * 114) / 1000;
-    } catch { return -1; }
+      const v = ctx.fillStyle;
+      if (v.startsWith('#')) {
+        return [1, 3, 5].map((i) => parseInt(v.slice(i, i + 2), 16)).concat(1);
+      }
+      const n = (v.match(/[\d.]+/g) || []).map(Number);
+      return n.length >= 3 ? [n[0], n[1], n[2], n.length > 3 ? n[3] : 1] : null;
+    } catch { return null; }
+  }
+
+  function getBrightness(color) {
+    return brightnessOver(toRGBA(color), ground);
   }
 
   function getNodeFill(el) {
@@ -214,8 +237,24 @@ export function fixMermaidTextColors(svgEl) {
   });
 
   // HTML inside foreignObject uses 'color'
+  // An HTML label's own background wins over any shape behind it. Mermaid
+  // paints edge labels this way — there is no rect to find, so the shape walk
+  // climbed past them to some unrelated node and inked them against that.
+  function htmlBackground(el) {
+    let n = el;
+    while (n && n.nodeType === 1) {
+      let bg = null;
+      try { bg = window.getComputedStyle(n).backgroundColor; } catch {}
+      const c = toRGBA(bg);
+      if (c && c[3] > 0) return bg;
+      if (n.tagName === 'foreignObject') break;
+      n = n.parentElement;
+    }
+    return null;
+  }
+
   svgEl.querySelectorAll('foreignObject span, foreignObject div, foreignObject p').forEach((t) => {
-    const fill = getNodeFill(t.closest('foreignObject') || t);
+    const fill = htmlBackground(t) || getNodeFill(t.closest('foreignObject') || t);
     const b = getBrightness(fill);
     const color = inkFor(b, activeTheme);
     t.style.setProperty('color', color, 'important');
