@@ -282,6 +282,13 @@
      to tell the eye which buttons were related, so it scanned as one long
      undifferentiated run of controls. */
   gap: var(--gap-between);
+  /* Wraps rather than overflowing. Every group is flex-shrink: 0 and the path
+     in the middle cannot shrink below its own buttons, so on a narrow editor —
+     a 13" laptop with the comment panel open — the row used to run past its
+     container and paint Rename/Delete on top of the theme and settings
+     buttons. Wrapping keeps every control visible and hittable. */
+  flex-wrap: wrap;
+  row-gap: var(--space-2);
   padding: var(--space-2) var(--space-4);
   background: var(--surface);
   border-bottom: 1px solid var(--border);
@@ -320,10 +327,20 @@
 }
 
 .toolbar-path {
-  flex: 1;
+  /* Not flex: 1. Growing to fill the row means the actions inside it sit at the
+     far right with nowhere to go, so they overflowed onto the group beside
+     them. margin-right: auto still pushes that group to the edge, but the bar
+     now wraps before anything collides. */
+  flex: 0 1 auto;
+  margin-right: auto;
   display: flex;
   align-items: center;
   min-width: 0;
+  /* Without this the path paints OUTSIDE its own box. The bar does not wrap and
+     every group is flex-shrink: 0, so once the comment panel squeezes the
+     editor (a 13" laptop with comments open is enough) the filename runs
+     straight over the buttons to its right instead of being clipped. */
+  overflow: hidden;
   color: var(--text-muted);
   font-size: 0.85rem;
   white-space: nowrap;
@@ -340,7 +357,12 @@
   flex-shrink: 1;
 }
 .toolbar-path-base {
-  flex-shrink: 0;
+  /* Shrinks to an ellipsis rather than pushing the bar wider. The directory
+     part already did; the filename holding firm is what overflowed the row. */
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--text);
   font-weight: 500;
 }
@@ -2018,7 +2040,7 @@ pre:hover .code-copy-btn {
    Bright yellow so it reads clearly on both light and dark themes. */
 .comment-highlight {
   background-color: var(--highlight) !important;
-  color: var(--text-inverse) !important;
+  color: var(--highlight-ink) !important;
   border-radius: 2px;
   padding: 1px 1px;
   box-shadow: 0 0 0 1px var(--highlight-ring);
@@ -2030,7 +2052,7 @@ pre:hover .code-copy-btn {
 }
 
 .comment-highlight * {
-  color: var(--text-inverse) !important;
+  color: var(--highlight-ink) !important;
 }
 
 /* [[wikilink]] highlight in the Live editor (ProseMirror decoration:
@@ -2171,7 +2193,7 @@ pre:hover .code-copy-btn {
    user's eye is drawn to it, then fades out. */
 .comment-flash-active {
   background-color: var(--highlight) !important;
-  color: var(--text-inverse) !important;
+  color: var(--highlight-ink) !important;
   border-radius: 2px;
   animation: comment-flash-editor 1.8s ease;
 }
