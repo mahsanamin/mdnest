@@ -4,6 +4,81 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v4.3.1 — Text you can actually read
+
+v4.3.0 added a light theme. Shipping a second theme turns out to reveal every
+place the first one was getting away with something, and this release is the
+cleanup: four separate cases where mdnest drew text you could not read, three of
+them found by simply looking at the app in the other theme.
+
+The Mermaid ones are the worst of them. A diagram with an author's own
+`classDef fill:` — the ordinary way anyone colours a flowchart — rendered its
+labels in the light ink while in dark mode, so the text was near-invisible on
+its own node. That is not a subtle miscalculation; the brightness maths was
+right all along, and the walk that fed it was measuring the wrong shape.
+
+### Fixed
+
+- **Mermaid labels are readable on coloured nodes, in both themes.** Mermaid
+  nests an empty `<rect>` spacer inside every flowchart node's label group. It
+  paints nothing, but it inherits the themed `mainBkg` — `#313244` in dark — and
+  that was the first shape the contrast pass found. So a pale `#cfe4ff` node was
+  told its background was dark and got light ink. Light mode was correct only by
+  luck, because its `mainBkg` happens to be bright too. The pass now measures
+  each candidate before trusting its colour and skips anything with zero area.
+  Measured on a pale node, the ink/fill luminance gap goes from **20 to 193** in
+  dark and **144** in light.
+- **Mermaid edge labels too.** An edge label has no shape at all — Mermaid
+  paints it with a CSS `background-color` on the HTML inside the foreignObject,
+  which the pass never looked at, so it climbed past the chip to an unrelated
+  node. Brightness is now composited over the diagram's own ground as well,
+  because that chip is half-transparent and judging the declaration instead of
+  the pixel got the answer right only by accident. Gap: **20 to 173**.
+- **Commented text is no longer white on yellow in light mode.** A commented
+  passage is painted with `--highlight` (a bright yellow in *both* themes) and
+  was inked with `--text-inverse`, which means "text that sits on the accent" —
+  `#1e1e2e` in dark, `#ffffff` in light. So the light theme put white on yellow
+  at **1.32:1**. The ink has its own token now.
+- **The toolbar no longer draws its controls on top of each other.** On a narrow
+  editor — a 13" laptop, or any window once the comment panel takes its 330px —
+  the bar ran past its container and painted the filename over the comment
+  button, and Rename/Delete over the theme and settings icons. It is a single
+  non-wrapping flex row whose groups are all `flex-shrink: 0`, so the only thing
+  that could give was the path in the middle, and it could not. The filename now
+  ellipsizes, the path clips instead of painting outside itself, and the bar
+  wraps rather than overflowing.
+
+### Documentation
+
+- **The README leads with what mdnest is** rather than a feature list, and every
+  screenshot is new — taken at the size it renders, and shipped light *and* dark
+  through `<picture>` so it follows the reader's theme. It also gains a diagram
+  of the browser, the CLI and an AI agent all reaching the same files, because
+  most people meet mdnest as a web app and never learn there is a CLI.
+- **The CLI section teaches the current syntax.** It documented
+  `mdnest note list`, the legacy form, which hides the whole point: one machine
+  holds as many servers as you like and addresses them as `@work/…` and
+  `@home/…` from the same shell.
+
+### Testing
+
+- `mermaid-contrast.test.js` and `theme-contrast.test.js` pin the decisions
+  behind the fixes above; `tests/browser/mermaid-contrast.spec.js` and
+  `toolbar-fit.spec.js` pin the rendered result in a real browser, in both
+  themes. Each was confirmed to fail against the pre-fix code rather than
+  assumed to.
+- Two notes for whoever writes the next one of these. The overlap check skips
+  nested pairs — Rename and Delete live *inside* `.toolbar-path`, and a parent
+  enclosing its children is not a collision — and it confirms each overlap by
+  hit-testing the intersection, because a control clipped by an
+  `overflow: hidden` ancestor still reports its full rectangle while painting
+  nothing.
+- The browser E2E stack now sets `ENABLE_LIVE_COLLAB`, and its Mermaid fixture
+  carries a pale-filled node and a labelled edge — the two shapes that were
+  broken.
+
+---
+
 ## v4.3.0 — Light mode
 
 mdnest has been dark-only since the first commit. Some people don't want that,

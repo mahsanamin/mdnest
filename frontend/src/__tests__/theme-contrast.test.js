@@ -16,10 +16,14 @@ import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
+// Comments are stripped before parsing. theme.css explains its palette in
+// prose, and prose about a token ("--text-inverse: white on the accent") is
+// otherwise indistinguishable from a declaration to the regex below — one
+// explanatory comment silently corrupted the value of the token after it.
 const CSS = readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), '..', 'theme.css'),
   'utf-8',
-);
+).replace(/\/\*[\s\S]*?\*\//g, '');
 
 const block = (selector) => {
   const m = CSS.match(
@@ -92,6 +96,16 @@ const ON_ACCENT = [
   ['--text-inverse', '--success'],
 ];
 
+// Text on the comment/search highlight. This needs its OWN ink token and not
+// --text-inverse: "inverse" means the text that sits on the ACCENT, which is
+// white in light mode, and --highlight is a bright yellow in BOTH themes. The
+// shipped light theme put white on #fde047 (1.7:1) — the commented span was
+// legible in dark mode and all but blank in light.
+const ON_MARKER = [
+  ['--highlight-ink', '--highlight'],
+  ['--highlight-ink', '--highlight-soft'],
+];
+
 describe.each([['dark', DARK], ['light', LIGHT]])('%s theme', (name, tokens) => {
   it.each(BODY_TEXT)('%s on %s clears AA', (fg, bg) => {
     expect(contrast(tokens, fg, bg)).toBeGreaterThanOrEqual(AA);
@@ -107,6 +121,33 @@ describe.each([['dark', DARK], ['light', LIGHT]])('%s theme', (name, tokens) => 
 
   it.each(ON_ACCENT)('%s on %s clears AA', (fg, bg) => {
     expect(contrast(tokens, fg, bg)).toBeGreaterThanOrEqual(AA);
+  });
+
+  it.each(ON_MARKER)('%s on %s clears AA', (fg, bg) => {
+    expect(contrast(tokens, fg, bg)).toBeGreaterThanOrEqual(AA);
+  });
+});
+
+// The bug was a token CHOICE, not a value, so the palette alone cannot catch a
+// relapse: --text-inverse on --highlight measures 1.32:1 in light mode and no
+// contrast assertion over the tokens would ever be reached if App.css stopped
+// using --highlight-ink. Check the rules themselves.
+describe('highlighted text is inked with --highlight-ink', () => {
+  const APP = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), '..', 'App.css'),
+    'utf-8',
+  ).replace(/\/\*[\s\S]*?\*\//g, '');
+
+  it('every rule filled with --highlight sets the marker ink', () => {
+    const rules = [...APP.matchAll(/\{([^{}]*background-color:\s*var\(--highlight\)[^{}]*)\}/g)];
+    expect(rules.length, 'no rule paints --highlight — did the token get renamed?')
+      .toBeGreaterThan(0);
+    for (const [, body] of rules) {
+      expect(body, 'a --highlight fill without --highlight-ink text')
+        .toMatch(/color:\s*var\(--highlight-ink\)/);
+      expect(body, '--text-inverse is the accent ink, not the marker ink')
+        .not.toMatch(/color:\s*var\(--text-inverse\)/);
+    }
   });
 });
 

@@ -67,6 +67,7 @@ docker run -d --name "$BE" --network "$NET" --network-alias backend \
   -e FRONTEND_ORIGIN=http://localhost \
   -e ENABLE_TASK_BOARD=true \
   -e ENABLE_EXCALIDRAW=true \
+  -e ENABLE_LIVE_COLLAB=true \
   -v "$NOTES_DIR:/notes" "$BE_IMAGE" >/dev/null
 
 log "Starting frontend (nginx) on an ephemeral host port"
@@ -106,15 +107,26 @@ pass "seeded $SEED_FILE (token $SEED_TOKEN)"
 # A mermaid flowchart, so the suite can prove diagram labels actually render.
 # Mermaid draws flowchart labels inside <foreignObject>; a sanitizer that drops
 # that element leaves the boxes but silently deletes every label (v3.11.7).
+#
+# Node C carries a pale author fill on purpose. Rendering a label is not the
+# same as rendering a READABLE one: in dark mode every such label used to be
+# painted with the light ink, because the contrast walk measured mermaid's
+# zero-area label spacer (which inherits the dark themed mainBkg) instead of
+# the node the text actually sits on. mermaid-contrast.spec.js pins that.
 MERMAID_FILE="e2e-mermaid.md"
 MERMAID_LABEL="zzm${SFX}label"
+MERMAID_PALE="zzp${SFX}pale"
+MERMAID_EDGE="zze${SFX}edge"
 curl -fsS -X POST "$BASE_URL/api/note?ns=testing_workspace&path=$MERMAID_FILE" \
   -H "Authorization: Bearer $TOKEN" \
   --data "# Mermaid render check
 
 \`\`\`mermaid
 flowchart TD
-  A[$MERMAID_LABEL] --> B[Second Node]
+  A[$MERMAID_LABEL] -->|\"$MERMAID_EDGE\"| B[Second Node]
+  B --> C[$MERMAID_PALE]
+  classDef pale fill:#cfe4ff,stroke:#2557d6,stroke-width:2px;
+  class C pale;
 \`\`\`
 " >/dev/null || { fail "could not seed mermaid note"; exit 1; }
 pass "seeded $MERMAID_FILE (label $MERMAID_LABEL)"
@@ -170,6 +182,7 @@ if ( cd tests/browser && \
      MDNEST_USER=e2e MDNEST_PASSWORD=e2epass123 \
      MDNEST_SEED_FILE="$SEED_FILE" MDNEST_SEED_TOKEN="$SEED_TOKEN" \
      MDNEST_MERMAID_FILE="$MERMAID_FILE" MDNEST_MERMAID_LABEL="$MERMAID_LABEL" \
+     MDNEST_MERMAID_PALE="$MERMAID_PALE" MDNEST_MERMAID_EDGE="$MERMAID_EDGE" \
      MDNEST_BOARD_FILE="$BOARD_FILE" MDNEST_BOARD_TASK="$BOARD_TASK" \
      MDNEST_NOTES_DIR="$NOTES_DIR" \
      npx playwright test ); then
