@@ -4,6 +4,12 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## Unreleased
+
+_Nothing yet — `develop` is at `4.3.2-dev`._
+
+---
+
 ## v4.3.1 — Text you can actually read
 
 v4.3.0 added a light theme. Shipping a second theme turns out to reveal every
