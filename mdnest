@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-MDNEST_CLI_VERSION="4.3.1"
+MDNEST_CLI_VERSION="4.3.2"
 CONFIG_DIR="${HOME}/.config/mdnest"
 SERVERS_DIR="${CONFIG_DIR}/servers"
 DEFAULT_FILE="${CONFIG_DIR}/default"
@@ -18,8 +18,8 @@ get_server_file() {
 load_server() {
   local alias="$1"
   if [ -n "$alias" ] && [ -f "$(get_server_file "$alias")" ]; then
-    MDNEST_URL=$(grep '^url=' "$(get_server_file "$alias")" 2>/dev/null | cut -d= -f2-)
-    MDNEST_TOKEN=$(grep '^token=' "$(get_server_file "$alias")" 2>/dev/null | cut -d= -f2-)
+    MDNEST_URL=$(grep '^url=' "$(get_server_file "$alias")" 2>/dev/null | cut -d= -f2-) || MDNEST_URL=""
+    MDNEST_TOKEN=$(grep '^token=' "$(get_server_file "$alias")" 2>/dev/null | cut -d= -f2-) || MDNEST_TOKEN=""
     CURRENT_ALIAS="$alias"
     return 0
   fi
@@ -29,17 +29,17 @@ load_server() {
 load_default() {
   if [ -f "$DEFAULT_FILE" ]; then
     local def
-    def=$(cat "$DEFAULT_FILE")
+    def=$(cat "$DEFAULT_FILE") || def=""
     if load_server "$def"; then return 0; fi
   fi
   if [ -d "$SERVERS_DIR" ]; then
     local first
-    first=$(ls "$SERVERS_DIR" 2>/dev/null | head -1)
+    first=$(ls "$SERVERS_DIR" 2>/dev/null | head -1) || first=""
     if [ -n "$first" ] && load_server "$first"; then return 0; fi
   fi
   if [ -f "$LEGACY_CONFIG" ]; then
-    MDNEST_URL=$(grep '^url=' "$LEGACY_CONFIG" 2>/dev/null | cut -d= -f2-)
-    MDNEST_TOKEN=$(grep '^token=' "$LEGACY_CONFIG" 2>/dev/null | cut -d= -f2-)
+    MDNEST_URL=$(grep '^url=' "$LEGACY_CONFIG" 2>/dev/null | cut -d= -f2-) || MDNEST_URL=""
+    MDNEST_TOKEN=$(grep '^token=' "$LEGACY_CONFIG" 2>/dev/null | cut -d= -f2-) || MDNEST_TOKEN=""
     CURRENT_ALIAS="default"
     return 0
   fi
@@ -93,6 +93,55 @@ curl_reason() {
     35|60) echo "the TLS handshake failed" ;;
     *)     echo "curl exited $1" ;;
   esac
+}
+
+# True when $1 is strictly newer than $2. Pure bash: no python3, no jq, and no
+# `sort -V` (busybox sort has no -V, and this must work on the fresh-machine
+# tier like everything else here).
+#
+# Pre-release aware in the one way that matters: a release outranks a
+# pre-release of the same core, so 4.3.2 > 4.3.2-dev and a -dev build never
+# nags about the release it is a candidate for. Mirrors isVersionNewer() in
+# App.jsx, which does the same job for the in-app banner.
+version_gt() {
+  # First line only. A caller that hands us a multi-line value (a sloppy JSON
+  # grep, say) must not be able to fabricate an upgrade: "4.3.1\n4.3.1" would
+  # otherwise compare its third field as "14" and beat 4.3.2.
+  local a="${1%%$'\n'*}" b="${2%%$'\n'*}" a_pre="" b_pre="" i x y
+  a="${a#v}"; b="${b#v}"
+  case "$a" in *-*) a_pre="${a#*-}"; a="${a%%-*}" ;; esac
+  case "$b" in *-*) b_pre="${b#*-}"; b="${b%%-*}" ;; esac
+  for i in 1 2 3; do
+    x="${a%%.*}"; y="${b%%.*}"
+    # Drop anything non-numeric so a stray suffix can't make [ -gt ] error out.
+    x="${x//[!0-9]/}"; y="${y//[!0-9]/}"
+    [ -n "$x" ] || x=0
+    [ -n "$y" ] || y=0
+    if [ "$x" -gt "$y" ]; then return 0; fi
+    if [ "$x" -lt "$y" ]; then return 1; fi
+    case "$a" in *.*) a="${a#*.}" ;; *) a=0 ;; esac
+    case "$b" in *.*) b="${b#*.}" ;; *) b=0 ;; esac
+  done
+  if [ -z "$a_pre" ] && [ -n "$b_pre" ]; then return 0; fi
+  return 1
+}
+
+# One line telling the user their CLI is behind, and exactly how to fix it.
+# Printed where someone is already looking at versions (`mdnest servers`,
+# `mdnest whoami`, `mdnest login`) rather than on every command — the CLI has
+# no update cache, and a nag on every read would be its own bug.
+#
+# The reference point is the SERVER's version, because the CLI and the server
+# ship from the same repo at the same number: if the box you are talking to is
+# newer than the script talking to it, the script is stale. This deliberately
+# does not reach out to GitHub — no extra network call, no new failure mode.
+cli_update_notice() {
+  local server_ver="$1" who="$2"
+  version_gt "$server_ver" "$MDNEST_CLI_VERSION" || return 0
+  echo ""
+  echo "  Your mdnest CLI is v${MDNEST_CLI_VERSION}; ${who} is running v${server_ver}."
+  echo "  Update it with:  mdnest update"
+  return 0
 }
 
 # Pulls SERVER_ALIAS (if any) out of an /api/config body already fetched by
@@ -177,9 +226,15 @@ api() {
   # legitimately slow to transfer; only the connect phase is capped.
   local args=(-s -w "\n%{http_code}" --connect-timeout "${MDNEST_TIMEOUT:-10}" -H "Authorization: Bearer $MDNEST_TOKEN")
   [ -n "$body" ] && args+=(-d "$body")
-  local response curl_rc
-  response=$(curl "${args[@]}" -X "$method" "${MDNEST_URL}/api${path}")
-  curl_rc=$?
+  local response curl_rc=0
+  # Guard the assignment with `|| curl_rc=$?`. The CLI runs under `set -e`, and
+  # a PLAIN assignment from a command substitution takes the substitution's exit
+  # status — so an unguarded `response=$(curl ...)` kills the whole script the
+  # moment curl can't connect, and every line below (including this error block)
+  # is dead code. `mdnest read @unreachable/ns/x.md` printed NOTHING and exited
+  # with curl's 28. Do NOT re-add a following `curl_rc=$?`: it would overwrite
+  # the real curl code with the status of the now-successful assignment.
+  response=$(curl "${args[@]}" -X "$method" "${MDNEST_URL}/api${path}") || curl_rc=$?
   if [ "$curl_rc" != "0" ]; then
     case "$curl_rc" in
       6)  echo "Error: can't resolve host for ${MDNEST_URL} (DNS)." >&2 ;;
@@ -298,7 +353,7 @@ urldecode() {
 # FIRST in /api/config, so a naive grep|head would pick the wrong one).
 json_top_string() {
   local field="$1" data out
-  data=$(cat)
+  data=$(cat) || data=""
   # A python3 that can't parse the body (or can't start at all) returns non-zero
   # and we fall through to jq/awk, rather than reporting an empty field.
   if out=$(printf '%s' "$data" | py -c \
@@ -307,8 +362,11 @@ json_top_string() {
     return 0
   fi
   if have jq; then
+    # `return 0`, not a bare `return`: a bare one propagates jq's exit status,
+    # and callers assign this into a plain variable, which under `set -e` would
+    # abort the script instead of yielding an empty field.
     printf '%s' "$data" | jq -r --arg f "$field" '.[$f] // empty' 2>/dev/null
-    return
+    return 0
   fi
   # Bash/awk fallback: scan for "field": at object depth 1 only. Accumulates all
   # input into `buf` and processes it in END so it works whether the JSON is on
@@ -592,7 +650,7 @@ ERR
       if [ "$cfg_rc" = "0" ]; then
         reason="it returned an empty response"
       else
-        reason=$(curl_reason "$cfg_rc")
+        reason=$(curl_reason "$cfg_rc") || reason=""
       fi
       cat >&2 <<ERR
 Error: couldn't reach ${url} to ask what it calls itself — ${reason}.
@@ -604,7 +662,7 @@ either get it reachable from here, or name it yourself:
 ERR
       exit 1
     fi
-    alias=$(parse_server_alias "$cfg")
+    alias=$(parse_server_alias "$cfg") || alias=""
     if [ -z "$alias" ]; then
       cat >&2 <<ERR
 Error: ${url} answered, but has no SERVER_ALIAS set, so the CLI can't pick
@@ -641,7 +699,7 @@ ERR
   # just rotating the token). Warn only if the URL changes underneath.
   if [ -f "$(get_server_file "$alias")" ]; then
     local existing_url
-    existing_url=$(grep '^url=' "$(get_server_file "$alias")" 2>/dev/null | cut -d= -f2-)
+    existing_url=$(grep '^url=' "$(get_server_file "$alias")" 2>/dev/null | cut -d= -f2-) || existing_url=""
     if [ -n "$existing_url" ] && [ "$existing_url" != "$url" ]; then
       echo "Warning: @${alias} currently points at ${existing_url}; replacing with ${url}."
     fi
@@ -667,12 +725,22 @@ EOF
     local resolution_note=""
     [ "$alias_source" = "autodetect" ] && resolution_note=" (SERVER_ALIAS from /api/config)"
     echo "Logged in to @${alias} (${url})${resolution_note}"
-    SERVER_VER=$(curl -s "${url}/api/config" 2>/dev/null | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
+    # json_top_string, NOT `grep -o '"version"'`: /api/config carries BOTH a
+    # top-level "version" and latestRelease.version, and the nested one is
+    # emitted FIRST, so the naive grep returned two lines. It went unnoticed
+    # while the value was only used for "${SERVER_VER%%.*}" (still "4"), and
+    # became visible the moment the version was printed and compared.
+    SERVER_VER=$(fetch_server_config "$url" | json_top_string version) || SERVER_VER=""
     if [ -n "$SERVER_VER" ]; then
       CLI_MAJOR="${MDNEST_CLI_VERSION%%.*}"
       SRV_MAJOR="${SERVER_VER%%.*}"
       if [ "$CLI_MAJOR" != "$SRV_MAJOR" ]; then
         echo "Warning: CLI v${MDNEST_CLI_VERSION} may not be compatible with server v${SERVER_VER}"
+      else
+        # Same major: not a compatibility problem, but the CLI may still be
+        # stale. The old check only fired across a major bump, so a client
+        # could sit on a broken point release forever without a word.
+        cli_update_notice "$SERVER_VER" "@${alias}"
       fi
     fi
   else
@@ -728,7 +796,7 @@ cmd_logout() {
     if [ -f "$DEFAULT_FILE" ] && [ "$(cat "$DEFAULT_FILE")" = "$alias" ]; then
       rm -f "$DEFAULT_FILE"
       local next
-      next=$(ls "$SERVERS_DIR" 2>/dev/null | head -1)
+      next=$(ls "$SERVERS_DIR" 2>/dev/null | head -1) || next=""
       if [ -n "$next" ]; then
         echo "$next" > "$DEFAULT_FILE"
         echo "Default switched to @${next}"
@@ -748,6 +816,10 @@ cmd_servers() {
     printf "  %-12s  %-35s  %-22s  %s\n" "ALIAS" "URL" "VERSION" "DEFAULT"
     printf "  %-12s  %-35s  %-22s  %s\n" "────────────" "───────────────────────────────────" "──────────────────────" "───────"
     local any_unreachable=0 first_unreachable_url=""
+    # Track the newest server we can see, so the listing can tell the user
+    # their CLI is behind. Newest rather than first: with several servers
+    # registered, the one furthest ahead is the one worth updating towards.
+    local newest_ver="" newest_alias=""
     for f in "$SERVERS_DIR"/*; do
       local name=$(basename "$f")
       local url=$(grep '^url=' "$f" 2>/dev/null | cut -d= -f2-)
@@ -762,13 +834,21 @@ cmd_servers() {
       # apart from "connected fine but couldn't parse the body" — the old code
       # conflated the two and labelled a perfectly healthy server "unreachable"
       # whenever the JSON parser (python3) was missing.
-      cfg=$(curl -s --connect-timeout 5 --max-time 8 "${url}/api/config" 2>/dev/null)
-      curl_rc=$?
+      # `|| curl_rc=$?` is load-bearing, not defensive style — see api(). An
+      # unguarded assignment aborts the script under `set -e` as soon as one
+      # server is unreachable, so `mdnest servers` printed the header and
+      # nothing else, exited 28, and never reached the labels below. Because
+      # the glob is alphabetical, it also hid every server sorting after the
+      # dead one.
+      cfg=$(curl -s --connect-timeout 5 --max-time 8 "${url}/api/config" 2>/dev/null) || curl_rc=$?
       [ "$curl_rc" = "0" ] && [ -n "$cfg" ] && reachable=1
 
       if [ "$reachable" = "1" ]; then
-        ver=$(printf '%s' "$cfg" | json_top_string version)
-        commit=$(printf '%s' "$cfg" | json_top_string commit)
+        ver=$(printf '%s' "$cfg" | json_top_string version) || ver=""
+        commit=$(printf '%s' "$cfg" | json_top_string commit) || commit=""
+        if [ -n "$ver" ] && version_gt "$ver" "${newest_ver:-0.0.0}"; then
+          newest_ver="$ver"; newest_alias="@${name}"
+        fi
         [ -n "$ver" ] || ver="(reachable, version unknown)"
         # Show the build commit next to the version so a stale container is
         # obvious even when the version string hasn't changed.
@@ -790,7 +870,7 @@ cmd_servers() {
       if $verbose && [ "$reachable" = "1" ]; then
         local tok=$(grep '^token=' "$f" 2>/dev/null | cut -d= -f2-)
         local ns_json
-        ns_json=$(curl -s --connect-timeout 5 --max-time 8 -H "Authorization: Bearer $tok" "${url}/api/namespaces" 2>/dev/null)
+        ns_json=$(curl -s --connect-timeout 5 --max-time 8 -H "Authorization: Bearer $tok" "${url}/api/namespaces" 2>/dev/null) || ns_json=""
         if [ -n "$ns_json" ] && [ "$ns_json" != "[]" ]; then
           local namespaces
           namespaces=$(printf '%s' "$ns_json" | py -c \
@@ -812,6 +892,14 @@ cmd_servers() {
       # Name an actually-unreachable server, not whichever one the loop happened
       # to end on — that was often the healthy one, which made the hint useless.
       echo "  VPN/network, or try 'curl -v ${first_unreachable_url}/api/config'."
+    fi
+    # An `if`, not `[ -n ... ] && ...`: this is the last statement in the
+    # branch, so a false test would become cmd_servers's return value and
+    # `set -e` would exit the CLI with 1 — the very failure this release is
+    # about. Conditions in an `if` are exempt from errexit; a trailing && list
+    # is not.
+    if [ -n "$newest_ver" ]; then
+      cli_update_notice "$newest_ver" "$newest_alias"
     fi
   elif [ -f "$LEGACY_CONFIG" ]; then
     local url=$(grep '^url=' "$LEGACY_CONFIG" 2>/dev/null | cut -d= -f2-)
@@ -841,7 +929,7 @@ cmd_update() {
   TARGET="$REAL_PATH"
 
   CURRENT="${MDNEST_CLI_VERSION}"
-  LATEST=$(curl -fsSL "$REPO_URL/mdnest" 2>/dev/null | grep '^MDNEST_CLI_VERSION=' | head -1 | cut -d'"' -f2)
+  LATEST=$(curl -fsSL "$REPO_URL/mdnest" 2>/dev/null | grep '^MDNEST_CLI_VERSION=' | head -1 | cut -d'"' -f2) || LATEST=""
   if [ -z "$LATEST" ]; then
     echo "Error: couldn't reach $REPO_URL — check your network." >&2
     exit 1
@@ -948,7 +1036,7 @@ print(json.dumps(node, indent=2))
 
   if have jq; then
     sub=$(printf '%s' "$tree" | jq --arg t "$target" \
-      'first(.. | objects | select((.path // "" | sub("^/";"") | sub("/$";"")) == $t))' 2>/dev/null)
+      'first(.. | objects | select((.path // "" | sub("^/";"") | sub("/$";"")) == $t))' 2>/dev/null) || sub=""
     if [ -z "$sub" ] || [ "$sub" = "null" ]; then
       echo "Error: path not found in namespace: $target" >&2; return 1
     fi
@@ -988,7 +1076,7 @@ print(json.dumps(node, indent=2))
           if (c=="}") { depth--; if(depth==0){ print substr(buf,start,i-start+1); exit 0 } }
         }
         exit 3
-      }')
+      }') || sub=""
   if [ -z "$sub" ]; then
     echo "Error: path not found in namespace: $target" >&2; return 1
   fi
