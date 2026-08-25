@@ -104,7 +104,11 @@ curl_reason() {
 # nags about the release it is a candidate for. Mirrors isVersionNewer() in
 # App.jsx, which does the same job for the in-app banner.
 version_gt() {
-  local a="${1#v}" b="${2#v}" a_pre="" b_pre="" i x y
+  # First line only. A caller that hands us a multi-line value (a sloppy JSON
+  # grep, say) must not be able to fabricate an upgrade: "4.3.1\n4.3.1" would
+  # otherwise compare its third field as "14" and beat 4.3.2.
+  local a="${1%%$'\n'*}" b="${2%%$'\n'*}" a_pre="" b_pre="" i x y
+  a="${a#v}"; b="${b#v}"
   case "$a" in *-*) a_pre="${a#*-}"; a="${a%%-*}" ;; esac
   case "$b" in *-*) b_pre="${b#*-}"; b="${b%%-*}" ;; esac
   for i in 1 2 3; do
@@ -721,7 +725,12 @@ EOF
     local resolution_note=""
     [ "$alias_source" = "autodetect" ] && resolution_note=" (SERVER_ALIAS from /api/config)"
     echo "Logged in to @${alias} (${url})${resolution_note}"
-    SERVER_VER=$(curl -s "${url}/api/config" 2>/dev/null | grep -o '"version":"[^"]*"' | cut -d'"' -f4) || SERVER_VER=""
+    # json_top_string, NOT `grep -o '"version"'`: /api/config carries BOTH a
+    # top-level "version" and latestRelease.version, and the nested one is
+    # emitted FIRST, so the naive grep returned two lines. It went unnoticed
+    # while the value was only used for "${SERVER_VER%%.*}" (still "4"), and
+    # became visible the moment the version was printed and compared.
+    SERVER_VER=$(fetch_server_config "$url" | json_top_string version) || SERVER_VER=""
     if [ -n "$SERVER_VER" ]; then
       CLI_MAJOR="${MDNEST_CLI_VERSION%%.*}"
       SRV_MAJOR="${SERVER_VER%%.*}"
