@@ -273,6 +273,137 @@ run_unreachable_suite() {
   esac
 }
 
+# ── errexit lint: the class of bug that produced this release ───────────────
+# `set -e` plus a PLAIN assignment from a command substitution is a silent
+# script-killer: the assignment takes the substitution's exit status, so the
+# script dies on that line and everything written below it — including the
+# error handling for exactly that case — never runs. It bit the CLI in five
+# places at once (v4.3.2), each one leaving handling that had been written,
+# reviewed, and never executed.
+#
+# The behavioural suites above are the real guard; this is the cheap mechanical
+# one that catches a NEW site the moment it's added, in any command, without
+# anyone having to think of the failing path. It is scoped to `mdnest` on
+# purpose: that is the script downloaded onto other people's machines, where a
+# silent death is invisible. (`mdnest-server` runs on the operator's own box
+# and still has unguarded sites — a separate audit, not a silent gap.)
+#
+# `local x=$(...)` is deliberately exempt. `local` is a builtin, so the
+# assignment's status is the builtin's own and errexit does not fire. That was
+# verified against bash, not assumed, which is why the CLI is full of them.
+ERREXIT_LINT='
+{ line[NR] = $0 }
+END {
+  for (n = 1; n <= NR; n++) {
+    s = line[n]
+    if (s ~ /^[[:space:]]*(local|declare|export|readonly|typeset)[[:space:]]/) continue
+    if (s !~ /^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=\$\(/) continue
+    if (s ~ /\)[[:space:]]*(\|\||&&)/) continue          # x=$(...) || x=""
+    if (s ~ /\|\|[[:space:]]*(true|echo|:)[^)]*\)/) continue  # $(cmd || true)
+
+    var = s; sub(/^[[:space:]]*/, "", var); sub(/=\$\(.*/, "", var)
+
+    # A statement that does not close on its own line continues — via a
+    # trailing backslash or an open quote. Rather than balance parentheses
+    # (the awk-fallback blocks are full of them, inside strings), look ahead
+    # for this variable name’s own guard, which is unambiguous.
+    if (s ~ /\)[[:space:]]*$/) { bad(n, s); continue }
+    guarded = 0
+    for (i = n + 1; i <= NR && i <= n + 60; i++) {
+      if (line[i] ~ ("\\|\\|[[:space:]]*(" var "=|true|:|return)")) { guarded = 1; break }
+      if (line[i] ~ /^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=\$\(/) break
+    }
+    if (!guarded) bad(n, s)
+  }
+}
+function bad(n, s) { printf "  %s:%d: %s\n", FILENAME, n, s }
+'
+
+run_errexit_lint() {
+  echo "── errexit lint (mdnest) ──"
+  local findings
+  findings="$(awk "$ERREXIT_LINT" "$REPO_ROOT/mdnest")" || findings=""
+  if [ -z "$findings" ]; then
+    ok "errexit: every command substitution assignment is guarded"
+  else
+    bad "errexit: every command substitution assignment is guarded" \
+        "unguarded under set -e — add '|| var=\"\"':
+$findings"
+  fi
+
+  # The lint has to actually fail on the shape it exists to catch, or a green
+  # run means nothing. Three shapes it must NOT flag, one it must.
+  local probe; probe="$SHIM_DIR/errexit-probe.sh"
+  cat > "$probe" <<'PROBE'
+a=$(false)
+b=$(printf x) || b=""
+local c=$(false)
+d=$(cmd \
+  --flag) || d=""
+e=$(cmd || true)
+PROBE
+  local hits; hits="$(awk "$ERREXIT_LINT" "$probe" | wc -l | tr -d ' ')" || hits=""
+  eq "errexit lint: flags exactly the unguarded form" "1" "$hits"
+  case "$(awk "$ERREXIT_LINT" "$probe")" in
+    *':1: a=$(false)'*) ok "errexit lint: names the offending line" ;;
+    *) bad "errexit lint: names the offending line" "got [$(awk "$ERREXIT_LINT" "$probe")]" ;;
+  esac
+}
+
+# ── version comparison + the "your CLI is stale" notice ─────────────────────
+# The CLI is pull-only: nothing pushes an update, and until v4.3.2 the only
+# version check was a MAJOR-version mismatch at login. That meant a client
+# could sit on a broken point release indefinitely without a word — which is
+# exactly what happened with the errexit bug, shipped in every release since
+# v1.0 and never surfaced to anyone running it.
+#
+# version_gt is pure bash on purpose (no python3, no jq, no `sort -V` — busybox
+# sort has no -V), so it runs on the fresh-machine tier like everything else.
+run_version_suite() {
+  echo "── version comparison ──"
+  gt() { version_gt "$1" "$2" && echo yes || echo no; }
+
+  eq "version_gt: patch newer"      "yes" "$(gt 4.3.2 4.3.1)"
+  eq "version_gt: patch older"      "no"  "$(gt 4.3.1 4.3.2)"
+  eq "version_gt: equal"            "no"  "$(gt 4.3.2 4.3.2)"
+  eq "version_gt: minor newer"      "yes" "$(gt 4.4.0 4.3.9)"
+  eq "version_gt: major newer"      "yes" "$(gt 5.0.0 4.9.9)"
+  eq "version_gt: major older"      "no"  "$(gt 4.9.9 5.0.0)"
+  eq "version_gt: leading v"        "yes" "$(gt v4.3.2 v4.3.1)"
+  eq "version_gt: two-field version" "yes" "$(gt 4.4 4.3.9)"
+  # Numeric, not lexical: "10" must beat "9", which a string compare gets wrong.
+  eq "version_gt: 4.10.0 > 4.9.0"   "yes" "$(gt 4.10.0 4.9.0)"
+  eq "version_gt: 4.9.0 < 4.10.0"   "no"  "$(gt 4.9.0 4.10.0)"
+  # Pre-release: a release outranks the -dev that was its candidate, so a
+  # develop build never nags about the release it is ahead of.
+  eq "version_gt: release beats -dev" "yes" "$(gt 4.3.2 4.3.2-dev)"
+  eq "version_gt: -dev loses to release" "no" "$(gt 4.3.2-dev 4.3.2)"
+  eq "version_gt: -dev vs older release" "yes" "$(gt 4.3.2-dev 4.3.1)"
+  # Garbage must not crash [ -gt ] or report a bogus upgrade.
+  eq "version_gt: unparseable input"  "no"  "$(gt '' 4.3.2)"
+  eq "version_gt: non-numeric field"  "no"  "$(gt 4.x.y 4.3.2)"
+
+  # The notice itself: printed only when the server is genuinely ahead, and it
+  # must name the command to run. Never a bare "an update is available".
+  MDNEST_CLI_VERSION=4.3.1
+  eq "notice: silent when up to date" "" "$(cli_update_notice 4.3.1 '@srv')"
+  eq "notice: silent when server older" "" "$(cli_update_notice 4.2.0 '@srv')"
+  case "$(cli_update_notice 4.3.2 '@srv')" in
+    *"mdnest update"*) ok "notice: says how to fix it" ;;
+    *) bad "notice: says how to fix it" "got [$(cli_update_notice 4.3.2 '@srv')]" ;;
+  esac
+  case "$(cli_update_notice 4.3.2 '@srv')" in
+    *"v4.3.1"*"@srv"*"v4.3.2"*) ok "notice: names both versions and the server" ;;
+    *) bad "notice: names both versions and the server" "got [$(cli_update_notice 4.3.2 '@srv')]" ;;
+  esac
+  # It is used as a bare statement in cmd_servers/cmd_login, so a "no update"
+  # verdict must still return 0 — a non-zero return there would exit the CLI
+  # under set -e, which is the same bug in a new coat.
+  cli_update_notice 4.2.0 '@srv' >/dev/null
+  eq "notice: returns 0 when silent" "0" "$?"
+  MDNEST_CLI_VERSION="$(grep '^MDNEST_CLI_VERSION=' "$REPO_ROOT/mdnest" | cut -d'"' -f2)"
+}
+
 echo "=== mdnest CLI unit tests ==="
 echo
 
@@ -339,6 +470,8 @@ run_list_suite "list rendering (no python3/jq)"
 # needs SHIM_DIR for its throwaway HOMEs, hence its place at the end.
 run_login_suite
 run_unreachable_suite
+run_version_suite
+run_errexit_lint
 
 echo
 echo "=== $((PASS+FAIL)) checks: $(green "$PASS passed"), $([ "$FAIL" -gt 0 ] && red "$FAIL failed" || echo "0 failed") ==="

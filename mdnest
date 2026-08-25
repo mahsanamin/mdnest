@@ -18,8 +18,8 @@ get_server_file() {
 load_server() {
   local alias="$1"
   if [ -n "$alias" ] && [ -f "$(get_server_file "$alias")" ]; then
-    MDNEST_URL=$(grep '^url=' "$(get_server_file "$alias")" 2>/dev/null | cut -d= -f2-)
-    MDNEST_TOKEN=$(grep '^token=' "$(get_server_file "$alias")" 2>/dev/null | cut -d= -f2-)
+    MDNEST_URL=$(grep '^url=' "$(get_server_file "$alias")" 2>/dev/null | cut -d= -f2-) || MDNEST_URL=""
+    MDNEST_TOKEN=$(grep '^token=' "$(get_server_file "$alias")" 2>/dev/null | cut -d= -f2-) || MDNEST_TOKEN=""
     CURRENT_ALIAS="$alias"
     return 0
   fi
@@ -29,17 +29,17 @@ load_server() {
 load_default() {
   if [ -f "$DEFAULT_FILE" ]; then
     local def
-    def=$(cat "$DEFAULT_FILE")
+    def=$(cat "$DEFAULT_FILE") || def=""
     if load_server "$def"; then return 0; fi
   fi
   if [ -d "$SERVERS_DIR" ]; then
     local first
-    first=$(ls "$SERVERS_DIR" 2>/dev/null | head -1)
+    first=$(ls "$SERVERS_DIR" 2>/dev/null | head -1) || first=""
     if [ -n "$first" ] && load_server "$first"; then return 0; fi
   fi
   if [ -f "$LEGACY_CONFIG" ]; then
-    MDNEST_URL=$(grep '^url=' "$LEGACY_CONFIG" 2>/dev/null | cut -d= -f2-)
-    MDNEST_TOKEN=$(grep '^token=' "$LEGACY_CONFIG" 2>/dev/null | cut -d= -f2-)
+    MDNEST_URL=$(grep '^url=' "$LEGACY_CONFIG" 2>/dev/null | cut -d= -f2-) || MDNEST_URL=""
+    MDNEST_TOKEN=$(grep '^token=' "$LEGACY_CONFIG" 2>/dev/null | cut -d= -f2-) || MDNEST_TOKEN=""
     CURRENT_ALIAS="default"
     return 0
   fi
@@ -93,6 +93,51 @@ curl_reason() {
     35|60) echo "the TLS handshake failed" ;;
     *)     echo "curl exited $1" ;;
   esac
+}
+
+# True when $1 is strictly newer than $2. Pure bash: no python3, no jq, and no
+# `sort -V` (busybox sort has no -V, and this must work on the fresh-machine
+# tier like everything else here).
+#
+# Pre-release aware in the one way that matters: a release outranks a
+# pre-release of the same core, so 4.3.2 > 4.3.2-dev and a -dev build never
+# nags about the release it is a candidate for. Mirrors isVersionNewer() in
+# App.jsx, which does the same job for the in-app banner.
+version_gt() {
+  local a="${1#v}" b="${2#v}" a_pre="" b_pre="" i x y
+  case "$a" in *-*) a_pre="${a#*-}"; a="${a%%-*}" ;; esac
+  case "$b" in *-*) b_pre="${b#*-}"; b="${b%%-*}" ;; esac
+  for i in 1 2 3; do
+    x="${a%%.*}"; y="${b%%.*}"
+    # Drop anything non-numeric so a stray suffix can't make [ -gt ] error out.
+    x="${x//[!0-9]/}"; y="${y//[!0-9]/}"
+    [ -n "$x" ] || x=0
+    [ -n "$y" ] || y=0
+    if [ "$x" -gt "$y" ]; then return 0; fi
+    if [ "$x" -lt "$y" ]; then return 1; fi
+    case "$a" in *.*) a="${a#*.}" ;; *) a=0 ;; esac
+    case "$b" in *.*) b="${b#*.}" ;; *) b=0 ;; esac
+  done
+  if [ -z "$a_pre" ] && [ -n "$b_pre" ]; then return 0; fi
+  return 1
+}
+
+# One line telling the user their CLI is behind, and exactly how to fix it.
+# Printed where someone is already looking at versions (`mdnest servers`,
+# `mdnest whoami`, `mdnest login`) rather than on every command — the CLI has
+# no update cache, and a nag on every read would be its own bug.
+#
+# The reference point is the SERVER's version, because the CLI and the server
+# ship from the same repo at the same number: if the box you are talking to is
+# newer than the script talking to it, the script is stale. This deliberately
+# does not reach out to GitHub — no extra network call, no new failure mode.
+cli_update_notice() {
+  local server_ver="$1" who="$2"
+  version_gt "$server_ver" "$MDNEST_CLI_VERSION" || return 0
+  echo ""
+  echo "  Your mdnest CLI is v${MDNEST_CLI_VERSION}; ${who} is running v${server_ver}."
+  echo "  Update it with:  mdnest update"
+  return 0
 }
 
 # Pulls SERVER_ALIAS (if any) out of an /api/config body already fetched by
@@ -304,7 +349,7 @@ urldecode() {
 # FIRST in /api/config, so a naive grep|head would pick the wrong one).
 json_top_string() {
   local field="$1" data out
-  data=$(cat)
+  data=$(cat) || data=""
   # A python3 that can't parse the body (or can't start at all) returns non-zero
   # and we fall through to jq/awk, rather than reporting an empty field.
   if out=$(printf '%s' "$data" | py -c \
@@ -601,7 +646,7 @@ ERR
       if [ "$cfg_rc" = "0" ]; then
         reason="it returned an empty response"
       else
-        reason=$(curl_reason "$cfg_rc")
+        reason=$(curl_reason "$cfg_rc") || reason=""
       fi
       cat >&2 <<ERR
 Error: couldn't reach ${url} to ask what it calls itself — ${reason}.
@@ -613,7 +658,7 @@ either get it reachable from here, or name it yourself:
 ERR
       exit 1
     fi
-    alias=$(parse_server_alias "$cfg")
+    alias=$(parse_server_alias "$cfg") || alias=""
     if [ -z "$alias" ]; then
       cat >&2 <<ERR
 Error: ${url} answered, but has no SERVER_ALIAS set, so the CLI can't pick
@@ -650,7 +695,7 @@ ERR
   # just rotating the token). Warn only if the URL changes underneath.
   if [ -f "$(get_server_file "$alias")" ]; then
     local existing_url
-    existing_url=$(grep '^url=' "$(get_server_file "$alias")" 2>/dev/null | cut -d= -f2-)
+    existing_url=$(grep '^url=' "$(get_server_file "$alias")" 2>/dev/null | cut -d= -f2-) || existing_url=""
     if [ -n "$existing_url" ] && [ "$existing_url" != "$url" ]; then
       echo "Warning: @${alias} currently points at ${existing_url}; replacing with ${url}."
     fi
@@ -676,12 +721,17 @@ EOF
     local resolution_note=""
     [ "$alias_source" = "autodetect" ] && resolution_note=" (SERVER_ALIAS from /api/config)"
     echo "Logged in to @${alias} (${url})${resolution_note}"
-    SERVER_VER=$(curl -s "${url}/api/config" 2>/dev/null | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
+    SERVER_VER=$(curl -s "${url}/api/config" 2>/dev/null | grep -o '"version":"[^"]*"' | cut -d'"' -f4) || SERVER_VER=""
     if [ -n "$SERVER_VER" ]; then
       CLI_MAJOR="${MDNEST_CLI_VERSION%%.*}"
       SRV_MAJOR="${SERVER_VER%%.*}"
       if [ "$CLI_MAJOR" != "$SRV_MAJOR" ]; then
         echo "Warning: CLI v${MDNEST_CLI_VERSION} may not be compatible with server v${SERVER_VER}"
+      else
+        # Same major: not a compatibility problem, but the CLI may still be
+        # stale. The old check only fired across a major bump, so a client
+        # could sit on a broken point release forever without a word.
+        cli_update_notice "$SERVER_VER" "@${alias}"
       fi
     fi
   else
@@ -737,7 +787,7 @@ cmd_logout() {
     if [ -f "$DEFAULT_FILE" ] && [ "$(cat "$DEFAULT_FILE")" = "$alias" ]; then
       rm -f "$DEFAULT_FILE"
       local next
-      next=$(ls "$SERVERS_DIR" 2>/dev/null | head -1)
+      next=$(ls "$SERVERS_DIR" 2>/dev/null | head -1) || next=""
       if [ -n "$next" ]; then
         echo "$next" > "$DEFAULT_FILE"
         echo "Default switched to @${next}"
@@ -757,6 +807,10 @@ cmd_servers() {
     printf "  %-12s  %-35s  %-22s  %s\n" "ALIAS" "URL" "VERSION" "DEFAULT"
     printf "  %-12s  %-35s  %-22s  %s\n" "────────────" "───────────────────────────────────" "──────────────────────" "───────"
     local any_unreachable=0 first_unreachable_url=""
+    # Track the newest server we can see, so the listing can tell the user
+    # their CLI is behind. Newest rather than first: with several servers
+    # registered, the one furthest ahead is the one worth updating towards.
+    local newest_ver="" newest_alias=""
     for f in "$SERVERS_DIR"/*; do
       local name=$(basename "$f")
       local url=$(grep '^url=' "$f" 2>/dev/null | cut -d= -f2-)
@@ -781,8 +835,11 @@ cmd_servers() {
       [ "$curl_rc" = "0" ] && [ -n "$cfg" ] && reachable=1
 
       if [ "$reachable" = "1" ]; then
-        ver=$(printf '%s' "$cfg" | json_top_string version)
-        commit=$(printf '%s' "$cfg" | json_top_string commit)
+        ver=$(printf '%s' "$cfg" | json_top_string version) || ver=""
+        commit=$(printf '%s' "$cfg" | json_top_string commit) || commit=""
+        if [ -n "$ver" ] && version_gt "$ver" "${newest_ver:-0.0.0}"; then
+          newest_ver="$ver"; newest_alias="@${name}"
+        fi
         [ -n "$ver" ] || ver="(reachable, version unknown)"
         # Show the build commit next to the version so a stale container is
         # obvious even when the version string hasn't changed.
@@ -827,6 +884,14 @@ cmd_servers() {
       # to end on — that was often the healthy one, which made the hint useless.
       echo "  VPN/network, or try 'curl -v ${first_unreachable_url}/api/config'."
     fi
+    # An `if`, not `[ -n ... ] && ...`: this is the last statement in the
+    # branch, so a false test would become cmd_servers's return value and
+    # `set -e` would exit the CLI with 1 — the very failure this release is
+    # about. Conditions in an `if` are exempt from errexit; a trailing && list
+    # is not.
+    if [ -n "$newest_ver" ]; then
+      cli_update_notice "$newest_ver" "$newest_alias"
+    fi
   elif [ -f "$LEGACY_CONFIG" ]; then
     local url=$(grep '^url=' "$LEGACY_CONFIG" 2>/dev/null | cut -d= -f2-)
     printf "  %-12s  %-35s  %s\n" "@default" "$url" "(legacy config)"
@@ -855,7 +920,7 @@ cmd_update() {
   TARGET="$REAL_PATH"
 
   CURRENT="${MDNEST_CLI_VERSION}"
-  LATEST=$(curl -fsSL "$REPO_URL/mdnest" 2>/dev/null | grep '^MDNEST_CLI_VERSION=' | head -1 | cut -d'"' -f2)
+  LATEST=$(curl -fsSL "$REPO_URL/mdnest" 2>/dev/null | grep '^MDNEST_CLI_VERSION=' | head -1 | cut -d'"' -f2) || LATEST=""
   if [ -z "$LATEST" ]; then
     echo "Error: couldn't reach $REPO_URL — check your network." >&2
     exit 1
