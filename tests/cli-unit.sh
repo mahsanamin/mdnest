@@ -382,6 +382,24 @@ run_version_suite() {
   # Garbage must not crash [ -gt ] or report a bogus upgrade.
   eq "version_gt: unparseable input"  "no"  "$(gt '' 4.3.2)"
   eq "version_gt: non-numeric field"  "no"  "$(gt 4.x.y 4.3.2)"
+  # A doubled value must not fabricate an upgrade. This is not hypothetical:
+  # cmd_login pulled the server version with `grep -o '"version":"[^"]*"'`,
+  # and /api/config carries BOTH a top-level version and latestRelease.version
+  # — so it returned two lines. Field three then read "1\n4" -> "14", which
+  # beats "2", and the CLI told you to update to a version older than itself.
+  # Fixed at the source (json_top_string is depth-aware); pinned here too,
+  # because the comparator should be unfoolable regardless of its caller.
+  eq "version_gt: doubled value isn't an upgrade" "no" \
+     "$(gt "$(printf '4.3.1\n4.3.1')" 4.3.2)"
+
+  # The naive extraction must not come back. The parser that gets this right
+  # already exists; the login path simply was not using it.
+  if grep -q "grep -o '\"version\":" "$REPO_ROOT/mdnest"; then
+    bad "version: server version is read with the depth-aware parser" \
+        "found a naive grep for \"version\" — /api/config nests one inside latestRelease"
+  else
+    ok "version: server version is read with the depth-aware parser"
+  fi
 
   # The notice itself: printed only when the server is genuinely ahead, and it
   # must name the command to run. Never a bare "an update is available".
