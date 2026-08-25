@@ -191,6 +191,88 @@ run_login_suite() {
   esac
 }
 
+# ── unreachable servers must degrade, not kill the script ───────────────────
+# `mdnest servers` printed the table header, then exited with curl's own 28 and
+# nothing else, whenever ANY registered server was unreachable. The cause is a
+# shell trap rather than a networking one: the CLI runs under `set -e`, and a
+# plain `cfg=$(curl ...)` assignment takes the command substitution's exit
+# status — so the script died mid-loop, before the first row, and every branch
+# written for this exact case (the `unreachable (DNS|refused|timeout|TLS)`
+# labels, the "works in your browser?" hint, api()'s three error messages) was
+# unreachable code. Because the server list is globbed alphabetically, one dead
+# server also hid every healthy server sorting after it.
+#
+# Both fixtures point at closed ports on loopback: connection-refused is
+# instant, needs no network, and triggers the identical failure path a timeout
+# does — the bug fires on any non-zero curl status, not on a particular one.
+srv_home() {  # srv_home <alias>=<url> ...
+  local home; home="$(mktemp -d "$SHIM_DIR/srv.XXXXXX")"
+  mkdir -p "$home/.config/mdnest/servers"
+  local pair
+  for pair in "$@"; do
+    printf 'url=%s\ntoken=mdnest_tok\n' "${pair#*=}" > "$home/.config/mdnest/servers/${pair%%=*}"
+  done
+  printf '%s' "$home"
+}
+
+run_unreachable_suite() {
+  echo "── unreachable servers ──"
+  local home out rc
+
+  home="$(srv_home aa-dead=http://127.0.0.1:1 zz-later=http://127.0.0.1:2)"
+  echo aa-dead > "$home/.config/mdnest/default"
+  rc=0; out="$(HOME="$home" "$REPO_ROOT/mdnest" servers 2>&1)" || rc=$?
+
+  # The headline symptom: a command that only reports status leaked curl's exit
+  # code. Anything non-zero here means the script died inside the loop again.
+  eq "servers: unreachable server still exits 0" "0" "$rc"
+
+  # One row per registered server. Counting rows is what pins the "alphabetical
+  # glob hid the healthy servers" half of the bug — asserting only on aa-dead
+  # would still pass with zz-later silently dropped.
+  eq "servers: prints a row per registered server" "2" \
+     "$(printf '%s\n' "$out" | grep -c '^  @')"
+  case "$out" in
+    *"@aa-dead"*)  ok "servers: names the dead server" ;;
+    *) bad "servers: names the dead server" "got [$out]" ;;
+  esac
+  case "$out" in
+    *"@zz-later"*) ok "servers: a dead server doesn't hide the ones after it" ;;
+    *) bad "servers: a dead server doesn't hide the ones after it" "got [$out]" ;;
+  esac
+
+  # The label and the hint are the handling that used to be dead code.
+  case "$out" in
+    *"unreachable ("*) ok "servers: labels why it's unreachable" ;;
+    *) bad "servers: labels why it's unreachable" "got [$out]" ;;
+  esac
+  case "$out" in
+    *"unreachable (curl 0)"*)
+      bad "servers: label carries the real curl code" "reported curl 0 — a stray 'curl_rc=\$?' is overwriting it" ;;
+    *) ok "servers: label carries the real curl code" ;;
+  esac
+  case "$out" in
+    *"working in your browser"*) ok "servers: prints the recovery hint" ;;
+    *) bad "servers: prints the recovery hint" "got [$out]" ;;
+  esac
+
+  # -v adds a namespace probe with the same shape; it must not reintroduce the
+  # abort when the probe itself fails.
+  rc=0; out="$(HOME="$home" "$REPO_ROOT/mdnest" servers -v 2>&1)" || rc=$?
+  eq "servers -v: unreachable server still exits 0" "0" "$rc"
+  eq "servers -v: prints a row per registered server" "2" \
+     "$(printf '%s\n' "$out" | grep -c '^  @')"
+
+  # api() had the same unguarded assignment, so every read/write against an
+  # unreachable server printed nothing at all and exited with curl's code.
+  rc=0; out="$(HOME="$home" "$REPO_ROOT/mdnest" read @aa-dead/ns/x.md 2>&1)" || rc=$?
+  eq "read: unreachable exits 1, not curl's code" "1" "$rc"
+  case "$out" in
+    *"connection refused"*) ok "read: unreachable says why" ;;
+    *) bad "read: unreachable says why" "got [$out]" ;;
+  esac
+}
+
 echo "=== mdnest CLI unit tests ==="
 echo
 
@@ -256,6 +338,7 @@ run_list_suite "list rendering (no python3/jq)"
 # Argument handling is pure bash and parser-independent, so it runs once. It
 # needs SHIM_DIR for its throwaway HOMEs, hence its place at the end.
 run_login_suite
+run_unreachable_suite
 
 echo
 echo "=== $((PASS+FAIL)) checks: $(green "$PASS passed"), $([ "$FAIL" -gt 0 ] && red "$FAIL failed" || echo "0 failed") ==="
