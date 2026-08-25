@@ -177,9 +177,15 @@ api() {
   # legitimately slow to transfer; only the connect phase is capped.
   local args=(-s -w "\n%{http_code}" --connect-timeout "${MDNEST_TIMEOUT:-10}" -H "Authorization: Bearer $MDNEST_TOKEN")
   [ -n "$body" ] && args+=(-d "$body")
-  local response curl_rc
-  response=$(curl "${args[@]}" -X "$method" "${MDNEST_URL}/api${path}")
-  curl_rc=$?
+  local response curl_rc=0
+  # Guard the assignment with `|| curl_rc=$?`. The CLI runs under `set -e`, and
+  # a PLAIN assignment from a command substitution takes the substitution's exit
+  # status — so an unguarded `response=$(curl ...)` kills the whole script the
+  # moment curl can't connect, and every line below (including this error block)
+  # is dead code. `mdnest read @unreachable/ns/x.md` printed NOTHING and exited
+  # with curl's 28. Do NOT re-add a following `curl_rc=$?`: it would overwrite
+  # the real curl code with the status of the now-successful assignment.
+  response=$(curl "${args[@]}" -X "$method" "${MDNEST_URL}/api${path}") || curl_rc=$?
   if [ "$curl_rc" != "0" ]; then
     case "$curl_rc" in
       6)  echo "Error: can't resolve host for ${MDNEST_URL} (DNS)." >&2 ;;
@@ -307,8 +313,11 @@ json_top_string() {
     return 0
   fi
   if have jq; then
+    # `return 0`, not a bare `return`: a bare one propagates jq's exit status,
+    # and callers assign this into a plain variable, which under `set -e` would
+    # abort the script instead of yielding an empty field.
     printf '%s' "$data" | jq -r --arg f "$field" '.[$f] // empty' 2>/dev/null
-    return
+    return 0
   fi
   # Bash/awk fallback: scan for "field": at object depth 1 only. Accumulates all
   # input into `buf` and processes it in END so it works whether the JSON is on
@@ -762,8 +771,13 @@ cmd_servers() {
       # apart from "connected fine but couldn't parse the body" — the old code
       # conflated the two and labelled a perfectly healthy server "unreachable"
       # whenever the JSON parser (python3) was missing.
-      cfg=$(curl -s --connect-timeout 5 --max-time 8 "${url}/api/config" 2>/dev/null)
-      curl_rc=$?
+      # `|| curl_rc=$?` is load-bearing, not defensive style — see api(). An
+      # unguarded assignment aborts the script under `set -e` as soon as one
+      # server is unreachable, so `mdnest servers` printed the header and
+      # nothing else, exited 28, and never reached the labels below. Because
+      # the glob is alphabetical, it also hid every server sorting after the
+      # dead one.
+      cfg=$(curl -s --connect-timeout 5 --max-time 8 "${url}/api/config" 2>/dev/null) || curl_rc=$?
       [ "$curl_rc" = "0" ] && [ -n "$cfg" ] && reachable=1
 
       if [ "$reachable" = "1" ]; then
@@ -790,7 +804,7 @@ cmd_servers() {
       if $verbose && [ "$reachable" = "1" ]; then
         local tok=$(grep '^token=' "$f" 2>/dev/null | cut -d= -f2-)
         local ns_json
-        ns_json=$(curl -s --connect-timeout 5 --max-time 8 -H "Authorization: Bearer $tok" "${url}/api/namespaces" 2>/dev/null)
+        ns_json=$(curl -s --connect-timeout 5 --max-time 8 -H "Authorization: Bearer $tok" "${url}/api/namespaces" 2>/dev/null) || ns_json=""
         if [ -n "$ns_json" ] && [ "$ns_json" != "[]" ]; then
           local namespaces
           namespaces=$(printf '%s' "$ns_json" | py -c \
@@ -948,7 +962,7 @@ print(json.dumps(node, indent=2))
 
   if have jq; then
     sub=$(printf '%s' "$tree" | jq --arg t "$target" \
-      'first(.. | objects | select((.path // "" | sub("^/";"") | sub("/$";"")) == $t))' 2>/dev/null)
+      'first(.. | objects | select((.path // "" | sub("^/";"") | sub("/$";"")) == $t))' 2>/dev/null) || sub=""
     if [ -z "$sub" ] || [ "$sub" = "null" ]; then
       echo "Error: path not found in namespace: $target" >&2; return 1
     fi
@@ -988,7 +1002,7 @@ print(json.dumps(node, indent=2))
           if (c=="}") { depth--; if(depth==0){ print substr(buf,start,i-start+1); exit 0 } }
         }
         exit 3
-      }')
+      }') || sub=""
   if [ -z "$sub" ]; then
     echo "Error: path not found in namespace: $target" >&2; return 1
   fi
