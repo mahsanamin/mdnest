@@ -119,6 +119,20 @@ codebase since the first release. Two things now make a sixth harder.
   `mdnest-server` runs on the operator's own box and still has unguarded sites
   — a separate audit, named here so it is a known gap rather than a quiet one.
 
+A third bug fell out of building the notice, and it is worth naming because it
+had been sitting there quietly: `mdnest login` read the server's version with
+`grep -o '"version":"[^"]*"'`, and `/api/config` carries **two** matches —
+the top-level `version` and `latestRelease.version`, the nested one emitted
+first. The value was two lines, not one. Nothing noticed, because the only
+consumer was `${SERVER_VER%%.*}`, which still yields `4` from a doubled string.
+The moment this release started *printing and comparing* that value, login
+began reporting `is running v4.3.1\n4.3.1.` and the comparison read the third
+field as `14`, telling a 4.3.2 CLI to update to a 4.3.1 server. `json_top_string`
+is the depth-aware parser written for exactly this — its own header comment
+names `latestRelease.version` as the trap — and the login path simply was not
+using it. Fixed at the source, and `version_gt` now takes only the first line
+of each argument so a sloppy caller cannot fabricate an upgrade either way.
+
 Worth recording, because it is the honest result: while writing the update
 notice, the same class of bug was **reintroduced inside the fix for it** — a
 trailing `[ -n "$x" ] && …` as a function's last statement, where a false test
