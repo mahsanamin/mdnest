@@ -6,9 +6,133 @@ All notable changes to mdnest are documented here.
 
 ## Unreleased
 
-_Nothing yet — `develop` is at `4.3.2-dev`._
+_Nothing yet — `develop` is at `4.3.3-dev`._
 
 ---
+
+## v4.3.2 — The CLI stops dying quietly
+
+One bug report, one root cause, five places it was hiding. `mdnest servers`
+printed the table header and then nothing at all — no rows, no error — and
+exited with curl's `28`, any time a registered server was unreachable. Since
+the server list is globbed alphabetically, one dead server also hid every
+healthy server sorting after it, so a `mdnest login` that had worked perfectly
+looked like it had failed.
+
+Nothing was wrong with the networking, and nothing was wrong with the error
+handling either: the labels, the hint, and the messages had all been written.
+They were simply unreachable code. The CLI runs under `set -e`, and in bash a
+plain assignment from a command substitution takes the substitution's exit
+status — so `cfg=$(curl ...)` killed the whole script the moment curl could not
+connect, mid-loop, before the first row. The leaked exit code was the tell: a
+command that should always exit `0` was handing back curl's `28`.
+
+The same shape turned up in four more places, each one silently killing the CLI
+in place of an error message that already existed.
+
+### Fixed
+
+- **`mdnest servers` lists every server when one is unreachable.** The probe
+  assignment is guarded (`... || curl_rc=$?`), so the loop survives a failed
+  connection and prints the row it was always meant to: the URL, the
+  `unreachable (DNS | refused | timeout | TLS)` label naming the actual reason,
+  and the "works in your browser?" recovery hint. A dead server no longer hides
+  the ones after it, and the command exits `0`. The trailing `curl_rc=$?` is
+  deliberately gone — left in place it overwrites the real curl code with the
+  status of the now-successful assignment and reports `unreachable (curl 0)`.
+- **Reads and writes against an unreachable server say so.** `api()` had the
+  identical unguarded assignment, so `mdnest read @unreachable/ns/x.md` printed
+  nothing whatsoever and exited `28`. Its three error messages — can't resolve
+  the host, connection refused, connection timed out — now actually run.
+- **`mdnest servers -v` survives a failed namespace probe** rather than aborting
+  partway through the listing.
+- **A broken `jq` yields an empty field, not a dead CLI.** `json_top_string`'s
+  jq tier returned jq's exit status from a bare `return`, which aborted the
+  caller's assignment instead of falling through to an empty value.
+- **`mdnest list <missing-folder>` reports the missing folder on a fresh
+  machine.** The pure-awk tier — the one that runs when neither python3 nor jq
+  is installed — signals "not found" with `exit 3`, and unguarded that killed
+  the CLI two lines before the `path not found in namespace` message. It
+  printed nothing and exited `3`. Same for the jq tier.
+
+### Testing
+
+- `tests/cli-unit.sh` gains an unreachable-servers suite that runs the real CLI
+  against a throwaway `HOME` pointed at two closed loopback ports — instant, no
+  network, no Docker — and pins the exit status, one row per registered server,
+  the label, the hint, and `api()`'s error text. Ten of its eleven checks fail
+  against the unpatched CLI. The eleventh exists to catch the *partial* fix that
+  guards the assignment but leaves the stray `curl_rc=$?` behind.
+- `tests/cli-smoke-test.sh` now requires the missing-subfolder case to say
+  *why* it failed, not merely to exit non-zero. The bare `assert_fails` passed
+  the entire time the awk tier was dying silently — a reminder that asserting a
+  non-zero exit proves nothing about whether the error path ran.
+  `tests/e2e-docker.sh` runs this suite in a bare alpine with neither parser
+  installed, which is where that tier gets exercised.
+
+### Added
+
+- **The CLI tells you when it is out of date.** One line, wherever you are
+  already looking at versions — `mdnest servers`, `mdnest whoami`,
+  `mdnest login` — naming both versions and the exact command:
+
+  ```
+    Your mdnest CLI is v4.3.1; @work is running v4.3.2.
+    Update it with:  mdnest update
+  ```
+
+  This is here because of what the bug above revealed rather than the bug
+  itself. `mdnest update` is **pull-only** — nothing pushes it, and the in-app
+  banner tracks the *server*, not the CLI. The only version check the CLI ever
+  had was a **major**-version mismatch at login, so a client could sit on a
+  stale point release indefinitely without a word. That is precisely how a bug
+  introduced in v1.0 stayed invisible through 47 releases: everyone running it
+  was told nothing.
+
+  Three deliberate limits, stated rather than discovered later. It is **not**
+  printed on every command — the CLI keeps no update cache, and a check on
+  every read would be its own bug. It **does not contact GitHub**; the version
+  comes from the `/api/config` call the CLI already makes, so there is no extra
+  round-trip and no new failure mode — the trade-off being that if *your
+  server* is also out of date, nothing tells you. And it never nags a
+  pre-release about its own release: `4.3.2-dev` is older than `4.3.2` and
+  newer than `4.3.1`, matching the in-app banner's `isVersionNewer`.
+
+  `version_gt()` is pure bash — no python3, no jq, and no `sort -V`, which
+  busybox sort does not have — so it works on the same fresh-machine tier as
+  everything else in the CLI.
+
+### Guarding against the next one
+
+The bug above was one root cause in five places, and it had been in the
+codebase since the first release. Two things now make a sixth harder.
+
+- **Every plain command-substitution assignment in the CLI is guarded**, and
+  `tests/cli-unit.sh` fails the build on a new unguarded one. The lint proves
+  itself against a probe file — one unguarded form flagged, three guarded forms
+  not — because a green lint that cannot fail is worse than no lint. It exempts
+  `local x=$(...)`, which was *verified* against bash rather than assumed:
+  `local` is a builtin, so the assignment's status is the builtin's own and
+  errexit does not fire.
+- **The lint is scoped to `mdnest`, not everything.** That is the script
+  downloaded onto other people's machines, where a silent death is invisible.
+  `mdnest-server` runs on the operator's own box and still has unguarded sites
+  — a separate audit, named here so it is a known gap rather than a quiet one.
+
+Worth recording, because it is the honest result: while writing the update
+notice, the same class of bug was **reintroduced inside the fix for it** — a
+trailing `[ -n "$x" ] && …` as a function's last statement, where a false test
+becomes the return value and `set -e` exits the CLI with `1`. The lint did not
+catch it; a lint cannot see that shape. The unreachable-servers suite added
+earlier in this release caught it within a minute. Which is the actual lesson:
+the behavioural test is the guard, and the lint is the cheap second net.
+
+Reported against v4.3.1 on Linux. Not platform-specific — it is shell
+semantics, and it reproduces anywhere with a server pointed at a blackhole
+address.
+
+---
+
 
 ## v4.3.1 — Text you can actually read
 
