@@ -158,6 +158,14 @@ case "$sublist" in
   *) ok "list subfolder is scoped" ;;
 esac
 assert_fails "list missing subfolder errors" -- m list "$ROOT/does-not-exist"
+# ...and SAYS SO. Exiting non-zero is not enough on its own: on the fresh-machine
+# tier (no python3/jq) the awk fallback signalled "not found" with `exit 3`, and
+# the unguarded `sub=$(... awk ...)` assignment let `set -e` kill the CLI right
+# there — non-zero exit, empty output, error message never reached. The bare
+# assert_fails above passed the whole time. e2e-docker.sh runs this suite in a
+# bare alpine with neither parser, so this is where that tier gets checked.
+missing_err="$(m list "$ROOT/does-not-exist" 2>&1 || true)"
+assert_contains "list missing subfolder says why" "path not found" "$missing_err"
 
 # ── 13c. --json still returns the raw payload, scoped the same way ───────────
 subjson="$(m list --json "$ROOT" 2>/dev/null)"

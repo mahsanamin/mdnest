@@ -216,8 +216,53 @@ This makes Copy Path produce `@work/namespace/path` which the CLI can use direct
 
 ## Version compatibility
 
-The CLI checks the server version on login. If major versions don't match, you'll see a warning. Update with:
+The CLI and the server ship from the same repo at the same version number, so
+the server you are talking to is the reference point for whether your CLI is
+current.
+
+**On a major mismatch** (`4.x` CLI against a `3.x` server, or the reverse) you
+get a compatibility warning at login — the two may genuinely disagree about the
+API.
+
+**On a same-major mismatch** — your CLI older than the server — you get one
+line telling you so, wherever you are already looking at versions
+(`mdnest servers`, `mdnest whoami`, `mdnest login`):
+
+```
+  Your mdnest CLI is v4.3.1; @work is running v4.3.2.
+  Update it with:  mdnest update
+```
+
+This exists because nothing pushes CLI updates to you. `mdnest update` is
+pull-only, and before v4.3.2 the *only* check was the major-version one — so a
+client could sit on a stale (or broken) point release indefinitely with no
+signal at all. The notice is deliberately not printed on every command: the CLI
+keeps no update cache, and checking on every read would cost a request each
+time.
+
+Two things it does not do, on purpose:
+
+- It does not contact GitHub. The version comes from the `/api/config` call the
+  CLI already makes, so there is no extra network round-trip and no new failure
+  mode. The trade-off is that if **your server** is also out of date, nothing
+  tells you — update the server and the CLI notice follows.
+- It never nags a pre-release about its own release. `4.3.2-dev` is treated as
+  older than `4.3.2` and newer than `4.3.1`, matching the in-app update banner.
+
+### Updating
+
+```bash
+mdnest update                 # self-update from main
+mdnest update --force         # re-download even if the version matches
+MDNEST_BRANCH=develop mdnest update --force   # track an unreleased build
+```
+
+Or reinstall from scratch:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/mahsanamin/mdnest/main/install-cli.sh | bash
 ```
+
+`mdnest update` reads the script straight from the `main` branch on GitHub, so
+a CLI fix reaches you as soon as it lands there — independent of the tag and
+the GitHub Release, which drive the in-app *server* update banner instead.

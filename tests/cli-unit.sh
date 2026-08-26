@@ -191,6 +191,237 @@ run_login_suite() {
   esac
 }
 
+# ── unreachable servers must degrade, not kill the script ───────────────────
+# `mdnest servers` printed the table header, then exited with curl's own 28 and
+# nothing else, whenever ANY registered server was unreachable. The cause is a
+# shell trap rather than a networking one: the CLI runs under `set -e`, and a
+# plain `cfg=$(curl ...)` assignment takes the command substitution's exit
+# status — so the script died mid-loop, before the first row, and every branch
+# written for this exact case (the `unreachable (DNS|refused|timeout|TLS)`
+# labels, the "works in your browser?" hint, api()'s three error messages) was
+# unreachable code. Because the server list is globbed alphabetically, one dead
+# server also hid every healthy server sorting after it.
+#
+# Both fixtures point at closed ports on loopback: connection-refused is
+# instant, needs no network, and triggers the identical failure path a timeout
+# does — the bug fires on any non-zero curl status, not on a particular one.
+srv_home() {  # srv_home <alias>=<url> ...
+  local home; home="$(mktemp -d "$SHIM_DIR/srv.XXXXXX")"
+  mkdir -p "$home/.config/mdnest/servers"
+  local pair
+  for pair in "$@"; do
+    printf 'url=%s\ntoken=mdnest_tok\n' "${pair#*=}" > "$home/.config/mdnest/servers/${pair%%=*}"
+  done
+  printf '%s' "$home"
+}
+
+run_unreachable_suite() {
+  echo "── unreachable servers ──"
+  local home out rc
+
+  home="$(srv_home aa-dead=http://127.0.0.1:1 zz-later=http://127.0.0.1:2)"
+  echo aa-dead > "$home/.config/mdnest/default"
+  rc=0; out="$(HOME="$home" "$REPO_ROOT/mdnest" servers 2>&1)" || rc=$?
+
+  # The headline symptom: a command that only reports status leaked curl's exit
+  # code. Anything non-zero here means the script died inside the loop again.
+  eq "servers: unreachable server still exits 0" "0" "$rc"
+
+  # One row per registered server. Counting rows is what pins the "alphabetical
+  # glob hid the healthy servers" half of the bug — asserting only on aa-dead
+  # would still pass with zz-later silently dropped.
+  eq "servers: prints a row per registered server" "2" \
+     "$(printf '%s\n' "$out" | grep -c '^  @')"
+  case "$out" in
+    *"@aa-dead"*)  ok "servers: names the dead server" ;;
+    *) bad "servers: names the dead server" "got [$out]" ;;
+  esac
+  case "$out" in
+    *"@zz-later"*) ok "servers: a dead server doesn't hide the ones after it" ;;
+    *) bad "servers: a dead server doesn't hide the ones after it" "got [$out]" ;;
+  esac
+
+  # The label and the hint are the handling that used to be dead code.
+  case "$out" in
+    *"unreachable ("*) ok "servers: labels why it's unreachable" ;;
+    *) bad "servers: labels why it's unreachable" "got [$out]" ;;
+  esac
+  case "$out" in
+    *"unreachable (curl 0)"*)
+      bad "servers: label carries the real curl code" "reported curl 0 — a stray 'curl_rc=\$?' is overwriting it" ;;
+    *) ok "servers: label carries the real curl code" ;;
+  esac
+  case "$out" in
+    *"working in your browser"*) ok "servers: prints the recovery hint" ;;
+    *) bad "servers: prints the recovery hint" "got [$out]" ;;
+  esac
+
+  # -v adds a namespace probe with the same shape; it must not reintroduce the
+  # abort when the probe itself fails.
+  rc=0; out="$(HOME="$home" "$REPO_ROOT/mdnest" servers -v 2>&1)" || rc=$?
+  eq "servers -v: unreachable server still exits 0" "0" "$rc"
+  eq "servers -v: prints a row per registered server" "2" \
+     "$(printf '%s\n' "$out" | grep -c '^  @')"
+
+  # api() had the same unguarded assignment, so every read/write against an
+  # unreachable server printed nothing at all and exited with curl's code.
+  rc=0; out="$(HOME="$home" "$REPO_ROOT/mdnest" read @aa-dead/ns/x.md 2>&1)" || rc=$?
+  eq "read: unreachable exits 1, not curl's code" "1" "$rc"
+  case "$out" in
+    *"connection refused"*) ok "read: unreachable says why" ;;
+    *) bad "read: unreachable says why" "got [$out]" ;;
+  esac
+}
+
+# ── errexit lint: the class of bug that produced this release ───────────────
+# `set -e` plus a PLAIN assignment from a command substitution is a silent
+# script-killer: the assignment takes the substitution's exit status, so the
+# script dies on that line and everything written below it — including the
+# error handling for exactly that case — never runs. It bit the CLI in five
+# places at once (v4.3.2), each one leaving handling that had been written,
+# reviewed, and never executed.
+#
+# The behavioural suites above are the real guard; this is the cheap mechanical
+# one that catches a NEW site the moment it's added, in any command, without
+# anyone having to think of the failing path. It is scoped to `mdnest` on
+# purpose: that is the script downloaded onto other people's machines, where a
+# silent death is invisible. (`mdnest-server` runs on the operator's own box
+# and still has unguarded sites — a separate audit, not a silent gap.)
+#
+# `local x=$(...)` is deliberately exempt. `local` is a builtin, so the
+# assignment's status is the builtin's own and errexit does not fire. That was
+# verified against bash, not assumed, which is why the CLI is full of them.
+ERREXIT_LINT='
+{ line[NR] = $0 }
+END {
+  for (n = 1; n <= NR; n++) {
+    s = line[n]
+    if (s ~ /^[[:space:]]*(local|declare|export|readonly|typeset)[[:space:]]/) continue
+    if (s !~ /^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=\$\(/) continue
+    if (s ~ /\)[[:space:]]*(\|\||&&)/) continue          # x=$(...) || x=""
+    if (s ~ /\|\|[[:space:]]*(true|echo|:)[^)]*\)/) continue  # $(cmd || true)
+
+    var = s; sub(/^[[:space:]]*/, "", var); sub(/=\$\(.*/, "", var)
+
+    # A statement that does not close on its own line continues — via a
+    # trailing backslash or an open quote. Rather than balance parentheses
+    # (the awk-fallback blocks are full of them, inside strings), look ahead
+    # for this variable name’s own guard, which is unambiguous.
+    if (s ~ /\)[[:space:]]*$/) { bad(n, s); continue }
+    guarded = 0
+    for (i = n + 1; i <= NR && i <= n + 60; i++) {
+      if (line[i] ~ ("\\|\\|[[:space:]]*(" var "=|true|:|return)")) { guarded = 1; break }
+      if (line[i] ~ /^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=\$\(/) break
+    }
+    if (!guarded) bad(n, s)
+  }
+}
+function bad(n, s) { printf "  %s:%d: %s\n", FILENAME, n, s }
+'
+
+run_errexit_lint() {
+  echo "── errexit lint (mdnest) ──"
+  local findings
+  findings="$(awk "$ERREXIT_LINT" "$REPO_ROOT/mdnest")" || findings=""
+  if [ -z "$findings" ]; then
+    ok "errexit: every command substitution assignment is guarded"
+  else
+    bad "errexit: every command substitution assignment is guarded" \
+        "unguarded under set -e — add '|| var=\"\"':
+$findings"
+  fi
+
+  # The lint has to actually fail on the shape it exists to catch, or a green
+  # run means nothing. Three shapes it must NOT flag, one it must.
+  local probe; probe="$SHIM_DIR/errexit-probe.sh"
+  cat > "$probe" <<'PROBE'
+a=$(false)
+b=$(printf x) || b=""
+local c=$(false)
+d=$(cmd \
+  --flag) || d=""
+e=$(cmd || true)
+PROBE
+  local hits; hits="$(awk "$ERREXIT_LINT" "$probe" | wc -l | tr -d ' ')" || hits=""
+  eq "errexit lint: flags exactly the unguarded form" "1" "$hits"
+  case "$(awk "$ERREXIT_LINT" "$probe")" in
+    *':1: a=$(false)'*) ok "errexit lint: names the offending line" ;;
+    *) bad "errexit lint: names the offending line" "got [$(awk "$ERREXIT_LINT" "$probe")]" ;;
+  esac
+}
+
+# ── version comparison + the "your CLI is stale" notice ─────────────────────
+# The CLI is pull-only: nothing pushes an update, and until v4.3.2 the only
+# version check was a MAJOR-version mismatch at login. That meant a client
+# could sit on a broken point release indefinitely without a word — which is
+# exactly what happened with the errexit bug, shipped in every release since
+# v1.0 and never surfaced to anyone running it.
+#
+# version_gt is pure bash on purpose (no python3, no jq, no `sort -V` — busybox
+# sort has no -V), so it runs on the fresh-machine tier like everything else.
+run_version_suite() {
+  echo "── version comparison ──"
+  gt() { version_gt "$1" "$2" && echo yes || echo no; }
+
+  eq "version_gt: patch newer"      "yes" "$(gt 4.3.2 4.3.1)"
+  eq "version_gt: patch older"      "no"  "$(gt 4.3.1 4.3.2)"
+  eq "version_gt: equal"            "no"  "$(gt 4.3.2 4.3.2)"
+  eq "version_gt: minor newer"      "yes" "$(gt 4.4.0 4.3.9)"
+  eq "version_gt: major newer"      "yes" "$(gt 5.0.0 4.9.9)"
+  eq "version_gt: major older"      "no"  "$(gt 4.9.9 5.0.0)"
+  eq "version_gt: leading v"        "yes" "$(gt v4.3.2 v4.3.1)"
+  eq "version_gt: two-field version" "yes" "$(gt 4.4 4.3.9)"
+  # Numeric, not lexical: "10" must beat "9", which a string compare gets wrong.
+  eq "version_gt: 4.10.0 > 4.9.0"   "yes" "$(gt 4.10.0 4.9.0)"
+  eq "version_gt: 4.9.0 < 4.10.0"   "no"  "$(gt 4.9.0 4.10.0)"
+  # Pre-release: a release outranks the -dev that was its candidate, so a
+  # develop build never nags about the release it is ahead of.
+  eq "version_gt: release beats -dev" "yes" "$(gt 4.3.2 4.3.2-dev)"
+  eq "version_gt: -dev loses to release" "no" "$(gt 4.3.2-dev 4.3.2)"
+  eq "version_gt: -dev vs older release" "yes" "$(gt 4.3.2-dev 4.3.1)"
+  # Garbage must not crash [ -gt ] or report a bogus upgrade.
+  eq "version_gt: unparseable input"  "no"  "$(gt '' 4.3.2)"
+  eq "version_gt: non-numeric field"  "no"  "$(gt 4.x.y 4.3.2)"
+  # A doubled value must not fabricate an upgrade. This is not hypothetical:
+  # cmd_login pulled the server version with `grep -o '"version":"[^"]*"'`,
+  # and /api/config carries BOTH a top-level version and latestRelease.version
+  # — so it returned two lines. Field three then read "1\n4" -> "14", which
+  # beats "2", and the CLI told you to update to a version older than itself.
+  # Fixed at the source (json_top_string is depth-aware); pinned here too,
+  # because the comparator should be unfoolable regardless of its caller.
+  eq "version_gt: doubled value isn't an upgrade" "no" \
+     "$(gt "$(printf '4.3.1\n4.3.1')" 4.3.2)"
+
+  # The naive extraction must not come back. The parser that gets this right
+  # already exists; the login path simply was not using it.
+  if grep -q "grep -o '\"version\":" "$REPO_ROOT/mdnest"; then
+    bad "version: server version is read with the depth-aware parser" \
+        "found a naive grep for \"version\" — /api/config nests one inside latestRelease"
+  else
+    ok "version: server version is read with the depth-aware parser"
+  fi
+
+  # The notice itself: printed only when the server is genuinely ahead, and it
+  # must name the command to run. Never a bare "an update is available".
+  MDNEST_CLI_VERSION=4.3.1
+  eq "notice: silent when up to date" "" "$(cli_update_notice 4.3.1 '@srv')"
+  eq "notice: silent when server older" "" "$(cli_update_notice 4.2.0 '@srv')"
+  case "$(cli_update_notice 4.3.2 '@srv')" in
+    *"mdnest update"*) ok "notice: says how to fix it" ;;
+    *) bad "notice: says how to fix it" "got [$(cli_update_notice 4.3.2 '@srv')]" ;;
+  esac
+  case "$(cli_update_notice 4.3.2 '@srv')" in
+    *"v4.3.1"*"@srv"*"v4.3.2"*) ok "notice: names both versions and the server" ;;
+    *) bad "notice: names both versions and the server" "got [$(cli_update_notice 4.3.2 '@srv')]" ;;
+  esac
+  # It is used as a bare statement in cmd_servers/cmd_login, so a "no update"
+  # verdict must still return 0 — a non-zero return there would exit the CLI
+  # under set -e, which is the same bug in a new coat.
+  cli_update_notice 4.2.0 '@srv' >/dev/null
+  eq "notice: returns 0 when silent" "0" "$?"
+  MDNEST_CLI_VERSION="$(grep '^MDNEST_CLI_VERSION=' "$REPO_ROOT/mdnest" | cut -d'"' -f2)"
+}
+
 echo "=== mdnest CLI unit tests ==="
 echo
 
@@ -256,6 +487,9 @@ run_list_suite "list rendering (no python3/jq)"
 # Argument handling is pure bash and parser-independent, so it runs once. It
 # needs SHIM_DIR for its throwaway HOMEs, hence its place at the end.
 run_login_suite
+run_unreachable_suite
+run_version_suite
+run_errexit_lint
 
 echo
 echo "=== $((PASS+FAIL)) checks: $(green "$PASS passed"), $([ "$FAIL" -gt 0 ] && red "$FAIL failed" || echo "0 failed") ==="
