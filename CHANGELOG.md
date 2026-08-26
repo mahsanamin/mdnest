@@ -4,6 +4,57 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v4.3.3 — Instructions that survive a paste
+
+A short one, entirely about the second half of the v4.3.2 report: someone hit a
+CLI bug, and nothing in the product told them their CLI was stale or how to fix
+it. v4.3.2 taught the CLI to say so. This does the same for the app.
+
+### Fixed
+
+- **The commands in Settings → CLI can be pasted.** Nine of them carried
+  `<your-token>` or `<namespace>`, and `<` is a shell **redirection** — pasting
+  `mdnest login https://notes.example.com <your-token>` into zsh or bash gives
+  `no such file or directory: your-token`. Every one of those blocks has a Copy
+  button that reproduces the text verbatim, so the instruction meant to get
+  someone started was the next thing that broke for them. They use literal
+  stand-ins now (`mdnest_yourtoken`, `notes`).
+
+  The CLI learned this in v4.1.3 and `tests/cli-unit.sh` has asserted it for
+  CLI *output* ever since. The web UI was simply never covered by that rule —
+  which is the more interesting failure: the convention existed, was written
+  down, and had a test, and the surface that most needed it sat outside the
+  test's reach.
+
+### Added
+
+- **"Keeping it up to date" in Settings → CLI.** It states the thing nobody
+  had been told: the CLI does not update itself and nothing pushes to it — it
+  is a script on your machine. It shows `mdnest update` and `mdnest version`,
+  and names the version *this server* is running, so there is something
+  concrete to compare against rather than a vague suggestion to check.
+
+### Guarding it
+
+`frontend/src/__tests__/pasteable-commands.test.js` fails the build on a new
+bracketed command. Two things it has to get right, both found by testing the
+guard itself against the pre-fix file rather than trusting it:
+
+- A shell block is checked **in full**, not line-by-line from a
+  `mdnest`-prefixed start. The Copy button copies the whole block, and one of
+  the nine offenders began `echo "text" | mdnest append <namespace>/log.md` —
+  which a "line starts with mdnest" rule walks straight past.
+- **JSON config blocks are excluded.** The MCP tab's
+  `claude_desktop_config.json` mentions `node` and `mdnest`, but it is pasted
+  into a *file*, not a shell, where `<your token>` is a perfectly good
+  placeholder. Flagging it would have been a false positive that teaches people
+  to ignore the check.
+
+Verified both directions: all nine flagged against the old file, and the false
+positive stays quiet.
+
+---
+
 ## v4.3.2 — The CLI stops dying quietly
 
 One bug report, one root cause, five places it was hiding. `mdnest servers`
