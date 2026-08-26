@@ -1968,6 +1968,7 @@ function App() {
           resolvedTheme={resolvedTheme}
           onChangeTheme={changeTheme}
           serverDefaultTheme={appConfig?.defaultTheme}
+          serverVersion={appConfig?.version}
         />
       )}
       {shareTarget && (

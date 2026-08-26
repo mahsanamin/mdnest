@@ -251,6 +251,10 @@ Two things it does not do, on purpose:
 
 ### Updating
 
+The app shows this too: **Settings → CLI → Keeping it up to date** names the
+version your server is running, so you have something concrete to compare
+`mdnest version` against.
+
 ```bash
 mdnest update                 # self-update from main
 mdnest update --force         # re-download even if the version matches
