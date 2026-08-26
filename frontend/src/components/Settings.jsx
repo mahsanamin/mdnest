@@ -51,7 +51,7 @@ function CodeBlock({ code, label }) {
   );
 }
 
-function Settings({ onClose, userProvider, themePreference, resolvedTheme, onChangeTheme, serverDefaultTheme }) {
+function Settings({ onClose, userProvider, themePreference, resolvedTheme, onChangeTheme, serverDefaultTheme, serverVersion }) {
   const [tab, setTab] = useState('tokens');
   // Hide Credentials + 2FA in any federated mode — identity lives with the
   // external provider (Firebase Auth / corporate SSO IdP), not in mdnest's
@@ -86,7 +86,7 @@ function Settings({ onClose, userProvider, themePreference, resolvedTheme, onCha
           />
         )}
         {tab === 'tokens' && <TokensTab />}
-        {tab === 'cli' && <CliTab />}
+        {tab === 'cli' && <CliTab serverVersion={serverVersion} />}
         {tab === 'mcp' && <McpTab />}
         {tab === 'api' && <ApiTab />}
         {tab === 'gitremote' && <GitRemoteTab />}
@@ -407,7 +407,7 @@ function TokensTab() {
   );
 }
 
-function CliTab() {
+function CliTab({ serverVersion }) {
   const serverUrl = getServerUrl();
   return (
     <div className="settings-content">
@@ -435,7 +435,7 @@ function CliTab() {
           <span>Create an API token in the <strong>API Tokens</strong> tab, then login:</span>
         </div>
       </div>
-      <CodeBlock code={`mdnest login ${serverUrl} <your-token>`} />
+      <CodeBlock code={`mdnest login ${serverUrl} mdnest_yourtoken`} />
 
       <div className="settings-steps">
         <div className="settings-step">
@@ -444,19 +444,35 @@ function CliTab() {
         </div>
       </div>
       <CodeBlock code={`mdnest list                              # list namespaces
-mdnest list <namespace>                  # list files
-mdnest read <namespace>/path/to/note.md  # read a note
-mdnest search <namespace> "query"        # search
-mdnest write <namespace>/path.md "text"  # write
-echo "text" | mdnest append <namespace>/log.md -  # pipe`} />
+mdnest list notes                        # list files in the "notes" namespace
+mdnest read notes/path/to/note.md        # read a note
+mdnest search notes "query"              # search
+mdnest write notes/path.md "text"        # write
+echo "text" | mdnest append notes/log.md -        # pipe`} />
+
+      <h4 className="settings-section-title">Keeping it up to date</h4>
+      <p className="settings-description">
+        The CLI does <strong>not</strong> update itself, and nothing pushes new versions to you —
+        it is a script on your machine. If it starts behaving oddly, update it first:
+      </p>
+      <CodeBlock code={`mdnest update      # self-update from GitHub
+mdnest version     # check what you are running`} />
+      <p className="settings-description">
+        {serverVersion
+          ? <>This server runs <code>v{serverVersion}</code>. If <code>mdnest version</code> reports
+            anything older, update — the CLI and the server ship together at the same version.</>
+          : <>Compare <code>mdnest version</code> against this server's version, shown in the sidebar footer.</>}
+        {' '}From v4.3.2 the CLI tells you itself, in <code>mdnest servers</code> and at login,
+        whenever it is behind the server it is talking to.
+      </p>
 
       <h4 className="settings-section-title">Multi-Server</h4>
       <p className="settings-description">
         Manage multiple mdnest servers with @alias paths:
       </p>
-      <CodeBlock code={`mdnest login @work ${serverUrl} <token>
-mdnest login @personal https://home:3236 <token>
-mdnest read @work/<namespace>/path.md
+      <CodeBlock code={`mdnest login @work ${serverUrl} mdnest_yourtoken
+mdnest login @personal https://home:3236 mdnest_yourtoken
+mdnest read @work/notes/path.md
 mdnest servers                           # list all servers`} />
     </div>
   );
