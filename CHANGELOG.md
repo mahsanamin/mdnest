@@ -4,10 +4,18 @@ All notable changes to mdnest are documented here.
 
 ---
 
-## Unreleased
+## v4.4.0 — Edits that don't overwrite someone else
 
-`develop` is at `4.4.0-dev`. A minor, because agents get a real edit verb on
-both surfaces they reach mdnest through.
+Changing one line in a note used to mean rewriting the whole file. Both surfaces
+agents reach mdnest through — the MCP server and the CLI — could only replace a
+note wholesale, so the only way to edit part of one was to read it, rebuild it,
+and write it back. Anything saved in that window by the web UI, git-sync, or
+another agent was silently overwritten, and the write reported
+`{"status":"ok"}` while doing it.
+
+Both now have an exact-string `edit` that carries the version it read, so a
+concurrent save comes back as a 409 with nothing lost. Plus the Preview pane
+renders images again.
 
 ### Added
 
