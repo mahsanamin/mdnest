@@ -4,6 +4,12 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## Unreleased
+
+_Nothing yet — `develop` is at `4.4.1-dev`._
+
+---
+
 ## v4.4.0 — Edits that don't overwrite someone else
 
 Changing one line in a note used to mean rewriting the whole file. Both surfaces
