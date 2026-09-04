@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-MDNEST_CLI_VERSION="4.3.4-dev"
+MDNEST_CLI_VERSION="4.4.0-dev"
 CONFIG_DIR="${HOME}/.config/mdnest"
 SERVERS_DIR="${CONFIG_DIR}/servers"
 DEFAULT_FILE="${CONFIG_DIR}/default"
@@ -218,14 +218,25 @@ parse_path() {
 
 # ─── API helpers ────────────────────────────────────────────────────────────
 
+# api <method> <path> [body] [extra_header] [header_dump_file]
+#   extra_header      one additional request header, e.g. "If-Match: \"abc\"".
+#   header_dump_file  when non-empty, curl writes the RESPONSE headers here, so
+#                     a caller can read the note's ETag (see note_etag).
+# Both are appended and optional, so every existing 3-arg call site is unchanged.
 api() {
-  local method="$1" path="$2" body="$3"
+  local method="$1" path="$2" body="$3" extra_header="$4" header_dump="$5"
   # --connect-timeout bounds a hanging/unreachable connection so a command
   # fails fast with a clear message instead of blocking forever (MDNEST_TIMEOUT
   # overrides for slow links). No --max-time: note bodies can be large and
   # legitimately slow to transfer; only the connect phase is capped.
   local args=(-s -w "\n%{http_code}" --connect-timeout "${MDNEST_TIMEOUT:-10}" -H "Authorization: Bearer $MDNEST_TOKEN")
-  [ -n "$body" ] && args+=(-d "$body")
+  [ -n "$extra_header" ] && args+=(-H "$extra_header")
+  [ -n "$header_dump" ] && args+=(-D "$header_dump")
+  # --data-raw, not -d: `-d @foo` makes curl read a FILE called foo, so a note
+  # whose content merely STARTS with '@' (`@mention ...`) could not be written
+  # at all — it failed with curl's exit 26 reported as "couldn't reach the
+  # server". --data-raw is -d without that special case.
+  [ -n "$body" ] && args+=(--data-raw "$body")
   local response curl_rc=0
   # Guard the assignment with `|| curl_rc=$?`. The CLI runs under `set -e`, and
   # a PLAIN assignment from a command substitution takes the substitution's exit
@@ -1123,6 +1134,60 @@ require_content() {
   return 0
 }
 
+# ─── Literal string splicing (for `edit`) ───────────────────────────────────
+# Pure bash on purpose: no python3, no jq, no awk, no sed. A note is arbitrary
+# markdown, so the needle and the replacement must be matched and inserted
+# BYTE-LITERALLY — a regex tool would read `.`/`*`/`[` in the needle and expand
+# `&`/`\1` in the replacement, silently corrupting exactly the code fences and
+# shell snippets people keep in notes. Quoting the pattern inside ${...} forces
+# literal matching, which is all this needs and works on the fresh-machine tier
+# (busybox + bash) like everything else here.
+
+# count_literal <haystack> <needle> — number of non-overlapping occurrences.
+count_literal() {
+  local h="$1" n="$2" c=0
+  [ -n "$n" ] || { printf '0'; return 0; }
+  while [ "${h#*"$n"}" != "$h" ]; do
+    h="${h#*"$n"}"
+    c=$((c + 1))
+  done
+  printf '%s' "$c"
+  return 0
+}
+
+# replace_first_literal <haystack> <needle> <replacement>
+replace_first_literal() {
+  local h="$1" n="$2" r="$3"
+  [ -n "$n" ] || { printf '%s' "$h"; return 0; }
+  [ "${h#*"$n"}" != "$h" ] || { printf '%s' "$h"; return 0; }
+  printf '%s' "${h%%"$n"*}$r${h#*"$n"}"
+  return 0
+}
+
+# replace_all_literal <haystack> <needle> <replacement>
+replace_all_literal() {
+  local h="$1" n="$2" r="$3" out=""
+  [ -n "$n" ] || { printf '%s' "$h"; return 0; }
+  while [ "${h#*"$n"}" != "$h" ]; do
+    out="$out${h%%"$n"*}$r"
+    h="${h#*"$n"}"
+  done
+  printf '%s' "$out$h"
+  return 0
+}
+
+# note_etag <headerfile> — the ETag from a dumped response header block.
+# Empty when the server sent none; the caller then writes unguarded rather
+# than refusing to work against an older server.
+note_etag() {
+  local v
+  # Header names are case-insensitive, and the value can carry a trailing \r.
+  v=$(grep -i '^etag:' "$1" 2>/dev/null | head -1 | cut -d' ' -f2-) || v=""
+  v="${v%$'\r'}"
+  printf '%s' "$v"
+  return 0
+}
+
 cmd_write() {
   parse_path "$1"
   require_server
@@ -1157,6 +1222,101 @@ cmd_prepend() {
   local content; content=$(read_content "$2") || exit 1
   require_content "$content"
   api PATCH "/note?ns=$(urlencode "$PARSED_NS")&path=$(urlencode "$PARSED_PATH")&position=top" "$content"
+}
+
+# `edit` replaces an exact string inside a note and leaves the rest of the file
+# alone. It exists because the alternative — read the whole note, rebuild it,
+# `write` it back — silently destroys anything saved in between by the web UI,
+# git-sync, or another agent. The read-modify-write here is guarded: the PUT
+# carries If-Match with the ETag from its own read, so a concurrent save comes
+# back as the backend's 409 instead of being clobbered.
+cmd_edit() {
+  parse_path "$1"
+  require_server
+  local old_string="$2" new_string="$3" replace_all=""
+  shift 3 2>/dev/null || true
+  # The flag is accepted in any trailing position so it reads naturally either
+  # side of the strings.
+  local arg
+  for arg in "$@"; do
+    case "$arg" in
+      --replace-all|--all) replace_all=1 ;;
+      "") ;;
+      *) echo "Error: unknown option '$arg'" >&2; exit 1 ;;
+    esac
+  done
+
+  if [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] || [ -z "$old_string" ]; then
+    echo "Usage: mdnest edit @alias/namespace/path.md \"old text\" \"new text\" [--replace-all]" >&2
+    echo "       old text must be non-empty; use 'mdnest write' to replace a whole note." >&2
+    exit 1
+  fi
+  if [ "$old_string" = "$new_string" ]; then
+    echo "Error: the old and new text are identical; nothing to edit." >&2
+    exit 1
+  fi
+
+  local query="ns=$(urlencode "$PARSED_NS")&path=$(urlencode "$PARSED_PATH")"
+
+  # Read the note AND its ETag in one request — a second GET could race the
+  # very save this is trying not to clobber.
+  local hdr
+  hdr="$(mktemp "${TMPDIR:-/tmp}/mdnest.XXXXXX")" || { echo "Error: couldn't create a temp file." >&2; exit 1; }
+  local before rc=0
+  # The sentinel X keeps the note byte-exact. Command substitution strips ALL
+  # trailing newlines, so a plain capture would silently drop the note's final
+  # newline — and `edit` promises to leave everything it did not match alone.
+  # `&&` (not `;`) so a failing api() still decides the exit status: with `;`
+  # the status would be printf's 0 and the error below would never fire.
+  before=$(api GET "/note?$query" "" "" "$hdr" && printf 'X') || rc=$?
+  if [ "$rc" != "0" ]; then rm -f "$hdr"; exit 1; fi
+  before="${before%X}"          # drop the sentinel
+  before="${before%$'\n'}"      # drop the single newline api()'s echo added
+  local etag; etag=$(note_etag "$hdr") || etag=""
+  rm -f "$hdr"
+
+  local matches; matches=$(count_literal "$before" "$old_string") || matches=0
+  if [ "$matches" = "0" ]; then
+    echo "Error: the old text was not found in ${PARSED_PATH}." >&2
+    exit 1
+  fi
+  if [ "$matches" != "1" ] && [ -z "$replace_all" ]; then
+    echo "Error: the old text occurs ${matches} times in ${PARSED_PATH}." >&2
+    echo "       Add surrounding lines to make it unique, or pass --replace-all." >&2
+    exit 1
+  fi
+
+  # The same sentinel as the read, and for the same reason: $( ) strips trailing
+  # newlines, so without it every edit would quietly delete the note's final
+  # newline. The helpers print with printf (they add none of their own), so
+  # stripping the X alone restores the exact bytes.
+  local after
+  if [ -n "$replace_all" ]; then
+    after=$(replace_all_literal "$before" "$old_string" "$new_string"; printf 'X') || after=""
+  else
+    after=$(replace_first_literal "$before" "$old_string" "$new_string"; printf 'X') || after=""
+  fi
+  after="${after%X}"
+
+  # An edit that empties a note would otherwise trip require_content's
+  # "no content provided", which describes the wrong problem entirely.
+  if [ -z "$after" ]; then
+    echo "Error: that edit would leave ${PARSED_PATH} empty; use 'mdnest write' or 'mdnest delete' if that is the intent." >&2
+    exit 1
+  fi
+
+  local if_match=""
+  [ -n "$etag" ] && if_match="If-Match: $etag"
+  if ! api PUT "/note?$query" "$after" "$if_match"; then
+    echo "" >&2
+    echo "Hint: a 409 means the note changed after this command read it." >&2
+    echo "      Nothing was overwritten. Re-run the same edit to apply it to the current content." >&2
+    exit 1
+  fi
+  if [ -n "$replace_all" ]; then
+    echo "Replaced ${matches} occurrence(s) in ${PARSED_PATH}." >&2
+  fi
+  return 0
 }
 
 cmd_delete() {
@@ -1217,6 +1377,7 @@ cmd_note_legacy() {
     # (name/type/path JSON) instead of the note body.
     read)     api GET "/note?ns=$(urlencode "$1")&path=$(urlencode "$2")" ;;
     write)    local ns="$1" p="$2" c; c=$(read_content "$3") || exit 1; require_content "$c"; api PUT "/note?ns=$(urlencode "$ns")&path=$(urlencode "$p")" "$c" ;;
+    edit)     cmd_edit "$1/$2" "$3" "$4" "$5" ;;
     create)   local ns="$1" p="$2" c; c=$(read_content "$3") || exit 1; require_content "$c"; api POST "/note?ns=$(urlencode "$ns")&path=$(urlencode "$p")" "$c" ;;
     append)   local ns="$1" p="$2" c; c=$(read_content "$3") || exit 1; require_content "$c"; api PATCH "/note?ns=$(urlencode "$ns")&path=$(urlencode "$p")&position=bottom" "$c" ;;
     prepend)  local ns="$1" p="$2" c; c=$(read_content "$3") || exit 1; require_content "$c"; api PATCH "/note?ns=$(urlencode "$ns")&path=$(urlencode "$p")&position=top" "$c" ;;
@@ -1240,6 +1401,7 @@ QUICK REFERENCE (for AI agents / LLMs)
   Path format:  @alias/namespace/path/to/file.md
   New file:     mdnest create @alias/namespace/path.md "content"
   Edit file:    mdnest write  @alias/namespace/path.md "content"  (file MUST exist)
+  One string:   mdnest edit   @alias/namespace/path.md "old text" "new text"
   Read file:    mdnest read   @alias/namespace/path.md
   Append:       mdnest append @alias/namespace/path.md "text"
   Search:       mdnest search @alias/namespace "query"
@@ -1275,6 +1437,8 @@ SERVER MANAGEMENT
 NOTE OPERATIONS
   create   <path> <content|->     Create a NEW file (fails if already exists; use - for stdin)
   write    <path> <content|->     Overwrite an EXISTING file (fails 404 if not found)
+  edit     <path> <old> <new>     Replace one exact string, leave the rest of the file alone
+           [--replace-all]        ...every occurrence instead of failing when not unique
   read     <path>                 Read a note (outputs markdown to stdout)
   append   <path> <content|->     Append text to end (creates file if not found)
   prepend  <path> <content|->     Prepend text to start (creates file if not found)
@@ -1309,6 +1473,12 @@ EXAMPLES
 
   # Update an existing file (use "write")
   mdnest write @work/engineering/notes/meeting.md "# Updated content"
+
+  # Change ONE string and leave the rest of the note untouched.
+  # Safer than read + rebuild + write: the note is not overwritten if
+  # someone else saved it in the meantime (you get a 409 instead).
+  mdnest edit @work/engineering/notes/meeting.md "Status: draft" "Status: final"
+  mdnest edit @work/engineering/log.md "v4.3.3" "v4.3.4" --replace-all
 
   # Read
   mdnest read @work/engineering/Architecture/system-overview.md
@@ -1358,6 +1528,7 @@ case "$CMD" in
   list)     load_default; warn_if_default_alias; cmd_list "$@" ;;
   read)     load_default; warn_if_default_alias; cmd_read "$@" ;;
   write)    load_default; warn_if_default_alias; cmd_write "$@" ;;
+  edit)     load_default; warn_if_default_alias; cmd_edit "$@" ;;
   create)   load_default; warn_if_default_alias; cmd_create "$@" ;;
   append)   load_default; warn_if_default_alias; cmd_append "$@" ;;
   prepend)  load_default; warn_if_default_alias; cmd_prepend "$@" ;;

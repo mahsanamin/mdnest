@@ -195,6 +195,52 @@ assert_contains "note list renders the tree" "── legacy.md" \
   "$(m note list "${BASE}/${RUN_DIR}" 2>/dev/null)"
 m delete "$ROOT/legacy.md" >/dev/null 2>&1
 
+# ── 17. content that STARTS with '@' must be writable ───────────────────────
+# `curl -d @foo` reads a FILE called foo, so for 47 releases a note whose body
+# merely began with '@' (`@mention ...`) could not be created, written,
+# appended or prepended at all: it failed with curl's exit 26, reported as
+# "couldn't reach the server". Fixed by --data-raw. One check per verb that
+# carries a body, because they each pass it to the same place.
+m create "$ROOT/at.md" "@mention starts this note" >/dev/null 2>&1
+assert_eq "create accepts content starting with @" "@mention starts this note" \
+  "$(m read "$ROOT/at.md" 2>/dev/null)"
+assert_succeeds "write accepts content starting with @" -- m write "$ROOT/at.md" "@handle rewritten"
+assert_eq "write stored the @ content" "@handle rewritten" "$(m read "$ROOT/at.md" 2>/dev/null)"
+assert_succeeds "append accepts content starting with @" -- m append "$ROOT/at.md" "@tail"
+assert_contains "append stored the @ content" "@tail" "$(m read "$ROOT/at.md" 2>/dev/null)"
+m delete "$ROOT/at.md" >/dev/null 2>&1
+
+# ── 18. edit — replace one exact string, leave the rest alone ───────────────
+# `edit` exists so an agent never has to read + rebuild + write a whole note
+# just to change a line; that pattern silently overwrote anything saved in
+# between. The concurrency guard itself is pinned in tests/cli-edit-etag.sh
+# (it needs a backend that reports the request it received); these are the
+# user-visible semantics against a real server.
+m create "$ROOT/edit.md" "$(printf '# Log\n\nalpha\nbeta\nalpha\n')" >/dev/null 2>&1
+assert_succeeds "edit replaces a unique string" -- m edit "$ROOT/edit.md" "beta" "BETA"
+assert_eq "edit changed only the match" "$(printf '# Log\n\nalpha\nBETA\nalpha')" \
+  "$(m read "$ROOT/edit.md" 2>/dev/null)"
+assert_fails "edit refuses a string that is not there" -- m edit "$ROOT/edit.md" "nosuchtext" "x"
+assert_fails "edit refuses an ambiguous string" -- m edit "$ROOT/edit.md" "alpha" "x"
+assert_contains "the ambiguity error names the count" "occurs 2 times" \
+  "$(m edit "$ROOT/edit.md" "alpha" "x" 2>&1 || true)"
+assert_succeeds "edit --replace-all takes every occurrence" -- \
+  m edit "$ROOT/edit.md" "alpha" "gamma" --replace-all
+assert_eq "all occurrences replaced" "$(printf '# Log\n\ngamma\nBETA\ngamma')" \
+  "$(m read "$ROOT/edit.md" 2>/dev/null)"
+assert_fails "edit refuses an empty old string" -- m edit "$ROOT/edit.md" "" "x"
+assert_fails "edit refuses identical old and new" -- m edit "$ROOT/edit.md" "gamma" "gamma"
+# The corruption class: `$&`/`$1` are what a regex replacer would expand, and
+# `.*[` is what a regex matcher would read. Both must land verbatim.
+m write "$ROOT/edit.md" "cost: PLACEHOLDER here" >/dev/null 2>&1
+m edit "$ROOT/edit.md" "PLACEHOLDER" 'a$& b$1 c.* d[x]' >/dev/null 2>&1
+assert_eq "the replacement is spliced literally" 'cost: a$& b$1 c.* d[x] here' \
+  "$(m read "$ROOT/edit.md" 2>/dev/null)"
+m write "$ROOT/edit.md" "keep a.*b keep" >/dev/null 2>&1
+assert_fails "a regex-looking needle does not match arbitrary text" -- \
+  m edit "$ROOT/edit.md" "k...p a" "X"
+m delete "$ROOT/edit.md" >/dev/null 2>&1
+
 # ── Summary ─────────────────────────────────────────────────────────────────
 echo
 echo "=== $((PASS+FAIL)) checks: $(green "$PASS passed"), $([ "$FAIL" -gt 0 ] && red "$FAIL failed" || echo "0 failed") ==="

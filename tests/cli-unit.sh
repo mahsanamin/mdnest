@@ -298,6 +298,11 @@ END {
     s = line[n]
     if (s ~ /^[[:space:]]*(local|declare|export|readonly|typeset)[[:space:]]/) continue
     if (s !~ /^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=\$\(/) continue
+    # $((...)) is ARITHMETIC expansion, not command substitution: the
+    # assignment carries its own status (0), so `c=$((c + 1))` is safe and
+    # must not be reported. Only ((expr)) and `let` as bare COMMANDS return 1
+    # on a zero result, and neither is this shape.
+    if (s ~ /^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=\$\(\(/) continue
     if (s ~ /\)[[:space:]]*(\|\||&&)/) continue          # x=$(...) || x=""
     if (s ~ /\|\|[[:space:]]*(true|echo|:)[^)]*\)/) continue  # $(cmd || true)
 
@@ -318,6 +323,76 @@ END {
 }
 function bad(n, s) { printf "  %s:%d: %s\n", FILENAME, n, s }
 '
+
+# ── literal splicing (`mdnest edit`) ────────────────────────────────────────
+# `edit` replaces an exact string inside a note. The whole point is that the
+# needle and the replacement are BYTE-LITERAL: a note is arbitrary markdown, so
+# a regex tool would read `.`/`*`/`[` in the needle and expand `&`/`\1` in the
+# replacement, corrupting exactly the code fences and shell snippets people
+# keep in notes. These are the checks that would catch that, and they run in
+# every parser pass because the implementation is pure bash and must not grow
+# a python3/jq/sed tier.
+run_splice_suite() {
+  echo "── literal splicing (edit) ──"
+  local h="# Log
+alpha
+beta
+alpha"
+
+  eq "count: unique"            "1"  "$(count_literal "$h" "beta")"
+  eq "count: repeated"          "2"  "$(count_literal "$h" "alpha")"
+  eq "count: absent"            "0"  "$(count_literal "$h" "zeta")"
+  eq "count: whole haystack"    "1"  "$(count_literal "abc" "abc")"
+  eq "count: empty needle is 0" "0"  "$(count_literal "$h" "")"
+  # Non-overlapping, the same way JS split() counts — so the number the error
+  # message quotes matches the number replace_all actually changes.
+  eq "count: non-overlapping"   "2"  "$(count_literal "aaaa" "aa")"
+  eq "count: multi-line needle" "1"  "$(count_literal "$h" "alpha
+beta")"
+
+  eq "first: replaces once" "# Log
+gamma
+beta
+alpha" "$(replace_first_literal "$h" "alpha" "gamma")"
+  eq "first: absent needle is a no-op" "$h" "$(replace_first_literal "$h" "zeta" "x")"
+  eq "all: replaces every one" "# Log
+gamma
+beta
+gamma" "$(replace_all_literal "$h" "alpha" "gamma")"
+
+  # The corruption class this exists to prevent. `$&` and `$1` are what
+  # String.replace / sed would expand; `.` `*` `[` are what a regex would match
+  # on. All six must survive verbatim in BOTH directions.
+  eq "literal: \$ in replacement stays literal" \
+     "cost: a\$& b\$1" "$(replace_first_literal "cost: X" "X" 'a$& b$1')"
+  eq "literal: regex chars in replacement stay literal" \
+     "re: .*[a-z]+" "$(replace_first_literal "re: X" "X" '.*[a-z]+')"
+  eq "literal: regex chars in NEEDLE match literally" \
+     "found" "$(replace_first_literal 'a.*[x]b' 'a.*[x]b' 'found')"
+  eq "literal: a needle of dots does not match arbitrary text" \
+     "abc" "$(replace_first_literal "abc" "..." "MATCHED")"
+  eq "literal: backslashes survive" \
+     'C:\\tmp\\n' "$(replace_first_literal "P" "P" 'C:\\tmp\\n')"
+  eq "literal: a code fence survives" \
+     '```mermaid' "$(replace_first_literal "P" "P" '```mermaid')"
+
+  # Deleting a string is an edit with an empty replacement, not a special case.
+  eq "empty replacement deletes" "# Log
+
+beta
+alpha" "$(replace_first_literal "$h" "alpha" "")"
+
+  # note_etag parses the header block curl dumps. Case-insensitive name and a
+  # trailing CR are both what a real server sends.
+  local hf; hf="$(mktemp "${TMPDIR:-/tmp}/mdnest-hdr.XXXXXX")"
+  printf 'HTTP/1.1 200 OK\r\nContent-Type: text/markdown\r\nETag: "abc123"\r\n\r\n' > "$hf"
+  eq "note_etag: reads the value, strips CR" '"abc123"' "$(note_etag "$hf")"
+  printf 'HTTP/1.1 200 OK\r\netag: "low"\r\n\r\n' > "$hf"
+  eq "note_etag: case-insensitive header name" '"low"' "$(note_etag "$hf")"
+  printf 'HTTP/1.1 200 OK\r\nContent-Type: text/markdown\r\n\r\n' > "$hf"
+  eq "note_etag: absent is empty (write unguarded, not refused)" "" "$(note_etag "$hf")"
+  rm -f "$hf"
+}
 
 run_errexit_lint() {
   echo "── errexit lint (mdnest) ──"
@@ -341,8 +416,11 @@ local c=$(false)
 d=$(cmd \
   --flag) || d=""
 e=$(cmd || true)
+f=$((f + 1))
 PROBE
   local hits; hits="$(awk "$ERREXIT_LINT" "$probe" | wc -l | tr -d ' ')" || hits=""
+  # 1, not 2: the probe's `f=$((f + 1))` is arithmetic expansion and must not
+  # be reported. This counts, so a relapse shows up here as 2.
   eq "errexit lint: flags exactly the unguarded form" "1" "$hits"
   case "$(awk "$ERREXIT_LINT" "$probe")" in
     *':1: a=$(false)'*) ok "errexit lint: names the offending line" ;;
@@ -432,6 +510,7 @@ else
   echo "── (python3 not present — skipping the python3 pass) ──"
 fi
 run_list_suite "list rendering"
+run_splice_suite
 
 # Passes 2 and 3 need a python3 stand-in on PATH, so they're driven through a
 # shim directory. This is the issue-#87 class of bug: on the reporter's Fedora
@@ -483,6 +562,9 @@ run_suite "fallback (no python3/jq)"
 # Same listings again with no parser at all: the rendering must be identical,
 # since it is awk-only. A difference here means a python3/jq tier crept back in.
 run_list_suite "list rendering (no python3/jq)"
+# Pure bash, so it must be identical with and without a parser — a difference
+# here means a python3/jq/sed tier crept into the splicing.
+run_splice_suite
 
 # Argument handling is pure bash and parser-independent, so it runs once. It
 # needs SHIM_DIR for its throwaway HOMEs, hence its place at the end.

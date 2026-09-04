@@ -63,6 +63,20 @@ else
   FAILED=1
 fi
 
+# 2b-ii. `mdnest edit` concurrency guard. Separate from the unit tests above
+# because it needs a fake backend that reports the request it received: the
+# unit tier can only prove the splice helpers work, and helpers that work
+# while nothing consults them are exactly how the silent-clobber bug would
+# come back. Still fast (<2s, loopback only) and SKIPs without python3.
+echo -n "CLI edit concurrency guard... "
+if bash tests/cli-edit-etag.sh > /dev/null 2>&1; then
+  echo "OK"
+else
+  echo "FAILED"
+  echo "  Run: bash tests/cli-edit-etag.sh"
+  FAILED=1
+fi
+
 # 2c. Server CLI unit tests: pure helpers in mdnest-server (namespace drift
 # reporting). Also fast and Docker-free.
 echo -n "Server CLI unit tests... "

@@ -6,7 +6,50 @@ All notable changes to mdnest are documented here.
 
 ## Unreleased
 
-_Nothing yet — `develop` is at `4.3.4-dev`._
+`develop` is at `4.4.0-dev`. A minor, because agents get a real edit verb on
+both surfaces they reach mdnest through.
+
+### Added
+
+- **`edit_note` MCP tool** — replace an exact string in a note instead of
+  rewriting the whole file. Zero matches, or more than one without
+  `replace_all`, is an error naming the count rather than a guess; the
+  replacement is spliced literally, so `$&` and `$1` in a pasted shell snippet
+  stay as written; and the write carries `If-Match`, so a save that landed
+  since the read surfaces as a 409 instead of being clobbered. Contributed by
+  **Luigi Lotito (@lglot)** (#107).
+- **`mdnest edit` in the CLI** — the same capability, for the same reason, on
+  the surface that had the same gap. Changing one line used to mean `read`,
+  rebuild the note, `write` it back, which silently overwrote anything the web
+  UI, git-sync or another agent had saved in the meantime — and reported
+  `{"status":"ok"}` while doing it. `edit` matches literally, refuses an
+  ambiguous match unless you pass `--replace-all`, and guards the write with
+  the version it read. See `docs/cli.md`.
+
+### Fixed
+
+- **Preview showed every image broken.** A relative `![](shot.png)` resolved to
+  `/api/files/…` but carried no `?token=`, and a browser `<img>` GET cannot send
+  an `Authorization` header — so each one 401'd. The Live editor had always
+  appended the token; the Preview renderer never did. The token is attached
+  only for our own `/api/files` path and never rides along to a foreign host.
+  Contributed by **@bilal-wego** (#108).
+- **An image whose filename began with a scheme name never loaded in Preview.**
+  The absolute-URL test was a `startsWith('http')` prefix check, so an ordinary
+  uploaded `http-flow.png` was treated as an external URL, never got its
+  `/api/files/` prefix, and rendered broken in Preview while working fine in
+  the Live editor. Both renderers now share the Live editor's test, which also
+  covers `blob:` and uppercased schemes.
+- **A note whose content started with `@` could not be written at all.** The
+  CLI passed note bodies to `curl -d`, where a leading `@` means *read this
+  file* — so `mdnest create`/`write`/`append`/`prepend` on a note beginning
+  `@mention …` failed with curl's exit 26, reported as "couldn't reach the
+  server". Present since v1.0. Now `--data-raw`, which is `-d` without that
+  special case.
+- **The errexit lint flagged arithmetic as a command substitution.** `c=$((c +
+  1))` is arithmetic expansion and carries its own exit status, but the lint's
+  pattern saw the leading `$(` and reported it. Its self-proof now includes an
+  arithmetic line, so a relapse shows up as a miscount.
 
 ---
 
