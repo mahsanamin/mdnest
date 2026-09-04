@@ -323,6 +323,20 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 **Nothing merges to `main` until the Security Audit passes — this is enforced server-side, not by trust.** The `Security Audit` workflow (`.github/workflows/security-audit.yml`) runs four jobs on every PR to `main` — `Frontend (npm audit)`, `MCP Server (npm audit)`, `Backend (govulncheck)`, `Shell scripts (shellcheck)` — and those four are **required status checks** on the `main-branch` repository ruleset. A red or pending check blocks the merge (`gh pr merge` refuses; the PR sits at `mergeStateStatus=BLOCKED`). The `main-branch` ruleset has **no bypass actors** (`current_user_can_bypass: never`), so the gate binds even the repo owner — the separate `mahsan_bypass` ruleset only exempts the *pull-request-required* rule on non-default branches (that's how `develop` takes direct pushes), it does **not** exempt `main`'s status checks.
 
 - **Why it exists / the failure it prevents:** *running* a check is not *requiring* it. Before this gate, the audit ran but wasn't required, so a PR merged at `mergeStateStatus=UNSTABLE` with a failing check — that's how the `crypto/tls` stdlib vuln **GO-2026-5856** landed on `main` via the v3.11.5 release (CI caught it only on the *post-merge* push). Bumping Go `1.26.4 → 1.26.5` (go.mod `go` directive + `backend/Dockerfile` builder image) fixed the vuln.
+- **"Could not check" is not "found something", and the hook got this wrong.**
+  `npm audit` exits non-zero for a real advisory AND for a failure to reach the
+  advisories endpoint. The hook discarded stderr and reported every non-zero
+  exit as `VULNERABILITIES FOUND`, so an npm outage (503s on
+  `/-/npm/v1/security/advisories/bulk`) blocked pushes while naming the wrong
+  cause — and `npm audit fix` exited 0 having applied nothing, which is how the
+  same outage looks from the other side. `npm_audit_check` now separates them:
+  an unreachable endpoint SKIPs with the reason printed (matching how the hook
+  already treats a missing Go toolchain or shellcheck), a real finding still
+  blocks. `tests/pre-push-audit.sh` drives the helper against fake `npm`s
+  covering all seven outcomes, and the load-bearing one is "REAL vulnerability
+  still exits non-zero" — a fix here that reclassified too much would silently
+  disarm the check. Same rule as `curl_reason` in the CLI: keep the reason when
+  the reason is what the reader has to act on.
 - **The local pre-push hook is defense-in-depth, not the gate.** It runs `govulncheck` too, but **silently skips it when `go` isn't installed on the host** (e.g. this dev machine) and can be `--no-verify`'d — and it doesn't run at all on a GitHub-side PR merge. Treat CI required checks as the authoritative gate; never assume a green local push means the security scan ran.
 - **Managing the gate as code:** `scripts/apply-main-branch-protection.sh` (idempotent) adds/updates the required-status-check rule on the `main-branch` ruleset. It needs a token with repo **Administration: write** (a contents/PR-scoped fine-grained PAT gets HTTP 403 on the ruleset PUT). The check-context strings in that script must match the workflow job `name:` values **exactly** — a typo becomes an "Expected" check that never reports and blocks `main` permanently.
 
@@ -412,6 +426,16 @@ override: `MDNEST_SKIP_E2E=1`.
     bracket. (Run those via `login_run`, never inside `$(…)` — a command
     substitution is a subshell, so the `HOME` and status it sets are lost and the
     assertions pass vacuously.)
+  - `tests/pre-push-audit.sh` — **new in v4.4.0.** Drives the hook's own
+    `npm_audit_check` against fake `npm` shims for all eleven outcomes, with no
+    network. It exists because the hook conflated "npm audit found advisories"
+    with "npm audit could not reach the endpoint" (see the gate section above),
+    and the danger in fixing that is over-classifying: the load-bearing check is
+    **"a real vulnerability still exits non-zero"**, not the skip cases. Verified
+    by mutation — 8 of its 11 checks fail against the pre-fix hook, and the three
+    that pass in both are exactly the ok/block cases that must not change. The
+    helper is `sed`-extracted from the shipped hook so the test cannot drift from
+    the code it pins.
   - `tests/cli-edit-etag.sh` — **new in v4.4.0.** Drives the real CLI against a
     throwaway-`HOME` and a fake backend that reports the request it received,
     pinning that `mdnest edit`'s PUT actually carries `If-Match` and that a save

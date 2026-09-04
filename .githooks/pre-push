@@ -101,25 +101,57 @@ else
   FAILED=1
 fi
 
-# 3. Frontend: npm audit
-echo -n "Frontend security (npm audit)... "
-if (cd frontend && npm audit --audit-level=high) > /dev/null 2>&1; then
+# 2e. This hook's own npm-audit classification. Cheap (no network, fake `npm`
+# shims) and it guards the check below from being silently disarmed: the whole
+# risk in separating "endpoint unreachable" from "found advisories" is
+# reclassifying too much.
+echo -n "pre-push audit classification... "
+if bash tests/pre-push-audit.sh > /dev/null 2>&1; then
   echo "OK"
 else
-  echo "VULNERABILITIES FOUND"
-  echo "  Run: cd frontend && npm audit"
+  echo "FAILED"
+  echo "  Run: bash tests/pre-push-audit.sh"
   FAILED=1
 fi
 
-# 4. MCP Server: npm audit
-echo -n "MCP Server security (npm audit)... "
-if (cd mcp-server && npm audit --audit-level=high) > /dev/null 2>&1; then
-  echo "OK"
-else
+# 3/4. npm audit — "could not check" is NOT "found something".
+#
+# `npm audit` exits non-zero for BOTH outcomes: real advisories, and a failure
+# to reach the advisories endpoint. The old form discarded stderr and treated
+# every non-zero exit as VULNERABILITIES FOUND, so an npm outage blocked the
+# push while pointing at the wrong problem entirely — a 503 from
+# /-/npm/v1/security/advisories/bulk reads exactly like a high-severity
+# finding. Distinguishing them is the same rule the CLI learned for curl: keep
+# the reason when the reason is what the user has to act on.
+#
+# An unreachable endpoint SKIPs rather than blocks, which is how this hook
+# already handles govulncheck without a host Go and shellcheck when it isn't
+# installed. The authoritative gate is CI: `Frontend (npm audit)` and
+# `MCP Server (npm audit)` are required status checks on the main-branch
+# ruleset, with no bypass actors. A real finding still blocks here.
+npm_audit_check() {
+  local label="$1" dir="$2" out rc=0
+  echo -n "$label security (npm audit)... "
+  out=$( (cd "$dir" && npm audit --audit-level=high) 2>&1 ) || rc=$?
+  if [ "$rc" = "0" ]; then
+    echo "OK"
+    return 0
+  fi
+  # Anything here means npm never got an answer, so it cannot have found one.
+  case "$out" in
+    *"audit endpoint returned an error"*|*"Service Unavailable"*|*"audit network timeout"*|\
+    *"ENOTFOUND"*|*"EAI_AGAIN"*|*"ETIMEDOUT"*|*"ECONNRESET"*|*"socket hang up"*)
+      echo "SKIPPED (npm advisories endpoint unreachable — CI's required check is the gate)"
+      return 0
+      ;;
+  esac
   echo "VULNERABILITIES FOUND"
-  echo "  Run: cd mcp-server && npm audit"
-  FAILED=1
-fi
+  echo "  Run: cd $dir && npm audit"
+  return 1
+}
+
+npm_audit_check "Frontend"   frontend   || FAILED=1
+npm_audit_check "MCP Server" mcp-server || FAILED=1
 
 # 5. Backend: govulncheck — two tiers, mirroring the test strategy.
 #
