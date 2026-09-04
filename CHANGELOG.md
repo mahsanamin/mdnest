@@ -46,6 +46,16 @@ both surfaces they reach mdnest through.
   `@mention …` failed with curl's exit 26, reported as "couldn't reach the
   server". Present since v1.0. Now `--data-raw`, which is `-d` without that
   special case.
+- **Four transitive security advisories.** `qs` 6.15.2 -> 6.16.0 and `fast-uri`
+  3.1.5 -> 3.1.7 (mcp-server), `browserslist` 4.28.2 -> 4.28.8 (frontend) — all
+  three in-range lock-file updates, no `package.json` change. `@xmldom/xmldom`
+  0.9.10 -> 0.9.12 needed an `overrides` entry instead, because
+  `speech-rule-engine` pins it at exactly 0.9.10 and no semver-compatible fix
+  exists; same mechanism the `nanoid` and `lodash-es` overrides already use.
+  None of these came from this release's own changes — they are newly published
+  advisories against dependencies that were already there, and both
+  `npm audit` jobs are required checks, so they would have blocked the release
+  PR to `main` outright.
 - **The errexit lint flagged arithmetic as a command substitution.** `c=$((c +
   1))` is arithmetic expansion and carries its own exit status, but the lint's
   pattern saw the leading `$(` and reported it. Its self-proof now includes an

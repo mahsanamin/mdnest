@@ -39,9 +39,10 @@
     "vite": "^6.0.0",
     "vitest": "^4.1.9"
   },
-  "//overrides": "Patch two HIGH advisories pulled in transitively by @excalidraw/excalidraw: nanoid (<=3.3.16||4.0.0-5.1.15) and lodash-es (<=4.17.23, via mermaid-to-excalidraw->langium->chevrotain). nanoid@^5.1.16 is the patched line milkdown already resolves to; lodash-es@4.18.x is published by the lodash author (jdalton). Both are API-compatible ESM.",
+  "//overrides": "Patch transitive advisories pulled in transitively by @excalidraw/excalidraw: nanoid (<=3.3.16||4.0.0-5.1.15) and lodash-es (<=4.17.23, via mermaid-to-excalidraw->langium->chevrotain). nanoid@^5.1.16 is the patched line milkdown already resolves to; lodash-es@4.18.x is published by the lodash author (jdalton). Both are API-compatible ESM. @xmldom/xmldom@0.9.12 patches a MODERATE XML-fragment-injection advisory (GHSA-6gmq-8vp8-gcm6); it needs an override rather than a plain update because speech-rule-engine (MathJax accessibility, reached via the Live editor) pins it at EXACTLY 0.9.10, so no semver-compatible fix exists. 0.9.10 -> 0.9.12 is a patch bump inside the same minor.",
   "overrides": {
     "nanoid": "^5.1.16",
-    "lodash-es": "^4.18.1"
+    "lodash-es": "^4.18.1",
+    "@xmldom/xmldom": "0.9.12"
   }
 }
