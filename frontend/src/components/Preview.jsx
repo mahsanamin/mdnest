@@ -7,7 +7,8 @@ import { resolveWikiLink, wikiLinkExtension, internalMdLinkHtml } from '../wikil
 import { sanitizeHtml, sanitizeSvg } from '../sanitize.js';
 import { extractDiagramText, copyPlainText } from '../mermaid-text.js';
 import { isExcalidrawDoc, noteRelativePath } from '../excalidraw.js';
-import { getNote } from '../api.js';
+import { getNote, getToken } from '../api.js';
+import { resolveImgSrc } from '../img-src.js';
 
 
 // Safety net for any render-time exception inside Preview (mostly marked, but
@@ -127,10 +128,11 @@ function renderMarkdownUnsafe(source, ns, notePath, pathIndex) {
           const p = noteRelativePath(notePath, href);
           return `<div class="excalidraw-embed" data-excalidraw-src="${encodeURIComponent(p)}">Loading drawing…</div>`;
         }
-        let src = href || '';
-        if (src && !src.startsWith('http') && !src.startsWith('data:') && !src.startsWith('/')) {
-          src = baseDir + src;
-        }
+        // Relative srcs resolve under /api/files/ and need the JWT as a
+        // query param — an <img> GET can't carry an Authorization header,
+        // so without it every image in Preview 401s (the Live editor's
+        // proxyDomURL already does this).
+        const src = resolveImgSrc(href, baseDir, getToken());
         const titleAttr = title ? ` title="${title}"` : '';
         return `<img src="${src}" alt="${text || ''}"${titleAttr} />`;
       },
