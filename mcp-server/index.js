@@ -696,6 +696,72 @@ server.tool(
 );
 
 server.tool(
+  "edit_note",
+  "Replace an exact string inside a note, leaving the rest of the file untouched. Fails if old_string is not found, or if it occurs more than once and replace_all is not set. The write is rejected if the note changed after this tool read it, so a concurrent edit is never silently overwritten.",
+  {
+    namespace: z.string().describe("Namespace name"),
+    path: z.string().describe("Path to the note within the namespace"),
+    old_string: z.string().describe("Exact text to replace, including whitespace. Add surrounding context to make it unique."),
+    new_string: z.string().describe("Replacement text. Pass an empty string to delete old_string."),
+    replace_all: z.boolean().optional().describe("Replace every occurrence instead of failing when old_string is not unique"),
+  },
+  async ({ namespace, path, old_string, new_string, replace_all }) => {
+    try {
+      if (old_string === "") {
+        return { content: [{ type: "text", text: "Error: old_string must not be empty; use write_note to replace the whole note" }], isError: true };
+      }
+      if (old_string === new_string) {
+        return { content: [{ type: "text", text: "Error: old_string and new_string are identical; nothing to edit" }], isError: true };
+      }
+
+      const query = `ns=${encodeURIComponent(namespace)}&path=${encodeURIComponent(path)}`;
+      const readRes = await api(`/api/note?${query}`);
+      if (!readRes.ok) {
+        const text = await readRes.text().catch(() => "");
+        return { content: [{ type: "text", text: `Error ${readRes.status}: ${text}` }], isError: true };
+      }
+      const before = await readRes.text();
+      // The note's ETag, so the PUT below can refuse to clobber a concurrent save.
+      const etag = readRes.headers.get("etag");
+
+      const parts = before.split(old_string);
+      const matches = parts.length - 1;
+      if (matches === 0) {
+        return { content: [{ type: "text", text: "Error: old_string not found in the note" }], isError: true };
+      }
+      if (matches > 1 && !replace_all) {
+        return { content: [{ type: "text", text: `Error: old_string occurs ${matches} times; add surrounding context to make it unique, or set replace_all` }], isError: true };
+      }
+
+      let after;
+      if (replace_all) {
+        // join() splices the replacement in literally — unlike String.replace,
+        // which would expand $&/$1 patterns inside new_string.
+        after = parts.join(new_string);
+      } else {
+        const at = before.indexOf(old_string);
+        after = before.slice(0, at) + new_string + before.slice(at + old_string.length);
+      }
+
+      const writeRes = await api(`/api/note?${query}`, {
+        method: "PUT",
+        body: after,
+        headers: etag ? { "If-Match": etag } : {},
+      });
+      if (!writeRes.ok) {
+        const text = await writeRes.text().catch(() => "");
+        const hint = text.includes("modified by another user") ? " -- read the note again and redo the edit on the current content" : "";
+        return { content: [{ type: "text", text: `Error ${writeRes.status}: ${text}${hint}` }], isError: true };
+      }
+      const data = await writeRes.json().catch(() => ({}));
+      return { content: [{ type: "text", text: JSON.stringify({ ...data, replacements: replace_all ? matches : 1 }) }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+server.tool(
   "create_folder",
   "Create a new folder",
   {

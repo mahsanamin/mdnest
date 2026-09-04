@@ -173,7 +173,7 @@ Create an API token in Settings (gear icon) > API Tokens, then configure your MC
 }
 ```
 
-**Available tools:** `list_namespaces`, `list_tree`, `read_note`, `write_note`, `append_note`, `prepend_note`, `create_note`, `create_folder`, `delete_item`, `move_item`, `search_notes`
+**Available tools:** `list_namespaces`, `list_tree`, `read_note`, `write_note`, `edit_note`, `append_note`, `prepend_note`, `create_note`, `create_folder`, `delete_item`, `move_item`, `search_notes`
 
 For a **shared/hosted endpoint** the server also speaks the streamable-HTTP
 transport (`MCP_TRANSPORT=http`, `POST /mcp`), with an optional per-user OAuth

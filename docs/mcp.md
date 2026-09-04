@@ -14,7 +14,7 @@ transports**:
 | **streamable-HTTP** | `MCP_TRANSPORT=http` | A shared/hosted endpoint that many clients (or a team) reach over the network. Runs as a long-lived service and exposes `POST /mcp`. |
 
 > **Available tools:** `list_namespaces`, `list_tree`, `read_note`,
-> `write_note`, `append_note`, `prepend_note`, `create_note`, `create_folder`,
+> `write_note`, `edit_note`, `append_note`, `prepend_note`, `create_note`, `create_folder`,
 > `delete_item`, `move_item`, `search_notes`, `list_tasks`, `create_task`,
 > `move_task`, `edit_task`, `set_task_field`, `toggle_task`, `delete_task`,
 > `search_tasks`, `create_excalidraw`, `draw_excalidraw`, `read_excalidraw`,
