@@ -323,6 +323,20 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 **Nothing merges to `main` until the Security Audit passes — this is enforced server-side, not by trust.** The `Security Audit` workflow (`.github/workflows/security-audit.yml`) runs four jobs on every PR to `main` — `Frontend (npm audit)`, `MCP Server (npm audit)`, `Backend (govulncheck)`, `Shell scripts (shellcheck)` — and those four are **required status checks** on the `main-branch` repository ruleset. A red or pending check blocks the merge (`gh pr merge` refuses; the PR sits at `mergeStateStatus=BLOCKED`). The `main-branch` ruleset has **no bypass actors** (`current_user_can_bypass: never`), so the gate binds even the repo owner — the separate `mahsan_bypass` ruleset only exempts the *pull-request-required* rule on non-default branches (that's how `develop` takes direct pushes), it does **not** exempt `main`'s status checks.
 
 - **Why it exists / the failure it prevents:** *running* a check is not *requiring* it. Before this gate, the audit ran but wasn't required, so a PR merged at `mergeStateStatus=UNSTABLE` with a failing check — that's how the `crypto/tls` stdlib vuln **GO-2026-5856** landed on `main` via the v3.11.5 release (CI caught it only on the *post-merge* push). Bumping Go `1.26.4 → 1.26.5` (go.mod `go` directive + `backend/Dockerfile` builder image) fixed the vuln.
+- **Read the threshold the gate actually sets before "fixing" what an audit
+  prints.** Both npm audit jobs run `--audit-level=high`, so a moderate
+  advisory is below the gate on purpose (`security-audit.yml` says as much:
+  "Bump severity here when those are cleaned up"). A bare local `npm audit`
+  lists every severity, and reading that as the gate is how v4.4.0-dev grew an
+  `overrides` entry for a MODERATE advisory that was never blocking anything —
+  and the override then made the tree invalid to npm's legacy quick-audit
+  endpoint (`400 … Invalid package tree`), which refuses the whole audit. One
+  moderate advisory traded for no audit signal at all. **An `overrides` entry
+  must satisfy what the parent declares**; `speech-rule-engine` pins
+  `@xmldom/xmldom` at exactly `0.9.10`, so there is nothing to force safely.
+  Local runs passed because local npm reached the working bulk endpoint while
+  CI fell back to the legacy one — verifying in one environment verified one
+  environment.
 - **"Could not check" is not "found something", and the hook got this wrong.**
   `npm audit` exits non-zero for a real advisory AND for a failure to reach the
   advisories endpoint. The hook discarded stderr and reported every non-zero
