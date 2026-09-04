@@ -244,6 +244,34 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 - **Under `set -e`, a PLAIN assignment from a command substitution is a silent script-killer** (v4.3.2+). `x=$(cmd)` takes the substitution's exit status, so the script dies on that line and everything below it — *including the error handling written for exactly that failure* — never runs. This is not a hypothetical: it shipped in `api()` in v1.0 and survived 47 releases. `mdnest servers` printed the table header, exited with curl's `28`, and never reached the `unreachable (DNS|refused|timeout|TLS)` labels or the "works in your browser?" hint; because the server list is globbed alphabetically, one dead server also hid every healthy server sorting after it. Write `x=$(cmd) || x=""` — always — and do **not** follow it with `rc=$?`, which overwrites the real status with the now-successful assignment's `0` and reports `unreachable (curl 0)`. `run_errexit_lint` in `tests/cli-unit.sh` fails the build on a new unguarded site; it proves itself against a probe file, because a lint that cannot fail is worse than none. Two exemptions, both verified rather than assumed: `local x=$(...)` is safe (`local` is a builtin, so the status is the builtin's own — which is why the CLI is full of them), and a substitution ending `|| true)` is already guarded from the inside.
 - **The same class also hides in a trailing `&&` list, and the lint cannot see it.** `[ -n "$x" ] && do_thing` as the *last statement of a function* makes a false test the function's return value, which `set -e` then treats as a failure. This was reintroduced *inside* the fix for it, and the behavioural test (`run_unreachable_suite`, "servers: unreachable server still exits 0") caught it, not the lint. Conditions inside an `if` are exempt from errexit; a trailing `&&` list is not. Prefer `if`.
 - **The CLI is pull-only, so a fix does not reach anyone until they run `mdnest update`** (v4.3.2+). Nothing pushes, and the in-app banner tracks the *server*, not the CLI. Before v4.3.2 the only version check was a MAJOR mismatch at login, which is how a bug present since v1.0 stayed invisible to every client running it. `version_gt()` + `cli_update_notice()` now print one line — naming both versions and the exact command — in `mdnest servers`, `mdnest whoami`, and `mdnest login`. Deliberately **not** on every command (there is no update cache, and a per-read check would be its own bug), and deliberately compared against the **server's** version rather than GitHub's latest: no extra network call, no new failure mode, and CLI + server ship from the same repo at the same number. Known limitation, stated rather than hidden: a client whose server is *also* stale hears nothing. `version_gt` is pure bash — no python3, no jq, and no `sort -V` (busybox sort has none) — and is pre-release aware the same way `isVersionNewer` in `App.jsx` is, so a `-dev` build never nags about the release it is a candidate for.
+- **A read-modify-write must carry the version it read.** `mdnest edit`
+  (v4.4.0+) exists because the only way to change one line used to be `read` +
+  rebuild + `write`, and a plain `PUT` overwrites whatever the web UI,
+  git-sync, or another agent saved in between while printing
+  `{"status":"ok"}`. The PUT sends `If-Match` with the ETag from its own read,
+  so the backend answers 409 instead. Two things this needed and a naive
+  version would miss: `api()` had to grow an optional response-header dump
+  (`-D`) because the ETag is only in the headers — do **not** recompute it
+  client-side from the content, that duplicates `canonicalForETag` in a second
+  language and silently rots; and the splice is **pure bash parameter
+  expansion**, not sed/awk, because a note is arbitrary markdown — a regex tool
+  reads `.`/`*`/`[` in the needle and expands `&`/`\1` in the replacement,
+  corrupting exactly the code fences people keep in notes. Quoting the pattern
+  inside `${...}` forces literal matching and needs no python3/jq/awk tier at
+  all.
+- **`$( )` strips trailing newlines, so every capture of note content needs a
+  sentinel.** `x=$(cmd)` silently deletes the note's final newline, which turns
+  "leave the rest of the file alone" into a lie. `cmd_edit` captures as
+  `$(... ; printf 'X')` and strips the `X`. This bit twice in one change — once
+  on the read and again on the splice result — and the second one survived the
+  first fix. Note the read uses `&&` before the `printf`, not `;`: with `;` the
+  status is printf's `0` and a failed `api()` sails straight past its error
+  handling.
+- **Body content goes to curl as `--data-raw`, never `-d`.** `-d @foo` makes
+  curl read a *file* called `foo`, so a note whose content merely STARTS with
+  `@` (`@mention …`) could not be created, written, appended or prepended —
+  it failed with curl's exit 26, surfaced as "couldn't reach the server".
+  Shipped in v1.0, fixed in v4.4.0. `--data-raw` is `-d` without that case.
 - **Every python3 call goes through `py()`** (v4.1.2+), never `python3` directly. It passes `-S` (skip site initialisation, so a user's broken site-packages/`.pth` can't print a traceback into our output — issue #87) and `-E` (ignore `PYTHON*` env), drops python's stderr, and returns its exit status. **Gate on the result, not on presence:** `have python3` passing does not mean python3 *works*, so every call site must fall through to its pure-bash/awk tier when `py` fails. A present-but-broken interpreter is the failure mode that bit us, not a missing one.
 - Dependency tiers, in order: python3 (`py`) → jq → pure bash/awk. The awk tier is not a token gesture; it is the tier that runs on a fresh machine, and `tests/e2e-docker.sh` proves it in a bare alpine container with neither python3 nor jq.
 - **Human-facing output is rendered in awk only** — `format_tree` / `format_namespaces` for `mdnest list` have deliberately no python3/jq tier, so a listing is byte-identical on every machine and a broken python can't garble it. Verified on gawk, mawk and busybox awk. Raw API JSON stays available behind `--json` / `MDNEST_JSON=1` for scripts; don't make raw JSON the default output of a command again.
@@ -384,6 +412,19 @@ override: `MDNEST_SKIP_E2E=1`.
     bracket. (Run those via `login_run`, never inside `$(…)` — a command
     substitution is a subshell, so the `HOME` and status it sets are lost and the
     assertions pass vacuously.)
+  - `tests/cli-edit-etag.sh` — **new in v4.4.0.** Drives the real CLI against a
+    throwaway-`HOME` and a fake backend that reports the request it received,
+    pinning that `mdnest edit`'s PUT actually carries `If-Match` and that a save
+    landing inside the read-modify-write window is refused rather than
+    overwritten. It is separate from `cli-unit.sh` on purpose: the unit tier can
+    only prove the splice helpers are correct, and **helpers that work while
+    nothing consults them are exactly how this bug comes back** — deleting the
+    `If-Match` line from `cmd_edit` leaves every unit check green. Verified by
+    mutation: that deletion fails 7 of its 9 checks, including "the concurrent
+    save survived". The fake backend mutates the note *when it serves the GET*,
+    so the race is deterministic and there is nothing to flake. Needs python3
+    for the fake backend only and SKIPs without it; the CLI's own no-python3
+    tier stays covered by `cli-unit.sh` and `e2e-docker.sh`.
   - `tests/server-unit.sh` — **new in v4.1.3.** Pure-function checks of
     `mdnest-server`, loaded through its `MDNEST_SERVER_LIB=1 source` hook (the
     mirror of the client CLI's `MDNEST_LIB`). Currently covers namespace-drift
