@@ -142,8 +142,13 @@ mdnest append @home/journal/today.md "- [ ] send the recap"
 mdnest list   @home/journal                    # a tree, not raw JSON
 mdnest create @home/ideas/new.md "First line"  # create = new file
 mdnest write  @home/ideas/new.md "Replaced"    # write = must already exist
+mdnest edit   @home/log.md "draft" "final"     # edit = one exact string
 echo "piped" | mdnest append @home/log.md -    # stdin with -
 ```
+
+`edit` is the one to reach for from a script or an agent: it changes only the
+text you name, and it refuses the write if the note changed since it read it,
+so a save from the web UI or another client is never silently overwritten.
 
 Drop the `@alias` if you only configured one server. `mdnest --help` lists
 everything; `mdnest docs` prints the full reference.

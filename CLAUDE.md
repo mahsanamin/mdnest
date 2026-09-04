@@ -116,6 +116,8 @@ frontend/
     lazyWithRetry.js         # v4.2.1+ — pure module: retries a failed dynamic import and, on the LAST attempt, re-imports with a `?mdnest_retry=` query. The proxy's cache key is the request URI, so a different URI misses an entry that cached an error for an immutable asset URL. Used by every React.lazy() call in App.jsx.
     __tests__/pasteable-commands.test.js # v4.3.3+ — every shell command the UI hands the user with a Copy button must survive a paste. Checks a shell block IN FULL (the button copies the whole thing, and one offender began `echo … | mdnest append <ns>/…`, which a "line starts with mdnest" rule misses) and excludes JSON config blocks (the MCP tab's config is pasted into a FILE, where `<your token>` is fine).
     __tests__/lazyWithRetry.test.js # Pins the retry policy: plain retry for a blip, cache-bust on the final attempt, and the no-URL fallback for engines whose error message omits it
+    img-src.js               # v4.4.0+ — pure module: resolveImgSrc turns a markdown image href into the <img src> Preview renders. A relative path resolves under /api/files/ and carries the JWT as ?token= (an <img> GET cannot set an Authorization header); absolute/rooted hrefs pass through untouched so the token never reaches a foreign host. The "already absolute" test is SHARED with the Live editor's proxyDomURL by design — /^(https?:|data:|blob:|\/)/i — because both renderers show the same note, and the prefix form it replaced called any filename starting with "http" absolute, so an uploaded http-flow.png rendered broken in Preview and fine in Live.
+    __tests__/img-src.test.js # Pins both directions (our /api/files URLs get the token, foreign ones never do) AND the parity cases that fail against the prefix form
     echo-gate.js             # v4.1.1+ — pure module (no React): suppresses the file-changed echo of a tab's own save. In-flight-save window + epoch token: broadcasts arriving before the PUT response resolves are deferred and re-checked once the save settles; reset() on note switch invalidates the window. Closes the self-conflict-banner race (issue #82).
     __tests__/echo-gate.test.js # Pins the echo-beats-response race, late echoes, note-switch epochs
     tree-refresh.js          # v4.1.3+ — pure module: when the sidebar tree re-reads itself (TREE_POLL_MS + shouldPollTree). The live-collab websocket is deliberately NOT an input — `tree-changed` only fires for API writes, so gating the poll on it left git-sync/filesystem writes invisible until a manual Refresh.
@@ -152,7 +154,8 @@ frontend/
       EditorErrorBoundary.jsx # React error boundary around Live editor — catches Milkdown crashes and flips to Basic (v3.8.0+)
 
 mcp-server/
-  index.js                   # MCP server entry — tools + resources wrapping REST API
+  index.js                   # MCP server entry — tools + resources wrapping REST API. v4.4.0+: `edit_note` is the exact-string editor — splices with indexOf/slice + join rather than String.replace (which would expand $&/$1 inside new_string and corrupt a pasted shell snippet), and sends If-Match with the ETag from its own read so a concurrent save 409s instead of being clobbered. It is the only tool that uses the ETag; `write_note` still overwrites, which is why partial edits should go through `edit_note`.
+  test_edit.mjs              # 14 assertions against a fake backend that serves an ETag and enforces If-Match: unique/missing/ambiguous match, replace_all, literal $ handling, the concurrent-save conflict. Registered in `npm test`.
   package.json
 
 deploy/
@@ -169,7 +172,7 @@ deploy/
   ci.yml                     # (v3.11.7+) go build/vet/test -race, frontend build+test, helm lint/render/kubeconform, image builds
   release.yml                # (v3.11.7+) on v* tags: push images + chart to ghcr.io/<owner>/
 
-mdnest                       # Client CLI (login, note read/write/append, works from any machine)
+mdnest                       # Client CLI (login, note read/write/append/edit, works from any machine). v4.4.0+ `edit` is the guarded read-modify-write — see the CLI conventions below for why the splice is pure bash and why the capture needs a sentinel.
 mdnest-server                # Server management CLI (start, stop, rebuild, reset-password, runs from project dir). `MDNEST_SERVER_LIB=1 source ./mdnest-server` loads its functions without dispatching, mirroring the client CLI's MDNEST_LIB hook (v4.1.3+)
 setup.sh                     # Reads mdnest.conf, generates docker-compose.yml + .env
 mdnest.conf.sample           # Template config with MOUNT_ entries
