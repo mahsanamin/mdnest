@@ -47,6 +47,25 @@ describe('resolveImgSrc', () => {
     }
   });
 
+  // The prefix test this replaced called any filename starting with those
+  // letters an absolute URL, so an ordinary uploaded screenshot rendered
+  // broken in Preview while working in the Live editor.
+  it('treats a filename that merely starts with a scheme name as relative', () => {
+    for (const name of ['http-flow.png', 'https-diagram.png', 'httpd-setup.png', 'data-model.png']) {
+      expect(resolveImgSrc(name, BASE, TOK)).toBe(
+        `${BASE}${name}?token=${encodeURIComponent(TOK)}`
+      );
+    }
+  });
+
+  // Parity with the Live editor's proxyDomURL: /^(https?:|data:|blob:|\/)/i.
+  // Both renderers show the same note, so the two tests must agree.
+  it('matches the Live editor on blob: and uppercased schemes', () => {
+    for (const href of ['blob:https://host/uuid', 'HTTPS://example.com/x.png', 'Data:image/png;base64,AAAA']) {
+      expect(resolveImgSrc(href, BASE, TOK)).toBe(href);
+    }
+  });
+
   it('handles empty/null href safely', () => {
     expect(resolveImgSrc('', BASE, TOK)).toBe('');
     expect(resolveImgSrc(null, BASE, TOK)).toBe('');

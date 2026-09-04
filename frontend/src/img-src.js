@@ -9,11 +9,21 @@
 //
 // Pure module (no React, no api.js import) so it is unit-testable standalone;
 // Preview.jsx supplies the token from api.js getToken().
+//
+// "Already absolute" is the SAME test the Live editor's proxyDomURL uses, and
+// it must stay that way — the two renderers show the same note, so a src that
+// resolves in one and not the other is a broken image in exactly one mode.
+// The prefix form this replaced (`startsWith('http')`) treated any filename
+// beginning with those letters as an absolute URL, so `![](http-flow.png)` —
+// a perfectly ordinary uploaded screenshot — never got its /api/files/ prefix
+// and rendered broken in Preview while working in Live. It also missed
+// `blob:` and anything uppercased. Require the scheme's colon, and match
+// case-insensitively.
+const ABSOLUTE_SRC = /^(https?:|data:|blob:|\/)/i;
+
 export function resolveImgSrc(href, baseDir, token) {
-  let src = href || '';
-  if (src && !src.startsWith('http') && !src.startsWith('data:') && !src.startsWith('/')) {
-    src = baseDir + src;
-    if (token) src += `?token=${encodeURIComponent(token)}`;
-  }
-  return src;
+  const src = href || '';
+  if (!src || ABSOLUTE_SRC.test(src)) return src;
+  const resolved = baseDir + src;
+  return token ? `${resolved}?token=${encodeURIComponent(token)}` : resolved;
 }
