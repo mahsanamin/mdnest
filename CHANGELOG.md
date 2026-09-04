@@ -4,6 +4,91 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v4.4.0 — Edits that don't overwrite someone else
+
+Changing one line in a note used to mean rewriting the whole file. Both surfaces
+agents reach mdnest through — the MCP server and the CLI — could only replace a
+note wholesale, so the only way to edit part of one was to read it, rebuild it,
+and write it back. Anything saved in that window by the web UI, git-sync, or
+another agent was silently overwritten, and the write reported
+`{"status":"ok"}` while doing it.
+
+Both now have an exact-string `edit` that carries the version it read, so a
+concurrent save comes back as a 409 with nothing lost. Plus the Preview pane
+renders images again.
+
+### Added
+
+- **`edit_note` MCP tool** — replace an exact string in a note instead of
+  rewriting the whole file. Zero matches, or more than one without
+  `replace_all`, is an error naming the count rather than a guess; the
+  replacement is spliced literally, so `$&` and `$1` in a pasted shell snippet
+  stay as written; and the write carries `If-Match`, so a save that landed
+  since the read surfaces as a 409 instead of being clobbered. Contributed by
+  **Luigi Lotito (@lglot)** (#107).
+- **`mdnest edit` in the CLI** — the same capability, for the same reason, on
+  the surface that had the same gap. Changing one line used to mean `read`,
+  rebuild the note, `write` it back, which silently overwrote anything the web
+  UI, git-sync or another agent had saved in the meantime — and reported
+  `{"status":"ok"}` while doing it. `edit` matches literally, refuses an
+  ambiguous match unless you pass `--replace-all`, and guards the write with
+  the version it read. See `docs/cli.md`.
+
+### Fixed
+
+- **Preview showed every image broken.** A relative `![](shot.png)` resolved to
+  `/api/files/…` but carried no `?token=`, and a browser `<img>` GET cannot send
+  an `Authorization` header — so each one 401'd. The Live editor had always
+  appended the token; the Preview renderer never did. The token is attached
+  only for our own `/api/files` path and never rides along to a foreign host.
+  Contributed by **@bilal-wego** (#108).
+- **An image whose filename began with a scheme name never loaded in Preview.**
+  The absolute-URL test was a `startsWith('http')` prefix check, so an ordinary
+  uploaded `http-flow.png` was treated as an external URL, never got its
+  `/api/files/` prefix, and rendered broken in Preview while working fine in
+  the Live editor. Both renderers now share the Live editor's test, which also
+  covers `blob:` and uppercased schemes.
+- **A note whose content started with `@` could not be written at all.** The
+  CLI passed note bodies to `curl -d`, where a leading `@` means *read this
+  file* — so `mdnest create`/`write`/`append`/`prepend` on a note beginning
+  `@mention …` failed with curl's exit 26, reported as "couldn't reach the
+  server". Present since v1.0. Now `--data-raw`, which is `-d` without that
+  special case.
+- **The pre-push hook called an npm outage a vulnerability.** `npm audit` exits
+  non-zero both when it finds advisories and when it cannot reach the
+  advisories endpoint, and the hook discarded stderr and treated every non-zero
+  exit as `VULNERABILITIES FOUND` — so a run of 503s from
+  `/-/npm/v1/security/advisories/bulk` blocked the push while naming the wrong
+  cause, and `npm audit fix` silently applied nothing for the same reason. An
+  unreachable endpoint now SKIPs with the reason stated, the way the hook
+  already handles govulncheck without a host Go toolchain; CI's required checks
+  remain the authoritative gate. A real finding still blocks — all seven
+  outcomes are probed in `tests/pre-push-audit.sh`.
+- **Four transitive security advisories.** `qs` 6.15.2 -> 6.16.0 and `fast-uri`
+  3.1.5 -> 3.1.7 (mcp-server), `browserslist` 4.28.2 -> 4.28.8 (frontend) — all
+  three in-range lock-file updates, no `package.json` change. None of these came
+  from this release's own changes — they are newly published advisories against
+  dependencies that were already there, and both `npm audit` jobs are required
+  checks, so `browserslist` (the only **high**) would have blocked the release
+  PR to `main` outright.
+
+  `@xmldom/xmldom` (moderate, GHSA-6gmq-8vp8-gcm6, reached via
+  `speech-rule-engine`) is knowingly **left in place**. There is no
+  semver-compatible fix — `speech-rule-engine` declares it as exactly `0.9.10` —
+  and an `overrides` entry forcing `0.9.12` was tried and reverted: it makes the
+  tree invalid to npm's legacy quick-audit endpoint, which then refuses the whole
+  audit (`400 Bad Request … Invalid package tree`). That trades one moderate
+  advisory for losing the audit signal entirely, which is strictly worse. Both
+  audit jobs run `--audit-level=high`, so a moderate is below the gate by
+  deliberate policy (see the severity note in `security-audit.yml`). Revisit if
+  it is ever rated high or `speech-rule-engine` relaxes the pin.
+- **The errexit lint flagged arithmetic as a command substitution.** `c=$((c +
+  1))` is arithmetic expansion and carries its own exit status, but the lint's
+  pattern saw the leading `$(` and reported it. Its self-proof now includes an
+  arithmetic line, so a relapse shows up as a miscount.
+
+---
+
 ## v4.3.3 — Instructions that survive a paste
 
 A short one, entirely about the second half of the v4.3.2 report: someone hit a

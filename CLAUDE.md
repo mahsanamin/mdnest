@@ -116,6 +116,8 @@ frontend/
     lazyWithRetry.js         # v4.2.1+ — pure module: retries a failed dynamic import and, on the LAST attempt, re-imports with a `?mdnest_retry=` query. The proxy's cache key is the request URI, so a different URI misses an entry that cached an error for an immutable asset URL. Used by every React.lazy() call in App.jsx.
     __tests__/pasteable-commands.test.js # v4.3.3+ — every shell command the UI hands the user with a Copy button must survive a paste. Checks a shell block IN FULL (the button copies the whole thing, and one offender began `echo … | mdnest append <ns>/…`, which a "line starts with mdnest" rule misses) and excludes JSON config blocks (the MCP tab's config is pasted into a FILE, where `<your token>` is fine).
     __tests__/lazyWithRetry.test.js # Pins the retry policy: plain retry for a blip, cache-bust on the final attempt, and the no-URL fallback for engines whose error message omits it
+    img-src.js               # v4.4.0+ — pure module: resolveImgSrc turns a markdown image href into the <img src> Preview renders. A relative path resolves under /api/files/ and carries the JWT as ?token= (an <img> GET cannot set an Authorization header); absolute/rooted hrefs pass through untouched so the token never reaches a foreign host. The "already absolute" test is SHARED with the Live editor's proxyDomURL by design — /^(https?:|data:|blob:|\/)/i — because both renderers show the same note, and the prefix form it replaced called any filename starting with "http" absolute, so an uploaded http-flow.png rendered broken in Preview and fine in Live.
+    __tests__/img-src.test.js # Pins both directions (our /api/files URLs get the token, foreign ones never do) AND the parity cases that fail against the prefix form
     echo-gate.js             # v4.1.1+ — pure module (no React): suppresses the file-changed echo of a tab's own save. In-flight-save window + epoch token: broadcasts arriving before the PUT response resolves are deferred and re-checked once the save settles; reset() on note switch invalidates the window. Closes the self-conflict-banner race (issue #82).
     __tests__/echo-gate.test.js # Pins the echo-beats-response race, late echoes, note-switch epochs
     tree-refresh.js          # v4.1.3+ — pure module: when the sidebar tree re-reads itself (TREE_POLL_MS + shouldPollTree). The live-collab websocket is deliberately NOT an input — `tree-changed` only fires for API writes, so gating the poll on it left git-sync/filesystem writes invisible until a manual Refresh.
@@ -152,7 +154,8 @@ frontend/
       EditorErrorBoundary.jsx # React error boundary around Live editor — catches Milkdown crashes and flips to Basic (v3.8.0+)
 
 mcp-server/
-  index.js                   # MCP server entry — tools + resources wrapping REST API
+  index.js                   # MCP server entry — tools + resources wrapping REST API. v4.4.0+: `edit_note` is the exact-string editor — splices with indexOf/slice + join rather than String.replace (which would expand $&/$1 inside new_string and corrupt a pasted shell snippet), and sends If-Match with the ETag from its own read so a concurrent save 409s instead of being clobbered. It is the only tool that uses the ETag; `write_note` still overwrites, which is why partial edits should go through `edit_note`.
+  test_edit.mjs              # 14 assertions against a fake backend that serves an ETag and enforces If-Match: unique/missing/ambiguous match, replace_all, literal $ handling, the concurrent-save conflict. Registered in `npm test`.
   package.json
 
 deploy/
@@ -169,7 +172,7 @@ deploy/
   ci.yml                     # (v3.11.7+) go build/vet/test -race, frontend build+test, helm lint/render/kubeconform, image builds
   release.yml                # (v3.11.7+) on v* tags: push images + chart to ghcr.io/<owner>/
 
-mdnest                       # Client CLI (login, note read/write/append, works from any machine)
+mdnest                       # Client CLI (login, note read/write/append/edit, works from any machine). v4.4.0+ `edit` is the guarded read-modify-write — see the CLI conventions below for why the splice is pure bash and why the capture needs a sentinel.
 mdnest-server                # Server management CLI (start, stop, rebuild, reset-password, runs from project dir). `MDNEST_SERVER_LIB=1 source ./mdnest-server` loads its functions without dispatching, mirroring the client CLI's MDNEST_LIB hook (v4.1.3+)
 setup.sh                     # Reads mdnest.conf, generates docker-compose.yml + .env
 mdnest.conf.sample           # Template config with MOUNT_ entries
@@ -244,6 +247,34 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 - **Under `set -e`, a PLAIN assignment from a command substitution is a silent script-killer** (v4.3.2+). `x=$(cmd)` takes the substitution's exit status, so the script dies on that line and everything below it — *including the error handling written for exactly that failure* — never runs. This is not a hypothetical: it shipped in `api()` in v1.0 and survived 47 releases. `mdnest servers` printed the table header, exited with curl's `28`, and never reached the `unreachable (DNS|refused|timeout|TLS)` labels or the "works in your browser?" hint; because the server list is globbed alphabetically, one dead server also hid every healthy server sorting after it. Write `x=$(cmd) || x=""` — always — and do **not** follow it with `rc=$?`, which overwrites the real status with the now-successful assignment's `0` and reports `unreachable (curl 0)`. `run_errexit_lint` in `tests/cli-unit.sh` fails the build on a new unguarded site; it proves itself against a probe file, because a lint that cannot fail is worse than none. Two exemptions, both verified rather than assumed: `local x=$(...)` is safe (`local` is a builtin, so the status is the builtin's own — which is why the CLI is full of them), and a substitution ending `|| true)` is already guarded from the inside.
 - **The same class also hides in a trailing `&&` list, and the lint cannot see it.** `[ -n "$x" ] && do_thing` as the *last statement of a function* makes a false test the function's return value, which `set -e` then treats as a failure. This was reintroduced *inside* the fix for it, and the behavioural test (`run_unreachable_suite`, "servers: unreachable server still exits 0") caught it, not the lint. Conditions inside an `if` are exempt from errexit; a trailing `&&` list is not. Prefer `if`.
 - **The CLI is pull-only, so a fix does not reach anyone until they run `mdnest update`** (v4.3.2+). Nothing pushes, and the in-app banner tracks the *server*, not the CLI. Before v4.3.2 the only version check was a MAJOR mismatch at login, which is how a bug present since v1.0 stayed invisible to every client running it. `version_gt()` + `cli_update_notice()` now print one line — naming both versions and the exact command — in `mdnest servers`, `mdnest whoami`, and `mdnest login`. Deliberately **not** on every command (there is no update cache, and a per-read check would be its own bug), and deliberately compared against the **server's** version rather than GitHub's latest: no extra network call, no new failure mode, and CLI + server ship from the same repo at the same number. Known limitation, stated rather than hidden: a client whose server is *also* stale hears nothing. `version_gt` is pure bash — no python3, no jq, and no `sort -V` (busybox sort has none) — and is pre-release aware the same way `isVersionNewer` in `App.jsx` is, so a `-dev` build never nags about the release it is a candidate for.
+- **A read-modify-write must carry the version it read.** `mdnest edit`
+  (v4.4.0+) exists because the only way to change one line used to be `read` +
+  rebuild + `write`, and a plain `PUT` overwrites whatever the web UI,
+  git-sync, or another agent saved in between while printing
+  `{"status":"ok"}`. The PUT sends `If-Match` with the ETag from its own read,
+  so the backend answers 409 instead. Two things this needed and a naive
+  version would miss: `api()` had to grow an optional response-header dump
+  (`-D`) because the ETag is only in the headers — do **not** recompute it
+  client-side from the content, that duplicates `canonicalForETag` in a second
+  language and silently rots; and the splice is **pure bash parameter
+  expansion**, not sed/awk, because a note is arbitrary markdown — a regex tool
+  reads `.`/`*`/`[` in the needle and expands `&`/`\1` in the replacement,
+  corrupting exactly the code fences people keep in notes. Quoting the pattern
+  inside `${...}` forces literal matching and needs no python3/jq/awk tier at
+  all.
+- **`$( )` strips trailing newlines, so every capture of note content needs a
+  sentinel.** `x=$(cmd)` silently deletes the note's final newline, which turns
+  "leave the rest of the file alone" into a lie. `cmd_edit` captures as
+  `$(... ; printf 'X')` and strips the `X`. This bit twice in one change — once
+  on the read and again on the splice result — and the second one survived the
+  first fix. Note the read uses `&&` before the `printf`, not `;`: with `;` the
+  status is printf's `0` and a failed `api()` sails straight past its error
+  handling.
+- **Body content goes to curl as `--data-raw`, never `-d`.** `-d @foo` makes
+  curl read a *file* called `foo`, so a note whose content merely STARTS with
+  `@` (`@mention …`) could not be created, written, appended or prepended —
+  it failed with curl's exit 26, surfaced as "couldn't reach the server".
+  Shipped in v1.0, fixed in v4.4.0. `--data-raw` is `-d` without that case.
 - **Every python3 call goes through `py()`** (v4.1.2+), never `python3` directly. It passes `-S` (skip site initialisation, so a user's broken site-packages/`.pth` can't print a traceback into our output — issue #87) and `-E` (ignore `PYTHON*` env), drops python's stderr, and returns its exit status. **Gate on the result, not on presence:** `have python3` passing does not mean python3 *works*, so every call site must fall through to its pure-bash/awk tier when `py` fails. A present-but-broken interpreter is the failure mode that bit us, not a missing one.
 - Dependency tiers, in order: python3 (`py`) → jq → pure bash/awk. The awk tier is not a token gesture; it is the tier that runs on a fresh machine, and `tests/e2e-docker.sh` proves it in a bare alpine container with neither python3 nor jq.
 - **Human-facing output is rendered in awk only** — `format_tree` / `format_namespaces` for `mdnest list` have deliberately no python3/jq tier, so a listing is byte-identical on every machine and a broken python can't garble it. Verified on gawk, mawk and busybox awk. Raw API JSON stays available behind `--json` / `MDNEST_JSON=1` for scripts; don't make raw JSON the default output of a command again.
@@ -295,6 +326,34 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 **Nothing merges to `main` until the Security Audit passes — this is enforced server-side, not by trust.** The `Security Audit` workflow (`.github/workflows/security-audit.yml`) runs four jobs on every PR to `main` — `Frontend (npm audit)`, `MCP Server (npm audit)`, `Backend (govulncheck)`, `Shell scripts (shellcheck)` — and those four are **required status checks** on the `main-branch` repository ruleset. A red or pending check blocks the merge (`gh pr merge` refuses; the PR sits at `mergeStateStatus=BLOCKED`). The `main-branch` ruleset has **no bypass actors** (`current_user_can_bypass: never`), so the gate binds even the repo owner — the separate `mahsan_bypass` ruleset only exempts the *pull-request-required* rule on non-default branches (that's how `develop` takes direct pushes), it does **not** exempt `main`'s status checks.
 
 - **Why it exists / the failure it prevents:** *running* a check is not *requiring* it. Before this gate, the audit ran but wasn't required, so a PR merged at `mergeStateStatus=UNSTABLE` with a failing check — that's how the `crypto/tls` stdlib vuln **GO-2026-5856** landed on `main` via the v3.11.5 release (CI caught it only on the *post-merge* push). Bumping Go `1.26.4 → 1.26.5` (go.mod `go` directive + `backend/Dockerfile` builder image) fixed the vuln.
+- **Read the threshold the gate actually sets before "fixing" what an audit
+  prints.** Both npm audit jobs run `--audit-level=high`, so a moderate
+  advisory is below the gate on purpose (`security-audit.yml` says as much:
+  "Bump severity here when those are cleaned up"). A bare local `npm audit`
+  lists every severity, and reading that as the gate is how v4.4.0-dev grew an
+  `overrides` entry for a MODERATE advisory that was never blocking anything —
+  and the override then made the tree invalid to npm's legacy quick-audit
+  endpoint (`400 … Invalid package tree`), which refuses the whole audit. One
+  moderate advisory traded for no audit signal at all. **An `overrides` entry
+  must satisfy what the parent declares**; `speech-rule-engine` pins
+  `@xmldom/xmldom` at exactly `0.9.10`, so there is nothing to force safely.
+  Local runs passed because local npm reached the working bulk endpoint while
+  CI fell back to the legacy one — verifying in one environment verified one
+  environment.
+- **"Could not check" is not "found something", and the hook got this wrong.**
+  `npm audit` exits non-zero for a real advisory AND for a failure to reach the
+  advisories endpoint. The hook discarded stderr and reported every non-zero
+  exit as `VULNERABILITIES FOUND`, so an npm outage (503s on
+  `/-/npm/v1/security/advisories/bulk`) blocked pushes while naming the wrong
+  cause — and `npm audit fix` exited 0 having applied nothing, which is how the
+  same outage looks from the other side. `npm_audit_check` now separates them:
+  an unreachable endpoint SKIPs with the reason printed (matching how the hook
+  already treats a missing Go toolchain or shellcheck), a real finding still
+  blocks. `tests/pre-push-audit.sh` drives the helper against fake `npm`s
+  covering all seven outcomes, and the load-bearing one is "REAL vulnerability
+  still exits non-zero" — a fix here that reclassified too much would silently
+  disarm the check. Same rule as `curl_reason` in the CLI: keep the reason when
+  the reason is what the reader has to act on.
 - **The local pre-push hook is defense-in-depth, not the gate.** It runs `govulncheck` too, but **silently skips it when `go` isn't installed on the host** (e.g. this dev machine) and can be `--no-verify`'d — and it doesn't run at all on a GitHub-side PR merge. Treat CI required checks as the authoritative gate; never assume a green local push means the security scan ran.
 - **Managing the gate as code:** `scripts/apply-main-branch-protection.sh` (idempotent) adds/updates the required-status-check rule on the `main-branch` ruleset. It needs a token with repo **Administration: write** (a contents/PR-scoped fine-grained PAT gets HTTP 403 on the ruleset PUT). The check-context strings in that script must match the workflow job `name:` values **exactly** — a typo becomes an "Expected" check that never reports and blocks `main` permanently.
 
@@ -384,6 +443,29 @@ override: `MDNEST_SKIP_E2E=1`.
     bracket. (Run those via `login_run`, never inside `$(…)` — a command
     substitution is a subshell, so the `HOME` and status it sets are lost and the
     assertions pass vacuously.)
+  - `tests/pre-push-audit.sh` — **new in v4.4.0.** Drives the hook's own
+    `npm_audit_check` against fake `npm` shims for all eleven outcomes, with no
+    network. It exists because the hook conflated "npm audit found advisories"
+    with "npm audit could not reach the endpoint" (see the gate section above),
+    and the danger in fixing that is over-classifying: the load-bearing check is
+    **"a real vulnerability still exits non-zero"**, not the skip cases. Verified
+    by mutation — 8 of its 11 checks fail against the pre-fix hook, and the three
+    that pass in both are exactly the ok/block cases that must not change. The
+    helper is `sed`-extracted from the shipped hook so the test cannot drift from
+    the code it pins.
+  - `tests/cli-edit-etag.sh` — **new in v4.4.0.** Drives the real CLI against a
+    throwaway-`HOME` and a fake backend that reports the request it received,
+    pinning that `mdnest edit`'s PUT actually carries `If-Match` and that a save
+    landing inside the read-modify-write window is refused rather than
+    overwritten. It is separate from `cli-unit.sh` on purpose: the unit tier can
+    only prove the splice helpers are correct, and **helpers that work while
+    nothing consults them are exactly how this bug comes back** — deleting the
+    `If-Match` line from `cmd_edit` leaves every unit check green. Verified by
+    mutation: that deletion fails 7 of its 9 checks, including "the concurrent
+    save survived". The fake backend mutates the note *when it serves the GET*,
+    so the race is deterministic and there is nothing to flake. Needs python3
+    for the fake backend only and SKIPs without it; the CLI's own no-python3
+    tier stays covered by `cli-unit.sh` and `e2e-docker.sh`.
   - `tests/server-unit.sh` — **new in v4.1.3.** Pure-function checks of
     `mdnest-server`, loaded through its `MDNEST_SERVER_LIB=1 source` hook (the
     mirror of the client CLI's `MDNEST_LIB`). Currently covers namespace-drift

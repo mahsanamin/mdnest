@@ -142,8 +142,13 @@ mdnest append @home/journal/today.md "- [ ] send the recap"
 mdnest list   @home/journal                    # a tree, not raw JSON
 mdnest create @home/ideas/new.md "First line"  # create = new file
 mdnest write  @home/ideas/new.md "Replaced"    # write = must already exist
+mdnest edit   @home/log.md "draft" "final"     # edit = one exact string
 echo "piped" | mdnest append @home/log.md -    # stdin with -
 ```
+
+`edit` is the one to reach for from a script or an agent: it changes only the
+text you name, and it refuses the write if the note changed since it read it,
+so a save from the web UI or another client is never silently overwritten.
 
 Drop the `@alias` if you only configured one server. `mdnest --help` lists
 everything; `mdnest docs` prints the full reference.
@@ -173,7 +178,7 @@ Create an API token in Settings (gear icon) > API Tokens, then configure your MC
 }
 ```
 
-**Available tools:** `list_namespaces`, `list_tree`, `read_note`, `write_note`, `append_note`, `prepend_note`, `create_note`, `create_folder`, `delete_item`, `move_item`, `search_notes`
+**Available tools:** `list_namespaces`, `list_tree`, `read_note`, `write_note`, `edit_note`, `append_note`, `prepend_note`, `create_note`, `create_folder`, `delete_item`, `move_item`, `search_notes`
 
 For a **shared/hosted endpoint** the server also speaks the streamable-HTTP
 transport (`MCP_TRANSPORT=http`, `POST /mcp`), with an optional per-user OAuth

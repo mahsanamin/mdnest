@@ -154,6 +154,40 @@ echo "# Title" | mdnest create @work/engineering/new-doc.md -   # read from stdi
 silently creating an empty file), and fails if the note already exists — use
 `write` to overwrite an existing note.
 
+### Edit one string in a note
+
+```bash
+mdnest edit @work/engineering/log.md "Status: draft" "Status: final"
+mdnest edit @work/engineering/log.md "v4.3.3" "v4.3.4" --replace-all
+```
+
+`edit` replaces an exact string and leaves the rest of the file alone. Reach for
+it instead of `read` + rebuild + `write` whenever you only mean to change part
+of a note — that round trip overwrites anything saved in between by the web UI,
+git-sync, or another agent, and reports success while doing it.
+
+Two properties make it safe to hand to a script or an agent:
+
+- **The match is exact and unambiguous.** The old text is matched literally, so
+  `.`, `*`, `[`, `$&` and `$1` are just characters — nothing is treated as a
+  pattern in the text being searched for, and nothing is expanded in the
+  replacement. If the old text is not found, or occurs more than once without
+  `--replace-all`, the command fails and names the count instead of guessing.
+  Add surrounding lines to make a match unique.
+- **A concurrent save is refused, not overwritten.** The write carries the
+  version the edit read (`If-Match`), so if the note changed in between you get
+  a 409 and the note is left exactly as the other writer left it. Re-run the
+  same command to apply the edit to the current content.
+
+```console
+$ mdnest edit @work/engineering/log.md "alpha" "beta"
+Error: the old text occurs 3 times in log.md.
+       Add surrounding lines to make it unique, or pass --replace-all.
+```
+
+Pass an empty replacement to delete the matched text. An edit that would empty
+the note is refused — use `write` or `delete` if that is the intent.
+
 ### Append / Prepend
 
 ```bash

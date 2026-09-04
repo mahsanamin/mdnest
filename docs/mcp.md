@@ -14,7 +14,7 @@ transports**:
 | **streamable-HTTP** | `MCP_TRANSPORT=http` | A shared/hosted endpoint that many clients (or a team) reach over the network. Runs as a long-lived service and exposes `POST /mcp`. |
 
 > **Available tools:** `list_namespaces`, `list_tree`, `read_note`,
-> `write_note`, `append_note`, `prepend_note`, `create_note`, `create_folder`,
+> `write_note`, `edit_note`, `append_note`, `prepend_note`, `create_note`, `create_folder`,
 > `delete_item`, `move_item`, `search_notes`, `list_tasks`, `create_task`,
 > `move_task`, `edit_task`, `set_task_field`, `toggle_task`, `delete_task`,
 > `search_tasks`, `create_excalidraw`, `draw_excalidraw`, `read_excalidraw`,
@@ -30,6 +30,18 @@ transports**:
 > changes a task's column, `delete_task` removes it and `search_tasks` filters
 > across a namespace (or all of them). `create_excalidraw`, `create_marp` and
 > `add_marp_slide` scaffold drawing and slide-deck notes.
+>
+> **Prefer `edit_note` over `read_note` + `write_note` for a partial change**
+> (v4.4.0+). It replaces an exact `old_string` with `new_string` and leaves the
+> rest of the file alone, which costs a fraction of the tokens on a large note.
+> It is also the safe one: `write_note` overwrites whatever is on disk, so a
+> save made by the web UI, git-sync, or another agent between the read and the
+> write is lost without a warning. `edit_note` sends the version it read, so
+> that case comes back as a 409 telling you to re-read — nothing is
+> overwritten. Zero matches, or more than one without `replace_all`, is an
+> error naming the count instead of a guess, so widen `old_string` with
+> surrounding lines to make it unique. The same command exists on the CLI as
+> `mdnest edit` (see [cli.md](cli.md)).
 
 ---
 
@@ -312,7 +324,9 @@ drawing is CRUD per element, not only redraw-in-full.
 Both features are gated in the app by `ENABLE_EXCALIDRAW` / `ENABLE_MARP`; the
 notes are still created and editable as plain markdown when a feature is off.
 Edit an existing drawing/deck through `read_note` + `write_note` (keep the
-`.excalidraw.md` scene block or the `marp: true` frontmatter intact).
+`.excalidraw.md` scene block or the `marp: true` frontmatter intact) — these are
+the cases where a whole-file rewrite is the right shape, because the scene is
+one JSON blob. For an ordinary note, reach for `edit_note` instead.
 
 > **Feature-gating.** At startup the server reads the backend's unauthenticated
 > `GET /api/config` and only registers the tools for features mdnest has
