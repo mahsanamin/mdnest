@@ -46,6 +46,16 @@ both surfaces they reach mdnest through.
   `@mention …` failed with curl's exit 26, reported as "couldn't reach the
   server". Present since v1.0. Now `--data-raw`, which is `-d` without that
   special case.
+- **The pre-push hook called an npm outage a vulnerability.** `npm audit` exits
+  non-zero both when it finds advisories and when it cannot reach the
+  advisories endpoint, and the hook discarded stderr and treated every non-zero
+  exit as `VULNERABILITIES FOUND` — so a run of 503s from
+  `/-/npm/v1/security/advisories/bulk` blocked the push while naming the wrong
+  cause, and `npm audit fix` silently applied nothing for the same reason. An
+  unreachable endpoint now SKIPs with the reason stated, the way the hook
+  already handles govulncheck without a host Go toolchain; CI's required checks
+  remain the authoritative gate. A real finding still blocks — all seven
+  outcomes are probed in `tests/pre-push-audit.sh`.
 - **Four transitive security advisories.** `qs` 6.15.2 -> 6.16.0 and `fast-uri`
   3.1.5 -> 3.1.7 (mcp-server), `browserslist` 4.28.2 -> 4.28.8 (frontend) — all
   three in-range lock-file updates, no `package.json` change. `@xmldom/xmldom`
