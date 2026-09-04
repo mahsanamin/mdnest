@@ -58,14 +58,22 @@ both surfaces they reach mdnest through.
   outcomes are probed in `tests/pre-push-audit.sh`.
 - **Four transitive security advisories.** `qs` 6.15.2 -> 6.16.0 and `fast-uri`
   3.1.5 -> 3.1.7 (mcp-server), `browserslist` 4.28.2 -> 4.28.8 (frontend) — all
-  three in-range lock-file updates, no `package.json` change. `@xmldom/xmldom`
-  0.9.10 -> 0.9.12 needed an `overrides` entry instead, because
-  `speech-rule-engine` pins it at exactly 0.9.10 and no semver-compatible fix
-  exists; same mechanism the `nanoid` and `lodash-es` overrides already use.
-  None of these came from this release's own changes — they are newly published
-  advisories against dependencies that were already there, and both
-  `npm audit` jobs are required checks, so they would have blocked the release
+  three in-range lock-file updates, no `package.json` change. None of these came
+  from this release's own changes — they are newly published advisories against
+  dependencies that were already there, and both `npm audit` jobs are required
+  checks, so `browserslist` (the only **high**) would have blocked the release
   PR to `main` outright.
+
+  `@xmldom/xmldom` (moderate, GHSA-6gmq-8vp8-gcm6, reached via
+  `speech-rule-engine`) is knowingly **left in place**. There is no
+  semver-compatible fix — `speech-rule-engine` declares it as exactly `0.9.10` —
+  and an `overrides` entry forcing `0.9.12` was tried and reverted: it makes the
+  tree invalid to npm's legacy quick-audit endpoint, which then refuses the whole
+  audit (`400 Bad Request … Invalid package tree`). That trades one moderate
+  advisory for losing the audit signal entirely, which is strictly worse. Both
+  audit jobs run `--audit-level=high`, so a moderate is below the gate by
+  deliberate policy (see the severity note in `security-audit.yml`). Revisit if
+  it is ever rated high or `speech-rule-engine` relaxes the pin.
 - **The errexit lint flagged arithmetic as a command substitution.** `c=$((c +
   1))` is arithmetic expansion and carries its own exit status, but the lint's
   pattern saw the leading `$(` and reported it. Its self-proof now includes an
