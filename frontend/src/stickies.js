@@ -121,13 +121,6 @@ export function isCardDone(card) {
   return card.items.length > 0 && card.items.every((i) => i.done);
 }
 
-// Progress for the card header. An item with no text yet is the row you are
-// about to type into, so it does not count toward either number.
-export function cardProgress(card) {
-  const real = card.items.filter((i) => i.text.trim() !== '');
-  return { done: real.filter((i) => i.done).length, total: real.length };
-}
-
 export function isCardFull(card) {
   return card.items.length >= MAX_ITEMS;
 }

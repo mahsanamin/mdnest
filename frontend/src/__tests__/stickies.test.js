@@ -32,7 +32,6 @@ import {
   editItem,
   removeItem,
   isCardDone,
-  cardProgress,
   isCardFull,
   cardWidth,
   clampWidth,
@@ -148,12 +147,6 @@ describe('checklist', () => {
     expect(isCardDone(card())).toBe(false);
     expect(isCardDone(withItems(item('a', true)))).toBe(true);
     expect(isCardDone(withItems(item('a', true), item('b')))).toBe(false);
-  });
-
-  it('counts progress over real items only', () => {
-    // A blank row is the line you are about to type into, not a task.
-    expect(cardProgress(withItems(item('a', true), item('b'), item('')))).toEqual({ done: 1, total: 2 });
-    expect(cardProgress(card())).toEqual({ done: 0, total: 0 });
   });
 
   it('stops at the server limit rather than after a failed save', () => {

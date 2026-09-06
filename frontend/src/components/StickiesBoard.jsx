@@ -164,6 +164,20 @@ function StickiesBoard({ stickies, onChange, onCollapse, onClose, saveState, loa
     onChange(next);
   }, [stickies, onChange]);
 
+  // Tidy up throws away every position on the board in one click, and it sits
+  // in the header next to "+ New sticky" — close enough to hit by accident.
+  // There is no undo for it, so it asks first, the same way deleting a note
+  // does. The count is in the question because "3 stickies" is what tells you
+  // whether you meant it.
+  const confirmTidyUp = useCallback(() => {
+    const placed = stickies.filter(hasPosition).length;
+    const msg = placed === 1
+      ? 'Move 1 sticky back onto the grid? Where you put it will be lost.'
+      : `Move ${placed} stickies back onto the grid? Where you put them will be lost.`;
+    if (!confirm(msg)) return;
+    tidyUp();
+  }, [stickies]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <div className="stickies-board">
       <div className="stickies-board-header">
@@ -183,7 +197,7 @@ function StickiesBoard({ stickies, onChange, onCollapse, onClose, saveState, loa
         {/* Only offered once something has actually been dragged — on an
             untouched board it would do nothing visible and read as broken. */}
         {!isMobile && loadState === 'ready' && stickies.some(hasPosition) && (
-          <button className="stickies-tidy" onClick={tidyUp} title="Line every sticky back up on the grid">
+          <button className="stickies-tidy" onClick={confirmTidyUp} title="Line every sticky back up on the grid">
             Tidy up
           </button>
         )}

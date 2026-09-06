@@ -5805,7 +5805,7 @@ pre:hover .code-copy-btn {
   padding: var(--space-2);
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: 2px;
   box-shadow: 0 1px 3px var(--shadow-color);
 }
 
@@ -5817,22 +5817,15 @@ pre:hover .code-copy-btn {
 .sticky-green  { background: var(--sticky-green); }
 .sticky-grey   { background: var(--sticky-grey); }
 
+/* Title and controls on ONE row. The title used to sit under them, which cost
+   a whole line per card and — on an untitled sticky — showed that line as a
+   blank band above the text. */
 .sticky-card-top {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: var(--space-2);
-  min-height: 18px;
 }
 
-/* Progress sits where the old card-level "Mark done" checkbox was. It is blank
-   until a card actually has a checklist, so a plain note shows a bare strip. */
-.sticky-progress {
-  font-size: 0.7rem;
-  font-variant-numeric: tabular-nums;
-  color: var(--text-secondary);
-  user-select: none;
-}
 
 /* The actions are always in the DOM and always reachable — no hover-to-reveal.
    The panel is used on touch as much as on a desktop, and a control that only
@@ -5923,6 +5916,11 @@ pre:hover .code-copy-btn {
   font-size: 0.9rem;
   font-weight: 700;
   line-height: 1.3;
+  /* min-width: 0 so a long title ellipsizes inside the row instead of pushing
+     the colour and delete buttons off the card. */
+  min-width: 0;
+  flex: 1;
+  text-overflow: ellipsis;
 }
 
 .sticky-card textarea::placeholder,
@@ -6122,23 +6120,27 @@ pre:hover .code-copy-btn {
   pointer-events: none;
 }
 
-/* The top bar is the drag handle, not the whole card — dragging from anywhere
-   would mean clicking into the text to fix a typo starts a drag instead of
-   placing the cursor. */
-.sticky-card.draggable .sticky-card-top {
+/* The whole card is the drag surface — a sticky is picked up by its edge, and
+   once the title moved onto the top row there was no strip left to grab. */
+.sticky-card.draggable {
   cursor: grab;
   touch-action: none;
 }
 
-.sticky-card.draggable .sticky-card-top:active {
+.sticky-card.draggable:active {
   cursor: grabbing;
 }
 
-/* The controls inside the handle are still controls. Without this the
-   checkbox and the delete button inherit the grab cursor and read as
-   undraggable-looking parts of a draggable strip. */
-.sticky-card.draggable .sticky-card-top button,
-.sticky-card.draggable .sticky-card-top input {
+/* Everything you can type in or press keeps its own cursor, so the card never
+   claims to be draggable where it is not. This mirrors the pointerdown
+   opt-out in StickyCard: the two must agree, or the cursor lies. */
+.sticky-card.draggable textarea,
+.sticky-card.draggable input[type="text"] {
+  cursor: text;
+}
+
+.sticky-card.draggable button,
+.sticky-card.draggable input[type="checkbox"] {
   cursor: pointer;
 }
 

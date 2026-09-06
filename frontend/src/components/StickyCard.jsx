@@ -10,7 +10,6 @@ import {
   editItem,
   removeItem,
   isCardDone,
-  cardProgress,
   isCardFull,
 } from '../stickies.js';
 
@@ -31,13 +30,12 @@ function StickyCard({ card, onCardChange, onDelete, style, dragHandleProps, drag
   const [showColors, setShowColors] = useState(false);
   const focusItemRef = useRef(null);
 
-  const progress = cardProgress(card);
   const allDone = isCardDone(card);
 
   // A newly added item's input does not exist until React has rendered it.
   useEffect(() => {
     if (!focusItemRef.current) return;
-    const node = document.querySelector(`[data-item-id="${focusItemRef.current}"] input[type=text]`);
+    const node = document.querySelector(`[data-item-id="${focusItemRef.current}"] textarea`);
     focusItemRef.current = null;
     if (node) node.focus();
   }, [card.items]);
@@ -54,24 +52,31 @@ function StickyCard({ card, onCardChange, onDelete, style, dragHandleProps, drag
       data-sticky-id={card.id}
       className={`sticky-card sticky-${card.color}${allDone ? ' done' : ''}${draggable ? ' draggable' : ''}`}
       style={style}
+      // The whole card drags, not a dedicated strip — a real sticky is picked
+      // up by its edge, and a card whose entire top row is the title had no
+      // grabbable strip left anyway. Every text field and control opts OUT, so
+      // clicking into the title to fix a typo places the cursor rather than
+      // starting a drag. That opt-out is also load-bearing for the buttons:
+      // pointerdown calls setPointerCapture, which redirects the following
+      // pointerup here, so the browser would fire `click` on the CARD instead
+      // of on the button that was pressed.
+      onPointerDown={(e) => {
+        if (e.target.closest('button, input, textarea, label, .sticky-colors, .sticky-resize')) return;
+        if (dragHandleProps?.onPointerDown) dragHandleProps.onPointerDown(e);
+      }}
     >
-      {/* The drag handle. Its controls have to opt OUT of the drag: a
-          pointerdown here calls setPointerCapture, which redirects the
-          following pointerup to this bar, so the browser fires `click` on the
-          bar instead of on the button that was pressed — and the colour and
-          delete buttons silently stopped working on the board. Bailing out
-          when the press lands on a control is what keeps them clickable. */}
-      <div
-        className="sticky-card-top"
-        {...(dragHandleProps || {})}
-        onPointerDown={(e) => {
-          if (e.target.closest('button, input, label, .sticky-colors')) return;
-          if (dragHandleProps?.onPointerDown) dragHandleProps.onPointerDown(e);
-        }}
-      >
-        <span className="sticky-progress">
-          {progress.total > 0 ? `${progress.done}/${progress.total}` : ''}
-        </span>
+      {/* Title shares the row with the controls rather than sitting under
+          them. On its own it cost a whole line per card, and an untitled
+          sticky showed that line as a blank band above the text. */}
+      <div className="sticky-card-top">
+        <input
+          className="sticky-title"
+          type="text"
+          value={card.title}
+          maxLength={MAX_TITLE}
+          placeholder="Title"
+          onChange={(e) => onCardChange({ ...card, title: e.target.value })}
+        />
         <div className="sticky-card-actions">
           <button
             className="sticky-color-btn"
@@ -104,21 +109,12 @@ function StickyCard({ card, onCardChange, onDelete, style, dragHandleProps, drag
         </div>
       )}
 
-      <input
-        className="sticky-title"
-        type="text"
-        value={card.title}
-        maxLength={MAX_TITLE}
-        placeholder="Title"
-        onChange={(e) => onCardChange({ ...card, title: e.target.value })}
-      />
-
       <textarea
         className="sticky-body"
         value={card.body}
         maxLength={MAX_BODY}
         placeholder="Notes…"
-        rows={2}
+        rows={1}
         onChange={(e) => onCardChange({ ...card, body: e.target.value })}
         // Grow with the content. A sticky is short by nature, so a fixed box
         // would hide the end of half of them, and a scrollbar inside a 60px

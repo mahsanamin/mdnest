@@ -367,7 +367,7 @@ Every note carries an invisible `<!-- mdnest:<uuid> -->` marker at its bottom th
 
 A private scratch pad that follows you rather than the note you have open. Click the sticky-note icon in the toolbar (next to the theme toggle) and a board slides in from the right.
 
-- **+ New sticky** adds an empty card at the top and puts the cursor in its title. The title is optional — leave it blank and it stays out of the way.
+- **+ New sticky** adds an empty card at the top and puts the cursor in its title. The title shares the top row with the card's controls, so an untitled sticky costs no space.
 - Below the title is free text for whatever the note is, and **+ to-do** adds a checklist. A sticky is usually a small list rather than one yes/no thing, so ticking happens per item: Enter opens the next line, Backspace on an empty line removes it, and the card header shows progress like `2/5`. A card whose whole checklist is done fades and strikes its title — it stays where it is rather than jumping to the bottom.
 - A card with no checklist is just a note. It never counts as unfinished and never gets struck through.
 - Each card also has a **colour dot** for one of five colours, and a **×** to delete it.
@@ -383,7 +383,7 @@ Stickies and comments share the right-hand panel, so opening one closes the othe
 The expand button in the panel header opens the same stickies full screen, as a corkboard. **Drag a card by its top bar** to put it wherever you like — the position is saved, so the board looks the same next time you open it. Dragging is by the top bar rather than the whole card so that clicking into the text to fix a typo places the cursor instead of starting a drag.
 
 - A card you have never dragged has no position at all. Those are dealt onto a grid, filling the first free space, so a new sticky never lands hidden underneath one that is already there.
-- **Tidy up** clears every stored position and puts the whole board back on the grid. It only appears once something has actually been moved.
+- **Tidy up** clears every stored position and puts the whole board back on the grid. It asks first — there is no undo — and it only appears once something has actually been moved.
 - **Drag a card's bottom-right corner** to make it wider or narrower; the width is saved per card. Only the width — the height follows whatever you type, so a card grows as you add to-dos rather than clipping them.
 - The board grows as you drag cards outward, and scrolls.
 - **Escape**, or the collapse button, returns to the side panel. The × closes stickies entirely.

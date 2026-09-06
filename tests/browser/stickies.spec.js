@@ -62,12 +62,19 @@ async function savedPosition(page, index = 0) {
 // Drag a card by its top bar. Stepped, because the board ignores movement
 // under a few pixels — a single jump would look like a click, which is
 // exactly the case the threshold exists for.
+// Grab point: a few pixels inside the card's top-left corner. That is the
+// card's own padding — clear of the title, the buttons and the text — now
+// that the whole card is the drag surface rather than a dedicated strip.
+async function grabPoint(page) {
+  const b = await page.locator('.sticky-card').first().boundingBox();
+  return { x: b.x + 4, y: b.y + 4 };
+}
+
 async function dragCard(page, dx, dy) {
-  const handle = page.locator('.sticky-card .sticky-card-top').first();
-  const h = await handle.boundingBox();
-  await page.mouse.move(h.x + h.width / 2, h.y + h.height / 2);
+  const g = await grabPoint(page);
+  await page.mouse.move(g.x, g.y);
   await page.mouse.down();
-  await page.mouse.move(h.x + h.width / 2 + dx, h.y + h.height / 2 + dy, { steps: 12 });
+  await page.mouse.move(g.x + dx, g.y + dy, { steps: 12 });
   await page.mouse.up();
 }
 
@@ -219,10 +226,10 @@ test.describe('stickies', () => {
     // the pointer zero pixels, which never reaches the drag handler at all —
     // so it passes whether or not the threshold exists, and proves nothing.
     // Two pixels is what a hand actually does.
-    const h = await page.locator('.sticky-card .sticky-card-top').first().boundingBox();
-    await page.mouse.move(h.x + h.width / 2, h.y + h.height / 2);
+    const g = await grabPoint(page);
+    await page.mouse.move(g.x, g.y);
     await page.mouse.down();
-    await page.mouse.move(h.x + h.width / 2 + 2, h.y + h.height / 2 + 1);
+    await page.mouse.move(g.x + 2, g.y + 1);
     await page.mouse.up();
 
     await page.waitForTimeout(900); // past the 500 ms save debounce
@@ -271,6 +278,7 @@ test.describe('stickies', () => {
     await expect.poll(async () => (await savedPosition(page)).x, { timeout: 10_000 })
       .toBeGreaterThan(100);
 
+    page.once('dialog', (d) => d.accept());
     await page.locator('.stickies-tidy').click();
     // Tidy clears the stored position rather than writing grid coordinates, so
     // the cards reflow with the window afterwards instead of being frozen at
@@ -338,14 +346,15 @@ test.describe('stickies', () => {
     await expect(page.locator('.sticky-items li')).toHaveCount(2);
 
     await page.locator('.sticky-items input[type=checkbox]').first().check();
-    await expect(page.locator('.sticky-progress')).toHaveText('1/2');
     await expectSavedCount(page, 1);
 
     await page.reload();
     await openPanel(page);
     await expect(page.locator('.sticky-title')).toHaveValue('Errands');
     await expect(page.locator('.sticky-items li')).toHaveCount(2);
-    await expect(page.locator('.sticky-progress')).toHaveText('1/2');
+    // The tick survives too, not just the rows.
+    await expect(page.locator('.sticky-items input[type=checkbox]').first()).toBeChecked();
+    await expect(page.locator('.sticky-items li.done')).toHaveCount(1);
   });
 
   test('a card is struck through only when its whole checklist is done', async ({ page }) => {
@@ -512,6 +521,66 @@ test.describe('stickies', () => {
     // And Try again recovers it rather than needing a reload.
     await page.locator('.stickies-retry').click();
     await expect(page.locator('.sticky-title')).toHaveValue('do not lose me');
+  });
+
+  test('Enter moves the cursor onto the new to-do', async ({ page }) => {
+    // It added the row but left the caret behind, because the focus lookup
+    // still searched for `input[type=text]` after the row became a textarea
+    // (to make long to-dos wrap). Nothing threw — the querySelector simply
+    // found nothing — so typing carried on appending to the previous line.
+    await signIn(page);
+    await clearBoard(page);
+    await openPanel(page);
+    await page.locator('.stickies-add').click();
+    await page.locator('.sticky-add-item').click();
+
+    const rows = page.locator('.sticky-items textarea');
+    await rows.first().fill('first');
+    await rows.first().press('Enter');
+    await expect(rows).toHaveCount(2);
+
+    // Type without clicking anywhere: it must land in the NEW row.
+    await page.keyboard.type('second');
+    await expect(rows.nth(0)).toHaveValue('first');
+    await expect(rows.nth(1)).toHaveValue('second');
+  });
+
+  test('Tidy up asks before discarding every position', async ({ page }) => {
+    // One click, no undo, and it sits next to "+ New sticky" in the header.
+    await signIn(page);
+    await clearBoard(page);
+    await openBoard(page);
+    await page.locator('.stickies-add.board').click();
+    await page.locator('.sticky-title').fill('placed');
+    await expectSavedCount(page, 1);
+    await dragCard(page, 240, 140);
+    await expect.poll(async () => (await savedPosition(page)).x, { timeout: 10_000 })
+      .toBeGreaterThan(100);
+
+    // Dismissed: the position stays.
+    page.once('dialog', (d) => d.dismiss());
+    await page.locator('.stickies-tidy').click();
+    await page.waitForTimeout(900); // past the save debounce
+    expect((await savedPosition(page)).x).toBeGreaterThan(100);
+  });
+
+  test('an untitled sticky wastes no space above its text', async ({ page }) => {
+    // The title used to sit on its own line under the controls, so an
+    // untitled card showed a blank band across the top of every sticky.
+    await signIn(page);
+    await clearBoard(page);
+    await openPanel(page);
+    await page.locator('.stickies-add').click();
+
+    const card = page.locator('.sticky-card').first();
+    const title = page.locator('.sticky-title');
+    const del = page.locator('.sticky-delete');
+    const [c, t, d] = await Promise.all([card.boundingBox(), title.boundingBox(), del.boundingBox()]);
+
+    // Title and controls share a row.
+    expect(Math.abs((t.y + t.height / 2) - (d.y + d.height / 2))).toBeLessThan(8);
+    // And nothing sits above that row but the card's own padding.
+    expect(t.y - c.y).toBeLessThan(16);
   });
 
   test('deleting a sticky removes it on the server too', async ({ page }) => {
