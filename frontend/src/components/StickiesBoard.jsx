@@ -1,5 +1,6 @@
 import { useRef, useState, useEffect, useCallback } from 'react';
 import StickyCard from './StickyCard.jsx';
+import StickiesLoadError from './StickiesLoadError.jsx';
 import {
   newSticky,
   addSticky,
@@ -31,7 +32,7 @@ import {
 // carefully placed card's position and marks the board unsaved.
 const DRAG_THRESHOLD = 4;
 
-function StickiesBoard({ stickies, onChange, onCollapse, onClose, saveState, isMobile }) {
+function StickiesBoard({ stickies, onChange, onCollapse, onClose, saveState, loadState, onRetry, isMobile }) {
   const canvasRef = useRef(null);
   const focusIdRef = useRef(null);
   const [boardWidth, setBoardWidth] = useState(() => window.innerWidth);
@@ -174,14 +175,14 @@ function StickiesBoard({ stickies, onChange, onCollapse, onClose, saveState, isM
         <button
           className="stickies-add board"
           onClick={handleAdd}
-          disabled={full}
+          disabled={full || loadState !== 'ready'}
           title={full ? `A board holds at most ${MAX_STICKIES} stickies` : 'Add a sticky'}
         >
           + New sticky
         </button>
         {/* Only offered once something has actually been dragged — on an
             untouched board it would do nothing visible and read as broken. */}
-        {!isMobile && stickies.some(hasPosition) && (
+        {!isMobile && loadState === 'ready' && stickies.some(hasPosition) && (
           <button className="stickies-tidy" onClick={tidyUp} title="Line every sticky back up on the grid">
             Tidy up
           </button>
@@ -201,7 +202,10 @@ function StickiesBoard({ stickies, onChange, onCollapse, onClose, saveState, isM
       </div>
 
       <div className={`stickies-canvas-scroll${isMobile ? ' flow' : ''}`}>
-        {stickies.length === 0 && (
+        {loadState === 'error' && <StickiesLoadError onRetry={onRetry} />}
+        {loadState === 'loading' && <div className="stickies-empty">Loading…</div>}
+
+        {loadState === 'ready' && stickies.length === 0 && (
           <div className="stickies-empty">
             <p>No stickies yet.</p>
             <p className="stickies-empty-note">
@@ -216,7 +220,7 @@ function StickiesBoard({ stickies, onChange, onCollapse, onClose, saveState, isM
           className="stickies-canvas"
           style={isMobile ? undefined : { width: extent.width, height: extent.height }}
         >
-          {stickies.map((c) => {
+          {loadState === 'ready' && stickies.map((c) => {
             const live = drag && drag.id === c.id ? drag : positions.get(c.id);
             const liveW = resize && resize.id === c.id ? resize.w : cardWidth(c);
             return (
@@ -245,7 +249,7 @@ function StickiesBoard({ stickies, onChange, onCollapse, onClose, saveState, isM
         </div>
       </div>
 
-      {!isMobile && stickies.length > 0 && (
+      {!isMobile && loadState === 'ready' && stickies.length > 0 && (
         <div className="stickies-board-hint" style={{ left: GAP }}>
           Drag a sticky by its top bar to move it, or its bottom-right corner to resize it.
         </div>

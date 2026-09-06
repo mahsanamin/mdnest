@@ -314,8 +314,15 @@ function App() {
   // flags makes "both open at once" representable when it never is.
   const [stickiesView, setStickiesView] = useState('closed');
   const [stickySaveState, setStickySaveState] = useState('idle'); // idle | saving | error
+  // 'loading' | 'ready' | 'error'. Load state is tracked, not collapsed into
+  // an empty array: the board is written back WHOLE, so "we could not read
+  // your board" must never be allowed to look like "your board is empty".
+  const [stickiesLoad, setStickiesLoad] = useState('loading');
   const stickySaveTimerRef = useRef(null);
   const stickyLatestRef = useRef([]);
+  // Mirrored in a ref because the save path is a callback that would otherwise
+  // close over a stale value.
+  const stickiesLoadRef = useRef('loading');
   const [showTaskBoard, setShowTaskBoard] = useState(false);
   // Bumped by the toolbar Refresh so the task board reloads its tasks too
   // (the board isn't part of the note/tree refresh path).
@@ -580,19 +587,33 @@ function App() {
   // stickyLatestRef holds what the timer will send. Reading it at fire time
   // rather than closing over the array means a burst of edits coalesces into
   // one PUT carrying the LAST state, not the state as of the first keystroke.
+  const setLoadState = useCallback((v) => {
+    stickiesLoadRef.current = v;
+    setStickiesLoad(v);
+  }, []);
+
+  const loadStickies = useCallback(() => {
+    setLoadState('loading');
+    return fetchStickies()
+      .then((cards) => {
+        const board = normalizeBoard(cards);
+        stickyLatestRef.current = board;
+        setStickies(board);
+        setLoadState('ready');
+      })
+      .catch(() => setLoadState('error'));
+  }, [setLoadState]);
+
   useEffect(() => {
     if (!authenticated) return;
-    let cancelled = false;
-    fetchStickies().then((cards) => {
-      if (cancelled) return;
-      const board = normalizeBoard(cards);
-      stickyLatestRef.current = board;
-      setStickies(board);
-    });
-    return () => { cancelled = true; };
-  }, [authenticated]);
+    loadStickies();
+  }, [authenticated, loadStickies]);
 
   const updateStickies = useCallback((next) => {
+    // Belt and braces: the panel renders a retry pane rather than cards when
+    // the load failed, so there is nothing to edit — but a save that could
+    // fire here would overwrite a board we never managed to read.
+    if (stickiesLoadRef.current !== 'ready') return;
     setStickies(next);
     stickyLatestRef.current = next;
     setStickySaveState('saving');
@@ -617,6 +638,7 @@ function App() {
   // request outlive the page; a normal fetch here is cancelled on unload.
   useEffect(() => {
     const flush = () => {
+      if (stickiesLoadRef.current !== 'ready') return;
       if (!stickySaveTimerRef.current) return;
       clearTimeout(stickySaveTimerRef.current);
       stickySaveTimerRef.current = null;
@@ -1848,7 +1870,7 @@ function App() {
           }}
           onRefresh={handleRefresh}
           commentCount={commentsEnabled ? comments.filter(c => !c.parentId && !c.resolved).length : 0}
-          stickyCount={undoneCount(stickies)}
+          stickyCount={stickiesLoad === 'ready' ? undoneCount(stickies) : 0}
           stickiesOpen={stickiesView !== 'closed'}
           onToggleStickies={() => {
             // Two drawers, one strip of screen. Opening either closes the
@@ -2189,6 +2211,8 @@ function App() {
           onClose={() => setStickiesView('closed')}
           onExpand={() => setStickiesView('board')}
           saveState={stickySaveState}
+          loadState={stickiesLoad}
+          onRetry={loadStickies}
           width={!isMobile ? commentWidth : undefined}
           onWidthChange={!isMobile ? (w) => { setCommentWidth(w); localStorage.setItem('mdnest_comment_width', String(w)); } : undefined}
         />
@@ -2200,6 +2224,8 @@ function App() {
           onCollapse={() => setStickiesView('panel')}
           onClose={() => setStickiesView('closed')}
           saveState={stickySaveState}
+          loadState={stickiesLoad}
+          onRetry={loadStickies}
           isMobile={isMobile}
         />
       )}

@@ -1,5 +1,6 @@
 import { useRef, useEffect, useCallback } from 'react';
 import StickyCard from './StickyCard.jsx';
+import StickiesLoadError from './StickiesLoadError.jsx';
 import {
   newSticky,
   addSticky,
@@ -13,7 +14,7 @@ import {
 // down without leaving the note you are reading. The full-screen corkboard
 // (StickiesBoard) is the same cards laid out spatially; the Expand button
 // swaps between them.
-function StickiesPanel({ stickies, onChange, onClose, onExpand, saveState, width, onWidthChange }) {
+function StickiesPanel({ stickies, onChange, onClose, onExpand, saveState, loadState, onRetry, width, onWidthChange }) {
   const focusIdRef = useRef(null); // card to focus after the next render
 
   const full = isBoardFull(stickies);
@@ -89,7 +90,7 @@ function StickiesPanel({ stickies, onChange, onClose, onExpand, saveState, width
         <button
           className="stickies-add"
           onClick={handleAdd}
-          disabled={full}
+          disabled={full || loadState !== 'ready'}
           title={full ? `A board holds at most ${MAX_STICKIES} stickies` : 'Add a sticky'}
         >
           + New sticky
@@ -97,7 +98,10 @@ function StickiesPanel({ stickies, onChange, onClose, onExpand, saveState, width
       </div>
 
       <div className="stickies-list">
-        {stickies.length === 0 && (
+        {loadState === 'error' && <StickiesLoadError onRetry={onRetry} />}
+        {loadState === 'loading' && <div className="stickies-empty">Loading…</div>}
+
+        {loadState === 'ready' && stickies.length === 0 && (
           <div className="stickies-empty">
             <p>No stickies yet.</p>
             {/* Said here rather than in the docs alone: this is the one place
@@ -110,7 +114,7 @@ function StickiesPanel({ stickies, onChange, onClose, onExpand, saveState, width
           </div>
         )}
 
-        {stickies.map((c) => (
+        {loadState === 'ready' && stickies.map((c) => (
           <StickyCard
             key={c.id}
             card={c}

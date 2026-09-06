@@ -371,6 +371,7 @@ A private scratch pad that follows you rather than the note you have open. Click
 - Below the title is free text for whatever the note is, and **+ to-do** adds a checklist. A sticky is usually a small list rather than one yes/no thing, so ticking happens per item: Enter opens the next line, Backspace on an empty line removes it, and the card header shows progress like `2/5`. A card whose whole checklist is done fades and strikes its title — it stays where it is rather than jumping to the bottom.
 - A card with no checklist is just a note. It never counts as unfinished and never gets struck through.
 - Each card also has a **colour dot** for one of five colours, and a **×** to delete it.
+- If the board can’t be loaded (the server restarting, a dropped connection), you get a **Try again** button rather than an empty board. Editing is held until it loads, so a failed read can never overwrite what’s on the server.
 - Everything saves by itself about half a second after you stop typing. The header says **Saving…** while a save is in flight and **Not saved** in red if one failed — nothing is hidden behind a silent autosave here.
 - The toolbar icon carries a badge counting **unfinished to-dos** across every sticky — things left to do, not notes containing something. A blank line does not count until you write in it.
 - The board is available even with no file open, and while the task board is showing — those are exactly the moments you want to jot something down.

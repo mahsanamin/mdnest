@@ -6175,3 +6175,15 @@ pre:hover .code-copy-btn {
   position: absolute;
   padding-bottom: 14px;
 }
+
+.stickies-retry {
+  margin-top: var(--space-3);
+  background: var(--accent);
+  color: var(--text-inverse);
+  border: none;
+  padding: 5px 14px;
+  border-radius: var(--radius);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}

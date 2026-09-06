@@ -478,6 +478,42 @@ test.describe('stickies', () => {
       .toEqual({ x: null, y: null });
   });
 
+  test('a failed load cannot wipe the board', async ({ page }) => {
+    // The sharpest failure this feature can have, and it shipped in the first
+    // draft. fetchStickies used to fail soft and return [] on any error, the
+    // way fetchPreferences does — but the two are not symmetric: a preference
+    // is PATCHed key by key, a board is PUT WHOLE. So a GET that failed showed
+    // an empty board indistinguishable from a genuinely empty one, and the
+    // next character typed replaced the real board with just that card.
+    await signIn(page);
+    await clearBoard(page);
+    await openPanel(page);
+    await page.locator('.stickies-add').click();
+    await page.locator('.sticky-title').fill('do not lose me');
+    await expectSavedCount(page, 1);
+
+    // Reload with the GET broken, exactly as it is while the backend restarts.
+    await page.route('**/api/stickies', (route) =>
+      route.request().method() === 'GET' ? route.abort() : route.continue());
+    await page.reload();
+    await expect(page.locator('.ns-label, .ns-select')).toBeVisible({ timeout: 20_000 });
+    await openPanel(page);
+
+    // No cards to edit, and no way to add one — that is the guarantee. An
+    // "empty board" here would be indistinguishable from the real thing.
+    await expect(page.locator('.stickies-retry')).toBeVisible();
+    await expect(page.locator('.sticky-card')).toHaveCount(0);
+    await expect(page.locator('.stickies-add')).toBeDisabled();
+
+    // The server still holds the real board.
+    await page.unroute('**/api/stickies');
+    await expectSavedCount(page, 1);
+
+    // And Try again recovers it rather than needing a reload.
+    await page.locator('.stickies-retry').click();
+    await expect(page.locator('.sticky-title')).toHaveValue('do not lose me');
+  });
+
   test('deleting a sticky removes it on the server too', async ({ page }) => {
     await signIn(page);
     await clearBoard(page);
