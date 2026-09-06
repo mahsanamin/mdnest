@@ -31,12 +31,14 @@ import Settings from './components/Settings.jsx';
 import AdminPanel from './components/AdminPanel.jsx';
 import PresenceBar from './components/PresenceBar.jsx';
 import CommentSidebar from './components/CommentSidebar.jsx';
+import StickiesPanel from './components/StickiesPanel.jsx';
 import ShareDialog from './components/ShareDialog.jsx';
 import HistoryModal from './components/HistoryModal.jsx';
 import AttributionModal from './components/AttributionModal.jsx';
 import MoveToModal from './components/MoveToModal.jsx';
 import ReleaseNotesModal from './components/ReleaseNotesModal.jsx';
 import CollabClient from './collab.js';
+import { normalizeBoard, undoneCount } from './stickies.js';
 import { isMarpDoc, effectiveEditorMode } from './marp.js';
 import { isExcalidrawDoc } from './excalidraw.js';
 import { TREE_POLL_MS, shouldPollTree } from './tree-refresh.js';
@@ -55,6 +57,8 @@ import {
   fetchMe,
   fetchPreferences,
   savePreferences,
+  fetchStickies,
+  saveStickies,
   logout as apiLogout,
   PermissionError,
 } from './api.js';
@@ -283,6 +287,13 @@ function App() {
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [comments, setComments] = useState([]);
   const [showComments, setShowComments] = useState(false);
+  // Personal sticky board. Not per-note and not per-namespace, so it lives at
+  // the top of the app and is loaded once per session.
+  const [stickies, setStickies] = useState([]);
+  const [showStickies, setShowStickies] = useState(false);
+  const [stickySaveState, setStickySaveState] = useState('idle'); // idle | saving | error
+  const stickySaveTimerRef = useRef(null);
+  const stickyLatestRef = useRef([]);
   const [showTaskBoard, setShowTaskBoard] = useState(false);
   // Bumped by the toolbar Refresh so the task board reloads its tasks too
   // (the board isn't part of the note/tree refresh path).
@@ -536,6 +547,71 @@ function App() {
     if (!isTheme(next)) return;
     setThemePreference(next);
     savePreferences({ theme: next }).catch(() => {});
+  }, []);
+
+  // --- Sticky board -------------------------------------------------------
+  //
+  // Loaded once per session, saved on a 500 ms debounce — the same shape as
+  // the note autosave, and for the same reason: every keystroke in a card is
+  // a board change, and a PUT per keystroke is absurd.
+  //
+  // stickyLatestRef holds what the timer will send. Reading it at fire time
+  // rather than closing over the array means a burst of edits coalesces into
+  // one PUT carrying the LAST state, not the state as of the first keystroke.
+  useEffect(() => {
+    if (!authenticated) return;
+    let cancelled = false;
+    fetchStickies().then((cards) => {
+      if (cancelled) return;
+      const board = normalizeBoard(cards);
+      stickyLatestRef.current = board;
+      setStickies(board);
+    });
+    return () => { cancelled = true; };
+  }, [authenticated]);
+
+  const updateStickies = useCallback((next) => {
+    setStickies(next);
+    stickyLatestRef.current = next;
+    setStickySaveState('saving');
+    if (stickySaveTimerRef.current) clearTimeout(stickySaveTimerRef.current);
+    stickySaveTimerRef.current = setTimeout(() => {
+      stickySaveTimerRef.current = null;
+      const sending = stickyLatestRef.current;
+      saveStickies(sending)
+        .then(() => {
+          // Only clear the indicator if nothing was typed while this PUT was
+          // in flight — otherwise "Saving…" would blink off while a newer
+          // board is still unsaved.
+          if (stickyLatestRef.current === sending) setStickySaveState('idle');
+        })
+        .catch(() => setStickySaveState('error'));
+    }, 500);
+  }, []);
+
+  // A pending board save must survive the tab closing. This is the one thing
+  // in mdnest whose content exists nowhere else — no file, no git remote — so
+  // losing the last 500 ms of typing has no recovery path. keepalive lets the
+  // request outlive the page; a normal fetch here is cancelled on unload.
+  useEffect(() => {
+    const flush = () => {
+      if (!stickySaveTimerRef.current) return;
+      clearTimeout(stickySaveTimerRef.current);
+      stickySaveTimerRef.current = null;
+      const token = localStorage.getItem('mdnest_token');
+      if (!token) return;
+      fetch('/api/stickies', {
+        method: 'PUT',
+        keepalive: true,
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ stickies: stickyLatestRef.current }),
+      }).catch(() => {});
+    };
+    window.addEventListener('pagehide', flush);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      flush();
+    };
   }, []);
 
   // The toolbar button flips between the two concrete themes. Choosing
@@ -1684,7 +1760,11 @@ function App() {
       />
       <div
         className="main"
-        style={commentsEnabled && showComments && currentPath && !isMobile ? { marginRight: commentWidth } : undefined}
+        style={
+          !isMobile && ((commentsEnabled && showComments && currentPath) || showStickies)
+            ? { marginRight: commentWidth }
+            : undefined
+        }
       >
         <Toolbar
           currentPath={currentPath}
@@ -1731,13 +1811,28 @@ function App() {
           }}
           onRefresh={handleRefresh}
           commentCount={commentsEnabled ? comments.filter(c => !c.parentId && !c.resolved).length : 0}
+          stickyCount={undoneCount(stickies)}
+          stickiesOpen={showStickies}
+          onToggleStickies={() => {
+            // Two drawers, one strip of screen. Opening either closes the
+            // other rather than stacking them — the comment panel already
+            // owns this edge, and two overlapping fixed panels is not a
+            // layout, it is a bug report.
+            setShowStickies((v) => {
+              if (!v) setShowComments(false);
+              return !v;
+            });
+          }}
           onToggleComments={!commentsEnabled ? null : () => {
             // A plain toggle: the panel is usable in any view mode (including
             // preview-only, e.g. reviewing Marp slides). Selection-anchored
             // comments and highlights still require the Live editor, but
             // general comments work everywhere, so we no longer force the
             // user out of their current view.
-            setShowComments((v) => !v);
+            setShowComments((v) => {
+              if (!v) setShowStickies(false);
+              return !v;
+            });
           }}
           wsStatus={appConfig?.liveCollab ? wsStatus : null}
         />
@@ -2046,6 +2141,16 @@ function App() {
             setDismissedReleaseVer(v);
             setShowReleaseNotes(false);
           }}
+        />
+      )}
+      {showStickies && (
+        <StickiesPanel
+          stickies={stickies}
+          onChange={updateStickies}
+          onClose={() => setShowStickies(false)}
+          saveState={stickySaveState}
+          width={!isMobile ? commentWidth : undefined}
+          onWidthChange={!isMobile ? (w) => { setCommentWidth(w); localStorage.setItem('mdnest_comment_width', String(w)); } : undefined}
         />
       )}
       {commentsEnabled && showComments && currentPath && (

@@ -144,6 +144,16 @@ For headless callers (CLI, MCP server, scripts):
 
 This was a behaviour change from pre-v3.5.0 where any admin token had unconditional global bypass.
 
+### Stickies *(v4.5.0+)*
+
+The per-user sticky board is the one surface whose content deliberately never leaves the server:
+
+- **Not addressable by anyone else.** `GET`/`PUT /api/stickies` takes no user id, path or namespace — the board is keyed server-side from the authenticated identity. Cross-user access is not a check that can be forgotten, it is not expressible in the request.
+- **Outside the namespace tree, so outside git.** Boards live in Postgres (`user_stickies`) in multi mode and in `stickies.json` in the secrets volume in single mode. git-sync walks `/data/notes/*/`, so nothing in either location can be committed or pushed to a remote.
+- **No encryption, deliberately.** The content is not travelling anywhere for encryption to protect — it is at rest behind the same filesystem and database permissions as `auth.json` and `tokens.json`. Adding a key would add key-management UX with no marginal gain. An operator who needs at-rest encryption for a shared host should encrypt the volume.
+- **Bounded.** 200 cards per board, 4 KB per card, 256 KB per board, and a colour enum — the endpoint is writable by any authenticated user, so without those caps it is a per-user blob store anyone can fill. The same reasoning gave preferences a key allowlist.
+- **Not backed up.** Stated here because it is a security-relevant tradeoff, not just a UX one: a sticky has no git history and no off-server copy. It survives `mdnest-server rebuild` (the secrets volume is declared, not part of the image layer) but not the loss of that volume.
+
 ---
 
 ## Layer 3 — Authorization

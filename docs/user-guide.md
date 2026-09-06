@@ -363,6 +363,32 @@ Every note carries an invisible `<!-- mdnest:<uuid> -->` marker at its bottom th
 
 ---
 
+## Stickies *(v4.5.0+)*
+
+A private scratch pad that follows you rather than the note you have open. Click the sticky-note icon in the toolbar (next to the theme toggle) and a board slides in from the right.
+
+- **+ New sticky** adds an empty card at the top and puts the cursor in it. Just start typing.
+- Each card has a **Mark done** checkbox (strikes the text through, keeps the card where it is), a **colour dot** for one of five colours, and a **×** to delete it.
+- Everything saves by itself about half a second after you stop typing. The header says **Saving…** while a save is in flight and **Not saved** in red if one failed — nothing is hidden behind a silent autosave here.
+- The toolbar icon carries a badge with the number of unfinished stickies. An empty card does not count until you write something in it.
+- The board is available even with no file open, and while the task board is showing — those are exactly the moments you want to jot something down.
+
+Stickies and comments share the right-hand panel, so opening one closes the other. Drag the panel's left edge to resize it; the width is shared with the comments panel and remembered.
+
+**Limits:** 200 stickies per board, 4 KB per card. Bodies are plain text — markdown is not rendered inside a card.
+
+### Where stickies live, and what that means
+
+Each person gets their own board — in multi-user mode nobody else can see yours, including admins, and there is no way to share one.
+
+**Stickies never leave this server.** They are stored in mdnest's secrets volume, alongside its login and API-token state, and the git-sync sidecar cannot see that volume at all. Nothing you paste into a sticky can be committed or pushed to GitHub. That is the point of the feature, and it is why there is no encryption option: the content is not travelling anywhere for encryption to protect it.
+
+The flip side is worth being explicit about: **stickies are not backed up.** A regular note in a git-synced namespace has a copy on your git remote and a full history behind the History button. A sticky has neither. It survives a `./mdnest-server rebuild` — the secrets volume is a declared Docker volume, not part of the container image — but if you lose the volume, you lose the board.
+
+So: stickies are for the short-lived stuff. A phone number to call back, a command to run after lunch, three things to finish today. Anything you would be upset to lose belongs in a real note.
+
+---
+
 ## Task Checkboxes
 
 Standard markdown task list syntax is supported:

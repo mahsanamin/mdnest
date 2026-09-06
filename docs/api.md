@@ -646,6 +646,67 @@ Preferences are stored server-side — Postgres (`user_preferences`) in multi mo
 
 ---
 
+## Stickies *(v4.5.0+)*
+
+A per-user sticky board — a handful of short personal notes kept beside the workspace. Stickies are **not notes**: they never appear in a namespace, never reach a git remote, and are never shared. Available in **both** auth modes.
+
+The board is addressed only by the authenticated identity. There is no user id, path or namespace parameter, so one user reading another user's board is not a check that can be forgotten — it is not expressible.
+
+### GET /api/stickies
+
+Returns the calling user's board. Requires authentication (any role).
+
+**Response** (200 OK):
+
+```json
+{
+  "stickies": [
+    {
+      "id": "s-1736179200000-a4f2",
+      "body": "Read the v4.4.0 changelog",
+      "done": false,
+      "color": "yellow",
+      "created_at": 1736179200,
+      "updated_at": 1736179200
+    }
+  ]
+}
+```
+
+A user who has never saved a board gets `{"stickies": []}` — an empty array, not a `404`.
+
+---
+
+### PUT /api/stickies
+
+Replaces the whole board and returns what was stored. There is no per-card `POST`/`PATCH`/`DELETE`: the client owns the array and sends it whole, so a delete is a `PUT` without that card. Last write wins — two tabs editing one board belong to the same person, so no `If-Match` dance.
+
+**Request:**
+
+```json
+{"stickies": [{"id": "s-1", "body": "buy milk", "done": false, "color": "blue"}]}
+```
+
+**Response** (200 OK) — the stored board, in the same shape as `GET`.
+
+**Errors:**
+
+- `400` — more than 200 stickies, a card body over 4 KB, a card id over 64 bytes, a missing or duplicate id, a colour outside the enum, a board over 256 KB once marshalled, or a body that is not JSON. The message names the specific limit. Nothing is stored on a rejection: the previous board is left exactly as it was, so a `400` never means "part of what you sent was saved".
+
+**Fields:**
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string | Client-generated, unique within the board, ≤ 64 bytes. Required. |
+| `body` | string | ≤ 4096 bytes. Plain text — not rendered as markdown. |
+| `done` | bool | Struck through in the UI when true. |
+| `color` | string | One of `yellow`, `pink`, `blue`, `green`, `grey`. Empty defaults to `yellow`; anything else is a `400`. |
+| `created_at` / `updated_at` | int | Unix seconds, client-supplied. Stored as given. |
+
+**Storage and the privacy guarantee.** Boards live in Postgres (`user_stickies`) in multi mode and in `stickies.json` in the **secrets volume** in single mode — the same volume as `auth.json` and `tokens.json`. That location is the entire feature: git-sync walks `/data/notes/*/` and commits what it finds, so nothing under the secrets volume can reach a git remote, and because it is a *declared* named volume rather than part of the image's writable layer, a board also survives `./mdnest-server rebuild`. There is no encryption, deliberately — it would add key-management UX for no gain over the filesystem permissions already in force. The tradeoff to state plainly: **stickies are not backed up anywhere.** Content worth keeping belongs in a real note.
+
+---
+
 ### GET /api/admin/sync-status?ns=\<namespace\>
 
 Report git-sync state for a namespace. Works in single mode (no user context → allowed) and multi mode (superadmin, or an admin of that namespace). Returns the repo/remote facts plus — when the git-sync daemon is running — its self-reported health, read from a git-excluded `.mdnest-sync-status.json` the daemon writes each cycle.

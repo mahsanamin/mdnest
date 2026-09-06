@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 
-function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePassword, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh, wsStatus, commentCount, onToggleComments, onSetBoardActive, boardActive, marpLocked, drawingDoc, drawingSource, onDrawingSourceChange, theme, onToggleTheme }) {
+function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePassword, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh, wsStatus, commentCount, onToggleComments, stickyCount, onToggleStickies, stickiesOpen, onSetBoardActive, boardActive, marpLocked, drawingDoc, drawingSource, onDrawingSourceChange, theme, onToggleTheme }) {
   const [refreshing, setRefreshing] = useState(false);
   const handleRefresh = useCallback(() => {
     if (refreshing || !onRefresh) return;
@@ -200,6 +200,25 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
             <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
           </svg>
           {commentCount > 0 && <span className="comment-badge">{commentCount}</span>}
+        </button>
+      )}
+      {/* Not gated on currentPath, unlike Comments. Comments are about the
+          open file; stickies are about the person, so the board has to be
+          reachable from an empty editor and from the task board too — those
+          are exactly the moments someone jots one down. */}
+      {onToggleStickies && (
+        <button
+          className={`toolbar-stickies${stickiesOpen ? ' active' : ''}`}
+          onClick={onToggleStickies}
+          title="Stickies — your private notes on this server"
+          aria-label="Stickies"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            {/* A page with its corner turned up — the sticky-note shape. */}
+            <path d="M4 4h16v10l-6 6H4z"/>
+            <path d="M20 14h-6v6"/>
+          </svg>
+          {stickyCount > 0 && <span className="comment-badge">{stickyCount}</span>}
         </button>
       )}
       {onToggleTheme && (

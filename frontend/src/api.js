@@ -197,6 +197,42 @@ export async function savePreferences(prefs) {
   return res.json();
 }
 
+// --- Stickies (both auth modes) ---
+
+// The personal sticky board. Keyed server-side by the authenticated identity —
+// there is no user id to pass, and no namespace: stickies are not notes and
+// never appear in one.
+//
+// fetchStickies fails soft like fetchPreferences: a board that cannot be
+// loaded must not stop the app from opening. saveStickies does NOT — a failed
+// save means the user's typing did not land, and swallowing that would show a
+// board that is quietly out of date with the server.
+
+export async function fetchStickies() {
+  try {
+    const res = await request('/stickies');
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data.stickies) ? data.stickies : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function saveStickies(stickies) {
+  const res = await request('/stickies', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ stickies }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to save stickies');
+  }
+  const data = await res.json();
+  return Array.isArray(data.stickies) ? data.stickies : [];
+}
+
 // --- Namespaces & Files ---
 
 export async function getNamespaces() {

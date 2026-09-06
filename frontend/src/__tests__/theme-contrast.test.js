@@ -106,6 +106,14 @@ const ON_MARKER = [
   ['--highlight-ink', '--highlight-soft'],
 ];
 
+// A sticky card is a solid block of body text on a coloured fill, so both inks
+// that land on it have to clear AA on all five colours: --text for a live card
+// and --text-secondary for a struck "done" one. Dark mode's fills are deep
+// versions of each hue rather than pastels precisely because of this — a
+// pastel would need dark ink, which the dark theme has no token for.
+const STICKY_FILLS = ['--sticky-yellow', '--sticky-pink', '--sticky-blue', '--sticky-green', '--sticky-grey'];
+const ON_STICKY = STICKY_FILLS.flatMap((fill) => [['--text', fill], ['--text-secondary', fill]]);
+
 describe.each([['dark', DARK], ['light', LIGHT]])('%s theme', (name, tokens) => {
   it.each(BODY_TEXT)('%s on %s clears AA', (fg, bg) => {
     expect(contrast(tokens, fg, bg)).toBeGreaterThanOrEqual(AA);
@@ -124,6 +132,10 @@ describe.each([['dark', DARK], ['light', LIGHT]])('%s theme', (name, tokens) => 
   });
 
   it.each(ON_MARKER)('%s on %s clears AA', (fg, bg) => {
+    expect(contrast(tokens, fg, bg)).toBeGreaterThanOrEqual(AA);
+  });
+
+  it.each(ON_STICKY)('%s on %s clears AA', (fg, bg) => {
     expect(contrast(tokens, fg, bg)).toBeGreaterThanOrEqual(AA);
   });
 });

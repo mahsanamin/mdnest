@@ -5596,3 +5596,268 @@ pre:hover .code-copy-btn {
   color: var(--accent);
   font-weight: 600;
 }
+
+/* ---------------------------------------------------------------------------
+   Stickies — the personal sticky board
+   ---------------------------------------------------------------------------
+   Shares the right-edge drawer geometry with the comment sidebar (same top
+   offset below the toolbar, same resize handle, same width preference), so
+   the two read as one panel that changes contents rather than two competing
+   panels. App.jsx enforces that only one is open at a time.
+   --------------------------------------------------------------------------- */
+
+.toolbar-stickies {
+  background: transparent !important;
+  border: none !important;
+  color: var(--text-muted) !important;
+  padding: 0.2rem 0.4rem !important;
+  cursor: pointer;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.toolbar-stickies:hover,
+.toolbar-stickies.active {
+  color: var(--text) !important;
+}
+
+.stickies-panel {
+  position: fixed;
+  /* Same 61px as .comment-sidebar: below the toolbar, so the button that
+     opened the panel stays clickable to close it. */
+  top: 61px;
+  right: 0;
+  bottom: 0;
+  width: 320px;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  border-top: 1px solid var(--border);
+  z-index: 9000;
+  display: flex;
+  flex-direction: column;
+  box-shadow: -4px 0 16px var(--shadow-color);
+}
+
+.stickies-resize-handle {
+  position: absolute;
+  top: 0;
+  left: -3px;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 10;
+}
+
+.stickies-resize-handle:hover,
+.stickies-resize-handle:active {
+  background: var(--accent-wash-3);
+}
+
+.stickies-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.stickies-header h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--text);
+  /* Takes the slack so the save state and close button sit right. */
+  margin-right: auto;
+}
+
+.stickies-save-state {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.stickies-save-state.error {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.stickies-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.stickies-close:hover {
+  color: var(--text);
+}
+
+.stickies-add-row {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.stickies-add {
+  width: 100%;
+  background: var(--accent);
+  color: var(--text-inverse);
+  border: none;
+  padding: 6px 12px;
+  border-radius: var(--radius);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.stickies-add:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.stickies-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.stickies-empty {
+  padding: var(--space-5) var(--space-2);
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.stickies-empty p {
+  margin: 0 0 var(--space-3);
+}
+
+.stickies-empty-note {
+  font-size: 0.78rem;
+  color: var(--text-faint);
+  line-height: 1.5;
+}
+
+.sticky-card {
+  border-radius: var(--radius);
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  box-shadow: 0 1px 3px var(--shadow-color);
+}
+
+/* The five fills. The class name comes from a server-validated enum, so an
+   unexpected value cannot reach here and paint an unstyled card. */
+.sticky-yellow { background: var(--sticky-yellow); }
+.sticky-pink   { background: var(--sticky-pink); }
+.sticky-blue   { background: var(--sticky-blue); }
+.sticky-green  { background: var(--sticky-green); }
+.sticky-grey   { background: var(--sticky-grey); }
+
+.sticky-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.sticky-check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.sticky-check input {
+  cursor: pointer;
+  margin: 0;
+}
+
+/* The actions are always in the DOM and always reachable — no hover-to-reveal.
+   The panel is used on touch as much as on a desktop, and a control that only
+   appears on hover does not exist on a phone. */
+.sticky-card-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.sticky-color-btn,
+.sticky-delete {
+  background: none;
+  border: none;
+  padding: 2px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+}
+
+.sticky-delete {
+  font-size: 1.1rem;
+}
+
+.sticky-delete:hover {
+  color: var(--danger);
+}
+
+.sticky-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  padding: 0;
+  cursor: pointer;
+}
+
+.sticky-swatch.active {
+  border-color: var(--accent);
+  border-width: 2px;
+}
+
+.sticky-colors {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+}
+
+.sticky-card textarea {
+  background: transparent;
+  border: none;
+  outline: none;
+  resize: none;
+  overflow: hidden;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  padding: 0;
+  width: 100%;
+}
+
+.sticky-card textarea::placeholder {
+  color: var(--text-secondary);
+}
+
+/* A done sticky stays exactly where it was. Sinking it to the bottom would
+   move a card the moment you tick it, which is disorienting when the thing
+   you ticked was the one you were reading. */
+.sticky-card.done textarea {
+  color: var(--text-secondary);
+  text-decoration: line-through;
+}
+
+@media (max-width: 768px) {
+  .stickies-panel {
+    width: min(94vw, 420px);
+  }
+}
