@@ -1,7 +1,6 @@
-import { useRef, useEffect, useCallback, useState } from 'react';
+import { useRef, useEffect, useCallback } from 'react';
+import StickyCard from './StickyCard.jsx';
 import {
-  STICKY_COLORS,
-  MAX_BODY,
   newSticky,
   addSticky,
   editSticky,
@@ -10,16 +9,12 @@ import {
   MAX_STICKIES,
 } from '../stickies.js';
 
-// The sticky board drawer. Mirrors CommentSidebar's slide-out: a fixed panel
-// on the right that the main column makes room for, and only one of the two is
-// open at a time.
-//
-// It renders and nothing else — every board mutation goes through the pure
-// functions in stickies.js, and persistence is the caller's debounced save.
-// That split is what lets the interesting rules be tested without a DOM.
-function StickiesPanel({ stickies, onChange, onClose, saveState, width, onWidthChange }) {
-  const [pickerFor, setPickerFor] = useState(null); // card id whose swatches are open
-  const focusIdRef = useRef(null);                  // card to focus after the next render
+// The sticky board as a right-edge drawer — the quick way in, for jotting one
+// down without leaving the note you are reading. The full-screen corkboard
+// (StickiesBoard) is the same cards laid out spatially; the Expand button
+// swaps between them.
+function StickiesPanel({ stickies, onChange, onClose, onExpand, saveState, width, onWidthChange }) {
+  const focusIdRef = useRef(null); // card to focus after the next render
 
   const full = isBoardFull(stickies);
 
@@ -76,6 +71,17 @@ function StickiesPanel({ stickies, onChange, onClose, saveState, width, onWidthC
           {saveState === 'saving' && 'Saving…'}
           {saveState === 'error' && 'Not saved'}
         </span>
+        <button
+          className="stickies-expand"
+          onClick={onExpand}
+          title="Open the full board"
+          aria-label="Open the full board"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" />
+            <line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" />
+          </svg>
+        </button>
         <button className="stickies-close" onClick={onClose} aria-label="Close stickies">&times;</button>
       </div>
 
@@ -105,71 +111,12 @@ function StickiesPanel({ stickies, onChange, onClose, saveState, width, onWidthC
         )}
 
         {stickies.map((c) => (
-          <div
+          <StickyCard
             key={c.id}
-            data-sticky-id={c.id}
-            className={`sticky-card sticky-${c.color}${c.done ? ' done' : ''}`}
-          >
-            <div className="sticky-card-top">
-              <label className="sticky-check">
-                <input
-                  type="checkbox"
-                  checked={c.done}
-                  onChange={() => onChange(editSticky(stickies, c.id, { done: !c.done }))}
-                />
-                <span className="sticky-check-label">{c.done ? 'Done' : 'Mark done'}</span>
-              </label>
-              <div className="sticky-card-actions">
-                <button
-                  className="sticky-color-btn"
-                  onClick={() => setPickerFor(pickerFor === c.id ? null : c.id)}
-                  title="Change colour"
-                  aria-label="Change colour"
-                >
-                  <span className={`sticky-swatch sticky-${c.color}`} />
-                </button>
-                <button
-                  className="sticky-delete"
-                  onClick={() => onChange(removeSticky(stickies, c.id))}
-                  title="Delete sticky"
-                  aria-label="Delete sticky"
-                >&times;</button>
-              </div>
-            </div>
-
-            {pickerFor === c.id && (
-              <div className="sticky-colors">
-                {STICKY_COLORS.map((col) => (
-                  <button
-                    key={col}
-                    className={`sticky-swatch sticky-${col}${col === c.color ? ' active' : ''}`}
-                    onClick={() => {
-                      onChange(editSticky(stickies, c.id, { color: col }));
-                      setPickerFor(null);
-                    }}
-                    title={col}
-                    aria-label={col}
-                  />
-                ))}
-              </div>
-            )}
-
-            <textarea
-              value={c.body}
-              maxLength={MAX_BODY}
-              placeholder="Write something…"
-              rows={2}
-              onChange={(e) => onChange(editSticky(stickies, c.id, { body: e.target.value }))}
-              // Grow with the content. A sticky is short by nature, so a fixed
-              // two-row box would hide the end of half of them and a scrollbar
-              // inside a 60px card is worse than a taller card.
-              ref={(el) => {
-                if (!el) return;
-                el.style.height = 'auto';
-                el.style.height = `${el.scrollHeight}px`;
-              }}
-            />
-          </div>
+            card={c}
+            onPatch={(patch) => onChange(editSticky(stickies, c.id, patch))}
+            onDelete={() => onChange(removeSticky(stickies, c.id))}
+          />
         ))}
       </div>
     </div>

@@ -35,6 +35,35 @@ async function clearBoard(page) {
 
 const openPanel = (page) => page.locator('.toolbar-stickies').click();
 
+async function openBoard(page) {
+  await openPanel(page);
+  await page.locator('.stickies-expand').click();
+  await expect(page.locator('.stickies-board')).toBeVisible();
+}
+
+// Read one card's stored position straight from the server.
+async function savedPosition(page, index = 0) {
+  return page.evaluate(async (i) => {
+    const t = localStorage.getItem('mdnest_token');
+    const r = await fetch('/api/stickies', { headers: { Authorization: 'Bearer ' + t } });
+    const d = await r.json();
+    const c = (d.stickies || [])[i];
+    return c ? { x: c.x ?? null, y: c.y ?? null } : null;
+  }, index);
+}
+
+// Drag a card by its top bar. Stepped, because the board ignores movement
+// under a few pixels — a single jump would look like a click, which is
+// exactly the case the threshold exists for.
+async function dragCard(page, dx, dy) {
+  const handle = page.locator('.sticky-card .sticky-card-top').first();
+  const h = await handle.boundingBox();
+  await page.mouse.move(h.x + h.width / 2, h.y + h.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(h.x + h.width / 2 + dx, h.y + h.height / 2 + dy, { steps: 12 });
+  await page.mouse.up();
+}
+
 // Wait until the SERVER holds the expected number of cards.
 //
 // Deliberately not "wait for the Saving… indicator to clear": that span is
@@ -132,6 +161,125 @@ test.describe('stickies', () => {
 
     await page.locator('.sticky-check input').check();
     await expect(page.locator('.toolbar-stickies .comment-badge')).toHaveCount(0);
+  });
+
+  test('a dragged sticky keeps its position across a reload', async ({ page }) => {
+    await signIn(page);
+    await clearBoard(page);
+    await openBoard(page);
+
+    await page.locator('.stickies-add.board').click();
+    await page.locator('.sticky-card textarea').fill('move me');
+    await expectSavedCount(page, 1);
+
+    // A card that has never been dragged has NO position — that is what lets
+    // the board lay it out on a grid instead of stacking everything at 0,0.
+    expect(await savedPosition(page)).toEqual({ x: null, y: null });
+
+    await dragCard(page, 260, 160);
+    await expect.poll(async () => (await savedPosition(page)).x, { timeout: 10_000 })
+      .toBeGreaterThan(100);
+
+    const after = await savedPosition(page);
+    await page.reload();
+    await openBoard(page);
+    expect(await savedPosition(page)).toEqual(after);
+
+    // And it is actually painted there, not just stored.
+    const box = await page.locator('.sticky-card').first().boundingBox();
+    expect(Math.abs(box.x - after.x)).toBeLessThan(40);
+  });
+
+  test('a click on a card does not move it', async ({ page }) => {
+    // Every pointer-down carries a pixel or two of jitter. Without a movement
+    // threshold each one writes a new position and marks the board unsaved,
+    // so simply tapping a card would nudge it.
+    await signIn(page);
+    await clearBoard(page);
+    await openBoard(page);
+
+    await page.locator('.stickies-add.board').click();
+    await page.locator('.sticky-card textarea').fill('do not move');
+    await expectSavedCount(page, 1);
+
+    // A click WITH the jitter a real one carries. Playwright's .click() moves
+    // the pointer zero pixels, which never reaches the drag handler at all —
+    // so it passes whether or not the threshold exists, and proves nothing.
+    // Two pixels is what a hand actually does.
+    const h = await page.locator('.sticky-card .sticky-card-top').first().boundingBox();
+    await page.mouse.move(h.x + h.width / 2, h.y + h.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(h.x + h.width / 2 + 2, h.y + h.height / 2 + 1);
+    await page.mouse.up();
+
+    await page.waitForTimeout(900); // past the 500 ms save debounce
+    expect(await savedPosition(page)).toEqual({ x: null, y: null });
+  });
+
+  test('the board and the drawer show the same cards', async ({ page }) => {
+    await signIn(page);
+    await clearBoard(page);
+    await openPanel(page);
+    await page.locator('.stickies-add').click();
+    await page.locator('.sticky-card textarea').fill('written in the drawer');
+    await expectSavedCount(page, 1);
+
+    await page.locator('.stickies-expand').click();
+    await expect(page.locator('.stickies-board')).toBeVisible();
+    await expect(page.locator('.stickies-panel')).toHaveCount(0);
+    await expect(page.locator('.sticky-card textarea')).toHaveValue('written in the drawer');
+
+    // Collapsing goes back to the drawer, not to nothing.
+    await page.locator('.stickies-collapse').click();
+    await expect(page.locator('.stickies-panel')).toBeVisible();
+    await expect(page.locator('.stickies-board')).toHaveCount(0);
+  });
+
+  test('Escape leaves the full-screen board', async ({ page }) => {
+    // The board covers the entire app, so without a keyboard way out someone
+    // who opened it by accident has to hunt for a small icon.
+    await signIn(page);
+    await clearBoard(page);
+    await openBoard(page);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.stickies-board')).toHaveCount(0);
+    await expect(page.locator('.stickies-panel')).toBeVisible();
+  });
+
+  test('Tidy up returns dragged cards to the grid', async ({ page }) => {
+    await signIn(page);
+    await clearBoard(page);
+    await openBoard(page);
+
+    await page.locator('.stickies-add.board').click();
+    await page.locator('.sticky-card textarea').fill('scattered');
+    await expectSavedCount(page, 1);
+    await dragCard(page, 240, 140);
+    await expect.poll(async () => (await savedPosition(page)).x, { timeout: 10_000 })
+      .toBeGreaterThan(100);
+
+    await page.locator('.stickies-tidy').click();
+    // Tidy clears the stored position rather than writing grid coordinates, so
+    // the cards reflow with the window afterwards instead of being frozen at
+    // whatever width they were tidied on.
+    await expect.poll(async () => (await savedPosition(page)).x, { timeout: 10_000 })
+      .toBeNull();
+  });
+
+  test('the board falls back to a flowing grid on a phone', async ({ page }) => {
+    // Free positioning on a 380px screen makes a board you have to pan around
+    // to read one card, so below the breakpoint the canvas stops being a
+    // canvas and dragging is off.
+    await page.setViewportSize({ width: 390, height: 780 });
+    await signIn(page);
+    await clearBoard(page);
+    await openBoard(page);
+    await page.locator('.stickies-add.board').click();
+
+    await expect(page.locator('.stickies-canvas-scroll.flow')).toBeVisible();
+    await expect(page.locator('.sticky-card.draggable')).toHaveCount(0);
+    const pos = await page.locator('.sticky-card').first().evaluate((el) => getComputedStyle(el).position);
+    expect(pos).not.toBe('absolute');
   });
 
   test('deleting a sticky removes it on the server too', async ({ page }) => {

@@ -32,6 +32,7 @@ import AdminPanel from './components/AdminPanel.jsx';
 import PresenceBar from './components/PresenceBar.jsx';
 import CommentSidebar from './components/CommentSidebar.jsx';
 import StickiesPanel from './components/StickiesPanel.jsx';
+import StickiesBoard from './components/StickiesBoard.jsx';
 import ShareDialog from './components/ShareDialog.jsx';
 import HistoryModal from './components/HistoryModal.jsx';
 import AttributionModal from './components/AttributionModal.jsx';
@@ -290,7 +291,10 @@ function App() {
   // Personal sticky board. Not per-note and not per-namespace, so it lives at
   // the top of the app and is loaded once per session.
   const [stickies, setStickies] = useState([]);
-  const [showStickies, setShowStickies] = useState(false);
+  // 'closed' | 'panel' | 'board'. Three states rather than two booleans: the
+  // drawer and the full-screen board are two views of one thing, and a pair of
+  // flags makes "both open at once" representable when it never is.
+  const [stickiesView, setStickiesView] = useState('closed');
   const [stickySaveState, setStickySaveState] = useState('idle'); // idle | saving | error
   const stickySaveTimerRef = useRef(null);
   const stickyLatestRef = useRef([]);
@@ -1761,7 +1765,7 @@ function App() {
       <div
         className="main"
         style={
-          !isMobile && ((commentsEnabled && showComments && currentPath) || showStickies)
+          !isMobile && ((commentsEnabled && showComments && currentPath) || stickiesView === 'panel')
             ? { marginRight: commentWidth }
             : undefined
         }
@@ -1812,15 +1816,17 @@ function App() {
           onRefresh={handleRefresh}
           commentCount={commentsEnabled ? comments.filter(c => !c.parentId && !c.resolved).length : 0}
           stickyCount={undoneCount(stickies)}
-          stickiesOpen={showStickies}
+          stickiesOpen={stickiesView !== 'closed'}
           onToggleStickies={() => {
             // Two drawers, one strip of screen. Opening either closes the
             // other rather than stacking them — the comment panel already
             // owns this edge, and two overlapping fixed panels is not a
             // layout, it is a bug report.
-            setShowStickies((v) => {
-              if (!v) setShowComments(false);
-              return !v;
+            setStickiesView((v) => {
+              if (v === 'closed') setShowComments(false);
+              // The button closes whichever view is open and reopens at the
+              // drawer — it is one toggle, not a cycle through three states.
+              return v === 'closed' ? 'panel' : 'closed';
             });
           }}
           onToggleComments={!commentsEnabled ? null : () => {
@@ -1830,7 +1836,7 @@ function App() {
             // general comments work everywhere, so we no longer force the
             // user out of their current view.
             setShowComments((v) => {
-              if (!v) setShowStickies(false);
+              if (!v) setStickiesView('closed');
               return !v;
             });
           }}
@@ -2143,14 +2149,25 @@ function App() {
           }}
         />
       )}
-      {showStickies && (
+      {stickiesView === 'panel' && (
         <StickiesPanel
           stickies={stickies}
           onChange={updateStickies}
-          onClose={() => setShowStickies(false)}
+          onClose={() => setStickiesView('closed')}
+          onExpand={() => setStickiesView('board')}
           saveState={stickySaveState}
           width={!isMobile ? commentWidth : undefined}
           onWidthChange={!isMobile ? (w) => { setCommentWidth(w); localStorage.setItem('mdnest_comment_width', String(w)); } : undefined}
+        />
+      )}
+      {stickiesView === 'board' && (
+        <StickiesBoard
+          stickies={stickies}
+          onChange={updateStickies}
+          onCollapse={() => setStickiesView('panel')}
+          onClose={() => setStickiesView('closed')}
+          saveState={stickySaveState}
+          isMobile={isMobile}
         />
       )}
       {commentsEnabled && showComments && currentPath && (

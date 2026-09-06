@@ -213,10 +213,17 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
           title="Stickies — your private notes on this server"
           aria-label="Stickies"
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            {/* A page with its corner turned up — the sticky-note shape. */}
-            <path d="M4 4h16v10l-6 6H4z"/>
-            <path d="M20 14h-6v6"/>
+          {/* Painted in the sticky palette rather than drawn in currentColor
+              like the other toolbar icons. Two overlapping notes with the
+              front one's corner peeled: the shape alone reads as "document"
+              at 16px, and the colour is what makes it read as "stickies".
+              The fills are theme tokens, so it re-themes with everything
+              else instead of being a light-mode-only splash of yellow. */}
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <rect x="3" y="3" width="13" height="13" rx="2" className="sticky-icon-back" />
+            <path d="M8 8h13v8l-5 5H8z" className="sticky-icon-front" />
+            <path d="M21 16h-5v5z" className="sticky-icon-fold" />
+            <path d="M11 12h7M11 15.5h4.5" className="sticky-icon-ink" strokeWidth="1.4" strokeLinecap="round" />
           </svg>
           {stickyCount > 0 && <span className="comment-badge">{stickyCount}</span>}
         </button>

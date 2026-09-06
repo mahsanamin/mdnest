@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -24,13 +25,22 @@ import (
 // problem and a concurrency question the feature does not have.
 
 // Sticky is one card.
+//
+// X and Y are the card's position on the full-screen corkboard, in board
+// pixels. They are POINTERS so that "never placed" is distinguishable from
+// "placed at the top-left corner" — with plain float64 a brand new card and a
+// card deliberately dragged to 0,0 would be identical, and the client lays out
+// unplaced cards on a grid rather than stacking them all in one corner.
+// A card only gains a position when it is dragged; the drawer never sets one.
 type Sticky struct {
-	ID        string `json:"id"`
-	Body      string `json:"body"`
-	Done      bool   `json:"done"`
-	Color     string `json:"color"`
-	CreatedAt int64  `json:"created_at"`
-	UpdatedAt int64  `json:"updated_at"`
+	ID        string   `json:"id"`
+	Body      string   `json:"body"`
+	Done      bool     `json:"done"`
+	Color     string   `json:"color"`
+	X         *float64 `json:"x,omitempty"`
+	Y         *float64 `json:"y,omitempty"`
+	CreatedAt int64    `json:"created_at"`
+	UpdatedAt int64    `json:"updated_at"`
 }
 
 // Limits, enforced by ValidateBoard on every write. They exist because the
@@ -42,6 +52,12 @@ const (
 	MaxStickyBody  = 4096 // bytes in one card
 	MaxStickyID    = 64   // bytes in one card id
 	MaxStickyBoard = 262144
+
+	// MaxStickyCoord bounds a card's position on the corkboard. The board
+	// scrolls to fit its content, so without a ceiling one card dragged to
+	// x=1e9 would stretch the scrollable area past everything else and make
+	// the rest of the board unreachable. Generous enough for any real board.
+	MaxStickyCoord = 20000
 )
 
 // StickyColors is the palette a card may claim. The frontend only ever sends
@@ -95,6 +111,12 @@ func ValidateBoard(cards []Sticky) ([]Sticky, error) {
 		if !StickyColors[c.Color] {
 			return nil, wrapSticky("invalid colour")
 		}
+		if err := validCoord(c.X); err != nil {
+			return nil, err
+		}
+		if err := validCoord(c.Y); err != nil {
+			return nil, err
+		}
 		out = append(out, c)
 	}
 
@@ -109,6 +131,24 @@ func ValidateBoard(cards []Sticky) ([]Sticky, error) {
 		return nil, wrapSticky("board too large (max %d bytes)", MaxStickyBoard)
 	}
 	return out, nil
+}
+
+// validCoord bounds one axis of a card's board position. nil is fine — that is
+// a card that has never been dragged. NaN and Inf are rejected explicitly:
+// they survive a JSON round trip through a float64, and either one poisons the
+// board-size arithmetic on the client into NaN, which collapses the whole
+// corkboard rather than misplacing one card.
+func validCoord(v *float64) error {
+	if v == nil {
+		return nil
+	}
+	if math.IsNaN(*v) || math.IsInf(*v, 0) {
+		return wrapSticky("invalid position")
+	}
+	if *v < 0 || *v > MaxStickyCoord {
+		return wrapSticky("position out of bounds (0-%d)", MaxStickyCoord)
+	}
+	return nil
 }
 
 // wrapSticky builds a validation error whose message is what the user sees.

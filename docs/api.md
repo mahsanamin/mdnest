@@ -666,6 +666,8 @@ Returns the calling user's board. Requires authentication (any role).
       "body": "Read the v4.4.0 changelog",
       "done": false,
       "color": "yellow",
+      "x": 246,
+      "y": 18,
       "created_at": 1736179200,
       "updated_at": 1736179200
     }
@@ -691,7 +693,7 @@ Replaces the whole board and returns what was stored. There is no per-card `POST
 
 **Errors:**
 
-- `400` — more than 200 stickies, a card body over 4 KB, a card id over 64 bytes, a missing or duplicate id, a colour outside the enum, a board over 256 KB once marshalled, or a body that is not JSON. The message names the specific limit. Nothing is stored on a rejection: the previous board is left exactly as it was, so a `400` never means "part of what you sent was saved".
+- `400` — more than 200 stickies, a card body over 4 KB, a card id over 64 bytes, a missing or duplicate id, a colour outside the enum, a position outside `0`–`20000` (or NaN/Infinity), a board over 256 KB once marshalled, or a body that is not JSON. The message names the specific limit. Nothing is stored on a rejection: the previous board is left exactly as it was, so a `400` never means "part of what you sent was saved".
 
 **Fields:**
 
@@ -701,6 +703,7 @@ Replaces the whole board and returns what was stored. There is no per-card `POST
 | `body` | string | ≤ 4096 bytes. Plain text — not rendered as markdown. |
 | `done` | bool | Struck through in the UI when true. |
 | `color` | string | One of `yellow`, `pink`, `blue`, `green`, `grey`. Empty defaults to `yellow`; anything else is a `400`. |
+| `x` / `y` | number \| absent | Position on the full-screen board, in board pixels, `0`–`20000`. **Omitted entirely for a card that has never been dragged** — that is not the same as `0`, which is a card deliberately placed in the top-left corner. The client lays unplaced cards out on a grid; only dragging stores a position. `null` is accepted and means the same as absent. NaN and Infinity are a `400`. |
 | `created_at` / `updated_at` | int | Unix seconds, client-supplied. Stored as given. |
 
 **Storage and the privacy guarantee.** Boards live in Postgres (`user_stickies`) in multi mode and in `stickies.json` in the **secrets volume** in single mode — the same volume as `auth.json` and `tokens.json`. That location is the entire feature: git-sync walks `/data/notes/*/` and commits what it finds, so nothing under the secrets volume can reach a git remote, and because it is a *declared* named volume rather than part of the image's writable layer, a board also survives `./mdnest-server rebuild`. There is no encryption, deliberately — it would add key-management UX for no gain over the filesystem permissions already in force. The tradeoff to state plainly: **stickies are not backed up anywhere.** Content worth keeping belongs in a real note.

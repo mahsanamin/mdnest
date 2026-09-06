@@ -166,6 +166,64 @@ func TestStickiesDefaultColour(t *testing.T) {
 	}
 }
 
+// A position round-trips, and the distinction the pointer exists for survives:
+// a card at 0,0 is not the same as a card that has never been dragged.
+func TestStickiesPositionRoundTrip(t *testing.T) {
+	h := multiHandler(t)
+	w := call(h, http.MethodPut, `{"stickies":[
+		{"id":"placed","body":"x","color":"yellow","x":0,"y":0},
+		{"id":"loose","body":"y","color":"yellow"}
+	]}`, 7)
+	if w.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200 (%s)", w.Code, w.Body.String())
+	}
+
+	cards := board(t, call(h, http.MethodGet, "", 7))
+	if cards[0].X == nil || *cards[0].X != 0 || cards[0].Y == nil {
+		t.Fatalf("a card placed at 0,0 lost its position: %+v", cards[0])
+	}
+	if cards[1].X != nil || cards[1].Y != nil {
+		t.Fatalf("an undragged card should have no position: %+v", cards[1])
+	}
+
+	// And it must serialise back as absent, not as 0 — otherwise every card
+	// the drawer created would render stacked in the board's top-left corner
+	// instead of being laid out on the grid.
+	if strings.Contains(w.Body.String(), `"id":"loose","body":"y","color":"yellow","x":`) {
+		t.Fatalf("an unplaced card should omit x/y, got %s", w.Body.String())
+	}
+}
+
+// A position that is out of bounds, NaN or Inf is refused. NaN and Inf matter
+// more than they look: both survive a JSON round trip and turn the client's
+// board-size arithmetic into NaN, which collapses the entire corkboard rather
+// than misplacing the one card.
+func TestStickiesPositionLimits(t *testing.T) {
+	cases := []struct{ name, body, wantMsg string }{
+		{"negative", `{"stickies":[{"id":"a","body":"x","color":"yellow","x":-1,"y":0}]}`, "bounds"},
+		{"too far", `{"stickies":[{"id":"a","body":"x","color":"yellow","x":0,"y":20001}]}`, "bounds"},
+		{"NaN", `{"stickies":[{"id":"a","body":"x","color":"yellow","x":null}]}`, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			w := call(multiHandler(t), http.MethodPut, c.body, 7)
+			if c.wantMsg == "" {
+				// null is simply "no position", not an error.
+				if w.Code != http.StatusOK {
+					t.Fatalf("null position got %d, want 200 (%s)", w.Code, w.Body.String())
+				}
+				return
+			}
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("got %d, want 400 (%s)", w.Code, w.Body.String())
+			}
+			if !strings.Contains(strings.ToLower(w.Body.String()), c.wantMsg) {
+				t.Fatalf("error should name the problem (%q), got %s", c.wantMsg, w.Body.String())
+			}
+		})
+	}
+}
+
 // Single mode reaches this handler with NO user context — the auth middleware
 // attaches one only in multi mode. Every other test here injects a context by
 // hand, so all of them would pass while every real single-mode request 500'd.

@@ -375,6 +375,17 @@ A private scratch pad that follows you rather than the note you have open. Click
 
 Stickies and comments share the right-hand panel, so opening one closes the other. Drag the panel's left edge to resize it; the width is shared with the comments panel and remembered.
 
+### The full board
+
+The expand button in the panel header opens the same stickies full screen, as a corkboard. **Drag a card by its top bar** to put it wherever you like — the position is saved, so the board looks the same next time you open it. Dragging is by the top bar rather than the whole card so that clicking into the text to fix a typo places the cursor instead of starting a drag.
+
+- A card you have never dragged has no position at all. Those are dealt onto a grid, filling the first free space, so a new sticky never lands hidden underneath one that is already there.
+- **Tidy up** clears every stored position and puts the whole board back on the grid. It only appears once something has actually been moved.
+- The board grows as you drag cards outward, and scrolls.
+- **Escape**, or the collapse button, returns to the side panel. The × closes stickies entirely.
+
+On a phone the board drops the free positioning and shows the same cards in a flowing grid — a corkboard you have to pan around to read one note is worse than a list.
+
 **Limits:** 200 stickies per board, 4 KB per card. Bodies are plain text — markdown is not rendered inside a card.
 
 ### Where stickies live, and what that means

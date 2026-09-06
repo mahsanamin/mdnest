@@ -5622,6 +5622,59 @@ pre:hover .code-copy-btn {
   color: var(--text) !important;
 }
 
+/* The one coloured icon in the toolbar. Everything else is a currentColor
+   stroke, which at 16px makes a sticky note indistinguishable from a document
+   — the colour is what names it. Fills are theme tokens so it re-themes with
+   the rest rather than staying a light-mode yellow on a dark bar. */
+.sticky-icon-back {
+  fill: var(--sticky-blue);
+  stroke: var(--border-strong);
+  stroke-width: 1;
+}
+
+.sticky-icon-front {
+  fill: var(--sticky-yellow);
+  stroke: var(--border-strong);
+  stroke-width: 1;
+}
+
+/* The peeled corner: a shade darker than the face so the fold reads as a fold
+   rather than a notch cut out of the card. */
+.sticky-icon-fold {
+  fill: var(--sticky-grey);
+  stroke: var(--border-strong);
+  stroke-width: 1;
+}
+
+.sticky-icon-ink {
+  stroke: var(--text-secondary);
+  fill: none;
+}
+
+.toolbar-stickies:hover .sticky-icon-back,
+.toolbar-stickies.active .sticky-icon-back,
+.toolbar-stickies:hover .sticky-icon-front,
+.toolbar-stickies.active .sticky-icon-front {
+  stroke: var(--accent);
+}
+
+.stickies-expand,
+.stickies-collapse {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  padding: 2px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+}
+
+.stickies-expand:hover,
+.stickies-collapse:hover {
+  color: var(--text);
+}
+
 .stickies-panel {
   position: fixed;
   /* Same 61px as .comment-sidebar: below the toolbar, so the button that
@@ -5860,4 +5913,114 @@ pre:hover .code-copy-btn {
   .stickies-panel {
     width: min(94vw, 420px);
   }
+}
+
+/* --- The full-screen corkboard --------------------------------------------
+   Covers the app rather than sitting inside the editor column: the point of
+   the board is the whole surface, and squeezing it beside the sidebar would
+   leave it the same narrow strip the drawer already is. Escape or the
+   collapse button goes back to the drawer. */
+
+.stickies-board {
+  position: fixed;
+  inset: 0;
+  z-index: 9500;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+}
+
+.stickies-board-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+
+.stickies-board-header h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  color: var(--text);
+}
+
+/* Takes the slack, so the title sits left and every control sits right. */
+.stickies-board-header .stickies-save-state {
+  margin-right: auto;
+}
+
+.stickies-add.board {
+  width: auto;
+  padding: 5px 14px;
+}
+
+.stickies-tidy {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 5px 12px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.stickies-tidy:hover {
+  border-color: var(--accent);
+}
+
+/* The scroll container. The canvas inside it is sized to its content, so the
+   board grows as cards are dragged outward instead of clipping them. */
+.stickies-canvas-scroll {
+  flex: 1;
+  overflow: auto;
+  position: relative;
+}
+
+.stickies-canvas {
+  position: relative;
+}
+
+/* Below the mobile breakpoint the canvas stops being a canvas: free
+   positioning on a phone produces a board you have to pan around to read one
+   card. The same cards flow in a grid, and dragging is off. */
+.stickies-canvas-scroll.flow .stickies-canvas {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--space-3);
+  padding: var(--space-3);
+}
+
+.stickies-board-hint {
+  position: absolute;
+  bottom: var(--space-3);
+  font-size: 0.72rem;
+  color: var(--text-faint);
+  pointer-events: none;
+}
+
+/* The top bar is the drag handle, not the whole card — dragging from anywhere
+   would mean clicking into the text to fix a typo starts a drag instead of
+   placing the cursor. */
+.sticky-card.draggable .sticky-card-top {
+  cursor: grab;
+  touch-action: none;
+}
+
+.sticky-card.draggable .sticky-card-top:active {
+  cursor: grabbing;
+}
+
+/* The controls inside the handle are still controls. Without this the
+   checkbox and the delete button inherit the grab cursor and read as
+   undraggable-looking parts of a draggable strip. */
+.sticky-card.draggable .sticky-card-top button,
+.sticky-card.draggable .sticky-card-top input,
+.sticky-card.draggable .sticky-card-top label {
+  cursor: pointer;
+}
+
+.sticky-card.draggable {
+  box-shadow: 0 2px 8px var(--shadow-color);
 }
