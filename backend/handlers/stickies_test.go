@@ -69,18 +69,26 @@ func TestStickiesRoundTrip(t *testing.T) {
 	h := multiHandler(t)
 
 	w := call(h, http.MethodPut, `{"stickies":[
-		{"id":"a","body":"buy milk","done":false,"color":"blue","created_at":1,"updated_at":1}
+		{"id":"a","title":"Errands","body":"before Friday","color":"blue",
+		 "items":[{"id":"i1","text":"buy milk","done":false},{"id":"i2","text":"call bank","done":true}],
+		 "created_at":1,"updated_at":1}
 	]}`, 7)
 	if w.Code != http.StatusOK {
 		t.Fatalf("PUT got %d, want 200 (%s)", w.Code, w.Body.String())
 	}
-	if cards := board(t, w); len(cards) != 1 || cards[0].Body != "buy milk" {
+	if cards := board(t, w); len(cards) != 1 || cards[0].Title != "Errands" {
 		t.Fatalf("PUT should echo the stored board, got %v", cards)
 	}
 
 	cards := board(t, call(h, http.MethodGet, "", 7))
-	if len(cards) != 1 || cards[0].ID != "a" || cards[0].Color != "blue" || cards[0].Done {
+	if len(cards) != 1 || cards[0].ID != "a" || cards[0].Color != "blue" {
 		t.Fatalf("GET after PUT: got %v", cards)
+	}
+	if cards[0].Title != "Errands" || cards[0].Body != "before Friday" {
+		t.Fatalf("title/body did not round trip: %+v", cards[0])
+	}
+	if len(cards[0].Items) != 2 || cards[0].Items[0].Text != "buy milk" || !cards[0].Items[1].Done {
+		t.Fatalf("checklist did not round trip: %+v", cards[0].Items)
 	}
 }
 
@@ -122,6 +130,13 @@ func TestStickiesLimits(t *testing.T) {
 		{"too many", manyStickies(store.MaxStickies + 1), "too many"},
 		{"card too large", fmt.Sprintf(`{"stickies":[{"id":"a","color":"yellow","body":%q}]}`,
 			strings.Repeat("x", store.MaxStickyBody+1)), "too large"},
+		{"title too long", fmt.Sprintf(`{"stickies":[{"id":"a","color":"yellow","title":%q}]}`,
+			strings.Repeat("x", store.MaxStickyTitle+1)), "title too long"},
+		{"too many items", manyItems(store.MaxStickyItems + 1), "too many checklist"},
+		{"item too long", fmt.Sprintf(`{"stickies":[{"id":"a","color":"yellow","items":[{"id":"i","text":%q}]}]}`,
+			strings.Repeat("x", store.MaxStickyItemLn+1)), "checklist item too long"},
+		{"item missing id", `{"stickies":[{"id":"a","color":"yellow","items":[{"text":"x"}]}]}`, "missing an id"},
+		{"duplicate item id", `{"stickies":[{"id":"a","color":"yellow","items":[{"id":"i","text":"x"},{"id":"i","text":"y"}]}]}`, "duplicate checklist"},
 		{"invalid colour", `{"stickies":[{"id":"a","body":"x","color":"rainbow"}]}`, "colour"},
 		{"missing id", `{"stickies":[{"body":"x","color":"yellow"}]}`, "id"},
 		{"duplicate id", `{"stickies":[{"id":"a","body":"x","color":"yellow"},{"id":"a","body":"y","color":"yellow"}]}`, "duplicate"},
@@ -182,8 +197,8 @@ func TestStickiesPositionRoundTrip(t *testing.T) {
 	if cards[0].X == nil || *cards[0].X != 0 || cards[0].Y == nil {
 		t.Fatalf("a card placed at 0,0 lost its position: %+v", cards[0])
 	}
-	if cards[1].X != nil || cards[1].Y != nil {
-		t.Fatalf("an undragged card should have no position: %+v", cards[1])
+	if cards[1].X != nil || cards[1].Y != nil || cards[1].W != nil {
+		t.Fatalf("an untouched card should have no position or width: %+v", cards[1])
 	}
 
 	// And it must serialise back as absent, not as 0 — otherwise every card
@@ -201,6 +216,8 @@ func TestStickiesPositionRoundTrip(t *testing.T) {
 func TestStickiesPositionLimits(t *testing.T) {
 	cases := []struct{ name, body, wantMsg string }{
 		{"negative", `{"stickies":[{"id":"a","body":"x","color":"yellow","x":-1,"y":0}]}`, "bounds"},
+		{"width too small", `{"stickies":[{"id":"a","body":"x","color":"yellow","w":4}]}`, "width out of bounds"},
+		{"width too large", `{"stickies":[{"id":"a","body":"x","color":"yellow","w":9999}]}`, "width out of bounds"},
 		{"too far", `{"stickies":[{"id":"a","body":"x","color":"yellow","x":0,"y":20001}]}`, "bounds"},
 		{"NaN", `{"stickies":[{"id":"a","body":"x","color":"yellow","x":null}]}`, ""},
 	}
@@ -221,6 +238,19 @@ func TestStickiesPositionLimits(t *testing.T) {
 				t.Fatalf("error should name the problem (%q), got %s", c.wantMsg, w.Body.String())
 			}
 		})
+	}
+}
+
+// A card with no checklist must serialise as [] rather than null. The client
+// maps over it, so one null would break the render of the whole board — not
+// just that card.
+func TestStickiesEmptyChecklistIsAnArray(t *testing.T) {
+	w := call(multiHandler(t), http.MethodPut, `{"stickies":[{"id":"a","body":"plain note","color":"yellow"}]}`, 7)
+	if w.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200 (%s)", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"items":[]`) {
+		t.Fatalf("a card with no checklist must serialise items as [], got %s", w.Body.String())
 	}
 }
 
@@ -297,6 +327,19 @@ func TestStickiesSurviveARestart(t *testing.T) {
 	if len(cards) != 1 || cards[0].Body != "still here" {
 		t.Fatalf("board did not survive a fresh store: %v", cards)
 	}
+}
+
+func manyItems(n int) string {
+	var b strings.Builder
+	b.WriteString(`{"stickies":[{"id":"a","color":"yellow","items":[`)
+	for i := 0; i < n; i++ {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		fmt.Fprintf(&b, `{"id":"i%d","text":"x"}`, i)
+	}
+	b.WriteString(`]}]}`)
+	return b.String()
 }
 
 func manyStickies(n int) string {

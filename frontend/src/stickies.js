@@ -20,7 +20,24 @@ export const DEFAULT_COLOR = 'yellow';
 // user is stopped at the point of the action rather than by a failed save
 // several hundred milliseconds later.
 export const MAX_STICKIES = 200;
+export const MAX_TITLE = 200;
 export const MAX_BODY = 4096;
+export const MAX_ITEMS = 50;
+export const MAX_ITEM_LEN = 500;
+
+// normalizeItems makes a checklist safe to render. Same reasoning as the card
+// pass: stickies.json is a plain file the owner of the box can open, and an
+// item with `text: undefined` throws on .trim() and takes the whole app down.
+function normalizeItems(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((i) => i && typeof i.id === 'string' && i.id !== '')
+    .map((i) => ({
+      id: i.id,
+      text: typeof i.text === 'string' ? i.text : '',
+      done: i.done === true,
+    }));
+}
 
 // coord accepts only a real, finite number as a position. Anything else — a
 // missing field, a string, NaN from a hand-edited stickies.json — means "not
@@ -30,22 +47,30 @@ function coord(v) {
   return typeof v === 'number' && Number.isFinite(v) ? v : null;
 }
 
+// uid builds an id unique within one board — that is all it has to be, since
+// nothing here is global. crypto.randomUUID would be nicer but is unavailable
+// over plain HTTP in some browsers, which is exactly how mdnest is often
+// reached.
+function uid(prefix, now = Date.now()) {
+  return `${prefix}-${now}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 // newSticky builds an empty card. The id is generated client-side because the
-// client owns the array — the server only ever stores what it is given — and
-// it has to be unique within one board, not globally, so time plus a random
-// suffix is enough. crypto.randomUUID would be nicer but is unavailable on
-// plain HTTP in some browsers, which is exactly how mdnest is often reached.
+// client owns the array — the server only ever stores what it is given.
 export function newSticky(color = DEFAULT_COLOR, now = Date.now()) {
-  const rand = Math.random().toString(36).slice(2, 8);
   return {
-    id: `s-${now}-${rand}`,
+    id: uid('s', now),
+    title: '',
     body: '',
-    done: false,
+    // A sticky is usually a small list, not one yes/no thing. The checklist
+    // starts empty so a plain scribbled note looks like a plain note.
+    items: [],
     color: STICKY_COLORS.includes(color) ? color : DEFAULT_COLOR,
     // Unplaced. The board deals it onto the first free grid slot; it gains a
     // real position only if the user drags it.
     x: null,
     y: null,
+    w: null,
     created_at: Math.floor(now / 1000),
     updated_at: Math.floor(now / 1000),
   };
@@ -71,6 +96,42 @@ export function removeSticky(cards, id) {
   return cards.filter((c) => c.id !== id);
 }
 
+// --- Checklist --------------------------------------------------------------
+
+export function newItem(now = Date.now()) {
+  return { id: uid('i', now), text: '', done: false };
+}
+
+export function addItem(card, item) {
+  return { ...card, items: [...card.items, item] };
+}
+
+export function editItem(card, itemId, patch) {
+  return { ...card, items: card.items.map((i) => (i.id === itemId ? { ...i, ...patch } : i)) };
+}
+
+export function removeItem(card, itemId) {
+  return { ...card, items: card.items.filter((i) => i.id !== itemId) };
+}
+
+// isCardDone is only meaningful for a card that HAS a checklist. A plain note
+// is never "done" — it is a note, not a task — so an empty checklist reports
+// false rather than vacuously true, which is what `every` would give.
+export function isCardDone(card) {
+  return card.items.length > 0 && card.items.every((i) => i.done);
+}
+
+// Progress for the card header. An item with no text yet is the row you are
+// about to type into, so it does not count toward either number.
+export function cardProgress(card) {
+  const real = card.items.filter((i) => i.text.trim() !== '');
+  return { done: real.filter((i) => i.done).length, total: real.length };
+}
+
+export function isCardFull(card) {
+  return card.items.length >= MAX_ITEMS;
+}
+
 // --- Corkboard layout -------------------------------------------------------
 //
 // On the full-screen board a card sits wherever it was dropped. A card that
@@ -85,6 +146,25 @@ export function removeSticky(cards, id) {
 export const CARD_W = 210;
 export const CARD_H = 150;
 export const GAP = 18;
+
+// Width bounds for a card the user has resized. Only width is settable:
+// height follows the content, because the title, body and every checklist
+// line grow as they are typed into — a stored height would clip a card the
+// moment you added a line to it.
+export const MIN_CARD_W = 150;
+export const MAX_CARD_W = 600;
+
+// cardWidth is the width to render a card at: what the user dragged it to, or
+// the default. Clamped on read as well as on write, so a hand-edited
+// stickies.json cannot produce a 4px-wide card that is impossible to grab.
+export function cardWidth(card) {
+  const w = typeof card.w === 'number' && Number.isFinite(card.w) ? card.w : CARD_W;
+  return Math.min(MAX_CARD_W, Math.max(MIN_CARD_W, w));
+}
+
+export function clampWidth(w) {
+  return Math.round(Math.min(MAX_CARD_W, Math.max(MIN_CARD_W, Number.isFinite(w) ? w : CARD_W)));
+}
 
 export const hasPosition = (c) => typeof c.x === 'number' && typeof c.y === 'number';
 
@@ -141,21 +221,39 @@ export function clampToBoard(x, y, maxCoord = 20000) {
 
 // boardExtent sizes the scrollable canvas: far enough to show every card plus
 // room to drop another one, and never smaller than the viewport.
-export function boardExtent(positions, viewportW, viewportH) {
+//
+// It reads each card's OWN width rather than the nominal one — a card widened
+// to 600px at the right edge would otherwise sit outside the scrollable area,
+// with its right half unreachable.
+export function boardExtent(cards, positions, viewportW, viewportH) {
   let w = viewportW;
   let h = viewportH;
-  for (const { x, y } of positions.values()) {
-    w = Math.max(w, x + CARD_W + GAP);
-    h = Math.max(h, y + CARD_H + GAP);
+  for (const c of cards) {
+    const p = positions.get(c.id);
+    if (!p) continue;
+    w = Math.max(w, p.x + cardWidth(c) + GAP);
+    h = Math.max(h, p.y + CARD_H + GAP);
   }
   return { width: w, height: h };
 }
 
-// undoneCount drives the toolbar badge. An empty card is not a task yet — it
-// is the row the user is about to type into — so it does not count, otherwise
-// clicking "+" bumps the badge before anything has been written.
+// undoneCount drives the toolbar badge: unfinished checklist items across the
+// whole board. It counts ITEMS rather than cards because that is what the
+// number means to a reader — "3 things left", not "3 notes containing
+// something unfinished".
+//
+// An item with no text yet is the row you are about to type into, so it does
+// not count; otherwise clicking "+ item" bumps the badge before anything has
+// been written. A card with no checklist contributes nothing at all — it is a
+// note, and a note is not outstanding work.
 export function undoneCount(cards) {
-  return cards.filter((c) => !c.done && c.body.trim() !== '').length;
+  let n = 0;
+  for (const c of cards) {
+    for (const i of c.items) {
+      if (!i.done && i.text.trim() !== '') n++;
+    }
+  }
+  return n;
 }
 
 // isBoardFull is asked before adding, so the "+" can be disabled with a reason
@@ -174,14 +272,16 @@ export function normalizeBoard(raw) {
     .filter((c) => c && typeof c.id === 'string' && c.id !== '')
     .map((c) => ({
       id: c.id,
+      title: typeof c.title === 'string' ? c.title.slice(0, MAX_TITLE) : '',
       body: typeof c.body === 'string' ? c.body : '',
-      done: c.done === true,
+      items: normalizeItems(c.items),
       color: STICKY_COLORS.includes(c.color) ? c.color : DEFAULT_COLOR,
       // null, not 0, for a card that has never been dragged — the board lays
       // those out on a grid, and coercing them to 0 would stack every one of
       // them in the top-left corner.
       x: coord(c.x),
       y: coord(c.y),
+      w: coord(c.w),
       created_at: Number(c.created_at) || 0,
       updated_at: Number(c.updated_at) || 0,
     }));

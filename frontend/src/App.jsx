@@ -129,18 +129,36 @@ function consumeSSOHashOnLoad() {
 }
 
 // URL helpers: store ns and path in hash like #ns/path/to/note.md
+//
+// The full-screen sticky board gets its own route. It replaces the entire
+// view rather than overlaying a note, so a refresh landing back on the last
+// note is wrong — you asked for the board, you should get the board back.
+// The side panel deliberately does NOT get a route: it is an overlay on a
+// note, and the note is what the URL should still describe.
+//
+// The marker is "!stickies" rather than "stickies" because a namespace is a
+// directory name the operator chooses, and a namespace called `stickies`
+// would otherwise become unreachable. A leading "!" cannot be one.
+const STICKIES_ROUTE = '!stickies';
+
 function parseHash() {
   const hash = window.location.hash.replace(/^#\/?/, '');
-  if (!hash) return { ns: null, path: null };
+  if (hash === STICKIES_ROUTE) return { ns: null, path: null, stickies: true };
+  if (!hash) return { ns: null, path: null, stickies: false };
   const slashIdx = hash.indexOf('/');
-  if (slashIdx === -1) return { ns: decodeURIComponent(hash), path: null };
+  if (slashIdx === -1) return { ns: decodeURIComponent(hash), path: null, stickies: false };
   return {
     ns: decodeURIComponent(hash.substring(0, slashIdx)),
     path: decodeURIComponent(hash.substring(slashIdx + 1)) || null,
+    stickies: false,
   };
 }
 
-function setHash(ns, path) {
+function setHash(ns, path, stickiesBoard) {
+  if (stickiesBoard) {
+    window.history.replaceState(null, '', '#' + STICKIES_ROUTE);
+    return;
+  }
   let hash = '';
   if (ns) {
     hash = encodeURIComponent(ns);
@@ -858,7 +876,11 @@ function App() {
       }
 
       const nsList = await loadNamespaces();
-      const { ns: hashNs, path: hashPath } = parseHash();
+      const { ns: hashNs, path: hashPath, stickies: hashStickies } = parseHash();
+      // Opened straight onto the board. The namespace and last file are still
+      // restored underneath, so closing the board lands somewhere sensible
+      // rather than on an empty editor.
+      if (hashStickies) setStickiesView('board');
       let targetNs = null;
 
       if (hashNs && nsList.includes(hashNs)) {
@@ -881,7 +903,9 @@ function App() {
           const last = getLastPath(targetNs);
           if (last) {
             setCurrentPath(last);
-            setHash(targetNs, last);
+            // Not while the board route is what brought us here — writing the
+            // note hash would overwrite the very URL being restored.
+            if (!hashStickies) setHash(targetNs, last);
           }
         }
       }
@@ -1011,15 +1035,24 @@ function App() {
 
   // Update URL hash
   useEffect(() => {
+    if (stickiesView === 'board') {
+      setHash(null, null, true);
+      return;
+    }
     if (selectedNs) {
       setHash(selectedNs, currentPath);
     }
-  }, [selectedNs, currentPath]);
+  }, [selectedNs, currentPath, stickiesView]);
 
   // Handle browser back/forward
   useEffect(() => {
     const onHashChange = () => {
-      const { ns, path } = parseHash();
+      const { ns, path, stickies } = parseHash();
+      if (stickies) {
+        setStickiesView('board');
+        return; // the board route says nothing about which note is open
+      }
+      setStickiesView((v) => (v === 'board' ? 'closed' : v));
       if (ns && ns !== selectedNs) {
         setSelectedNs(ns);
       }

@@ -9,8 +9,9 @@ import {
   layoutBoard,
   boardExtent,
   clampToBoard,
+  clampWidth,
+  cardWidth,
   hasPosition,
-  CARD_W,
   GAP,
   MAX_STICKIES,
 } from '../stickies.js';
@@ -36,8 +37,9 @@ function StickiesBoard({ stickies, onChange, onCollapse, onClose, saveState, isM
   const [boardWidth, setBoardWidth] = useState(() => window.innerWidth);
   // The card being dragged and where it currently is. Held locally so the drag
   // is smooth: committing to the board state on every pointermove would rerun
-  // the debounced save on every frame.
+  // the debounced save on every frame. Resizing works the same way.
   const [drag, setDrag] = useState(null);
+  const [resize, setResize] = useState(null);
 
   const full = isBoardFull(stickies);
 
@@ -48,7 +50,7 @@ function StickiesBoard({ stickies, onChange, onCollapse, onClose, saveState, isM
   }, []);
 
   const positions = layoutBoard(stickies, boardWidth);
-  const extent = boardExtent(positions, boardWidth, window.innerHeight);
+  const extent = boardExtent(stickies, positions, boardWidth, window.innerHeight);
 
   const handleAdd = useCallback(() => {
     if (full) return;
@@ -62,7 +64,7 @@ function StickiesBoard({ stickies, onChange, onCollapse, onClose, saveState, isM
 
   useEffect(() => {
     if (!focusIdRef.current) return;
-    const node = document.querySelector(`[data-sticky-id="${focusIdRef.current}"] textarea`);
+    const node = document.querySelector(`[data-sticky-id="${focusIdRef.current}"] .sticky-title`);
     focusIdRef.current = null;
     if (node) node.focus();
   }, [stickies]);
@@ -116,6 +118,38 @@ function StickiesBoard({ stickies, onChange, onCollapse, onClose, saveState, isM
     window.addEventListener('pointerup', onUp);
     window.addEventListener('pointercancel', onUp);
   }, [positions, stickies, onChange, isMobile]);
+
+  // Resizing changes WIDTH only. Height follows the content — the title, the
+  // body and every checklist line grow as they are typed into — so a stored
+  // height would clip the card the moment another to-do was added.
+  const startResize = useCallback((card, e) => {
+    if (isMobile || e.button > 0) return;
+    e.stopPropagation(); // never let the card start moving as well
+    const originX = e.clientX;
+    const startW = cardWidth(card);
+    e.currentTarget.setPointerCapture(e.pointerId);
+
+    let moved = false;
+    let latest = startW;
+
+    const onMove = (ev) => {
+      const dx = ev.clientX - originX;
+      if (!moved && Math.abs(dx) < DRAG_THRESHOLD) return;
+      moved = true;
+      latest = clampWidth(startW + dx);
+      setResize({ id: card.id, w: latest });
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      setResize(null);
+      if (moved) onChange(editSticky(stickies, card.id, { w: latest }));
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  }, [stickies, onChange, isMobile]);
 
   // Tidy up: drop every stored position so layoutBoard deals the whole board
   // back onto the grid. Clearing x/y rather than computing and storing grid
@@ -184,6 +218,7 @@ function StickiesBoard({ stickies, onChange, onCollapse, onClose, saveState, isM
         >
           {stickies.map((c) => {
             const live = drag && drag.id === c.id ? drag : positions.get(c.id);
+            const liveW = resize && resize.id === c.id ? resize.w : cardWidth(c);
             return (
               <StickyCard
                 key={c.id}
@@ -193,7 +228,7 @@ function StickiesBoard({ stickies, onChange, onCollapse, onClose, saveState, isM
                   position: 'absolute',
                   left: live.x,
                   top: live.y,
-                  width: CARD_W,
+                  width: liveW,
                   // The card being dragged rides above the rest, or it slides
                   // under whatever it is being dropped next to.
                   zIndex: drag && drag.id === c.id ? 10 : 1,
@@ -201,7 +236,8 @@ function StickiesBoard({ stickies, onChange, onCollapse, onClose, saveState, isM
                 dragHandleProps={isMobile ? undefined : {
                   onPointerDown: (e) => startDrag(c, e),
                 }}
-                onPatch={(patch) => onChange(editSticky(stickies, c.id, patch))}
+                onResizeStart={isMobile ? undefined : startResize}
+                onCardChange={(next) => onChange(editSticky(stickies, c.id, next))}
                 onDelete={() => onChange(removeSticky(stickies, c.id))}
               />
             );
@@ -211,7 +247,7 @@ function StickiesBoard({ stickies, onChange, onCollapse, onClose, saveState, isM
 
       {!isMobile && stickies.length > 0 && (
         <div className="stickies-board-hint" style={{ left: GAP }}>
-          Drag a sticky by its top bar to move it.
+          Drag a sticky by its top bar to move it, or its bottom-right corner to resize it.
         </div>
       )}
     </div>

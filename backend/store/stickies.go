@@ -24,7 +24,19 @@ import (
 // every change, so a row-per-card schema would buy nothing but a diffing
 // problem and a concurrency question the feature does not have.
 
-// Sticky is one card.
+// StickyItem is one checkable line on a card. A sticky is usually a small
+// list, not a single yes/no thing, so "done" lives here rather than on the
+// card — a card-level flag forces "buy milk, call bank, post form" to be three
+// separate notes or one note you can only tick when all of it is finished.
+type StickyItem struct {
+	ID   string `json:"id"`
+	Text string `json:"text"`
+	Done bool   `json:"done"`
+}
+
+// Sticky is one card: an optional title, some free text, and an optional
+// checklist. All three are optional so the same card covers a scribbled note,
+// a titled note, and a to-do list without three different kinds of card.
 //
 // X and Y are the card's position on the full-screen corkboard, in board
 // pixels. They are POINTERS so that "never placed" is distinguishable from
@@ -33,14 +45,16 @@ import (
 // unplaced cards on a grid rather than stacking them all in one corner.
 // A card only gains a position when it is dragged; the drawer never sets one.
 type Sticky struct {
-	ID        string   `json:"id"`
-	Body      string   `json:"body"`
-	Done      bool     `json:"done"`
-	Color     string   `json:"color"`
-	X         *float64 `json:"x,omitempty"`
-	Y         *float64 `json:"y,omitempty"`
-	CreatedAt int64    `json:"created_at"`
-	UpdatedAt int64    `json:"updated_at"`
+	ID        string       `json:"id"`
+	Title     string       `json:"title"`
+	Body      string       `json:"body"`
+	Items     []StickyItem `json:"items"`
+	Color     string       `json:"color"`
+	X         *float64     `json:"x,omitempty"`
+	Y         *float64     `json:"y,omitempty"`
+	W         *float64     `json:"w,omitempty"`
+	CreatedAt int64        `json:"created_at"`
+	UpdatedAt int64        `json:"updated_at"`
 }
 
 // Limits, enforced by ValidateBoard on every write. They exist because the
@@ -48,10 +62,20 @@ type Sticky struct {
 // unbounded per-user blob store, the same reasoning that gave preferences a
 // key allowlist.
 const (
-	MaxStickies    = 200  // cards per board
-	MaxStickyBody  = 4096 // bytes in one card
-	MaxStickyID    = 64   // bytes in one card id
-	MaxStickyBoard = 262144
+	MaxStickies     = 200  // cards per board
+	MaxStickyTitle  = 200  // bytes in one card title
+	MaxStickyBody   = 4096 // bytes in one card
+	MaxStickyItems  = 50   // checklist lines on one card
+	MaxStickyItemLn = 500  // bytes in one checklist line
+	MaxStickyID     = 64   // bytes in one card id
+	MaxStickyBoard  = 262144
+
+	// Width bounds for a resized card. Only width is user-settable: height is
+	// driven by the content (the text areas grow as you type), so a stored
+	// height would either clip a card or leave a gap under it the moment the
+	// text changed.
+	MinStickyWidth = 150
+	MaxStickyWidth = 600
 
 	// MaxStickyCoord bounds a card's position on the corkboard. The board
 	// scrolls to fit its content, so without a ceiling one card dragged to
@@ -102,9 +126,17 @@ func ValidateBoard(cards []Sticky) ([]Sticky, error) {
 			return nil, wrapSticky("duplicate sticky id")
 		}
 		seen[c.ID] = true
+		if len(c.Title) > MaxStickyTitle {
+			return nil, wrapSticky("title too long (max %d bytes)", MaxStickyTitle)
+		}
 		if len(c.Body) > MaxStickyBody {
 			return nil, wrapSticky("sticky too large (max %d bytes)", MaxStickyBody)
 		}
+		items, err := validItems(c.Items)
+		if err != nil {
+			return nil, err
+		}
+		c.Items = items
 		if c.Color == "" {
 			c.Color = "yellow"
 		}
@@ -115,6 +147,9 @@ func ValidateBoard(cards []Sticky) ([]Sticky, error) {
 			return nil, err
 		}
 		if err := validCoord(c.Y); err != nil {
+			return nil, err
+		}
+		if err := validWidth(c.W); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -133,6 +168,36 @@ func ValidateBoard(cards []Sticky) ([]Sticky, error) {
 	return out, nil
 }
 
+// validItems checks a card's checklist and normalises it to a non-nil slice.
+//
+// Non-nil matters on the wire: a nil slice marshals to `null`, and the client
+// maps over it, so one card with no checklist would break the render of the
+// whole board. Empty array is the correct empty value here.
+func validItems(items []StickyItem) ([]StickyItem, error) {
+	if len(items) > MaxStickyItems {
+		return nil, wrapSticky("too many checklist items (max %d)", MaxStickyItems)
+	}
+	out := make([]StickyItem, 0, len(items))
+	seen := make(map[string]bool, len(items))
+	for _, it := range items {
+		if it.ID == "" {
+			return nil, wrapSticky("checklist item is missing an id")
+		}
+		if len(it.ID) > MaxStickyID {
+			return nil, wrapSticky("checklist item id too long (max %d bytes)", MaxStickyID)
+		}
+		if seen[it.ID] {
+			return nil, wrapSticky("duplicate checklist item id")
+		}
+		seen[it.ID] = true
+		if len(it.Text) > MaxStickyItemLn {
+			return nil, wrapSticky("checklist item too long (max %d bytes)", MaxStickyItemLn)
+		}
+		out = append(out, it)
+	}
+	return out, nil
+}
+
 // validCoord bounds one axis of a card's board position. nil is fine — that is
 // a card that has never been dragged. NaN and Inf are rejected explicitly:
 // they survive a JSON round trip through a float64, and either one poisons the
@@ -147,6 +212,22 @@ func validCoord(v *float64) error {
 	}
 	if *v < 0 || *v > MaxStickyCoord {
 		return wrapSticky("position out of bounds (0-%d)", MaxStickyCoord)
+	}
+	return nil
+}
+
+// validWidth bounds a resized card. nil is "never resized" — the client uses
+// its default width — which is the same nil-means-untouched convention X and Y
+// use, and for the same reason: a stored 0 would be a card resized to nothing.
+func validWidth(v *float64) error {
+	if v == nil {
+		return nil
+	}
+	if math.IsNaN(*v) || math.IsInf(*v, 0) {
+		return wrapSticky("invalid width")
+	}
+	if *v < MinStickyWidth || *v > MaxStickyWidth {
+		return wrapSticky("width out of bounds (%d-%d)", MinStickyWidth, MaxStickyWidth)
 	}
 	return nil
 }

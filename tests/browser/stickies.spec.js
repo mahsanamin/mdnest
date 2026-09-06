@@ -35,7 +35,14 @@ async function clearBoard(page) {
 
 const openPanel = (page) => page.locator('.toolbar-stickies').click();
 
+// Idempotent on purpose. The board has its own URL, so after a reload it is
+// already open — and clicking the toolbar button then fails, because the
+// full-screen board is covering the toolbar.
 async function openBoard(page) {
+  if (await page.locator('.stickies-board').count()) {
+    await expect(page.locator('.stickies-board')).toBeVisible();
+    return;
+  }
   await openPanel(page);
   await page.locator('.stickies-expand').click();
   await expect(page.locator('.stickies-board')).toBeVisible();
@@ -87,7 +94,7 @@ test.describe('stickies', () => {
     await openPanel(page);
     await expect(page.locator('.stickies-panel')).toBeVisible();
     await page.locator('.stickies-add').click();
-    await page.locator('.sticky-card textarea').fill('call the bank');
+    await page.locator('.sticky-card .sticky-body').fill('call the bank');
 
     await expectSavedCount(page, 1);
 
@@ -101,7 +108,7 @@ test.describe('stickies', () => {
     });
     await page.reload();
     await openPanel(page);
-    await expect(page.locator('.sticky-card textarea')).toHaveValue('call the bank');
+    await expect(page.locator('.sticky-card .sticky-body')).toHaveValue('call the bank');
   });
 
   test('the board is reachable with no file open', async ({ page }) => {
@@ -156,10 +163,16 @@ test.describe('stickies', () => {
     await page.locator('.stickies-add').click();
     await expect(page.locator('.toolbar-stickies .comment-badge')).toHaveCount(0);
 
-    await page.locator('.sticky-card textarea').fill('something to do');
+    // Body text is a note, not a task — it must not reach the badge.
+    await page.locator('.sticky-card .sticky-body').fill('just a note');
+    await expect(page.locator('.toolbar-stickies .comment-badge')).toHaveCount(0);
+
+    await page.locator('.sticky-add-item').click();
+    await expect(page.locator('.toolbar-stickies .comment-badge')).toHaveCount(0); // blank row
+    await page.locator('.sticky-items textarea').fill('something to do');
     await expect(page.locator('.toolbar-stickies .comment-badge')).toHaveText('1');
 
-    await page.locator('.sticky-check input').check();
+    await page.locator('.sticky-items input[type=checkbox]').check();
     await expect(page.locator('.toolbar-stickies .comment-badge')).toHaveCount(0);
   });
 
@@ -169,7 +182,7 @@ test.describe('stickies', () => {
     await openBoard(page);
 
     await page.locator('.stickies-add.board').click();
-    await page.locator('.sticky-card textarea').fill('move me');
+    await page.locator('.sticky-card .sticky-body').fill('move me');
     await expectSavedCount(page, 1);
 
     // A card that has never been dragged has NO position — that is what lets
@@ -199,7 +212,7 @@ test.describe('stickies', () => {
     await openBoard(page);
 
     await page.locator('.stickies-add.board').click();
-    await page.locator('.sticky-card textarea').fill('do not move');
+    await page.locator('.sticky-card .sticky-body').fill('do not move');
     await expectSavedCount(page, 1);
 
     // A click WITH the jitter a real one carries. Playwright's .click() moves
@@ -221,13 +234,13 @@ test.describe('stickies', () => {
     await clearBoard(page);
     await openPanel(page);
     await page.locator('.stickies-add').click();
-    await page.locator('.sticky-card textarea').fill('written in the drawer');
+    await page.locator('.sticky-card .sticky-body').fill('written in the drawer');
     await expectSavedCount(page, 1);
 
     await page.locator('.stickies-expand').click();
     await expect(page.locator('.stickies-board')).toBeVisible();
     await expect(page.locator('.stickies-panel')).toHaveCount(0);
-    await expect(page.locator('.sticky-card textarea')).toHaveValue('written in the drawer');
+    await expect(page.locator('.sticky-card .sticky-body')).toHaveValue('written in the drawer');
 
     // Collapsing goes back to the drawer, not to nothing.
     await page.locator('.stickies-collapse').click();
@@ -252,7 +265,7 @@ test.describe('stickies', () => {
     await openBoard(page);
 
     await page.locator('.stickies-add.board').click();
-    await page.locator('.sticky-card textarea').fill('scattered');
+    await page.locator('.sticky-card .sticky-body').fill('scattered');
     await expectSavedCount(page, 1);
     await dragCard(page, 240, 140);
     await expect.poll(async () => (await savedPosition(page)).x, { timeout: 10_000 })
@@ -282,13 +295,196 @@ test.describe('stickies', () => {
     expect(pos).not.toBe('absolute');
   });
 
+  test('the card controls still work on the full-screen board', async ({ page }) => {
+    // The regression this exists for: the drag handler calls setPointerCapture
+    // on the top bar, which redirects the following pointerup there — so the
+    // browser fired `click` on the BAR rather than on the button that was
+    // pressed, and the colour and delete buttons silently stopped working the
+    // moment the board was opened. They work in the drawer, which has no drag
+    // handler, so the drawer's coverage says nothing about this.
+    await signIn(page);
+    await clearBoard(page);
+    await openBoard(page);
+    await page.locator('.stickies-add.board').click();
+
+    await page.locator('.sticky-color-btn').click();
+    await expect(page.locator('.sticky-colors')).toBeVisible();
+    await page.locator('.sticky-colors .sticky-green').click();
+    await expect(page.locator('.sticky-card.sticky-green')).toHaveCount(1);
+
+    // And it reached the server, not just the DOM.
+    await expect.poll(async () => page.evaluate(async () => {
+      const t = localStorage.getItem('mdnest_token');
+      const d = await (await fetch('/api/stickies', { headers: { Authorization: 'Bearer ' + t } })).json();
+      return d.stickies[0]?.color ?? null;
+    }), { timeout: 10_000 }).toBe('green');
+
+    await page.locator('.sticky-delete').click();
+    await expect(page.locator('.sticky-card')).toHaveCount(0);
+  });
+
+  test('a sticky holds a title and several to-dos', async ({ page }) => {
+    await signIn(page);
+    await clearBoard(page);
+    await openPanel(page);
+    await page.locator('.stickies-add').click();
+
+    await page.locator('.sticky-title').fill('Errands');
+    await page.locator('.sticky-add-item').click();
+    await page.locator('.sticky-items textarea').first().fill('buy milk');
+    // Enter opens the next line, the way any list behaves.
+    await page.locator('.sticky-items textarea').first().press('Enter');
+    await page.locator('.sticky-items textarea').nth(1).fill('call bank');
+    await expect(page.locator('.sticky-items li')).toHaveCount(2);
+
+    await page.locator('.sticky-items input[type=checkbox]').first().check();
+    await expect(page.locator('.sticky-progress')).toHaveText('1/2');
+    await expectSavedCount(page, 1);
+
+    await page.reload();
+    await openPanel(page);
+    await expect(page.locator('.sticky-title')).toHaveValue('Errands');
+    await expect(page.locator('.sticky-items li')).toHaveCount(2);
+    await expect(page.locator('.sticky-progress')).toHaveText('1/2');
+  });
+
+  test('a card is struck through only when its whole checklist is done', async ({ page }) => {
+    // `items.every()` is vacuously true on an empty list, so a plain note must
+    // not read as finished the moment it is created.
+    await signIn(page);
+    await clearBoard(page);
+    await openPanel(page);
+    await page.locator('.stickies-add').click();
+    await expect(page.locator('.sticky-card.done')).toHaveCount(0);
+
+    await page.locator('.sticky-add-item').click();
+    await page.locator('.sticky-items textarea').fill('the only task');
+    await expect(page.locator('.sticky-card.done')).toHaveCount(0);
+
+    await page.locator('.sticky-items input[type=checkbox]').check();
+    await expect(page.locator('.sticky-card.done')).toHaveCount(1);
+  });
+
+  test('the full board has its own URL and a refresh returns to it', async ({ page }) => {
+    // The board replaces the whole view, so landing back on the last note
+    // after a refresh is wrong. The side panel deliberately has no route — it
+    // overlays a note, and the note is what the URL should describe.
+    await signIn(page);
+    await clearBoard(page);
+    await openBoard(page);
+    expect(page.url()).toContain('#!stickies');
+
+    await page.reload();
+    await expect(page.locator('.stickies-board')).toBeVisible({ timeout: 20_000 });
+
+    // Closing lands on a real note rather than an empty editor: the namespace
+    // and last file are restored underneath the board.
+    await page.locator('.stickies-board .stickies-close').click();
+    await expect(page.locator('.stickies-board')).toHaveCount(0);
+    expect(page.url()).not.toContain('!stickies');
+  });
+
+  test('the drawer does not take over the URL', async ({ page }) => {
+    await signIn(page);
+    await clearBoard(page);
+    const files = page.locator('.tree-row:has(.tree-icon-svg.file)');
+    await expect(files.first()).toBeVisible({ timeout: 20_000 });
+    await files.first().click();
+    // Wait for the note hash to land before capturing it. The click resolves
+    // before the URL is rewritten, so reading it immediately captures the
+    // bare namespace and the test then "fails" on the note arriving.
+    await expect.poll(() => page.url()).toMatch(/#[^/]+\/.+/);
+    const noteUrl = page.url();
+
+    await openPanel(page);
+    await expect(page.locator('.stickies-panel')).toBeVisible();
+    expect(page.url()).toBe(noteUrl);
+  });
+
+  test('a long to-do wraps instead of being cut off', async ({ page }) => {
+    // It used to be an <input>, which cannot wrap: the text was still stored,
+    // but everything past the card's edge was invisible. The check is that the
+    // row grows TALLER than one line — an input would stay exactly one line
+    // high no matter how much was typed into it.
+    await signIn(page);
+    await clearBoard(page);
+    await openPanel(page);
+    await page.locator('.stickies-add').click();
+    await page.locator('.sticky-add-item').click();
+
+    const row = page.locator('.sticky-items textarea').first();
+    const oneLine = (await row.boundingBox()).height;
+    await row.fill('renew the domain before it lapses and then update the DNS records for the staging host');
+    await expect.poll(async () => (await row.boundingBox()).height, { timeout: 5_000 })
+      .toBeGreaterThan(oneLine * 1.8);
+
+    // And nothing is clipped horizontally: the text fits the row it is in.
+    const clipped = await row.evaluate((el) => el.scrollWidth > el.clientWidth + 1);
+    expect(clipped, 'the to-do is still being cut off at the card edge').toBe(false);
+  });
+
+  test('a sticky can be resized, and the width sticks', async ({ page }) => {
+    await signIn(page);
+    await clearBoard(page);
+    await openBoard(page);
+    await page.locator('.stickies-add.board').click();
+    await page.locator('.sticky-title').fill('wide one');
+
+    const card = page.locator('.sticky-card').first();
+    const before = (await card.boundingBox()).width;
+
+    const grip = page.locator('.sticky-resize').first();
+    const g = await grip.boundingBox();
+    await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(g.x + g.width / 2 + 150, g.y + g.height / 2, { steps: 10 });
+    await page.mouse.up();
+
+    await expect.poll(async () => (await card.boundingBox()).width, { timeout: 5_000 })
+      .toBeGreaterThan(before + 100);
+
+    // Stored, not just painted. Polled, and with optional chaining: every
+    // change resets the 500 ms debounce, so a card can be on screen before any
+    // save has fired — and a callback that throws on an empty board aborts the
+    // poll instead of retrying.
+    await expect.poll(async () => page.evaluate(async () => {
+      const t = localStorage.getItem('mdnest_token');
+      const d = await (await fetch('/api/stickies', { headers: { Authorization: 'Bearer ' + t } })).json();
+      return d.stickies[0]?.w ?? 0;
+    }), { timeout: 10_000 }).toBeGreaterThan(before + 100);
+
+    await page.reload();
+    await expect(page.locator('.stickies-board')).toBeVisible({ timeout: 20_000 });
+    expect((await page.locator('.sticky-card').first().boundingBox()).width)
+      .toBeGreaterThan(before + 100);
+  });
+
+  test('resizing a card does not also move it', async ({ page }) => {
+    // The grip sits inside the card, so without stopPropagation the resize
+    // pointerdown would reach the card and start a move at the same time.
+    await signIn(page);
+    await clearBoard(page);
+    await openBoard(page);
+    await page.locator('.stickies-add.board').click();
+
+    const grip = page.locator('.sticky-resize').first();
+    const g = await grip.boundingBox();
+    await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(g.x + g.width / 2 + 120, g.y + g.height / 2, { steps: 10 });
+    await page.mouse.up();
+
+    await expect.poll(async () => savedPosition(page), { timeout: 5_000 })
+      .toEqual({ x: null, y: null });
+  });
+
   test('deleting a sticky removes it on the server too', async ({ page }) => {
     await signIn(page);
     await clearBoard(page);
     await openPanel(page);
 
     await page.locator('.stickies-add').click();
-    await page.locator('.sticky-card textarea').fill('temporary');
+    await page.locator('.sticky-card .sticky-body').fill('temporary');
     await expectSavedCount(page, 1);
 
     await page.locator('.sticky-delete').click();

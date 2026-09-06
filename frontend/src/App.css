@@ -5626,24 +5626,30 @@ pre:hover .code-copy-btn {
    stroke, which at 16px makes a sticky note indistinguishable from a document
    — the colour is what names it. Fills are theme tokens so it re-themes with
    the rest rather than staying a light-mode yellow on a dark bar. */
+/* Outlined in currentColor, not in a border token. The fills are pale by
+   design (they are card backgrounds that dark text sits on), so in light mode
+   a pale fill outlined in a pale border gave a 16px blob with no readable
+   shape — it looked like a smudge next to the crisp single-stroke icons
+   beside it. currentColor ties the outline to the button's own text colour,
+   so it darkens on hover with everything else. */
 .sticky-icon-back {
   fill: var(--sticky-blue);
-  stroke: var(--border-strong);
-  stroke-width: 1;
+  stroke: currentColor;
+  stroke-width: 1.5;
 }
 
 .sticky-icon-front {
   fill: var(--sticky-yellow);
-  stroke: var(--border-strong);
-  stroke-width: 1;
+  stroke: currentColor;
+  stroke-width: 1.5;
 }
 
-/* The peeled corner: a shade darker than the face so the fold reads as a fold
-   rather than a notch cut out of the card. */
+/* The peeled corner: a different fill from the face so the fold reads as a
+   fold rather than a notch cut out of the card. */
 .sticky-icon-fold {
   fill: var(--sticky-grey);
-  stroke: var(--border-strong);
-  stroke-width: 1;
+  stroke: currentColor;
+  stroke-width: 1.5;
 }
 
 .sticky-icon-ink {
@@ -5651,11 +5657,11 @@ pre:hover .code-copy-btn {
   fill: none;
 }
 
-.toolbar-stickies:hover .sticky-icon-back,
-.toolbar-stickies.active .sticky-icon-back,
-.toolbar-stickies:hover .sticky-icon-front,
-.toolbar-stickies.active .sticky-icon-front {
-  stroke: var(--accent);
+/* The ink lines are the only part not tied to currentColor, so they need to
+   keep up on hover or they stay faint against a darkened outline. */
+.toolbar-stickies:hover .sticky-icon-ink,
+.toolbar-stickies.active .sticky-icon-ink {
+  stroke: var(--text);
 }
 
 .stickies-expand,
@@ -5816,21 +5822,16 @@ pre:hover .code-copy-btn {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
+  min-height: 18px;
 }
 
-.sticky-check {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
+/* Progress sits where the old card-level "Mark done" checkbox was. It is blank
+   until a card actually has a checklist, so a plain note shows a bare strip. */
+.sticky-progress {
   font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
   color: var(--text-secondary);
-  cursor: pointer;
   user-select: none;
-}
-
-.sticky-check input {
-  cursor: pointer;
-  margin: 0;
 }
 
 /* The actions are always in the DOM and always reachable — no hover-to-reveal.
@@ -5862,14 +5863,26 @@ pre:hover .code-copy-btn {
   color: var(--danger);
 }
 
+/* The swatch shows the card's colour, and it sits ON a card of that colour —
+   so with only a faint border it rendered as an empty ring on its own
+   background and read as a broken control. The ring is the strong border and
+   the dot needs a visible edge in both themes. */
 .sticky-swatch {
   display: inline-block;
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  border: 1px solid var(--border-strong);
+  border: 1.5px solid var(--text-secondary);
   padding: 0;
   cursor: pointer;
+  box-sizing: border-box;
+}
+
+/* Inside the card's own top bar the swatch is a *button face*, not a choice —
+   give it the page background behind the colour so it always reads as a
+   distinct chip rather than dissolving into the card. */
+.sticky-color-btn .sticky-swatch {
+  box-shadow: 0 0 0 1.5px var(--surface);
 }
 
 .sticky-swatch.active {
@@ -5883,29 +5896,138 @@ pre:hover .code-copy-btn {
   padding: var(--space-1) 0;
 }
 
-.sticky-card textarea {
+/* Every text surface on a card is transparent and borderless — the card IS
+   the field. A boxed input inside a 210px sticky reads as a form, not a note. */
+.sticky-card textarea,
+.sticky-card input[type="text"] {
+  /* Break a long unspaced string (a URL, a path) instead of letting it push
+     the card's own layout wider than the card. */
+  overflow-wrap: anywhere;
   background: transparent;
   border: none;
   outline: none;
-  resize: none;
-  overflow: hidden;
   color: var(--text);
   font-family: inherit;
+  width: 100%;
+  padding: 0;
+}
+
+.sticky-card textarea {
+  resize: none;
+  overflow: hidden;
   font-size: 0.85rem;
   line-height: 1.45;
-  padding: 0;
-  width: 100%;
 }
 
-.sticky-card textarea::placeholder {
+.sticky-title {
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.sticky-card textarea::placeholder,
+.sticky-card input[type="text"]::placeholder {
   color: var(--text-secondary);
 }
 
-/* A done sticky stays exactly where it was. Sinking it to the bottom would
-   move a card the moment you tick it, which is disorienting when the thing
-   you ticked was the one you were reading. */
+/* The title's placeholder is dimmer than the body's: an untitled sticky is
+   completely normal, so "Title" must not read as something you failed to
+   fill in. */
+.sticky-title::placeholder {
+  color: var(--text-faint);
+  font-weight: 400;
+}
+
+.sticky-items {
+  list-style: none;
+  margin: var(--space-1) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* align-items: flex-start, not center — a wrapped to-do is several lines tall
+   and its checkbox belongs beside the FIRST line, not floating in the middle
+   of the block. */
+.sticky-items li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-1);
+}
+
+.sticky-items input[type="checkbox"] {
+  margin: 2px 0 0;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.sticky-items textarea {
+  font-size: 0.8rem;
+  line-height: 1.4;
+  /* min-width: 0 so the textarea can shrink below its intrinsic width inside
+     the flex row. Without it the row refuses to narrow and the text is cut
+     off at the card edge — the exact truncation this replaced an <input> to
+     fix. */
+  min-width: 0;
+}
+
+.sticky-items li.done textarea {
+  color: var(--text-secondary);
+  text-decoration: line-through;
+}
+
+/* Per-item delete. Faint until the row is hovered, because one × per line
+   would otherwise be the loudest thing on the card. It stays in the layout
+   rather than appearing on hover, so nothing reflows under the pointer — and
+   it is always visible to a keyboard user via focus. */
+.sticky-item-remove {
+  background: none;
+  border: none;
+  padding: 0 2px;
+  line-height: 1.4;
+  cursor: pointer;
+  color: transparent;
+  flex-shrink: 0;
+}
+
+.sticky-items li:hover .sticky-item-remove,
+.sticky-item-remove:focus-visible {
+  color: var(--text-secondary);
+}
+
+.sticky-item-remove:hover {
+  color: var(--danger) !important;
+}
+
+.sticky-add-item {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  padding: 2px 0 0;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.sticky-add-item:hover {
+  color: var(--text);
+}
+
+.sticky-add-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* A finished sticky stays exactly where it was. Sinking it to the bottom would
+   move a card the moment you tick its last item, which is disorienting when
+   the thing you ticked is the one you were reading. It fades instead. */
+.sticky-card.done .sticky-title,
 .sticky-card.done textarea {
   color: var(--text-secondary);
+}
+
+.sticky-card.done .sticky-title {
   text-decoration: line-through;
 }
 
@@ -6016,11 +6138,40 @@ pre:hover .code-copy-btn {
    checkbox and the delete button inherit the grab cursor and read as
    undraggable-looking parts of a draggable strip. */
 .sticky-card.draggable .sticky-card-top button,
-.sticky-card.draggable .sticky-card-top input,
-.sticky-card.draggable .sticky-card-top label {
+.sticky-card.draggable .sticky-card-top input {
   cursor: pointer;
 }
 
 .sticky-card.draggable {
   box-shadow: 0 2px 8px var(--shadow-color);
+}
+
+/* Resize grip, bottom-right. Width only: height follows the content, so a
+   stored height would clip the card as soon as another to-do was added. */
+.sticky-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 14px;
+  height: 14px;
+  cursor: ew-resize;
+  touch-action: none;
+  /* Two short strokes, the conventional grip, drawn with a gradient so it
+     needs no extra element. */
+  background:
+    linear-gradient(135deg, transparent 46%, var(--text-secondary) 46%, var(--text-secondary) 54%, transparent 54%),
+    linear-gradient(135deg, transparent 70%, var(--text-secondary) 70%, var(--text-secondary) 78%, transparent 78%);
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.sticky-card:hover .sticky-resize {
+  opacity: 0.7;
+}
+
+.sticky-card.draggable {
+  /* The grip is positioned against the card, and the card needs room for it
+     so it never sits on top of the last line of text. */
+  position: absolute;
+  padding-bottom: 14px;
 }

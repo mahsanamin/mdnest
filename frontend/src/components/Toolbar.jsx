@@ -219,7 +219,7 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
               at 16px, and the colour is what makes it read as "stickies".
               The fills are theme tokens, so it re-themes with everything
               else instead of being a light-mode-only splash of yellow. */}
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" strokeLinejoin="round" aria-hidden="true">
             <rect x="3" y="3" width="13" height="13" rx="2" className="sticky-icon-back" />
             <path d="M8 8h13v8l-5 5H8z" className="sticky-icon-front" />
             <path d="M21 16h-5v5z" className="sticky-icon-fold" />

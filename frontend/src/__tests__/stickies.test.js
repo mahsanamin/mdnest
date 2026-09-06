@@ -26,15 +26,30 @@ import {
   CARD_W,
   CARD_H,
   GAP,
+  MAX_ITEMS,
+  newItem,
+  addItem,
+  editItem,
+  removeItem,
+  isCardDone,
+  cardProgress,
+  isCardFull,
+  cardWidth,
+  clampWidth,
+  MIN_CARD_W,
+  MAX_CARD_W,
 } from '../stickies.js';
 
 const card = (over = {}) => ({ ...newSticky(), ...over });
 
 describe('newSticky', () => {
-  it('starts empty, undone, and in the default colour', () => {
+  it('starts blank, with no checklist, in the default colour', () => {
     const c = newSticky();
+    expect(c.title).toBe('');
     expect(c.body).toBe('');
-    expect(c.done).toBe(false);
+    // Empty, not one blank row: a sticky is often just a scribbled note, and
+    // starting every one with a to-do makes it a form.
+    expect(c.items).toEqual([]);
     expect(c.color).toBe(DEFAULT_COLOR);
   });
 
@@ -101,16 +116,79 @@ describe('removeSticky', () => {
   });
 });
 
-describe('undoneCount', () => {
-  it('ignores done cards', () => {
-    expect(undoneCount([card({ done: true }), card({ body: 'x' })])).toBe(1);
+describe('checklist', () => {
+  const withItems = (...items) => card({ items });
+  const item = (text, done = false) => ({ ...newItem(), text, done });
+
+  it('adds to the end, so the list reads in the order it was written', () => {
+    const c = addItem(addItem(card(), item('first')), item('second'));
+    expect(c.items.map((i) => i.text)).toEqual(['first', 'second']);
   });
 
-  it('ignores a card that is still empty', () => {
-    // Clicking "+" creates an empty card. Counting it would bump the toolbar
-    // badge before the user has written anything — the badge would say there
-    // is a task when there is only a blank box.
-    expect(undoneCount([card({ body: '' }), card({ body: '   ' })])).toBe(0);
+  it('edits and removes exactly one item', () => {
+    const c = withItems(item('a'), item('b'));
+    const ticked = editItem(c, c.items[1].id, { done: true });
+    expect(ticked.items[0].done).toBe(false);
+    expect(ticked.items[1].done).toBe(true);
+    expect(removeItem(ticked, c.items[0].id).items.map((i) => i.text)).toEqual(['b']);
+  });
+
+  it('does not mutate the card it was given', () => {
+    const before = withItems(item('a'));
+    addItem(before, item('b'));
+    editItem(before, before.items[0].id, { done: true });
+    removeItem(before, before.items[0].id);
+    expect(before.items).toHaveLength(1);
+    expect(before.items[0].done).toBe(false);
+  });
+
+  it('does not call a card with no checklist done', () => {
+    // `items.every(...)` is vacuously true on an empty list, which would strike
+    // through every plain note on the board the moment it was created.
+    expect(isCardDone(card())).toBe(false);
+    expect(isCardDone(withItems(item('a', true)))).toBe(true);
+    expect(isCardDone(withItems(item('a', true), item('b')))).toBe(false);
+  });
+
+  it('counts progress over real items only', () => {
+    // A blank row is the line you are about to type into, not a task.
+    expect(cardProgress(withItems(item('a', true), item('b'), item('')))).toEqual({ done: 1, total: 2 });
+    expect(cardProgress(card())).toEqual({ done: 0, total: 0 });
+  });
+
+  it('stops at the server limit rather than after a failed save', () => {
+    const full = card({ items: Array.from({ length: MAX_ITEMS }, () => newItem()) });
+    expect(isCardFull(full)).toBe(true);
+    expect(isCardFull(card())).toBe(false);
+  });
+
+  it('gives every item a distinct id', () => {
+    const ids = new Set(Array.from({ length: 200 }, () => newItem().id));
+    expect(ids.size).toBe(200);
+  });
+});
+
+describe('undoneCount', () => {
+  const item = (text, done = false) => ({ ...newItem(), text, done });
+
+  it('counts unfinished checklist items across the board', () => {
+    // Items, not cards: "3 things left" is what the badge means to a reader,
+    // not "3 notes containing something unfinished".
+    expect(undoneCount([
+      card({ items: [item('a'), item('b', true), item('c')] }),
+      card({ items: [item('d')] }),
+    ])).toBe(3);
+  });
+
+  it('ignores a card with no checklist', () => {
+    // A note is not outstanding work.
+    expect(undoneCount([card({ body: 'just a note' })])).toBe(0);
+  });
+
+  it('ignores an item that is still empty', () => {
+    // Clicking "+ to-do" creates a blank row. Counting it would bump the badge
+    // before anything has been written.
+    expect(undoneCount([card({ items: [item(''), item('   ')] })])).toBe(0);
   });
 });
 
@@ -128,8 +206,8 @@ describe('normalizeBoard', () => {
     // on .trim(), taking the whole app down with it.
     const [c] = normalizeBoard([{ id: 'a' }]);
     expect(c).toEqual({
-      id: 'a', body: '', done: false, color: DEFAULT_COLOR,
-      x: null, y: null, created_at: 0, updated_at: 0,
+      id: 'a', title: '', body: '', items: [], color: DEFAULT_COLOR,
+      x: null, y: null, w: null, created_at: 0, updated_at: 0,
     });
   });
 
@@ -157,9 +235,20 @@ describe('normalizeBoard', () => {
     expect(normalizeBoard([{ id: 'c', x: NaN, y: 10 }])[0]).toMatchObject({ x: null });
   });
 
-  it('coerces done to a real boolean', () => {
-    expect(normalizeBoard([{ id: 'a', done: 'true' }])[0].done).toBe(false);
-    expect(normalizeBoard([{ id: 'b', done: true }])[0].done).toBe(true);
+  it('makes a hand-written checklist safe to render', () => {
+    // An item with `text: undefined` throws on .trim() and takes the whole app
+    // down, and `items: null` breaks the map over it.
+    expect(normalizeBoard([{ id: 'a', items: null }])[0].items).toEqual([]);
+    expect(normalizeBoard([{ id: 'b', items: [{ id: 'i1' }] }])[0].items)
+      .toEqual([{ id: 'i1', text: '', done: false }]);
+    // Items with no id are dropped — an id is how an edit finds its row.
+    expect(normalizeBoard([{ id: 'c', items: [{ text: 'x' }, null, { id: 'ok', text: 'y' }] }])[0].items)
+      .toHaveLength(1);
+  });
+
+  it('coerces a truthy-but-not-true done to a real boolean', () => {
+    expect(normalizeBoard([{ id: 'a', items: [{ id: 'i', done: 'true' }] }])[0].items[0].done).toBe(false);
+    expect(normalizeBoard([{ id: 'b', items: [{ id: 'i', done: true }] }])[0].items[0].done).toBe(true);
   });
 });
 
@@ -245,16 +334,45 @@ describe('clampToBoard', () => {
   });
 });
 
+describe('card width', () => {
+  it('falls back to the default when never resized', () => {
+    expect(cardWidth(newSticky())).toBe(CARD_W);
+  });
+
+  it('clamps a hand-edited width instead of rendering an ungrabbable card', () => {
+    // stickies.json is a plain file the owner can open. A 4px card has no
+    // resize grip you could ever hit, so it would be stuck that way.
+    expect(cardWidth({ w: 4 })).toBe(MIN_CARD_W);
+    expect(cardWidth({ w: 9999 })).toBe(MAX_CARD_W);
+    expect(cardWidth({ w: NaN })).toBe(CARD_W);
+  });
+
+  it('clamps and rounds what a resize drag produces', () => {
+    expect(clampWidth(300.4)).toBe(300);
+    expect(clampWidth(10)).toBe(MIN_CARD_W);
+    expect(clampWidth(5000)).toBe(MAX_CARD_W);
+  });
+});
+
 describe('boardExtent', () => {
   it('is never smaller than the viewport', () => {
-    expect(boardExtent(new Map(), 1200, 800)).toEqual({ width: 1200, height: 800 });
+    expect(boardExtent([], new Map(), 1200, 800)).toEqual({ width: 1200, height: 800 });
   });
 
   it('grows to include a card dragged past the edge, plus room to drop another', () => {
+    const cards = [card({ id: 'a' })];
     const positions = new Map([['a', { x: 1500, y: 900 }]]);
-    const { width, height } = boardExtent(positions, 1200, 800);
+    const { width, height } = boardExtent(cards, positions, 1200, 800);
     expect(width).toBe(1500 + CARD_W + GAP);
     expect(height).toBe(900 + CARD_H + GAP);
+  });
+
+  it("uses each card's OWN width, not the nominal one", () => {
+    // A card widened at the right edge would otherwise fall outside the
+    // scrollable area, with its right half permanently unreachable.
+    const cards = [card({ id: 'a', w: MAX_CARD_W })];
+    const positions = new Map([['a', { x: 1000, y: 0 }]]);
+    expect(boardExtent(cards, positions, 1200, 800).width).toBe(1000 + MAX_CARD_W + GAP);
   });
 });
 

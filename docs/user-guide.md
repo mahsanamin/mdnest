@@ -367,10 +367,12 @@ Every note carries an invisible `<!-- mdnest:<uuid> -->` marker at its bottom th
 
 A private scratch pad that follows you rather than the note you have open. Click the sticky-note icon in the toolbar (next to the theme toggle) and a board slides in from the right.
 
-- **+ New sticky** adds an empty card at the top and puts the cursor in it. Just start typing.
-- Each card has a **Mark done** checkbox (strikes the text through, keeps the card where it is), a **colour dot** for one of five colours, and a **×** to delete it.
+- **+ New sticky** adds an empty card at the top and puts the cursor in its title. The title is optional — leave it blank and it stays out of the way.
+- Below the title is free text for whatever the note is, and **+ to-do** adds a checklist. A sticky is usually a small list rather than one yes/no thing, so ticking happens per item: Enter opens the next line, Backspace on an empty line removes it, and the card header shows progress like `2/5`. A card whose whole checklist is done fades and strikes its title — it stays where it is rather than jumping to the bottom.
+- A card with no checklist is just a note. It never counts as unfinished and never gets struck through.
+- Each card also has a **colour dot** for one of five colours, and a **×** to delete it.
 - Everything saves by itself about half a second after you stop typing. The header says **Saving…** while a save is in flight and **Not saved** in red if one failed — nothing is hidden behind a silent autosave here.
-- The toolbar icon carries a badge with the number of unfinished stickies. An empty card does not count until you write something in it.
+- The toolbar icon carries a badge counting **unfinished to-dos** across every sticky — things left to do, not notes containing something. A blank line does not count until you write in it.
 - The board is available even with no file open, and while the task board is showing — those are exactly the moments you want to jot something down.
 
 Stickies and comments share the right-hand panel, so opening one closes the other. Drag the panel's left edge to resize it; the width is shared with the comments panel and remembered.
@@ -381,12 +383,14 @@ The expand button in the panel header opens the same stickies full screen, as a 
 
 - A card you have never dragged has no position at all. Those are dealt onto a grid, filling the first free space, so a new sticky never lands hidden underneath one that is already there.
 - **Tidy up** clears every stored position and puts the whole board back on the grid. It only appears once something has actually been moved.
+- **Drag a card's bottom-right corner** to make it wider or narrower; the width is saved per card. Only the width — the height follows whatever you type, so a card grows as you add to-dos rather than clipping them.
 - The board grows as you drag cards outward, and scrolls.
 - **Escape**, or the collapse button, returns to the side panel. The × closes stickies entirely.
+- The full board has its own address (`#!stickies`), so a refresh or a bookmark brings you back to the board rather than to the last note you had open. The side panel deliberately does not — it sits on top of a note, and the note is what the URL should describe.
 
 On a phone the board drops the free positioning and shows the same cards in a flowing grid — a corkboard you have to pan around to read one note is worse than a list.
 
-**Limits:** 200 stickies per board, 4 KB per card. Bodies are plain text — markdown is not rendered inside a card.
+**Limits:** 200 stickies per board, 200 characters of title, 4 KB of text and 50 to-dos per card; a card can be 150–600px wide. Text is plain — markdown is not rendered inside a card.
 
 ### Where stickies live, and what that means
 

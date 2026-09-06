@@ -29,7 +29,7 @@ function StickiesPanel({ stickies, onChange, onClose, onExpand, saveState, width
 
   useEffect(() => {
     if (!focusIdRef.current) return;
-    const node = document.querySelector(`[data-sticky-id="${focusIdRef.current}"] textarea`);
+    const node = document.querySelector(`[data-sticky-id="${focusIdRef.current}"] .sticky-title`);
     focusIdRef.current = null;
     if (node) node.focus();
   }, [stickies]);
@@ -114,7 +114,7 @@ function StickiesPanel({ stickies, onChange, onClose, onExpand, saveState, width
           <StickyCard
             key={c.id}
             card={c}
-            onPatch={(patch) => onChange(editSticky(stickies, c.id, patch))}
+            onCardChange={(next) => onChange(editSticky(stickies, c.id, next))}
             onDelete={() => onChange(removeSticky(stickies, c.id))}
           />
         ))}

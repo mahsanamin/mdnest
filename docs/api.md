@@ -648,7 +648,7 @@ Preferences are stored server-side — Postgres (`user_preferences`) in multi mo
 
 ## Stickies *(v4.5.0+)*
 
-A per-user sticky board — a handful of short personal notes kept beside the workspace. Stickies are **not notes**: they never appear in a namespace, never reach a git remote, and are never shared. Available in **both** auth modes.
+A per-user sticky board — a handful of short personal notes kept beside the workspace. Each card is a title, some free text, and a checklist, all optional: "done" lives on the checklist item rather than the card, because a card-level flag forces "buy milk, call bank, post form" to be either three separate notes or one note you can only tick when all of it is finished. Stickies are **not notes**: they never appear in a namespace, never reach a git remote, and are never shared. Available in **both** auth modes.
 
 The board is addressed only by the authenticated identity. There is no user id, path or namespace parameter, so one user reading another user's board is not a check that can be forgotten — it is not expressible.
 
@@ -663,8 +663,12 @@ Returns the calling user's board. Requires authentication (any role).
   "stickies": [
     {
       "id": "s-1736179200000-a4f2",
-      "body": "Read the v4.4.0 changelog",
-      "done": false,
+      "title": "Errands",
+      "body": "before Friday",
+      "items": [
+        {"id": "i1", "text": "buy milk", "done": false},
+        {"id": "i2", "text": "call bank", "done": true}
+      ],
       "color": "yellow",
       "x": 246,
       "y": 18,
@@ -686,23 +690,25 @@ Replaces the whole board and returns what was stored. There is no per-card `POST
 **Request:**
 
 ```json
-{"stickies": [{"id": "s-1", "body": "buy milk", "done": false, "color": "blue"}]}
+{"stickies": [{"id": "s-1", "title": "Errands", "body": "", "items": [{"id": "i1", "text": "buy milk", "done": false}], "color": "blue"}]}
 ```
 
 **Response** (200 OK) — the stored board, in the same shape as `GET`.
 
 **Errors:**
 
-- `400` — more than 200 stickies, a card body over 4 KB, a card id over 64 bytes, a missing or duplicate id, a colour outside the enum, a position outside `0`–`20000` (or NaN/Infinity), a board over 256 KB once marshalled, or a body that is not JSON. The message names the specific limit. Nothing is stored on a rejection: the previous board is left exactly as it was, so a `400` never means "part of what you sent was saved".
+- `400` — more than 200 stickies, a card body over 4 KB, a card id over 64 bytes, a missing or duplicate id, a colour outside the enum, a title over 200 bytes, more than 50 checklist items, a checklist item over 500 bytes or with a missing/duplicate id, a position outside `0`–`20000` or a width outside `150`–`600` (or NaN/Infinity in either), a board over 256 KB once marshalled, or a body that is not JSON. The message names the specific limit. Nothing is stored on a rejection: the previous board is left exactly as it was, so a `400` never means "part of what you sent was saved".
 
 **Fields:**
 
 | Field | Type | Notes |
 |---|---|---|
 | `id` | string | Client-generated, unique within the board, ≤ 64 bytes. Required. |
-| `body` | string | ≤ 4096 bytes. Plain text — not rendered as markdown. |
-| `done` | bool | Struck through in the UI when true. |
+| `title` | string | ≤ 200 bytes. Optional. |
+| `body` | string | ≤ 4096 bytes. Plain text — not rendered as markdown. Optional. |
+| `items` | array | The card's checklist: `{id, text, done}`, at most 50, each `text` ≤ 500 bytes. Ids must be present and unique **within the card**. Always serialised as an array, never `null`. Optional (an empty checklist is a plain note). |
 | `color` | string | One of `yellow`, `pink`, `blue`, `green`, `grey`. Empty defaults to `yellow`; anything else is a `400`. |
+| `w` | number \| absent | Card width in pixels, `150`–`600`. **Omitted until the card has been resized**, same convention as `x`/`y` — a stored `0` would be a card resized to nothing. Height is not stored: it follows the content, so a fixed height would clip a card the moment another to-do was added. |
 | `x` / `y` | number \| absent | Position on the full-screen board, in board pixels, `0`–`20000`. **Omitted entirely for a card that has never been dragged** — that is not the same as `0`, which is a card deliberately placed in the top-left corner. The client lays unplaced cards out on a grid; only dragging stores a position. `null` is accepted and means the same as absent. NaN and Infinity are a `400`. |
 | `created_at` / `updated_at` | int | Unix seconds, client-supplied. Stored as given. |
 
