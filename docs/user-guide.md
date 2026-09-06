@@ -387,7 +387,7 @@ The expand button in the panel header opens the same stickies full screen, as a 
 - **Drag a card's bottom-right corner** to make it wider or narrower; the width is saved per card. Only the width — the height follows whatever you type, so a card grows as you add to-dos rather than clipping them.
 - The board grows as you drag cards outward, and scrolls.
 - **Escape**, or the collapse button, returns to the side panel. The × closes stickies entirely.
-- The full board has its own address (`#!stickies`), so a refresh or a bookmark brings you back to the board rather than to the last note you had open. The side panel deliberately does not — it sits on top of a note, and the note is what the URL should describe.
+- The full board has its own address (`#!stickies`), so a refresh or a bookmark brings you back to the board rather than to the last note you had open. The side panel deliberately does not — it sits on top of a note, and the note is what the URL should describe. The panel is still remembered across a refresh, just in your browser rather than in the link, so sharing a note URL never forces someone else's stickies open.
 
 On a phone the board drops the free positioning and shows the same cards in a flowing grid — a corkboard you have to pan around to read one note is worse than a list.
 

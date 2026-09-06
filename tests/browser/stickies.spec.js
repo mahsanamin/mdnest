@@ -18,6 +18,32 @@ async function signIn(page) {
   await expect(page.locator('.ns-label, .ns-select')).toBeVisible({ timeout: 20_000 });
 }
 
+// THIS SUITE DESTROYS THE BOARD OF WHATEVER ACCOUNT IT SIGNS IN AS.
+//
+// That is not a hypothetical. Running it against the repo owner's own account
+// on the dev instance silently deleted his real stickies, repeatedly, because
+// every test starts by wiping the board and nothing in the code objected.
+// A sticky exists nowhere else — no namespace, no git remote, no history — so
+// there was nothing to recover from.
+//
+// The guard is here rather than in a habit, because a habit is exactly what
+// failed. Point the suite at a throwaway account (`e2e` by default, which is
+// what tests/e2e-browser.sh provisions), or say explicitly that you accept
+// losing this account's board.
+const ALLOW_WIPE = process.env.MDNEST_ALLOW_BOARD_WIPE === '1';
+const THROWAWAY = /^(e2e|test)/i;
+
+test.beforeAll(() => {
+  if (!THROWAWAY.test(USER) && !ALLOW_WIPE) {
+    throw new Error(
+      `Refusing to run: this suite deletes the sticky board of "${USER}", and a ` +
+      `sticky exists nowhere else — there is no backup to restore from.\n` +
+      `Run it as a throwaway account (MDNEST_USER=e2e MDNEST_PASSWORD=e2epass123), ` +
+      `or set MDNEST_ALLOW_BOARD_WIPE=1 if you really mean to lose that board.`,
+    );
+  }
+});
+
 // The board is server-side, so clearing browser storage does not reset it.
 // Every test starts from an empty one or they leak into each other.
 async function clearBoard(page) {
@@ -33,7 +59,16 @@ async function clearBoard(page) {
   await expect(page.locator('.ns-label, .ns-select')).toBeVisible({ timeout: 20_000 });
 }
 
-const openPanel = (page) => page.locator('.toolbar-stickies').click();
+// The drawer's open state is remembered per browser now, so a test cannot
+// assume it starts closed — clicking the toolbar button would CLOSE it.
+async function openPanel(page) {
+  if (await page.locator('.stickies-panel').count()) {
+    await expect(page.locator('.stickies-panel')).toBeVisible();
+    return;
+  }
+  await page.locator('.toolbar-stickies').click();
+  await expect(page.locator('.stickies-panel')).toBeVisible();
+}
 
 // Idempotent on purpose. The board has its own URL, so after a reload it is
 // already open — and clicking the toolbar button then fails, because the
@@ -581,6 +616,54 @@ test.describe('stickies', () => {
     expect(Math.abs((t.y + t.height / 2) - (d.y + d.height / 2))).toBeLessThan(8);
     // And nothing sits above that row but the card's own padding.
     expect(t.y - c.y).toBeLessThan(16);
+  });
+
+  test('the drawer survives a refresh, without owning the URL', async ({ page }) => {
+    // A panel you deliberately opened should still be there after a reload —
+    // the same expectation the view mode and the sidebar width already meet.
+    // It stays out of the URL though: the drawer sits on top of a note, and a
+    // link you share should not force the recipient's stickies open.
+    await signIn(page);
+    await clearBoard(page);
+    const files = page.locator('.tree-row:has(.tree-icon-svg.file)');
+    await expect(files.first()).toBeVisible({ timeout: 20_000 });
+    await files.first().click();
+    await expect.poll(() => page.url()).toMatch(/#[^/]+\/.+/);
+
+    await openPanel(page);
+    const noteUrl = page.url();
+    expect(noteUrl).not.toContain('!stickies');
+
+    await page.reload();
+    await expect(page.locator('.stickies-panel')).toBeVisible({ timeout: 20_000 });
+    expect(page.url()).toBe(noteUrl);
+
+    // And closing it is remembered too, or the toggle would feel one-way.
+    await page.locator('.stickies-panel .stickies-close').click();
+    await page.reload();
+    await expect(page.locator('.ns-label, .ns-select')).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('.stickies-panel')).toHaveCount(0);
+  });
+
+  test('the drawer leaves no bare strip above it', async ({ page }) => {
+    // .main carries a margin-right the width of the panel, so the toolbar is
+    // already squeezed clear of it. A top offset on the panel therefore bought
+    // nothing and left a band of bare page background in the top-right corner.
+    await signIn(page);
+    await clearBoard(page);
+    await openPanel(page);
+
+    const panel = await page.locator('.stickies-panel').boundingBox();
+    expect(panel.y, 'bare strip above the stickies panel').toBeLessThanOrEqual(1);
+
+    // The toolbar is still fully reachable beside it, which is what the offset
+    // was protecting. Polled, because .main animates its margin-right over
+    // 150ms — measured immediately, the toolbar still reads as full width and
+    // the assertion fails against perfectly correct layout.
+    await expect.poll(async () => {
+      const btn = await page.locator('.toolbar-stickies').boundingBox();
+      return btn.x + btn.width;
+    }, { timeout: 5_000 }).toBeLessThanOrEqual(panel.x + 1);
   });
 
   test('deleting a sticky removes it on the server too', async ({ page }) => {

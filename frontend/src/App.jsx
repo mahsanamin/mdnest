@@ -312,7 +312,15 @@ function App() {
   // 'closed' | 'panel' | 'board'. Three states rather than two booleans: the
   // drawer and the full-screen board are two views of one thing, and a pair of
   // flags makes "both open at once" representable when it never is.
-  const [stickiesView, setStickiesView] = useState('closed');
+  const [stickiesView, setStickiesView] = useState(() => (
+    // The DRAWER's open/closed state is remembered per browser, the way the
+    // view mode and the sidebar width already are. It is not in the URL —
+    // only the full-screen board gets a route, because the drawer sits on top
+    // of a note and a shared link should not force someone's stickies open.
+    // But it is a panel the user chose to have open, and a refresh throwing it
+    // away is the same annoyance as a refresh forgetting Basic vs Live.
+    localStorage.getItem('mdnest_stickies_open') === '1' ? 'panel' : 'closed'
+  ));
   const [stickySaveState, setStickySaveState] = useState('idle'); // idle | saving | error
   // 'loading' | 'ready' | 'error'. Load state is tracked, not collapsed into
   // an empty array: the board is written back WHOLE, so "we could not read
@@ -1054,6 +1062,13 @@ function App() {
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, [authenticated, refreshTree]);
+
+  // Remember the drawer, not the board: the board has a URL, and restoring it
+  // from storage as well would let a stale flag fight the address bar.
+  useEffect(() => {
+    if (stickiesView === 'board') return;
+    localStorage.setItem('mdnest_stickies_open', stickiesView === 'panel' ? '1' : '0');
+  }, [stickiesView]);
 
   // Update URL hash
   useEffect(() => {

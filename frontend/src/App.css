@@ -5683,9 +5683,13 @@ pre:hover .code-copy-btn {
 
 .stickies-panel {
   position: fixed;
-  /* Same 61px as .comment-sidebar: below the toolbar, so the button that
-     opened the panel stays clickable to close it. */
-  top: 61px;
+  /* Full height, unlike .comment-sidebar's 61px offset.
+     That offset exists so the toolbar stays reachable — but .main already
+     carries a margin-right the width of this panel, so the toolbar has
+     ALREADY been squeezed clear of it. The offset therefore bought nothing
+     and left a band of bare page background in the top-right corner, above
+     the panel and to the right of the shortened toolbar. */
+  top: 0;
   right: 0;
   bottom: 0;
   width: 320px;
