@@ -130,6 +130,21 @@
      ink is near-black in both. */
   --highlight-ink: #1e1e2e;
 
+  /* --- Semantics: sticky notes ------------------------------------------
+     Five card fills, one per colour a sticky may claim. They are solid, not
+     washes: a sticky is a small block of body text, and a translucent tint
+     over whatever happens to be behind it makes the ink unpredictable.
+     Every fill is measured against --text AND --text-secondary (the struck
+     "done" state) at AA in both themes — see theme-contrast.test.js. Dark
+     mode uses deep, desaturated versions of the hue rather than pastels for
+     exactly that reason: a pastel here would need dark ink, which no other
+     token in the dark theme supplies. */
+  --sticky-yellow: #3b3524;
+  --sticky-pink: #3d2a35;
+  --sticky-blue: #22334c;
+  --sticky-green: #26382b;
+  --sticky-grey: #2b2c3c;
+
   /* --- Semantics: scrims and shadows ------------------------------------ */
   --scrim: #00000080;
   --scrim-strong: #000000a6;
@@ -271,6 +286,14 @@
   --highlight-pulse-a: #fef08a;
   --highlight-pulse-b: #fefce8;
   --highlight-ink: #1e1e2e;
+
+  /* Sticky fills invert to true pastels — in Latte the ink is dark, so the
+     card has to be lighter than the page rather than darker. */
+  --sticky-yellow: #fbf1c7;
+  --sticky-pink: #fbdcef;
+  --sticky-blue: #d9e6ff;
+  --sticky-green: #d8f0d5;
+  --sticky-grey: #e3e6ef;
 
   /* Scrims stay black — a dim behind a modal is black on any ground — but
      shadows lighten, because a shadow tuned for a dark UI reads as a smudge

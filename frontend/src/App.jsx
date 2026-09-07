@@ -31,12 +31,15 @@ import Settings from './components/Settings.jsx';
 import AdminPanel from './components/AdminPanel.jsx';
 import PresenceBar from './components/PresenceBar.jsx';
 import CommentSidebar from './components/CommentSidebar.jsx';
+import StickiesPanel from './components/StickiesPanel.jsx';
+import StickiesBoard from './components/StickiesBoard.jsx';
 import ShareDialog from './components/ShareDialog.jsx';
 import HistoryModal from './components/HistoryModal.jsx';
 import AttributionModal from './components/AttributionModal.jsx';
 import MoveToModal from './components/MoveToModal.jsx';
 import ReleaseNotesModal from './components/ReleaseNotesModal.jsx';
 import CollabClient from './collab.js';
+import { normalizeBoard, undoneCount } from './stickies.js';
 import { isMarpDoc, effectiveEditorMode } from './marp.js';
 import { isExcalidrawDoc } from './excalidraw.js';
 import { TREE_POLL_MS, shouldPollTree } from './tree-refresh.js';
@@ -55,6 +58,8 @@ import {
   fetchMe,
   fetchPreferences,
   savePreferences,
+  fetchStickies,
+  saveStickies,
   logout as apiLogout,
   PermissionError,
 } from './api.js';
@@ -124,18 +129,36 @@ function consumeSSOHashOnLoad() {
 }
 
 // URL helpers: store ns and path in hash like #ns/path/to/note.md
+//
+// The full-screen sticky board gets its own route. It replaces the entire
+// view rather than overlaying a note, so a refresh landing back on the last
+// note is wrong — you asked for the board, you should get the board back.
+// The side panel deliberately does NOT get a route: it is an overlay on a
+// note, and the note is what the URL should still describe.
+//
+// The marker is "!stickies" rather than "stickies" because a namespace is a
+// directory name the operator chooses, and a namespace called `stickies`
+// would otherwise become unreachable. A leading "!" cannot be one.
+const STICKIES_ROUTE = '!stickies';
+
 function parseHash() {
   const hash = window.location.hash.replace(/^#\/?/, '');
-  if (!hash) return { ns: null, path: null };
+  if (hash === STICKIES_ROUTE) return { ns: null, path: null, stickies: true };
+  if (!hash) return { ns: null, path: null, stickies: false };
   const slashIdx = hash.indexOf('/');
-  if (slashIdx === -1) return { ns: decodeURIComponent(hash), path: null };
+  if (slashIdx === -1) return { ns: decodeURIComponent(hash), path: null, stickies: false };
   return {
     ns: decodeURIComponent(hash.substring(0, slashIdx)),
     path: decodeURIComponent(hash.substring(slashIdx + 1)) || null,
+    stickies: false,
   };
 }
 
-function setHash(ns, path) {
+function setHash(ns, path, stickiesBoard) {
+  if (stickiesBoard) {
+    window.history.replaceState(null, '', '#' + STICKIES_ROUTE);
+    return;
+  }
   let hash = '';
   if (ns) {
     hash = encodeURIComponent(ns);
@@ -283,6 +306,31 @@ function App() {
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [comments, setComments] = useState([]);
   const [showComments, setShowComments] = useState(false);
+  // Personal sticky board. Not per-note and not per-namespace, so it lives at
+  // the top of the app and is loaded once per session.
+  const [stickies, setStickies] = useState([]);
+  // 'closed' | 'panel' | 'board'. Three states rather than two booleans: the
+  // drawer and the full-screen board are two views of one thing, and a pair of
+  // flags makes "both open at once" representable when it never is.
+  const [stickiesView, setStickiesView] = useState(() => (
+    // The DRAWER's open/closed state is remembered per browser, the way the
+    // view mode and the sidebar width already are. It is not in the URL —
+    // only the full-screen board gets a route, because the drawer sits on top
+    // of a note and a shared link should not force someone's stickies open.
+    // But it is a panel the user chose to have open, and a refresh throwing it
+    // away is the same annoyance as a refresh forgetting Basic vs Live.
+    localStorage.getItem('mdnest_stickies_open') === '1' ? 'panel' : 'closed'
+  ));
+  const [stickySaveState, setStickySaveState] = useState('idle'); // idle | saving | error
+  // 'loading' | 'ready' | 'error'. Load state is tracked, not collapsed into
+  // an empty array: the board is written back WHOLE, so "we could not read
+  // your board" must never be allowed to look like "your board is empty".
+  const [stickiesLoad, setStickiesLoad] = useState('loading');
+  const stickySaveTimerRef = useRef(null);
+  const stickyLatestRef = useRef([]);
+  // Mirrored in a ref because the save path is a callback that would otherwise
+  // close over a stale value.
+  const stickiesLoadRef = useRef('loading');
   const [showTaskBoard, setShowTaskBoard] = useState(false);
   // Bumped by the toolbar Refresh so the task board reloads its tasks too
   // (the board isn't part of the note/tree refresh path).
@@ -538,6 +586,86 @@ function App() {
     savePreferences({ theme: next }).catch(() => {});
   }, []);
 
+  // --- Sticky board -------------------------------------------------------
+  //
+  // Loaded once per session, saved on a 500 ms debounce — the same shape as
+  // the note autosave, and for the same reason: every keystroke in a card is
+  // a board change, and a PUT per keystroke is absurd.
+  //
+  // stickyLatestRef holds what the timer will send. Reading it at fire time
+  // rather than closing over the array means a burst of edits coalesces into
+  // one PUT carrying the LAST state, not the state as of the first keystroke.
+  const setLoadState = useCallback((v) => {
+    stickiesLoadRef.current = v;
+    setStickiesLoad(v);
+  }, []);
+
+  const loadStickies = useCallback(() => {
+    setLoadState('loading');
+    return fetchStickies()
+      .then((cards) => {
+        const board = normalizeBoard(cards);
+        stickyLatestRef.current = board;
+        setStickies(board);
+        setLoadState('ready');
+      })
+      .catch(() => setLoadState('error'));
+  }, [setLoadState]);
+
+  useEffect(() => {
+    if (!authenticated) return;
+    loadStickies();
+  }, [authenticated, loadStickies]);
+
+  const updateStickies = useCallback((next) => {
+    // Belt and braces: the panel renders a retry pane rather than cards when
+    // the load failed, so there is nothing to edit — but a save that could
+    // fire here would overwrite a board we never managed to read.
+    if (stickiesLoadRef.current !== 'ready') return;
+    setStickies(next);
+    stickyLatestRef.current = next;
+    setStickySaveState('saving');
+    if (stickySaveTimerRef.current) clearTimeout(stickySaveTimerRef.current);
+    stickySaveTimerRef.current = setTimeout(() => {
+      stickySaveTimerRef.current = null;
+      const sending = stickyLatestRef.current;
+      saveStickies(sending)
+        .then(() => {
+          // Only clear the indicator if nothing was typed while this PUT was
+          // in flight — otherwise "Saving…" would blink off while a newer
+          // board is still unsaved.
+          if (stickyLatestRef.current === sending) setStickySaveState('idle');
+        })
+        .catch(() => setStickySaveState('error'));
+    }, 500);
+  }, []);
+
+  // A pending board save must survive the tab closing. This is the one thing
+  // in mdnest whose content exists nowhere else — no file, no git remote — so
+  // losing the last 500 ms of typing has no recovery path. keepalive lets the
+  // request outlive the page; a normal fetch here is cancelled on unload.
+  useEffect(() => {
+    const flush = () => {
+      if (stickiesLoadRef.current !== 'ready') return;
+      if (!stickySaveTimerRef.current) return;
+      clearTimeout(stickySaveTimerRef.current);
+      stickySaveTimerRef.current = null;
+      const token = localStorage.getItem('mdnest_token');
+      if (!token) return;
+      fetch('/api/stickies', {
+        method: 'PUT',
+        keepalive: true,
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ stickies: stickyLatestRef.current }),
+      }).catch(() => {});
+    };
+    window.addEventListener('pagehide', flush);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      flush();
+    };
+  }, []);
+
   // The toolbar button flips between the two concrete themes. Choosing
   // 'auto' is available in Settings — a single button cannot express three
   // states without becoming a menu, and the common action is "not this one".
@@ -778,7 +906,11 @@ function App() {
       }
 
       const nsList = await loadNamespaces();
-      const { ns: hashNs, path: hashPath } = parseHash();
+      const { ns: hashNs, path: hashPath, stickies: hashStickies } = parseHash();
+      // Opened straight onto the board. The namespace and last file are still
+      // restored underneath, so closing the board lands somewhere sensible
+      // rather than on an empty editor.
+      if (hashStickies) setStickiesView('board');
       let targetNs = null;
 
       if (hashNs && nsList.includes(hashNs)) {
@@ -801,7 +933,9 @@ function App() {
           const last = getLastPath(targetNs);
           if (last) {
             setCurrentPath(last);
-            setHash(targetNs, last);
+            // Not while the board route is what brought us here — writing the
+            // note hash would overwrite the very URL being restored.
+            if (!hashStickies) setHash(targetNs, last);
           }
         }
       }
@@ -929,17 +1063,33 @@ function App() {
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, [authenticated, refreshTree]);
 
+  // Remember the drawer, not the board: the board has a URL, and restoring it
+  // from storage as well would let a stale flag fight the address bar.
+  useEffect(() => {
+    if (stickiesView === 'board') return;
+    localStorage.setItem('mdnest_stickies_open', stickiesView === 'panel' ? '1' : '0');
+  }, [stickiesView]);
+
   // Update URL hash
   useEffect(() => {
+    if (stickiesView === 'board') {
+      setHash(null, null, true);
+      return;
+    }
     if (selectedNs) {
       setHash(selectedNs, currentPath);
     }
-  }, [selectedNs, currentPath]);
+  }, [selectedNs, currentPath, stickiesView]);
 
   // Handle browser back/forward
   useEffect(() => {
     const onHashChange = () => {
-      const { ns, path } = parseHash();
+      const { ns, path, stickies } = parseHash();
+      if (stickies) {
+        setStickiesView('board');
+        return; // the board route says nothing about which note is open
+      }
+      setStickiesView((v) => (v === 'board' ? 'closed' : v));
       if (ns && ns !== selectedNs) {
         setSelectedNs(ns);
       }
@@ -1684,7 +1834,11 @@ function App() {
       />
       <div
         className="main"
-        style={commentsEnabled && showComments && currentPath && !isMobile ? { marginRight: commentWidth } : undefined}
+        style={
+          !isMobile && ((commentsEnabled && showComments && currentPath) || stickiesView === 'panel')
+            ? { marginRight: commentWidth }
+            : undefined
+        }
       >
         <Toolbar
           currentPath={currentPath}
@@ -1731,13 +1885,30 @@ function App() {
           }}
           onRefresh={handleRefresh}
           commentCount={commentsEnabled ? comments.filter(c => !c.parentId && !c.resolved).length : 0}
+          stickyCount={stickiesLoad === 'ready' ? undoneCount(stickies) : 0}
+          stickiesOpen={stickiesView !== 'closed'}
+          onToggleStickies={() => {
+            // Two drawers, one strip of screen. Opening either closes the
+            // other rather than stacking them — the comment panel already
+            // owns this edge, and two overlapping fixed panels is not a
+            // layout, it is a bug report.
+            setStickiesView((v) => {
+              if (v === 'closed') setShowComments(false);
+              // The button closes whichever view is open and reopens at the
+              // drawer — it is one toggle, not a cycle through three states.
+              return v === 'closed' ? 'panel' : 'closed';
+            });
+          }}
           onToggleComments={!commentsEnabled ? null : () => {
             // A plain toggle: the panel is usable in any view mode (including
             // preview-only, e.g. reviewing Marp slides). Selection-anchored
             // comments and highlights still require the Live editor, but
             // general comments work everywhere, so we no longer force the
             // user out of their current view.
-            setShowComments((v) => !v);
+            setShowComments((v) => {
+              if (!v) setStickiesView('closed');
+              return !v;
+            });
           }}
           wsStatus={appConfig?.liveCollab ? wsStatus : null}
         />
@@ -2046,6 +2217,31 @@ function App() {
             setDismissedReleaseVer(v);
             setShowReleaseNotes(false);
           }}
+        />
+      )}
+      {stickiesView === 'panel' && (
+        <StickiesPanel
+          stickies={stickies}
+          onChange={updateStickies}
+          onClose={() => setStickiesView('closed')}
+          onExpand={() => setStickiesView('board')}
+          saveState={stickySaveState}
+          loadState={stickiesLoad}
+          onRetry={loadStickies}
+          width={!isMobile ? commentWidth : undefined}
+          onWidthChange={!isMobile ? (w) => { setCommentWidth(w); localStorage.setItem('mdnest_comment_width', String(w)); } : undefined}
+        />
+      )}
+      {stickiesView === 'board' && (
+        <StickiesBoard
+          stickies={stickies}
+          onChange={updateStickies}
+          onCollapse={() => setStickiesView('panel')}
+          onClose={() => setStickiesView('closed')}
+          saveState={stickySaveState}
+          loadState={stickiesLoad}
+          onRetry={loadStickies}
+          isMobile={isMobile}
         />
       )}
       {commentsEnabled && showComments && currentPath && (

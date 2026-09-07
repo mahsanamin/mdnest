@@ -4,6 +4,74 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v4.5.0 — Stickies
+
+A personal sticky board, kept beside your notes and never mixed in with them.
+Open it as a drawer on the right to jot something down without leaving the note
+you are reading, or full screen as a corkboard where cards are dragged and
+resized freely. Each card is a title, some free text, and a checklist — all
+optional, so the same card covers a scribbled reminder and a small to-do list.
+
+Stickies are deliberately **not** notes. They never appear in a namespace and
+never reach a git remote: they live in mdnest's secrets volume (Postgres in
+multi mode), which the git-sync sidecar cannot see. That storage location *is*
+the privacy guarantee, which is why there is nothing to encrypt and no key to
+manage. The tradeoff is stated plainly in the app and the docs — a sticky has
+no git history and no off-server copy, so anything you would be upset to lose
+belongs in a real note.
+
+Nothing about the default install changes: no new dependency, no new
+environment variable, no new failure mode for an operator who never opens it.
+
+### Added
+
+- **Sticky notes** — `GET`/`PUT /api/stickies`, available in both auth modes.
+  Each user gets exactly one board, keyed server-side from the authenticated
+  identity: there is no user id, path or namespace in the request, so reading
+  someone else's board is not a check that can be forgotten, it is not
+  expressible. Boards are stored in Postgres (`user_stickies`, migration 016)
+  in multi mode and in `stickies.json` in the secrets volume in single mode —
+  the same volume as `auth.json` and `tokens.json`, so a board survives
+  `./mdnest-server rebuild` and stays invisible to git-sync.
+- **The drawer** — a right-edge panel sharing geometry and remembered width
+  with the comments sidebar; only one of the two is open at a time. Its open
+  state is remembered per browser, so a refresh keeps it, but it stays out of
+  the URL: a shared note link should never force someone else's stickies open.
+- **The full board** — a corkboard at `#!stickies` with its own URL, so a
+  refresh returns to the board rather than to the last note. Drag a card
+  anywhere, resize it by its bottom-right corner, or use **Tidy up** (which
+  asks first) to put everything back on the grid. On a phone it falls back to
+  a flowing grid; free positioning on a 380px screen is a board you have to
+  pan around to read.
+- **Checklists** — "done" lives on the item, not the card. A single card-level
+  flag forces "buy milk, call bank, post form" to be either three separate
+  notes or one note you can only tick when all of it is finished. Enter opens
+  the next line, Backspace on an empty one removes it, and long to-dos wrap.
+- **Limits, enforced server-side** — 200 stickies per board, 200 bytes of
+  title, 4 KB of text and 50 checklist items per card, a five-colour enum, and
+  a 150–600px card width. The endpoint is writable by any authenticated user,
+  so without them a board is an unbounded per-user blob store; this is the
+  same reasoning that gave preferences a key allowlist.
+
+### Notes for operators
+
+- **No configuration.** There is no flag to turn stickies on, no env var to
+  set, and `setup.sh`, `docker-compose.yml`, the Dockerfiles, `nginx.conf` and
+  `mdnest-server` are untouched. The cost to an install that never uses the
+  feature is +1.7 KB of JavaScript and +0.7 KB of CSS, gzipped, and one
+  Postgres table in multi mode.
+- **Boards are not backed up.** This is deliberate and is the flip side of the
+  privacy guarantee: a sticky has no git history and no off-server copy. It
+  survives a rebuild because the secrets volume is declared, but not the loss
+  of that volume.
+- **A board that cannot be read is an error, never an empty board.** Because a
+  board is written back whole, a "gentle" empty result on a failed read would
+  be replaced by the next keystroke. Both the client and the server refuse to
+  save until a read has actually succeeded, so unreadable data is left in
+  place to be recovered by hand.
+
+---
+
 ## v4.4.0 — Edits that don't overwrite someone else
 
 Changing one line in a note used to mean rewriting the whole file. Both surfaces
