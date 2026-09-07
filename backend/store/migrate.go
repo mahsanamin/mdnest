@@ -298,6 +298,24 @@ var migrations = []struct {
 			);
 		`,
 	},
+	{
+		// One row per user holding the WHOLE board as a JSON document, not one
+		// row per card. The API replaces the board on every change (the client
+		// owns ordering and card identity), so a row-per-card schema would add
+		// a diff step and a partial-write failure mode to buy queryability
+		// nothing asks for. The shape is validated in store.ValidateBoard
+		// before it ever reaches this column.
+		// CASCADE on user deletion: a personal scratch board has no meaning
+		// without its user, same as user_preferences.
+		name: "016_create_user_stickies",
+		sql: `
+			CREATE TABLE IF NOT EXISTS user_stickies (
+				user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+				data       TEXT NOT NULL,
+				updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+			);
+		`,
+	},
 }
 
 // Migrate runs all pending migrations. Safe to call on every startup.
