@@ -254,6 +254,43 @@ func TestStickiesEmptyChecklistIsAnArray(t *testing.T) {
 	}
 }
 
+// A board that cannot be read is a 500, never an empty board.
+//
+// The gentle-looking version — log a warning, serve [] — is the dangerous one:
+// the client cannot tell it from a real empty board, and because a board is
+// written back WHOLE, the next keystroke replaces the unreadable data with one
+// card. Failing loudly leaves the file on disk to be recovered by hand.
+func TestStickiesCorruptStoreIsAnErrorNotAnEmptyBoard(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "stickies.json"), []byte("{not json"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	h := NewStickiesHandler(store.NewFileStickyStore(dir), false)
+
+	w := call(h, http.MethodGet, "", -1)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("got %d, want 500 for an unreadable board (%s)", w.Code, w.Body.String())
+	}
+
+	// And the file is left exactly as it was — nothing overwrote it on the
+	// way past.
+	got, _ := os.ReadFile(filepath.Join(dir, "stickies.json"))
+	if string(got) != "{not json" {
+		t.Fatalf("the unreadable board was modified: %q", got)
+	}
+}
+
+// A file that is simply absent is a first run, not a failure.
+func TestStickiesMissingFileIsAFreshBoard(t *testing.T) {
+	w := call(NewStickiesHandler(store.NewFileStickyStore(t.TempDir()), false), http.MethodGet, "", -1)
+	if w.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200 for a first run (%s)", w.Code, w.Body.String())
+	}
+	if cards := board(t, w); len(cards) != 0 {
+		t.Fatalf("a first run should be an empty board, got %v", cards)
+	}
+}
+
 // Single mode reaches this handler with NO user context — the auth middleware
 // attaches one only in multi mode. Every other test here injects a context by
 // hand, so all of them would pass while every real single-mode request 500'd.

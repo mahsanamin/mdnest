@@ -176,7 +176,7 @@ function StickiesBoard({ stickies, onChange, onCollapse, onClose, saveState, loa
       : `Move ${placed} stickies back onto the grid? Where you put them will be lost.`;
     if (!confirm(msg)) return;
     tidyUp();
-  }, [stickies]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [stickies, tidyUp]);
 
   return (
     <div className="stickies-board">

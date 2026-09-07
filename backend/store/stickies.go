@@ -312,6 +312,9 @@ type FileStickyStore struct {
 	dir   string
 	mu    sync.RWMutex
 	users map[string][]Sticky
+	// Set when stickies.json exists but could not be read or parsed. Get
+	// reports it instead of serving an empty board — see load.
+	loadErr error
 }
 
 // NewFileStickyStore creates a file-backed sticky store rooted at dir.
@@ -325,20 +328,33 @@ func (s *FileStickyStore) path() string {
 	return filepath.Join(s.dir, "stickies.json")
 }
 
-// load reads stickies.json into memory. A missing file is a first run. A
-// corrupt one is logged and skipped rather than fatal — matching the
-// preference store, because no personal scratch board is worth refusing to
-// start the server over.
+// load reads stickies.json into memory.
+//
+// A missing file is a first run and stays silent. Anything else — unreadable,
+// or present but not parseable — is REMEMBERED rather than swallowed, and the
+// server still starts (a scratch board is not worth refusing to boot over)
+// but every read reports the failure.
+//
+// The swallowing version is the dangerous one, and it is what shipped here
+// first: starting with an empty map makes a broken file look like a new one,
+// and the next save writes that empty map over the file. The same reasoning
+// as decodeBoard above — a soft failure on read destroys the data when the
+// write replaces the whole object.
 func (s *FileStickyStore) load() {
 	data, err := os.ReadFile(s.path())
 	if err != nil {
+		if !os.IsNotExist(err) {
+			s.loadErr = fmt.Errorf("cannot read stickies.json: %w", err)
+			log.Printf("warning: %v — sticky boards will not be served until this is fixed", s.loadErr)
+		}
 		return
 	}
 	var wrap struct {
 		Users map[string][]Sticky `json:"users"`
 	}
 	if err := json.Unmarshal(data, &wrap); err != nil {
-		log.Printf("warning: failed to parse stickies.json, starting fresh")
+		s.loadErr = fmt.Errorf("stickies.json is not valid JSON: %w", err)
+		log.Printf("warning: %v — the file is left untouched; fix or move it to start fresh", s.loadErr)
 		return
 	}
 	if wrap.Users != nil {
@@ -386,6 +402,9 @@ func (s *FileStickyStore) save() error {
 func (s *FileStickyStore) Get(userID int) ([]Sticky, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if s.loadErr != nil {
+		return nil, s.loadErr
+	}
 	stored := s.users[strconv.Itoa(userID)]
 	out := make([]Sticky, len(stored))
 	copy(out, stored)
@@ -402,17 +421,24 @@ func (s *FileStickyStore) Set(userID int, cards []Sticky) error {
 	return s.save()
 }
 
-// decodeBoard turns stored JSON back into cards. A stored board that no longer
-// parses returns an empty board rather than an error, for the same reason the
-// file store tolerates a corrupt file.
+// decodeBoard turns stored JSON back into cards.
+//
+// A board that will not parse is an ERROR, not an empty board. The tempting
+// version logs a warning and returns nothing, which reads as robust and is
+// the opposite: the client cannot tell that empty board from a real one, and
+// because a board is written back WHOLE, the next keystroke replaces the
+// unreadable-but-present data with one card. This is the same trap the
+// frontend's fetchStickies fell into — fail-soft read plus whole-object write
+// destroys exactly the data the soft failure was trying to be gentle about.
+// Failing here surfaces as a 500, the client refuses to save, and whatever is
+// in the column stays there to be recovered by hand.
 func decodeBoard(data []byte) ([]Sticky, error) {
 	if len(data) == 0 {
 		return []Sticky{}, nil
 	}
 	var cards []Sticky
 	if err := json.Unmarshal(data, &cards); err != nil {
-		log.Printf("warning: failed to parse stored sticky board, returning empty")
-		return []Sticky{}, nil
+		return nil, fmt.Errorf("stored sticky board is not valid JSON: %w", err)
 	}
 	if cards == nil {
 		cards = []Sticky{}
