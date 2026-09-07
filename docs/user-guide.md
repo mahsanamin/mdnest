@@ -363,6 +363,48 @@ Every note carries an invisible `<!-- mdnest:<uuid> -->` marker at its bottom th
 
 ---
 
+## Stickies *(v4.5.0+)*
+
+A private scratch pad that follows you rather than the note you have open. Click the sticky-note icon in the toolbar (next to the theme toggle) and a board slides in from the right.
+
+- **+ New sticky** adds an empty card at the top and puts the cursor in its title. The title shares the top row with the card's controls, so an untitled sticky costs no space.
+- Below the title is free text for whatever the note is, and **+ to-do** adds a checklist. A sticky is usually a small list rather than one yes/no thing, so ticking happens per item: Enter opens the next line, Backspace on an empty line removes it, and the card header shows progress like `2/5`. A card whose whole checklist is done fades and strikes its title — it stays where it is rather than jumping to the bottom.
+- A card with no checklist is just a note. It never counts as unfinished and never gets struck through.
+- Each card also has a **colour dot** for one of five colours, and a **×** to delete it.
+- If the board can’t be loaded (the server restarting, a dropped connection), you get a **Try again** button rather than an empty board. Editing is held until it loads, so a failed read can never overwrite what’s on the server.
+- Everything saves by itself about half a second after you stop typing. The header says **Saving…** while a save is in flight and **Not saved** in red if one failed — nothing is hidden behind a silent autosave here.
+- The toolbar icon carries a badge counting **unfinished to-dos** across every sticky — things left to do, not notes containing something. A blank line does not count until you write in it.
+- The board is available even with no file open, and while the task board is showing — those are exactly the moments you want to jot something down.
+
+Stickies and comments share the right-hand panel, so opening one closes the other. Drag the panel's left edge to resize it; the width is shared with the comments panel and remembered.
+
+### The full board
+
+The expand button in the panel header opens the same stickies full screen, as a corkboard. **Drag a card by its top bar** to put it wherever you like — the position is saved, so the board looks the same next time you open it. Dragging is by the top bar rather than the whole card so that clicking into the text to fix a typo places the cursor instead of starting a drag.
+
+- A card you have never dragged has no position at all. Those are dealt onto a grid, filling the first free space, so a new sticky never lands hidden underneath one that is already there.
+- **Tidy up** clears every stored position and puts the whole board back on the grid. It asks first — there is no undo — and it only appears once something has actually been moved.
+- **Drag a card's bottom-right corner** to make it wider or narrower; the width is saved per card. Only the width — the height follows whatever you type, so a card grows as you add to-dos rather than clipping them.
+- The board grows as you drag cards outward, and scrolls.
+- **Escape**, or the collapse button, returns to the side panel. The × closes stickies entirely.
+- The full board has its own address (`#!stickies`), so a refresh or a bookmark brings you back to the board rather than to the last note you had open. The side panel deliberately does not — it sits on top of a note, and the note is what the URL should describe. The panel is still remembered across a refresh, just in your browser rather than in the link, so sharing a note URL never forces someone else's stickies open.
+
+On a phone the board drops the free positioning and shows the same cards in a flowing grid — a corkboard you have to pan around to read one note is worse than a list.
+
+**Limits:** 200 stickies per board, 200 characters of title, 4 KB of text and 50 to-dos per card; a card can be 150–600px wide. Text is plain — markdown is not rendered inside a card.
+
+### Where stickies live, and what that means
+
+Each person gets their own board — in multi-user mode nobody else can see yours, including admins, and there is no way to share one.
+
+**Stickies never leave this server.** They are stored in mdnest's secrets volume, alongside its login and API-token state, and the git-sync sidecar cannot see that volume at all. Nothing you paste into a sticky can be committed or pushed to GitHub. That is the point of the feature, and it is why there is no encryption option: the content is not travelling anywhere for encryption to protect it.
+
+The flip side is worth being explicit about: **stickies are not backed up.** A regular note in a git-synced namespace has a copy on your git remote and a full history behind the History button. A sticky has neither. It survives a `./mdnest-server rebuild` — the secrets volume is a declared Docker volume, not part of the container image — but if you lose the volume, you lose the board.
+
+So: stickies are for the short-lived stuff. A phone number to call back, a command to run after lunch, three things to finish today. Anything you would be upset to lose belongs in a real note.
+
+---
+
 ## Task Checkboxes
 
 Standard markdown task list syntax is supported:

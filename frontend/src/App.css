@@ -5596,3 +5596,600 @@ pre:hover .code-copy-btn {
   color: var(--accent);
   font-weight: 600;
 }
+
+/* ---------------------------------------------------------------------------
+   Stickies — the personal sticky board
+   ---------------------------------------------------------------------------
+   Shares the right-edge drawer geometry with the comment sidebar (same top
+   offset below the toolbar, same resize handle, same width preference), so
+   the two read as one panel that changes contents rather than two competing
+   panels. App.jsx enforces that only one is open at a time.
+   --------------------------------------------------------------------------- */
+
+.toolbar-stickies {
+  background: transparent !important;
+  border: none !important;
+  color: var(--text-muted) !important;
+  padding: 0.2rem 0.4rem !important;
+  cursor: pointer;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.toolbar-stickies:hover,
+.toolbar-stickies.active {
+  color: var(--text) !important;
+}
+
+/* The one coloured icon in the toolbar. Everything else is a currentColor
+   stroke, which at 16px makes a sticky note indistinguishable from a document
+   — the colour is what names it. Fills are theme tokens so it re-themes with
+   the rest rather than staying a light-mode yellow on a dark bar. */
+/* Outlined in currentColor, not in a border token. The fills are pale by
+   design (they are card backgrounds that dark text sits on), so in light mode
+   a pale fill outlined in a pale border gave a 16px blob with no readable
+   shape — it looked like a smudge next to the crisp single-stroke icons
+   beside it. currentColor ties the outline to the button's own text colour,
+   so it darkens on hover with everything else. */
+.sticky-icon-back {
+  fill: var(--sticky-blue);
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+
+.sticky-icon-front {
+  fill: var(--sticky-yellow);
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+
+/* The peeled corner: a different fill from the face so the fold reads as a
+   fold rather than a notch cut out of the card. */
+.sticky-icon-fold {
+  fill: var(--sticky-grey);
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+
+.sticky-icon-ink {
+  stroke: var(--text-secondary);
+  fill: none;
+}
+
+/* The ink lines are the only part not tied to currentColor, so they need to
+   keep up on hover or they stay faint against a darkened outline. */
+.toolbar-stickies:hover .sticky-icon-ink,
+.toolbar-stickies.active .sticky-icon-ink {
+  stroke: var(--text);
+}
+
+.stickies-expand,
+.stickies-collapse {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  padding: 2px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+}
+
+.stickies-expand:hover,
+.stickies-collapse:hover {
+  color: var(--text);
+}
+
+.stickies-panel {
+  position: fixed;
+  /* Full height, unlike .comment-sidebar's 61px offset.
+     That offset exists so the toolbar stays reachable — but .main already
+     carries a margin-right the width of this panel, so the toolbar has
+     ALREADY been squeezed clear of it. The offset therefore bought nothing
+     and left a band of bare page background in the top-right corner, above
+     the panel and to the right of the shortened toolbar. */
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 320px;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  border-top: 1px solid var(--border);
+  z-index: 9000;
+  display: flex;
+  flex-direction: column;
+  box-shadow: -4px 0 16px var(--shadow-color);
+}
+
+.stickies-resize-handle {
+  position: absolute;
+  top: 0;
+  left: -3px;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 10;
+}
+
+.stickies-resize-handle:hover,
+.stickies-resize-handle:active {
+  background: var(--accent-wash-3);
+}
+
+.stickies-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.stickies-header h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--text);
+  /* Takes the slack so the save state and close button sit right. */
+  margin-right: auto;
+}
+
+.stickies-save-state {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.stickies-save-state.error {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.stickies-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.stickies-close:hover {
+  color: var(--text);
+}
+
+.stickies-add-row {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.stickies-add {
+  width: 100%;
+  background: var(--accent);
+  color: var(--text-inverse);
+  border: none;
+  padding: 6px 12px;
+  border-radius: var(--radius);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.stickies-add:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.stickies-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.stickies-empty {
+  padding: var(--space-5) var(--space-2);
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.stickies-empty p {
+  margin: 0 0 var(--space-3);
+}
+
+.stickies-empty-note {
+  font-size: 0.78rem;
+  color: var(--text-faint);
+  line-height: 1.5;
+}
+
+.sticky-card {
+  border-radius: var(--radius);
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  box-shadow: 0 1px 3px var(--shadow-color);
+}
+
+/* The five fills. The class name comes from a server-validated enum, so an
+   unexpected value cannot reach here and paint an unstyled card. */
+.sticky-yellow { background: var(--sticky-yellow); }
+.sticky-pink   { background: var(--sticky-pink); }
+.sticky-blue   { background: var(--sticky-blue); }
+.sticky-green  { background: var(--sticky-green); }
+.sticky-grey   { background: var(--sticky-grey); }
+
+/* Title and controls on ONE row. The title used to sit under them, which cost
+   a whole line per card and — on an untitled sticky — showed that line as a
+   blank band above the text. */
+.sticky-card-top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+
+/* The actions are always in the DOM and always reachable — no hover-to-reveal.
+   The panel is used on touch as much as on a desktop, and a control that only
+   appears on hover does not exist on a phone. */
+.sticky-card-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.sticky-color-btn,
+.sticky-delete {
+  background: none;
+  border: none;
+  padding: 2px;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+}
+
+.sticky-delete {
+  font-size: 1.1rem;
+}
+
+.sticky-delete:hover {
+  color: var(--danger);
+}
+
+/* The swatch shows the card's colour, and it sits ON a card of that colour —
+   so with only a faint border it rendered as an empty ring on its own
+   background and read as a broken control. The ring is the strong border and
+   the dot needs a visible edge in both themes. */
+.sticky-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1.5px solid var(--text-secondary);
+  padding: 0;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+/* Inside the card's own top bar the swatch is a *button face*, not a choice —
+   give it the page background behind the colour so it always reads as a
+   distinct chip rather than dissolving into the card. */
+.sticky-color-btn .sticky-swatch {
+  box-shadow: 0 0 0 1.5px var(--surface);
+}
+
+.sticky-swatch.active {
+  border-color: var(--accent);
+  border-width: 2px;
+}
+
+.sticky-colors {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+}
+
+/* Every text surface on a card is transparent and borderless — the card IS
+   the field. A boxed input inside a 210px sticky reads as a form, not a note. */
+.sticky-card textarea,
+.sticky-card input[type="text"] {
+  /* Break a long unspaced string (a URL, a path) instead of letting it push
+     the card's own layout wider than the card. */
+  overflow-wrap: anywhere;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-family: inherit;
+  width: 100%;
+  padding: 0;
+}
+
+.sticky-card textarea {
+  resize: none;
+  overflow: hidden;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.sticky-title {
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1.3;
+  /* min-width: 0 so a long title ellipsizes inside the row instead of pushing
+     the colour and delete buttons off the card. */
+  min-width: 0;
+  flex: 1;
+  text-overflow: ellipsis;
+}
+
+.sticky-card textarea::placeholder,
+.sticky-card input[type="text"]::placeholder {
+  color: var(--text-secondary);
+}
+
+/* The title's placeholder is dimmer than the body's: an untitled sticky is
+   completely normal, so "Title" must not read as something you failed to
+   fill in. */
+.sticky-title::placeholder {
+  color: var(--text-faint);
+  font-weight: 400;
+}
+
+.sticky-items {
+  list-style: none;
+  margin: var(--space-1) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* align-items: flex-start, not center — a wrapped to-do is several lines tall
+   and its checkbox belongs beside the FIRST line, not floating in the middle
+   of the block. */
+.sticky-items li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-1);
+}
+
+.sticky-items input[type="checkbox"] {
+  margin: 2px 0 0;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.sticky-items textarea {
+  font-size: 0.8rem;
+  line-height: 1.4;
+  /* min-width: 0 so the textarea can shrink below its intrinsic width inside
+     the flex row. Without it the row refuses to narrow and the text is cut
+     off at the card edge — the exact truncation this replaced an <input> to
+     fix. */
+  min-width: 0;
+}
+
+.sticky-items li.done textarea {
+  color: var(--text-secondary);
+  text-decoration: line-through;
+}
+
+/* Per-item delete. Faint until the row is hovered, because one × per line
+   would otherwise be the loudest thing on the card. It stays in the layout
+   rather than appearing on hover, so nothing reflows under the pointer — and
+   it is always visible to a keyboard user via focus. */
+.sticky-item-remove {
+  background: none;
+  border: none;
+  padding: 0 2px;
+  line-height: 1.4;
+  cursor: pointer;
+  color: transparent;
+  flex-shrink: 0;
+}
+
+.sticky-items li:hover .sticky-item-remove,
+.sticky-item-remove:focus-visible {
+  color: var(--text-secondary);
+}
+
+.sticky-item-remove:hover {
+  color: var(--danger) !important;
+}
+
+.sticky-add-item {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  padding: 2px 0 0;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.sticky-add-item:hover {
+  color: var(--text);
+}
+
+.sticky-add-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* A finished sticky stays exactly where it was. Sinking it to the bottom would
+   move a card the moment you tick its last item, which is disorienting when
+   the thing you ticked is the one you were reading. It fades instead. */
+.sticky-card.done .sticky-title,
+.sticky-card.done textarea {
+  color: var(--text-secondary);
+}
+
+.sticky-card.done .sticky-title {
+  text-decoration: line-through;
+}
+
+@media (max-width: 768px) {
+  .stickies-panel {
+    width: min(94vw, 420px);
+  }
+}
+
+/* --- The full-screen corkboard --------------------------------------------
+   Covers the app rather than sitting inside the editor column: the point of
+   the board is the whole surface, and squeezing it beside the sidebar would
+   leave it the same narrow strip the drawer already is. Escape or the
+   collapse button goes back to the drawer. */
+
+.stickies-board {
+  position: fixed;
+  inset: 0;
+  z-index: 9500;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+}
+
+.stickies-board-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+
+.stickies-board-header h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  color: var(--text);
+}
+
+/* Takes the slack, so the title sits left and every control sits right. */
+.stickies-board-header .stickies-save-state {
+  margin-right: auto;
+}
+
+.stickies-add.board {
+  width: auto;
+  padding: 5px 14px;
+}
+
+.stickies-tidy {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 5px 12px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.stickies-tidy:hover {
+  border-color: var(--accent);
+}
+
+/* The scroll container. The canvas inside it is sized to its content, so the
+   board grows as cards are dragged outward instead of clipping them. */
+.stickies-canvas-scroll {
+  flex: 1;
+  overflow: auto;
+  position: relative;
+}
+
+.stickies-canvas {
+  position: relative;
+}
+
+/* Below the mobile breakpoint the canvas stops being a canvas: free
+   positioning on a phone produces a board you have to pan around to read one
+   card. The same cards flow in a grid, and dragging is off. */
+.stickies-canvas-scroll.flow .stickies-canvas {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--space-3);
+  padding: var(--space-3);
+}
+
+.stickies-board-hint {
+  position: absolute;
+  bottom: var(--space-3);
+  font-size: 0.72rem;
+  color: var(--text-faint);
+  pointer-events: none;
+}
+
+/* The whole card is the drag surface — a sticky is picked up by its edge, and
+   once the title moved onto the top row there was no strip left to grab. */
+.sticky-card.draggable {
+  cursor: grab;
+  touch-action: none;
+}
+
+.sticky-card.draggable:active {
+  cursor: grabbing;
+}
+
+/* Everything you can type in or press keeps its own cursor, so the card never
+   claims to be draggable where it is not. This mirrors the pointerdown
+   opt-out in StickyCard: the two must agree, or the cursor lies. */
+.sticky-card.draggable textarea,
+.sticky-card.draggable input[type="text"] {
+  cursor: text;
+}
+
+.sticky-card.draggable button,
+.sticky-card.draggable input[type="checkbox"] {
+  cursor: pointer;
+}
+
+.sticky-card.draggable {
+  box-shadow: 0 2px 8px var(--shadow-color);
+}
+
+/* Resize grip, bottom-right. Width only: height follows the content, so a
+   stored height would clip the card as soon as another to-do was added. */
+.sticky-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 14px;
+  height: 14px;
+  cursor: ew-resize;
+  touch-action: none;
+  /* Two short strokes, the conventional grip, drawn with a gradient so it
+     needs no extra element. */
+  background:
+    linear-gradient(135deg, transparent 46%, var(--text-secondary) 46%, var(--text-secondary) 54%, transparent 54%),
+    linear-gradient(135deg, transparent 70%, var(--text-secondary) 70%, var(--text-secondary) 78%, transparent 78%);
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.sticky-card:hover .sticky-resize {
+  opacity: 0.7;
+}
+
+.sticky-card.draggable {
+  /* The grip is positioned against the card, and the card needs room for it
+     so it never sits on top of the last line of text. */
+  position: absolute;
+  padding-bottom: 14px;
+}
+
+.stickies-retry {
+  margin-top: var(--space-3);
+  background: var(--accent);
+  color: var(--text-inverse);
+  border: none;
+  padding: 5px 14px;
+  border-radius: var(--radius);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}

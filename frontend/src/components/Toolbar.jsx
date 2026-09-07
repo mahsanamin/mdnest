@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 
-function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePassword, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh, wsStatus, commentCount, onToggleComments, onSetBoardActive, boardActive, marpLocked, drawingDoc, drawingSource, onDrawingSourceChange, theme, onToggleTheme }) {
+function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePassword, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh, wsStatus, commentCount, onToggleComments, stickyCount, onToggleStickies, stickiesOpen, onSetBoardActive, boardActive, marpLocked, drawingDoc, drawingSource, onDrawingSourceChange, theme, onToggleTheme }) {
   const [refreshing, setRefreshing] = useState(false);
   const handleRefresh = useCallback(() => {
     if (refreshing || !onRefresh) return;
@@ -200,6 +200,32 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
             <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
           </svg>
           {commentCount > 0 && <span className="comment-badge">{commentCount}</span>}
+        </button>
+      )}
+      {/* Not gated on currentPath, unlike Comments. Comments are about the
+          open file; stickies are about the person, so the board has to be
+          reachable from an empty editor and from the task board too — those
+          are exactly the moments someone jots one down. */}
+      {onToggleStickies && (
+        <button
+          className={`toolbar-stickies${stickiesOpen ? ' active' : ''}`}
+          onClick={onToggleStickies}
+          title="Stickies — your private notes on this server"
+          aria-label="Stickies"
+        >
+          {/* Painted in the sticky palette rather than drawn in currentColor
+              like the other toolbar icons. Two overlapping notes with the
+              front one's corner peeled: the shape alone reads as "document"
+              at 16px, and the colour is what makes it read as "stickies".
+              The fills are theme tokens, so it re-themes with everything
+              else instead of being a light-mode-only splash of yellow. */}
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" strokeLinejoin="round" aria-hidden="true">
+            <rect x="3" y="3" width="13" height="13" rx="2" className="sticky-icon-back" />
+            <path d="M8 8h13v8l-5 5H8z" className="sticky-icon-front" />
+            <path d="M21 16h-5v5z" className="sticky-icon-fold" />
+            <path d="M11 12h7M11 15.5h4.5" className="sticky-icon-ink" strokeWidth="1.4" strokeLinecap="round" />
+          </svg>
+          {stickyCount > 0 && <span className="comment-badge">{stickyCount}</span>}
         </button>
       )}
       {onToggleTheme && (

@@ -197,6 +197,47 @@ export async function savePreferences(prefs) {
   return res.json();
 }
 
+// --- Stickies (both auth modes) ---
+
+// The personal sticky board. Keyed server-side by the authenticated identity —
+// there is no user id to pass, and no namespace: stickies are not notes and
+// never appear in one.
+//
+// Neither call fails soft, and fetchStickies in particular MUST NOT.
+//
+// It did at first, returning [] on any error the way fetchPreferences does.
+// That is right for a preference — losing one costs a click — and quietly
+// catastrophic here, because the two are not symmetric: a preference is
+// PATCHed key by key, but a board is PUT whole. So a GET that failed (the
+// backend restarting, a dropped connection, a proxy hiccup) showed an empty
+// board that was indistinguishable from a genuinely empty one, and the next
+// character typed replaced the real board on the server with just that card.
+// Fail-soft read plus whole-board write is a data-loss machine.
+//
+// It throws now, and the caller refuses to save anything until a load has
+// actually succeeded.
+
+export async function fetchStickies() {
+  const res = await request('/stickies');
+  if (!res.ok) throw new Error('Failed to load stickies');
+  const data = await res.json();
+  return Array.isArray(data.stickies) ? data.stickies : [];
+}
+
+export async function saveStickies(stickies) {
+  const res = await request('/stickies', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ stickies }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to save stickies');
+  }
+  const data = await res.json();
+  return Array.isArray(data.stickies) ? data.stickies : [];
+}
+
 // --- Namespaces & Files ---
 
 export async function getNamespaces() {

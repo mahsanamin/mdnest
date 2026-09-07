@@ -539,6 +539,19 @@ func main() {
 		preferenceStore = store.NewFilePreferenceStore(secretsDir)
 	}
 	preferencesHandler := handlers.NewPreferencesHandler(preferenceStore, multiMode)
+
+	// Personal sticky board. Same store split as preferences, and deliberately
+	// the same volume: the secrets dir is a declared named volume (so a board
+	// survives `mdnest-server rebuild`) that git-sync cannot see (it walks
+	// /data/notes/*/ only). That location is the entire privacy guarantee —
+	// nothing pasted into a sticky can reach a git remote.
+	var stickyStore store.StickyStore
+	if multiMode {
+		stickyStore = store.NewPostgresStickyStore(db)
+	} else {
+		stickyStore = store.NewFileStickyStore(secretsDir)
+	}
+	stickiesHandler := handlers.NewStickiesHandler(stickyStore, multiMode)
 	// Comments require both a real user identity and the WebSocket hub for
 	// live refresh on other clients, so we gate on enableCollab (which
 	// itself implies multiMode). In single mode or collab-off deployments
@@ -682,6 +695,7 @@ func main() {
 	mux.HandleFunc("/api/auth/change-password-forced", authHandler.HandleForcedPasswordChange)
 	mux.Handle("/api/auth/tokens", authMiddleware.Wrap(http.HandlerFunc(tokenHandler.HandleTokens)))
 	mux.Handle("/api/preferences", authMiddleware.Wrap(http.HandlerFunc(preferencesHandler.Handle)))
+	mux.Handle("/api/stickies", authMiddleware.Wrap(http.HandlerFunc(stickiesHandler.Handle)))
 
 	// TOTP / 2FA routes (multi mode only, and not in SSO mode — the IdP owns MFA).
 	var totpHandler *handlers.TOTPHandler
