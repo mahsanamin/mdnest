@@ -4,6 +4,90 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v4.5.1 — The CLI installer survives GitHub's CDN
+
+`curl -fsSL https://raw.githubusercontent.com/.../install-cli.sh | bash` was
+returning `503` and nobody could install the CLI. The repo was fine, GitHub was
+fine, and the network was fine — the 503 came from Fastly's own edge:
+`Backend.max_conn reached`, served by one POP, which takes out every install in
+that region for as long as it lasts. Both the installer and `mdnest update`
+were hardcoded to that single host with no fallback and no retry, and reported
+the failure as "check your network" — sending people to look at the one thing
+that was working.
+
+The install command is now:
+
+```bash
+curl -fsSL https://mdnest.dev/install.sh | bash
+```
+
+The GitHub URL is the same script and keeps working.
+
+### Fixed
+
+- **The installer and `mdnest update` try three independent hosts, twice
+  each** — GitHub raw first, then jsDelivr, then `mdnest.dev`. GitHub stays
+  first deliberately: it publishes the instant a fix lands on `main`, whereas
+  jsDelivr caches a branch ref for hours, and the CLI is pull-only so an
+  update that arrives half a day late is its own problem.
+- **A failure now names itself.** Every source's actual HTTP status is
+  printed, plus a line saying that a 503 from `raw.githubusercontent.com` is
+  GitHub's CDN rather than your network or the repo. Same rule as
+  `curl_reason` and the pre-push audit check: keep the reason when the reason
+  is what the reader has to act on.
+- **A downloaded CLI is verified before it replaces a working one.** The old
+  check was a shebang, which a captive-portal page and a truncated download
+  both pass; it now also requires the `MDNEST_CLI_VERSION` marker. `mdnest
+  update` also downloads once instead of twice — it used to fetch the file to
+  read the version and fetch it again to install it, doubling the exposure to
+  exactly this outage and leaving room for the two to disagree.
+- **`mdnest.dev` mirrors the CLI**, pulled from `main` by the site's own
+  deploy step rather than copied by hand — a mirror that can drift would hand
+  people a stale CLI precisely when the canonical source is unreachable and
+  nobody could tell.
+- **The installer's closing hint is pasteable.** It printed
+  `mdnest login <server-url> <api-token>`, and `<server-url>` is a shell
+  redirection — the instruction meant to get you started was the next thing to
+  fail. The project already had this rule for CLI output and the web UI; the
+  installer sat outside both.
+
+### Security
+
+- **Two transitive **high** advisories, neither from this change.** They are
+  here because `--audit-level=high` is a required check on `main`, so they
+  blocked the hotfix outright.
+  - `js-yaml` 4.3.1 -> 4.3.2 (GHSA-2883-xcg3-v3hh), reached via
+    `@marp-team/marpit`. An in-range lock-file bump, no `package.json` change.
+  - `@xmldom/xmldom` forced to `^0.9.12` with an `overrides` entry
+    (GHSA-6gmq-8vp8-gcm6 and twelve siblings), reached via
+    `speech-rule-engine`. v4.4.0 deliberately left this one alone while it was
+    *moderate* — below the gate — because the override then made the tree
+    invalid to npm's legacy quick-audit endpoint. The re-rating to high met the
+    stated condition for revisiting it, and under CI's actual environment
+    (`node:20`, npm 10.8.2) the override no longer breaks the audit.
+    `speech-rule-engine@4.1.4` still pins `0.9.10` exactly and both
+    `marp-core` and `mathjax-full` are already at their latest, so there is no
+    other route.
+
+    Two things made it safe to take rather than merely necessary: `xmldom` and
+    `speech-rule-engine` are tree-shaken out of every shipped chunk, so the
+    browser bundle does not change at all; and Marp still renders — verified
+    by rendering a deck with front-matter, pagination and math through
+    `marp-core` in Node, since the unit tests cover our own Marp detection and
+    not marpit's YAML parsing, which is what the `js-yaml` bump touches.
+
+### Notes
+
+- `tests/cli-unit.sh` gains a source-chain suite: there must be more than one
+  source, they must be on genuinely different hosts, GitHub must stay first,
+  `mdnest.dev` must not be offered for a non-`main` branch, and the two copies
+  of the list — the CLI's and the installer's, which cannot share code because
+  the installer is fetched on its own — must match. The errexit lint now covers
+  `install-cli.sh` too, since it runs under `set -e` and is no longer a
+  straight-line script.
+
+---
+
 ## v4.5.0 — Stickies
 
 A personal sticky board, kept beside your notes and never mixed in with them.

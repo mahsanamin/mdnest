@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-MDNEST_CLI_VERSION="4.5.0"
+MDNEST_CLI_VERSION="4.5.1"
 CONFIG_DIR="${HOME}/.config/mdnest"
 SERVERS_DIR="${CONFIG_DIR}/servers"
 DEFAULT_FILE="${CONFIG_DIR}/default"
@@ -931,42 +931,121 @@ cmd_whoami() {
 # mdnest while it's running is safe on Unix — the kernel keeps the open
 # inode alive until the current process exits; the next invocation
 # picks up the new code. Uses the same source as install-cli.sh.
+# Where the CLI can be fetched from, in order. Kept identical to
+# mdnest_sources in install-cli.sh — the installer is a bootstrap script that
+# is fetched on its own, so it cannot source this file, and the duplication is
+# unavoidable. tests/cli-unit.sh asserts the two lists match rather than
+# trusting them to.
+#
+# raw.githubusercontent.com stays FIRST because it publishes the instant a fix
+# lands on main; jsDelivr caches a branch ref for hours, so leading with it
+# would delay every CLI fix. But raw is one Fastly tier and it fails on its
+# own — a POP out of backend connections answers `503 Backend.max_conn
+# reached` to an entire region while GitHub is healthy. That is what broke
+# installs, with no fallback, no retry, and a "check your network" message
+# pointing at the one thing that was fine.
+cli_sources() {
+  local branch="$1" name="$2"
+  echo "https://raw.githubusercontent.com/mahsanamin/mdnest/${branch}/${name}"
+  echo "https://cdn.jsdelivr.net/gh/mahsanamin/mdnest@${branch}/${name}"
+  # mdnest.dev mirrors main only — a branch build has to come from GitHub.
+  if [ "$branch" = "main" ]; then
+    echo "https://mdnest.dev/cli/${name}"
+  fi
+  return 0
+}
+
+# looks_like_cli rejects an HTML error page and a truncated download. The
+# shebang alone is not enough: a captive-portal or proxy page can start with
+# anything, and half a script still has a valid first line. Installing either
+# one over a working CLI is the worst outcome available here.
+looks_like_cli() {
+  head -1 "$1" | grep -q '^#!' && grep -q '^MDNEST_CLI_VERSION=' "$1"
+}
+
+# cli_fetch downloads the CLI into $2, trying every source twice. On failure
+# it prints what each source actually said — a 503 from GitHub's CDN and a
+# blocked proxy need different actions from the reader, and collapsing both
+# into "check your network" sends people to look at the wrong thing.
+cli_fetch() {
+  local branch="$1" out="$2" url code attempt got="" why=""
+  while IFS= read -r url; do
+    [ -n "$url" ] || continue
+    for attempt in 1 2; do
+      # No -f: we want the status code, not just a non-zero exit.
+      code="$(curl -sSL --max-time 30 -o "$out" -w '%{http_code}' "$url" 2>/dev/null)" || code="000"
+      if [ "$code" = "200" ] && looks_like_cli "$out"; then
+        got="$url"
+        break
+      fi
+      if [ "$code" = "200" ]; then
+        why="$why
+  $url — 200 but not the mdnest CLI (an error page?)"
+        break   # a 200 serving junk will not fix itself on a retry
+      fi
+      if [ "$attempt" = "2" ]; then
+        why="$why
+  $url — HTTP $code"
+      else
+        sleep 1
+      fi
+    done
+    if [ -n "$got" ]; then break; fi
+  done <<SOURCES
+$(cli_sources "$branch" "mdnest")
+SOURCES
+
+  if [ -z "$got" ]; then
+    echo "Error: couldn't download the mdnest CLI from any source." >&2
+    echo "Tried:$why" >&2
+    echo "" >&2
+    echo "A 503 from raw.githubusercontent.com is GitHub's CDN — not your" >&2
+    echo "network and not the repo — and usually clears within minutes." >&2
+    return 1
+  fi
+  CLI_FETCHED_FROM="$got"
+  return 0
+}
+
 cmd_update() {
   # Update from the same branch the CLI was installed from — override with
   # MDNEST_BRANCH=develop to track an unreleased build.
   BRANCH="${MDNEST_BRANCH:-main}"
-  REPO_URL="https://raw.githubusercontent.com/mahsanamin/mdnest/${BRANCH}"
   REAL_PATH="$(resolve_self "$0")"
   TARGET="$REAL_PATH"
 
+  # Download FIRST, then compare versions, rather than fetching once to read
+  # the version and again to install it. Two fetches meant twice the exposure
+  # to the outage this is guarding against, and they could disagree.
+  local tmp
+  tmp="$(mktemp "${TMPDIR:-/tmp}/mdnest.XXXXXX")" || { echo "Error: couldn't create a temp file." >&2; exit 1; }
+  if ! cli_fetch "$BRANCH" "$tmp"; then
+    rm -f "$tmp"
+    exit 1
+  fi
+
   CURRENT="${MDNEST_CLI_VERSION}"
-  LATEST=$(curl -fsSL "$REPO_URL/mdnest" 2>/dev/null | grep '^MDNEST_CLI_VERSION=' | head -1 | cut -d'"' -f2) || LATEST=""
+  LATEST="$(grep '^MDNEST_CLI_VERSION=' "$tmp" | head -1 | cut -d'"' -f2)" || LATEST=""
   if [ -z "$LATEST" ]; then
-    echo "Error: couldn't reach $REPO_URL — check your network." >&2
+    rm -f "$tmp"
+    echo "Error: the downloaded CLI has no version marker; aborting." >&2
     exit 1
   fi
 
   if [ "$CURRENT" = "$LATEST" ] && [ "$1" != "--force" ]; then
+    rm -f "$tmp"
     echo "mdnest CLI is up to date (v${CURRENT})."
     echo "Pass --force to re-download anyway."
     return 0
   fi
 
   echo "Updating mdnest CLI: v${CURRENT} -> v${LATEST}"
+  echo "Source: ${CLI_FETCHED_FROM}"
   echo "Target: $TARGET"
 
-  # Download to a temp file first, then install atomically — same reasoning as
-  # install-cli.sh: a direct 'curl -o "$TARGET"' can abort mid-write (curl 56)
-  # and leave a truncated, unrunnable binary in place. install(1) swaps it in.
-  local tmp
-  tmp="$(mktemp "${TMPDIR:-/tmp}/mdnest.XXXXXX")" || { echo "Error: couldn't create a temp file." >&2; exit 1; }
-  if ! curl -fsSL "$REPO_URL/mdnest" -o "$tmp"; then
-    rm -f "$tmp"; echo "Error: download failed — check your network." >&2; exit 1
-  fi
-  if ! head -1 "$tmp" | grep -q '^#!'; then
-    rm -f "$tmp"; echo "Error: downloaded file isn't the mdnest CLI (no shebang); aborting." >&2; exit 1
-  fi
-
+  # Installed from the temp file with install(1), never by curl writing to
+  # $TARGET directly — a direct write can abort mid-stream (curl 56) and leave
+  # a truncated, unrunnable CLI in place.
   if [ -w "$TARGET" ] || [ -w "$(dirname "$TARGET")" ]; then
     install -m 0755 "$tmp" "$TARGET"
   else

@@ -7,8 +7,24 @@ The `mdnest` CLI lets you read, write, search, and organize notes from any termi
 One command, works on macOS and Linux:
 
 ```bash
+curl -fsSL https://mdnest.dev/install.sh | bash
+```
+
+Served from `mdnest.dev` rather than `raw.githubusercontent.com`. GitHub's raw
+CDN is a single tier and it fails on its own — a POP that runs out of backend
+connections answers `503 Backend.max_conn reached` to every request in that
+region while GitHub itself is perfectly healthy, and a `curl … | bash`
+one-liner has nowhere else to go. The GitHub URL is the same script and still
+works when the CDN is up:
+
+```bash
 curl -fsSL https://raw.githubusercontent.com/mahsanamin/mdnest/main/install-cli.sh | bash
 ```
+
+Either way the installer tries three sources in order — GitHub raw first (it
+publishes the moment a fix lands on `main`), then jsDelivr, then `mdnest.dev`
+— twice each, and tells you what every one of them said if they all fail.
+`mdnest update` uses the same chain.
 
 **No dependencies — just bash and curl.** `python3`/`jq` are used when present (for prettier JSON), but the CLI falls back to pure-bash/awk so every command works without them. The installer downloads to a temp file and installs atomically (using `sudo` only if `/usr/local/bin` isn't writable, and falling back to `~/.local/bin` with a PATH hint if it can't) — so it never leaves a half-written binary or aborts mid-download on a fresh machine.
 
@@ -17,7 +33,7 @@ curl -fsSL https://raw.githubusercontent.com/mahsanamin/mdnest/main/install-cli.
 To try an unreleased build, point at that branch's installer and set `MDNEST_BRANCH`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mahsanamin/mdnest/develop/install-cli.sh | MDNEST_BRANCH=develop bash
+curl -fsSL https://mdnest.dev/install.sh | MDNEST_BRANCH=develop bash
 ```
 
 `mdnest update` honours the same `MDNEST_BRANCH` (default `main`), so you can stay on a branch:
@@ -298,7 +314,7 @@ MDNEST_BRANCH=develop mdnest update --force   # track an unreleased build
 Or reinstall from scratch:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mahsanamin/mdnest/main/install-cli.sh | bash
+curl -fsSL https://mdnest.dev/install.sh | bash
 ```
 
 `mdnest update` reads the script straight from the `main` branch on GitHub, so
