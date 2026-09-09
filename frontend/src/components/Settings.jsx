@@ -427,7 +427,7 @@ function CliTab({ serverVersion }) {
           <span>Install the CLI (one command):</span>
         </div>
       </div>
-      <CodeBlock code="curl -fsSL https://raw.githubusercontent.com/mahsanamin/mdnest/main/install-cli.sh | bash" />
+      <CodeBlock code="curl -fsSL https://mdnest.dev/install.sh | bash" />
 
       <div className="settings-steps">
         <div className="settings-step">

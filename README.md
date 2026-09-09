@@ -120,7 +120,7 @@ Open `http://localhost:3236` (or your Tailscale URL) in any browser. Works on de
 Install it on any machine (macOS / Linux):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mahsanamin/mdnest/main/install-cli.sh | bash
+curl -fsSL https://mdnest.dev/install.sh | bash
 ```
 
 Create a token in the web UI (Settings → API Tokens), then name your server

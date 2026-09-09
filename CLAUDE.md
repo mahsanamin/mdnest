@@ -341,12 +341,27 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
   `overrides` entry for a MODERATE advisory that was never blocking anything —
   and the override then made the tree invalid to npm's legacy quick-audit
   endpoint (`400 … Invalid package tree`), which refuses the whole audit. One
-  moderate advisory traded for no audit signal at all. **An `overrides` entry
-  must satisfy what the parent declares**; `speech-rule-engine` pins
-  `@xmldom/xmldom` at exactly `0.9.10`, so there is nothing to force safely.
-  Local runs passed because local npm reached the working bulk endpoint while
-  CI fell back to the legacy one — verifying in one environment verified one
-  environment.
+  moderate advisory traded for no audit signal at all. Local runs passed
+  because local npm reached the working bulk endpoint while CI fell back to
+  the legacy one — **verifying in one environment verified one environment**,
+  which is the durable half of this lesson: CI pins Node 20 (npm 10.x) and a
+  dev box on Node 24 (npm 11.x) is a different audit client, so test a
+  dependency change in `node:20` before believing it.
+
+  **Updated in v4.5.1: that `@xmldom/xmldom` override is now in place and
+  required.** The advisory was re-rated **high**, which put it above the gate
+  and blocked every merge to `main` — the exact condition the old note said to
+  revisit on. `speech-rule-engine@4.1.4` still pins `0.9.10` exactly and
+  `marp-core`/`mathjax-full` are both already at their latest, so an
+  `overrides` entry forcing `^0.9.12` is the only route, and re-testing under
+  `node:20`/npm 10.8.2 shows it no longer breaks the audit the way it did in
+  v4.4.0-dev. Two things made it safe to take: `xmldom` and
+  `speech-rule-engine` are **tree-shaken out of every shipped chunk** (grep
+  `frontend/dist/assets/*.js` — zero hits), so nothing about the browser
+  bundle changes; and Marp still renders, verified by rendering a real deck
+  with front-matter, pagination and math through `marp-core` in Node rather
+  than by trusting the unit tests, which cover our own `isMarpDoc` and not
+  marpit's YAML parsing.
 - **"Could not check" is not "found something", and the hook got this wrong.**
   `npm audit` exits non-zero for a real advisory AND for a failure to reach the
   advisories endpoint. The hook discarded stderr and reported every non-zero
