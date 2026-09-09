@@ -395,16 +395,21 @@ alpha" "$(replace_first_literal "$h" "alpha" "")"
 }
 
 run_errexit_lint() {
-  echo "── errexit lint (mdnest) ──"
-  local findings
-  findings="$(awk "$ERREXIT_LINT" "$REPO_ROOT/mdnest")" || findings=""
-  if [ -z "$findings" ]; then
-    ok "errexit: every command substitution assignment is guarded"
-  else
-    bad "errexit: every command substitution assignment is guarded" \
-        "unguarded under set -e — add '|| var=\"\"':
+  echo "── errexit lint (mdnest, install-cli.sh) ──"
+  # install-cli.sh is linted too: it runs under `set -e` and is no longer a
+  # straight-line script — it grew a source-fallback loop when GitHub's raw
+  # CDN turned out to be a single point of failure for every install.
+  local f findings
+  for f in mdnest install-cli.sh; do
+    findings="$(awk "$ERREXIT_LINT" "$REPO_ROOT/$f")" || findings=""
+    if [ -z "$findings" ]; then
+      ok "errexit ($f): every command substitution assignment is guarded"
+    else
+      bad "errexit ($f): every command substitution assignment is guarded" \
+          "unguarded under set -e — add '|| var=\"\"':
 $findings"
-  fi
+    fi
+  done
 
   # The lint has to actually fail on the shape it exists to catch, or a green
   # run means nothing. Three shapes it must NOT flag, one it must.
@@ -426,6 +431,74 @@ PROBE
     *':1: a=$(false)'*) ok "errexit lint: names the offending line" ;;
     *) bad "errexit lint: names the offending line" "got [$(awk "$ERREXIT_LINT" "$probe")]" ;;
   esac
+}
+
+# ── CLI download sources ────────────────────────────────────────────────────
+# The install one-liner started returning 503 for everyone in a region:
+# raw.githubusercontent.com is one Fastly tier, a POP ran out of backend
+# connections, and both install-cli.sh and `mdnest update` were hardcoded to
+# it with no fallback and no retry — reporting it as "check your network",
+# which is the one thing that was fine.
+#
+# Two things are pinned here. The chain must have a real fallback (a list of
+# one is the bug), and the copy in install-cli.sh must match the copy in the
+# CLI: the installer is fetched on its own so it cannot source the CLI, and
+# duplication that drifts would leave exactly one of the two able to recover.
+run_install_source_suite() {
+  echo "── CLI download sources ──"
+
+  # Extract each list by running the function out of its own file, so the test
+  # reads the shipped code rather than a restatement of it.
+  local cli_list inst_list
+  cli_list="$(sed -n '/^cli_sources() {/,/^}/p' "$REPO_ROOT/mdnest" | { cat; echo 'cli_sources main mdnest'; } | bash)" || cli_list=""
+  inst_list="$(sed -n '/^mdnest_sources() {/,/^}/p' "$REPO_ROOT/install-cli.sh" | { cat; echo 'mdnest_sources main mdnest'; } | bash)" || inst_list=""
+
+  eq "sources: the installer and the CLI agree" "$cli_list" "$inst_list"
+
+  # A single source is the bug this fixed, so require more than one.
+  local n; n="$(printf '%s\n' "$cli_list" | grep -c .)" || n=0
+  if [ "$n" -ge 2 ]; then
+    ok "sources: there is a fallback (found $n)"
+  else
+    bad "sources: there is a fallback" "only $n source — a list of one cannot survive an outage"
+  fi
+
+  # raw.githubusercontent.com must stay FIRST. jsDelivr caches a branch ref for
+  # hours, so promoting it would mean a CLI fix reaching nobody for half a day
+  # — the pull-only CLI's whole update story depends on main being immediate.
+  case "$(printf '%s\n' "$cli_list" | head -1)" in
+    https://raw.githubusercontent.com/*) ok "sources: GitHub raw is tried first" ;;
+    *) bad "sources: GitHub raw is tried first" "got [$(printf '%s\n' "$cli_list" | head -1)]" ;;
+  esac
+
+  # The hosts must actually differ. Three URLs on one host is not a fallback,
+  # and that is easy to write by accident when they are built from one prefix.
+  local hosts; hosts="$(printf '%s\n' "$cli_list" | sed -E 's#^https?://([^/]+).*#\1#' | sort -u | grep -c .)" || hosts=0
+  if [ "$hosts" -ge 2 ]; then
+    ok "sources: spread across $hosts independent hosts"
+  else
+    bad "sources: spread across independent hosts" "all $n URLs share one host — an outage there takes out every source"
+  fi
+
+  # mdnest.dev mirrors main only; a branch build has to come from GitHub, and
+  # offering a URL that 404s would just add a slow step to every branch install.
+  local dev_list; dev_list="$(sed -n '/^cli_sources() {/,/^}/p' "$REPO_ROOT/mdnest" | { cat; echo 'cli_sources develop mdnest'; } | bash)" || dev_list=""
+  case "$dev_list" in
+    *mdnest.dev*) bad "sources: mdnest.dev is offered for main only" "develop got [$dev_list]" ;;
+    *) ok "sources: mdnest.dev is offered for main only" ;;
+  esac
+
+  # An HTML error page and a truncated script must both be rejected. A shebang
+  # check alone passes a proxy login page and half a download, and installing
+  # either over a working CLI is the worst outcome available.
+  local vfy; vfy="$SHIM_DIR/looks.sh"
+  { sed -n '/^looks_like_cli() {/,/^}/p' "$REPO_ROOT/mdnest"; echo 'looks_like_cli "$1" && echo YES || echo NO'; } > "$vfy"
+  printf '#!/bin/bash\nMDNEST_CLI_VERSION="9.9.9"\n' > "$SHIM_DIR/good"
+  printf '<html><body>503</body></html>\n' > "$SHIM_DIR/htmlpage"
+  printf '#!/bin/bash\n# truncated before the version marker\n' > "$SHIM_DIR/partial"
+  eq "verify: a real CLI is accepted"       "YES" "$(bash "$vfy" "$SHIM_DIR/good")"
+  eq "verify: an HTML error page is refused" "NO" "$(bash "$vfy" "$SHIM_DIR/htmlpage")"
+  eq "verify: a truncated script is refused" "NO" "$(bash "$vfy" "$SHIM_DIR/partial")"
 }
 
 # ── version comparison + the "your CLI is stale" notice ─────────────────────
@@ -570,6 +643,7 @@ run_splice_suite
 # needs SHIM_DIR for its throwaway HOMEs, hence its place at the end.
 run_login_suite
 run_unreachable_suite
+run_install_source_suite
 run_version_suite
 run_errexit_lint
 
