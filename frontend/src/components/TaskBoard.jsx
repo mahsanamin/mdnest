@@ -12,7 +12,7 @@ import { sortTasks, SORT_MODES } from '../task-sort.js';
 import { matchesTaskFilters } from '../taskFilters';
 import { buildRelationLookup, resolveTask } from '../relations';
 import { laneAt, edgeScrollStep } from '../boardLanes';
-import { cardKey } from './cardKey';
+import { cardKey, relocateTask, withStableIds } from './cardKey';
 import TaskCard from './TaskCard';
 import BoardColumn from './BoardColumn';
 import BoardColumnsEditor from './BoardColumnsEditor';
@@ -98,23 +98,31 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
 
   // reload refetches the board. `silent` skips the loading/error UI so a
   // background auto-refresh doesn't flash the spinner or clobber the view.
+  const fetchTasks = useCallback((force) => (isGlobal
+    ? getAllTasks(force)
+    : getTasks(ns, effectiveScope === 'note' ? currentPath : undefined, force)
+  ), [ns, effectiveScope, isGlobal, currentPath]);
+
+  // `afterDrop` is the quiet refresh that follows a card move: it is dropped
+  // if another drag has started by the time it resolves, because replacing
+  // the task list mid-drag re-keys the dragged card and cancels the drag.
   const reload = useCallback(async (opts = {}) => {
     if (!ns && !isGlobal) return;
     if (!opts.silent) setLoading(true);
     if (!opts.silent) setError(null);
     try {
-      const data = isGlobal
-        ? await getAllTasks(opts.force)
-        : await getTasks(ns, effectiveScope === 'note' ? currentPath : undefined, opts.force);
+      const data = await fetchTasks(opts.force);
+      if (opts.afterDrop && activeTaskRef.current) return;
       setBoard(data.board);
-      setTasks(data.tasks || []);
-      setError(null);
+      setTasks((cur) => withStableIds(cur, data.tasks || []));
+      // A quiet post-drop refresh must not wipe the message a failed move set.
+      if (!opts.afterDrop) setError(null);
     } catch (e) {
       if (!opts.silent) setError(e.message || 'Failed to load tasks');
     } finally {
       if (!opts.silent) setLoading(false);
     }
-  }, [ns, effectiveScope, isGlobal, currentPath]);
+  }, [ns, isGlobal, fetchTasks]);
 
   useEffect(() => { reload(); }, [reload]);
 
@@ -214,7 +222,8 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
   // Optimistically replace a task in local state after a successful mutation,
   // keyed by its (still-current) source location.
   const applyUpdated = useCallback((prevKey, updated) => {
-    setTasks((cur) => cur.map((t) => (cardKey(t) === prevKey ? updated : t)));
+    // Keep the card's identity: the server's copy carries no uid.
+    setTasks((cur) => cur.map((t) => (cardKey(t) === prevKey ? { ...updated, uid: t.uid } : t)));
   }, []);
 
   const handleToggle = useCallback(async (task) => {
@@ -297,6 +306,8 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
   // card at the edge keeps scrolling toward the off-screen columns.
   const boardRef = useRef(null);
   const livePointer = useRef(null);
+  const moveQueue = useRef(Promise.resolve());
+  const pendingMoves = useRef(0);
   const laneCollision = useMemo(() => makeLaneCollision(livePointer), []);
   const handleDragStartTracked = useCallback((event) => {
     const e = event.activatorEvent;
@@ -341,20 +352,48 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
     const key = cardKey(task);
     // Optimistic move so the card lands instantly.
     setTasks((cur) => cur.map((t) => (cardKey(t) === key ? { ...t, column: toColumn } : t)));
-    try {
-      const updated = await patchTask(task.namespace || ns, task.path, {
-        line: task.line,
-        raw: task.raw,
-        toColumn,
-      });
-      applyUpdated(key, updated);
-    } catch (e) {
-      if (e.status === 409) { await reload(); return; }
-      // reload reverts the optimistic move and clears error, so set it after.
-      await reload();
-      setError(e.message);
-    }
-  }, [ns, canWrite, applyUpdated, reload]);
+    const move = (t) => patchTask(t.namespace || ns, t.path, { line: t.line, raw: t.raw, toColumn });
+    // Saves run one at a time, in drop order. Each move rewrites its note, so
+    // a save that overlaps the previous one can read the note mid-change and
+    // miss again even after retrying. The card has already landed on screen,
+    // so queueing costs nothing visible.
+    pendingMoves.current += 1;
+    moveQueue.current = moveQueue.current.then(async () => {
+      try {
+        let updated;
+        try {
+          updated = await move(task);
+        } catch (e) {
+          if (e.status !== 409) throw e;
+          // The note moved under the board. Usually that's the board's own
+          // previous drop: a move writes a `status:` line under the task, so
+          // every task below it in the same note shifts down one line and the
+          // server (rightly) refuses a line number it no longer recognises.
+          // Refetch quietly, find the same task, and try once more — the old
+          // path did a full reload here, which flashed "Loading tasks…" and
+          // threw the move away.
+          const data = await fetchTasks(true);
+          const fresh = relocateTask(data.tasks || [], task);
+          if (!fresh) throw e;
+          updated = await move(fresh);
+        }
+        applyUpdated(key, updated);
+      } catch (e) {
+        // Revert the optimistic move without the loading flash, and say so —
+        // a move that silently snaps back reads as "drag is broken".
+        await reload({ silent: true, force: true });
+        setError(e.status === 409
+          ? 'That task changed in its note before the move was saved. The board is refreshed; drag it again.'
+          : e.message);
+      } finally {
+        pendingMoves.current -= 1;
+        // Line numbers below each moved task are stale now; once the last
+        // queued move is saved, refresh quietly so the next drag starts from
+        // the note as it is.
+        if (pendingMoves.current === 0) reload({ silent: true, force: true, afterDrop: true });
+      }
+    });
+  }, [ns, canWrite, applyUpdated, reload, fetchTasks]);
 
   const columns = board?.columns || [];
 
