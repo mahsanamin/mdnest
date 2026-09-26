@@ -36,6 +36,37 @@ async function drag(page, from, to) {
 
 const center = (b) => ({ x: b.x + b.width / 2, y: b.y + b.height / 2 });
 
+// Every task's column and tick in every namespace this account can read,
+// minus the ones this test seeded. Compared before and after each test: a
+// drop that lands on the WRONG card is exactly the bug this spec exists for,
+// and a board test must never rearrange someone's real tasks. (An earlier
+// flaky version of the two-drops case did, in the dev instance's sample data.)
+async function othersSnapshot(page, marker) {
+  return page.evaluate(async (m) => {
+    const t = localStorage.getItem('mdnest_token');
+    const h = { Authorization: 'Bearer ' + t };
+    const nss = await (await fetch('/api/namespaces', { headers: h })).json();
+    const rows = [];
+    for (const ns of nss) {
+      const d = await (await fetch(`/api/tasks?ns=${encodeURIComponent(ns)}`, { headers: h })).json();
+      for (const x of d.tasks || []) {
+        if ((x.text || '').includes(m) || (x.path || '').includes('DRAGTEST')) continue;
+        rows.push(`${ns}|${x.path}|${x.raw}|${x.column}|${x.checked}`);
+      }
+    }
+    return rows.sort().join('\n');
+  }, marker);
+}
+
+function expectNoCollateral(before, after) {
+  if (before === after) return;
+  const a = new Set(before.split('\n'));
+  const b = new Set(after.split('\n'));
+  const gone = [...a].filter((r) => !b.has(r)).slice(0, 5);
+  const came = [...b].filter((r) => !a.has(r)).slice(0, 5);
+  throw new Error(`a drag changed tasks it was not aimed at:\n- ${gone.join('\n- ')}\n+ ${came.join('\n+ ')}`);
+}
+
 // Seeds one task, opens the board on it, runs `gesture`, and asserts the
 // server now has the task in the column `gesture` returned.
 async function runCase(page, scope, gesture) {
@@ -59,6 +90,7 @@ async function runCase(page, scope, gesture) {
     `/api/note?ns=${encodeURIComponent(NS)}&path=${encodeURIComponent(notePath)}`,
     `# Drag test\n\n- [ ] ${marker}\n`);
   expect(created.status, created.text).toBe(201);
+  const before = await othersSnapshot(page, marker);
 
   try {
     const sel = page.locator('.ns-select');
@@ -81,6 +113,7 @@ async function runCase(page, scope, gesture) {
       const t = (JSON.parse(r.text).tasks || []).find((x) => (x.text || '').includes(marker));
       return t && t.column;
     }, { message: 'the server must record the move', timeout: 10_000 }).toBe(targetId);
+    expectNoCollateral(before, await othersSnapshot(page, marker));
   } finally {
     await api(page, 'DELETE', `/api/note?ns=${encodeURIComponent(NS)}&path=${encodeURIComponent(notePath)}`);
   }
@@ -169,4 +202,66 @@ test('card controls still click (edit opens the editor, no drag)', async ({ page
     await expect(page.locator('.tb-editor-grid')).toBeVisible();
     return 'todo'; // unmoved
   });
+});
+
+// Moving a task writes a `status:` line under it, which shifts every task
+// below it in the same note down a line. The board kept the old line numbers,
+// so the SECOND drop from that note was refused (409) and answered with a full
+// reload: the board flashed "Loading tasks…" and the move was lost.
+test('two drops in a row from the same note both land, with no reload flash', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.addInitScript(() => {
+    localStorage.setItem('mdnest_taskboard_scope', 'workspace');
+    localStorage.setItem('mdnest_taskboard_mode', 'board');
+  });
+  const marker = `DRAGTEST-${Date.now()}`;
+  const notePath = `__${marker}.md`;
+  await page.goto('/');
+  await page.fill('input[name=username]', USER);
+  await page.fill('input[name=password]', PASS);
+  await page.click('button:has-text("Sign in")');
+  const boardBtn = page.locator('.toolbar-view-board');
+  const ok = await boardBtn.waitFor({ state: 'visible', timeout: 15_000 }).then(() => true).catch(() => false);
+  if (!ok) test.skip(true, 'task board disabled (ENABLE_TASK_BOARD)');
+  const created = await api(page, 'POST',
+    `/api/note?ns=${encodeURIComponent(NS)}&path=${encodeURIComponent(notePath)}`,
+    `# Drag test\n\n- [ ] ${marker}-A\n- [ ] ${marker}-B\n- [ ] ${marker}-C\n`);
+  expect(created.status, created.text).toBe(201);
+  const before = await othersSnapshot(page, marker);
+  try {
+    const sel = page.locator('.ns-select');
+    if (await sel.count()) await sel.selectOption(NS);
+    await boardBtn.click();
+    await page.getByPlaceholder('Filter by text…').fill(marker);
+    await expect(page.locator('.tb-card', { hasText: `${marker}-C` })).toBeVisible({ timeout: 20_000 });
+
+    const board = JSON.parse((await api(page, 'GET', `/api/board?ns=${encodeURIComponent(NS)}`)).text);
+    const target = openTarget(board);
+    const col = page.locator('.tb-column', { has: page.locator('.tb-column-title', { hasText: target.title }) });
+    await page.evaluate(() => {
+      window.__loadingSeen = false;
+      new MutationObserver(() => { if (document.querySelector('.tb-loading')) window.__loadingSeen = true; })
+        .observe(document.body, { childList: true, subtree: true });
+    });
+
+    // Back to back, no waiting between drops — the way people actually do it.
+    for (const which of ['A', 'B', 'C']) {
+      const from = center(await page.locator('.tb-card', { hasText: `${marker}-${which}` }).locator('.tb-card-head').boundingBox());
+      const to = await col.boundingBox();
+      await drag(page, from, { x: to.x + to.width / 2, y: to.y + 40 });
+    }
+
+    await expect.poll(async () => {
+      const r = await api(page, 'GET', `/api/tasks?ns=${encodeURIComponent(NS)}`);
+      return (JSON.parse(r.text).tasks || [])
+        .filter((x) => (x.text || '').includes(marker))
+        .map((x) => x.column).sort().join(',');
+    }, { message: 'all three moves must reach the server', timeout: 10_000 })
+      .toBe([target.id, target.id, target.id].join(','));
+    expect(await page.evaluate(() => window.__loadingSeen), 'the board must not flash "Loading tasks…"').toBe(false);
+    await expect(page.locator('.tb-error')).toHaveCount(0);
+    expectNoCollateral(before, await othersSnapshot(page, marker));
+  } finally {
+    await api(page, 'DELETE', `/api/note?ns=${encodeURIComponent(NS)}&path=${encodeURIComponent(notePath)}`);
+  }
 });
