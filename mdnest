@@ -1177,7 +1177,27 @@ cmd_read() {
   parse_path "$1"
   require_server
   [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] && { echo "Usage: mdnest read @alias/namespace/path.md" >&2; exit 1; }
-  api GET "/note?ns=$(urlencode "$PARSED_NS")&path=$(urlencode "$PARSED_PATH")"
+  print_note "$PARSED_NS" "$PARSED_PATH"
+}
+
+# print_note <ns> <path> — print a note's body byte-for-byte, adding a final
+# newline only when the note lacks one. api()'s echo always appends "\n", so a
+# note that already ended in one (anything saved by `write` or the web UI)
+# read back with an extra blank line, and `mdnest read | diff - note.md`
+# failed after every write even though nothing had changed.
+print_note() {
+  local body rc=0
+  # Sentinel: $( ) would strip the note's own trailing newlines along with
+  # echo's. `&&` so a failed api() still decides the exit status.
+  body=$(api GET "/note?ns=$(urlencode "$1")&path=$(urlencode "$2")" && printf 'X') || rc=$?
+  [ "$rc" = "0" ] || exit "$rc"
+  body="${body%X}"
+  body="${body%$'\n'}"          # drop the newline api()'s echo added
+  printf '%s' "$body"
+  if [ -n "$body" ] && [ "${body: -1}" != $'\n' ]; then
+    printf '\n'
+  fi
+  return 0
 }
 
 # Resolve note content from a positional arg and/or stdin.
@@ -1454,7 +1474,7 @@ cmd_note_legacy() {
     # Read the note itself. This used to try cmd_list first and only fall back to
     # /note if that failed — so for a path that exists it printed the tree entry
     # (name/type/path JSON) instead of the note body.
-    read)     api GET "/note?ns=$(urlencode "$1")&path=$(urlencode "$2")" ;;
+    read)     print_note "$1" "$2" ;;
     write)    local ns="$1" p="$2" c; c=$(read_content "$3") || exit 1; require_content "$c"; api PUT "/note?ns=$(urlencode "$ns")&path=$(urlencode "$p")" "$c" ;;
     edit)     cmd_edit "$1/$2" "$3" "$4" "$5" ;;
     create)   local ns="$1" p="$2" c; c=$(read_content "$3") || exit 1; require_content "$c"; api POST "/note?ns=$(urlencode "$ns")&path=$(urlencode "$p")" "$c" ;;
