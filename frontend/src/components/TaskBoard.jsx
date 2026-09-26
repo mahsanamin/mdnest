@@ -12,6 +12,7 @@ import { sortTasks, SORT_MODES } from '../task-sort.js';
 import { matchesTaskFilters } from '../taskFilters';
 import { buildRelationLookup, resolveTask } from '../relations';
 import { laneAt, edgeScrollStep } from '../boardLanes';
+import { pageGroups, LIST_PAGE } from '../listPage';
 import { cardKey, relocateTask, withStableIds } from './cardKey';
 import TaskCard from './TaskCard';
 import BoardColumn from './BoardColumn';
@@ -539,6 +540,12 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
     return [...groups.values()].sort((a, b) => (a.ns + a.path).localeCompare(b.ns + b.path));
   }, [orderedTasks]);
 
+  // The List view paints a page at a time, like the Kanban columns (see
+  // listPage.js). Back to one page when the workspace or scope changes.
+  const [listShown, setListShown] = useState(LIST_PAGE);
+  useEffect(() => { setListShown(LIST_PAGE); }, [ns, effectiveScope]);
+  const listPage = useMemo(() => pageGroups(tasksByNote, listShown), [tasksByNote, listShown]);
+
   return (
     <div className="tb-panel" role="region" aria-label="Task board">
       <div className="tb-header">
@@ -749,7 +756,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
         </DndContext>
       ) : (
         <div className="tb-list">
-          {tasksByNote.map(({ ns: groupNs, path: notePath, items }) => (
+          {listPage.shown.map(({ ns: groupNs, path: notePath, items }) => (
             <div className="tb-list-group" key={`${groupNs}\u0000${notePath}`}>
               {isGlobal ? (
                 <div className="tb-list-note tb-list-note-static" title={`${groupNs}/${notePath}`}>
@@ -784,6 +791,12 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
               </ul>
             </div>
           ))}
+          {listPage.hidden > 0 && (
+            <button type="button" className="tb-column-more" onClick={() => setListShown((n) => n + LIST_PAGE)}>
+              Show {Math.min(LIST_PAGE, listPage.hidden)} more
+              <span> · {listPage.hidden} hidden</span>
+            </button>
+          )}
         </div>
       )}
 
