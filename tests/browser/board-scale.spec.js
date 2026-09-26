@@ -111,3 +111,29 @@ test('a column pages its cards instead of rendering thousands', async ({ page })
   // The header count is always the truth, paged or not.
   expect(total).toBeGreaterThanOrEqual(rendered);
 });
+
+// The List view had no cap at all: on a 6,327-task workspace the click froze
+// the app for ~10 seconds painting every row, while Kanban stayed instant.
+test('the List view pages its tasks instead of rendering thousands', async ({ page }) => {
+  test.setTimeout(120_000);
+  await login(page);
+  await openBoard(page);
+
+  await page.locator('.tb-mode-toggle button', { hasText: 'List' }).click();
+  await expect(page.locator('.tb-list')).toBeVisible({ timeout: 20_000 });
+  const rows = page.locator('.tb-list-items li');
+  const rendered = await rows.count();
+  expect(rendered, 'List paints at most one page').toBeLessThanOrEqual(200);
+
+  const more = page.locator('.tb-list > .tb-column-more');
+  if (await more.count()) {
+    // Capped, and the excess is offered rather than dropped.
+    expect(rendered).toBe(200);
+    await expect(more).toContainText('hidden');
+    await more.click();
+    expect(await rows.count()).toBeGreaterThan(rendered);
+  }
+
+  // Put the view back so the other specs start on Kanban.
+  await page.locator('.tb-mode-toggle button', { hasText: 'Kanban' }).click();
+});

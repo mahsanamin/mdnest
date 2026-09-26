@@ -25,7 +25,7 @@ export default function BoardColumn({ column, tasks, canWrite, onOpen, onToggleS
   // checkbox.
   const [shown, setShown] = useState(PAGE);
   return (
-    <div ref={setNodeRef} className={`tb-column${isOver ? ' over' : ''}${collapsed ? ' collapsed' : ''}`}>
+    <div ref={setNodeRef} data-column-id={column.id} className={`tb-column${isOver ? ' over' : ''}${collapsed ? ' collapsed' : ''}`}>
       <div className="tb-column-head" onClick={collapsed ? onToggleCollapse : undefined}>
         <button
           type="button"
