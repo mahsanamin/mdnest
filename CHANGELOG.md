@@ -49,6 +49,14 @@ fixed, along with one byte the CLI added to every note it read.
   or the web UI — read back with an extra blank line, and `mdnest read |
   diff - note.md` failed after every write though nothing had changed.
 
+### Security
+
+- **gRPC bumped to v1.83.1** (GO-2026-6443, GO-2026-6441, GO-2026-6348, all
+  in `google.golang.org/grpc@v1.82.1`, published after v4.5.1). gRPC arrives
+  indirectly through the Firebase / Google Cloud client libraries; the bump
+  pulls matching minor versions of OpenTelemetry and genproto with it.
+  `govulncheck` reports no vulnerable code reachable from mdnest after it.
+
 ### Tests
 
 - `board-drag.spec.js` drags by the title (both scopes), by the card body,
