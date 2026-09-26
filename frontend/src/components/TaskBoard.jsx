@@ -3,6 +3,7 @@ import {
   DndContext,
   DragOverlay,
   PointerSensor,
+  rectIntersection,
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
@@ -10,12 +11,34 @@ import { getTasks, patchTask, saveBoard, createTask, getNamespaceUsers, getAllTa
 import { sortTasks, SORT_MODES } from '../task-sort.js';
 import { matchesTaskFilters } from '../taskFilters';
 import { buildRelationLookup, resolveTask } from '../relations';
-import { cardKey } from './cardKey';
+import { laneAt, edgeScrollStep } from '../boardLanes';
+import { pageGroups, LIST_PAGE } from '../listPage';
+import { cardKey, relocateTask, withStableIds } from './cardKey';
 import TaskCard from './TaskCard';
 import BoardColumn from './BoardColumn';
 import BoardColumnsEditor from './BoardColumnsEditor';
 import TaskEditor from './TaskEditor';
 import './TaskBoard.css';
+
+// Drop target = the column lane under the pointer (see boardLanes.js), so a
+// release below a short column's cards or on the collapsed Done strip still
+// lands. Both inputs are read live: column boxes from the DOM rather than
+// dnd-kit's cached droppableRects, and the pointer from the browser's own
+// events rather than dnd-kit's coordinates — dnd-kit folds the board's scroll
+// into its drag offset, so once the board scrolls sideways mid-drag either
+// cached value sends the card to the neighbouring column. There are only a
+// handful of columns, so measuring them per move is cheap. Outside every lane
+// (a gap, the filter bar) fall back to dnd-kit's overlap rule, which is what
+// the board always used.
+function makeLaneCollision(livePointer) {
+  return (args) => {
+    const live = args.droppableContainers.map((c) => [c.id, c.node.current?.getBoundingClientRect()]);
+    const id = laneAt(livePointer.current || args.pointerCoordinates, live);
+    const hit = id != null && args.droppableContainers.find((c) => c.id === id);
+    if (hit) return [{ id, data: { droppableContainer: hit, value: 0 } }];
+    return rectIntersection(args);
+  };
+}
 
 // TaskBoard is a namespace-level overlay presenting every markdown task-list
 // item in the namespace, either as a flat list (with checkbox toggling) or as
@@ -76,23 +99,31 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
 
   // reload refetches the board. `silent` skips the loading/error UI so a
   // background auto-refresh doesn't flash the spinner or clobber the view.
+  const fetchTasks = useCallback((force) => (isGlobal
+    ? getAllTasks(force)
+    : getTasks(ns, effectiveScope === 'note' ? currentPath : undefined, force)
+  ), [ns, effectiveScope, isGlobal, currentPath]);
+
+  // `afterDrop` is the quiet refresh that follows a card move: it is dropped
+  // if another drag has started by the time it resolves, because replacing
+  // the task list mid-drag re-keys the dragged card and cancels the drag.
   const reload = useCallback(async (opts = {}) => {
     if (!ns && !isGlobal) return;
     if (!opts.silent) setLoading(true);
     if (!opts.silent) setError(null);
     try {
-      const data = isGlobal
-        ? await getAllTasks(opts.force)
-        : await getTasks(ns, effectiveScope === 'note' ? currentPath : undefined, opts.force);
+      const data = await fetchTasks(opts.force);
+      if (opts.afterDrop && activeTaskRef.current) return;
       setBoard(data.board);
-      setTasks(data.tasks || []);
-      setError(null);
+      setTasks((cur) => withStableIds(cur, data.tasks || []));
+      // A quiet post-drop refresh must not wipe the message a failed move set.
+      if (!opts.afterDrop) setError(null);
     } catch (e) {
       if (!opts.silent) setError(e.message || 'Failed to load tasks');
     } finally {
       if (!opts.silent) setLoading(false);
     }
-  }, [ns, effectiveScope, isGlobal, currentPath]);
+  }, [ns, isGlobal, fetchTasks]);
 
   useEffect(() => { reload(); }, [reload]);
 
@@ -192,7 +223,8 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
   // Optimistically replace a task in local state after a successful mutation,
   // keyed by its (still-current) source location.
   const applyUpdated = useCallback((prevKey, updated) => {
-    setTasks((cur) => cur.map((t) => (cardKey(t) === prevKey ? updated : t)));
+    // Keep the card's identity: the server's copy carries no uid.
+    setTasks((cur) => cur.map((t) => (cardKey(t) === prevKey ? { ...updated, uid: t.uid } : t)));
   }, []);
 
   const handleToggle = useCallback(async (task) => {
@@ -269,29 +301,100 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
     setActiveTask(event.active?.data?.current?.task || null);
   }, []);
 
+  // Our own edge auto-scroll (dnd-kit's is off — see edgeScrollStep). While a
+  // drag is live the real pointer is tracked from window pointer events, and a
+  // frame loop nudges the board when it sits in the edge zone, so holding a
+  // card at the edge keeps scrolling toward the off-screen columns.
+  const boardRef = useRef(null);
+  const livePointer = useRef(null);
+  const moveQueue = useRef(Promise.resolve());
+  const pendingMoves = useRef(0);
+  const laneCollision = useMemo(() => makeLaneCollision(livePointer), []);
+  const handleDragStartTracked = useCallback((event) => {
+    const e = event.activatorEvent;
+    livePointer.current = e && typeof e.clientX === 'number' ? { x: e.clientX, y: e.clientY } : null;
+    handleDragStart(event);
+  }, [handleDragStart]);
+  useEffect(() => {
+    if (!activeTask) { livePointer.current = null; return undefined; }
+    const onMove = (e) => { livePointer.current = { x: e.clientX, y: e.clientY }; };
+    window.addEventListener('pointermove', onMove, true);
+    let raf = 0;
+    const tick = () => {
+      const el = boardRef.current;
+      if (el && livePointer.current) {
+        const step = edgeScrollStep(livePointer.current.x, el.getBoundingClientRect());
+        if (step) el.scrollLeft += step;
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => {
+      window.removeEventListener('pointermove', onMove, true);
+      cancelAnimationFrame(raf);
+    };
+  }, [activeTask]);
+
   const handleDragEnd = useCallback(async (event) => {
+    // Decide the target from where the pointer IS on release, over the columns
+    // as they are laid out NOW. dnd-kit only re-evaluates `over` on pointer
+    // moves, so after the edge scroll slides the board under a still pointer
+    // its `over` names the column that USED to be there.
+    const board = boardRef.current;
+    const lanes = board
+      ? [...board.querySelectorAll('.tb-column[data-column-id]')].map((el) => [el.dataset.columnId, el.getBoundingClientRect()])
+      : [];
+    const toColumn = laneAt(livePointer.current, lanes) ?? event.over?.id;
     setActiveTask(null);
-    const { active, over } = event;
-    if (!over) return;
+    const { active } = event;
+    if (toColumn == null || !canWrite) return;
     const task = active.data?.current?.task;
-    if (!task || task.column === over.id) return;
+    if (!task || task.column === toColumn) return;
     const key = cardKey(task);
     // Optimistic move so the card lands instantly.
-    setTasks((cur) => cur.map((t) => (cardKey(t) === key ? { ...t, column: over.id } : t)));
-    try {
-      const updated = await patchTask(task.namespace || ns, task.path, {
-        line: task.line,
-        raw: task.raw,
-        toColumn: over.id,
-      });
-      applyUpdated(key, updated);
-    } catch (e) {
-      if (e.status === 409) { await reload(); return; }
-      // reload reverts the optimistic move and clears error, so set it after.
-      await reload();
-      setError(e.message);
-    }
-  }, [ns, applyUpdated, reload]);
+    setTasks((cur) => cur.map((t) => (cardKey(t) === key ? { ...t, column: toColumn } : t)));
+    const move = (t) => patchTask(t.namespace || ns, t.path, { line: t.line, raw: t.raw, toColumn });
+    // Saves run one at a time, in drop order. Each move rewrites its note, so
+    // a save that overlaps the previous one can read the note mid-change and
+    // miss again even after retrying. The card has already landed on screen,
+    // so queueing costs nothing visible.
+    pendingMoves.current += 1;
+    moveQueue.current = moveQueue.current.then(async () => {
+      try {
+        let updated;
+        try {
+          updated = await move(task);
+        } catch (e) {
+          if (e.status !== 409) throw e;
+          // The note moved under the board. Usually that's the board's own
+          // previous drop: a move writes a `status:` line under the task, so
+          // every task below it in the same note shifts down one line and the
+          // server (rightly) refuses a line number it no longer recognises.
+          // Refetch quietly, find the same task, and try once more — the old
+          // path did a full reload here, which flashed "Loading tasks…" and
+          // threw the move away.
+          const data = await fetchTasks(true);
+          const fresh = relocateTask(data.tasks || [], task);
+          if (!fresh) throw e;
+          updated = await move(fresh);
+        }
+        applyUpdated(key, updated);
+      } catch (e) {
+        // Revert the optimistic move without the loading flash, and say so —
+        // a move that silently snaps back reads as "drag is broken".
+        await reload({ silent: true, force: true });
+        setError(e.status === 409
+          ? 'That task changed in its note before the move was saved. The board is refreshed; drag it again.'
+          : e.message);
+      } finally {
+        pendingMoves.current -= 1;
+        // Line numbers below each moved task are stale now; once the last
+        // queued move is saved, refresh quietly so the next drag starts from
+        // the note as it is.
+        if (pendingMoves.current === 0) reload({ silent: true, force: true, afterDrop: true });
+      }
+    });
+  }, [ns, canWrite, applyUpdated, reload, fetchTasks]);
 
   const columns = board?.columns || [];
 
@@ -436,6 +539,12 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
     }
     return [...groups.values()].sort((a, b) => (a.ns + a.path).localeCompare(b.ns + b.path));
   }, [orderedTasks]);
+
+  // The List view paints a page at a time, like the Kanban columns (see
+  // listPage.js). Back to one page when the workspace or scope changes.
+  const [listShown, setListShown] = useState(LIST_PAGE);
+  useEffect(() => { setListShown(LIST_PAGE); }, [ns, effectiveScope]);
+  const listPage = useMemo(() => pageGroups(tasksByNote, listShown), [tasksByNote, listShown]);
 
   return (
     <div className="tb-panel" role="region" aria-label="Task board">
@@ -609,11 +718,18 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
       ) : mode === 'board' ? (
         <DndContext
           sensors={sensors}
-          onDragStart={handleDragStart}
+          collisionDetection={laneCollision}
+          // dnd-kit's auto-scroll paired the board with the SOURCE column's
+          // box, so the moment the pointer left the starting column it counted
+          // as "at the edge" and slid the board sideways — the card then
+          // landed in whichever column moved under the pointer. Replaced by
+          // the edge scroll above, which measures the board itself.
+          autoScroll={false}
+          onDragStart={handleDragStartTracked}
           onDragEnd={handleDragEnd}
           onDragCancel={() => setActiveTask(null)}
         >
-          <div className="tb-board">
+          <div className="tb-board" ref={boardRef}>
             {columns.map((col) => (
               <BoardColumn
                 key={col.id}
@@ -640,7 +756,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
         </DndContext>
       ) : (
         <div className="tb-list">
-          {tasksByNote.map(({ ns: groupNs, path: notePath, items }) => (
+          {listPage.shown.map(({ ns: groupNs, path: notePath, items }) => (
             <div className="tb-list-group" key={`${groupNs}\u0000${notePath}`}>
               {isGlobal ? (
                 <div className="tb-list-note tb-list-note-static" title={`${groupNs}/${notePath}`}>
@@ -675,6 +791,12 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
               </ul>
             </div>
           ))}
+          {listPage.hidden > 0 && (
+            <button type="button" className="tb-column-more" onClick={() => setListShown((n) => n + LIST_PAGE)}>
+              Show {Math.min(LIST_PAGE, listPage.hidden)} more
+              <span> · {listPage.hidden} hidden</span>
+            </button>
+          )}
         </div>
       )}
 

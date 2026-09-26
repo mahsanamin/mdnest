@@ -99,6 +99,17 @@ assert_fails "create on existing path fails" -- m create "$ROOT/inline.md" "dup"
 m write "$ROOT/inline.md" "# Overwritten" >/dev/null 2>&1
 assert_eq "write overwrites existing" "# Overwritten" "$(m read "$ROOT/inline.md" 2>/dev/null)"
 
+# ── 6b. read is byte-exact after create AND after write ─────────────────────
+# `write` stores the note ID marker, and the server hands a marked note back
+# ending in "\n"; read then added a second one, so `read | diff` failed after
+# every write. Compared with od, not assert_eq: $( ) strips the very trailing
+# newlines this is about.
+nl_expect=$(printf '# T\n\nline\n' | od -c)
+m create "$ROOT/nl.md" "$(printf '# T\n\nline\n')" >/dev/null 2>&1
+assert_eq "read after create is byte-exact" "$nl_expect" "$(m read "$ROOT/nl.md" 2>/dev/null | od -c)"
+m write "$ROOT/nl.md" "$(printf '# T\n\nline\n')" >/dev/null 2>&1
+assert_eq "read after write is byte-exact (no extra trailing newline)" "$nl_expect" "$(m read "$ROOT/nl.md" 2>/dev/null | od -c)"
+
 # ── 7. write to missing path → must fail (404) ──────────────────────────────
 assert_fails "write to missing path fails" -- m write "$ROOT/ghost.md" "x"
 

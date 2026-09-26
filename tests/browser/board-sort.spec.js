@@ -122,7 +122,7 @@ test('the sort choice is remembered', async ({ page }) => {
   await page.locator('.tb-filter-sort').selectOption('urgency');
   expect(await page.evaluate(() => localStorage.getItem('mdnest_taskboard_sort'))).toBe('urgency');
   await page.reload();
-  await page.locator('.toolbar-view-board').click();
+  // The board has a URL now (#!board/...), so it is still open after the reload.
   await expect(page.locator('.tb-panel')).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('.tb-filter-sort')).toHaveValue('urgency');
   // put it back so the other specs see the default

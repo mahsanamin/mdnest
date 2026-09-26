@@ -37,12 +37,19 @@ function TaskCard({ task, canWrite, onOpen, onToggleStep, onEdit, resolve, onDel
   });
 
   return (
-    <div className={`tb-card${isDragging ? ' dragging' : ''}${task.checked ? ' checked' : ''}`} ref={setNodeRef}>
+    // The whole card is the drag handle — it already wore a grab cursor
+    // everywhere, but only the title strip used to respond, so grabbing the
+    // body or the workspace chip did nothing. Every control inside opts out
+    // with onPointerDown={noSwallow}, and a click still works because a drag
+    // only starts after the sensor's 6px activation distance.
+    <div className={`tb-card${isDragging ? ' dragging' : ''}${task.checked ? ' checked' : ''}`} ref={setNodeRef}
+      {...(canWrite ? listeners : {})}>
       {task.namespace && (
         <div className="tb-card-ns" title="Source workspace">🗂 {task.namespace}</div>
       )}
-      {/* The head is the drag handle; interactive controls below stop propagation. */}
-      <div className="tb-card-head" {...(canWrite ? { ...attributes, ...listeners } : {})}>
+      {/* The drag ARIA attributes stay on the head so the card isn't a
+          role=button wrapping other buttons; the listeners are on the card. */}
+      <div className="tb-card-head" {...(canWrite ? attributes : {})}>
         {(task.ref || task.priority || isBlocked) && (
           <div className="tb-card-badges">
             {task.ref && <span className="tb-ref" title="Task id">{task.ref}</span>}
