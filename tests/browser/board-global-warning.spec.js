@@ -49,8 +49,7 @@ test('the warning can be dismissed for good and stays dismissed', async ({ page 
   // Persisted, so it survives a reload — and the scope switches straight away.
   expect(await page.evaluate(() => localStorage.getItem('mdnest_taskboard_skip_global_warning'))).toBe('1');
   await page.reload();
-  // The board is view state, not persisted — reopen it after the reload.
-  await page.locator('.toolbar-view-board').click();
+  // The board has a URL now (#!board/...), so it is still open after the reload.
   await expect(page.locator('.tb-panel')).toBeVisible({ timeout: 30_000 });
   const all2 = page.locator('.tb-header-left button').filter({ hasText: 'All workspaces' }).first();
   await page.locator('.tb-header-left button').filter({ hasText: 'Workspace' }).first().click();

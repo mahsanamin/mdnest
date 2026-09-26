@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { parseRoute, formatRoute } from './hashRoute';
 import Login from './components/Login.jsx';
 import LoginFirebase from './components/LoginFirebase.jsx';
 import LoginSSO from './components/LoginSSO.jsx';
@@ -128,43 +129,13 @@ function consumeSSOHashOnLoad() {
   return null;
 }
 
-// URL helpers: store ns and path in hash like #ns/path/to/note.md
-//
-// The full-screen sticky board gets its own route. It replaces the entire
-// view rather than overlaying a note, so a refresh landing back on the last
-// note is wrong — you asked for the board, you should get the board back.
-// The side panel deliberately does NOT get a route: it is an overlay on a
-// note, and the note is what the URL should still describe.
-//
-// The marker is "!stickies" rather than "stickies" because a namespace is a
-// directory name the operator chooses, and a namespace called `stickies`
-// would otherwise become unreachable. A leading "!" cannot be one.
-const STICKIES_ROUTE = '!stickies';
-
+// URL helpers — the route shapes live in hashRoute.js.
 function parseHash() {
-  const hash = window.location.hash.replace(/^#\/?/, '');
-  if (hash === STICKIES_ROUTE) return { ns: null, path: null, stickies: true };
-  if (!hash) return { ns: null, path: null, stickies: false };
-  const slashIdx = hash.indexOf('/');
-  if (slashIdx === -1) return { ns: decodeURIComponent(hash), path: null, stickies: false };
-  return {
-    ns: decodeURIComponent(hash.substring(0, slashIdx)),
-    path: decodeURIComponent(hash.substring(slashIdx + 1)) || null,
-    stickies: false,
-  };
+  return parseRoute(window.location.hash);
 }
 
-function setHash(ns, path, stickiesBoard) {
-  if (stickiesBoard) {
-    window.history.replaceState(null, '', '#' + STICKIES_ROUTE);
-    return;
-  }
-  let hash = '';
-  if (ns) {
-    hash = encodeURIComponent(ns);
-    if (path) hash += '/' + path.split('/').map(encodeURIComponent).join('/');
-  }
-  window.history.replaceState(null, '', '#' + hash);
+function setHash(ns, path, stickiesBoard, taskBoard) {
+  window.history.replaceState(null, '', formatRoute({ ns, path, stickies: stickiesBoard, board: taskBoard }));
 }
 
 // decodeJwtSub returns the `sub` claim of the JWT (the username), without
@@ -906,7 +877,10 @@ function App() {
       }
 
       const nsList = await loadNamespaces();
-      const { ns: hashNs, path: hashPath, stickies: hashStickies } = parseHash();
+      const { ns: hashNs, path: hashPath, stickies: hashStickies, board: hashBoard } = parseHash();
+      // Opened (or refreshed) on the task board: reopen it over the same
+      // namespace and note.
+      if (hashBoard) setShowTaskBoard(true);
       // Opened straight onto the board. The namespace and last file are still
       // restored underneath, so closing the board lands somewhere sensible
       // rather than on an empty editor.
@@ -1070,32 +1044,44 @@ function App() {
     localStorage.setItem('mdnest_stickies_open', stickiesView === 'panel' ? '1' : '0');
   }, [stickiesView]);
 
+  // Set while a navigation that came FROM the address bar (back/forward, a
+  // pasted link) is still loading its note. The URL already says what the
+  // user asked for; writing it from state in the meantime would record the
+  // half-finished state — e.g. the board switched on but the note not loaded
+  // yet, which turned a pasted #!board/ns/note into #!board/ns.
+  const hashNavPending = useRef(false);
+
   // Update URL hash
   useEffect(() => {
+    if (hashNavPending.current) return;
     if (stickiesView === 'board') {
       setHash(null, null, true);
       return;
     }
     if (selectedNs) {
-      setHash(selectedNs, currentPath);
+      // Until the config has loaded we can't know whether the board is
+      // enabled; keep the board route rather than rewriting a deep link away.
+      setHash(selectedNs, currentPath, false, showTaskBoard && (!appConfig || taskBoardEnabled));
     }
-  }, [selectedNs, currentPath, stickiesView]);
+  }, [selectedNs, currentPath, stickiesView, showTaskBoard, appConfig, taskBoardEnabled]);
 
   // Handle browser back/forward
   useEffect(() => {
     const onHashChange = () => {
-      const { ns, path, stickies } = parseHash();
+      const { ns, path, stickies, board } = parseHash();
       if (stickies) {
         setStickiesView('board');
         return; // the board route says nothing about which note is open
       }
       setStickiesView((v) => (v === 'board' ? 'closed' : v));
+      setShowTaskBoard(board);
       if (ns && ns !== selectedNs) {
         setSelectedNs(ns);
       }
       if (path !== currentPath) {
         if (path && ns) {
-          openNoteDirect(ns, path);
+          hashNavPending.current = true;
+          openNoteDirect(ns, path).finally(() => { hashNavPending.current = false; });
         } else {
           setCurrentPath(null);
           setContent(null);
