@@ -24,7 +24,13 @@ IMAGE="mdnest-e2e-backend:test"
 SFX="$$"
 CONTAINER="mdnest-e2e-be-$SFX"
 NET="mdnest-e2e-net-$SFX"
-NOTES_DIR="$(mktemp -d)"
+# Inside the repo, not the system temp dir: this folder is bind-mounted into
+# the backend container, and on macOS mktemp lands in /var/folders, which
+# Colima (and a Docker Desktop with narrowed file sharing) does not share —
+# the container then saw an empty /notes and the run died at "could not seed
+# note" before a single test ran. The repo is shareable by definition: the
+# dev stack already bind-mounts its namespaces from here.
+NOTES_DIR="$(mktemp -d "$REPO_ROOT/.e2e-notes.XXXXXX")"
 CLI_HOME="$(mktemp -d)"
 FAILED=0
 

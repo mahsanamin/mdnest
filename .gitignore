@@ -21,3 +21,5 @@ tests/browser/playwright-report/
 .playwright/
 .demo_workspace/
 .bigproject/
+# e2e runs mount a throwaway notes dir from inside the repo (tests/e2e-*.sh)
+.e2e-notes.*/
