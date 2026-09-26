@@ -449,13 +449,15 @@ The task board gathers every task-list item in a namespace and presents it as a 
 
 **Getting back.** Either works: the same button now reads **Editor**, or use the back button at the start of the board's own header, which names the note you came from (**← my-note.md**).
 
+**A link of its own** *(v4.5.2+).* The board has its own address, `#!board/<workspace>/<note>`, so a browser refresh keeps you on the board instead of dropping you back into the editor, and a board can be bookmarked or shared. The link keeps the workspace and the note you opened it from, so the back button and the **This note** scope still work after a refresh. Back and forward open and close it like any other page.
+
 **Lots of columns.** The board scrolls horizontally when the columns don't fit, so a wide board stays reachable on a narrow window.
 
-**Lots of tasks.** A column shows 100 cards at a time with a **Show more** button; the number beside the column name is always the true total. On a big board the **Sort** control matters, because it decides which cards are on that first page: leave it on *Note order* to see tasks in the order they appear in your notes, or switch to *Due date, then priority* to bring the urgent ones to the front. Your choice is remembered.
+**Lots of tasks.** A column shows 100 cards at a time, and the List view 200 *(v4.5.2+)*, each with a **Show more** button; the number beside the column name is always the true total. On a big board the **Sort** control matters, because it decides which cards are on that first page: leave it on *Note order* to see tasks in the order they appear in your notes, or switch to *Due date, then priority* to bring the urgent ones to the front. Your choice is remembered.
 
 **Views.**
 
-- **Kanban / List** -- a toggle at the top left. Kanban shows one column per board column (drag a card between columns to change its status); List shows tasks grouped by note with quick checkboxes.
+- **Kanban / List** -- a toggle at the top left. Kanban shows one column per board column (drag a card between columns to change its status — grab it anywhere, and drop anywhere in the target column's lane, including below its last card or on a collapsed column; hold a card at the board's left or right edge to scroll to columns off-screen); List shows tasks grouped by note with quick checkboxes.
 - **Workspace / This note / All workspaces** -- when a note is open, scope the board to the whole namespace, just the current note, or *(v4.2.0+)* every workspace you can access. In the cross-workspace view each card shows which workspace it came from; creating tasks and editing columns are hidden there, since both belong to one specific workspace.
 
 **Filtering** *(v4.2.0+).* A filter bar narrows the loaded tasks by title text, tags (click chips to toggle; matching is OR) and assignee (**All / Me / Unassigned / a member**). It applies to every scope and both views, and filters before grouping, so it's instant with no extra round-trip.

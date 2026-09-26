@@ -4,6 +4,68 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v4.5.2 — A task board that does what you meant
+
+Dragging a card between columns worked for exactly one gesture: grab the thin
+title strip, release squarely over another column's cards. Everything else
+failed quietly or, worse, landed somewhere you didn't aim. The second move
+from the same note was thrown away with a flash of "Loading tasks…". A
+refresh on the board dropped you back into the editor, and switching to the
+List view on a big workspace froze the app for ten seconds. All of that is
+fixed, along with one byte the CLI added to every note it read.
+
+### Fixed
+
+- **Grab a card anywhere.** Only the title strip used to start a drag,
+  although the whole card wore a grab cursor. The whole card is the handle
+  now; its buttons and step checkboxes still click.
+- **The column under the pointer is the target.** It used to be the column
+  the card's rectangle overlapped most, and a column is only as tall as its
+  cards — so a release below a short column's last card, or on the collapsed
+  Done strip, hit nothing and the card snapped back. Anywhere in a column's
+  lane counts now.
+- **The board no longer slides sideways mid-drag.** dnd-kit measured its
+  auto-scroll edge zone against the *source column's* box while scrolling the
+  board, so leaving the starting column counted as "at the edge" and the card
+  landed one column over. Its auto-scroll is off; the board scrolls only when
+  you hold a card at its own left or right edge.
+- **The second drop from a note lands too, without a reload flash.** A move
+  writes a `status:` line under the task, shifting every task below it; the
+  board kept the old line numbers, the server rightly refused the next move,
+  and the board answered with a full reload that discarded it. A refused
+  move now re-finds the task and retries quietly, moves save one at a time in
+  drop order, and cards keep a stable identity across refreshes — a refresh
+  landing mid-drag used to bind the drag to a different card.
+- **The task board has a URL** — `#!board/<workspace>/<note>` — so a refresh
+  keeps you on it, and a board can be bookmarked or shared. The link keeps
+  the note underneath, so the back button and *This note* scope survive a
+  reload.
+- **The List view is instant on a big workspace.** It put every task into
+  the page (6,327 rows, ~39k elements on the sample project) and froze the
+  app for ~10 seconds. It now shows 200 at a time with a **Show more**
+  button, like the Kanban columns' 100. Filters still cover every task.
+- **`mdnest read` prints a note byte for byte.** It always appended a
+  newline, so a note that already ended in one — anything saved by `write`
+  or the web UI — read back with an extra blank line, and `mdnest read |
+  diff - note.md` failed after every write though nothing had changed.
+
+### Tests
+
+- `board-drag.spec.js` drags by the title (both scopes), by the card body,
+  into the empty lane, onto collapsed Done, to an off-screen column via the
+  edge, and three cards from one note back to back. Every case also fails if
+  any *other* task anywhere changed — an early flaky version of the
+  back-to-back case moved real cards in the dev instance's sample data, and
+  nothing noticed.
+- `board-deep-link.spec.js`, a List paging case in `board-scale.spec.js`, and
+  a byte-exact `read` check in `cli-smoke-test.sh`.
+- `tests/e2e-browser.sh` and `tests/e2e-docker.sh` mount their throwaway
+  notes directory from inside the repo instead of the system temp dir, which
+  Colima does not share — the run died at "could not seed note" before a
+  single test ran.
+
+---
+
 ## v4.5.1 — The CLI installer survives GitHub's CDN
 
 `curl -fsSL https://raw.githubusercontent.com/.../install-cli.sh | bash` was
