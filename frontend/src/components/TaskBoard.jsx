@@ -3,6 +3,7 @@ import {
   DndContext,
   DragOverlay,
   PointerSensor,
+  rectIntersection,
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
@@ -10,12 +11,33 @@ import { getTasks, patchTask, saveBoard, createTask, getNamespaceUsers, getAllTa
 import { sortTasks, SORT_MODES } from '../task-sort.js';
 import { matchesTaskFilters } from '../taskFilters';
 import { buildRelationLookup, resolveTask } from '../relations';
+import { laneAt, edgeScrollStep } from '../boardLanes';
 import { cardKey } from './cardKey';
 import TaskCard from './TaskCard';
 import BoardColumn from './BoardColumn';
 import BoardColumnsEditor from './BoardColumnsEditor';
 import TaskEditor from './TaskEditor';
 import './TaskBoard.css';
+
+// Drop target = the column lane under the pointer (see boardLanes.js), so a
+// release below a short column's cards or on the collapsed Done strip still
+// lands. Both inputs are read live: column boxes from the DOM rather than
+// dnd-kit's cached droppableRects, and the pointer from the browser's own
+// events rather than dnd-kit's coordinates — dnd-kit folds the board's scroll
+// into its drag offset, so once the board scrolls sideways mid-drag either
+// cached value sends the card to the neighbouring column. There are only a
+// handful of columns, so measuring them per move is cheap. Outside every lane
+// (a gap, the filter bar) fall back to dnd-kit's overlap rule, which is what
+// the board always used.
+function makeLaneCollision(livePointer) {
+  return (args) => {
+    const live = args.droppableContainers.map((c) => [c.id, c.node.current?.getBoundingClientRect()]);
+    const id = laneAt(livePointer.current || args.pointerCoordinates, live);
+    const hit = id != null && args.droppableContainers.find((c) => c.id === id);
+    if (hit) return [{ id, data: { droppableContainer: hit, value: 0 } }];
+    return rectIntersection(args);
+  };
+}
 
 // TaskBoard is a namespace-level overlay presenting every markdown task-list
 // item in the namespace, either as a flat list (with checkbox toggling) or as
@@ -269,20 +291,61 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
     setActiveTask(event.active?.data?.current?.task || null);
   }, []);
 
+  // Our own edge auto-scroll (dnd-kit's is off — see edgeScrollStep). While a
+  // drag is live the real pointer is tracked from window pointer events, and a
+  // frame loop nudges the board when it sits in the edge zone, so holding a
+  // card at the edge keeps scrolling toward the off-screen columns.
+  const boardRef = useRef(null);
+  const livePointer = useRef(null);
+  const laneCollision = useMemo(() => makeLaneCollision(livePointer), []);
+  const handleDragStartTracked = useCallback((event) => {
+    const e = event.activatorEvent;
+    livePointer.current = e && typeof e.clientX === 'number' ? { x: e.clientX, y: e.clientY } : null;
+    handleDragStart(event);
+  }, [handleDragStart]);
+  useEffect(() => {
+    if (!activeTask) { livePointer.current = null; return undefined; }
+    const onMove = (e) => { livePointer.current = { x: e.clientX, y: e.clientY }; };
+    window.addEventListener('pointermove', onMove, true);
+    let raf = 0;
+    const tick = () => {
+      const el = boardRef.current;
+      if (el && livePointer.current) {
+        const step = edgeScrollStep(livePointer.current.x, el.getBoundingClientRect());
+        if (step) el.scrollLeft += step;
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => {
+      window.removeEventListener('pointermove', onMove, true);
+      cancelAnimationFrame(raf);
+    };
+  }, [activeTask]);
+
   const handleDragEnd = useCallback(async (event) => {
+    // Decide the target from where the pointer IS on release, over the columns
+    // as they are laid out NOW. dnd-kit only re-evaluates `over` on pointer
+    // moves, so after the edge scroll slides the board under a still pointer
+    // its `over` names the column that USED to be there.
+    const board = boardRef.current;
+    const lanes = board
+      ? [...board.querySelectorAll('.tb-column[data-column-id]')].map((el) => [el.dataset.columnId, el.getBoundingClientRect()])
+      : [];
+    const toColumn = laneAt(livePointer.current, lanes) ?? event.over?.id;
     setActiveTask(null);
-    const { active, over } = event;
-    if (!over) return;
+    const { active } = event;
+    if (toColumn == null || !canWrite) return;
     const task = active.data?.current?.task;
-    if (!task || task.column === over.id) return;
+    if (!task || task.column === toColumn) return;
     const key = cardKey(task);
     // Optimistic move so the card lands instantly.
-    setTasks((cur) => cur.map((t) => (cardKey(t) === key ? { ...t, column: over.id } : t)));
+    setTasks((cur) => cur.map((t) => (cardKey(t) === key ? { ...t, column: toColumn } : t)));
     try {
       const updated = await patchTask(task.namespace || ns, task.path, {
         line: task.line,
         raw: task.raw,
-        toColumn: over.id,
+        toColumn,
       });
       applyUpdated(key, updated);
     } catch (e) {
@@ -291,7 +354,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
       await reload();
       setError(e.message);
     }
-  }, [ns, applyUpdated, reload]);
+  }, [ns, canWrite, applyUpdated, reload]);
 
   const columns = board?.columns || [];
 
@@ -609,11 +672,18 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
       ) : mode === 'board' ? (
         <DndContext
           sensors={sensors}
-          onDragStart={handleDragStart}
+          collisionDetection={laneCollision}
+          // dnd-kit's auto-scroll paired the board with the SOURCE column's
+          // box, so the moment the pointer left the starting column it counted
+          // as "at the edge" and slid the board sideways — the card then
+          // landed in whichever column moved under the pointer. Replaced by
+          // the edge scroll above, which measures the board itself.
+          autoScroll={false}
+          onDragStart={handleDragStartTracked}
           onDragEnd={handleDragEnd}
           onDragCancel={() => setActiveTask(null)}
         >
-          <div className="tb-board">
+          <div className="tb-board" ref={boardRef}>
             {columns.map((col) => (
               <BoardColumn
                 key={col.id}
