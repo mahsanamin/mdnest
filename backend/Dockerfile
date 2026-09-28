@@ -6,7 +6,12 @@
 # (GO-2026-4865/4866/4870/4946/4947 — all crypto/x509, crypto/tls,
 # html/template). The 1.26-alpine moving tag pulls the latest 1.26.x
 # patch so we keep up with future fixes without manual bumps.
-FROM golang:1.26.6-alpine AS builder
+#
+# The builder always runs on the build machine's own architecture
+# ($BUILDPLATFORM) and cross-compiles for the target one via GOARCH, so a
+# multi-arch release (amd64 + arm64) compiles natively instead of under QEMU
+# emulation, which is several times slower for this codebase.
+FROM --platform=$BUILDPLATFORM golang:1.26.6-alpine AS builder
 
 WORKDIR /app
 
@@ -25,6 +30,9 @@ COPY . .
 # commit and when it was built — that's running.
 ARG GIT_COMMIT=unknown
 ARG BUILD_TIME=unknown
+# Set by BuildKit from --platform (empty means the builder's own arch).
+ARG TARGETOS
+ARG TARGETARCH
 
 # Two cache mounts:
 #   /root/.cache/go-build — Go's incremental compile cache. Reusing this
@@ -37,7 +45,7 @@ ARG BUILD_TIME=unknown
 # the image layers; only the layer hashes get invalidated.
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
-    CGO_ENABLED=0 GOOS=linux go build \
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
       -ldflags "-X github.com/mdnest/mdnest/backend/handlers.Commit=${GIT_COMMIT} -X github.com/mdnest/mdnest/backend/handlers.BuildTime=${BUILD_TIME}" \
       -o mdnest .
 
