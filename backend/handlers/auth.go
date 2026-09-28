@@ -46,6 +46,13 @@ type AuthHandler struct {
 	// verified idTokens resolve to a local users row via UpsertFirebaseUser.
 	firebaseClient *firebase.Client
 	adminEmails    map[string]bool
+
+	// passwordLoginDisabled refuses username/password on POST /api/auth/login
+	// (SSO_DISABLE_PASSWORD_LOGIN, USER_PROVIDER=sso only). On a public
+	// hostname the login endpoint is otherwise a password prompt on the
+	// internet that bypasses the IdP. API tokens and the SSO callback don't go
+	// through Login, so they are unaffected.
+	passwordLoginDisabled bool
 }
 
 type loginRequest struct {
@@ -194,6 +201,11 @@ func (h *AuthHandler) currentUsername() string {
 	return h.defaultUser
 }
 
+// DisablePasswordLogin makes Login refuse username/password credentials.
+func (h *AuthHandler) DisablePasswordLogin() {
+	h.passwordLoginDisabled = true
+}
+
 // Login handles POST /api/auth/login.
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -213,6 +225,14 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	// sends the username form.
 	if req.IDToken != "" && h.firebaseClient != nil {
 		h.loginFirebase(w, r, req.IDToken, req.RememberMe)
+		return
+	}
+
+	// Refused before the credentials are looked at, so a disabled endpoint
+	// answers the same for a right and a wrong password and can't be used to
+	// test either.
+	if h.passwordLoginDisabled {
+		http.Error(w, `{"error":"password login is disabled on this server; sign in with SSO or use an API token"}`, http.StatusForbidden)
 		return
 	}
 

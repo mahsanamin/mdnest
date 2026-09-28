@@ -74,6 +74,10 @@ SSO_PROVIDER_LABEL=Google
 
 # Optional: only set if your callback URL isn't FRONTEND_ORIGIN/api/auth/sso/callback.
 # SSO_REDIRECT_URL=https://notes.example.com/api/auth/sso/callback
+
+# Optional, recommended when mdnest is reachable from the internet: refuse
+# username/password on /api/auth/login so the IdP is the only way in.
+# SSO_DISABLE_PASSWORD_LOGIN=true
 ```
 
 Any email in `ADMIN_EMAILS` (if set) is still auto-promoted to admin role on startup — same behaviour as the Firebase path.
@@ -103,6 +107,15 @@ Each server is configured independently. Pointing two mdnest servers at the *sam
 ---
 
 ## Things to know
+
+**Who the IdP says signed in is checked, not just that it signed something.** After the ID token's signature, issuer, audience and nonce verify, the callback also refuses:
+
+- an email the IdP marks unverified (`email_verified: false`), for every IdP. A token with no `email_verified` claim at all is refused for Google, which always sends it, and allowed for other IdPs, because Microsoft Entra ID omits it by default;
+- for Google, when `SSO_ALLOWED_DOMAINS` is set, an account whose `hd` (Workspace hosted domain) claim is missing or not in that list. `SSO_ALLOWED_DOMAINS` alone checks the email's domain, and a *personal* Google account can be registered on a company address — it has no `hd`, so this is what keeps it out. Google is recognised by the issuer (`https://accounts.google.com`); other IdPs never send `hd` and are not checked for it.
+
+A refusal shows as `sso_failed` on the sign-in page; the backend log says which rule it was.
+
+**Turn off password login on a public hostname.** In SSO mode the web UI only shows the SSO button, but `POST /api/auth/login` still accepts a username and password — a password prompt on the internet that skips the IdP and its MFA. `SSO_DISABLE_PASSWORD_LOGIN=true` makes it answer `403` for every username/password request, right or wrong. It is off by default so existing installs behave the same. With it on, SSO sign-in, API tokens (the `mdnest` CLI, `MDNEST_TOKEN` for the MCP server) and existing sessions keep working; an MCP server configured with `MDNEST_USER`/`MDNEST_PASSWORD` must switch to `MDNEST_TOKEN`, and so must any script that logs in with a password. Helm: `sso.disablePasswordLogin: true`.
 
 **Only 2FA at the IdP.** `REQUIRE_2FA` in `mdnest.conf` is ignored with a log notice when `USER_PROVIDER=sso`. The TOTP handlers aren't registered at all in this mode — your IdP enforces MFA, and we don't mirror it locally. If you later flip back to `local`, users will need to re-enroll TOTP.
 

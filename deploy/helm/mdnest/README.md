@@ -364,6 +364,7 @@ All traffic goes to the frontend Service, which proxies `/api` and `/api/ws` (We
 | sso.autoProvisionUsers | bool | `false` | Opt-in: auto-create a least-privilege collaborator for an unknown but IdP-authenticated email on first login, instead of rejecting it. Off by default. Enable only when the IdP itself gates who may obtain a token (e.g. a domain-restricted enterprise IdP); pair with `allowedDomains`. |
 | sso.clientId | string | `""` | OIDC client ID. |
 | sso.clientSecret | string | `""` | Inline OIDC client secret (used only when `existingSecret` is empty). |
+| sso.disablePasswordLogin | bool | `false` | Opt-in: refuse username/password on `/api/auth/login` so the IdP is the only way to get a session (`SSO_DISABLE_PASSWORD_LOGIN`). Recommended for an internet-facing install. SSO sign-in and API tokens keep working. |
 | sso.enabled | bool | `false` | Enable SSO/OIDC login (`USER_PROVIDER=sso`; otherwise `local`). |
 | sso.existingSecret | string | `""` | Existing Secret holding the OIDC client secret (preferred over inline). |
 | sso.issuerUrl | string | `""` | OIDC issuer URL. |
