@@ -1,6 +1,6 @@
 .env
 mdnest.conf
-docker-compose.yml
+/docker-compose.yml
 Caddyfile
 notes/
 backend/mdnest

@@ -59,12 +59,36 @@ a memory that survives the session.
 ## Prerequisites
 
 - [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/)
-- Git
+- Git — only for the guided setup (option B below)
 - *Optional:* [Tailscale](https://tailscale.com/download) — free, **only** if you want encrypted remote access to your own devices later. Not needed to install or run mdnest.
 
 ## Quick Start
 
 ### 1. Set up the server
+
+Pick one. Both give you the same mdnest.
+
+**A. Plain Docker Compose: one file, nothing to build (fastest)**
+
+```bash
+mkdir mdnest && cd mdnest
+curl -fsSLo docker-compose.yml https://raw.githubusercontent.com/mahsanamin/mdnest/main/deploy/compose/docker-compose.yml
+echo "MDNEST_PASSWORD=$(openssl rand -base64 18)"  > .env
+echo "MDNEST_JWT_SECRET=$(openssl rand -hex 32)"  >> .env
+docker compose up -d
+```
+
+Open [http://localhost:3236](http://localhost:3236) and sign in as `admin`,
+using the password in `.env`. Your notes are plain `.md` files in `./notes`.
+Every optional setting is explained in a comment inside
+[`docker-compose.yml`](deploy/compose/docker-compose.yml), including how to
+put mdnest behind your own reverse proxy. There's also a
+[`docker run` version](docs/setup.md#plain-docker-compose-or-docker-run).
+
+**B. Guided setup: a script writes the compose file for you**
+
+Use this if you want git sync, multi-user mode or built-in HTTPS set up for
+you from one config file.
 
 ```bash
 git clone https://github.com/mahsanamin/mdnest.git
