@@ -169,6 +169,7 @@ mcp-server/
   package.json
 
 deploy/
+  compose/docker-compose.yml # v4.5.3+ — the PLAIN install (issue #112): published ghcr images, no clone, no setup.sh, every option a comment. Copied by people who never run anything else in this repo, so `tests/compose-example.sh` pins it (every knob is one the backend reads, nginx's `backend` proxy target is a service, same tag on both images, not gitignored — the root `.gitignore` rule is anchored to `/docker-compose.yml` for exactly this — and release.yml publishes arm64, or `compose up` fails on every ARM host).
   helm/mdnest/               # Optional Helm chart (v3.11.7+) — inert unless used; Compose path unchanged
     Chart.yaml               # appVersion tracks the release — the FOURTH version-bump file
     values.yaml              # Every knob; three options are gated off (see _helpers.tpl)

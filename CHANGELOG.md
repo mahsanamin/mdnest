@@ -4,6 +4,61 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v4.5.3 — Install with one compose file
+
+Installing mdnest meant cloning the repo, running a setup script and building
+both images on your own machine. That's a lot of ceremony for anyone who
+already runs their own networks, reverse proxy and certificates, and wants a
+compose file they can read and edit. GitHub issue #112 said so plainly, after
+30 minutes in the docs without a running install. There is now one file,
+nothing to build and nothing to clone.
+
+### Added
+
+- **A plain `docker-compose.yml`.** `deploy/compose/docker-compose.yml` pulls
+  the published images and runs single-user mdnest with your notes as plain
+  files in `./notes`:
+
+  ```bash
+  mkdir mdnest && cd mdnest
+  curl -fsSLo docker-compose.yml https://raw.githubusercontent.com/mahsanamin/mdnest/main/deploy/compose/docker-compose.yml
+  echo "MDNEST_PASSWORD=$(openssl rand -base64 18)"  > .env
+  echo "MDNEST_JWT_SECRET=$(openssl rand -hex 32)"  >> .env
+  docker compose up -d
+  ```
+
+  Every optional setting is a comment in the file: extra namespaces, the task
+  board, drawings and slides, a reverse-proxy network, and a multi-user block
+  with Postgres. If a secret is missing, compose refuses to start and names
+  the variable, rather than booting with a default password.
+- **A `docker run` version, and a guide to both.** `docs/setup.md` now opens
+  with this install. It covers the usual changes in one table, the upgrade
+  command (`docker compose pull && docker compose up -d`), and which
+  `mdnest.conf` keys only mean something to the guided setup. The README
+  Quick Start offers it as option A. The guided `setup.sh` path is unchanged
+  as option B.
+
+### Fixed
+
+- **The published images now run on ARM.** They were amd64 only, so pulling
+  them on Apple silicon, a Raspberry Pi or an ARM cloud host failed with "no
+  matching manifest for linux/arm64". Releases now publish `linux/amd64` and
+  `linux/arm64`. The builds cross-compile natively rather than under
+  emulation, and local `setup.sh` builds are unaffected.
+- **The clone URL in `docs/setup.md`** pointed at the wrong GitHub owner.
+
+### Tests
+
+- `tests/compose-example.sh` runs in the pre-push hook. It checks that every
+  setting the compose file offers is one the backend actually reads, that
+  nginx's proxy target `backend` is a service in it, that both images share a
+  tag, that the file isn't gitignored, that releases publish arm64, and that
+  the documented one-liner downloads the right path. With Docker present, it
+  also checks the missing-secret refusal. Each check was confirmed to fail
+  when its condition is broken.
+
+---
+
 ## v4.5.2 — A task board that does what you meant
 
 Dragging a card between columns worked for exactly one gesture: grab the thin

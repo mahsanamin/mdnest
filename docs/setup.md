@@ -10,15 +10,102 @@ This guide covers installing, configuring, and running mdnest.
 
 - [Docker](https://docs.docker.com/get-docker/) (version 20.10 or later)
 - [Docker Compose](https://docs.docker.com/compose/install/) (v2, included with Docker Desktop)
-- Git (to clone the repository)
+- Git — only for the [guided setup](#guided-setup); the plain Compose install needs none
+
+There are two ways to install. They run the same images and give you the same
+mdnest.
+
+| | [Plain Docker Compose](#plain-docker-compose-or-docker-run) | [Guided setup](#guided-setup) |
+|---|---|---|
+| You get | one `docker-compose.yml` you own and edit | a script that writes the compose file from `mdnest.conf` |
+| Images | pulled from `ghcr.io`, nothing to build | built from source on your machine |
+| Good for | people who run their own proxy, TLS and networks | a one-command install with git sync, HTTPS and multi-user wired for you |
 
 ---
 
-## Quick Start
+## Plain Docker Compose (or docker run)
+
+No clone, no setup script, nothing to build. Four commands:
+
+```bash
+mkdir mdnest && cd mdnest
+curl -fsSLo docker-compose.yml https://raw.githubusercontent.com/mahsanamin/mdnest/main/deploy/compose/docker-compose.yml
+echo "MDNEST_PASSWORD=$(openssl rand -base64 18)"  > .env
+echo "MDNEST_JWT_SECRET=$(openssl rand -hex 32)"  >> .env
+docker compose up -d
+```
+
+Open `http://localhost:3236` and sign in as `admin` with the password from
+`.env` (`cat .env`). If you forget a secret, `docker compose up` refuses to
+start and names the variable, so a half-configured mdnest never runs.
+
+**What is running:** two containers, `backend` (the API) and `frontend` (nginx
+serving the web app and proxying `/api/` to the backend). Only the frontend has
+a port. Your notes are plain `.md` files in `./notes` on the host. The
+`mdnest-secrets` volume holds API tokens, preferences and stickies. It isn't
+notes, but it is state you'd miss.
+
+The file is short and every optional setting is a comment in it:
+[`deploy/compose/docker-compose.yml`](../deploy/compose/docker-compose.yml).
+The usual changes:
+
+| I want to… | Change this in `docker-compose.yml` |
+|---|---|
+| add a second notes folder | another line under `backend.volumes`: `- /srv/work:/data/notes/work` (each mount is one namespace in the sidebar) |
+| reach it from other machines | `ports: ["3236:80"]` instead of `127.0.0.1:3236:80` |
+| use my own reverse proxy | delete `ports`, attach `frontend` to your proxy's network, point the proxy at `frontend:80`, and set `FRONTEND_ORIGIN` to your public URL (the block at the end of the file shows the lines) |
+| turn on the task board, drawings or slides | uncomment `ENABLE_TASK_BOARD`, `ENABLE_EXCALIDRAW` or `ENABLE_MARP` |
+| accounts for a team | uncomment the multi-user block at the end of the file (adds Postgres) |
+| pin a version | replace `:latest` with a release, e.g. `:4.5.3`, on **both** images |
+
+Point your proxy at the **frontend**, never the backend. The frontend already
+routes `/api/` and the `/api/ws` websocket.
+
+**Upgrade:** `docker compose pull && docker compose up -d`. Your notes and
+settings stay where they are.
+
+**The same thing with `docker run`.** The frontend finds the backend by the
+name `backend`, so both containers need a shared network, and the backend
+must be named `backend` on it:
+
+```bash
+docker network create mdnest
+docker volume create mdnest-secrets
+
+docker run -d --name backend --network mdnest --restart unless-stopped \
+  -e MDNEST_USER=admin \
+  -e MDNEST_PASSWORD='pick-a-strong-password' \
+  -e MDNEST_JWT_SECRET="$(openssl rand -hex 32)" \
+  -e NOTES_DIR=/data/notes -e SECRETS_DIR=/data/secrets \
+  -e FRONTEND_ORIGIN=http://localhost:3236 \
+  -e SERVER_ALIAS=mdnest \
+  -v "$PWD/notes:/data/notes/notes" \
+  -v mdnest-secrets:/data/secrets \
+  ghcr.io/mahsanamin/mdnest-backend:latest
+
+docker run -d --name mdnest-frontend --network mdnest --restart unless-stopped \
+  -p 127.0.0.1:3236:80 \
+  ghcr.io/mahsanamin/mdnest-frontend:latest
+```
+
+Every setting in the rest of this guide is an environment variable on the
+backend container, with the same name as in `mdnest.conf`. Only these keys
+are specific to the guided setup and don't apply here: `MOUNT_*` (use
+volumes), `BACKEND_PORT`, `FRONTEND_PORT` and `BIND_ADDRESS` (use `ports`),
+`SSH_KEY_PATH` and `GIT_SYNC_INTERVAL` (the git-sync sidecar),
+`CADDY_DOMAIN`, `COMPOSE_PROJECT_NAME`, and `ENABLE_MCP` / `MCP_*` (those
+configure the separate MCP server container, see [mcp.md](mcp.md)). The
+Firebase settings `FIREBASE_SERVICE_ACCOUNT` and `FIREBASE_WEB_CONFIG` are
+file paths, so mount the files into the backend and give the path *inside*
+the container.
+
+---
+
+## Guided setup
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/mdnest/mdnest.git
+git clone https://github.com/mahsanamin/mdnest.git
 cd mdnest
 
 # 2. Run setup (creates mdnest.conf from the sample on first run)
