@@ -1,0 +1,118 @@
+# mdnest — plain Docker Compose install
+#
+# No clone, no setup script, nothing to build. This file pulls the published
+# images and runs single-user mdnest with your notes as plain files on disk.
+#
+#   1. Put this file in an empty folder.
+#   2. Create a .env file next to it with two secrets:
+#        echo "MDNEST_PASSWORD=$(openssl rand -base64 18)"  > .env
+#        echo "MDNEST_JWT_SECRET=$(openssl rand -hex 32)"  >> .env
+#   3. docker compose up -d
+#   4. Open http://localhost:3236 and sign in as "admin" with the password
+#      from .env (cat .env).
+#
+# Your notes live in ./notes on the host. Every file mdnest writes is an
+# ordinary .md file there, so you can back it up, edit it, or put it in git
+# yourself.
+#
+# Everything below marked "Optional" can be deleted or left commented out.
+# Full reference: https://github.com/mahsanamin/mdnest/blob/main/docs/setup.md
+
+services:
+  # The API server. It is not published on a host port: the frontend proxies
+  # /api/ to it over the compose network, by the service name "backend".
+  # Keep that name, or the frontend cannot find it.
+  backend:
+    image: ghcr.io/mahsanamin/mdnest-backend:latest   # or pin a release, e.g. :4.5.3
+    restart: unless-stopped
+    volumes:
+      # Namespaces: each mount is one top-level workspace in the sidebar.
+      # Format: <folder on your host>:/data/notes/<name shown in mdnest>
+      - ./notes:/data/notes/notes
+      # - /srv/work-notes:/data/notes/work          # Optional: a second namespace
+
+      # App state that is not notes (API tokens, preferences, stickies).
+      # Keep this volume, or you lose that state on every recreate.
+      - mdnest-secrets:/data/secrets
+    environment:
+      MDNEST_USER: admin
+      MDNEST_PASSWORD: ${MDNEST_PASSWORD:?set MDNEST_PASSWORD in .env - see the top of this file}
+      MDNEST_JWT_SECRET: ${MDNEST_JWT_SECRET:?set MDNEST_JWT_SECRET in .env - see the top of this file}
+      NOTES_DIR: /data/notes
+      SECRETS_DIR: /data/secrets
+
+      # The address you open mdnest at. Change it when you put mdnest behind
+      # your own domain, e.g. https://notes.example.com
+      FRONTEND_ORIGIN: http://localhost:3236
+
+      # The short name the mdnest CLI uses for this server, as in @mdnest.
+      SERVER_ALIAS: mdnest
+
+      # Optional features, all off by default:
+      # ENABLE_TASK_BOARD: "true"     # Kanban board over the checkboxes in your notes
+      # ENABLE_EXCALIDRAW: "true"     # .excalidraw.md drawings
+      # ENABLE_MARP: "true"           # Marp slide decks
+      # DEFAULT_THEME: auto           # auto | dark | light
+
+      # Optional: search tuning.
+      # SEARCH_MAX_RESULTS: "30"
+      # SEARCH_WORKERS: "8"
+
+      # Optional: do not check GitHub for newer mdnest releases.
+      # DISABLE_UPDATE_CHECK: "true"
+
+  # The web app (nginx). This is the only port you need to expose.
+  frontend:
+    image: ghcr.io/mahsanamin/mdnest-frontend:latest  # keep the same tag as backend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      # 127.0.0.1 keeps it off your LAN. Use "3236:80" to listen on every
+      # interface, or delete "ports" entirely and attach this service to your
+      # reverse proxy's network instead (see the end of this file).
+      - "127.0.0.1:3236:80"
+
+volumes:
+  mdnest-secrets:
+
+# ---------------------------------------------------------------------------
+# Optional: behind your own reverse proxy (Traefik, Caddy, nginx-proxy-manager)
+# ---------------------------------------------------------------------------
+# Point the proxy at the frontend container, port 80 — never at the backend.
+# The frontend already routes /api/ and the /api/ws websocket to the backend.
+# Set FRONTEND_ORIGIN above to your public URL. For example:
+#
+#   frontend:
+#     networks: [default, proxy]
+#   networks:
+#     proxy:
+#       external: true
+#
+# ---------------------------------------------------------------------------
+# Optional: multi-user mode (accounts, roles, per-namespace access)
+# ---------------------------------------------------------------------------
+# Add these to backend.environment:
+#
+#     AUTH_MODE: multi
+#     POSTGRES_HOST: postgres
+#     POSTGRES_PORT: "5432"
+#     POSTGRES_DB: mdnest
+#     POSTGRES_USER: mdnest
+#     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+#
+# add this service, and add "mdnest-pgdata:" under volumes:
+#
+#   postgres:
+#     image: postgres:16-alpine
+#     restart: unless-stopped
+#     environment:
+#       POSTGRES_DB: mdnest
+#       POSTGRES_USER: mdnest
+#       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+#     volumes:
+#       - mdnest-pgdata:/var/lib/postgresql/data
+#
+# MDNEST_USER / MDNEST_PASSWORD become the first admin account. Already run
+# Postgres? Skip the service and point POSTGRES_HOST at yours.
+# Details: https://github.com/mahsanamin/mdnest/blob/main/docs/setup.md#multi-user-mode

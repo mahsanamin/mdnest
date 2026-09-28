@@ -1,5 +1,7 @@
 # Stage 1: Build
-FROM node:20-alpine AS builder
+# The output is static files, identical for every architecture, so the build
+# runs on the build machine's own platform even for a multi-arch release.
+FROM --platform=$BUILDPLATFORM node:20-alpine AS builder
 
 WORKDIR /app
 
