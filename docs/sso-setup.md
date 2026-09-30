@@ -53,6 +53,16 @@ Below are quick steps per provider. Your DevOps team likely does this already fo
 4. **Expose an API** isn't needed; we're a relying party, not an API.
 5. Copy **Application (client) ID** and the tenant's issuer (`https://login.microsoftonline.com/<tenant-id>/v2.0`).
 
+**Clerk** (Clerk as the identity provider, no Clerk SDK in mdnest):
+1. Dashboard → **Configure → Developers → OAuth applications → Add application → Create OAuth application**.
+2. Scopes: `openid`, `email`, `profile`. Leave **Public** off, so the client is confidential, and keep PKCE on. Leave dynamic client registration off: it opens an unauthenticated client-registration endpoint.
+3. Copy the **Client Secret** straight away, because Clerk shows it once. The **Client ID** is under "Application credentials".
+4. Redirect URIs: `https://<your-mdnest-host>/api/auth/sso/callback`.
+5. The issuer is the instance's **Frontend API URL** (Configure → API keys), e.g. `https://<slug>.clerk.accounts.dev` on a development instance.
+6. In Clerk, make the sign-in methods only what you want (e.g. Google only). mdnest's `SSO_ALLOWED_DOMAINS` and invite-only users table still gate who gets in.
+
+Clerk's ID token carries `email_verified`, so the "refuse an unverified email" rule applies. Clerk does **not** pass Google's `hd` through, so the Google Workspace check below cannot fire behind Clerk: rely on `SSO_ALLOWED_DOMAINS` plus invite-only, or on Clerk's own enterprise connection limited to your domain. Clerk has no `groups` claim, so leave `OIDC_GROUPS_CLAIM` unset. Clerk may add `offline_access` to the app's scopes; it is harmless, because mdnest never requests it.
+
 **Keycloak / Auth0 / Custom**:
 Any provider with OIDC discovery works. You need the **issuer URL** (the thing that serves `/.well-known/openid-configuration`), plus a client ID and secret for a confidential web client.
 
