@@ -1,5 +1,7 @@
 .env
 mdnest.conf
+# Backups of mdnest.conf hold the same secrets
+mdnest.conf.bak*
 /docker-compose.yml
 Caddyfile
 notes/

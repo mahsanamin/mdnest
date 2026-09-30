@@ -278,6 +278,7 @@ func main() {
 	var totpStore store.TOTPStore
 	var firebaseClient *firebase.Client
 	var ssoClient *sso.Client
+	ssoDisablePasswordLogin := false
 	if multiMode {
 		switch userProvider {
 		case "firebase":
@@ -311,6 +312,10 @@ func main() {
 			}
 			ssoClient = client
 			log.Printf("USER_PROVIDER=sso — OIDC via %s (callback: %s)", env("SSO_ISSUER_URL", ""), redirect)
+			if env("SSO_DISABLE_PASSWORD_LOGIN", "false") == "true" {
+				ssoDisablePasswordLogin = true
+				log.Println("SSO_DISABLE_PASSWORD_LOGIN: username/password login is refused; sign in via SSO or an API token")
+			}
 			if require2FA {
 				log.Println("REQUIRE_2FA is ignored in SSO mode (the IdP owns MFA)")
 				require2FA = false
@@ -320,6 +325,9 @@ func main() {
 		}
 
 		authHandler = handlers.NewMultiAuthHandler(jwtSecret, userStore, totpStore, require2FA)
+		if ssoDisablePasswordLogin {
+			authHandler.DisablePasswordLogin()
+		}
 
 		// Reconcile ADMIN_EMAILS on startup (idempotent). Emails removed from
 		// the list are NOT auto-demoted — operator must demote explicitly.

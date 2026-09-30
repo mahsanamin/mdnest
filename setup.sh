@@ -40,6 +40,11 @@ GIT_AUTHOR_EMAIL=""
 # empty here so a value left over in the shell environment can't leak
 # in and silently rename containers on rebuild.
 COMPOSE_PROJECT_NAME=""
+# SSO switches that widen or narrow who can sign in. Same reason: an exported
+# shell variable must not quietly turn one on.
+SSO_DISABLE_PASSWORD_LOGIN=""
+SSO_AUTOPROVISION_USERS=""
+OIDC_GROUPS_CLAIM=""
 declare -a MOUNT_NAMES=()
 declare -a MOUNT_PATHS=()
 
@@ -95,6 +100,9 @@ while IFS= read -r line; do
     SSO_REDIRECT_URL) SSO_REDIRECT_URL="$value" ;;
     SSO_ALLOWED_DOMAINS) SSO_ALLOWED_DOMAINS="$value" ;;
     SSO_PROVIDER_LABEL) SSO_PROVIDER_LABEL="$value" ;;
+    SSO_DISABLE_PASSWORD_LOGIN) SSO_DISABLE_PASSWORD_LOGIN="$value" ;;
+    SSO_AUTOPROVISION_USERS) SSO_AUTOPROVISION_USERS="$value" ;;
+    OIDC_GROUPS_CLAIM) OIDC_GROUPS_CLAIM="$value" ;;
     INSECURE_DEV_LOGIN) INSECURE_DEV_LOGIN="$value" ;;
     GRANT_MAX_DEPTH) GRANT_MAX_DEPTH="$value" ;;
     ENABLE_MCP) ENABLE_MCP="$value" ;;
@@ -189,6 +197,22 @@ if [ "$USER_PROVIDER" = "sso" ]; then
   if [ -n "$SSO_ALLOWED_DOMAINS" ]; then
     echo "  Allowed email domains: $SSO_ALLOWED_DOMAINS"
   fi
+  case "${SSO_DISABLE_PASSWORD_LOGIN:-false}" in
+    true)  echo "  Password login: disabled (SSO and API tokens only)" ;;
+    false) ;;
+    *)
+      echo "Error: SSO_DISABLE_PASSWORD_LOGIN must be true or false (got '${SSO_DISABLE_PASSWORD_LOGIN}')."
+      exit 1
+      ;;
+  esac
+  case "${SSO_AUTOPROVISION_USERS:-false}" in
+    true)  echo "  Auto-provisioning: unknown IdP-authenticated emails get a collaborator account" ;;
+    false) ;;
+    *)
+      echo "Error: SSO_AUTOPROVISION_USERS must be true or false (got '${SSO_AUTOPROVISION_USERS}')."
+      exit 1
+      ;;
+  esac
 fi
 
 if [ ${#MOUNT_NAMES[@]} -eq 0 ]; then
@@ -281,6 +305,9 @@ SSO_CLIENT_SECRET=${SSO_CLIENT_SECRET}
 SSO_REDIRECT_URL=${SSO_REDIRECT_URL:-}
 SSO_ALLOWED_DOMAINS=${SSO_ALLOWED_DOMAINS:-}
 SSO_PROVIDER_LABEL=${SSO_PROVIDER_LABEL:-}
+SSO_DISABLE_PASSWORD_LOGIN=${SSO_DISABLE_PASSWORD_LOGIN:-false}
+SSO_AUTOPROVISION_USERS=${SSO_AUTOPROVISION_USERS:-false}
+OIDC_GROUPS_CLAIM=${OIDC_GROUPS_CLAIM:-}
 ADMIN_EMAILS=${ADMIN_EMAILS:-}
 EOF
 fi

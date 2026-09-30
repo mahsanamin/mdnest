@@ -184,7 +184,7 @@ In OAuth mode no process-wide `MDNEST_TOKEN` is needed. Cookies are marked
 |---|---|---|
 | `MDNEST_URL` | `http://localhost:8286` | Base URL of the mdnest backend the MCP server calls. |
 | `MDNEST_TOKEN` | — | Long-lived API token (preferred credential; required in `service` mode). |
-| `MDNEST_USER` / `MDNEST_PASSWORD` | — | Fallback login if no token is set. |
+| `MDNEST_USER` / `MDNEST_PASSWORD` | — | Fallback login if no token is set. Refused by a server running `USER_PROVIDER=sso` with `SSO_DISABLE_PASSWORD_LOGIN=true` — use `MDNEST_TOKEN` there. |
 | `MCP_TRANSPORT` | `stdio` | `stdio` or `http` (a.k.a. `streamable-http`). |
 | `MCP_HTTP_HOST` | `0.0.0.0` | Bind address (HTTP mode). |
 | `MCP_HTTP_PORT` | `3000` | Listen port (HTTP mode). |

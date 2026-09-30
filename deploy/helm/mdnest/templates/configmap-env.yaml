@@ -76,4 +76,7 @@ data:
   {{- if .Values.sso.autoProvisionUsers }}
   SSO_AUTOPROVISION_USERS: "true"
   {{- end }}
+  {{- if .Values.sso.disablePasswordLogin }}
+  SSO_DISABLE_PASSWORD_LOGIN: "true"
+  {{- end }}
   {{- end }}
