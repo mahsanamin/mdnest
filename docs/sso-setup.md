@@ -1,6 +1,6 @@
 # Corporate SSO setup (USER_PROVIDER=sso)
 
-This is the operator checklist for letting users sign in to mdnest with your corporate identity provider (Google Workspace, Okta, Microsoft Entra, Keycloak, Auth0 — anything that implements OIDC discovery).
+This is the operator checklist for letting users sign in to mdnest with your corporate identity provider (Google Workspace, Okta, Microsoft Entra, Keycloak, Auth0, Clerk — anything that implements OIDC discovery).
 
 **When to use this.** You have an IdP your team already signs in with, you want one set of credentials + central MFA, and you don't want to manage local passwords inside mdnest. If you're running a personal install on a laptop, skip — the built-in username/password is simpler.
 
@@ -120,8 +120,8 @@ Each server is configured independently. Pointing two mdnest servers at the *sam
 
 **Who the IdP says signed in is checked, not just that it signed something.** After the ID token's signature, issuer, audience and nonce verify, the callback also refuses:
 
-- an email the IdP marks unverified (`email_verified: false`), for every IdP. A token with no `email_verified` claim at all is refused for Google, which always sends it, and allowed for other IdPs, because Microsoft Entra ID omits it by default;
-- for Google, when `SSO_ALLOWED_DOMAINS` is set, an account whose `hd` (Workspace hosted domain) claim is missing or not in that list. `SSO_ALLOWED_DOMAINS` alone checks the email's domain, and a *personal* Google account can be registered on a company address — it has no `hd`, so this is what keeps it out. Google is recognised by the issuer (`https://accounts.google.com`); other IdPs never send `hd` and are not checked for it.
+- an email the IdP marks unverified (`email_verified: false`), for every IdP. A token with no `email_verified` claim at all is refused for Google, which always sends it, and allowed for other IdPs, because Microsoft Entra ID omits it by default. The string form some IdPs send (`"true"` / `"false"`) is read the same as the boolean;
+- for Google, when `SSO_ALLOWED_DOMAINS` is set, an account with no `hd` (Workspace hosted domain) claim. `SSO_ALLOWED_DOMAINS` alone checks the email's domain, and a *personal* Google account can be registered on a company address — it has no `hd`, so this is what keeps it out. Presence is what is checked, not that `hd` is in the list: `hd` is the org's *primary* domain, so a user on a secondary domain (`alice@b.com` in an org whose primary is `a.com`) still gets in with `SSO_ALLOWED_DOMAINS=b.com`. Addresses on `gmail.com` / `googlemail.com` are exempt, since they never carry `hd` — listing `gmail.com` admits personal Gmail accounts on purpose. Google is recognised by the issuer (`https://accounts.google.com`); other IdPs (Okta, Entra, Keycloak, Auth0, Clerk…) never send `hd` and are not checked for it.
 
 A refusal shows as `sso_failed` on the sign-in page; the backend log says which rule it was.
 

@@ -1,6 +1,7 @@
 package sso
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -12,7 +13,7 @@ import (
 
 const googleIss = "https://accounts.google.com"
 
-func boolp(b bool) *bool { return &b }
+func boolp(b bool) *flexBool { v := flexBool(b); return &v }
 
 func clientWithDomains(domains ...string) *Client {
 	return &Client{cfg: Config{AllowedDomains: domains}}
@@ -39,12 +40,19 @@ func TestCheckIdentity(t *testing.T) {
 			identityClaims{Email: "alice@example.com"}, ""},
 
 		// hd
-		{"google hd mismatch refused", []string{"example.com"}, googleIss,
-			identityClaims{Email: "alice@example.com", EmailVerified: boolp(true), HostedDomain: "other.com"}, "hosted domain"},
 		{"google consumer account on a company address (no hd) refused", []string{"example.com"}, googleIss,
-			identityClaims{Email: "alice@example.com", EmailVerified: boolp(true)}, "hosted domain"},
+			identityClaims{Email: "alice@example.com", EmailVerified: boolp(true)}, "no hd claim"},
 		{"google bare-issuer form is still google", []string{"example.com"}, "accounts.google.com",
-			identityClaims{Email: "alice@example.com", EmailVerified: boolp(true)}, "hosted domain"},
+			identityClaims{Email: "alice@example.com", EmailVerified: boolp(true)}, "no hd claim"},
+		// hd is the org's PRIMARY domain: a user on a secondary domain carries
+		// the primary as hd, and must not be locked out.
+		{"google workspace user on a secondary domain allowed", []string{"b.example"}, googleIss,
+			identityClaims{Email: "alice@b.example", EmailVerified: boolp(true), HostedDomain: "a.example"}, ""},
+		// gmail.com accounts never have hd; listing gmail.com admits them on purpose.
+		{"gmail.com in the allowlist admits consumer gmail", []string{"gmail.com"}, googleIss,
+			identityClaims{Email: "alice@gmail.com", EmailVerified: boolp(true)}, ""},
+		{"gmail.com allowlisted does not open other domains", []string{"gmail.com", "example.com"}, googleIss,
+			identityClaims{Email: "alice@example.com", EmailVerified: boolp(true)}, "no hd claim"},
 		{"google with no allowlist does not require hd", nil, googleIss,
 			identityClaims{Email: "alice@gmail.com", EmailVerified: boolp(true)}, ""},
 		{"non-google IdP without hd still allowed", []string{"example.com"}, "https://okta.example.com",
@@ -76,3 +84,47 @@ func TestCheckIdentity(t *testing.T) {
 		})
 	}
 }
+
+// email_verified is a boolean in the spec, but some IdPs send "true"/"false".
+// A strict bool failed the whole claim decode, so sign-in broke on those IdPs.
+func TestEmailVerifiedDecoding(t *testing.T) {
+	cases := []struct {
+		raw     string
+		want    *bool // nil = claim absent
+		wantErr bool
+	}{
+		{`{"email":"a@x.com","email_verified":true}`, ptr(true), false},
+		{`{"email":"a@x.com","email_verified":false}`, ptr(false), false},
+		{`{"email":"a@x.com","email_verified":"true"}`, ptr(true), false},
+		{`{"email":"a@x.com","email_verified":"False"}`, ptr(false), false},
+		{`{"email":"a@x.com"}`, nil, false},
+		{`{"email":"a@x.com","email_verified":"maybe"}`, nil, true},
+	}
+	for _, tc := range cases {
+		var c identityClaims
+		err := json.Unmarshal([]byte(tc.raw), &c)
+		if tc.wantErr {
+			if err == nil {
+				t.Fatalf("%s: want decode error", tc.raw)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("%s: %v", tc.raw, err)
+		}
+		switch {
+		case tc.want == nil && c.EmailVerified != nil:
+			t.Fatalf("%s: want absent, got %v", tc.raw, *c.EmailVerified)
+		case tc.want != nil && (c.EmailVerified == nil || bool(*c.EmailVerified) != *tc.want):
+			t.Fatalf("%s: want %v, got %v", tc.raw, *tc.want, c.EmailVerified)
+		}
+	}
+	// A string "false" must still be refused by the gate, not just decoded.
+	var c identityClaims
+	_ = json.Unmarshal([]byte(`{"email":"a@x.com","email_verified":"false"}`), &c)
+	if _, err := clientWithDomains().checkIdentity("https://cognito.example", c); err == nil {
+		t.Fatal(`email_verified "false" (string) was accepted`)
+	}
+}
+
+func ptr(b bool) *bool { return &b }

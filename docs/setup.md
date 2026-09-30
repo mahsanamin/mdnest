@@ -154,7 +154,7 @@ On first run, `setup.sh` copies `mdnest.conf.sample` to `mdnest.conf` and exits,
 | `SSO_CLIENT_ID` | *(required when `USER_PROVIDER=sso`)* | OAuth client ID from your IdP. |
 | `SSO_CLIENT_SECRET` | *(required when `USER_PROVIDER=sso`)* | OAuth client secret from your IdP. |
 | `SSO_REDIRECT_URL` | `<FRONTEND_ORIGIN>/api/auth/sso/callback` | Override if your callback URL doesn't match the default. |
-| `SSO_ALLOWED_DOMAINS` | *(none)* | Comma-separated email-domain allowlist, e.g. `example.com`. Leave empty to allow any verified email. For Google, a set allowlist also requires the account's Workspace `hd` claim to be in it — see `docs/sso-setup.md`. |
+| `SSO_ALLOWED_DOMAINS` | *(none)* | Comma-separated email-domain allowlist, e.g. `example.com`. Leave empty to allow any verified email. For Google, a set allowlist also requires the account to be in a Workspace (an `hd` claim), except for `gmail.com` addresses — see `docs/sso-setup.md`. |
 | `SSO_PROVIDER_LABEL` | `SSO` | Text on the sign-in button (e.g. `Google`, `Okta`). |
 | `SSO_AUTOPROVISION_USERS` | `false` | Opt-in. Create a least-privilege collaborator for an unknown but IdP-authenticated email on first sign-in, instead of rejecting it. Enable only when the IdP gates who can get a token; pair with `SSO_ALLOWED_DOMAINS`. |
 | `SSO_DISABLE_PASSWORD_LOGIN` | `false` | Opt-in. Refuse username/password on `/api/auth/login`, so the IdP is the only way in. Recommended when mdnest is reachable from the internet. SSO sign-in and API tokens keep working; an MCP server must then use `MDNEST_TOKEN`, not `MDNEST_USER`/`MDNEST_PASSWORD`. |
