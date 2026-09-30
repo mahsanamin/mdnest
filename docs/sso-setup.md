@@ -1,6 +1,6 @@
 # Corporate SSO setup (USER_PROVIDER=sso)
 
-This is the operator checklist for letting users sign in to mdnest with your corporate identity provider (Google Workspace, Okta, Microsoft Entra, Keycloak, Auth0 — anything that implements OIDC discovery).
+This is the operator checklist for letting users sign in to mdnest with your corporate identity provider (Google Workspace, Okta, Microsoft Entra, Keycloak, Auth0, Clerk — anything that implements OIDC discovery).
 
 **When to use this.** You have an IdP your team already signs in with, you want one set of credentials + central MFA, and you don't want to manage local passwords inside mdnest. If you're running a personal install on a laptop, skip — the built-in username/password is simpler.
 
@@ -53,6 +53,16 @@ Below are quick steps per provider. Your DevOps team likely does this already fo
 4. **Expose an API** isn't needed; we're a relying party, not an API.
 5. Copy **Application (client) ID** and the tenant's issuer (`https://login.microsoftonline.com/<tenant-id>/v2.0`).
 
+**Clerk** (Clerk as the identity provider, no Clerk SDK in mdnest):
+1. Dashboard → **Configure → Developers → OAuth applications → Add application → Create OAuth application**.
+2. Scopes: `openid`, `email`, `profile`. Leave **Public** off, so the client is confidential, and keep PKCE on. Leave dynamic client registration off: it opens an unauthenticated client-registration endpoint.
+3. Copy the **Client Secret** straight away, because Clerk shows it once. The **Client ID** is under "Application credentials".
+4. Redirect URIs: `https://<your-mdnest-host>/api/auth/sso/callback`.
+5. The issuer is the instance's **Frontend API URL** (Configure → API keys), e.g. `https://<slug>.clerk.accounts.dev` on a development instance.
+6. In Clerk, make the sign-in methods only what you want (e.g. Google only). mdnest's `SSO_ALLOWED_DOMAINS` and invite-only users table still gate who gets in.
+
+Clerk's ID token carries `email_verified`, so the "refuse an unverified email" rule applies. Clerk does **not** pass Google's `hd` through, so the Google Workspace check below cannot fire behind Clerk: rely on `SSO_ALLOWED_DOMAINS` plus invite-only, or on Clerk's own enterprise connection limited to your domain. Clerk has no `groups` claim, so leave `OIDC_GROUPS_CLAIM` unset. Clerk may add `offline_access` to the app's scopes; it is harmless, because mdnest never requests it.
+
 **Keycloak / Auth0 / Custom**:
 Any provider with OIDC discovery works. You need the **issuer URL** (the thing that serves `/.well-known/openid-configuration`), plus a client ID and secret for a confidential web client.
 
@@ -74,6 +84,10 @@ SSO_PROVIDER_LABEL=Google
 
 # Optional: only set if your callback URL isn't FRONTEND_ORIGIN/api/auth/sso/callback.
 # SSO_REDIRECT_URL=https://notes.example.com/api/auth/sso/callback
+
+# Optional, recommended when mdnest is reachable from the internet: refuse
+# username/password on /api/auth/login so the IdP is the only way in.
+# SSO_DISABLE_PASSWORD_LOGIN=true
 ```
 
 Any email in `ADMIN_EMAILS` (if set) is still auto-promoted to admin role on startup — same behaviour as the Firebase path.
@@ -103,6 +117,15 @@ Each server is configured independently. Pointing two mdnest servers at the *sam
 ---
 
 ## Things to know
+
+**Who the IdP says signed in is checked, not just that it signed something.** After the ID token's signature, issuer, audience and nonce verify, the callback also refuses:
+
+- an email the IdP marks unverified (`email_verified: false`), for every IdP. A token with no `email_verified` claim at all is refused for Google, which always sends it, and allowed for other IdPs, because Microsoft Entra ID omits it by default. The string form some IdPs send (`"true"` / `"false"`) is read the same as the boolean;
+- for Google, when `SSO_ALLOWED_DOMAINS` is set, an account with no `hd` (Workspace hosted domain) claim. `SSO_ALLOWED_DOMAINS` alone checks the email's domain, and a *personal* Google account can be registered on a company address — it has no `hd`, so this is what keeps it out. Presence is what is checked, not that `hd` is in the list: `hd` is the org's *primary* domain, so a user on a secondary domain (`alice@b.com` in an org whose primary is `a.com`) still gets in with `SSO_ALLOWED_DOMAINS=b.com`. Addresses on `gmail.com` / `googlemail.com` are exempt, since they never carry `hd` — listing `gmail.com` admits personal Gmail accounts on purpose. Google is recognised by the issuer (`https://accounts.google.com`); other IdPs (Okta, Entra, Keycloak, Auth0, Clerk…) never send `hd` and are not checked for it.
+
+A refusal shows as `sso_failed` on the sign-in page; the backend log says which rule it was.
+
+**Turn off password login on a public hostname.** In SSO mode the web UI only shows the SSO button, but `POST /api/auth/login` still accepts a username and password — a password prompt on the internet that skips the IdP and its MFA. `SSO_DISABLE_PASSWORD_LOGIN=true` makes it answer `403` for every username/password request, right or wrong. It is off by default so existing installs behave the same. With it on, SSO sign-in, API tokens (the `mdnest` CLI, `MDNEST_TOKEN` for the MCP server) and existing sessions keep working; an MCP server configured with `MDNEST_USER`/`MDNEST_PASSWORD` must switch to `MDNEST_TOKEN`, and so must any script that logs in with a password. Helm: `sso.disablePasswordLogin: true`.
 
 **Only 2FA at the IdP.** `REQUIRE_2FA` in `mdnest.conf` is ignored with a log notice when `USER_PROVIDER=sso`. The TOTP handlers aren't registered at all in this mode — your IdP enforces MFA, and we don't mirror it locally. If you later flip back to `local`, users will need to re-enroll TOTP.
 

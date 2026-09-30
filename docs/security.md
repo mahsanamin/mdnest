@@ -76,7 +76,7 @@ Three identity providers are supported in multi-user mode (`AUTH_MODE=multi`), e
 |---|---|---|---|
 | Single-user | n/a (no `AUTH_MODE`) | bcrypt in `auth.json` | none |
 | Multi, local | `local` (default) | bcrypt in Postgres `users.password_hash` | TOTP (per-user, optional or required via `REQUIRE_2FA`) |
-| Multi, SSO | `sso` | n/a — IdP owns identity | IdP-managed (Google/Okta/Entra/Keycloak/Auth0) |
+| Multi, SSO | `sso` | n/a — IdP owns identity | IdP-managed (Google/Okta/Entra/Keycloak/Auth0/Clerk) |
 | Multi, Firebase | `firebase` | n/a — Firebase Auth owns identity | TOTP stored in Firestore (shared across mdnest servers using the same Firebase project) |
 
 ### Local mode (single or multi)
@@ -88,10 +88,13 @@ Three identity providers are supported in multi-user mode (`AUTH_MODE=multi`), e
 
 ### SSO mode (`USER_PROVIDER=sso`)
 
-- mdnest acts as an OIDC relying party — it never sees the user's password. The IdP authenticates the user, hands back an ID token, mdnest verifies signature + nonce + state cookie + PKCE verifier and trusts the email claim.
+- mdnest acts as an OIDC relying party — it never sees the user's password. The IdP authenticates the user, hands back an ID token, mdnest verifies signature + nonce + state cookie + PKCE verifier, then checks *who* the token names before trusting the email claim (v4.5.4+, `checkIdentity` in `backend/sso/client.go`):
+  - an email the IdP marks unverified (`email_verified: false`, boolean or string) is refused for every IdP. An absent claim is refused for Google, which always sends it, and allowed elsewhere, because Microsoft Entra ID omits it by default;
+  - for Google with `SSO_ALLOWED_DOMAINS` set, the account must carry an `hd` (Workspace) claim, because a *personal* Google account can be registered on a company address and would otherwise pass the email-domain check. `gmail.com` addresses are exempt, and `hd` need not itself be in the list, since it is the org's primary domain and secondary-domain users carry it too. Other IdPs never send `hd` and are not checked for it.
 - **MFA is the IdP's responsibility.** mdnest's local TOTP routes are not registered in this mode (`/api/auth/totp/*` returns 404). If your IdP requires MFA for the user, that's already enforced by the time the user lands on mdnest's callback. `REQUIRE_2FA` in `mdnest.conf` is ignored with a log notice.
 - **No auto-provisioning.** A successful SSO sign-in still fails with `sso_not_invited` if the email isn't already a row in `users`. Operators invite users via the admin panel before they can sign in. This is the only way to keep authorization decoupled from the IdP — you can have someone with a valid corporate Google account who still can't access mdnest.
 - `SSO_ALLOWED_DOMAINS=example.com` adds an additional email-domain allowlist so a typo in the IdP config doesn't accidentally let any verified Google user in.
+- **Password login can be switched off** (`SSO_DISABLE_PASSWORD_LOGIN=true`, v4.5.4+, opt-in). In SSO mode the UI shows only the SSO button, but `POST /api/auth/login` otherwise still accepts a username and password — a password prompt on the internet that skips the IdP and its MFA. With the flag it answers `403` before looking at the credentials, so right and wrong passwords get the same reply. API tokens and the SSO callback are unaffected.
 - The post-callback JWT is the same shape as a local login (HS256, 30-day expiry, `role` + `user_id` claims), and the rest of the app sees a normal session.
 
 ### Firebase mode (`USER_PROVIDER=firebase`)

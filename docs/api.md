@@ -27,7 +27,7 @@ Common HTTP status codes across all endpoints:
 
 ### POST /api/auth/login
 
-Authenticate with username and password (local mode), or post a Firebase ID token (Firebase mode). In SSO mode this endpoint is unused — use `/api/auth/sso/start` instead. Returns a JWT valid for 30 days.
+Authenticate with username and password (local mode), or post a Firebase ID token (Firebase mode). In SSO mode the web UI does not use this endpoint — use `/api/auth/sso/start` instead — and with `SSO_DISABLE_PASSWORD_LOGIN=true` it refuses username/password outright. Returns a JWT valid for 30 days.
 
 This is the only endpoint that does **not** require the `Authorization` header.
 
@@ -58,6 +58,7 @@ curl -X POST http://localhost:8286/api/auth/login \
 |--------|------|-------|
 | 400 | `{"error":"invalid request body"}` | Malformed or missing JSON body |
 | 401 | `{"error":"invalid credentials"}` | Wrong username or password |
+| 403 | `{"error":"password login is disabled on this server; sign in with SSO or use an API token"}` | `USER_PROVIDER=sso` with `SSO_DISABLE_PASSWORD_LOGIN=true` (sent for right and wrong passwords alike) |
 
 ---
 

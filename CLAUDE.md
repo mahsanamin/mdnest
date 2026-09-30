@@ -200,6 +200,7 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 - **Three role values** (v3.5.0+): `superadmin` (global), `admin` (namespace-scoped via the `namespace_admins` table), `collaborator` (per-grant only). Pre-v3.5.0 `admin` is migrated to `superadmin` by migration 007. `ADMIN_EMAILS` auto-promotes to `superadmin`. Permission checks go through `middleware.PermissionChecker.hasAdminScope(uc, ns)` — superadmin bypasses everywhere; admin only for `namespace_admins` rows; everyone else falls through to grants. API tokens follow the same precedence chain (no admin bypass for tokens).
 - **Access Groups are a second grant source, unioned in** (v4.2.0+): effective access = own grants ∪ every group's grants. Consulted only after direct grants fail, and a nil `groupStore` disables the layer (single mode / no DB). The two member kinds have *different revocation latency* and that asymmetry is deliberate but must stay documented: a `user_id` member resolves live per request, while an `oidc_group` member is matched against the `groups` claim snapshotted into the JWT at login. That is why SSO sessions use `ssoJWTTTL` (12h) instead of the year-long remember-me TTL — it bounds how long a stale IdP snapshot outlives a change. Note `uc.Role` is read from the token too, so role changes are equally deferred; that is pre-existing, not new.
 - **An access filter passed as a function must be required, not optional.** `/api/tasks/all` is access-controlled *solely* by its namespace filter and deliberately skips `RequireNsAccess` (it isn't scoped to one namespace). The filter is a mandatory `NewTaskHandler` argument, and `HandleGlobalTasks` treats nil as deny-all — so forgetting to wire it is a compile error, and if one ever slips through the endpoint serves nothing instead of every namespace. When a test pins a guard, mutate the *call site* too: a nil-means-permissive default is invisible to a predicate test.
+- **SSO identity rules live in one pure function, `checkIdentity`** (`backend/sso/client.go`, v4.5.4+), so they are unit-tested without an IdP. Any IdP-specific rule must be keyed on the issuer and leave every other IdP untouched — mdnest is generic OIDC, and Clerk, Okta, Entra, Keycloak and Auth0 all go through the same path. The Google `hd` rule is the example: it requires `hd` to be *present*, not *listed*, because `hd` is the org's primary domain (a secondary-domain user carries the primary), and it exempts `gmail.com`, whose accounts never have `hd`. The first draft required membership and would have locked out both. `email_verified` decodes as `flexBool` because some IdPs send the string `"true"`, and a strict `bool` failed the whole claim decode.
 - In single mode, the store/ package is not initialized — zero DB dependency
 - All handlers take `notesDir` (absolute path) in constructor
 - All file APIs require `ns` query param (namespace = top-level dir under NOTES_DIR)
@@ -524,6 +525,12 @@ override: `MDNEST_SKIP_E2E=1`.
     quietly reverts to a default. Runs in the pre-push hook alongside
     `tests/setup-marp-themes.sh`, which existed from v4.2.0 but was never
     invoked by anything until now.
+  - `tests/setup-sso-options.sh` — **new in v4.5.4.** The same class for the
+    SSO switches (`SSO_DISABLE_PASSWORD_LOGIN`, `SSO_AUTOPROVISION_USERS`,
+    `OIDC_GROUPS_CLAIM`): each reaches `.env`, a typo in a boolean fails setup
+    instead of silently meaning "off", and a value exported in the shell does
+    not leak in. Written because `setup.sh` never forwarded the last two, so
+    both were ignored on every setup.sh install and nothing said so.
 - **Playwright pins `colorScheme: 'dark'`** in `tests/browser/playwright.config.js`.
   mdnest's default theme is `auto`, which follows `prefers-color-scheme`, and
   Playwright's own default emulation is *light* — so without that pin every

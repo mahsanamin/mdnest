@@ -9,6 +9,8 @@
 //     in the mdnest users table (matched by lowercased email) — we do NOT
 //     auto-provision. Roles and grants continue to live in Postgres.
 //   - Optional domain allowlist (SSO_ALLOWED_DOMAINS) as a second defense.
+//   - The IdP must have verified the email; for Google, the account must also
+//     belong to a Workspace (`hd`) unless it is a gmail.com address. See checkIdentity.
 //   - No server-side session store: the CSRF/nonce state is carried in a
 //     short-lived signed cookie.
 //   - 2FA is skipped in SSO mode (the IdP owns MFA).
@@ -215,26 +217,18 @@ func (c *Client) ExchangeCallback(ctx context.Context, cookieValue, state, code 
 		return nil, errors.New("id_token nonce mismatch")
 	}
 
-	var claims struct {
-		Email         string `json:"email"`
-		EmailVerified bool   `json:"email_verified"`
-		Name          string `json:"name"`
-		Picture       string `json:"picture"`
-	}
+	var claims identityClaims
 	if err := idToken.Claims(&claims); err != nil {
 		return nil, fmt.Errorf("claim decode: %w", err)
 	}
-	if claims.Email == "" {
-		return nil, errors.New("id_token has no email claim")
-	}
-	email := strings.ToLower(strings.TrimSpace(claims.Email))
-	if !c.domainAllowed(email) {
-		return nil, fmt.Errorf("email domain not in SSO_ALLOWED_DOMAINS: %s", email)
+	email, err := c.checkIdentity(idToken.Issuer, claims)
+	if err != nil {
+		return nil, err
 	}
 
 	return &VerifiedClaims{
 		Email:         email,
-		EmailVerified: claims.EmailVerified,
+		EmailVerified: claims.EmailVerified != nil && bool(*claims.EmailVerified),
 		Name:          claims.Name,
 		Picture:       claims.Picture,
 		Subject:       idToken.Subject,
@@ -273,6 +267,94 @@ func (c *Client) extractGroups(idToken *oidc.IDToken) []string {
 	return out
 }
 
+// identityClaims is the subset of ID-token claims that decides WHO signed in.
+// EmailVerified is a pointer so "claim absent" stays distinguishable from
+// "claim present and false" — the two get different treatment below.
+type identityClaims struct {
+	Email         string    `json:"email"`
+	EmailVerified *flexBool `json:"email_verified"`
+	HostedDomain  string    `json:"hd"`
+	Name          string    `json:"name"`
+	Picture       string    `json:"picture"`
+}
+
+// flexBool decodes a JSON boolean or its string form ("true"/"false"). The
+// OIDC spec says email_verified is a boolean, but some IdPs (AWS Cognito among
+// them) send the string, and a strict bool made the whole claim decode fail —
+// so sign-in broke outright on those IdPs rather than just skipping a check.
+type flexBool bool
+
+func (b *flexBool) UnmarshalJSON(data []byte) error {
+	switch strings.ToLower(strings.Trim(string(data), `"`)) {
+	case "true":
+		*b = true
+	case "false":
+		*b = false
+	default:
+		return fmt.Errorf("email_verified: not a boolean: %s", data)
+	}
+	return nil
+}
+
+// isGoogleIssuer reports whether iss is Google's OIDC issuer. Google puts
+// either form in `iss`, so both are accepted.
+func isGoogleIssuer(iss string) bool {
+	iss = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(iss)), "/")
+	return iss == "https://accounts.google.com" || iss == "accounts.google.com"
+}
+
+// googleConsumerDomains are Google's own address domains. An account there is
+// a personal Google account by construction, never has `hd`, and its address
+// is owned by Google rather than by whoever registered it — so the Workspace
+// check below does not apply to it. An operator who lists gmail.com in
+// SSO_ALLOWED_DOMAINS is admitting consumer accounts on purpose.
+var googleConsumerDomains = map[string]bool{"gmail.com": true, "googlemail.com": true}
+
+// checkIdentity is the gate between "the IdP signed this token" and "this is
+// someone we let in". It returns the normalized email, or why it refused.
+// Pure (no network), so every rule is unit-tested without an IdP.
+//
+//   - email_verified: an email the IdP itself has not verified is not an
+//     identity — anyone can type one into a consumer account. A claim that is
+//     present and false is refused for every IdP. An ABSENT claim is refused
+//     for Google (which always sends it, so absence means something is wrong)
+//     and allowed for other IdPs, because Microsoft Entra ID omits it by
+//     default and refusing there would lock out working installs.
+//   - hd (Google hosted domain): SSO_ALLOWED_DOMAINS checks the email's
+//     domain, but a personal Google account can be registered on a company
+//     address, and its email then passes that check. Such an account has no
+//     `hd` — `hd` is only present for accounts a Google Workspace manages — so
+//     for Google, when SSO_ALLOWED_DOMAINS is set, `hd` must be present.
+//     Presence is the test, not membership of the list: `hd` is the org's
+//     PRIMARY domain, so a user on a secondary domain (alice@b.com in an org
+//     whose primary is a.com) carries hd=a.com, and a Workspace can only issue
+//     addresses on domains it has verified, so the email-domain check above
+//     already pins which org it is. Google's own consumer domains (gmail.com)
+//     are exempt: those accounts never have `hd`. `hd` is Google-specific:
+//     other IdPs never send it and are not checked for it, so
+//     Okta/Entra/Keycloak/Clerk installs see no new failure mode.
+func (c *Client) checkIdentity(issuer string, claims identityClaims) (string, error) {
+	if claims.Email == "" {
+		return "", errors.New("id_token has no email claim")
+	}
+	email := strings.ToLower(strings.TrimSpace(claims.Email))
+	google := isGoogleIssuer(issuer)
+	if claims.EmailVerified != nil && !*claims.EmailVerified {
+		return "", fmt.Errorf("email not verified by the IdP: %s", email)
+	}
+	if claims.EmailVerified == nil && google {
+		return "", fmt.Errorf("id_token has no email_verified claim: %s", email)
+	}
+	if !c.domainAllowed(email) {
+		return "", fmt.Errorf("email domain not in SSO_ALLOWED_DOMAINS: %s", email)
+	}
+	if google && len(c.cfg.AllowedDomains) > 0 && strings.TrimSpace(claims.HostedDomain) == "" &&
+		!googleConsumerDomains[email[strings.LastIndex(email, "@")+1:]] {
+		return "", fmt.Errorf("google account is not in a Workspace (no hd claim), so its address is not proof of the domain: %s", email)
+	}
+	return email, nil
+}
+
 func (c *Client) domainAllowed(email string) bool {
 	if len(c.cfg.AllowedDomains) == 0 {
 		return true // no allowlist configured = accept anything
@@ -281,7 +363,16 @@ func (c *Client) domainAllowed(email string) bool {
 	if at < 0 {
 		return false
 	}
-	domain := strings.ToLower(email[at+1:])
+	return c.domainInList(email[at+1:])
+}
+
+// domainInList reports whether domain is one of SSO_ALLOWED_DOMAINS. An empty
+// domain never matches.
+func (c *Client) domainInList(domain string) bool {
+	domain = strings.ToLower(strings.TrimSpace(domain))
+	if domain == "" {
+		return false
+	}
 	for _, d := range c.cfg.AllowedDomains {
 		if strings.ToLower(strings.TrimSpace(d)) == domain {
 			return true

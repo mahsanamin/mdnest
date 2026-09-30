@@ -332,6 +332,10 @@ sso:
   # default. Enable only when the IdP itself gates who may obtain a token
   # (e.g. a domain-restricted enterprise IdP); pair with `allowedDomains`.
   autoProvisionUsers: false
+  # -- Opt-in: refuse username/password on `/api/auth/login` so the IdP is the
+  # only way to get a session (`SSO_DISABLE_PASSWORD_LOGIN`). Recommended for an
+  # internet-facing install. SSO sign-in and API tokens keep working.
+  disablePasswordLogin: false
   # -- Existing Secret holding the OIDC client secret (preferred over inline).
   existingSecret: ""
   # -- Key inside `existingSecret` holding the client secret.
