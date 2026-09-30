@@ -4,6 +4,62 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v4.5.4 — SSO that is safe to put on the internet
+
+SSO sign-in (`USER_PROVIDER=sso`) was built for an install behind a company
+proxy. Put on a public hostname with nothing in front of it, the OIDC
+callback and the login endpoint are the whole gate, and they had gaps. This
+release closes them without changing anything for an install that was
+working, on any IdP. mdnest stays plain OIDC: Google, Okta, Microsoft Entra,
+Keycloak, Auth0 and now Clerk all go through the same code, with no
+provider SDK.
+
+### Security
+
+- **An email the IdP has not verified is refused.** `email_verified` was
+  read but never checked, so an unverified address matching an invited user
+  got in. A token that says `email_verified: false` is now refused for every
+  IdP. A token without the claim is refused for Google, which always sends
+  it, and still accepted elsewhere, because Microsoft Entra ID leaves it out
+  by default.
+- **For Google, a personal account on a company address no longer passes
+  `SSO_ALLOWED_DOMAINS`.** That setting checks the email's domain, and anyone
+  can register a personal Google account on their work address. Such an
+  account has no `hd` (Workspace) claim, so with an allowlist set, Google
+  sign-ins must now carry one. Two setups that work today keep working:
+  `gmail.com` in the allowlist (personal Gmail never has `hd`), and a
+  Workspace user on a secondary domain (`hd` is the org's primary domain, so
+  it is required to be present, not to be in the list).
+- **Password login can be switched off in SSO mode.** The web UI shows only
+  the SSO button, but `POST /api/auth/login` kept accepting a username and
+  password: a password prompt on the internet that skips the IdP and its MFA.
+  Set `SSO_DISABLE_PASSWORD_LOGIN=true` (Helm: `sso.disablePasswordLogin`)
+  and it answers `403` to every password attempt, right or wrong. It is off
+  by default. SSO sign-in, API tokens and existing sessions are unaffected;
+  an MCP server using `MDNEST_USER`/`MDNEST_PASSWORD` must switch to
+  `MDNEST_TOKEN`.
+
+### Fixed
+
+- **`SSO_AUTOPROVISION_USERS` and `OIDC_GROUPS_CLAIM` now work on `setup.sh`
+  installs.** `setup.sh` never copied either into `.env`, so both were
+  silently ignored. The SSO on/off switches are now also checked at setup
+  time: a value other than `true` or `false` stops setup and names the
+  setting, rather than quietly meaning "off".
+- **Sign-in works on IdPs that send `email_verified` as a string.** Some IdPs
+  send `"true"` rather than `true`, which made the whole token unreadable, so
+  sign-in failed outright. Both forms are now accepted.
+
+### Added
+
+- **Clerk setup steps** in `docs/sso-setup.md`, next to Google, Okta and
+  Entra. Clerk needs no code change: it is a standard OIDC provider. The
+  guide notes the one difference, that Clerk does not pass Google's `hd`
+  through, so behind Clerk the allowlist and invite-only users carry the
+  gate.
+
+---
+
 ## v4.5.3 — Install with one compose file
 
 Installing mdnest meant cloning the repo, running a setup script and building
