@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 
-function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePassword, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh, wsStatus, commentCount, onToggleComments, stickyCount, onToggleStickies, stickiesOpen, onSetBoardActive, boardActive, marpLocked, drawingDoc, drawingSource, onDrawingSourceChange, theme, onToggleTheme }) {
+function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePassword, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh, wsStatus, commentCount, onToggleComments, stickyCount, onToggleStickies, stickiesOpen, onSetBoardActive, boardActive, onSetChatsActive, chatsActive, marpLocked, drawingDoc, drawingSource, onDrawingSourceChange, theme, onToggleTheme }) {
   const [refreshing, setRefreshing] = useState(false);
   const handleRefresh = useCallback(() => {
     if (refreshing || !onRefresh) return;
@@ -17,7 +17,7 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
   // is edited, and the board has replaced it, so there is nothing for them to
   // act on. Leaving them visible-but-inert was the confusing part — they read
   // as view switches for what is on screen.
-  const showEditorToggle = viewMode !== 'preview' && onEditorModeChange && !boardActive;
+  const showEditorToggle = viewMode !== 'preview' && onEditorModeChange && !boardActive && !chatsActive;
 
   return (
     <div className="toolbar">
@@ -39,26 +39,37 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
           The class follows the destination too (.toolbar-view-board takes you
           to the board, .toolbar-view-editor brings you back), so the name is
           about intent rather than which half is lit. */}
-      {onSetBoardActive && (
-        boardActive ? (
-          <button
-            className="toolbar-view-btn toolbar-view-editor"
-            onClick={() => onSetBoardActive(false)}
-            title={currentPath ? `Back to ${currentPath}` : 'Back to the editor'}
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>
-            <span>Editor</span>
-          </button>
-        ) : (
-          <button
-            className="toolbar-view-btn toolbar-view-board"
-            onClick={() => onSetBoardActive(true)}
-            title="Task board for this workspace"
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
-            <span>Board</span>
-          </button>
-        )
+      {(boardActive || chatsActive) ? (
+        <button
+          className="toolbar-view-btn toolbar-view-editor"
+          onClick={() => (chatsActive ? onSetChatsActive(false) : onSetBoardActive(false))}
+          title={currentPath ? `Back to ${currentPath}` : 'Back to the editor'}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>
+          <span>Editor</span>
+        </button>
+      ) : null}
+      {onSetBoardActive && !boardActive && (
+        <button
+          className="toolbar-view-btn toolbar-view-board"
+          onClick={() => onSetBoardActive(true)}
+          title="Task board for this workspace"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+          <span>Board</span>
+        </button>
+      )}
+      {/* Chats sits beside Board and follows the same rule: the button names
+          where it takes you, and on that view it is replaced by "Editor". */}
+      {onSetChatsActive && !chatsActive && (
+        <button
+          className="toolbar-view-btn toolbar-view-chats"
+          onClick={() => onSetChatsActive(true)}
+          title="All chats"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <span>Chats</span>
+        </button>
       )}
       </div>
 

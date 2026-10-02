@@ -1314,6 +1314,135 @@ cmd_append() {
   api PATCH "/note?ns=$(urlencode "$PARSED_NS")&path=$(urlencode "$PARSED_PATH")&position=bottom" "$content"
 }
 
+# ─── chat ───────────────────────────────────────────────────────────────────
+# File-based chat (server needs ENABLE_CHAT=true). A chat is a note whose
+# frontmatter says `mdnest-chat: true`; every post is appended to it. The
+# server renders reads as plain text (`format=text`), so this needs no JSON
+# parser on any tier.
+#
+#   mdnest chat list [@alias]
+#   mdnest chat new  <path.md> ["Title"]          create a chat, or convert a note
+#   mdnest chat post <path.md> <text|-> [--as name]
+#   mdnest chat read <path.md> [--after N]
+#   mdnest chat wait <path.md> --after N [--timeout SECONDS]
+#
+# `wait` is what lets two agents hold a conversation: post, note the #N it
+# printed, then `wait --after N` blocks until someone else replies.
+chat_usage() {
+  cat >&2 <<'USAGE'
+Usage:
+  mdnest chat list [@alias]
+  mdnest chat new  @alias/namespace/path.md ["Title"]
+  mdnest chat post @alias/namespace/path.md <text|-> [--as name]
+  mdnest chat read @alias/namespace/path.md [--after N]
+  mdnest chat wait @alias/namespace/path.md --after N [--timeout SECONDS]
+
+--as sets the name shown on your message (default: $MDNEST_CHAT_AS, else your
+account). Each agent in a conversation should use its own --as.
+USAGE
+}
+
+chat_target() {
+  parse_path "$1"
+  require_server
+  if [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ]; then
+    chat_usage
+    exit 1
+  fi
+  CHAT_QS="ns=$(urlencode "$PARSED_NS")&path=$(urlencode "$PARSED_PATH")"
+  return 0
+}
+
+cmd_chat() {
+  local sub="${1:-}"
+  shift 2>/dev/null || true
+  case "$sub" in
+    list)
+      if [ -n "${1:-}" ]; then parse_path "$1"; fi
+      require_server
+      local qs="format=text"
+      if [ -n "$PARSED_NS" ]; then qs="$qs&ns=$(urlencode "$PARSED_NS")"; fi
+      local out
+      out=$(api GET "/chats?$qs") || exit 1
+      if [ -z "$out" ]; then
+        echo "No chats yet. Start one: mdnest chat new notes/Chats/team.md \"Team\""
+      else
+        printf '%s\n' "$out"
+      fi
+      ;;
+    new)
+      chat_target "${1:-}"
+      local title="${2:-}"
+      api POST "/chat/convert?$CHAT_QS&title=$(urlencode "$title")" "" >/dev/null || exit 1
+      echo "Chat ready: ${PARSED_NS}/${PARSED_PATH}"
+      ;;
+    post)
+      chat_target "${1:-}"
+      shift
+      local text_arg="" as="${MDNEST_CHAT_AS:-}"
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --as) as="${2:-}"; shift 2 ;;
+          --as=*) as="${1#--as=}"; shift ;;
+          *) text_arg="$1"; shift ;;
+        esac
+      done
+      local text; text=$(read_content "$text_arg") || exit 1
+      require_content "$text"
+      local resp
+      resp=$(api POST "/chat?$CHAT_QS&as=$(urlencode "$as")" "$text") || exit 1
+      local n="${resp#*\"count\":}"
+      n="${n%%[!0-9]*}"
+      echo "posted #${n} to ${PARSED_NS}/${PARSED_PATH}"
+      ;;
+    read|wait)
+      chat_target "${1:-}"
+      shift
+      local after=0 timeout="${MDNEST_CHAT_TIMEOUT:-600}"
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --after) after="${2:-0}"; shift 2 ;;
+          --after=*) after="${1#--after=}"; shift ;;
+          --timeout) timeout="${2:-600}"; shift 2 ;;
+          --timeout=*) timeout="${1#--timeout=}"; shift ;;
+          *) chat_usage; exit 1 ;;
+        esac
+      done
+      local poll="${MDNEST_CHAT_POLL:-3}"
+      # All three reach $(( )) or curl; bash arithmetic evaluates `a[$(cmd)]`,
+      # so anything but digits is refused rather than interpreted.
+      case "$after" in ''|*[!0-9]*) echo "Error: --after takes a whole number" >&2; exit 1 ;; esac
+      case "$timeout" in ''|*[!0-9]*) echo "Error: --timeout takes a whole number of seconds" >&2; exit 1 ;; esac
+      case "$poll" in ''|0|*[!0-9]*) echo "Error: MDNEST_CHAT_POLL must be a whole number of seconds (1 or more)" >&2; exit 1 ;; esac
+      local out
+      if [ "$sub" = "read" ]; then
+        out=$(api GET "/chat?$CHAT_QS&after=$after&format=text") || exit 1
+        if [ -n "$out" ]; then printf '%s\n' "$out"; fi
+        return 0
+      fi
+      # wait: poll until a message after N exists. Plain polling on purpose —
+      # it works through every proxy and needs no websocket support in bash.
+      local waited=0
+      while :; do
+        out=$(api GET "/chat?$CHAT_QS&after=$after&format=text") || exit 1
+        if [ -n "$out" ]; then
+          printf '%s\n' "$out"
+          return 0
+        fi
+        if [ "$waited" -ge "$timeout" ]; then
+          echo "No new messages after #${after} within ${timeout}s." >&2
+          exit 2
+        fi
+        sleep "$poll"
+        waited=$((waited + poll))
+      done
+      ;;
+    ""|help|-h|--help) chat_usage ;;
+    *) echo "Unknown chat command: $sub" >&2; chat_usage; exit 1 ;;
+  esac
+  return 0
+}
+
 cmd_prepend() {
   parse_path "$1"
   require_server
@@ -1505,6 +1634,8 @@ QUICK REFERENCE (for AI agents / LLMs)
   Append:       mdnest append @alias/namespace/path.md "text"
   Search:       mdnest search @alias/namespace "query"
   List:         mdnest list   @alias/namespace
+  Chat:         mdnest chat post @alias/namespace/chat.md "text" --as my-name
+                mdnest chat wait @alias/namespace/chat.md --after 7   (blocks for a reply)
 
   IMPORTANT: "create" = new file. "write" = overwrite EXISTING file (returns 404 if not found).
   Use "mdnest servers -v" to discover available @aliases and namespaces.
@@ -1546,6 +1677,9 @@ NOTE OPERATIONS
   list     [@alias/namespace]     List namespaces, or a namespace/folder as a tree
            [--json]               ...as the raw API JSON instead (for scripts)
   search   <ns-path> "query"      Search note contents
+  chat     list|new|post|read|wait  File-based chat in a note (server: ENABLE_CHAT)
+           post <path> <text|-> [--as name]   read <path> [--after N]
+           wait <path> --after N [--timeout S]   new <path> ["Title"]
 
 OTHER
   version                         Show CLI version
@@ -1587,6 +1721,11 @@ EXAMPLES
 
   # Search
   mdnest search @work/engineering "database schema"
+
+  # Chat — two agents (or an agent and you) talking through one note
+  mdnest chat new  @work/engineering/Chats/release.md "Release"
+  mdnest chat post @work/engineering/Chats/release.md "Migrations done" --as api-agent
+  mdnest chat wait @work/engineering/Chats/release.md --after 1
 
   # List — a tree for humans, --json for scripts
   mdnest list @work/engineering
@@ -1634,6 +1773,7 @@ case "$CMD" in
   delete)   load_default; warn_if_default_alias; cmd_delete "$@" ;;
   move)     load_default; warn_if_default_alias; cmd_move "$@" ;;
   search)   load_default; warn_if_default_alias; cmd_search "$@" ;;
+  chat)     load_default; warn_if_default_alias; cmd_chat "$@" ;;
   note)     cmd_note_legacy "$@" ;;
   version|--version|-v) echo "mdnest CLI v${MDNEST_CLI_VERSION}" ;;
   docs)

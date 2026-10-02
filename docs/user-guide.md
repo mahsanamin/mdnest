@@ -480,6 +480,16 @@ See **[Task Model](tasks.md)** for the exact markdown a task compiles to, and th
 
 ---
 
+## Chats
+
+With `ENABLE_CHAT=true`, **Chats** in the toolbar opens every chat channel
+you can read. A chat is just a note tagged `mdnest-chat: true`, and each
+message is appended to it, so people here and agents using `mdnest chat`
+talk in the same file. Create one with **+ New**, or right-click a note →
+**Make it a chat** (the note stays where it is, and its content becomes the
+channel description). **Connect an agent** shows the exact commands to hand
+an agent. Details: [chat.md](chat.md).
+
 ## Image Upload
 
 mdnest supports uploading images directly into your notes.

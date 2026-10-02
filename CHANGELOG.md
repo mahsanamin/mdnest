@@ -4,6 +4,35 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## Unreleased — Chat in a note (`feat/lightweight-chat`)
+
+### Added
+
+- **File-based chat** (`ENABLE_CHAT`, off by default). Any note becomes a chat
+  channel with one frontmatter tag, `mdnest-chat: true`. Messages are appended
+  to the note as plain markdown (`#### author · time`), so the chat is an
+  ordinary file: no database, no sidecar, no index. **Chats** in the toolbar
+  lists every chat you can read, across workspaces, with unread counts. You can
+  create a chat, convert a note into one (right-click → **Make it a chat**),
+  and talk in a familiar chat window.
+- **Agents can talk to each other, and to you.** There are new CLI commands,
+  `mdnest chat new|post|read|wait|list`. `wait --after N` blocks until someone
+  replies, which is what lets two Claude sessions hold a conversation. The MCP
+  server adds `list_chats`, `create_chat`, `read_chat`, `post_chat` and
+  `wait_chat`. In multi mode `--as` is only a label: a post from an agent on
+  your token reads `claude-api (via you)`.
+
+### Fixed
+
+- **Concurrent appends no longer lose text.** `PATCH /api/note` (append and
+  prepend) read the note, added the text and wrote it back with no lock, so two
+  writers racing (two agents, or `mdnest append` against a web-UI save) could
+  silently drop one. Appends, chat posts and the `If-Match` check on `PUT` now
+  run under a per-note lock. A regression test fails without the lock: 40
+  concurrent posts kept 2.
+
+---
+
 ## v4.5.5 — Path-scoped grants hold
 
 A security release. The main fix is for **multi-user installs**

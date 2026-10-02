@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { parseRoute, formatRoute } from './hashRoute';
+import { chatPathFor } from './chat.js';
 import Login from './components/Login.jsx';
 import LoginFirebase from './components/LoginFirebase.jsx';
 import LoginSSO from './components/LoginSSO.jsx';
@@ -26,6 +27,9 @@ const MarpDeck = lazy(() => loadWithRetry(() => import('./components/MarpDeck.js
 // Lazy Excalidraw drawing editor: pulls in the (large) Excalidraw bundle, off
 // by default (ENABLE_EXCALIDRAW), so notes-only installs never carry the chunk.
 const ExcalidrawEditor = lazy(() => loadWithRetry(() => import('./components/ExcalidrawEditor.jsx')));
+// Lazy chats view, off by default (ENABLE_CHAT): notes-only installs never
+// download it.
+const ChatView = lazy(() => loadWithRetry(() => import('./components/ChatView.jsx')));
 import Preview from './components/Preview.jsx';
 import ContextMenu from './components/ContextMenu.jsx';
 import Settings from './components/Settings.jsx';
@@ -62,8 +66,7 @@ import {
   fetchStickies,
   saveStickies,
   logout as apiLogout,
-  PermissionError,
-} from './api.js';
+  PermissionError, convertToChat } from './api.js';
 import { buildPathIndex } from './wikilink.js';
 import { createEchoGate } from './echo-gate.js';
 import { broadcastTabMessage, onTabMessage } from './tab-sync.js';
@@ -303,6 +306,11 @@ function App() {
   // close over a stale value.
   const stickiesLoadRef = useRef('loading');
   const [showTaskBoard, setShowTaskBoard] = useState(false);
+  // The chats view replaces the editor area like the board does. openChat is
+  // the conversation shown in it ({ns, path} | null) — chats span namespaces,
+  // so it is independent of the note open underneath.
+  const [chatsOpen, setChatsOpen] = useState(false);
+  const [openChat, setOpenChat] = useState(null);
   // Bumped by the toolbar Refresh so the task board reloads its tasks too
   // (the board isn't part of the note/tree refresh path).
   const [boardRefreshNonce, setBoardRefreshNonce] = useState(0);
@@ -345,6 +353,7 @@ function App() {
   // ENABLE_TASK_BOARD on the backend. When off, /api/tasks and /api/board are
   // not registered at all, so the button must not be offered.
   const taskBoardEnabled = !!appConfig?.taskBoard;
+  const chatEnabled = !!appConfig?.chat;
 
   // "Basic" on a drawing shows the file's markdown source rather than the
   // canvas. Per-note and not persisted: a drawing should open as a drawing, so
@@ -877,7 +886,12 @@ function App() {
       }
 
       const nsList = await loadNamespaces();
-      const { ns: hashNs, path: hashPath, stickies: hashStickies, board: hashBoard } = parseHash();
+      const { ns: hashNs, path: hashPath, stickies: hashStickies, board: hashBoard, chats: hashChats, chat: hashChat } = parseHash();
+      // Opened (or refreshed) on the chats view, possibly with one chat open.
+      if (hashChats) {
+        setChatsOpen(true);
+        setOpenChat(hashChat || null);
+      }
       // Opened (or refreshed) on the task board: reopen it over the same
       // namespace and note.
       if (hashBoard) setShowTaskBoard(true);
@@ -909,7 +923,7 @@ function App() {
             setCurrentPath(last);
             // Not while the board route is what brought us here — writing the
             // note hash would overwrite the very URL being restored.
-            if (!hashStickies) setHash(targetNs, last);
+            if (!hashStickies && !hashChats) setHash(targetNs, last);
           }
         }
       }
@@ -1058,21 +1072,32 @@ function App() {
       setHash(null, null, true);
       return;
     }
+    // Same rule as the board: until config loads, keep a chats deep link.
+    if (chatsOpen && (!appConfig || chatEnabled)) {
+      window.history.replaceState(null, '', formatRoute({ chats: true, chat: openChat }));
+      return;
+    }
     if (selectedNs) {
       // Until the config has loaded we can't know whether the board is
       // enabled; keep the board route rather than rewriting a deep link away.
       setHash(selectedNs, currentPath, false, showTaskBoard && (!appConfig || taskBoardEnabled));
     }
-  }, [selectedNs, currentPath, stickiesView, showTaskBoard, appConfig, taskBoardEnabled]);
+  }, [selectedNs, currentPath, stickiesView, showTaskBoard, appConfig, taskBoardEnabled, chatsOpen, openChat, chatEnabled]);
 
   // Handle browser back/forward
   useEffect(() => {
     const onHashChange = () => {
-      const { ns, path, stickies, board } = parseHash();
+      const { ns, path, stickies, board, chats, chat } = parseHash();
       if (stickies) {
         setStickiesView('board');
         return; // the board route says nothing about which note is open
       }
+      if (chats) {
+        setChatsOpen(true);
+        setOpenChat(chat || null);
+        return; // the chats route names a chat, not the note underneath
+      }
+      setChatsOpen(false);
       setStickiesView((v) => (v === 'board' ? 'closed' : v));
       setShowTaskBoard(board);
       if (ns && ns !== selectedNs) {
@@ -1262,6 +1287,21 @@ function App() {
   // memoised. An inline arrow here would be a new function on every App
   // render, so every card would re-render and the memo would buy nothing.
   const openNoteFromBoard = useCallback((p) => { setShowTaskBoard(false); openNote(p); }, [openNote]);
+  // "Open the note behind this chat": leave the chats view and open the file,
+  // switching namespace when the chat lives in another one.
+  const openNoteFromChat = useCallback((ns, p) => {
+    setChatsOpen(false);
+    if (ns !== selectedNs) setSelectedNs(ns);
+    openNoteDirect(ns, p);
+  }, [openNoteDirect, selectedNs]);
+  const setChatsActive = useCallback((on) => {
+    if (on) setShowTaskBoard(false);
+    setChatsOpen(on);
+  }, []);
+  const setBoardActive = useCallback((on) => {
+    if (on) setChatsOpen(false);
+    setShowTaskBoard(on);
+  }, []);
 
 
   const refreshComments = useCallback(() => {
@@ -1501,6 +1541,34 @@ function App() {
           if (lastForNs && lastForNs.startsWith(target.path)) setLastPath(selectedNs, null);
           await refreshTree(undefined, { broadcast: true });
         } catch (e) { alert('Failed to delete folder: ' + e.message); }
+        break;
+      }
+      case 'convert-chat': {
+        // Tag the note as a chat in place (its content becomes the channel
+        // description) and open it in the chats view. The file is not moved,
+        // so a path already handed to an agent keeps working.
+        if (target && selectedNs) {
+          try {
+            await convertToChat(selectedNs, target.path, '');
+            setShowTaskBoard(false);
+            setOpenChat({ ns: selectedNs, path: target.path });
+            setChatsOpen(true);
+          } catch (e) { alert('Failed to make a chat: ' + e.message); }
+        }
+        break;
+      }
+      case 'new-chat': {
+        if (!selectedNs) break;
+        const title = window.prompt('Chat name');
+        if (!title || !title.trim()) break;
+        const path = chatPathFor(title, target?.path || '');
+        try {
+          await convertToChat(selectedNs, path, title.trim());
+          await refreshTree(undefined, { broadcast: true });
+          setShowTaskBoard(false);
+          setOpenChat({ ns: selectedNs, path });
+          setChatsOpen(true);
+        } catch (e) { alert('Failed to create chat: ' + e.message); }
         break;
       }
       case 'copy-path': {
@@ -1784,7 +1852,7 @@ function App() {
         // Opening a file hands the create-target back to that file's folder,
         // so it tracks where you actually are rather than the last folder
         // you happened to expand.
-        onSelect={(p) => { setPickedFolder(null); openNote(p); }}
+        onSelect={(p) => { setPickedFolder(null); setChatsOpen(false); openNote(p); }}
         currentPath={currentPath}
         namespaces={namespaces}
         selectedNs={selectedNs}
@@ -1850,7 +1918,9 @@ function App() {
           }}
           editorMode={editorModeForNote}
           marpLocked={marpActive}
-          onSetBoardActive={taskBoardEnabled && selectedNs ? setShowTaskBoard : null}
+          onSetBoardActive={taskBoardEnabled && selectedNs ? setBoardActive : null}
+          onSetChatsActive={chatEnabled ? setChatsActive : null}
+          chatsActive={chatsOpen && chatEnabled}
           drawingDoc={isDrawingDoc}
           drawingSource={drawingSource}
           onDrawingSourceChange={setDrawingSource}
@@ -1860,6 +1930,7 @@ function App() {
             // Live editor, which would reformat and break the slides.
             if (marpActive && mode === 'live') return;
             setShowTaskBoard(false);
+            setChatsOpen(false);
             setEditorMode(mode);
             localStorage.setItem('mdnest_editor_mode', mode);
             // User explicitly opted back into Live for this file — clear
@@ -1950,7 +2021,28 @@ function App() {
           {appConfig?.liveCollab && presenceUsers.length > 1 && (
             <PresenceBar users={presenceUsers} currentUserId={userInfo?.id} typingUsers={typingUsers} />
           )}
-          {showTaskBoard && taskBoardEnabled && selectedNs ? (
+          {chatsOpen && chatEnabled ? (
+            <ChunkErrorBoundary
+              label="chats"
+              resetKey="chats"
+              onDismiss={() => setChatsOpen(false)}
+              dismissLabel="Close chats"
+            >
+            <Suspense fallback={<div className="editor-loading">Loading chats...</div>}>
+              <ChatView
+                namespaces={namespaces}
+                defaultNs={selectedNs}
+                account={isMulti ? userInfo?.username : null}
+                serverAlias={appConfig?.serverAlias}
+                isMobile={isMobile}
+                openChat={openChat}
+                onSelectChat={setOpenChat}
+                onOpenNote={openNoteFromChat}
+                onClose={() => setChatsOpen(false)}
+              />
+            </Suspense>
+            </ChunkErrorBoundary>
+          ) : showTaskBoard && taskBoardEnabled && selectedNs ? (
             <ChunkErrorBoundary
               label="the task board"
               resetKey={selectedNs}
@@ -2191,6 +2283,7 @@ function App() {
         isAdmin={isAdmin && isMulti}
         selectedNs={selectedNs}
         excalidraw={excalidrawEnabled}
+        chat={chatEnabled}
       />
       {showReleaseNotes && appConfig?.latestRelease && (
         <ReleaseNotesModal

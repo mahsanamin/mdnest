@@ -60,7 +60,7 @@ async function authenticate() {
 // registered when the backend has them enabled — an operator running notes-only
 // mdnest sees no task/drawing/slide tools. If /api/config can't be read we stay
 // permissive (expose everything) rather than hide a working feature.
-const features = { taskBoard: true, marp: true, excalidraw: true };
+const features = { taskBoard: true, marp: true, excalidraw: true, chat: true };
 async function loadFeatures() {
   try {
     const res = await fetch(`${BASE_URL}/api/config`);
@@ -69,9 +69,10 @@ async function loadFeatures() {
     features.taskBoard = !!cfg.taskBoard;
     features.marp = !!cfg.marp;
     features.excalidraw = !!cfg.excalidraw;
+    features.chat = !!cfg.chat;
   } catch (err) {
     console.error(`Could not read /api/config (${err.message}); exposing all tools.`);
-    features.taskBoard = features.marp = features.excalidraw = true;
+    features.taskBoard = features.marp = features.excalidraw = features.chat = true;
   }
 }
 
@@ -663,6 +664,122 @@ server.tool(
       }
       const data = await res.json();
       return { content: [{ type: "text", text: JSON.stringify(data) }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// File-based chat (ENABLE_CHAT). A chat is a note tagged `mdnest-chat: true`;
+// posts are appended to it. Several agents (and people in the web UI) can talk
+// through one note: post, then wait_chat with after=<the #N you got back>.
+// ---------------------------------------------------------------------------
+async function chatError(res) {
+  const text = await res.text().catch(() => "");
+  return { content: [{ type: "text", text: `Error ${res.status}: ${text}` }], isError: true };
+}
+const chatQS = (namespace, path) => `ns=${encodeURIComponent(namespace)}&path=${encodeURIComponent(path)}`;
+
+if (features.chat) server.tool(
+  "list_chats",
+  "List every chat channel (notes tagged `mdnest-chat: true`) you can read, most recently active first.",
+  { namespace: z.string().optional().describe("Limit to one namespace") },
+  async ({ namespace }) => {
+    try {
+      const q = namespace ? `?ns=${encodeURIComponent(namespace)}` : "";
+      const res = await api(`/api/chats${q}`);
+      if (!res.ok) return chatError(res);
+      return { content: [{ type: "text", text: JSON.stringify(await res.json(), null, 2) }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+if (features.chat) server.tool(
+  "create_chat",
+  "Create a chat channel at a .md path, or turn an existing note into one (its content becomes the channel description; the file is not moved).",
+  {
+    namespace: z.string().describe("Namespace name"),
+    path: z.string().describe("Path of the .md note, e.g. Chats/release.md"),
+    title: z.string().optional().describe("Display name for the channel"),
+  },
+  async ({ namespace, path, title }) => {
+    try {
+      const res = await api(`/api/chat/convert?${chatQS(namespace, path)}&title=${encodeURIComponent(title || "")}`, { method: "POST" });
+      if (!res.ok) return chatError(res);
+      return { content: [{ type: "text", text: JSON.stringify(await res.json()) }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+if (features.chat) server.tool(
+  "read_chat",
+  "Read a chat's messages. Pass after=N to get only messages newer than #N.",
+  {
+    namespace: z.string().describe("Namespace name"),
+    path: z.string().describe("Path of the chat note"),
+    after: z.number().int().min(0).optional().describe("Only return messages after this message number"),
+  },
+  async ({ namespace, path, after }) => {
+    try {
+      const res = await api(`/api/chat?${chatQS(namespace, path)}&after=${after || 0}&format=text`);
+      if (!res.ok) return chatError(res);
+      const text = await res.text();
+      const count = res.headers.get("x-chat-count") || "0";
+      return { content: [{ type: "text", text: text || `(no messages after #${after || 0}; the chat has ${count})` }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+if (features.chat) server.tool(
+  "post_chat",
+  "Post a message to a chat. `as` is the name shown on the message — give each agent in a conversation its own. Returns the message number to pass to wait_chat.",
+  {
+    namespace: z.string().describe("Namespace name"),
+    path: z.string().describe("Path of the chat note"),
+    text: z.string().describe("Message (markdown)"),
+    as: z.string().optional().describe("Display name for this poster, e.g. 'api-agent'"),
+  },
+  async ({ namespace, path, text, as }) => {
+    try {
+      const res = await api(`/api/chat?${chatQS(namespace, path)}&as=${encodeURIComponent(as || "")}`, { method: "POST", body: text });
+      if (!res.ok) return chatError(res);
+      const data = await res.json();
+      return { content: [{ type: "text", text: `posted #${data.count}` }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+if (features.chat) server.tool(
+  "wait_chat",
+  "Block until a message newer than #after arrives (polls every 3s), then return the new messages. Use after posting to wait for a reply.",
+  {
+    namespace: z.string().describe("Namespace name"),
+    path: z.string().describe("Path of the chat note"),
+    after: z.number().int().min(0).describe("Wait for messages after this number"),
+    timeout_seconds: z.number().int().min(1).max(300).optional().describe("Give up after this long (default 120, max 300)"),
+  },
+  async ({ namespace, path, after, timeout_seconds }) => {
+    const deadline = Date.now() + (timeout_seconds || 120) * 1000;
+    try {
+      for (;;) {
+        const res = await api(`/api/chat?${chatQS(namespace, path)}&after=${after}&format=text`);
+        if (!res.ok) return chatError(res);
+        const text = await res.text();
+        if (text) return { content: [{ type: "text", text }] };
+        if (Date.now() >= deadline) {
+          return { content: [{ type: "text", text: `No new messages after #${after} yet. Call wait_chat again to keep waiting.` }] };
+        }
+        await new Promise((r) => setTimeout(r, 3000));
+      }
     } catch (err) {
       return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
     }

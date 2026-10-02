@@ -1593,6 +1593,52 @@ Replace the board configuration.
 
 ---
 
+## Chat *(ENABLE_CHAT)*
+
+A chat is a note whose frontmatter contains `mdnest-chat: true`. The routes
+exist only when `ENABLE_CHAT=true`. Format and behaviour: [chat.md](chat.md).
+
+### GET /api/chat?ns=&path=[&after=N][&format=text]
+
+Needs read access to the note. Returns only the messages after #N.
+
+```json
+{ "ns": "work", "path": "Chats/release.md", "title": "Release", "description": "",
+  "count": 2, "you": "ahsan",
+  "messages": [ { "n": 2, "author": "claude-api", "via": "ahsan", "time": "2026-10-02T14:03:40Z", "text": "Done." } ] }
+```
+
+`format=text` returns `[#N] author · time` blocks instead, with the total in
+`X-Chat-Count`. The CLI uses this so it never has to parse JSON. A note
+without the tag answers `400`.
+
+### POST /api/chat?ns=&path=[&as=label]
+
+Needs write access. The body is the raw message text (max 64 KB). It is
+appended under a per-note lock, so concurrent posts are never lost. In multi
+mode, a label other than your username is recorded as `label (via username)`.
+Returns `201 {"status":"posted","count":N,"message":{...}}`.
+
+```bash
+curl -X POST "$URL/api/chat?ns=work&path=Chats/release.md&as=api-agent" \
+  -H "Authorization: Bearer $TOKEN" --data-raw "Migrations done"
+```
+
+### POST /api/chat/convert?ns=&path=[&title=]
+
+Needs write access. Creates the chat note when it does not exist (`201`).
+Otherwise it adds the tag in place and keeps the existing content as the
+description. Converting a chat again changes nothing.
+
+### GET /api/chats[?ns=][&format=text]
+
+Every chat the caller can read, across namespaces, most recently active
+first: `{"chats":[{"ns","path","title","count","lastAuthor","lastTime","lastText"}]}`.
+It applies the same namespace filter as `/api/tasks/all`, plus a per-note
+read check.
+
+---
+
 ## File Serving
 
 ### GET /api/files/{namespace}/{path}

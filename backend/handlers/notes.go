@@ -198,6 +198,21 @@ func (h *NoteHandler) updateNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Read the body BEFORE taking the note lock: a slow client must not be
+	// able to hold the lock (and stall every append/chat post to this note)
+	// while it trickles its upload in.
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxNoteSize))
+	if err != nil {
+		http.Error(w, `{"error":"failed to read body"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Held across the If-Match check and the write, so the check is about the
+	// bytes actually being replaced: an append or chat post can no longer
+	// land between the two and be overwritten by a save that "matched".
+	unlock := lockNote(ns, relPath)
+	defer unlock()
+
 	// Read current file for existence check and ETag verification
 	currentData, err := h.store.ReadFile(ctx, ns, relPath)
 	if err != nil {
@@ -230,12 +245,6 @@ func (h *NoteHandler) updateNote(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-	}
-
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxNoteSize))
-	if err != nil {
-		http.Error(w, `{"error":"failed to read body"}`, http.StatusBadRequest)
-		return
 	}
 
 	// Last-line-of-defense against destructive autosave: refuse to truncate
@@ -420,6 +429,11 @@ func (h *NoteHandler) patchNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	text := string(body)
+
+	// Serialise with any other append/chat post to this note: the read and
+	// the write below would otherwise interleave and drop one writer's text.
+	unlock := lockNote(ns, relPath)
+	defer unlock()
 
 	// Read existing content (empty if file doesn't exist yet)
 	existing := ""
