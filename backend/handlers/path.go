@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/mdnest/mdnest/backend/relpath"
 	"github.com/mdnest/mdnest/backend/storage"
 )
 
@@ -28,15 +29,10 @@ func ValidNamespaceName(ns string) bool {
 // returns it cleaned with forward-slash separators. It returns ("", false)
 // if the path is empty, absolute or attempts traversal. Unlike SafePath it
 // does no filesystem access, so it is valid for object-store backends too.
+// It is relpath.Clean, which the permission middleware also uses, so the path
+// a request is authorised for is the path the handler acts on.
 func SafeRelPath(reqPath string) (string, bool) {
-	if reqPath == "" {
-		return "", false
-	}
-	cleaned := filepath.ToSlash(filepath.Clean(reqPath))
-	if strings.HasPrefix(cleaned, "/") || strings.HasPrefix(cleaned, "..") || cleaned == "." {
-		return "", false
-	}
-	return cleaned, true
+	return relpath.Clean(reqPath)
 }
 
 // RequireNamespaceStore extracts and validates the "ns" query parameter

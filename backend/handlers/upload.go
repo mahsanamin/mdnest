@@ -107,6 +107,13 @@ func (h *UploadHandler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid upload destination"}`, http.StatusBadRequest)
 		return
 	}
+	// The route middleware authorised ?path=, but the file lands in
+	// dir(path)/<filename>, which can sit outside that grant (path=Shared
+	// writes to the namespace root). Check the destination actually written.
+	if h.perms != nil && !h.perms.CheckWrite(r, ns, "/"+destRel) {
+		middleware.DenyJSON(w)
+		return
+	}
 
 	if err := h.store.WriteFrom(ctx, ns, destRel, file, header.Size); err != nil {
 		http.Error(w, `{"error":"failed to save file"}`, http.StatusInternalServerError)
@@ -174,9 +181,15 @@ func (h *UploadHandler) HandleServeFile(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if ct := mime.TypeByExtension(path.Ext(relPath)); ct != "" {
-		w.Header().Set("Content-Type", ct)
+	// Always declare a type. Left unset, http.ServeContent sniffs the bytes,
+	// so an extension-less file that starts with <html> would be served as
+	// text/html, bypassing the extension-based sandbox below.
+	ct := mime.TypeByExtension(path.Ext(relPath))
+	if ct == "" {
+		ct = "application/octet-stream"
 	}
+	w.Header().Set("Content-Type", ct)
+	setServedFileSafetyHeaders(w, relPath, ct)
 
 	// Prefer range/conditional-GET support when the backend can hand out a
 	// seekable reader (local filesystem). This keeps browser image caching
@@ -200,4 +213,40 @@ func (h *UploadHandler) HandleServeFile(w http.ResponseWriter, r *http.Request) 
 	}
 	defer rc.Close()
 	io.Copy(w, rc)
+}
+
+// activeFileExts are formats a browser will EXECUTE when the file is opened
+// directly (not via <img>): an SVG can carry <script>, and so can HTML/XML.
+// Served inline from mdnest's own origin, such a file could read the
+// viewer's session token, and anyone who can write a note can create one.
+var activeFileExts = map[string]bool{
+	".svg": true, ".svgz": true, ".html": true, ".htm": true, ".xhtml": true,
+	".xml": true, ".js": true, ".mjs": true,
+}
+
+// setServedFileSafetyHeaders: nosniff on every file, so a browser never
+// guesses a type more powerful than the one we declared; and for active
+// formats a CSP sandbox, which turns a directly opened file into an inert,
+// script-less document in a unique origin. <img> rendering is unaffected
+// (an image never runs scripts, and its own CSP does not apply there).
+// "Active" is judged by the extension AND by the declared type, so an
+// extension mapped to an HTML/XML/script type by the host's mime table is
+// covered too.
+func setServedFileSafetyHeaders(w http.ResponseWriter, relPath, contentType string) {
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if activeFileExts[strings.ToLower(path.Ext(relPath))] || isActiveContentType(contentType) {
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; img-src data:; style-src 'unsafe-inline'; sandbox")
+	}
+}
+
+// isActiveContentType reports whether a browser could run script in a
+// document of this type: any HTML or XML flavour (XHTML, SVG, XSLT) and
+// JavaScript.
+func isActiveContentType(contentType string) bool {
+	mt, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return true // unparseable: assume the worst
+	}
+	return strings.Contains(mt, "html") || strings.Contains(mt, "xml") ||
+		strings.Contains(mt, "javascript") || strings.Contains(mt, "ecmascript")
 }
