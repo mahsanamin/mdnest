@@ -5,6 +5,15 @@
 // format); this module only decides how the web UI names, colours, groups and
 // polls it.
 
+// isChatDoc mirrors the backend's IsChatNote: leading frontmatter with
+// `mdnest-chat: true`. Same frontmatter grammar as isMarpDoc (marp.js).
+export function isChatDoc(content) {
+  if (typeof content !== 'string') return false;
+  const m = content.match(/^\uFEFF?---\r?\n([\s\S]*?)\r?\n---[ \t]*(\r?\n|$)/);
+  if (!m) return false;
+  return /^mdnest-chat[ \t]*:[ \t]*["']?true["']?[ \t]*$/im.test(m[1]);
+}
+
 // Poll cadence. The chat view does not depend on the live-collab websocket
 // (off by default, multi mode only), so polling is the one mechanism that
 // works on every install. Reads are cheap: `after=N` returns only new posts.

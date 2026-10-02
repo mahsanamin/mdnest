@@ -5632,28 +5632,21 @@ pre:hover .code-copy-btn {
    shape — it looked like a smudge next to the crisp single-stroke icons
    beside it. currentColor ties the outline to the button's own text colour,
    so it darkens on hover with everything else. */
-.sticky-icon-back {
-  fill: var(--sticky-blue);
-  stroke: currentColor;
-  stroke-width: 1.5;
-}
-
 .sticky-icon-front {
-  fill: var(--sticky-yellow);
-  stroke: currentColor;
-  stroke-width: 1.5;
+  fill: var(--sticky-icon-paper);
+  stroke: var(--sticky-icon-ink);
+  stroke-width: 1.4;
 }
 
-/* The peeled corner: a different fill from the face so the fold reads as a
-   fold rather than a notch cut out of the card. */
+/* The peeled corner: darker than the face so it reads as a fold. */
 .sticky-icon-fold {
-  fill: var(--sticky-grey);
-  stroke: currentColor;
-  stroke-width: 1.5;
+  fill: var(--sticky-icon-fold);
+  stroke: var(--sticky-icon-ink);
+  stroke-width: 1.4;
 }
 
 .sticky-icon-ink {
-  stroke: var(--text-secondary);
+  stroke: var(--sticky-icon-ink);
   fill: none;
 }
 

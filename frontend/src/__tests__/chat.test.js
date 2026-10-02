@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   slugify, chatPathFor, colorForAuthor, AUTHOR_COLORS, isOwnMessage,
-  groupMessages, mergeMessages, agentInstructions, plainPreview, shellQuote,
+  groupMessages, mergeMessages, agentInstructions, plainPreview, shellQuote, isChatDoc,
 } from '../chat.js';
 
 describe('chat naming', () => {
@@ -88,5 +88,18 @@ describe('shell safety of the agent snippet', () => {
     const hostile = "a;echo PWNED|cat;$(id)`id`'b.md";
     const out = execFileSync('sh', ['-c', `printf %s ${shellQuote(hostile)}`]).toString();
     expect(out).toBe(hostile);
+  });
+});
+
+describe('isChatDoc (the editor lock and the tree redirect depend on it)', () => {
+  it('matches the backend: leading frontmatter with mdnest-chat: true', () => {
+    expect(isChatDoc('---\nmdnest-chat: true\ntitle: T\n---\n\nhi')).toBe(true);
+    expect(isChatDoc('\uFEFF---\r\ntitle: T\r\nmdnest-chat: "true"\r\n---\r\n')).toBe(true);
+  });
+  it('does not match a note the Live editor already flattened', () => {
+    // exactly what Live turned a chat into before chat notes were locked
+    expect(isChatDoc('***\n\nmdnest-chat: true\ntitle: myCustomChat\n-------------------\n')).toBe(false);
+    expect(isChatDoc('---\nmdnest-chat: false\n---\n')).toBe(false);
+    expect(isChatDoc('# mdnest-chat: true')).toBe(false);
   });
 });

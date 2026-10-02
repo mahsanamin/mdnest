@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 
-function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePassword, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh, wsStatus, commentCount, onToggleComments, stickyCount, onToggleStickies, stickiesOpen, onSetBoardActive, boardActive, onSetChatsActive, chatsActive, marpLocked, drawingDoc, drawingSource, onDrawingSourceChange, theme, onToggleTheme }) {
+function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePassword, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh, wsStatus, commentCount, onToggleComments, stickyCount, onToggleStickies, stickiesOpen, onSetBoardActive, boardActive, onSetChatsActive, chatsActive, marpLocked, liveLockReason, drawingDoc, drawingSource, onDrawingSourceChange, theme, onToggleTheme }) {
   const [refreshing, setRefreshing] = useState(false);
   const handleRefresh = useCallback(() => {
     if (refreshing || !onRefresh) return;
@@ -67,10 +67,15 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
           onClick={() => onSetChatsActive(true)}
           title="All chats"
         >
-          {/* Two overlapping bubbles — a conversation. Deliberately NOT the
-              single bubble the comments button uses: the two sat side by
-              side and read as the same control. */}
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z"/><path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1"/></svg>
+          {/* A conversation: a solid bubble in front of an outlined one,
+              both ROUND. Comments use a square bubble with text lines and
+              Stickies a yellow note, so the three side-by-side toolbar
+              icons differ in shape, not just in detail. */}
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <defs><mask id="chats-icon-dots"><rect width="24" height="24" fill="#fff"/><circle cx="6.3" cy="14" r="1.2" fill="#000"/><circle cx="9.6" cy="14" r="1.2" fill="#000"/><circle cx="12.9" cy="14" r="1.2" fill="#000"/></mask></defs>
+            <path d="M9.2 5.6A7 7 0 0 1 21.3 12.9l.9 3.6-3.6-.9a7 7 0 0 1-1.8.9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            <path d="M9.6 7.4a6.6 6.6 0 1 1-3.4 12.3L2.3 20.8l1.1-3.7A6.6 6.6 0 0 1 9.6 7.4z" fill="currentColor" mask="url(#chats-icon-dots)"/>
+          </svg>
           <span>Chats</span>
         </button>
       )}
@@ -109,7 +114,7 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
                 className={editorMode === 'live' ? 'active' : ''}
                 onClick={() => onEditorModeChange('live')}
                 disabled={marpLocked}
-                title={marpLocked ? 'Disabled for Marp slides — the rich editor would reformat and break the deck' : 'Live rich editor'}
+                title={marpLocked ? (liveLockReason || 'Disabled for Marp slides — the rich editor would reformat and break the deck') : 'Live rich editor'}
               >Live</button>
             </>
           )}
@@ -210,8 +215,10 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
       )}
       {currentPath && onToggleComments && (
         <button className="toolbar-comments" onClick={onToggleComments} title="Comments">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
+          {/* A note ON this file: square bubble with text lines. */}
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M20 3H4a1.5 1.5 0 0 0-1.5 1.5v11A1.5 1.5 0 0 0 4 17h3v4l4.5-4H20a1.5 1.5 0 0 0 1.5-1.5v-11A1.5 1.5 0 0 0 20 3z"/>
+            <path d="M7 8h10M7 12h6"/>
           </svg>
           {commentCount > 0 && <span className="comment-badge">{commentCount}</span>}
         </button>
@@ -227,17 +234,13 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
           title="Stickies — your private notes on this server"
           aria-label="Stickies"
         >
-          {/* Painted in the sticky palette rather than drawn in currentColor
-              like the other toolbar icons. Two overlapping notes with the
-              front one's corner peeled: the shape alone reads as "document"
-              at 16px, and the colour is what makes it read as "stickies".
-              The fills are theme tokens, so it re-themes with everything
-              else instead of being a light-mode-only splash of yellow. */}
+          {/* One bright note with a peeled corner, in its own icon tokens
+              (--sticky-icon-*), not the muted card fills: at 16px those read
+              as a grey smudge. Yellow + dark ink in both themes. */}
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" strokeLinejoin="round" aria-hidden="true">
-            <rect x="3" y="3" width="13" height="13" rx="2" className="sticky-icon-back" />
-            <path d="M8 8h13v8l-5 5H8z" className="sticky-icon-front" />
-            <path d="M21 16h-5v5z" className="sticky-icon-fold" />
-            <path d="M11 12h7M11 15.5h4.5" className="sticky-icon-ink" strokeWidth="1.4" strokeLinecap="round" />
+            <path d="M4.5 3h15A1.5 1.5 0 0 1 21 4.5V15l-6 6H4.5A1.5 1.5 0 0 1 3 19.5v-15A1.5 1.5 0 0 1 4.5 3z" className="sticky-icon-front" />
+            <path d="M21 15h-4.5A1.5 1.5 0 0 0 15 16.5V21z" className="sticky-icon-fold" />
+            <path d="M7 8.5h10M7 12.5h6.5" className="sticky-icon-ink" strokeWidth="1.6" strokeLinecap="round" />
           </svg>
           {stickyCount > 0 && <span className="comment-badge">{stickyCount}</span>}
         </button>

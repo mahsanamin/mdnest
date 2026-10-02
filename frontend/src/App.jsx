@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { parseRoute, formatRoute } from './hashRoute';
-import { chatPathFor } from './chat.js';
+import { chatPathFor, isChatDoc } from './chat.js';
 import Login from './components/Login.jsx';
 import LoginFirebase from './components/LoginFirebase.jsx';
 import LoginSSO from './components/LoginSSO.jsx';
@@ -311,6 +311,12 @@ function App() {
   // so it is independent of the note open underneath.
   const [chatsOpen, setChatsOpen] = useState(false);
   const [openChat, setOpenChat] = useState(null);
+  // Set to `${ns}/${path}` when the user NAVIGATES to a note (tree click,
+  // address bar). If that note turns out to be a chat, it opens in the chat
+  // view instead of the editor, so a chat always opens as a chat. "Open the
+  // note" from inside a chat does not set it, which is how you still reach
+  // the raw markdown on purpose.
+  const chatRedirectFor = useRef(null);
   // Bumped by the toolbar Refresh so the task board reloads its tasks too
   // (the board isn't part of the note/tree refresh path).
   const [boardRefreshNonce, setBoardRefreshNonce] = useState(0);
@@ -368,7 +374,12 @@ function App() {
   // markdown and corrupts the frontmatter and slide breaks. Force Basic (raw)
   // editing for them, regardless of the user's editor-mode preference. A
   // drawing opened as source is raw scene JSON and carries the same hazard.
-  const editorModeForNote = effectiveEditorMode(editorMode, marpActive || drawingSource);
+  // A chat note is frontmatter-tagged like a Marp deck, and the Live editor
+  // destroys that frontmatter on autosave (`---` -> `***` + a setext
+  // heading), which silently turns the chat back into a plain note. So when
+  // one is opened as a note, it is locked to Basic exactly like Marp.
+  const chatNoteActive = chatEnabled && isChatDoc(content);
+  const editorModeForNote = effectiveEditorMode(editorMode, marpActive || drawingSource || chatNoteActive);
   // `.excalidraw.md` files open in the drawing editor (opt-in ENABLE_EXCALIDRAW),
   // bypassing the text editor/preview entirely.
   const excalidrawEnabled = !!appConfig?.excalidraw;
@@ -1105,6 +1116,7 @@ function App() {
       }
       if (path !== currentPath) {
         if (path && ns) {
+          chatRedirectFor.current = `${ns}/${path}`;
           hashNavPending.current = true;
           openNoteDirect(ns, path).finally(() => { hashNavPending.current = false; });
         } else {
@@ -1287,6 +1299,17 @@ function App() {
   // memoised. An inline arrow here would be a new function on every App
   // render, so every card would re-render and the memo would buy nothing.
   const openNoteFromBoard = useCallback((p) => { setShowTaskBoard(false); openNote(p); }, [openNote]);
+  useEffect(() => {
+    const want = chatRedirectFor.current;
+    if (!want || !selectedNs || !currentPath || content === null) return;
+    if (want !== `${selectedNs}/${currentPath}`) return; // still loading the target
+    chatRedirectFor.current = null;
+    if (!chatEnabled || !isChatDoc(content)) return;
+    setShowTaskBoard(false);
+    setOpenChat({ ns: selectedNs, path: currentPath });
+    setChatsOpen(true);
+  }, [content, currentPath, selectedNs, chatEnabled]);
+
   // "Open the note behind this chat": leave the chats view and open the file,
   // switching namespace when the chat lives in another one.
   const openNoteFromChat = useCallback((ns, p) => {
@@ -1852,7 +1875,7 @@ function App() {
         // Opening a file hands the create-target back to that file's folder,
         // so it tracks where you actually are rather than the last folder
         // you happened to expand.
-        onSelect={(p) => { setPickedFolder(null); setChatsOpen(false); openNote(p); }}
+        onSelect={(p) => { setPickedFolder(null); setChatsOpen(false); chatRedirectFor.current = `${selectedNs}/${p}`; openNote(p); }}
         currentPath={currentPath}
         namespaces={namespaces}
         selectedNs={selectedNs}
@@ -1917,7 +1940,8 @@ function App() {
             }
           }}
           editorMode={editorModeForNote}
-          marpLocked={marpActive}
+          marpLocked={marpActive || chatNoteActive}
+          liveLockReason={chatNoteActive && !marpActive ? 'Disabled for chats — the rich editor would rewrite the chat tag and turn it back into a plain note' : null}
           onSetBoardActive={taskBoardEnabled && selectedNs ? setBoardActive : null}
           onSetChatsActive={chatEnabled ? setChatsActive : null}
           chatsActive={chatsOpen && chatEnabled}
@@ -1928,7 +1952,7 @@ function App() {
           onEditorModeChange={(mode) => {
             // Marp decks are locked to Basic — ignore attempts to switch to the
             // Live editor, which would reformat and break the slides.
-            if (marpActive && mode === 'live') return;
+            if ((marpActive || chatNoteActive) && mode === 'live') return;
             setShowTaskBoard(false);
             setChatsOpen(false);
             setEditorMode(mode);
