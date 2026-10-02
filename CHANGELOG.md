@@ -12,7 +12,7 @@ All notable changes to mdnest are documented here.
   channel with one frontmatter tag, `mdnest-chat: true`. Messages are appended
   to the note as plain markdown (`#### author · time`), so the chat is an
   ordinary file: no database, no sidecar, no index. **Chats** in the toolbar
-  lists every chat you can read, across workspaces, with unread counts. You can
+  lists the chats in the current workspace, with unread counts. You can
   create a chat, convert a note into one (right-click → **Make it a chat**),
   and talk in a familiar chat window.
 - **Agents can talk to each other, and to you.** There are new CLI commands,

@@ -911,9 +911,12 @@ function App() {
       // rather than on an empty editor.
       if (hashStickies) setStickiesView('board');
       let targetNs = null;
+      // A chat link names its chat's namespace; open that workspace so the
+      // (namespace-scoped) chat list matches the chat on screen.
+      const linkedNs = hashNs || (hashChats && hashChat ? hashChat.ns : null);
 
-      if (hashNs && nsList.includes(hashNs)) {
-        targetNs = hashNs;
+      if (linkedNs && nsList.includes(linkedNs)) {
+        targetNs = linkedNs;
       } else if (nsList.length > 0) {
         targetNs = nsList[0];
       }
@@ -1106,6 +1109,7 @@ function App() {
       if (chats) {
         setChatsOpen(true);
         setOpenChat(chat || null);
+        if (chat && chat.ns !== selectedNs && namespaces.includes(chat.ns)) setSelectedNs(chat.ns);
         return; // the chats route names a chat, not the note underneath
       }
       setChatsOpen(false);
@@ -1128,7 +1132,7 @@ function App() {
     };
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
-  }, [selectedNs, currentPath]);
+  }, [selectedNs, currentPath, namespaces]);
 
   // Find all scrollable elements in the editor/preview area
   const getScrollables = useCallback(() => {
@@ -1323,6 +1327,13 @@ function App() {
     setOpenChat(null);
     return true;
   }, [selectedNs, currentPath, getLastPath, setLastPath, refreshTree]);
+
+  // The chat list is namespace-scoped, so switching workspace closes a chat
+  // that belongs to the previous one instead of leaving it open beside a
+  // list it is not in.
+  useEffect(() => {
+    if (openChat && selectedNs && openChat.ns !== selectedNs) setOpenChat(null);
+  }, [selectedNs]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // "Open the note behind this chat": leave the chats view and open the file,
   // switching namespace when the chat lives in another one.
@@ -2070,8 +2081,7 @@ function App() {
             >
             <Suspense fallback={<div className="editor-loading">Loading chats...</div>}>
               <ChatView
-                namespaces={namespaces}
-                defaultNs={selectedNs}
+                ns={selectedNs}
                 account={isMulti ? userInfo?.username : null}
                 serverAlias={appConfig?.serverAlias}
                 isMobile={isMobile}

@@ -38,9 +38,8 @@ function useVisible() {
   return visible;
 }
 
-function NewChatForm({ namespaces, defaultNs, onCreated, onCancel }) {
+function NewChatForm({ ns, onCreated, onCancel }) {
   const [title, setTitle] = useState('');
-  const [ns, setNs] = useState(defaultNs || namespaces[0] || '');
   const [folder, setFolder] = useState(DEFAULT_CHAT_FOLDER);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -71,9 +70,6 @@ function NewChatForm({ namespaces, defaultNs, onCreated, onCancel }) {
         maxLength={60}
       />
       <div className="chat-new-row">
-        <select className="chat-input" value={ns} onChange={(e) => setNs(e.target.value)} aria-label="Workspace">
-          {namespaces.map((n) => <option key={n} value={n}>{n}</option>)}
-        </select>
         <input
           className="chat-input"
           value={folder}
@@ -97,7 +93,7 @@ function NewChatForm({ namespaces, defaultNs, onCreated, onCancel }) {
 function ChatList({ chats, loading, error, openChat, onSelect, filter, onFilter }) {
   const f = filter.trim().toLowerCase();
   const shown = f
-    ? chats.filter((c) => `${c.title} ${c.ns}/${c.path}`.toLowerCase().includes(f))
+    ? chats.filter((c) => `${c.title} ${c.path}`.toLowerCase().includes(f))
     : chats;
   if (error) return <div className="chat-empty chat-error">{error}</div>;
   return (
@@ -122,7 +118,7 @@ function ChatList({ chats, loading, error, openChat, onSelect, filter, onFilter 
                   </span>
                   {unread > 0 && <span className="chat-unread" aria-label={`${unread} unread`}>{unread}</span>}
                 </span>
-                <span className="chat-list-path">{c.ns}/{c.path}</span>
+                <span className="chat-list-path">{c.path}</span>
               </button>
             </li>
           );
@@ -130,7 +126,7 @@ function ChatList({ chats, loading, error, openChat, onSelect, filter, onFilter 
       </ul>
       {!loading && chats.length === 0 && (
         <div className="chat-empty">
-          No chats yet. Create one, or right-click any note and choose <b>Make it a chat</b>.
+          No chats in this workspace yet. Create one, or right-click any note and choose <b>Make it a chat</b>.
         </div>
       )}
     </>
@@ -349,7 +345,7 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
   );
 }
 
-function ChatView({ namespaces, defaultNs, account, serverAlias, isMobile, openChat, onSelectChat, onOpenNote, onDeleteChat, onClose }) {
+function ChatView({ ns, account, serverAlias, isMobile, openChat, onSelectChat, onOpenNote, onDeleteChat, onClose }) {
   const [chats, setChats] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -357,18 +353,21 @@ function ChatView({ namespaces, defaultNs, account, serverAlias, isMobile, openC
   const [filter, setFilter] = useState('');
   const visible = useVisible();
 
+  // Scoped to the workspace you are in, like the rest of the sidebar. A chat
+  // in another workspace is still reachable by its link (#!chats/ns/path).
   const refresh = useCallback(async () => {
+    if (!ns) { setChats([]); setLoading(false); return; }
     try {
-      setChats(await listChats());
+      setChats(await listChats(ns));
       setError('');
     } catch (e) {
       setError(e.message);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [ns]);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => { setLoading(true); setChats([]); refresh(); }, [refresh]);
   useEffect(() => {
     if (!visible) return undefined;
     const id = setInterval(refresh, CHAT_LIST_POLL_MS);
@@ -389,10 +388,10 @@ function ChatView({ namespaces, defaultNs, account, serverAlias, isMobile, openC
             {isMobile ? (
               <>
                 <button className="chat-btn chat-back" onClick={onClose} title="Back to the editor" aria-label="Close chats">&#8592;</button>
-                <span className="chat-list-count">{loading ? '' : `${chats.length} chat${chats.length === 1 ? '' : 's'}`}</span>
+                <span className="chat-list-count">{loading ? '' : `${chats.length} chat${chats.length === 1 ? '' : 's'} in ${ns}`}</span>
               </>
             ) : (
-              <h2>Chats</h2>
+              <h2>Chats <span className="chat-list-ns">in {ns}</span></h2>
             )}
             <div className="chat-list-actions">
               <button className="chat-btn chat-btn-icon" onClick={refresh} title="Refresh the list of chats" aria-label="Refresh the list of chats">
@@ -404,8 +403,7 @@ function ChatView({ namespaces, defaultNs, account, serverAlias, isMobile, openC
           </header>
           {creating && (
             <NewChatForm
-              namespaces={namespaces}
-              defaultNs={defaultNs}
+              ns={ns}
               onCancel={() => setCreating(false)}
               onCreated={(c) => { setCreating(false); refresh(); onSelectChat(c); }}
             />

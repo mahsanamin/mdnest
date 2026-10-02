@@ -957,8 +957,10 @@ async function chatError(res, fallback) {
   return new Error(data.error || fallback);
 }
 
-export async function listChats() {
-  const res = await request('/chats');
+// ns: only that namespace's chats (what the chats view shows). Omit for every
+// namespace you can read.
+export async function listChats(ns) {
+  const res = await request(ns ? `/chats?ns=${encodeURIComponent(ns)}` : '/chats');
   if (!res.ok) throw await chatError(res, 'Failed to load chats');
   return (await res.json()).chats || [];
 }

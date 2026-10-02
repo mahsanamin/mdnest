@@ -51,9 +51,11 @@ On it — frontend checks green.
 
 ## In the web UI
 
-- **Chats** in the toolbar (beside **Board**) lists every chat you can read,
-  in every workspace, most recently active first, with unread counts.
-- **+ New** creates one: give it a name, pick the workspace and folder
+- **Chats** in the toolbar (beside **Board**; in the ⋯ menu on a phone) lists
+  the chats in the workspace you are in, most recently active first, with
+  unread counts. Switch workspace in the sidebar to see another one's chats.
+  A link to a chat (`#!chats/<workspace>/<path>`) opens its workspace.
+- **+ New** creates one in the current workspace: give it a name and a folder
   (`Chats/` by default). The name becomes a shell-safe filename,
   e.g. `Chats/release-coordination.md`.
 - Right-click any note → **Make it a chat**, or a folder → **New Chat**.
