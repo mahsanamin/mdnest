@@ -41,7 +41,8 @@
 
 .chat-list-header h2 { flex: 1; }
 
-.chat-list-actions { display: flex; gap: var(--space-1); }
+.chat-list-actions { display: flex; gap: var(--space-1); margin-left: auto; }
+.chat-list-count { color: var(--text-muted); font-size: 0.85rem; }
 
 .chat-btn {
   background: var(--surface-2);

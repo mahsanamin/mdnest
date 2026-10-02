@@ -353,10 +353,20 @@ function ChatView({ namespaces, defaultNs, account, serverAlias, isMobile, openC
       {showList && (
         <aside className="chat-list">
           <header className="chat-list-header">
-            <h2>Chats</h2>
+            {/* Phone: the app bar already says "Chats", so this row is the
+                way back plus the count, laid out like the task board's
+                header (← on the left). Desktop keeps the title and ✕. */}
+            {isMobile ? (
+              <>
+                <button className="chat-btn chat-back" onClick={onClose} title="Back to the editor" aria-label="Close chats">&#8592;</button>
+                <span className="chat-list-count">{loading ? '' : `${chats.length} chat${chats.length === 1 ? '' : 's'}`}</span>
+              </>
+            ) : (
+              <h2>Chats</h2>
+            )}
             <div className="chat-list-actions">
               <button className="chat-btn chat-btn-primary" onClick={() => setCreating((v) => !v)}>+ New</button>
-              <button className="chat-btn" onClick={onClose} title="Back to the editor" aria-label="Close chats">✕</button>
+              {!isMobile && <button className="chat-btn" onClick={onClose} title="Back to the editor" aria-label="Close chats">✕</button>}
             </div>
           </header>
           {creating && (

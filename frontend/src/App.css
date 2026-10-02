@@ -6379,3 +6379,31 @@ pre:hover .code-copy-btn {
   .live-toolbar > *,
   .editor-toolbar > * { flex-shrink: 0; }
 }
+
+/* The view title is phone-only; desktop names the view in the Board/Chats
+   button itself. */
+.toolbar-view-title { display: none; }
+
+/* Phone, on the task board or the chats view: the bar is sidebar · title ·
+   ⋯. The note underneath is not on screen, so its filename and comments go,
+   and so does the toolbar's Editor button: both views carry their own way
+   back, and two back buttons on one screen was the confusing part. */
+@media (max-width: 768px) {
+  .toolbar--view .toolbar-path,
+  .toolbar--view .toolbar-comments,
+  .toolbar .toolbar--view .toolbar-view-editor,
+  .toolbar.toolbar--view .toolbar-view-btn.toolbar-view-editor { display: none; }
+  .toolbar--view .toolbar-view-title {
+    display: block;
+    order: 2;
+    flex: 1 1 0;
+    min-width: 0;
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+

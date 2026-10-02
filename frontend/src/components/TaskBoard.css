@@ -42,6 +42,7 @@
 }
 .tb-header-right { position: relative; }
 .tb-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tb-btn-label { display: none; }
 /* The overflow toggle is desktop-hidden; the buttons sit inline. */
 .tb-actions-toggle {
   display: none;
@@ -399,6 +400,25 @@
     box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
   }
   .tb-actions.open { display: flex; }
+
+  /* Two tidy rows instead of three ragged ones:
+       row 1  ← · List | Kanban ............ board options
+       row 2  Workspace | This note | All workspaces   (full width)
+     .tb-header-left dissolves (display: contents) so its children can be
+     ordered against .tb-header-right on the same line. */
+  .tb-header { padding: 8px 10px; row-gap: 8px; }
+  .tb-header-left { display: contents; }
+  .tb-back { order: 1; }
+  .tb-header-left > .tb-mode-toggle:not(.tb-scope-toggle) { order: 2; }
+  .tb-header-right { order: 3; }
+  .tb-scope-toggle { order: 4; flex: 1 0 100%; display: flex; }
+  .tb-scope-toggle button { flex: 1; padding: 6px 4px; white-space: nowrap; }
+  /* The note name is in the button's tooltip; the arrow says "back". */
+  .tb-back-label { display: none; }
+  /* In the dropdown the bare ↻ needs a word. */
+  .tb-actions .tb-btn-label { display: inline; }
+  .tb-actions .tb-btn { white-space: nowrap; }
+  .tb-actions-toggle { align-items: center; justify-content: center; width: 36px; height: 32px; padding: 0; }
 }
 
 /* --- filters ---------------------------------------------------------- */

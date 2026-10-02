@@ -44,7 +44,7 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
   const mobilePreview = !!onMobileViewChange && mobileView === 'preview';
 
   return (
-    <div className="toolbar">
+    <div className={`toolbar${boardActive || chatsActive ? ' toolbar--view' : ''}`}>
       {/* Groups, not a flat row. Every control used to sit the same 0.5rem
           from its neighbour, so "Rename / Delete" read as no more related to
           each other than to the file path beside them, and the trailing icons
@@ -150,6 +150,11 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
             </>
           )}
         </div>
+      )}
+      {/* Phone only (CSS): on the board or the chats view the bar names that
+          view instead of the note underneath it, which it is not showing. */}
+      {(boardActive || chatsActive) && (
+        <span className="toolbar-view-title">{boardActive ? 'Task board' : 'Chats'}</span>
       )}
       {/* Path display splits dir + basename so the filename never gets
           ellipsized away on narrow screens. .toolbar-path-dir shrinks
