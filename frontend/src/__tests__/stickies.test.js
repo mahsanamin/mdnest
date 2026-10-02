@@ -16,7 +16,6 @@ import {
   addSticky,
   editSticky,
   removeSticky,
-  undoneCount,
   isBoardFull,
   normalizeBoard,
   layoutBoard,
@@ -158,30 +157,6 @@ describe('checklist', () => {
   it('gives every item a distinct id', () => {
     const ids = new Set(Array.from({ length: 200 }, () => newItem().id));
     expect(ids.size).toBe(200);
-  });
-});
-
-describe('undoneCount', () => {
-  const item = (text, done = false) => ({ ...newItem(), text, done });
-
-  it('counts unfinished checklist items across the board', () => {
-    // Items, not cards: "3 things left" is what the badge means to a reader,
-    // not "3 notes containing something unfinished".
-    expect(undoneCount([
-      card({ items: [item('a'), item('b', true), item('c')] }),
-      card({ items: [item('d')] }),
-    ])).toBe(3);
-  });
-
-  it('ignores a card with no checklist', () => {
-    // A note is not outstanding work.
-    expect(undoneCount([card({ body: 'just a note' })])).toBe(0);
-  });
-
-  it('ignores an item that is still empty', () => {
-    // Clicking "+ to-do" creates a blank row. Counting it would bump the badge
-    // before anything has been written.
-    expect(undoneCount([card({ items: [item(''), item('   ')] })])).toBe(0);
   });
 });
 

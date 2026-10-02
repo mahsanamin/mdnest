@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 
-function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePassword, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh, wsStatus, commentCount, onToggleComments, stickyCount, onToggleStickies, stickiesOpen, onSetBoardActive, boardActive, onSetChatsActive, chatsActive, marpLocked, liveLockReason, mobileView, onMobileViewChange, drawingDoc, drawingSource, onDrawingSourceChange, theme, onToggleTheme }) {
+function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePassword, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh, wsStatus, commentCount, onToggleComments, onToggleStickies, stickiesOpen, onSetBoardActive, boardActive, onSetChatsActive, chatsActive, marpLocked, liveLockReason, mobileView, onMobileViewChange, drawingDoc, drawingSource, onDrawingSourceChange, theme, onToggleTheme }) {
   const [refreshing, setRefreshing] = useState(false);
   // Phone overflow menu. On a phone the bar keeps only what is used per note
   // (sidebar, filename, comments, the mode switch); every other control lives
@@ -281,7 +281,6 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
             <path d="M21 15h-4.5A1.5 1.5 0 0 0 15 16.5V21z" className="sticky-icon-fold" />
             <path d="M7 8.5h10M7 12.5h6.5" className="sticky-icon-ink" strokeWidth="1.6" strokeLinecap="round" />
           </svg>
-          {stickyCount > 0 && <span className="comment-badge">{stickyCount}</span>}
         </button>
       )}
       {onToggleTheme && (
@@ -348,7 +347,6 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
                   <path d="M7 8.5h10M7 12.5h6.5" className="sticky-icon-ink" strokeWidth="1.6" strokeLinecap="round" />
                 </svg>
                 Stickies
-                {stickyCount > 0 && <span className="toolbar-more-count">{stickyCount}</span>}
               </button>
             )}
             {currentPath && (onRevealInTree || onRefresh || onRename || onDelete) && <div className="toolbar-more-sep" />}

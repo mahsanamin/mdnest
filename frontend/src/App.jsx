@@ -44,7 +44,7 @@ import AttributionModal from './components/AttributionModal.jsx';
 import MoveToModal from './components/MoveToModal.jsx';
 import ReleaseNotesModal from './components/ReleaseNotesModal.jsx';
 import CollabClient from './collab.js';
-import { normalizeBoard, undoneCount } from './stickies.js';
+import { normalizeBoard } from './stickies.js';
 import { isMarpDoc, effectiveEditorMode } from './marp.js';
 import { isExcalidrawDoc } from './excalidraw.js';
 import { TREE_POLL_MS, shouldPollTree } from './tree-refresh.js';
@@ -1968,7 +1968,6 @@ function App() {
           }}
           onRefresh={handleRefresh}
           commentCount={commentsEnabled ? comments.filter(c => !c.parentId && !c.resolved).length : 0}
-          stickyCount={stickiesLoad === 'ready' ? undoneCount(stickies) : 0}
           stickiesOpen={stickiesView !== 'closed'}
           onToggleStickies={() => {
             // Two drawers, one strip of screen. Opening either closes the

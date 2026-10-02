@@ -6314,18 +6314,6 @@ pre:hover .code-copy-btn {
 .toolbar-more-menu > button svg { flex: 0 0 auto; color: var(--text-secondary); }
 .toolbar-more-menu > button.danger,
 .toolbar-more-menu > button.danger svg { color: var(--danger); }
-.toolbar-more-count {
-  margin-left: auto;
-  min-width: 20px;
-  padding: 0 6px;
-  border-radius: 10px;
-  background: var(--accent);
-  color: var(--text-inverse);
-  font-size: 0.75rem;
-  font-weight: 700;
-  line-height: 20px;
-  text-align: center;
-}
 .toolbar-more-status {
   display: flex;
   align-items: center;

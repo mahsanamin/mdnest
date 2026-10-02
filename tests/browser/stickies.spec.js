@@ -196,26 +196,19 @@ test.describe('stickies', () => {
     await expect(page.locator('.comment-sidebar')).toHaveCount(0);
   });
 
-  test('the badge counts unfinished stickies, not empty cards', async ({ page }) => {
+  // The Stickies button deliberately shows no count. It used to badge the
+  // number of unfinished to-dos, and on a phone a permanent number on that
+  // icon read as noise rather than information, so it was removed.
+  test('the stickies button shows no count, even with unfinished to-dos', async ({ page }) => {
     await signIn(page);
     await clearBoard(page);
     await openPanel(page);
 
-    // A fresh card is a blank box, not a task yet.
     await page.locator('.stickies-add').click();
-    await expect(page.locator('.toolbar-stickies .comment-badge')).toHaveCount(0);
-
-    // Body text is a note, not a task — it must not reach the badge.
-    await page.locator('.sticky-card .sticky-body').fill('just a note');
-    await expect(page.locator('.toolbar-stickies .comment-badge')).toHaveCount(0);
-
     await page.locator('.sticky-add-item').click();
-    await expect(page.locator('.toolbar-stickies .comment-badge')).toHaveCount(0); // blank row
     await page.locator('.sticky-items textarea').fill('something to do');
-    await expect(page.locator('.toolbar-stickies .comment-badge')).toHaveText('1');
-
-    await page.locator('.sticky-items input[type=checkbox]').check();
     await expect(page.locator('.toolbar-stickies .comment-badge')).toHaveCount(0);
+    await expect(page.locator('.toolbar-more-count')).toHaveCount(0);
   });
 
   test('a dragged sticky keeps its position across a reload', async ({ page }) => {
