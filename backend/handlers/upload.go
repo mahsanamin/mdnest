@@ -107,6 +107,13 @@ func (h *UploadHandler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid upload destination"}`, http.StatusBadRequest)
 		return
 	}
+	// The route middleware authorised ?path=, but the file lands in
+	// dir(path)/<filename>, which can sit outside that grant (path=Shared
+	// writes to the namespace root). Check the destination actually written.
+	if h.perms != nil && !h.perms.CheckWrite(r, ns, "/"+destRel) {
+		middleware.DenyJSON(w)
+		return
+	}
 
 	if err := h.store.WriteFrom(ctx, ns, destRel, file, header.Size); err != nil {
 		http.Error(w, `{"error":"failed to save file"}`, http.StatusInternalServerError)

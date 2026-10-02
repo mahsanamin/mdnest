@@ -264,7 +264,7 @@ func (s *PostgresGrantStore) CheckAccess(userID int, namespace, path, requiredPe
 			grantPath = "/" + grantPath
 		}
 
-		if !pathCovers(grantPath, path) {
+		if !PathCovers(grantPath, path) {
 			continue
 		}
 
@@ -330,9 +330,17 @@ func PathDepth(p string) int {
 	return depth
 }
 
-// pathCovers returns true if grantPath covers requestPath.
+// PathCovers returns true if grantPath covers requestPath.
 // "/" covers everything. "/foo" covers "/foo", "/foo/bar", "/foo/bar/baz".
-func pathCovers(grantPath, requestPath string) bool {
+// requestPath must be canonical: one that still carries a "." or ".." segment
+// is never covered, because a prefix match on it says nothing about the path
+// a handler will act on once it is cleaned.
+func PathCovers(grantPath, requestPath string) bool {
+	for _, seg := range strings.Split(requestPath, "/") {
+		if seg == "." || seg == ".." {
+			return false
+		}
+	}
 	if grantPath == "/" {
 		return true
 	}
