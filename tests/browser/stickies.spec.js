@@ -66,7 +66,13 @@ async function openPanel(page) {
     await expect(page.locator('.stickies-panel')).toBeVisible();
     return;
   }
-  await page.locator('.toolbar-stickies').click();
+  // On the desktop bar Stickies is an icon; on a phone it is in the ⋯ menu.
+  if (await page.locator('.toolbar-stickies').isVisible()) {
+    await page.locator('.toolbar-stickies').click();
+  } else {
+    await page.locator('.toolbar-more-btn').click();
+    await page.locator('.toolbar-more-menu button', { hasText: 'Stickies' }).click();
+  }
   await expect(page.locator('.stickies-panel')).toBeVisible();
 }
 
@@ -208,7 +214,6 @@ test.describe('stickies', () => {
     await page.locator('.sticky-add-item').click();
     await page.locator('.sticky-items textarea').fill('something to do');
     await expect(page.locator('.toolbar-stickies .comment-badge')).toHaveCount(0);
-    await expect(page.locator('.toolbar-more-count')).toHaveCount(0);
   });
 
   test('a dragged sticky keeps its position across a reload', async ({ page }) => {

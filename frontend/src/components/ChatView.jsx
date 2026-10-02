@@ -366,15 +366,21 @@ function ChatView({ ns, namespaces, onSelectNs, account, serverAlias, isMobile, 
 
   // Scoped to the workspace you are in, like the rest of the sidebar. A chat
   // in another workspace is still reachable by its link (#!chats/ns/path).
+  // A response for a workspace you have since switched away from is dropped,
+  // or a slow A list could land under B's heading.
+  const nsRef = useRef(ns);
+  nsRef.current = ns;
   const refresh = useCallback(async () => {
     if (!ns) { setChats([]); setLoading(false); return; }
     try {
-      setChats(await listChats(ns));
+      const list = await listChats(ns);
+      if (nsRef.current !== ns) return;
+      setChats(list);
       setError('');
     } catch (e) {
-      setError(e.message);
+      if (nsRef.current === ns) setError(e.message);
     } finally {
-      setLoading(false);
+      if (nsRef.current === ns) setLoading(false);
     }
   }, [ns]);
 
@@ -398,7 +404,7 @@ function ChatView({ ns, namespaces, onSelectNs, account, serverAlias, isMobile, 
                 header (← on the left). Desktop keeps the title and ✕. */}
             {isMobile ? (
               <>
-                <button className="chat-btn chat-back" onClick={onClose} title="Back to the editor" aria-label="Close chats">&#8592;</button>
+                <button className="chat-btn chat-back" onClick={onClose} title="Back to where you were" aria-label="Leave chats">&#8592;</button>
                 <NsPicker ns={ns} namespaces={namespaces} onSelectNs={onSelectNs} />
                 <span className="chat-list-count">{loading ? '' : `${chats.length} chat${chats.length === 1 ? '' : 's'}`}</span>
               </>
@@ -410,7 +416,7 @@ function ChatView({ ns, namespaces, onSelectNs, account, serverAlias, isMobile, 
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
               </button>
               <button className="chat-btn chat-btn-primary" onClick={() => setCreating((v) => !v)}>+ New</button>
-              {/* No ✕ on desktop: the toolbar's Editor button is the way back,
+              {/* No ✕ on desktop: the toolbar's "← Back to …" is the way out,
                   and two exits for one view was the confusing part. */}
             </div>
           </header>

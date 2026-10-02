@@ -382,16 +382,6 @@
   background: var(--surface-3);
 }
 
-/* Theme toggle. Icon-only like the comments button next to it, so it reads as
-   part of that trailing group rather than as another labelled action. */
-.toolbar-theme {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.35rem 0.5rem;
-  flex-shrink: 0;
-}
-
 /* Appearance tab: one row per choice, because the third option ("match
    system") has an explanation and does not fit a two-state switch. */
 .theme-options {
@@ -1828,19 +1818,6 @@ pre:hover .code-copy-btn {
   padding: 0 3px;
 }
 
-.toolbar-settings {
-  background: transparent !important;
-  border: none !important;
-  color: var(--text-muted) !important;
-  font-size: 1.1rem !important;
-  padding: 0.2rem 0.4rem !important;
-  cursor: pointer;
-}
-
-.toolbar-settings:hover {
-  color: var(--text) !important;
-}
-
 /* Comment Sidebar */
 .comment-sidebar {
   position: fixed;
@@ -2750,35 +2727,6 @@ pre:hover .code-copy-btn {
   transform: scale(0.95);
 }
 
-/* Mobile view toggle (editor/preview switch) */
-.mobile-view-toggle {
-  display: none;
-  gap: 6px;
-  padding: 6px 10px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-
-.mobile-view-toggle button {
-  flex: 1;
-  padding: 7px 0;
-  background: var(--bg);
-  color: var(--text-muted);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  font-size: 0.82rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.mobile-view-toggle button.active {
-  background: var(--accent);
-  color: var(--text-inverse);
-  border-color: var(--accent);
-}
-
 /* Responsive: Mobile (<768px) */
 @media (max-width: 768px) {
   .toolbar-hamburger {
@@ -2833,7 +2781,8 @@ pre:hover .code-copy-btn {
     z-index: 7000;
   }
 
-  /* Hide desktop view toggle on mobile — mobile-view-toggle handles this */
+  /* Hide the desktop view toggle on mobile: the toolbar's Basic | Live |
+     Preview control handles the editor/preview switch there. */
   .toolbar-view-toggle {
     display: none !important;
   }
@@ -2890,11 +2839,7 @@ pre:hover .code-copy-btn {
     height: 100%;
   }
 
-  /* Show mobile view toggle & FAB */
-  .mobile-view-toggle {
-    display: flex;
-  }
-
+  /* Show the FAB */
   .fab {
     display: none;
   }
@@ -6261,8 +6206,6 @@ pre:hover .code-copy-btn {
   .toolbar .toolbar-view-btn.toolbar-view-chats,
   .toolbar-utility .ws-status,
   .toolbar-utility .toolbar-stickies,
-  .toolbar-utility .toolbar-theme,
-  .toolbar-utility .toolbar-settings,
   .toolbar-path .toolbar-inline-reveal,
   .toolbar-path .toolbar-inline-refresh,
   .toolbar-path-actions { display: none; }
@@ -6424,7 +6367,6 @@ pre:hover .code-copy-btn {
 @media (max-width: 768px) {
   .toolbar--view .toolbar-path,
   .toolbar--view .toolbar-comments,
-  .toolbar .toolbar--view .toolbar-view-editor,
   .toolbar.toolbar--view .toolbar-view-btn.toolbar-view-editor { display: none; }
   .toolbar--view .toolbar-view-title {
     display: block;

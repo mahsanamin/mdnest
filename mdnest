@@ -1382,7 +1382,7 @@ cmd_chat() {
       local text_arg="" as="${MDNEST_CHAT_AS:-}"
       while [ $# -gt 0 ]; do
         case "$1" in
-          --as) as="${2:-}"; shift 2 ;;
+          --as) [ $# -ge 2 ] || { echo "Error: --as needs a name" >&2; exit 1; }; as="$2"; shift 2 ;;
           --as=*) as="${1#--as=}"; shift ;;
           *) text_arg="$1"; shift ;;
         esac
@@ -1401,9 +1401,9 @@ cmd_chat() {
       local after=0 timeout="${MDNEST_CHAT_TIMEOUT:-600}"
       while [ $# -gt 0 ]; do
         case "$1" in
-          --after) after="${2:-0}"; shift 2 ;;
+          --after) [ $# -ge 2 ] || { echo "Error: --after needs a number" >&2; exit 1; }; after="$2"; shift 2 ;;
           --after=*) after="${1#--after=}"; shift ;;
-          --timeout) timeout="${2:-600}"; shift 2 ;;
+          --timeout) [ $# -ge 2 ] || { echo "Error: --timeout needs a number of seconds" >&2; exit 1; }; timeout="$2"; shift 2 ;;
           --timeout=*) timeout="${1#--timeout=}"; shift ;;
           *) chat_usage; exit 1 ;;
         esac

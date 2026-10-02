@@ -188,6 +188,10 @@ function App() {
   // An editor that debounces internally (the drawing canvas) registers a
   // callback here so its unsaved scene can be drained before we navigate.
   const editorFlushRef = useRef(null);
+  // Called by every note loader with the text it just loaded. Assigned after
+  // enterChats exists (further down) so the loaders, defined earlier, can
+  // reach it without depending on it.
+  const noteLoadedRef = useRef(null);
   const registerEditorFlush = useCallback((fn) => { editorFlushRef.current = fn; }, []);
   // Run a queued autosave now rather than discarding it.
   //
@@ -974,7 +978,9 @@ function App() {
           // namespace. The per-file prefs (mdnest_file_prefs:<ns>/<path>)
           // hold the scrollPct from when they were last reading.
           restoreScrollPosition(selectedNs, currentPath);
+          noteLoadedRef.current?.(selectedNs, currentPath, text);
         }).catch(() => {
+          chatRedirectFor.current = null;
           // The saved/hash-pointed file is gone (deleted on disk, renamed
           // by another client). Clear so the user gets a clean slate, and
           // forget the stale last-path so the next ns switch doesn't try
@@ -1120,6 +1126,8 @@ function App() {
         return; // the board route says nothing about which note is open
       }
       if (chats) {
+        setShowTaskBoard(false);
+        setChatsReturnTo('editor');
         setChatsOpen(true);
         setOpenChat(chat || null);
         if (chat) setChatNs(chat.ns);
@@ -1245,7 +1253,9 @@ function App() {
       if (commentsEnabled) {
         listComments(ns, path).then(setComments).catch(() => setComments([]));
       }
+      noteLoadedRef.current?.(ns, path, text);
     } catch (e) {
+      chatRedirectFor.current = null;
       console.error('Failed to open note:', e);
     }
   }, [restoreScrollPosition, commentsEnabled, flushPendingSave]);
@@ -1303,7 +1313,9 @@ function App() {
       if (commentsEnabled) {
         listComments(selectedNs, path).then(setComments).catch(() => setComments([]));
       }
+      noteLoadedRef.current?.(selectedNs, path, text);
     } catch (e) {
+      chatRedirectFor.current = null;
       if (e.name === 'PermissionError') {
         alert('Access denied: you do not have permission to read this file.');
       } else {
@@ -1316,16 +1328,6 @@ function App() {
   // memoised. An inline arrow here would be a new function on every App
   // render, so every card would re-render and the memo would buy nothing.
   const openNoteFromBoard = useCallback((p) => { setShowTaskBoard(false); openNote(p); }, [openNote]);
-  useEffect(() => {
-    const want = chatRedirectFor.current;
-    if (!want || !selectedNs || !currentPath || content === null) return;
-    if (want !== `${selectedNs}/${currentPath}`) return; // still loading the target
-    chatRedirectFor.current = null;
-    const from = chatRedirectFrom.current;
-    chatRedirectFrom.current = null;
-    if (!chatEnabled || !isChatDoc(content)) return;
-    enterChats({ ns: selectedNs, path: currentPath }, from && from.path !== currentPath ? from : 'none');
-  }, [content, currentPath, selectedNs, chatEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Delete a chat = delete its note (the note IS the chat). Confirmed first,
   // naming the note, because it removes every message too. Clears whatever
@@ -1343,24 +1345,43 @@ function App() {
 
   // "Open the note behind this chat": leave the chats view and open the file,
   // switching namespace when the chat lives in another one.
+  // Open a note that may live in another workspace. Switching workspace and
+  // THEN loading raced the namespace effect, which reloads the OLD path in
+  // the new workspace and, on a miss, clears the editor, so the note just
+  // opened vanished. Like handleSelectNs: set workspace and path in one
+  // batch and let that effect load it.
+  const openNoteIn = useCallback((ns, p) => {
+    if (ns === selectedNs) { openNoteDirect(ns, p); return; }
+    flushPendingSave();
+    setSelectedNs(ns);
+    setCurrentPath(p);
+    setContent(null);
+    setSavedContent('');
+    setLastPath(ns, p);
+  }, [selectedNs, openNoteDirect, flushPendingSave, setLastPath]);
   const openNoteFromChat = useCallback((ns, p) => {
     setChatsOpen(false);
-    if (ns !== selectedNs) setSelectedNs(ns);
-    openNoteDirect(ns, p);
-  }, [openNoteDirect, selectedNs]);
+    openNoteIn(ns, p);
+  }, [openNoteIn]);
   // Every way into chat mode goes through enterChats, so Back always knows
   // where it came from.
   // returnNote: the note to reopen on Back ({ns, path}), 'none' when the
   // only note underneath is the chat itself, or undefined to keep the
   // current one.
   const enterChats = useCallback((chat, returnNote) => {
+    // The editor is about to be swapped out. Its pending edits (and a
+    // drawing's 500ms debounce, which its unmount would cancel) must be
+    // written now: a queued save is flushed on navigation, never dropped.
+    flushPendingSave();
+    // Comments belong to the note, which chat mode is hiding.
+    setShowComments(false);
     setChatsReturnTo(showTaskBoard ? 'board' : 'editor');
     setChatsReturnNote(returnNote === undefined ? null : returnNote);
     setShowTaskBoard(false);
     setChatNs(chat?.ns || selectedNs);
     setOpenChat(chat || null);
     setChatsOpen(true);
-  }, [showTaskBoard, selectedNs]);
+  }, [showTaskBoard, selectedNs, flushPendingSave]);
   const leaveChats = useCallback(() => {
     setChatsOpen(false);
     if (chatsReturnTo === 'board') setShowTaskBoard(true);
@@ -1369,23 +1390,43 @@ function App() {
       // empty editor instead.
       setCurrentPath(null); setContent(null); setSavedContent('');
     } else if (chatsReturnNote) {
-      if (chatsReturnNote.ns !== selectedNs) setSelectedNs(chatsReturnNote.ns);
-      openNoteDirect(chatsReturnNote.ns, chatsReturnNote.path);
+      openNoteIn(chatsReturnNote.ns, chatsReturnNote.path);
+    } else if (currentPath) {
+      // Reload the note underneath: chat mode may have rewritten it (a post
+      // to that very chat, "Make it a chat" on the open note), and editing a
+      // stale copy would 409, or strip the chat tag if overwritten.
+      openNoteDirect(selectedNs, currentPath);
     }
     setChatsReturnNote(null);
-  }, [chatsReturnTo, chatsReturnNote, selectedNs, openNoteDirect]);
+  }, [chatsReturnTo, chatsReturnNote, selectedNs, currentPath, openNoteIn, openNoteDirect]);
   const setChatsActive = useCallback((on) => {
     if (on) enterChats(null); else leaveChats();
   }, [enterChats, leaveChats]);
+  // The "is this note a chat?" decision, made where a note finishes loading
+  // rather than in an effect on `content`: that effect stayed armed when the
+  // click reloaded identical text (or the load failed), then fired on the
+  // next keystroke.
+  noteLoadedRef.current = (ns, path, text) => {
+    const want = chatRedirectFor.current;
+    if (!want) return;
+    chatRedirectFor.current = null;
+    const from = chatRedirectFrom.current;
+    chatRedirectFrom.current = null;
+    if (want !== `${ns}/${path}` || !chatEnabled || !isChatDoc(text)) return;
+    enterChats({ ns, path }, from && !(from.ns === ns && from.path === path) ? from : 'none');
+  };
   const chatsBackLabel = chatsReturnTo === 'board'
     ? 'Task board'
     : chatsReturnNote === 'none'
       ? 'notes'
       : (chatsReturnNote?.path || currentPath || '').split('/').pop() || 'notes';
   const setBoardActive = useCallback((on) => {
-    if (on) setChatsOpen(false);
+    if (on) {
+      flushPendingSave(); // the editor is swapped out; see enterChats
+      setChatsOpen(false);
+    }
     setShowTaskBoard(on);
-  }, []);
+  }, [flushPendingSave]);
 
 
   const refreshComments = useCallback(() => {

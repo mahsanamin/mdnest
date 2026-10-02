@@ -74,6 +74,7 @@ docker run -d --name "$BE" --network "$NET" --network-alias backend \
   -e ENABLE_TASK_BOARD=true \
   -e ENABLE_EXCALIDRAW=true \
   -e ENABLE_LIVE_COLLAB=true \
+  -e ENABLE_CHAT=true \
   -v "$NOTES_DIR:/notes" "$BE_IMAGE" >/dev/null
 
 log "Starting frontend (nginx) on an ephemeral host port"

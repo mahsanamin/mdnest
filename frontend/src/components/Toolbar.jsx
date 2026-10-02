@@ -4,7 +4,8 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
   const [refreshing, setRefreshing] = useState(false);
   // Phone overflow menu. On a phone the bar keeps only what is used per note
   // (sidebar, filename, comments, the mode switch); every other control lives
-  // in this menu. The menu is CSS-hidden on desktop, where everything fits.
+  // in this menu. On desktop the menu holds only theme, Settings and Manage
+  // users (phone-only entries carry .more-phone / .more-file).
   const [moreOpen, setMoreOpen] = useState(false);
   const moreRef = useRef(null);
   useEffect(() => {
@@ -98,7 +99,7 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
         </button>
       )}
       {/* Chats sits beside Board and follows the same rule: the button names
-          where it takes you, and on that view it is replaced by "Editor". */}
+          where it takes you. In chat mode it is replaced by "← Back to …". */}
       {onSetChatsActive && !chatsActive && (
         <button
           className="toolbar-view-btn toolbar-view-chats"
@@ -345,26 +346,29 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
                 Stickies
               </button>
             )}
-            {currentPath && (onRevealInTree || onRefresh || onRename || onDelete) && <div className="toolbar-more-sep more-file" />}
-            {currentPath && onRevealInTree && (
+            {/* In chat mode the note underneath is not on screen, so its file
+                actions are not offered: Delete would act on a note you cannot
+                see. */}
+            {currentPath && !chatsActive && (onRevealInTree || onRefresh || onRename || onDelete) && <div className="toolbar-more-sep more-file" />}
+            {currentPath && !chatsActive && onRevealInTree && (
               <button role="menuitem" className="more-file" onClick={runMore(onRevealInTree)}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
                 Show in tree
               </button>
             )}
-            {currentPath && onRefresh && (
+            {currentPath && !chatsActive && onRefresh && (
               <button role="menuitem" className="more-file" onClick={runMore(handleRefresh)}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
                 Reload note
               </button>
             )}
-            {currentPath && onRename && (
+            {currentPath && !chatsActive && onRename && (
               <button role="menuitem" className="more-file" onClick={runMore(onRename)}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
                 Rename
               </button>
             )}
-            {currentPath && onDelete && (
+            {currentPath && !chatsActive && onDelete && (
               <button role="menuitem" className="danger more-file" onClick={runMore(onDelete)}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>
                 Delete
