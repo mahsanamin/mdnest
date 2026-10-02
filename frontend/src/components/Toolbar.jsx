@@ -345,27 +345,27 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
                 Stickies
               </button>
             )}
-            {currentPath && (onRevealInTree || onRefresh || onRename || onDelete) && <div className="toolbar-more-sep more-phone" />}
+            {currentPath && (onRevealInTree || onRefresh || onRename || onDelete) && <div className="toolbar-more-sep more-file" />}
             {currentPath && onRevealInTree && (
-              <button role="menuitem" className="more-phone" onClick={runMore(onRevealInTree)}>
+              <button role="menuitem" className="more-file" onClick={runMore(onRevealInTree)}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
                 Show in tree
               </button>
             )}
             {currentPath && onRefresh && (
-              <button role="menuitem" className="more-phone" onClick={runMore(handleRefresh)}>
+              <button role="menuitem" className="more-file" onClick={runMore(handleRefresh)}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
                 Reload note
               </button>
             )}
             {currentPath && onRename && (
-              <button role="menuitem" className="more-phone" onClick={runMore(onRename)}>
+              <button role="menuitem" className="more-file" onClick={runMore(onRename)}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
                 Rename
               </button>
             )}
             {currentPath && onDelete && (
-              <button role="menuitem" className="danger more-phone" onClick={runMore(onDelete)}>
+              <button role="menuitem" className="danger more-file" onClick={runMore(onDelete)}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>
                 Delete
               </button>

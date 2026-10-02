@@ -457,18 +457,32 @@
   flex-shrink: 0;
 }
 
+/* One line, never two. It used to be space-between WITH wrapping, so a
+   narrow sidebar dropped the version onto its own line, left-aligned under
+   the host. Now the host gives way (ellipsis, full value in the tooltip)
+   and the version keeps its place on the right. The 14px side padding
+   lines the text up with the avatar above (footer 10px + row 4px), and the
+   bottom padding keeps it off the window's rounded corner. */
 .sidebar-server-info {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 2px 8px;
+  flex-wrap: nowrap;
+  gap: 8px;
   position: relative;
-  padding: 3px 12px;
-  font-size: 0.6rem;
+  padding: 6px 14px 8px;
+  font-size: 0.65rem;
+  line-height: 1.3;
   color: var(--text-faintest);
   border-top: 1px solid var(--border-subtle);
   flex-shrink: 0;
+  min-width: 0;
+}
+.sidebar-host {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Version + clickable (i) build-details popover. */
@@ -476,6 +490,8 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .version-info-btn {
   display: inline-flex;
@@ -6195,8 +6211,12 @@ pre:hover .code-copy-btn {
    layer on every screen size or the editor's own toolbar paints over the
    menu and swallows its clicks. */
 .toolbar { position: relative; z-index: 30; }
+/* .more-file entries (Show in tree, Reload, Rename, Delete) are on the bar
+   when it has room; the container query further down moves them into the
+   menu when the toolbar gets narrow, on a desktop window too. */
 @media (min-width: 769px) {
   .toolbar-more-menu .more-phone { display: none; }
+  .toolbar-more-menu .more-file { display: none; }
   /* Desktop shows the status pill on the bar; the dot is phone-only. */
   .toolbar-more-dot { display: none; }
 }
@@ -6357,24 +6377,41 @@ pre:hover .code-copy-btn {
     padding-left: 0;
     border-left: none;
   }
-}
-
-
-/* Phone: the formatting bars stay one row and scroll sideways instead of
-   wrapping to two, which cost a second row of screen above every note. */
-@media (max-width: 768px) {
-  .live-toolbar,
-  .editor-toolbar {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    overscroll-behavior-x: contain;
-    scrollbar-width: none;
+  /* A narrow desktop window (half a laptop screen, say) wrapped the bar to
+     three rows. The open file's own actions move into the ⋯ menu, which
+     keeps navigation, the mode switch, the filename, the view switch and
+     the utilities on one row. */
+  .toolbar-path .toolbar-inline-reveal,
+  .toolbar-path .toolbar-inline-refresh,
+  .toolbar-path-actions { display: none; }
+  .toolbar-more-menu .more-file { display: flex; }
+  .toolbar-more-menu .toolbar-more-sep.more-file { display: block; }
+  /* The old "under 900px, the path gets its own line" rule existed to make
+     room for Rename/Delete beside it. They are in the menu now, so the path
+     stays inline and ellipsizes instead of costing a row. */
+  .toolbar > .toolbar-path {
+    order: 0;
+    flex: 1 1 0;
+    flex-basis: 0;
+    min-width: 0;
   }
-  .live-toolbar::-webkit-scrollbar,
-  .editor-toolbar::-webkit-scrollbar { display: none; }
-  .live-toolbar > *,
-  .editor-toolbar > * { flex-shrink: 0; }
 }
+
+
+/* The formatting bars stay one row and scroll sideways instead of wrapping
+   to two, which cost a second row of screen above every note on a phone or
+   a narrow window. On a wide screen they fit and nothing scrolls. */
+.live-toolbar,
+.editor-toolbar {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.live-toolbar::-webkit-scrollbar,
+.editor-toolbar::-webkit-scrollbar { display: none; }
+.live-toolbar > *,
+.editor-toolbar > * { flex-shrink: 0; }
 
 /* The view title is phone-only; desktop names the view in the Board/Chats
    button itself. */
