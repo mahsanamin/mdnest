@@ -57,6 +57,11 @@
 .chat-btn:hover:not(:disabled) { background: var(--surface-3); }
 .chat-btn:disabled { opacity: 0.5; cursor: default; }
 .chat-btn.active { border-color: var(--accent); color: var(--accent); }
+.chat-btn-icon { display: inline-flex; align-items: center; justify-content: center; padding: 4px 8px; }
+@keyframes chat-spin { to { transform: rotate(360deg); } }
+.chat-refresh.spinning svg { animation: chat-spin 0.8s linear infinite; }
+.chat-delete:hover:not(:disabled) { color: var(--danger); border-color: var(--danger); }
+.chat-label-short { display: none; }
 .chat-btn-primary {
   background: var(--accent);
   border-color: var(--accent);
@@ -294,6 +299,8 @@
 .chat-room-error { padding: 4px 14px; }
 
 @media (max-width: 768px) {
+  .chat-label-long { display: none; }
+  .chat-label-short { display: inline; }
   .chat-list { width: 100%; flex: 1 1 auto; border-right: none; }
   .chat-msg { max-width: 92%; }
   .chat-messages { padding: 10px; }

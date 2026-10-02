@@ -137,7 +137,7 @@ function ChatList({ chats, loading, error, openChat, onSelect, filter, onFilter 
   );
 }
 
-function ChatRoom({ chat, account, serverAlias, onOpenNote, onBack, onActivity }) {
+function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack, onActivity }) {
   const [doc, setDoc] = useState(null); // { title, description, you }
   const [messages, setMessages] = useState([]);
   const [error, setError] = useState('');
@@ -154,11 +154,18 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onBack, onActivity }
 
   const effectiveAs = postingAs.trim() || doc?.you || account || '';
 
-  // Load from scratch when the chat changes.
+  const [reloadNonce, setReloadNonce] = useState(0);
+  const [reloading, setReloading] = useState(false);
+
+  // Load from scratch when the chat changes, or on Refresh. Refresh re-reads
+  // the WHOLE note rather than "after N", so it also picks up a message that
+  // was edited or removed by hand in the editor, which polling never sees.
   useEffect(() => {
     let cancelled = false;
-    setDoc(null);
-    setMessages([]);
+    if (reloadNonce === 0) {
+      setDoc(null);
+      setMessages([]);
+    }
     setError('');
     countRef.current = 0;
     stickToBottom.current = true;
@@ -170,9 +177,10 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onBack, onActivity }
         countRef.current = r.count;
         writeSeen(chat.ns, chat.path, r.count);
       })
-      .catch((e) => { if (!cancelled) setError(e.message); });
+      .catch((e) => { if (!cancelled) setError(e.message); })
+      .finally(() => { if (!cancelled) setReloading(false); });
     return () => { cancelled = true; };
-  }, [chat.ns, chat.path]);
+  }, [chat.ns, chat.path, reloadNonce]);
 
   const poll = useCallback(async () => {
     try {
@@ -252,8 +260,30 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onBack, onActivity }
           </button>
         </div>
         <button className={`chat-btn${showAgent ? ' active' : ''}`} onClick={() => setShowAgent((v) => !v)} title="How an agent joins this chat">
-          Connect an agent
+          <span className="chat-label-long">Connect an agent</span>
+          <span className="chat-label-short">Agents</span>
         </button>
+        <button
+          className={`chat-btn chat-btn-icon chat-refresh${reloading ? ' spinning' : ''}`}
+          onClick={() => { setReloading(true); setReloadNonce((n) => n + 1); onActivity?.(); }}
+          disabled={reloading}
+          title="Refresh this chat"
+          aria-label="Refresh this chat"
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+        </button>
+        {onDeleteChat && (
+          <button
+            className="chat-btn chat-btn-icon chat-delete"
+            onClick={async () => {
+              try { await onDeleteChat(chat.ns, chat.path, doc?.title); } catch (e) { setError(e.message); }
+            }}
+            title="Delete this chat"
+            aria-label="Delete this chat"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>
+          </button>
+        )}
       </header>
 
       {showAgent && (
@@ -319,7 +349,7 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onBack, onActivity }
   );
 }
 
-function ChatView({ namespaces, defaultNs, account, serverAlias, isMobile, openChat, onSelectChat, onOpenNote, onClose }) {
+function ChatView({ namespaces, defaultNs, account, serverAlias, isMobile, openChat, onSelectChat, onOpenNote, onDeleteChat, onClose }) {
   const [chats, setChats] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -365,6 +395,9 @@ function ChatView({ namespaces, defaultNs, account, serverAlias, isMobile, openC
               <h2>Chats</h2>
             )}
             <div className="chat-list-actions">
+              <button className="chat-btn chat-btn-icon" onClick={refresh} title="Refresh the list of chats" aria-label="Refresh the list of chats">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+              </button>
               <button className="chat-btn chat-btn-primary" onClick={() => setCreating((v) => !v)}>+ New</button>
               {!isMobile && <button className="chat-btn" onClick={onClose} title="Back to the editor" aria-label="Close chats">✕</button>}
             </div>
@@ -387,6 +420,9 @@ function ChatView({ namespaces, defaultNs, account, serverAlias, isMobile, openC
           account={account}
           serverAlias={serverAlias}
           onOpenNote={onOpenNote}
+          onDeleteChat={onDeleteChat ? async (ns, path, title) => {
+            if (await onDeleteChat(ns, path, title)) refresh();
+          } : null}
           onBack={isMobile ? () => onSelectChat(null) : null}
           onActivity={refresh}
         />

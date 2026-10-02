@@ -1310,6 +1310,20 @@ function App() {
     setChatsOpen(true);
   }, [content, currentPath, selectedNs, chatEnabled]);
 
+  // Delete a chat = delete its note (the note IS the chat). Confirmed first,
+  // naming the note, because it removes every message too. Clears whatever
+  // still points at the note (the open file, the namespace's last-opened
+  // memory, the tree) exactly like deleting the file from the tree does.
+  const deleteChat = useCallback(async (ns, path, title) => {
+    if (!window.confirm(`Delete the chat "${title || path}"?\n\nThis deletes the note ${ns}/${path} and every message in it.`)) return false;
+    await deleteNote(ns, path);
+    if (ns === selectedNs && currentPath === path) { setCurrentPath(null); setContent(null); setSavedContent(''); }
+    if (getLastPath(ns) === path) setLastPath(ns, null);
+    if (ns === selectedNs) await refreshTree(undefined, { broadcast: true });
+    setOpenChat(null);
+    return true;
+  }, [selectedNs, currentPath, getLastPath, setLastPath, refreshTree]);
+
   // "Open the note behind this chat": leave the chats view and open the file,
   // switching namespace when the chat lives in another one.
   const openNoteFromChat = useCallback((ns, p) => {
@@ -2064,6 +2078,7 @@ function App() {
                 openChat={openChat}
                 onSelectChat={setOpenChat}
                 onOpenNote={openNoteFromChat}
+                onDeleteChat={deleteChat}
                 onClose={() => setChatsOpen(false)}
               />
             </Suspense>
