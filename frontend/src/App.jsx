@@ -1919,6 +1919,7 @@ function App() {
       >
         <Toolbar
           currentPath={currentPath}
+          onManageUsers={isAdmin && isMulti ? () => setShowAdminPanel(true) : null}
           theme={resolvedTheme}
           onToggleTheme={toggleTheme}
           onToggleSidebar={() => setSidebarVisible((v) => !v)}
