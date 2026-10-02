@@ -1,10 +1,14 @@
 package handlers
 
 import (
+	"bytes"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/mdnest/mdnest/backend/middleware"
@@ -197,4 +201,64 @@ func TestUploadDelegatesToWriterProxy(t *testing.T) {
 	if rec.Code != http.StatusTeapot || gotPath != "/api/upload" {
 		t.Fatalf("expected upload delegation to proxy, got code=%d path=%q", rec.Code, gotPath)
 	}
+}
+
+// pathWriteGrantStore grants write on exactly one (namespace, path) subtree,
+// matched with the real store.PathCovers.
+type pathWriteGrantStore struct {
+	fakeGrantStore
+	path string
+}
+
+func (f *pathWriteGrantStore) CheckAccess(userID int, namespace, p, _ string) bool {
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	return userID == f.userID && namespace == f.namespace && store.PathCovers(f.path, p)
+}
+
+func uploadAs(h *UploadHandler, uc *middleware.UserContext, ns, reqPath, filename string) *httptest.ResponseRecorder {
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	fw, _ := mw.CreateFormFile("file", filename)
+	fw.Write([]byte("uploaded bytes"))
+	mw.Close()
+	q := url.Values{"ns": {ns}, "path": {reqPath}}
+	r := httptest.NewRequest(http.MethodPost, "/api/upload?"+q.Encode(), &body)
+	r.Header.Set("Content-Type", mw.FormDataContentType())
+	r = middleware.WithUser(r, uc)
+	w := httptest.NewRecorder()
+	h.HandleUpload(w, r)
+	return w
+}
+
+// /api/upload is authorised by the route middleware on ?path=, but the file is
+// written to dir(path)/<uploaded filename>. With a grant on /Shared, sending
+// path=Shared put the file at the namespace root — outside the grant. The
+// handler must check write access on the destination it actually writes.
+func TestUploadChecksWriteOnActualDestination(t *testing.T) {
+	notesDir := notesDirWithTwoNamespaces(t)
+	gs := &pathWriteGrantStore{fakeGrantStore: fakeGrantStore{userID: 7, namespace: "alpha"}, path: "/Shared"}
+	h := NewUploadHandler(localStore(t, notesDir), middleware.NewPermissionChecker(gs, fakeNsAdminStore{}, nil))
+	collaborator := &middleware.UserContext{ID: 7, Username: "carol", Role: "collaborator"}
+
+	t.Run("upload next to a note inside the grant is allowed", func(t *testing.T) {
+		w := uploadAs(h, collaborator, "alpha", "Shared/note.md", "pic.png")
+		if w.Code != http.StatusOK {
+			t.Fatalf("want 200, got %d (%s)", w.Code, w.Body.String())
+		}
+		if _, err := os.Stat(filepath.Join(notesDir, "alpha", "Shared", "pic.png")); err != nil {
+			t.Fatalf("upload not written inside the grant: %v", err)
+		}
+	})
+
+	t.Run("destination outside the grant is refused", func(t *testing.T) {
+		w := uploadAs(h, collaborator, "alpha", "Shared", "escape.png")
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("want 403 for a destination outside the grant, got %d (%s)", w.Code, w.Body.String())
+		}
+		if _, err := os.Stat(filepath.Join(notesDir, "alpha", "escape.png")); err == nil {
+			t.Fatal("file was written at the namespace root, outside the /Shared grant")
+		}
+	})
 }

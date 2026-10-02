@@ -322,7 +322,7 @@ func (s *PostgresGroupStore) CheckGroupAccess(userID int, oidcGroups []string, n
 		if !strings.HasPrefix(grantPath, "/") {
 			grantPath = "/" + grantPath
 		}
-		if !pathCovers(grantPath, path) {
+		if !PathCovers(grantPath, path) {
 			continue
 		}
 		if requiredPermission == "read" {
