@@ -6186,3 +6186,62 @@ pre:hover .code-copy-btn {
   font-weight: 600;
   cursor: pointer;
 }
+
+/* Phone toolbar: two rows instead of three. Rows are filled by `order`, not
+   DOM position, because the DOM order is the desktop reading order:
+     row 1  navigation (sidebar, Board, Chats) ........ utilities, pushed right
+     row 2  Basic/Live + the open file's controls
+   Before this, the utilities wrapped onto a row of their own and started with
+   their desktop divider hanging off the left edge, leaving the top-right
+   corner of the screen empty. */
+@media (max-width: 768px) {
+  .toolbar > .toolbar-group:first-child { order: 1; }
+  .toolbar-utility {
+    order: 2;
+    margin-left: auto;
+    padding-left: 0;
+    border-left: none;
+  }
+  .toolbar > .editor-mode-toggle { order: 3; }
+  .toolbar > .toolbar-path {
+    order: 4;
+    flex: 1 1 0;
+    flex-basis: 0;
+    min-width: 0;
+    max-width: none;
+  }
+  /* The status keeps its colour dot; the word moves to the tooltip. */
+  .toolbar-utility .ws-status-text { display: none; }
+  /* Rename/Delete were always meant to be hidden here (the 768px block near
+     the top of this file says so), but the unconditional
+     .toolbar-path-actions rule further down won on source order, so on a
+     phone they squeezed the filename to a single letter. Both stay on the
+     tree's long-press menu. */
+  .toolbar-path-actions { display: none; }
+}
+
+/* Desktop: keep the toolbar on ONE row as it fills up. It is measured as a
+   container, not by viewport, because what decides the space is the
+   (resizable) sidebar beside it: 1280px wide with the sidebar open leaves
+   the toolbar ~1020px, a few pixels short of one row once Chats was added.
+   Shed words, never controls, in order of how little they say. */
+.toolbar { container: toolbar / inline-size; }
+@container toolbar (max-width: 1120px) {
+  /* Board / Chats keep their icons; the name is in the tooltip. */
+  .toolbar-view-btn > span { display: none; }
+  .toolbar-view-btn { padding: 4px 8px; }
+}
+@container toolbar (max-width: 980px) {
+  .toolbar-utility .ws-status-text { display: none; }
+}
+/* Too narrow for one row even after shedding words: the utilities wrap. Then
+   they sit at the right of their own row instead of starting it with the
+   divider that only means something when a group is beside them. */
+@container toolbar (max-width: 860px) {
+  .toolbar-utility {
+    margin-left: auto;
+    padding-left: 0;
+    border-left: none;
+  }
+}
+

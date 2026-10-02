@@ -206,7 +206,10 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
           own group and carry a divider. */}
       <div className="toolbar-group toolbar-utility">
       {wsStatus && currentPath && (
-        <span className={`ws-status ${wsStatus}`}>
+        <span
+          className={`ws-status ${wsStatus}`}
+          title={wsStatus === 'connected' ? 'Live collaboration connected' : wsStatus === 'connecting' ? 'Reconnecting to live collaboration' : wsStatus === 'superseded' ? 'Session moved to another tab' : 'Live collaboration offline'}
+        >
           <span className={`ws-status-dot ${wsStatus}`} />
           <span className="ws-status-text">
             {wsStatus === 'connected' ? 'Live' : wsStatus === 'connecting' ? 'Reconnecting' : wsStatus === 'superseded' ? 'Session moved' : 'Offline'}
