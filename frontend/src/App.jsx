@@ -1941,6 +1941,8 @@ function App() {
           }}
           editorMode={editorModeForNote}
           marpLocked={marpActive || chatNoteActive}
+          mobileView={mobileView}
+          onMobileViewChange={isMobile && currentPath && !excalidrawActive && !showTaskBoard && !chatsOpen ? (v) => { setMobileView(v); localStorage.setItem('mdnest_mobile_view', v); } : null}
           liveLockReason={chatNoteActive && !marpActive ? 'Disabled for chats — the rich editor would rewrite the chat tag and turn it back into a plain note' : null}
           onSetBoardActive={taskBoardEnabled && selectedNs ? setBoardActive : null}
           onSetChatsActive={chatEnabled ? setChatsActive : null}
@@ -2111,10 +2113,8 @@ function App() {
               </div>
             ) : (
             <>
-              <div className="mobile-view-toggle">
-                <button className={mobileView === 'editor' ? 'active' : ''} onClick={() => { setMobileView('editor'); localStorage.setItem('mdnest_mobile_view', 'editor'); }}>Edit</button>
-                <button className={mobileView === 'preview' ? 'active' : ''} onClick={() => { setMobileView('preview'); localStorage.setItem('mdnest_mobile_view', 'preview'); }}>Preview</button>
-              </div>
+              {/* The phone's Edit/Preview switch lives in the toolbar now, as
+                  the third option of Basic | Live | Preview. */}
               {(isMobile ? mobileView === 'editor' : viewMode !== 'preview') && (
                 <div
                   ref={editorWrapperRef}

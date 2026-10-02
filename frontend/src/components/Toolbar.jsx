@@ -1,7 +1,25 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 
-function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePassword, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh, wsStatus, commentCount, onToggleComments, stickyCount, onToggleStickies, stickiesOpen, onSetBoardActive, boardActive, onSetChatsActive, chatsActive, marpLocked, liveLockReason, drawingDoc, drawingSource, onDrawingSourceChange, theme, onToggleTheme }) {
+function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePassword, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh, wsStatus, commentCount, onToggleComments, stickyCount, onToggleStickies, stickiesOpen, onSetBoardActive, boardActive, onSetChatsActive, chatsActive, marpLocked, liveLockReason, mobileView, onMobileViewChange, drawingDoc, drawingSource, onDrawingSourceChange, theme, onToggleTheme }) {
   const [refreshing, setRefreshing] = useState(false);
+  // Phone overflow menu. On a phone the bar keeps only what is used per note
+  // (sidebar, filename, comments, the mode switch); every other control lives
+  // in this menu. The menu is CSS-hidden on desktop, where everything fits.
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreRef = useRef(null);
+  useEffect(() => {
+    if (!moreOpen) return undefined;
+    const onDown = (e) => { if (moreRef.current && !moreRef.current.contains(e.target)) setMoreOpen(false); };
+    const onKey = (e) => { if (e.key === 'Escape') setMoreOpen(false); };
+    document.addEventListener('pointerdown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('pointerdown', onDown); document.removeEventListener('keydown', onKey); };
+  }, [moreOpen]);
+  const runMore = (fn) => () => { setMoreOpen(false); fn?.(); };
+  const statusLabel = wsStatus === 'connected' ? 'Live' : wsStatus === 'connecting' ? 'Reconnecting' : wsStatus === 'superseded' ? 'Session moved' : 'Offline';
+  // The dot on the menu button: only for something that is wrong, so it
+  // means "look inside" rather than being permanent decoration.
+  const moreNeedsAttention = !!wsStatus && !!currentPath && wsStatus !== 'connected';
   const handleRefresh = useCallback(() => {
     if (refreshing || !onRefresh) return;
     setRefreshing(true);
@@ -17,7 +35,13 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
   // is edited, and the board has replaced it, so there is nothing for them to
   // act on. Leaving them visible-but-inert was the confusing part — they read
   // as view switches for what is on screen.
-  const showEditorToggle = viewMode !== 'preview' && onEditorModeChange && !boardActive && !chatsActive;
+  // On a phone the same control also carries Preview (see below), so it must
+  // show even when the desktop view mode is preview-only.
+  const showEditorToggle = (viewMode !== 'preview' || !!onMobileViewChange) && onEditorModeChange && !boardActive && !chatsActive;
+  // Phone only: one Basic | Live | Preview control instead of the Basic/Live
+  // pair plus a full-width Edit/Preview row under the toolbar. Basic and Live
+  // mean "edit, in this mode"; Preview means "read".
+  const mobilePreview = !!onMobileViewChange && mobileView === 'preview';
 
   return (
     <div className="toolbar">
@@ -106,16 +130,23 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
           {showEditorToggle && !drawingDoc && (
             <>
               <button
-                className={editorMode === 'basic' ? 'active' : ''}
-                onClick={() => onEditorModeChange('basic')}
+                className={editorMode === 'basic' && !mobilePreview ? 'active' : ''}
+                onClick={() => { onEditorModeChange('basic'); onMobileViewChange?.('editor'); }}
                 title="Plain text editor"
               >Basic</button>
               <button
-                className={editorMode === 'live' ? 'active' : ''}
-                onClick={() => onEditorModeChange('live')}
+                className={editorMode === 'live' && !mobilePreview ? 'active' : ''}
+                onClick={() => { onEditorModeChange('live'); onMobileViewChange?.('editor'); }}
                 disabled={marpLocked}
                 title={marpLocked ? (liveLockReason || 'Disabled for Marp slides — the rich editor would reformat and break the deck') : 'Live rich editor'}
               >Live</button>
+              {onMobileViewChange && (
+                <button
+                  className={mobilePreview ? 'active' : ''}
+                  onClick={() => onMobileViewChange('preview')}
+                  title="Rendered preview"
+                >Preview</button>
+              )}
             </>
           )}
         </div>
@@ -269,6 +300,95 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
       <button className="toolbar-settings" onClick={onChangePassword} title="Settings">
         &#9881;
       </button>
+      <div className="toolbar-more" ref={moreRef}>
+        <button
+          className={`toolbar-more-btn${moreOpen ? ' active' : ''}`}
+          onClick={() => setMoreOpen((v) => !v)}
+          aria-label="More"
+          aria-haspopup="menu"
+          aria-expanded={moreOpen}
+          title="More"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
+          {moreNeedsAttention && <span className={`toolbar-more-dot ${wsStatus}`} />}
+        </button>
+        {moreOpen && (
+          <div className="toolbar-more-menu" role="menu">
+            {wsStatus && currentPath && (
+              <div className="toolbar-more-status" role="presentation">
+                <span className={`ws-status-dot ${wsStatus}`} /> Live collaboration: {statusLabel}
+              </div>
+            )}
+            {onSetBoardActive && (
+              <button role="menuitem" onClick={runMore(() => onSetBoardActive(!boardActive))}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+                {boardActive ? 'Close board' : 'Board'}
+              </button>
+            )}
+            {onSetChatsActive && (
+              <button role="menuitem" onClick={runMore(() => onSetChatsActive(!chatsActive))}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <defs><mask id="chats-menu-dots"><rect width="24" height="24" fill="#fff"/><circle cx="6.3" cy="14" r="1.2" fill="#000"/><circle cx="9.6" cy="14" r="1.2" fill="#000"/><circle cx="12.9" cy="14" r="1.2" fill="#000"/></mask></defs>
+                  <path d="M9.2 5.6A7 7 0 0 1 21.3 12.9l.9 3.6-3.6-.9a7 7 0 0 1-1.8.9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M9.6 7.4a6.6 6.6 0 1 1-3.4 12.3L2.3 20.8l1.1-3.7A6.6 6.6 0 0 1 9.6 7.4z" fill="currentColor" mask="url(#chats-menu-dots)"/>
+                </svg>
+                {chatsActive ? 'Close chats' : 'Chats'}
+              </button>
+            )}
+            {onToggleStickies && (
+              <button role="menuitem" onClick={runMore(onToggleStickies)}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M4.5 3h15A1.5 1.5 0 0 1 21 4.5V15l-6 6H4.5A1.5 1.5 0 0 1 3 19.5v-15A1.5 1.5 0 0 1 4.5 3z" className="sticky-icon-front" />
+                  <path d="M21 15h-4.5A1.5 1.5 0 0 0 15 16.5V21z" className="sticky-icon-fold" />
+                  <path d="M7 8.5h10M7 12.5h6.5" className="sticky-icon-ink" strokeWidth="1.6" strokeLinecap="round" />
+                </svg>
+                Stickies
+                {stickyCount > 0 && <span className="toolbar-more-count">{stickyCount}</span>}
+              </button>
+            )}
+            {currentPath && (onRevealInTree || onRefresh || onRename || onDelete) && <div className="toolbar-more-sep" />}
+            {currentPath && onRevealInTree && (
+              <button role="menuitem" onClick={runMore(onRevealInTree)}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+                Show in tree
+              </button>
+            )}
+            {currentPath && onRefresh && (
+              <button role="menuitem" onClick={runMore(handleRefresh)}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+                Reload note
+              </button>
+            )}
+            {currentPath && onRename && (
+              <button role="menuitem" onClick={runMore(onRename)}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+                Rename
+              </button>
+            )}
+            {currentPath && onDelete && (
+              <button role="menuitem" className="danger" onClick={runMore(onDelete)}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>
+                Delete
+              </button>
+            )}
+            <div className="toolbar-more-sep" />
+            {onToggleTheme && (
+              <button role="menuitem" onClick={runMore(onToggleTheme)}>
+                {theme === 'dark' ? (
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M6.3 17.7l-1.4 1.4M19.1 4.9l-1.4 1.4"/></svg>
+                ) : (
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+                )}
+                {theme === 'dark' ? 'Light mode' : 'Dark mode'}
+              </button>
+            )}
+            <button role="menuitem" onClick={runMore(onChangePassword)}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+              Settings
+            </button>
+          </div>
+        )}
+      </div>
       </div>
     </div>
   );

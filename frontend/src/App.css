@@ -6187,38 +6187,156 @@ pre:hover .code-copy-btn {
   cursor: pointer;
 }
 
-/* Phone toolbar: two rows instead of three. Rows are filled by `order`, not
-   DOM position, because the DOM order is the desktop reading order:
-     row 1  navigation (sidebar, Board, Chats) ........ utilities, pushed right
-     row 2  Basic/Live + the open file's controls
-   Before this, the utilities wrapped onto a row of their own and started with
-   their desktop divider hanging off the left edge, leaving the top-right
-   corner of the screen empty. */
+/* The phone overflow menu exists only on phones. */
+.toolbar-more { display: none; position: relative; }
+
+/* Phone toolbar: the bar keeps only what is used on every note, and the rest
+   moves into the ⋯ menu (Toolbar.jsx). Two rows:
+     row 1  sidebar · [back to editor] · filename ......... comments · ⋯
+     row 2  Basic | Live | Preview
+   Before this it showed ~11 controls over two or three rows, in mixed
+   styles, and pushed the note a third of the way down the screen. Rows are
+   filled by `order`, not DOM position, because the DOM order is the desktop
+   reading order. */
 @media (max-width: 768px) {
-  .toolbar > .toolbar-group:first-child { order: 1; }
-  .toolbar-utility {
-    order: 2;
-    margin-left: auto;
-    padding-left: 0;
-    border-left: none;
+  .toolbar {
+    position: relative;
+    z-index: 30; /* the ⋯ menu must paint over the note below */
+    padding: 6px 10px;
+    gap: 6px;
+    row-gap: 6px;
   }
-  .toolbar > .editor-mode-toggle { order: 3; }
+  .toolbar > .toolbar-group:first-child { order: 1; gap: 4px; }
   .toolbar > .toolbar-path {
-    order: 4;
+    order: 2;
     flex: 1 1 0;
-    flex-basis: 0;
     min-width: 0;
     max-width: none;
   }
-  /* The status keeps its colour dot; the word moves to the tooltip. */
-  .toolbar-utility .ws-status-text { display: none; }
-  /* Rename/Delete were always meant to be hidden here (the 768px block near
-     the top of this file says so), but the unconditional
-     .toolbar-path-actions rule further down won on source order, so on a
-     phone they squeezed the filename to a single letter. Both stay on the
-     tree's long-press menu. */
+  .toolbar-utility {
+    order: 3;
+    margin-left: auto;
+    padding-left: 0;
+    border-left: none;
+    gap: 4px;
+  }
+  .toolbar > .editor-mode-toggle {
+    order: 4;
+    flex: 1 0 100%;
+    display: flex;
+  }
+  .toolbar > .editor-mode-toggle button { flex: 1; padding: 6px 0; }
+
+  /* Moved into the ⋯ menu. */
+  .toolbar .toolbar-view-btn.toolbar-view-board,
+  .toolbar .toolbar-view-btn.toolbar-view-chats,
+  .toolbar-utility .ws-status,
+  .toolbar-utility .toolbar-stickies,
+  .toolbar-utility .toolbar-theme,
+  .toolbar-utility .toolbar-settings,
+  .toolbar-path .toolbar-inline-reveal,
+  .toolbar-path .toolbar-inline-refresh,
   .toolbar-path-actions { display: none; }
+  .toolbar-more { display: block; }
+
+  /* One look for every icon button left on the bar: same square, no box. */
+  /* Prefixed with .toolbar: the generic `.toolbar button` rule near the top
+     of this file outranks a bare class and boxed the sidebar and ⋯ buttons. */
+  .toolbar .toolbar-hamburger,
+  .toolbar .toolbar-view-btn,
+  .toolbar .toolbar-comments,
+  .toolbar .toolbar-more-btn {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius);
+    color: var(--text-secondary);
+    position: relative;
+  }
+  .toolbar .toolbar-hamburger:active,
+  .toolbar .toolbar-comments:active,
+  .toolbar .toolbar-more-btn:active,
+  .toolbar .toolbar-more-btn.active { background: var(--surface-2); color: var(--text); }
+  .toolbar-path-base { font-weight: 600; font-size: 0.95rem; }
 }
+
+.toolbar-more-btn { cursor: pointer; }
+.toolbar-more-dot {
+  position: absolute;
+  top: 5px;
+  right: 3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--warning);
+  box-shadow: 0 0 0 2px var(--surface);
+}
+.toolbar-more-dot.disconnected { background: var(--danger); }
+.toolbar-more-dot.superseded { background: var(--orange); }
+
+.toolbar-more-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 220px;
+  max-width: calc(100vw - 20px);
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 12px 32px var(--shadow-color-strong);
+  display: flex;
+  flex-direction: column;
+}
+.toolbar-more-menu > button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  background: none;
+  border: none;
+  border-radius: var(--radius);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.95rem;
+  text-align: left;
+  cursor: pointer;
+}
+.toolbar-more-menu > button:active,
+.toolbar-more-menu > button:hover { background: var(--surface-2); }
+.toolbar-more-menu > button svg { flex: 0 0 auto; color: var(--text-secondary); }
+.toolbar-more-menu > button.danger,
+.toolbar-more-menu > button.danger svg { color: var(--danger); }
+.toolbar-more-count {
+  margin-left: auto;
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: var(--text-inverse);
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+}
+.toolbar-more-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px 10px;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+.toolbar-more-sep { height: 1px; margin: 4px 6px; background: var(--border); }
 
 /* Desktop: keep the toolbar on ONE row as it fills up. It is measured as a
    container, not by viewport, because what decides the space is the
@@ -6245,3 +6363,19 @@ pre:hover .code-copy-btn {
   }
 }
 
+
+/* Phone: the formatting bars stay one row and scroll sideways instead of
+   wrapping to two, which cost a second row of screen above every note. */
+@media (max-width: 768px) {
+  .live-toolbar,
+  .editor-toolbar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+  .live-toolbar::-webkit-scrollbar,
+  .editor-toolbar::-webkit-scrollbar { display: none; }
+  .live-toolbar > *,
+  .editor-toolbar > * { flex-shrink: 0; }
+}
