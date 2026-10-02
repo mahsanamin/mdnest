@@ -67,7 +67,10 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
           onClick={() => onSetChatsActive(true)}
           title="All chats"
         >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          {/* Two overlapping bubbles — a conversation. Deliberately NOT the
+              single bubble the comments button uses: the two sat side by
+              side and read as the same control. */}
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z"/><path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1"/></svg>
           <span>Chats</span>
         </button>
       )}
