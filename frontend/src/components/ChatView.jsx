@@ -345,7 +345,18 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
   );
 }
 
-function ChatView({ ns, account, serverAlias, isMobile, openChat, onSelectChat, onOpenNote, onDeleteChat, onClose }) {
+// The chat list is per workspace, and in chat mode the file tree (which holds
+// the sidebar's workspace switcher) is hidden, so the header carries its own.
+function NsPicker({ ns, namespaces, onSelectNs }) {
+  if (!onSelectNs || !namespaces || namespaces.length < 2) return <span className="chat-list-ns">{ns}</span>;
+  return (
+    <select className="chat-ns-select" value={ns || ''} onChange={(e) => onSelectNs(e.target.value)} aria-label="Workspace">
+      {namespaces.map((n) => <option key={n} value={n}>{n}</option>)}
+    </select>
+  );
+}
+
+function ChatView({ ns, namespaces, onSelectNs, account, serverAlias, isMobile, openChat, onSelectChat, onOpenNote, onDeleteChat, onClose }) {
   const [chats, setChats] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -388,17 +399,19 @@ function ChatView({ ns, account, serverAlias, isMobile, openChat, onSelectChat, 
             {isMobile ? (
               <>
                 <button className="chat-btn chat-back" onClick={onClose} title="Back to the editor" aria-label="Close chats">&#8592;</button>
-                <span className="chat-list-count">{loading ? '' : `${chats.length} chat${chats.length === 1 ? '' : 's'} in ${ns}`}</span>
+                <NsPicker ns={ns} namespaces={namespaces} onSelectNs={onSelectNs} />
+                <span className="chat-list-count">{loading ? '' : `${chats.length} chat${chats.length === 1 ? '' : 's'}`}</span>
               </>
             ) : (
-              <h2>Chats <span className="chat-list-ns">in {ns}</span></h2>
+              <h2>Chats <span className="chat-list-in">in</span> <NsPicker ns={ns} namespaces={namespaces} onSelectNs={onSelectNs} /></h2>
             )}
             <div className="chat-list-actions">
               <button className="chat-btn chat-btn-icon" onClick={refresh} title="Refresh the list of chats" aria-label="Refresh the list of chats">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
               </button>
               <button className="chat-btn chat-btn-primary" onClick={() => setCreating((v) => !v)}>+ New</button>
-              {!isMobile && <button className="chat-btn" onClick={onClose} title="Back to the editor" aria-label="Close chats">✕</button>}
+              {/* No ✕ on desktop: the toolbar's Editor button is the way back,
+                  and two exits for one view was the confusing part. */}
             </div>
           </header>
           {creating && (

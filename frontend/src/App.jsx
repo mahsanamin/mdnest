@@ -1876,7 +1876,7 @@ function App() {
   }
 
   return (
-    <div className="app">
+    <div className={`app${chatsOpen && chatEnabled ? ' app--chats' : ''}`}>
       {appConfig?.devLoginEnabled && (
         // Small fixed-position warning pill — visible on every
         // authenticated screen but unobtrusive. Hover for the full
@@ -2082,6 +2082,8 @@ function App() {
             <Suspense fallback={<div className="editor-loading">Loading chats...</div>}>
               <ChatView
                 ns={selectedNs}
+                namespaces={namespaces}
+                onSelectNs={handleSelectNs}
                 account={isMulti ? userInfo?.username : null}
                 serverAlias={appConfig?.serverAlias}
                 isMobile={isMobile}

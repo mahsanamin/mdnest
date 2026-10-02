@@ -6395,3 +6395,16 @@ pre:hover .code-copy-btn {
   }
 }
 
+/* Chat mode is full screen. The file tree and the open note's controls
+   (filename, Rename/Delete, the editor view switch, comments) are about a
+   note that is not on screen, so they go; the chats list is the left panel
+   and the workspace switcher moves into its header (ChatView NsPicker).
+   Desktop only for the sidebar: on a phone it is already an off-canvas
+   drawer behind ☰, and that stays the way to reach the tree. */
+@media (min-width: 769px) {
+  .app--chats .sidebar { display: none; }
+}
+.toolbar--chats .toolbar-path,
+.toolbar--chats .toolbar-comments,
+.toolbar--chats .toolbar-view-toggle { display: none; }
+

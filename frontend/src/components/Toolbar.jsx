@@ -44,7 +44,7 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
   const mobilePreview = !!onMobileViewChange && mobileView === 'preview';
 
   return (
-    <div className={`toolbar${boardActive || chatsActive ? ' toolbar--view' : ''}`}>
+    <div className={`toolbar${boardActive || chatsActive ? ' toolbar--view' : ''}${chatsActive ? ' toolbar--chats' : ''}`}>
       {/* Groups, not a flat row. Every control used to sit the same 0.5rem
           from its neighbour, so "Rename / Delete" read as no more related to
           each other than to the file path beside them, and the trailing icons

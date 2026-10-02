@@ -55,6 +55,9 @@ On it — frontend checks green.
   the chats in the workspace you are in, most recently active first, with
   unread counts. Switch workspace in the sidebar to see another one's chats.
   A link to a chat (`#!chats/<workspace>/<path>`) opens its workspace.
+- Chat mode is full screen: the file tree and the open note's controls are
+  hidden, and the workspace picker sits in the chats header. **Editor** in
+  the toolbar takes you back.
 - **+ New** creates one in the current workspace: give it a name and a folder
   (`Chats/` by default). The name becomes a shell-safe filename,
   e.g. `Chats/release-coordination.md`.
