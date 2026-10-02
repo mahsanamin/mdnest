@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 
-function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePassword, onManageUsers, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh, wsStatus, commentCount, onToggleComments, onToggleStickies, stickiesOpen, onSetBoardActive, boardActive, onSetChatsActive, chatsActive, marpLocked, liveLockReason, mobileView, onMobileViewChange, drawingDoc, drawingSource, onDrawingSourceChange, theme, onToggleTheme }) {
+function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePassword, onManageUsers, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh, wsStatus, commentCount, onToggleComments, onToggleStickies, stickiesOpen, onSetBoardActive, boardActive, onSetChatsActive, chatsActive, chatsBackLabel, marpLocked, liveLockReason, mobileView, onMobileViewChange, drawingDoc, drawingSource, onDrawingSourceChange, theme, onToggleTheme }) {
   const [refreshing, setRefreshing] = useState(false);
   // Phone overflow menu. On a phone the bar keeps only what is used per note
   // (sidebar, filename, comments, the mode switch); every other control lives
@@ -63,17 +63,31 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
           The class follows the destination too (.toolbar-view-board takes you
           to the board, .toolbar-view-editor brings you back), so the name is
           about intent rather than which half is lit. */}
-      {(boardActive || chatsActive) ? (
+      {/* Chat mode has ONE exit, and it says where it goes: back to the note or
+          board you came from. Board/Chats/Editor are hidden there, because
+          leaving by switching to some other view is a side effect, not an
+          exit. (On a phone the chats header carries the ←, see CSS.) */}
+      {chatsActive && (
+        <button
+          className="toolbar-view-btn toolbar-chats-back"
+          onClick={() => onSetChatsActive(false)}
+          title={`Back to ${chatsBackLabel || 'the editor'}`}
+        >
+          <span aria-hidden="true">&#8592;</span>
+          <span>Back to {chatsBackLabel || 'the editor'}</span>
+        </button>
+      )}
+      {boardActive ? (
         <button
           className="toolbar-view-btn toolbar-view-editor"
-          onClick={() => (chatsActive ? onSetChatsActive(false) : onSetBoardActive(false))}
+          onClick={() => onSetBoardActive(false)}
           title={currentPath ? `Back to ${currentPath}` : 'Back to the editor'}
         >
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>
           <span>Editor</span>
         </button>
       ) : null}
-      {onSetBoardActive && !boardActive && (
+      {onSetBoardActive && !boardActive && !chatsActive && (
         <button
           className="toolbar-view-btn toolbar-view-board"
           onClick={() => onSetBoardActive(true)}
@@ -283,27 +297,9 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
           </svg>
         </button>
       )}
-      {onToggleTheme && (
-        <button
-          className="toolbar-theme"
-          onClick={onToggleTheme}
-          title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-          aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-        >
-          {/* Shows the theme you would switch TO, which is what the button
-              does. Showing the current one reads as a status light and leaves
-              the click ambiguous. Choosing "follow my OS" is a third state a
-              single button cannot express — that lives in Settings. */}
-          {theme === 'dark' ? (
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M6.3 17.7l-1.4 1.4M19.1 4.9l-1.4 1.4"/></svg>
-          ) : (
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
-          )}
-        </button>
-      )}
-      <button className="toolbar-settings" onClick={onChangePassword} title="Settings">
-        &#9881;
-      </button>
+      {/* Theme, Settings and Manage users live in the ⋯ menu on every
+          screen size: rarely used, and the menu pins one control to the
+          top-right corner whatever else the bar is showing. */}
       <div className="toolbar-more" ref={moreRef}>
         <button
           className={`toolbar-more-btn${moreOpen ? ' active' : ''}`}
@@ -319,18 +315,18 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
         {moreOpen && (
           <div className="toolbar-more-menu" role="menu">
             {wsStatus && currentPath && (
-              <div className="toolbar-more-status" role="presentation">
+              <div className="toolbar-more-status more-phone" role="presentation">
                 <span className={`ws-status-dot ${wsStatus}`} /> Live collaboration: {statusLabel}
               </div>
             )}
             {onSetBoardActive && (
-              <button role="menuitem" onClick={runMore(() => onSetBoardActive(!boardActive))}>
+              <button role="menuitem" className="more-phone" onClick={runMore(() => onSetBoardActive(!boardActive))}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
                 {boardActive ? 'Close board' : 'Board'}
               </button>
             )}
             {onSetChatsActive && (
-              <button role="menuitem" onClick={runMore(() => onSetChatsActive(!chatsActive))}>
+              <button role="menuitem" className="more-phone" onClick={runMore(() => onSetChatsActive(!chatsActive))}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                   <defs><mask id="chats-menu-dots"><rect width="24" height="24" fill="#fff"/><circle cx="6.3" cy="14" r="1.2" fill="#000"/><circle cx="9.6" cy="14" r="1.2" fill="#000"/><circle cx="12.9" cy="14" r="1.2" fill="#000"/></mask></defs>
                   <path d="M9.2 5.6A7 7 0 0 1 21.3 12.9l.9 3.6-3.6-.9a7 7 0 0 1-1.8.9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
@@ -340,7 +336,7 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
               </button>
             )}
             {onToggleStickies && (
-              <button role="menuitem" onClick={runMore(onToggleStickies)}>
+              <button role="menuitem" className="more-phone" onClick={runMore(onToggleStickies)}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" strokeLinejoin="round" aria-hidden="true">
                   <path d="M4.5 3h15A1.5 1.5 0 0 1 21 4.5V15l-6 6H4.5A1.5 1.5 0 0 1 3 19.5v-15A1.5 1.5 0 0 1 4.5 3z" className="sticky-icon-front" />
                   <path d="M21 15h-4.5A1.5 1.5 0 0 0 15 16.5V21z" className="sticky-icon-fold" />
@@ -349,34 +345,34 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
                 Stickies
               </button>
             )}
-            {currentPath && (onRevealInTree || onRefresh || onRename || onDelete) && <div className="toolbar-more-sep" />}
+            {currentPath && (onRevealInTree || onRefresh || onRename || onDelete) && <div className="toolbar-more-sep more-phone" />}
             {currentPath && onRevealInTree && (
-              <button role="menuitem" onClick={runMore(onRevealInTree)}>
+              <button role="menuitem" className="more-phone" onClick={runMore(onRevealInTree)}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
                 Show in tree
               </button>
             )}
             {currentPath && onRefresh && (
-              <button role="menuitem" onClick={runMore(handleRefresh)}>
+              <button role="menuitem" className="more-phone" onClick={runMore(handleRefresh)}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
                 Reload note
               </button>
             )}
             {currentPath && onRename && (
-              <button role="menuitem" onClick={runMore(onRename)}>
+              <button role="menuitem" className="more-phone" onClick={runMore(onRename)}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
                 Rename
               </button>
             )}
             {currentPath && onDelete && (
-              <button role="menuitem" className="danger" onClick={runMore(onDelete)}>
+              <button role="menuitem" className="danger more-phone" onClick={runMore(onDelete)}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>
                 Delete
               </button>
             )}
-            <div className="toolbar-more-sep" />
+            <div className="toolbar-more-sep more-phone" />
             {onToggleTheme && (
-              <button role="menuitem" onClick={runMore(onToggleTheme)}>
+              <button role="menuitem" className="toolbar-more-theme" onClick={runMore(onToggleTheme)}>
                 {theme === 'dark' ? (
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M6.3 17.7l-1.4 1.4M19.1 4.9l-1.4 1.4"/></svg>
                 ) : (
@@ -388,12 +384,12 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
             {/* Same entry, same gate (admin, multi mode) as the sidebar's
                 account menu, which on a phone is two taps further away. */}
             {onManageUsers && (
-              <button role="menuitem" onClick={runMore(onManageUsers)}>
+              <button role="menuitem" className="toolbar-more-users" onClick={runMore(onManageUsers)}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/></svg>
                 Manage users &amp; access
               </button>
             )}
-            <button role="menuitem" onClick={runMore(onChangePassword)}>
+            <button role="menuitem" className="toolbar-more-settings" onClick={runMore(onChangePassword)}>
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
               Settings
             </button>

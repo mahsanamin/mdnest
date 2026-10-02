@@ -311,6 +311,18 @@ function App() {
   // so it is independent of the note open underneath.
   const [chatsOpen, setChatsOpen] = useState(false);
   const [openChat, setOpenChat] = useState(null);
+  // Chat mode is a place you visit and come back from. chatsReturnTo is the
+  // view you came from ('editor' | 'board'), so the one Back button lands you
+  // exactly there. chatNs is the workspace the chat LIST shows; it is
+  // deliberately separate from selectedNs, so browsing another workspace's
+  // chats does not swap the workspace (and note) you return to.
+  const [chatsReturnTo, setChatsReturnTo] = useState('editor');
+  // Set when chat mode was entered by NAVIGATING to a chat note (tree click,
+  // address bar): by then the note underneath is the chat itself, so Back
+  // must reopen the note you were on before, not the chat's raw markdown.
+  const [chatsReturnNote, setChatsReturnNote] = useState(null);
+  const chatRedirectFrom = useRef(null);
+  const [chatNs, setChatNs] = useState(null);
   // Set to `${ns}/${path}` when the user NAVIGATES to a note (tree click,
   // address bar). If that note turns out to be a chat, it opens in the chat
   // view instead of the editor, so a chat always opens as a chat. "Open the
@@ -902,6 +914,7 @@ function App() {
       if (hashChats) {
         setChatsOpen(true);
         setOpenChat(hashChat || null);
+        setChatNs(hashChat ? hashChat.ns : null);
       }
       // Opened (or refreshed) on the task board: reopen it over the same
       // namespace and note.
@@ -1109,7 +1122,7 @@ function App() {
       if (chats) {
         setChatsOpen(true);
         setOpenChat(chat || null);
-        if (chat && chat.ns !== selectedNs && namespaces.includes(chat.ns)) setSelectedNs(chat.ns);
+        if (chat) setChatNs(chat.ns);
         return; // the chats route names a chat, not the note underneath
       }
       setChatsOpen(false);
@@ -1132,7 +1145,7 @@ function App() {
     };
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
-  }, [selectedNs, currentPath, namespaces]);
+  }, [selectedNs, currentPath]);
 
   // Find all scrollable elements in the editor/preview area
   const getScrollables = useCallback(() => {
@@ -1308,11 +1321,11 @@ function App() {
     if (!want || !selectedNs || !currentPath || content === null) return;
     if (want !== `${selectedNs}/${currentPath}`) return; // still loading the target
     chatRedirectFor.current = null;
+    const from = chatRedirectFrom.current;
+    chatRedirectFrom.current = null;
     if (!chatEnabled || !isChatDoc(content)) return;
-    setShowTaskBoard(false);
-    setOpenChat({ ns: selectedNs, path: currentPath });
-    setChatsOpen(true);
-  }, [content, currentPath, selectedNs, chatEnabled]);
+    enterChats({ ns: selectedNs, path: currentPath }, from && from.path !== currentPath ? from : 'none');
+  }, [content, currentPath, selectedNs, chatEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Delete a chat = delete its note (the note IS the chat). Confirmed first,
   // naming the note, because it removes every message too. Clears whatever
@@ -1328,13 +1341,6 @@ function App() {
     return true;
   }, [selectedNs, currentPath, getLastPath, setLastPath, refreshTree]);
 
-  // The chat list is namespace-scoped, so switching workspace closes a chat
-  // that belongs to the previous one instead of leaving it open beside a
-  // list it is not in.
-  useEffect(() => {
-    if (openChat && selectedNs && openChat.ns !== selectedNs) setOpenChat(null);
-  }, [selectedNs]); // eslint-disable-line react-hooks/exhaustive-deps
-
   // "Open the note behind this chat": leave the chats view and open the file,
   // switching namespace when the chat lives in another one.
   const openNoteFromChat = useCallback((ns, p) => {
@@ -1342,10 +1348,40 @@ function App() {
     if (ns !== selectedNs) setSelectedNs(ns);
     openNoteDirect(ns, p);
   }, [openNoteDirect, selectedNs]);
+  // Every way into chat mode goes through enterChats, so Back always knows
+  // where it came from.
+  // returnNote: the note to reopen on Back ({ns, path}), 'none' when the
+  // only note underneath is the chat itself, or undefined to keep the
+  // current one.
+  const enterChats = useCallback((chat, returnNote) => {
+    setChatsReturnTo(showTaskBoard ? 'board' : 'editor');
+    setChatsReturnNote(returnNote === undefined ? null : returnNote);
+    setShowTaskBoard(false);
+    setChatNs(chat?.ns || selectedNs);
+    setOpenChat(chat || null);
+    setChatsOpen(true);
+  }, [showTaskBoard, selectedNs]);
+  const leaveChats = useCallback(() => {
+    setChatsOpen(false);
+    if (chatsReturnTo === 'board') setShowTaskBoard(true);
+    if (chatsReturnNote === 'none') {
+      // Nothing to go back to but the chat's own raw markdown: land on an
+      // empty editor instead.
+      setCurrentPath(null); setContent(null); setSavedContent('');
+    } else if (chatsReturnNote) {
+      if (chatsReturnNote.ns !== selectedNs) setSelectedNs(chatsReturnNote.ns);
+      openNoteDirect(chatsReturnNote.ns, chatsReturnNote.path);
+    }
+    setChatsReturnNote(null);
+  }, [chatsReturnTo, chatsReturnNote, selectedNs, openNoteDirect]);
   const setChatsActive = useCallback((on) => {
-    if (on) setShowTaskBoard(false);
-    setChatsOpen(on);
-  }, []);
+    if (on) enterChats(null); else leaveChats();
+  }, [enterChats, leaveChats]);
+  const chatsBackLabel = chatsReturnTo === 'board'
+    ? 'Task board'
+    : chatsReturnNote === 'none'
+      ? 'notes'
+      : (chatsReturnNote?.path || currentPath || '').split('/').pop() || 'notes';
   const setBoardActive = useCallback((on) => {
     if (on) setChatsOpen(false);
     setShowTaskBoard(on);
@@ -1598,9 +1634,7 @@ function App() {
         if (target && selectedNs) {
           try {
             await convertToChat(selectedNs, target.path, '');
-            setShowTaskBoard(false);
-            setOpenChat({ ns: selectedNs, path: target.path });
-            setChatsOpen(true);
+            enterChats({ ns: selectedNs, path: target.path });
           } catch (e) { alert('Failed to make a chat: ' + e.message); }
         }
         break;
@@ -1613,9 +1647,7 @@ function App() {
         try {
           await convertToChat(selectedNs, path, title.trim());
           await refreshTree(undefined, { broadcast: true });
-          setShowTaskBoard(false);
-          setOpenChat({ ns: selectedNs, path });
-          setChatsOpen(true);
+          enterChats({ ns: selectedNs, path });
         } catch (e) { alert('Failed to create chat: ' + e.message); }
         break;
       }
@@ -1688,7 +1720,7 @@ function App() {
         break;
       }
     }
-  }, [selectedNs, currentPath, refreshTree, doCreateNote, doCreateDrawing, doCreateFolder, getLastPath, setLastPath]);
+  }, [selectedNs, currentPath, refreshTree, doCreateNote, doCreateDrawing, doCreateFolder, getLastPath, setLastPath, enterChats]);
 
   const handleTreeDrop = useCallback(async (fromPath, toFolderPath) => {
     if (!selectedNs) return;
@@ -1900,7 +1932,7 @@ function App() {
         // Opening a file hands the create-target back to that file's folder,
         // so it tracks where you actually are rather than the last folder
         // you happened to expand.
-        onSelect={(p) => { setPickedFolder(null); setChatsOpen(false); chatRedirectFor.current = `${selectedNs}/${p}`; openNote(p); }}
+        onSelect={(p) => { setPickedFolder(null); setChatsOpen(false); chatRedirectFor.current = `${selectedNs}/${p}`; chatRedirectFrom.current = currentPath ? { ns: selectedNs, path: currentPath } : null; openNote(p); }}
         currentPath={currentPath}
         namespaces={namespaces}
         selectedNs={selectedNs}
@@ -1972,6 +2004,7 @@ function App() {
           liveLockReason={chatNoteActive && !marpActive ? 'Disabled for chats — the rich editor would rewrite the chat tag and turn it back into a plain note' : null}
           onSetBoardActive={taskBoardEnabled && selectedNs ? setBoardActive : null}
           onSetChatsActive={chatEnabled ? setChatsActive : null}
+          chatsBackLabel={chatsBackLabel}
           chatsActive={chatsOpen && chatEnabled}
           drawingDoc={isDrawingDoc}
           drawingSource={drawingSource}
@@ -2081,9 +2114,9 @@ function App() {
             >
             <Suspense fallback={<div className="editor-loading">Loading chats...</div>}>
               <ChatView
-                ns={selectedNs}
+                ns={chatNs || selectedNs}
                 namespaces={namespaces}
-                onSelectNs={handleSelectNs}
+                onSelectNs={(n) => { setChatNs(n); if (openChat && openChat.ns !== n) setOpenChat(null); }}
                 account={isMulti ? userInfo?.username : null}
                 serverAlias={appConfig?.serverAlias}
                 isMobile={isMobile}
@@ -2091,7 +2124,7 @@ function App() {
                 onSelectChat={setOpenChat}
                 onOpenNote={openNoteFromChat}
                 onDeleteChat={deleteChat}
-                onClose={() => setChatsOpen(false)}
+                onClose={leaveChats}
               />
             </Suspense>
             </ChunkErrorBoundary>

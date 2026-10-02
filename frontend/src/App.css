@@ -6187,8 +6187,19 @@ pre:hover .code-copy-btn {
   cursor: pointer;
 }
 
-/* The phone overflow menu exists only on phones. */
-.toolbar-more { display: none; position: relative; }
+/* The ⋯ menu: on every screen size it holds theme, Settings and Manage
+   users; on a phone it also takes everything the narrow bar cannot show
+   (those entries carry .more-phone). */
+.toolbar-more { position: relative; }
+/* The menu drops below the bar, over the editor; the bar must be the higher
+   layer on every screen size or the editor's own toolbar paints over the
+   menu and swallows its clicks. */
+.toolbar { position: relative; z-index: 30; }
+@media (min-width: 769px) {
+  .toolbar-more-menu .more-phone { display: none; }
+  /* Desktop shows the status pill on the bar; the dot is phone-only. */
+  .toolbar-more-dot { display: none; }
+}
 
 /* Phone toolbar: the bar keeps only what is used on every note, and the rest
    moves into the ⋯ menu (Toolbar.jsx). Two rows:
@@ -6200,8 +6211,6 @@ pre:hover .code-copy-btn {
    reading order. */
 @media (max-width: 768px) {
   .toolbar {
-    position: relative;
-    z-index: 30; /* the ⋯ menu must paint over the note below */
     padding: 6px 10px;
     gap: 6px;
     row-gap: 6px;
@@ -6237,7 +6246,6 @@ pre:hover .code-copy-btn {
   .toolbar-path .toolbar-inline-reveal,
   .toolbar-path .toolbar-inline-refresh,
   .toolbar-path-actions { display: none; }
-  .toolbar-more { display: block; }
 
   /* One look for every icon button left on the bar: same square, no box. */
   /* Prefixed with .toolbar: the generic `.toolbar button` rule near the top
@@ -6407,4 +6415,13 @@ pre:hover .code-copy-btn {
 .toolbar--chats .toolbar-path,
 .toolbar--chats .toolbar-comments,
 .toolbar--chats .toolbar-view-toggle { display: none; }
+
+/* In chat mode the bar's middle (the note's path and controls) is hidden,
+   so nothing pushed the utilities right and they drifted left beside the
+   Back button. Pin them to the right edge. */
+.toolbar--chats .toolbar-utility { margin-left: auto; }
+/* On a phone the chats header has its own ←; the bar stays ☰ · title · ⋯. */
+@media (max-width: 768px) {
+  .toolbar .toolbar-chats-back { display: none; }
+}
 
