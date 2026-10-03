@@ -473,6 +473,9 @@ func main() {
 	}
 	treeHandler := handlers.NewTreeHandler(stg, grantStore, groupStore)
 	uploadHandler := handlers.NewUploadHandler(stg, perms)
+	// writerProxy is set on MDNEST_ROLE=app replicas; endpoints that need the
+	// durable tree (attachments, history, download, transfer) forward to it.
+	var writerProxy http.Handler
 	// Stateless app replicas own no attachment bytes: proxy attachment traffic
 	// (upload + serve) to the writer, which owns the git tree, when WRITER_URL is
 	// configured.
@@ -482,7 +485,7 @@ func main() {
 			if perr != nil {
 				log.Fatalf("invalid WRITER_URL %q: %v", writerURL, perr)
 			}
-			writerProxy := httputil.NewSingleHostReverseProxy(u)
+			writerProxy = httputil.NewSingleHostReverseProxy(u)
 			uploadHandler.SetWriterProxy(writerProxy)
 			// The git tree — and therefore per-file commit history — lives only on
 			// the writer, so history reads must be proxied there too. Without this,
@@ -499,6 +502,29 @@ func main() {
 	}
 	moveHandler := handlers.NewMoveHandler(stg)
 	searchHandler := handlers.NewSearchHandler(stg)
+
+	// Folder download (zip) and cross-namespace move/copy share one set of
+	// limits: DOWNLOAD_MAX_FILES / DOWNLOAD_MAX_MB per request, and
+	// DOWNLOAD_MAX_CONCURRENT zip downloads server-wide (one per user).
+	treeLimits := handlers.TreeLimitsFromEnv()
+	downloadMaxConcurrent := envInt("DOWNLOAD_MAX_CONCURRENT", 2)
+	if downloadMaxConcurrent <= 0 {
+		downloadMaxConcurrent = 2
+	}
+	log.Printf("download/transfer limits: max_files=%d, max_bytes=%d, max_concurrent_downloads=%d",
+		treeLimits.MaxFiles, treeLimits.MaxBytes, downloadMaxConcurrent)
+	downloadHandler := handlers.NewDownloadHandler(stg, treeLimits, downloadMaxConcurrent)
+	transferCanRead, transferCanWrite := handlers.TransferPermissionFuncs(perms)
+	transferHandler := handlers.NewTransferHandler(stg, treeLimits, transferCanRead, transferCanWrite, func(ns string) {
+		searchHandler.InvalidateCache(ns)
+		if collabHub != nil {
+			collabHub.BroadcastTreeChanged(ns)
+		}
+	})
+	if writerProxy != nil {
+		downloadHandler.SetWriterProxy(writerProxy)
+		transferHandler.SetWriterProxy(writerProxy)
+	}
 	// The global (cross-namespace) task view is access-controlled entirely by
 	// this filter. Multi mode enforces per-user access (perms.FilterNamespaces);
 	// single mode has one owner of every namespace, so an explicit all-access
@@ -755,6 +781,11 @@ func main() {
 		mux.Handle("/api/folder", authMiddleware.Wrap(perms.RequireWrite(invalidateSearch(http.HandlerFunc(uploadHandler.HandleFolder)))))
 		mux.Handle("/api/upload", authMiddleware.Wrap(perms.RequireWrite(invalidateSearch(http.HandlerFunc(uploadHandler.HandleUpload)))))
 		mux.Handle("/api/move", authMiddleware.Wrap(perms.RequireMove(invalidateSearch(http.HandlerFunc(moveHandler.HandleMove)))))
+		// Path-scoped read, not RequireNsAccess: a grant on /Shared must not
+		// be able to zip /Private.
+		mux.Handle("/api/download", authMiddleware.Wrap(perms.RequireRead(http.HandlerFunc(downloadHandler.HandleDownload))))
+		// Two namespaces in the body: the handler checks both sides itself.
+		mux.Handle("/api/transfer", authMiddleware.Wrap(http.HandlerFunc(transferHandler.HandleTransfer)))
 		mux.Handle("/api/search", authMiddleware.Wrap(perms.RequireNsAccess(http.HandlerFunc(searchHandler.HandleSearch))))
 		// Task aggregation: GET reads notes, PATCH rewrites a task line in a note,
 		// so route by method (read vs write) and invalidate the search cache on
@@ -797,6 +828,8 @@ func main() {
 		mux.Handle("/api/folder", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(uploadHandler.HandleFolder))))
 		mux.Handle("/api/upload", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(uploadHandler.HandleUpload))))
 		mux.Handle("/api/move", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(moveHandler.HandleMove))))
+		mux.Handle("/api/download", authMiddleware.Wrap(http.HandlerFunc(downloadHandler.HandleDownload)))
+		mux.Handle("/api/transfer", authMiddleware.Wrap(http.HandlerFunc(transferHandler.HandleTransfer)))
 		mux.Handle("/api/search", authMiddleware.Wrap(http.HandlerFunc(searchHandler.HandleSearch)))
 		if enableTaskBoard {
 			mux.Handle("/api/tasks", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(taskHandler.HandleTasks))))
