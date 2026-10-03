@@ -357,6 +357,15 @@ func (h *NoteHandler) createNote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"failed to read body"}`, http.StatusBadRequest)
 		return
 	}
+	// A note's marker is its identity: it names the comment sidecar
+	// (.mdnest/comments/<uuid>.jsonl). Content arriving with one — pasted from
+	// another note, or sent raw by a client — would make two notes share one
+	// thread, so a new note never keeps it; it gets its own ID through the
+	// normal lazy path. No first-party client sends one: GET strips it, the UI
+	// creates empty notes, and restores go through PUT, which keeps the ID.
+	if id, clean := ExtractNoteID(string(body)); id != "" {
+		body = []byte(clean)
+	}
 	if err := h.store.WriteFile(ctx, ns, relPath, body); err != nil {
 		http.Error(w, `{"error":"failed to write file"}`, http.StatusInternalServerError)
 		return
