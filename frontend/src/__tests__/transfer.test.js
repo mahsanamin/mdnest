@@ -98,6 +98,7 @@ describe('the server answers in plain words', () => {
     expect(t).toContain('140 MB');
     expect(t).toContain('500 files and 100 MB');
     expect(t).toContain('subfolder');
+    expect(describeRefusal(413, { files: 501, bytes: 10, maxFiles: 500, maxBytes: 100, partial: true })).toContain('at least 501 files');
     expect(describeRefusal(429, { error: 'busy' })).toMatch(/Another download is running/);
     expect(describeRefusal(400, { error: 'symlink', path: 'F/link' })).toContain('F/link');
   });

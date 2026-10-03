@@ -86,7 +86,19 @@ func (h *DownloadHandler) HandleDownload(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	plan, err := planTree(ctx, h.store, ns, rel)
+	// The slot is taken before the walk, so a burst of folder downloads
+	// cannot make the server walk large trees in parallel either.
+	release, err := h.slots.acquire(slotKey(r))
+	if err != nil {
+		w.Header().Set("Retry-After", zipRetryAfter)
+		writeStatusJSON(w, http.StatusTooManyRequests, map[string]string{"error": "busy"})
+		return
+	}
+	// Released on every path out, including a client that hangs up mid-stream
+	// (the request context is cancelled and writeZip returns).
+	defer release()
+
+	plan, err := planTree(ctx, h.store, ns, rel, h.limits)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotExist) {
 			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
@@ -106,16 +118,6 @@ func (h *DownloadHandler) HandleDownload(w http.ResponseWriter, r *http.Request)
 		writeTooLarge(w, plan, h.limits)
 		return
 	}
-	release, err := h.slots.acquire(slotKey(r))
-	if err != nil {
-		w.Header().Set("Retry-After", zipRetryAfter)
-		writeStatusJSON(w, http.StatusTooManyRequests, map[string]string{"error": "busy"})
-		return
-	}
-	// Released on every path out, including a client that hangs up mid-stream
-	// (the request context is cancelled and writeZip returns).
-	defer release()
-
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", contentDisposition(name+".zip"))
 	w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -185,6 +187,10 @@ func (h *DownloadHandler) writeZip(ctx context.Context, w io.Writer, ns, root, n
 		if inner != "" {
 			zname = name + "/" + inner
 		}
+		// A backslash is an ordinary character in a Linux file name but a
+		// separator to Windows extractors, so "a\..\..\evil.bat" could
+		// unpack outside the folder. Entry names never carry one.
+		zname = strings.ReplaceAll(zname, "\\", "_")
 		if e.isDir {
 			if _, err := zw.CreateHeader(&zip.FileHeader{Name: zname + "/", Method: zip.Store, Modified: e.mod}); err != nil {
 				return err

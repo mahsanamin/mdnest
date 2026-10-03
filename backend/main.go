@@ -523,6 +523,7 @@ func main() {
 			collabHub.BroadcastTreeChanged(ns)
 		}
 	})
+	transferHandler.SetConcurrency(downloadMaxConcurrent)
 	if writerProxy != nil {
 		downloadHandler.SetWriterProxy(writerProxy)
 		transferHandler.SetWriterProxy(writerProxy)

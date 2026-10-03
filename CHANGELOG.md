@@ -70,6 +70,11 @@ whole folder, and carry a note from one mdnest server to another
   symbolic link. A link could lead out of the folder a grant covers.
 - Commit-body annotations cannot carry a newline, so a file name cannot forge
   a commit trailer.
+- A move never writes into a comment thread that already exists at the
+  destination, and carries only valid comment lines.
+- Folder downloads and transfers stop counting once past a limit, and each
+  takes a concurrency slot (dry runs excepted), so neither can be used to
+  make the server walk a huge tree over and over.
 
 ---
 

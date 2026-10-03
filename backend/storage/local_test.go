@@ -239,3 +239,15 @@ func TestLocalRefusesLinksIntoGitOrOutOfNamespace(t *testing.T) {
 		}
 	}
 }
+
+// CoherentStorage over a backend that cannot answer the symlink question
+// says "linked", keeping download/transfer fail-closed.
+type noSymlinkInfo struct{ Storage }
+
+func TestCoherentHasSymlinkFailsClosed(t *testing.T) {
+	local, _ := NewLocalStorage(t.TempDir())
+	c := &CoherentStorage{Storage: noSymlinkInfo{local}}
+	if linked, _ := c.HasSymlink(context.Background(), "ns", "x"); !linked {
+		t.Fatal("coherent tier over an unknowing backend reported no link")
+	}
+}

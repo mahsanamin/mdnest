@@ -1307,7 +1307,7 @@ Move or copy a file or folder to another namespace, or to another place in the s
 
 - **Never overwrites.** If the destination exists, or a parent of it is a file, the answer is `409` with the colliding path. A folder never merges into an existing one.
 - **Copy:** every note gets a fresh ID, and comments are not copied.
-- **Move:** every note keeps its ID, and its comment thread (`.mdnest/comments/<uuid>.jsonl`) moves with it. The exception is a thread whose ID is also carried by a note left behind; that thread stays where it is.
+- **Move:** every note keeps its ID, and its comment thread (`.mdnest/comments/<uuid>.jsonl`) moves with it. A thread stays where it is, neither copied nor deleted, if a note left behind still carries its ID, if the source namespace is too large to check that (over 5,000 notes), or if the destination already has a thread under that ID. A move never writes into an existing thread. Only lines that are valid comments are carried.
 - **Moving between namespaces** never renames across them, since they may be separate mounts with separate git repos. It copies everything, checks the target, and only then deletes the source. A failure before the delete removes the partial target and leaves the source untouched.
 - **Same namespace with `move`** is a plain rename, exactly like `/api/move`.
 - On a git-backed namespace, each side's next commit names the other side (`moved to shared:Project/x.md` / `moved from personal:Notes/x.md`).
@@ -1330,7 +1330,8 @@ Move or copy a file or folder to another namespace, or to another place in the s
 | 404 | `{"error":"namespace not found"}` / `{"error":"source not found"}` | |
 | 400 | `{"error":"symlink","path":"..."}` | The item, a parent folder, or anything inside it is a symbolic link |
 | 409 | `{"error":"exists","path":"Project/x.md"}` | The destination (or a parent that is a file) exists |
-| 413 | `{"error":"too_large","files":612,"bytes":146800640,"maxFiles":500,"maxBytes":104857600}` | Over `DOWNLOAD_MAX_FILES` / `DOWNLOAD_MAX_MB` |
+| 413 | `{"error":"too_large","files":612,"bytes":146800640,"maxFiles":500,"maxBytes":104857600}` | Over `DOWNLOAD_MAX_FILES` / `DOWNLOAD_MAX_MB`. The server stops counting once a limit is passed; `"partial": true` then marks the counts as lower bounds |
+| 429 | `{"error":"busy"}` plus `Retry-After` | The caller already has a transfer running, or `DOWNLOAD_MAX_CONCURRENT` are running server-wide. A dry run is never refused for this |
 | 400 | `{"error":"reserved","path":"..."}` | The folder contains a nested `.git` or `.mdnest` |
 
 **Example:**
@@ -1371,7 +1372,7 @@ Access is read on the cleaned `path` (path-scoped, like `GET /api/note`).
 | 400 | `{"error":"invalid path"}` / `{"error":"symlink","path":"..."}` | Traversal, a `.git`/`.mdnest` path, or a linked path |
 | 403 | `{"error":"access denied"}` | No read access to that path |
 | 404 | `{"error":"not found"}` | |
-| 413 | same body as transfer | A folder over the limits, refused before any byte is sent |
+| 413 | same body as transfer (including `"partial"`) | A folder over the limits, refused before any byte is sent |
 | 429 | `{"error":"busy"}` plus `Retry-After` | The caller already has a zip download running, or `DOWNLOAD_MAX_CONCURRENT` are running server-wide |
 
 A cancelled download stops at the next read and frees its slots. Folder downloads only are limited and slotted; a single file is served like `/api/files/`.

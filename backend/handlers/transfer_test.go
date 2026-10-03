@@ -490,7 +490,8 @@ func TestTransfer_TooLarge(t *testing.T) {
 	}
 	e.h.limits = TreeLimits{MaxFiles: 100, MaxBytes: 3}
 	code, body, _ = doTransfer(t, e.h, transferReq("copy", "alpha", "F", "beta", "F"), false, nil)
-	if code != http.StatusRequestEntityTooLarge || body["bytes"] != float64(6) {
+	// The walk stops once past a limit, so the counts are lower bounds.
+	if code != http.StatusRequestEntityTooLarge || body["bytes"].(float64) <= 3 || body["partial"] != true {
 		t.Fatalf("byte limit: %d %v", code, body)
 	}
 }
@@ -829,4 +830,143 @@ func (f *failingStore) HasSymlink(ctx context.Context, ns, rel string) (bool, er
 
 func (a *annotatingStore) HasSymlink(ctx context.Context, ns, rel string) (bool, error) {
 	return forwardHasSymlink(a.Storage, ctx, ns, rel)
+}
+
+// A move never merges into, or writes lines into, a thread that already
+// exists at the destination; and a carried thread keeps only real comments.
+func TestTransfer_CommentThreadIsNeverMerged(t *testing.T) {
+	e := newTEnv(t)
+	e.put(t, "alpha", "x.md", marked("x\n", idA))
+	e.put(t, "alpha", ".mdnest/comments/"+idA+".jsonl", `{"id":"forged","body":"injected"}`+"\n")
+	e.put(t, "beta", ".mdnest/comments/"+idA+".jsonl", `{"id":"victim","body":"theirs"}`+"\n")
+	if code, body, _ := doTransfer(t, e.h, transferReq("move", "alpha", "x.md", "beta", "x.md"), false, nil); code != http.StatusOK {
+		t.Fatalf("move: %d %v", code, body)
+	}
+	if got, _ := e.read(t, "beta", ".mdnest/comments/"+idA+".jsonl"); got != `{"id":"victim","body":"theirs"}`+"\n" {
+		t.Fatalf("the destination's thread was changed: %q", got)
+	}
+	if _, ok := e.read(t, "alpha", ".mdnest/comments/"+idA+".jsonl"); !ok {
+		t.Fatal("an uncarried thread was deleted from the source")
+	}
+
+	e.put(t, "alpha", "y.md", marked("y\n", idB))
+	e.put(t, "alpha", ".mdnest/comments/"+idB+".jsonl", "not json\n{\"id\":\"c1\",\"body\":\"ok\"}\n{\"body\":\"no id\"}\n[1,2]\n")
+	if code, _, _ := doTransfer(t, e.h, transferReq("move", "alpha", "y.md", "beta", "y.md"), false, nil); code != http.StatusOK {
+		t.Fatalf("move y: %d", code)
+	}
+	if got, _ := e.read(t, "beta", ".mdnest/comments/"+idB+".jsonl"); got != `{"id":"c1","body":"ok"}`+"\n" {
+		t.Fatalf("carried thread = %q, want only the valid comment", got)
+	}
+}
+
+// Rollback removes only what the transfer created, and a move deletes only
+// what it planned and copied.
+func TestTransfer_TouchesOnlyItsOwnEntries(t *testing.T) {
+	root := t.TempDir()
+	for _, ns := range []string{"alpha", "beta"} {
+		os.MkdirAll(filepath.Join(root, ns), 0o755)
+	}
+	local, _ := storage.NewLocalStorage(root)
+	// A concurrent writer drops a file into the destination folder while the
+	// transfer runs, just before the write that fails.
+	fs := &failingStore{Storage: local, failNS: "beta", failPath: "F/z.md"}
+	e := newTEnvWith(t, root, &concurrentWriter{failingStore: fs, root: root})
+	e.put(t, "alpha", "F/a.md", "a\n")
+	e.put(t, "alpha", "F/z.md", "z\n")
+	if code, _, _ := doTransfer(t, e.h, transferReq("move", "alpha", "F", "beta", "F"), false, nil); code != http.StatusInternalServerError {
+		t.Fatalf("got %d, want 500", code)
+	}
+	if got, ok := e.read(t, "beta", "F/theirs.md"); !ok || got != "someone else\n" {
+		t.Fatal("rollback deleted a file the transfer did not create")
+	}
+	if _, ok := e.read(t, "beta", "F/a.md"); ok {
+		t.Fatal("rollback left a file the transfer created")
+	}
+}
+
+// concurrentWriter writes beta:F/theirs.md just before the failing write.
+type concurrentWriter struct {
+	*failingStore
+	root string
+}
+
+func (c *concurrentWriter) WriteFile(ctx context.Context, ns, rel string, data []byte) error {
+	if ns == "beta" && rel == "F/z.md" {
+		os.WriteFile(filepath.Join(c.root, "beta", "F", "theirs.md"), []byte("someone else\n"), 0o644)
+	}
+	return c.failingStore.WriteFile(ctx, ns, rel, data)
+}
+
+// A file that lands in the source folder after the move planned its copy is
+// not deleted with the source.
+func TestTransfer_MoveKeepsLateArrivals(t *testing.T) {
+	root := t.TempDir()
+	for _, ns := range []string{"alpha", "beta"} {
+		os.MkdirAll(filepath.Join(root, ns), 0o755)
+	}
+	local, _ := storage.NewLocalStorage(root)
+	e := newTEnvWith(t, root, &lateArrival{Storage: local, root: root})
+	e.put(t, "alpha", "F/a.md", "a\n")
+	if code, body, _ := doTransfer(t, e.h, transferReq("move", "alpha", "F", "beta", "F"), false, nil); code != http.StatusOK {
+		t.Fatalf("move: %d %v", code, body)
+	}
+	if got, ok := e.read(t, "alpha", "F/late.md"); !ok || got != "late\n" {
+		t.Fatal("a file that arrived after planning was deleted with the source")
+	}
+	if _, ok := e.read(t, "alpha", "F/a.md"); ok {
+		t.Fatal("the moved file is still in the source")
+	}
+}
+
+// lateArrival writes alpha:F/late.md during the first destination write.
+type lateArrival struct {
+	storage.Storage
+	root string
+	done bool
+}
+
+func (l *lateArrival) WriteFile(ctx context.Context, ns, rel string, data []byte) error {
+	if !l.done && ns == "beta" {
+		l.done = true
+		os.WriteFile(filepath.Join(l.root, "alpha", "F", "late.md"), []byte("late\n"), 0o644)
+	}
+	return l.Storage.WriteFile(ctx, ns, rel, data)
+}
+
+func (l *lateArrival) HasSymlink(ctx context.Context, ns, rel string) (bool, error) {
+	return forwardHasSymlink(l.Storage, ctx, ns, rel)
+}
+
+// A real transfer holds a slot (one per user, a global cap); a dry run never.
+func TestTransfer_SlotsAndDryRun(t *testing.T) {
+	e := newTEnv(t)
+	e.put(t, "alpha", "x.md", "x\n")
+	release, _ := e.h.slots.acquire("single")
+	code, body, _ := doTransfer(t, e.h, transferReq("copy", "alpha", "x.md", "beta", "x.md"), true, nil)
+	if code != http.StatusOK {
+		t.Fatalf("a dry run was blocked by a busy slot: %d %v", code, body)
+	}
+	code, body, _ = doTransfer(t, e.h, transferReq("copy", "alpha", "x.md", "beta", "x.md"), false, nil)
+	if code != http.StatusTooManyRequests || body["error"] != "busy" {
+		t.Fatalf("a second transfer by the same user: %d %v, want 429", code, body)
+	}
+	release()
+	if code, _, _ := doTransfer(t, e.h, transferReq("copy", "alpha", "x.md", "beta", "x.md"), false, nil); code != http.StatusOK {
+		t.Fatalf("after release: %d", code)
+	}
+	if e.h.slots.inUse() != 0 {
+		t.Fatal("a finished transfer kept its slot")
+	}
+}
+
+// Reserved folders are matched case-insensitively.
+func TestReservedSegmentIgnoresCase(t *testing.T) {
+	for _, p := range []string{".git/config", "a/.GIT/x", ".Mdnest/comments/x.jsonl", "a/.MDNEST"} {
+		if !hasReservedSegment(p) {
+			t.Errorf("%q not treated as reserved", p)
+		}
+	}
+	if hasReservedSegment("a/.gitignore") || hasReservedSegment("git/x") {
+		t.Error("an ordinary name treated as reserved")
+	}
 }
