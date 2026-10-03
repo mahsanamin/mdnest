@@ -67,6 +67,8 @@ function ContextMenu({ visible, x, y, target, onAction, onClose, canWrite, isAdm
     if (excalidraw) items.push({ label: 'New Drawing', action: 'new-drawing' });
     items.push({ label: 'New Folder', action: 'new-folder' });
     if (chat) items.push({ label: 'New Chat', action: 'new-chat' });
+    // A note copied with "Copy for another mdnest", possibly on another server.
+    items.push({ label: 'Paste here', action: 'paste-here' });
   }
 
   if (isFile && hasWrite) {
@@ -90,6 +92,18 @@ function ContextMenu({ visible, x, y, target, onAction, onClose, canWrite, isAdm
     // and to put the destructive action last.
     items.push({ label: 'Move to…', action: 'move' });
     items.push({ label: 'Delete', action: 'delete-file', danger: true });
+  }
+
+  // Download and copy need only read access: the server checks the rest
+  // (write on the destination) in the picker's dry run.
+  if (isFile || isFolder) {
+    if (items.length > 0) items.push({ separator: true });
+    items.push({ label: isFolder ? 'Download as zip' : 'Download', action: 'download' });
+    items.push({ label: 'Copy to…', action: 'copy-to' });
+    const lowerName = targetPath.toLowerCase();
+    if (isFile && (lowerName.endsWith('.md') || lowerName.endsWith('.txt'))) {
+      items.push({ label: 'Copy for another mdnest', action: 'copy-clipboard' });
+    }
   }
 
   // History — available for any file the user can read. The handler
