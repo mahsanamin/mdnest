@@ -177,3 +177,13 @@ func linkedPath(ctx context.Context, s Storage, ns, relPath string) bool {
 type Annotator interface {
 	Annotate(ns, line string)
 }
+
+// SymlinkChecker is an optional capability of filesystem backends: it reports
+// whether any existing component of relPath (the path itself or a parent
+// folder) is a symbolic link. The local backend keeps a link inside the
+// namespace, but inside it a link can still point from a folder a user may
+// read to one they may not, so endpoints that hand out or relocate whole files
+// refuse a linked path rather than trust the grant on the link's name.
+type SymlinkChecker interface {
+	HasSymlink(ctx context.Context, ns, relPath string) (bool, error)
+}

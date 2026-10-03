@@ -732,3 +732,72 @@ func TestTransferAndDownload_ProxyToWriter(t *testing.T) {
 		t.Fatalf("download not proxied: %d hits=%d", w.Code, p.hits)
 	}
 }
+
+// A link anywhere on either path is refused: a grant is checked against the
+// link's name, not where it leads, so Shared/link -> Private would let a
+// /Shared reader copy or download /Private.
+func TestTransferAndDownload_RefuseLinkedPaths(t *testing.T) {
+	e := newTEnv(t)
+	e.put(t, "alpha", "Private/p.md", "secret\n")
+	e.put(t, "alpha", "Shared/a.md", "a\n")
+	os.MkdirAll(filepath.Join(e.root, "beta", "Inbox"), 0o755)
+	if err := os.Symlink(filepath.Join(e.root, "alpha", "Private", "p.md"), filepath.Join(e.root, "alpha", "Shared", "link.md")); err != nil {
+		t.Skip("symlinks unavailable")
+	}
+	os.Symlink(filepath.Join(e.root, "alpha", "Private"), filepath.Join(e.root, "alpha", "Shared", "ldir"))
+	os.Symlink(filepath.Join(e.root, "beta"), filepath.Join(e.root, "beta", "Inbox", "out"))
+	before := e.snapshot(t)
+	for _, c := range []struct {
+		name string
+		req  map[string]any
+	}{
+		{"linked file", transferReq("copy", "alpha", "Shared/link.md", "beta", "Inbox/x.md")},
+		{"file under a linked folder", transferReq("copy", "alpha", "Shared/ldir/p.md", "beta", "Inbox/x.md")},
+		{"linked folder", transferReq("move", "alpha", "Shared/ldir", "beta", "Inbox/D")},
+		{"destination under a linked folder", transferReq("copy", "alpha", "Shared/a.md", "beta", "Inbox/out/a.md")},
+	} {
+		code, body, _ := doTransfer(t, e.h, c.req, false, nil)
+		if code != http.StatusBadRequest || body["error"] != "symlink" {
+			t.Errorf("%s: got %d %v, want 400 symlink", c.name, code, body)
+		}
+	}
+	if !reflect.DeepEqual(before, e.snapshot(t)) {
+		t.Fatal("a refused linked transfer changed the disk")
+	}
+	d := NewDownloadHandler(e.store, DefaultTreeLimits, 2)
+	for _, p := range []string{"Shared/link.md", "Shared/ldir/p.md", "Shared/ldir"} {
+		w := httptest.NewRecorder()
+		d.HandleDownload(w, httptest.NewRequest(http.MethodGet, "/api/download?ns=alpha&path="+p, nil))
+		if w.Code != http.StatusBadRequest || strings.Contains(w.Body.String(), "secret") {
+			t.Errorf("download %s: %d %q", p, w.Code, w.Body.String())
+		}
+	}
+}
+
+// Two notes that share an ID share a thread. Moving one must not take the
+// thread from the other; a duplicate inside the moved set is carried once.
+func TestTransfer_SharedIDThreadStays(t *testing.T) {
+	e := newTEnv(t)
+	e.put(t, "alpha", "F/a.md", marked("a\n", idA))
+	e.put(t, "alpha", "Other/b.md", marked("b\n", idA)) // same ID, stays behind
+	e.put(t, "alpha", "F/c.md", marked("c\n", idB))
+	e.put(t, "alpha", "F/d.md", marked("d\n", idB)) // duplicate inside the moved set
+	e.put(t, "alpha", ".mdnest/comments/"+idA+".jsonl", `{"id":"ca"}`+"\n")
+	e.put(t, "alpha", ".mdnest/comments/"+idB+".jsonl", `{"id":"cb"}`+"\n")
+	if code, body, _ := doTransfer(t, e.h, transferReq("move", "alpha", "F", "beta", "F"), false, nil); code != http.StatusOK {
+		t.Fatalf("move: %d %v", code, body)
+	}
+	if _, ok := e.read(t, "alpha", ".mdnest/comments/"+idA+".jsonl"); !ok {
+		t.Fatal("the thread of a note left behind was taken")
+	}
+	if _, ok := e.read(t, "beta", ".mdnest/comments/"+idA+".jsonl"); ok {
+		t.Fatal("a shared thread was copied out")
+	}
+	got, _ := e.read(t, "beta", ".mdnest/comments/"+idB+".jsonl")
+	if got != `{"id":"cb"}`+"\n" {
+		t.Fatalf("thread inside the moved set: %q (carried more than once?)", got)
+	}
+	if _, ok := e.read(t, "alpha", ".mdnest/comments/"+idB+".jsonl"); ok {
+		t.Fatal("the moved thread is still in the source")
+	}
+}
