@@ -82,6 +82,71 @@ eq    "substring names are distinct" "1" "$rc"
 has   "substring: workspace pending" "$out" "not live yet: workspace"
 has   "substring: work is stale"     "$out" "not in conf: work"
 
+# ── missing Docker credential helpers ───────────────────────────────────────
+# A config that names a helper which is not installed (`"credsStore":
+# "desktop"` left behind after moving to Colima/OrbStack) fails EVERY image
+# pull, so `rebuild` broke on a machine where nothing about mdnest changed.
+echo
+echo "── docker credential helpers ──"
+
+T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
+mkdir -p "$T/bin"
+printf '#!/bin/sh\n' > "$T/bin/docker-credential-present"; chmod +x "$T/bin/docker-credential-present"
+OLDPATH=$PATH; PATH="$T/bin:/usr/bin:/bin"
+
+printf '{\n\t"auths": {},\n\t"credsStore": "desktop",\n\t"currentContext": "colima"\n}' > "$T/a.json"
+eq "credsStore missing: named"        "desktop" "$(missing_cred_helpers "$T/a.json")"
+
+printf '{"credsStore":"present"}' > "$T/b.json"
+eq "credsStore installed: silent"     ""        "$(missing_cred_helpers "$T/b.json")"
+
+printf '{"credHelpers": {\n "gcr.io": "gcloud",\n "x.io": "present",\n "y.io": "gcloud"\n}, "credsStore": "osxkeychain"}' > "$T/c.json"
+eq "credHelpers: missing ones, deduped" "gcloud osxkeychain" "$(missing_cred_helpers "$T/c.json" | tr '\n' ' ' | sed 's/ $//')"
+
+printf '{"auths": {}}' > "$T/d.json"
+eq "no helper configured: silent"     ""        "$(missing_cred_helpers "$T/d.json")"
+eq "no config file: silent"           ""        "$(missing_cred_helpers "$T/nope.json")"
+
+printf '{"credsStore": "../../evil x"}' > "$T/e.json"
+eq "unsafe helper name: ignored"      ""        "$(missing_cred_helpers "$T/e.json")"
+
+# The stand-in must speak the helper protocol well enough for the Docker
+# client to treat it as "no credentials" — the message is matched exactly.
+write_cred_helper_stub "$T/bin" desktop
+out=$(printf 'registry-1.docker.io' | "$T/bin/docker-credential-desktop" get); rc=$?
+eq "stub get: not-found message"      "credentials not found in native keychain" "$out"
+eq "stub get: exits non-zero"         "1"       "$rc"
+eq "stub list: empty object"          "{}"      "$("$T/bin/docker-credential-desktop" list)"
+
+# The guard: puts the stand-in on PATH, so the helper resolves afterwards.
+rm "$T/bin/docker-credential-desktop"
+out=$(DOCKER_CONFIG="$T/cfg" bash -c '
+  mkdir -p "$DOCKER_CONFIG"; cp "'"$T"'/a.json" "$DOCKER_CONFIG/config.json"
+  MDNEST_SERVER_LIB=1 source "'"$REPO_ROOT"'/mdnest-server"
+  guard_docker_cred_helpers
+  docker-credential-desktop list')
+has "guard: warns and names the helper" "$out" "docker-credential-desktop is not installed"
+has "guard: helper resolves afterwards" "$out" "{}"
+out=$(DOCKER_CONFIG="$T/cfg2" bash -c '
+  mkdir -p "$DOCKER_CONFIG"; cp "'"$T"'/d.json" "$DOCKER_CONFIG/config.json"
+  MDNEST_SERVER_LIB=1 source "'"$REPO_ROOT"'/mdnest-server"
+  guard_docker_cred_helpers')
+eq "guard: healthy config says nothing" "" "$out"
+
+# The guard is best effort: mdnest-server runs under `set -e`, so a failure
+# inside it must skip the workaround, never abort the command it guards.
+mkdir -p "$T/unr"; cp "$T/a.json" "$T/unr/config.json"; chmod 000 "$T/unr/config.json"
+out=$(DOCKER_CONFIG="$T/unr" bash -c '
+  MDNEST_SERVER_LIB=1 source "'"$REPO_ROOT"'/mdnest-server"; set -e
+  guard_docker_cred_helpers; echo SURVIVED' 2>&1)
+chmod 644 "$T/unr/config.json"
+eq "guard: unreadable config is silent, no abort" "SURVIVED" "$out"
+out=$(DOCKER_CONFIG="$T/cfg" TMPDIR="$T/does-not-exist" bash -c '
+  MDNEST_SERVER_LIB=1 source "'"$REPO_ROOT"'/mdnest-server"; set -e
+  guard_docker_cred_helpers >/dev/null; echo SURVIVED' 2>/dev/null)
+eq "guard: mktemp failure does not abort"   "SURVIVED" "$out"
+PATH=$OLDPATH
+
 echo
 echo "=== $((PASS+FAIL)) checks: $(green "$PASS passed"), $([ "$FAIL" -gt 0 ] && red "$FAIL failed" || echo "0 failed") ==="
 [ "$FAIL" -eq 0 ]
