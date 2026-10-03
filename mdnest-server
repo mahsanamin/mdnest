@@ -116,8 +116,9 @@ namespace_drift_report() {
 # are restricted to [A-Za-z0-9._-]: they become a filename below.
 missing_cred_helpers() {
   local cfg="$1" flat names name
-  [ -f "$cfg" ] || return 0
-  flat=$(tr '\n\r\t' '   ' < "$cfg")
+  # An unreadable config is nothing we can fix, not a reason to abort.
+  [ -f "$cfg" ] && [ -r "$cfg" ] || return 0
+  flat=$(tr '\n\r\t' '   ' < "$cfg") || return 0
   names=$(
     printf '%s' "$flat" | grep -o '"credsStore"[[:space:]]*:[[:space:]]*"[^"]*"' \
       | sed 's/.*"\([^"]*\)"$/\1/' || true
@@ -154,9 +155,11 @@ STUB
 # installed: stands in for each missing one for this run only, and says so.
 guard_docker_cred_helpers() {
   local cfg="${DOCKER_CONFIG:-$HOME/.docker}/config.json" missing name dir
-  missing=$(missing_cred_helpers "$cfg")
+  # Best effort throughout: under `set -e` a failed assignment here would abort
+  # the command, and without a workaround the build just reports its own error.
+  missing=$(missing_cred_helpers "$cfg") || missing=""
   [ -n "$missing" ] || return 0
-  dir=$(mktemp -d "${TMPDIR:-/tmp}/mdnest-cred.XXXXXX")
+  dir=$(mktemp -d "${TMPDIR:-/tmp}/mdnest-cred.XXXXXX") || return 0
   # shellcheck disable=SC2064 # expand $dir now, the local is gone by EXIT
   trap "rm -rf '$dir'" EXIT
   for name in $missing; do
