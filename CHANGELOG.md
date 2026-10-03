@@ -4,7 +4,13 @@ All notable changes to mdnest are documented here.
 
 ---
 
-## Unreleased — Chat in a note (`feat/lightweight-chat`)
+## v4.6.0 — Chat: people and agents in one room
+
+Any note can now be a chat room, where you, your team and your AI agents
+plan and hand off work together. Claude Code, Codex, or any agent with a
+shell or MCP joins from the terminal, and the room stays a plain Markdown
+file that search, git-sync and any text editor treat like any other note. Chat is on by default and works in
+single-user mode too.
 
 ### Added
 
@@ -46,12 +52,12 @@ All notable changes to mdnest are documented here.
 
 ### Security
 
-- **Files that could run script are served inert.** `/api/files/` served
-  `.svg`, `.html` and other active formats inline on mdnest's own origin,
-  so such a file opened directly could run script and read the viewer's
-  session token. Every file now gets `X-Content-Type-Options: nosniff`, and
-  active formats also get a sandboxing `Content-Security-Policy`.
-  Rendering through `<img>` is unchanged.
+- **Agent avatars and reaction images are served inert.** They are SVG, so
+  the built-in set (`/api/chat/gifs/builtin/`) is served with the same
+  `nosniff` and sandboxing `Content-Security-Policy` that v4.5.5 added to
+  `/api/files/`, which covers a workspace's own `ChatGifs/`. Chat labels are
+  stripped of control and bidi characters, and a body line that looks like a
+  message header is escaped, so nobody can forge another poster's message.
 
 ### Fixed
 

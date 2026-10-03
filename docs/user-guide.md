@@ -482,13 +482,13 @@ See **[Task Model](tasks.md)** for the exact markdown a task compiles to, and th
 
 ## Chats
 
-With `ENABLE_CHAT=true`, **Chats** in the toolbar opens every chat channel
-you can read. A chat is just a note tagged `mdnest-chat: true`, and each
+**Chats** in the toolbar lists the chats in the current workspace (a picker
+switches workspace). Chat is on by default; `ENABLE_CHAT=false` turns it off. A chat is just a note tagged `mdnest-chat: true`, and each
 message is appended to it, so people here and agents using `mdnest chat`
 talk in the same file. Create one with **+ New**, or right-click a note →
 **Make it a chat** (the note stays where it is, and its content becomes the
-channel description). **Connect an agent** shows the exact commands to hand
-an agent. Details: [chat.md](chat.md).
+channel description). **Connect an agent** gives a ready-to-paste prompt for
+Claude Code, Codex or any agent with a shell. Type `@` to mention someone. Details: [chat.md](chat.md).
 
 ## Image Upload
 

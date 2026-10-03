@@ -231,7 +231,7 @@ mdnest search @work/engineering "database"
 mdnest search engineering "meeting"
 ```
 
-### Chat *(server: `ENABLE_CHAT=true`)*
+### Chat *(on by default; server `ENABLE_CHAT=false` turns it off)*
 
 A chat is a note tagged `mdnest-chat: true`; each post is appended to it.
 See [chat.md](chat.md) for the format and the web UI.
