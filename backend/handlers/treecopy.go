@@ -134,12 +134,14 @@ func writeStatusJSON(w http.ResponseWriter, status int, v any) {
 }
 
 // linkedPath reports whether relPath or one of its existing parent folders is
-// a symlink, on backends that can tell (see storage.SymlinkChecker). An error
-// counts as linked: the caller refuses rather than guesses.
+// a symlink (see storage.SymlinkChecker). It fails closed: an error, or a
+// backend that cannot answer, counts as linked and the caller refuses. The one
+// exception is the app tier's working set, which is a Redis key space with no
+// links at all (and whose download/transfer requests go to the writer anyway).
 func linkedPath(ctx context.Context, stg storage.Storage, ns, relPath string) bool {
 	sc, ok := stg.(storage.SymlinkChecker)
 	if !ok {
-		return false
+		return stg.Kind() != "app"
 	}
 	linked, err := sc.HasSymlink(ctx, ns, relPath)
 	return err != nil || linked

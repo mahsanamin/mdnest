@@ -122,3 +122,31 @@ func TestLocalStorageOpenSeek(t *testing.T) {
 		t.Fatalf("missing file: got err=%v, want ErrNotExist", err)
 	}
 }
+
+// Every storage stack a deployment can build must answer the symlink question
+// (download and transfer refuse a path on a backend that cannot) and keep the
+// commit annotations a cross-namespace move writes. A wrapper that forgot to
+// forward either would fail closed (symlinks) or silently drop the note.
+func TestStacksImplementSymlinkCheckerAndAnnotator(t *testing.T) {
+	root := t.TempDir()
+	local, err := NewLocalStorage(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	git, err := NewGitStorage(root, NoopCommitter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	coherent := newCoherentStorage(git, nil, 0) // RangeReadable inner -> coherentRangeStorage
+	plainCoherent := &CoherentStorage{Storage: git}
+	for name, s := range map[string]Storage{"local": local, "git": git, "coherent(range)": coherent, "coherent": plainCoherent} {
+		if _, ok := s.(SymlinkChecker); !ok {
+			t.Errorf("%s does not implement SymlinkChecker", name)
+		}
+	}
+	for name, s := range map[string]Storage{"git": git, "coherent(range)": coherent, "coherent": plainCoherent} {
+		if _, ok := s.(Annotator); !ok {
+			t.Errorf("%s does not implement Annotator", name)
+		}
+	}
+}
