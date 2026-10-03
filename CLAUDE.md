@@ -51,8 +51,11 @@ backend/
     upload.go                # POST /api/folder, /api/upload, GET /api/files/ (ns comes from the URL path, so the read check is IN the handler, not middleware)
     upload_test.go           # First Go test in the repo (v3.11.7+) — pins the /api/files/ cross-namespace authz check
     move.go                  # POST /api/move?ns=&from=&to=
+    transfer.go              # POST /api/transfer (+?dryRun=1) — move/copy a file or folder to another namespace (issue #114). The body names TWO namespaces, so the query-param middleware cannot guard it: canRead/canWrite are REQUIRED constructor args (nil denies) and both sides are checked in the handler before anything is written. A cross-namespace move is copy → verify → delete-source, never a rename across mounts. A copy re-IDs every note (StripAllNoteIDs + fresh marker) and carries no comments; a move carries each `.mdnest/comments/<uuid>.jsonl` to the ID the note actually LANDED with (the git backend can restore an older marker on a reused path), and leaves a thread behind if a note outside the moved set still claims that ID. Proxied to the writer on MDNEST_ROLE=app.
+    download.go              # GET /api/download — a file as an attachment, a folder as a streamed zip. Routed with path-scoped RequireRead, NOT RequireNsAccess (that would let a /Shared grant zip /Private). Limits are counted before the first byte (413 JSON); zip downloads hold one slot per user (uc.ID, so N tokens are one user; single mode is one key) + DOWNLOAD_MAX_CONCURRENT globally, non-blocking (429), released by defer; a ctx check per entry AND ctxReader per read stop a cancelled download — each alone passes the cancel test, removing both fails it.
+    treecopy.go              # Shared by download + transfer: TreeLimits (DOWNLOAD_MAX_FILES/MB), planTree (skips + records symlinks and nested .git/.mdnest), the 413 body, download slots, contentDisposition (ASCII fallback + RFC 5987), linkedPath (fails CLOSED on a backend without storage.SymlinkChecker, except the app tier's Redis working set).
     path.go                  # SafePath(), RequireNamespace() — shared utils
-    noteid.go                # ExtractNoteID / InjectNoteID / EnsureNoteID (UUID marker)
+    noteid.go                # ExtractNoteID / InjectNoteID / EnsureNoteID (UUID marker). StripAllNoteIDs removes EVERY marker — readers take the first match, so stripping only one lets a second become the identity. Create and PATCH append/prepend strip incoming markers (a prepended marker used to become the note's ID, and so its comment thread); PUT keeps the note's own.
     comments.go              # GET/POST/PATCH/DELETE /api/comments?ns=&path=&id=
     history.go               # GET /api/note/history, /api/note/at — git-sync version history (v3.7.0+)
     sso.go                   # GET /api/auth/sso/{start,callback} (USER_PROVIDER=sso only)
@@ -76,7 +79,7 @@ backend/
     secrets.go               # DeriveKey/Encrypt/Decrypt — same construction as the MCP OAuth sealing
   relpath/                   # The one lexical rule for namespace-relative paths (relpath.Clean). Leaf package on purpose: handlers.SafeRelPath IS relpath.Clean, and the permission middleware cleans ?path=/from=/to= with it before checking grants. Before v4.5.5 the middleware checked the raw string while handlers acted on the cleaned one, so a ".." segment walked a request out of a path-scoped grant. Never authorise a path you have not cleaned the same way the handler will.
   storage/                   # Pluggable note persistence behind STORAGE_BACKEND (v4.0.0+)
-    storage.go               # Storage interface — namespace-scoped, backend-agnostic
+    storage.go               # Storage interface — namespace-scoped, backend-agnostic. Optional capabilities: RangeReadable, Annotator (a line in the namespace's next commit body; control chars are collapsed so a path cannot forge a trailer), SymlinkChecker (is any component of a path a link). A wrapper (CoherentStorage) must FORWARD each one explicitly — embedding an interface does not promote methods outside it; TestStacksImplementSymlinkCheckerAndAnnotator pins every stack.
     local.go                 # Default filesystem backend; owns the symlink-containment check
     git.go                   # STORAGE_BACKEND=git — in-process git history, idle-debounced commits
     gitremote.go             # Per-namespace remote resolution + push plan (askpass / GIT_SSH_COMMAND)
@@ -130,6 +133,7 @@ frontend/
     __tests__/lazyWithRetry.test.js # Pins the retry policy: plain retry for a blip, cache-bust on the final attempt, and the no-URL fallback for engines whose error message omits it
     img-src.js               # v4.4.0+ — pure module: resolveImgSrc turns a markdown image href into the <img src> Preview renders. A relative path resolves under /api/files/ and carries the JWT as ?token= (an <img> GET cannot set an Authorization header); absolute/rooted hrefs pass through untouched so the token never reaches a foreign host. The "already absolute" test is SHARED with the Live editor's proxyDomURL by design — /^(https?:|data:|blob:|\/)/i — because both renderers show the same note, and the prefix form it replaced called any filename starting with "http" absolute, so an uploaded http-flow.png rendered broken in Preview and fine in Live.
     __tests__/img-src.test.js # Pins both directions (our /api/files URLs get the token, foreign ones never do) AND the parity cases that fail against the prefix form
+    transfer.js              # Pure module for issue #114: the cross-server clipboard payload ({mdnest:"file/v1",name,content}, 1 MB measured in UTF-8 BYTES via TextEncoder, not string length), safeFileName (a pasted name never picks a folder), suggestCopyName, localLinks, describeRefusal (409/413/429 bodies in words), filenameFromDisposition.
     echo-gate.js             # v4.1.1+ — pure module (no React): suppresses the file-changed echo of a tab's own save. In-flight-save window + epoch token: broadcasts arriving before the PUT response resolves are deferred and re-checked once the save settles; reset() on note switch invalidates the window. Closes the self-conflict-banner race (issue #82).
     __tests__/echo-gate.test.js # Pins the echo-beats-response race, late echoes, note-switch epochs
     tree-refresh.js          # v4.1.3+ — pure module: when the sidebar tree re-reads itself (TREE_POLL_MS + shouldPollTree). The live-collab websocket is deliberately NOT an input — `tree-changed` only fires for API writes, so gating the poll on it left git-sync/filesystem writes invisible until a manual Refresh.
@@ -166,12 +170,14 @@ frontend/
       BoardColumnsEditor.jsx # Per-namespace column layout (.mdnest/board.json)
       ExcalidrawEditor.jsx   # v4.2.0+ — the drawing canvas for a .excalidraw.md note. React.lazy()'d, and Preview.jsx dynamic-imports the engine only when an embed is present, so the entry bundle grows ~1.8 KB gzipped rather than ~1.5 MB
       AttributionModal.jsx   # v4.2.0+ — created / last-edited / contributors, from the note context menu (multi mode only)
-      MoveToModal.jsx        # Touch-friendly destination picker for "Move to…" context action (v3.8.0+)
+      MoveToModal.jsx        # Destination picker for "Move to…" AND "Copy to…" (v3.8.0+; namespaces + name + dry run since issue #114). Offers the current namespace plus those writable at root (/api/namespaces?detail=1), dry-runs every choice and enables Confirm only on a 200 — it never infers permission. Stale dry-run answers are dropped by a sequence number.
+      PasteModal.jsx         # "Paste here" for a note copied with "Copy for another mdnest". Driven ONLY by a real paste event (never navigator.clipboard.readText(), which plain-HTTP installs lack); creates through POST /api/note so the target server's 409 and permissions apply; a "(copy)" name is offered on collision, never applied silently.
       ChunkErrorBoundary.jsx # v4.2.1+ — visible fallback for a lazily-imported surface whose chunk fails to download (drawings, task board, slides). <Suspense> handles a *pending* import, never a *rejected* one, so without this the error reached React's root and unmounted the entire app: blank page, no sidebar, no way to open another note.
       EditorErrorBoundary.jsx # React error boundary around Live editor — catches Milkdown crashes and flips to Basic (v3.8.0+)
 
 mcp-server/
   index.js                   # MCP server entry — tools + resources wrapping REST API. v4.4.0+: `edit_note` is the exact-string editor — splices with indexOf/slice + join rather than String.replace (which would expand $&/$1 inside new_string and corrupt a pasted shell snippet), and sends If-Match with the ETag from its own read so a concurrent save 409s instead of being clobbered. It is the only tool that uses the ETag; `write_note` still overwrites, which is why partial edits should go through `edit_note`.
+  test_transfer.mjs          # move_item with targetNamespace / copy_item go to /api/transfer with the right body; same-namespace move_item keeps /api/move; a 409 is a tool error naming the path.
   test_edit.mjs              # 14 assertions against a fake backend that serves an ETag and enforces If-Match: unique/missing/ambiguous match, replace_all, literal $ handling, the concurrent-save conflict. Registered in `npm test`.
   package.json
 
@@ -298,6 +304,7 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 - Dependency tiers, in order: python3 (`py`) → jq → pure bash/awk. The awk tier is not a token gesture; it is the tier that runs on a fresh machine, and `tests/e2e-docker.sh` proves it in a bare alpine container with neither python3 nor jq.
 - **Human-facing output is rendered in awk only** — `format_tree` / `format_namespaces` for `mdnest list` have deliberately no python3/jq tier, so a listing is byte-identical on every machine and a broken python can't garble it. Verified on gawk, mawk and busybox awk. Raw API JSON stays available behind `--json` / `MDNEST_JSON=1` for scripts; don't make raw JSON the default output of a command again.
 - Adding a command means three edits: the `case` dispatch, the help **Commands** list, and the help **Examples** block (`grep -c '<cmd>' mdnest` ≥ 3).
+- **A download never trusts the server with where it lands** (issue #114). `mdnest download` writes to a temp file in the target folder and renames it only after a non-error status, so a refusal (413/403) leaves nothing behind; it never overwrites an existing local file; and `disposition_filename` reduces the server-chosen name to a bare file name (no folder part, decoded `%2F` included, no leading dots). The move/copy request body is built with `json_str`, pure bash, so a quote or backslash in a path cannot break the JSON on the no-python3 tier.
 - `mdnest update` self-updates from `raw.githubusercontent.com/.../main` — so a CLI fix reaches users when it lands on `main`, independent of the tag/Release (those drive the in-app *server* update banner). Corollary: the CLI installed on this machine lags `develop`, so test with `./mdnest`, not `mdnest`.
 - **Never print `<angle brackets>` inside a command you tell the user to RUN** (v4.1.3+). `<name>` is a shell redirection, so a hint like `mdnest login @<name> ...` errors in zsh and bash the moment it's pasted — the recovery instruction became a second error. Use literal placeholder words (`@myserver`, `mdnest_yourtoken`) whenever real values are being substituted in. Bracket notation is still fine in `Usage:`/`--help` *synopses*, which nobody pastes. `tests/cli-unit.sh` asserts no suggested command contains a bracket.
 - **Validate before you conclude, and before you persist.** Two failures of the same shape shipped together in `login`: reporting "this server has no SERVER_ALIAS configured" for a host we never reached (the curl exit code was thrown away, so "couldn't connect" and "connected, no alias" were one empty string), and saving a non-URL to disk — where it became the *default* server. Keep curl's exit status when the reason matters (`fetch_server_config` + `curl_reason`), and never write config you haven't validated.
@@ -543,6 +550,22 @@ override: `MDNEST_SKIP_E2E=1`.
   Playwright's own default emulation is *light* — so without that pin every
   existing spec would silently start running against the light palette. A spec
   that cares about a theme sets it with `page.emulateMedia()`.
+- **A browser spec that seeds files must clean them up** (issue #114). The
+  first transfer spec left fixtures at the namespace root, which pushed
+  `tree-target.spec.js`'s drag row off-screen and failed it — a later spec,
+  in another file. `transfer.spec.js` keeps each test's files in one folder
+  and deletes it in `afterEach`. The harness mounts a second namespace,
+  `zz_e2e_target`, named to sort AFTER `testing_workspace` so every other
+  spec still opens in the namespace it expects.
+- `tests/e2e-transfer-multi.sh` — **issue #114.** Postgres + the backend from
+  the working tree, real users, path-scoped grants, an access group and an API
+  token driven through `/api/transfer` and `/api/download`, every allowed and
+  denied case checked against the disk. The multi-mode counterpart of the unit
+  fakes; not in the pre-push hook (it needs Postgres), run it when touching
+  either endpoint or the permission checker.
+- `tests/setup-download-limits.sh` — `DOWNLOAD_MAX_*` reach `.env`, defaults
+  are written, a non-number is refused at setup, a shell export cannot leak
+  in (it did, before the reset at the top of `setup.sh`).
 - **A test that destroys user data must refuse to run against a real account.**
   `tests/browser/stickies.spec.js` wipes the sticky board of whatever account
   it signs in as, and a sticky exists nowhere else — no namespace, no git
