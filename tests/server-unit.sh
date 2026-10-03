@@ -132,6 +132,19 @@ out=$(DOCKER_CONFIG="$T/cfg2" bash -c '
   MDNEST_SERVER_LIB=1 source "'"$REPO_ROOT"'/mdnest-server"
   guard_docker_cred_helpers')
 eq "guard: healthy config says nothing" "" "$out"
+
+# The guard is best effort: mdnest-server runs under `set -e`, so a failure
+# inside it must skip the workaround, never abort the command it guards.
+mkdir -p "$T/unr"; cp "$T/a.json" "$T/unr/config.json"; chmod 000 "$T/unr/config.json"
+out=$(DOCKER_CONFIG="$T/unr" bash -c '
+  MDNEST_SERVER_LIB=1 source "'"$REPO_ROOT"'/mdnest-server"; set -e
+  guard_docker_cred_helpers; echo SURVIVED' 2>&1)
+chmod 644 "$T/unr/config.json"
+eq "guard: unreadable config is silent, no abort" "SURVIVED" "$out"
+out=$(DOCKER_CONFIG="$T/cfg" TMPDIR="$T/does-not-exist" bash -c '
+  MDNEST_SERVER_LIB=1 source "'"$REPO_ROOT"'/mdnest-server"; set -e
+  guard_docker_cred_helpers >/dev/null; echo SURVIVED' 2>/dev/null)
+eq "guard: mktemp failure does not abort"   "SURVIVED" "$out"
 PATH=$OLDPATH
 
 echo
