@@ -141,3 +141,49 @@ func TestCommitMessage_PathsAndNamesCannotForgeLines(t *testing.T) {
 		t.Fatalf("a real trailer was lost:\n%s", msg)
 	}
 }
+
+// A cross-namespace move commits in two repositories; each commit's body names
+// the other side. Lines are drained by the commit that carries them.
+func TestCommitMessage_Annotations(t *testing.T) {
+	c := &intervalCommitter{}
+	c.Annotate("alpha", "moved to beta:Project/x.md")
+	c.Annotate("alpha", "moved to beta:Project/x.md") // duplicate kept once
+	c.Annotate("beta", "moved from alpha:Notes/x.md")
+	msg := c.commitMessageWith(nil, c.takeNotes("alpha"))
+	if !strings.HasPrefix(msg, "mdnest: ") || !strings.HasSuffix(msg, "\n\nmoved to beta:Project/x.md") {
+		t.Fatalf("alpha message = %q", msg)
+	}
+	if strings.Count(msg, "moved to") != 1 {
+		t.Fatalf("duplicate annotation: %q", msg)
+	}
+	if got := c.takeNotes("alpha"); got != nil {
+		t.Fatalf("notes not drained: %v", got)
+	}
+	files := map[string]map[ident]struct{}{"Project/x.md": {{name: "Ann", email: "a@x"}: {}}}
+	msg = c.commitMessageWith(files, c.takeNotes("beta"))
+	if !strings.Contains(msg, "\n\nmoved from alpha:Notes/x.md\n\nProject/x.md") || !strings.Contains(msg, "Co-authored-by: Ann <a@x>") {
+		t.Fatalf("beta message = %q", msg)
+	}
+}
+
+// Walk reports a symlink as itself and never descends into it.
+func TestLocalWalk_ReportsSymlinks(t *testing.T) {
+	root := t.TempDir()
+	os.MkdirAll(filepath.Join(root, "ns", "d"), 0o755)
+	os.WriteFile(filepath.Join(root, "ns", "d", "f.md"), []byte("x"), 0o644)
+	if err := os.Symlink(filepath.Join(root, "ns", "d"), filepath.Join(root, "ns", "link")); err != nil {
+		t.Skip("symlinks unavailable")
+	}
+	ls, _ := NewLocalStorage(root)
+	seen := map[string]bool{}
+	ls.Walk(context.Background(), "ns", "", func(rel string, info FileInfo) error {
+		seen[rel] = info.IsSymlink
+		return nil
+	})
+	if !seen["link"] || seen["d/f.md"] || seen["d"] {
+		t.Fatalf("symlink flags = %v", seen)
+	}
+	if _, ok := seen["link/f.md"]; ok {
+		t.Fatal("Walk followed a symlink")
+	}
+}
