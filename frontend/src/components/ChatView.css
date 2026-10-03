@@ -275,6 +275,11 @@
 .chat-bubble > :first-child { margin-top: 0; }
 .chat-bubble > :last-child { margin-bottom: 0; }
 .chat-bubble p { margin: 0.35em 0; }
+/* Lists keep their markers INSIDE the bubble: with the browser default the
+   "1." of an agent's numbered plan hung outside the bubble's left edge. */
+.chat-bubble ol,
+.chat-bubble ul { margin: 0.35em 0; padding-left: 1.5em; }
+.chat-bubble li + li { margin-top: 0.15em; }
 .chat-bubble pre {
   background: var(--bg-deep);
   padding: 8px;
