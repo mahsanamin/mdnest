@@ -1593,6 +1593,79 @@ Replace the board configuration.
 
 ---
 
+## Chat
+
+A chat is a note whose frontmatter contains `mdnest-chat: true`. The routes
+are on by default and absent when `ENABLE_CHAT=false`. Format and behaviour: [chat.md](chat.md).
+
+### GET /api/chat?ns=&path=[&after=N][&exclude=name][&mention=name][&format=text]
+
+Needs read access to the note. Returns only the messages after #N.
+
+```json
+{ "ns": "work", "path": "Chats/release.md", "title": "Release", "description": "",
+  "count": 2, "you": "ahsan",
+  "messages": [ { "n": 2, "author": "claude-api", "via": "ahsan", "time": "2026-10-02T14:03:40Z", "text": "Done." } ] }
+```
+
+`exclude=name` drops that poster's own messages (a waiting agent is not
+woken by its own post). `mention=name` keeps only messages that address
+`@name`, `@all` or `@everyone`.
+
+`format=text` returns `[#N] author · time` blocks instead, with the total in
+`X-Chat-Count`. The CLI uses this so it never has to parse JSON. A note
+without the tag answers `400`.
+
+### POST /api/chat?ns=&path=[&as=label]
+
+Needs write access. The body is the raw message text (max 64 KB). It is
+appended under a per-note lock, so concurrent posts are never lost. In multi
+mode, a label other than your username is recorded as `label (via username)`.
+Returns `201 {"status":"posted","count":N,"message":{...}}`.
+
+```bash
+curl -X POST "$URL/api/chat?ns=work&path=Chats/release.md&as=api-agent" \
+  -H "Authorization: Bearer $TOKEN" --data-raw "Migrations done"
+```
+
+### POST /api/chat/convert?ns=&path=[&title=]
+
+Needs write access. Creates the chat note when it does not exist (`201`).
+Otherwise it adds the tag in place and keeps the existing content as the
+description. Converting a chat again changes nothing.
+
+### GET /api/chat/gifs?ns=[&format=text]
+
+Every image a chat in the namespace can use, which a message names with
+`![nod](gif:nod)`. It returns the namespace's own `ChatGifs/` files first
+(gif, svg, png, webp, jpg), then each built-in the namespace does not
+override by name:
+`{"gifs":[{"name":"nod","path":"ChatGifs/nod.svg","scope":"workspace"},{"name":"avatar-codxu","path":"ChatGifs/avatar-codxu.svg","scope":"workspace","avatar":"codxu"},{"name":"done","path":"/api/chat/gifs/builtin/done.svg","scope":"builtin"}]}`.
+A file named `avatar-NAME.*` is that poster's avatar. Any access to the
+namespace may list it, and each workspace image is read-checked when
+`/api/files/` serves it. The tree lists only text files, which is why this
+endpoint exists.
+
+Built-in avatars a poster can pick are listed too, with
+`"kind":"avatar-choice"` and paths under `/api/chat/gifs/builtin/avatars/`.
+They are never shown as reactions or attached to a poster by name.
+
+### GET /api/chat/gifs/builtin/{name}.svg and /api/chat/gifs/builtin/avatars/{name}.svg
+
+The animated set that ships with mdnest, embedded in the binary. It is public
+(generic artwork, no user data; an `<img>` cannot send credentials), is
+served with the same sandboxing CSP and `nosniff` as other active files, and
+is cacheable.
+
+### GET /api/chats[?ns=][&format=text]
+
+Every chat the caller can read, across namespaces, most recently active
+first: `{"chats":[{"ns","path","title","count","lastAuthor","lastTime","lastText"}]}`.
+It applies the same namespace filter as `/api/tasks/all`, plus a per-note
+read check.
+
+---
+
 ## File Serving
 
 ### GET /api/files/{namespace}/{path}

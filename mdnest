@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-MDNEST_CLI_VERSION="4.5.5"
+MDNEST_CLI_VERSION="4.6.0"
 CONFIG_DIR="${HOME}/.config/mdnest"
 SERVERS_DIR="${CONFIG_DIR}/servers"
 DEFAULT_FILE="${CONFIG_DIR}/default"
@@ -1314,6 +1314,290 @@ cmd_append() {
   api PATCH "/note?ns=$(urlencode "$PARSED_NS")&path=$(urlencode "$PARSED_PATH")&position=bottom" "$content"
 }
 
+# ─── chat ───────────────────────────────────────────────────────────────────
+# File-based chat (server needs ENABLE_CHAT=true). A chat is a note whose
+# frontmatter says `mdnest-chat: true`; every post is appended to it. The
+# server renders reads as plain text (`format=text`), so this needs no JSON
+# parser on any tier.
+#
+#   mdnest chat list [@alias]
+#   mdnest chat new  <path.md> ["Title"]          create a chat, or convert a note
+#   mdnest chat post <path.md> <text|-> [--as name]
+#   mdnest chat read <path.md> [--as NAME] [--after N]
+#   mdnest chat wait <path.md> --as NAME [--mentions] [--timeout SECONDS]
+#
+# `wait` is what lets agents hold a conversation: with --as NAME it returns
+# what is new since NAME last read, never NAME's own posts, so the loop is
+# wait → post → wait. --mentions wakes only on @NAME / @all.
+chat_usage() {
+  cat >&2 <<'USAGE'
+Usage:
+  mdnest chat list [@alias]
+  mdnest chat gifs @alias/namespace          (images to post as ![nod](gif:nod), and avatars)
+  mdnest chat avatar @alias/namespace --as name [--pick owl | --file my.svg]
+  mdnest chat new  @alias/namespace/path.md ["Title"]
+  mdnest chat post @alias/namespace/path.md <text|-> [--as name]
+  mdnest chat read @alias/namespace/path.md [--as name] [--after N]
+  mdnest chat wait @alias/namespace/path.md [--as name] [--mentions] [--timeout SECONDS]
+
+--as is your name in the chat (default: $MDNEST_CHAT_AS, else your account).
+Give every agent its own and use it on EVERY command. With a name:
+  read   marks the chat as read for that name
+  wait   returns only what is new since that name last read, never its own
+         posts, so an agent loop is just: wait, reply with post, wait again
+  --mentions  wake only for messages that say @name (or @all / @everyone)
+Address someone with @name in a message. wait exits 2 on timeout: run it again.
+
+Images: post one by name, ![nod](gif:nod). `chat gifs` lists the names: the set
+that ships with mdnest plus the namespace's ChatGifs/ folder, where a file with
+a built-in's name replaces it. Add your own (animated SVG works well):
+  cat wave.svg | mdnest create @alias/namespace/ChatGifs/wave.svg -
+Your thumbnail: `chat avatar --as NAME --pick owl` uses a built-in one (run it
+without --pick to see the choices); `--file my.svg` uses your own drawing. It is
+saved as ChatGifs/avatar-NAME.svg. Without one, your initial is shown.
+USAGE
+}
+
+chat_target() {
+  parse_path "$1"
+  require_server
+  if [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ]; then
+    chat_usage
+    exit 1
+  fi
+  CHAT_QS="ns=$(urlencode "$PARSED_NS")&path=$(urlencode "$PARSED_PATH")"
+  return 0
+}
+
+cmd_chat() {
+  local sub="${1:-}"
+  shift 2>/dev/null || true
+  case "$sub" in
+    list)
+      if [ -n "${1:-}" ]; then parse_path "$1"; fi
+      require_server
+      local qs="format=text"
+      if [ -n "$PARSED_NS" ]; then qs="$qs&ns=$(urlencode "$PARSED_NS")"; fi
+      local out
+      out=$(api GET "/chats?$qs") || exit 1
+      if [ -z "$out" ]; then
+        echo "No chats yet. Start one: mdnest chat new notes/Chats/team.md \"Team\""
+      else
+        printf '%s\n' "$out"
+      fi
+      ;;
+    gifs)
+      # The tree only lists text files, so this is how anyone (agents
+      # included) sees the namespace's chat images.
+      parse_path "${1:-}"
+      require_server
+      if [ -z "$PARSED_NS" ]; then chat_usage; exit 1; fi
+      local gifs
+      gifs=$(api GET "/chat/gifs?ns=$(urlencode "$PARSED_NS")&format=text") || exit 1
+      if [ -z "$gifs" ]; then
+        echo "No chat images in ${PARSED_NS}/ChatGifs yet. Add one, e.g. an animated SVG:"
+        echo "  cat wave.svg | mdnest create @${PARSED_ALIAS:-myserver}/${PARSED_NS}/ChatGifs/wave.svg -"
+      else
+        printf '%s\n' "$gifs"
+      fi
+      ;;
+    avatar)
+      # Give a poster a thumbnail: copy a built-in avatar, or upload an SVG,
+      # to ChatGifs/avatar-NAME.svg (what the chat window shows beside NAME).
+      parse_path "${1:-}"
+      require_server
+      if [ -z "$PARSED_NS" ]; then chat_usage; exit 1; fi
+      shift
+      local as="${MDNEST_CHAT_AS:-}" pick="" file=""
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --as) [ $# -ge 2 ] || { echo "Error: --as needs a name" >&2; exit 1; }; as="$2"; shift 2 ;;
+          --as=*) as="${1#--as=}"; shift ;;
+          --pick) [ $# -ge 2 ] || { echo "Error: --pick needs a choice, e.g. owl" >&2; exit 1; }; pick="$2"; shift 2 ;;
+          --pick=*) pick="${1#--pick=}"; shift ;;
+          --file) [ $# -ge 2 ] || { echo "Error: --file needs a path to an .svg" >&2; exit 1; }; file="$2"; shift 2 ;;
+          --file=*) file="${1#--file=}"; shift ;;
+          *) chat_usage; exit 1 ;;
+        esac
+      done
+      if [ -z "$pick" ] && [ -z "$file" ]; then
+        local choices
+        choices=$(api GET "/chat/gifs?ns=$(urlencode "$PARSED_NS")&format=text") || exit 1
+        echo "Built-in avatars (use one with: mdnest chat avatar @${PARSED_ALIAS:-myserver}/${PARSED_NS} --as yourname --pick owl):"
+        printf '%s\n' "$choices" | awk -F'\t' '$1 == "avatar choice" { print "  " $2 }'
+        echo "Or draw your own animated SVG and use --file my.svg."
+        printf '%s\n' "$choices" | awk -F'\t' '/^avatar of / { print "Already set: " $1 }'
+        return 0
+      fi
+      case "$as" in
+        ''|*[!A-Za-z0-9._-]*) echo "Error: --as needs a name made of letters, digits, dot, dash or underscore" >&2; exit 1 ;;
+      esac
+      local svg=""
+      if [ -n "$pick" ]; then
+        case "$pick" in ''|*[!a-z0-9-]*) echo "Error: --pick takes a choice name such as owl (run without --pick to list them)" >&2; exit 1 ;; esac
+        svg=$(curl -sf --connect-timeout "${MDNEST_TIMEOUT:-10}" "${MDNEST_URL}/api/chat/gifs/builtin/avatars/${pick}.svg") || svg=""
+        if [ -z "$svg" ]; then echo "Error: no built-in avatar called '$pick' (run without --pick to list them)" >&2; exit 1; fi
+      else
+        case "$file" in *.svg|*.SVG) ;; *) echo "Error: --file must be an .svg (agents can write one as plain text)" >&2; exit 1 ;; esac
+        [ -f "$file" ] || { echo "Error: no such file: $file" >&2; exit 1; }
+        svg=$(cat "$file") || svg=""
+        [ -n "$svg" ] || { echo "Error: $file is empty" >&2; exit 1; }
+      fi
+      local target_qs; target_qs="ns=$(urlencode "$PARSED_NS")&path=$(urlencode "ChatGifs/avatar-${as}.svg")"
+      # Create, or replace an avatar that is already there.
+      if ! api POST "/note?$target_qs" "$svg" >/dev/null 2>&1; then
+        api PUT "/note?$target_qs" "$svg" >/dev/null || exit 1
+      fi
+      echo "Avatar set for ${as}: ${PARSED_NS}/ChatGifs/avatar-${as}.svg"
+      ;;
+    new)
+      chat_target "${1:-}"
+      local title="${2:-}"
+      api POST "/chat/convert?$CHAT_QS&title=$(urlencode "$title")" "" >/dev/null || exit 1
+      echo "Chat ready: ${PARSED_NS}/${PARSED_PATH}"
+      ;;
+    post)
+      chat_target "${1:-}"
+      shift
+      local text_arg="" as="${MDNEST_CHAT_AS:-}"
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --as) [ $# -ge 2 ] || { echo "Error: --as needs a name" >&2; exit 1; }; as="$2"; shift 2 ;;
+          --as=*) as="${1#--as=}"; shift ;;
+          *) text_arg="$1"; shift ;;
+        esac
+      done
+      local text; text=$(read_content "$text_arg") || exit 1
+      require_content "$text"
+      local resp
+      resp=$(api POST "/chat?$CHAT_QS&as=$(urlencode "$as")" "$text") || exit 1
+      local n="${resp#*\"count\":}"
+      n="${n%%[!0-9]*}"
+      echo "posted #${n} to ${PARSED_NS}/${PARSED_PATH}"
+      ;;
+    read|wait)
+      chat_target "${1:-}"
+      shift
+      local after="" timeout="${MDNEST_CHAT_TIMEOUT:-600}" as="${MDNEST_CHAT_AS:-}" mentions=0
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --after) [ $# -ge 2 ] || { echo "Error: --after needs a number" >&2; exit 1; }; after="$2"; shift 2 ;;
+          --after=*) after="${1#--after=}"; shift ;;
+          --timeout) [ $# -ge 2 ] || { echo "Error: --timeout needs a number of seconds" >&2; exit 1; }; timeout="$2"; shift 2 ;;
+          --timeout=*) timeout="${1#--timeout=}"; shift ;;
+          --as) [ $# -ge 2 ] || { echo "Error: --as needs a name" >&2; exit 1; }; as="$2"; shift 2 ;;
+          --as=*) as="${1#--as=}"; shift ;;
+          --mentions) mentions=1; shift ;;
+          *) chat_usage; exit 1 ;;
+        esac
+      done
+      local poll="${MDNEST_CHAT_POLL:-3}"
+      # All of these reach $(( )) or curl; bash arithmetic evaluates `a[$(cmd)]`,
+      # so anything but digits is refused rather than interpreted.
+      case "$after" in *[!0-9]*) echo "Error: --after takes a whole number" >&2; exit 1 ;; esac
+      case "$timeout" in ''|*[!0-9]*) echo "Error: --timeout takes a whole number of seconds" >&2; exit 1 ;; esac
+      case "$poll" in ''|0|*[!0-9]*) echo "Error: MDNEST_CHAT_POLL must be a whole number of seconds (1 or more)" >&2; exit 1 ;; esac
+      if [ "$mentions" = "1" ] && [ -z "$as" ]; then
+        echo "Error: --mentions needs --as (or MDNEST_CHAT_AS): whose mentions?" >&2; exit 1
+      fi
+
+      # With a name, the CLI remembers how far that name has read this chat,
+      # so an agent loop is just `wait --as NAME`, over and over. It never
+      # has to carry an --after number from one call to the next, which is
+      # the step agents got wrong (a fixed `--after 1` returned the whole
+      # backlog every time, including the agent's own post). An explicit
+      # --after still wins.
+      local cursor_file=""
+      if [ -n "$as" ]; then
+        local key
+        key=$(printf '%s|%s|%s|%s' "$MDNEST_URL" "$PARSED_NS" "$PARSED_PATH" "$as" | cksum | awk '{print $1}') || key=""
+        if [ -n "$key" ]; then
+          mkdir -p "$CONFIG_DIR/chat-cursors" 2>/dev/null || true
+          cursor_file="$CONFIG_DIR/chat-cursors/$key"
+        fi
+      fi
+      local hdr; hdr=$(mktemp "${TMPDIR:-/tmp}/mdnest-chat.XXXXXX") || { echo "Error: cannot create a temp file" >&2; exit 1; }
+      local qs_extra=""
+      if [ -n "$as" ]; then qs_extra="$qs_extra&exclude=$(urlencode "$as")"; fi
+      if [ "$mentions" = "1" ]; then qs_extra="$qs_extra&mention=$(urlencode "$as")"; fi
+
+      # fetch AFTER: prints the matching messages into $out and the chat's
+      # total message count into $count (from the X-Chat-Count header).
+      local out="" count=0
+      chat_fetch() {
+        out=$(api GET "/chat?$CHAT_QS&after=$1&format=text$2" "" "" "$hdr") || return 1
+        count=$(grep -i '^x-chat-count:' "$hdr" | tr -dc '0-9') || count=""
+        [ -n "$count" ] || count=0
+        return 0
+      }
+      chat_save_cursor() {
+        if [ -n "$cursor_file" ]; then printf '%s\n' "$1" > "$cursor_file" 2>/dev/null || true; fi
+        return 0
+      }
+
+      if [ "$sub" = "read" ]; then
+        # read shows everything (your own posts included) after --after, or
+        # from the start. With a name, it also marks the chat as read.
+        chat_fetch "${after:-0}" "" || { rm -f "$hdr"; exit 1; }
+        rm -f "$hdr"
+        # One summary line first, so an agent joining the chat sees at a
+        # glance who is in it before reading the messages.
+        local who
+        who=$(printf '%s\n' "$out" | awk '
+          /^\[#[0-9]+\] / {
+            line = $0; sub(/^\[#[0-9]+\] /, "", line); sub(/ · [^·]*$/, "", line); sub(/ \(via [^)]*\)$/, "", line)
+            if (!(line in seen)) { seen[line] = 1; names = names (names == "" ? "" : ", ") line }
+          }
+          END { print names }') || who=""
+        # Only on a full read: with --after the list would describe a slice.
+        if [ -z "$after" ] || [ "$after" = "0" ]; then
+          printf '%s message%s · participants: %s\n\n' "$count" "$([ "$count" = "1" ] && echo "" || echo "s")" "${who:-none yet}"
+        fi
+        if [ -n "$out" ]; then printf '%s\n' "$out"; fi
+        chat_save_cursor "$count"
+        return 0
+      fi
+
+      # wait: start from --after, else where this name last read, else "now".
+      if [ -z "$after" ] && [ -n "$cursor_file" ] && [ -f "$cursor_file" ]; then
+        after=$(tr -dc '0-9' < "$cursor_file") || after=""
+      fi
+      if [ -z "$after" ]; then
+        chat_fetch 0 "&exclude=$(urlencode "${as:-~}")&mention=$(urlencode "${as:-~}")" || { rm -f "$hdr"; exit 1; }
+        after="$count"
+      fi
+      # Plain polling on purpose: it works through every proxy and needs no
+      # websocket support in bash.
+      local waited=0
+      while :; do
+        chat_fetch "$after" "$qs_extra" || { rm -f "$hdr"; exit 1; }
+        if [ -n "$out" ]; then
+          rm -f "$hdr"
+          printf '%s\n' "$out"
+          chat_save_cursor "$count"
+          return 0
+        fi
+        # Nothing for us after #after: everything newer is our own post (or,
+        # with --mentions, not addressed to us), so the cursor can move on.
+        if [ "$count" -gt "$after" ]; then
+          after="$count"
+          chat_save_cursor "$after"
+        fi
+        if [ "$waited" -ge "$timeout" ]; then
+          rm -f "$hdr"
+          echo "No new messages within ${timeout}s (seen up to #${after}). Run wait again to keep listening." >&2
+          exit 2
+        fi
+        sleep "$poll"
+        waited=$((waited + poll))
+      done
+      ;;
+    ""|help|-h|--help) chat_usage ;;
+    *) echo "Unknown chat command: $sub" >&2; chat_usage; exit 1 ;;
+  esac
+  return 0
+}
+
 cmd_prepend() {
   parse_path "$1"
   require_server
@@ -1505,6 +1789,8 @@ QUICK REFERENCE (for AI agents / LLMs)
   Append:       mdnest append @alias/namespace/path.md "text"
   Search:       mdnest search @alias/namespace "query"
   List:         mdnest list   @alias/namespace
+  Chat:         mdnest chat post @alias/namespace/chat.md "text" --as my-name
+                mdnest chat wait @alias/namespace/chat.md --as my-name   (blocks for a reply)
 
   IMPORTANT: "create" = new file. "write" = overwrite EXISTING file (returns 404 if not found).
   Use "mdnest servers -v" to discover available @aliases and namespaces.
@@ -1546,6 +1832,9 @@ NOTE OPERATIONS
   list     [@alias/namespace]     List namespaces, or a namespace/folder as a tree
            [--json]               ...as the raw API JSON instead (for scripts)
   search   <ns-path> "query"      Search note contents
+  chat     list|new|post|read|wait  File-based chat in a note (server: ENABLE_CHAT)
+           post <path> <text|-> --as NAME   read <path> --as NAME
+           wait <path> --as NAME [--mentions] [--timeout S]   new <path> ["Title"]
 
 OTHER
   version                         Show CLI version
@@ -1587,6 +1876,11 @@ EXAMPLES
 
   # Search
   mdnest search @work/engineering "database schema"
+
+  # Chat — two agents (or an agent and you) talking through one note
+  mdnest chat new  @work/engineering/Chats/release.md "Release"
+  mdnest chat post @work/engineering/Chats/release.md "Migrations done" --as api-agent
+  mdnest chat wait @work/engineering/Chats/release.md --as api-agent --mentions
 
   # List — a tree for humans, --json for scripts
   mdnest list @work/engineering
@@ -1634,6 +1928,7 @@ case "$CMD" in
   delete)   load_default; warn_if_default_alias; cmd_delete "$@" ;;
   move)     load_default; warn_if_default_alias; cmd_move "$@" ;;
   search)   load_default; warn_if_default_alias; cmd_search "$@" ;;
+  chat)     load_default; warn_if_default_alias; cmd_chat "$@" ;;
   note)     cmd_note_legacy "$@" ;;
   version|--version|-v) echo "mdnest CLI v${MDNEST_CLI_VERSION}" ;;
   docs)

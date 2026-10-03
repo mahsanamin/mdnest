@@ -53,7 +53,8 @@ test.describe('theme', () => {
 
     const darkBg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
 
-    await page.locator('.toolbar-theme').click();
+    await page.locator('.toolbar-more-btn').click(); // theme lives in the ⋯ menu
+    await page.locator('.toolbar-more-theme').click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
 
     // The attribute alone proves nothing — the stylesheet has to respond to
@@ -67,7 +68,8 @@ test.describe('theme', () => {
     await clearPreference(page);
     await page.reload();
 
-    await page.locator('.toolbar-theme').click();
+    await page.locator('.toolbar-more-btn').click(); // theme lives in the ⋯ menu
+    await page.locator('.toolbar-more-theme').click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
 
     // It reached the API, not just React state.
@@ -128,7 +130,8 @@ test.describe('theme', () => {
 
   test('Settings exposes the three-way choice including Match system', async ({ page }) => {
     await signIn(page);
-    await page.locator('.toolbar-settings').click();
+    await page.locator('.toolbar-more-btn').click(); // Settings lives in the ⋯ menu
+    await page.locator('.toolbar-more-settings').click();
     await page.locator('.settings-tabs button:has-text("Appearance")').click();
 
     await expect(page.locator('.theme-option:has-text("Match system")')).toBeVisible();

@@ -569,7 +569,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
             <button className={mode === 'list' ? 'active' : ''} onClick={() => setModePersist('list')}>List</button>
             <button className={mode === 'board' ? 'active' : ''} onClick={() => setModePersist('board')}>Kanban</button>
           </div>
-          <div className="tb-mode-toggle">
+          <div className="tb-mode-toggle tb-scope-toggle">
             <button className={effectiveScope === 'workspace' ? 'active' : ''} onClick={() => setScopePersist('workspace')} title="All notes in this workspace">Workspace</button>
             {currentPath && (
               <button className={effectiveScope === 'note' ? 'active' : ''} onClick={() => setScopePersist('note')} title="Only the current note">This note</button>
@@ -583,13 +583,18 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
             className="tb-actions-toggle"
             onClick={() => setActionsOpen((v) => !v)}
             aria-expanded={actionsOpen}
-            title="Actions"
-          >⋯</button>
+            aria-label="Board options"
+            title="Board options"
+          >
+            {/* Sliders, not ⋯: on a phone the app bar already has a ⋯ menu
+                right above this one, and two identical glyphs read as one. */}
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
+          </button>
           <div className={`tb-actions${actionsOpen ? ' open' : ''}`}>
             {canWrite && !isGlobal && (
               <button className="tb-btn" onClick={() => { setActionsOpen(false); openCreate(); }} title="New task">+ New task</button>
             )}
-            <button className="tb-btn" onClick={() => { setActionsOpen(false); reload({ force: true }); }} title="Re-scan every note now">&#8635;</button>
+            <button className="tb-btn" onClick={() => { setActionsOpen(false); reload({ force: true }); }} title="Re-scan every note now">&#8635;<span className="tb-btn-label"> Rescan</span></button>
             {canWrite && !isGlobal && (
               <button className="tb-btn" onClick={() => { setActionsOpen(false); setEditingColumns(true); }} title="Edit columns">Columns…</button>
             )}
