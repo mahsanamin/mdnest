@@ -801,3 +801,32 @@ func TestTransfer_SharedIDThreadStays(t *testing.T) {
 		t.Fatal("the moved thread is still in the source")
 	}
 }
+
+// noLinkInfo hides the symlink capability, as an unknown backend would.
+type noLinkInfo struct{ storage.Storage }
+
+// A backend that cannot say whether a path is linked is refused, not trusted.
+func TestLinkedPath_FailsClosed(t *testing.T) {
+	e := newTEnv(t)
+	e.put(t, "alpha", "a.md", "a\n")
+	if linkedPath(context.Background(), e.store, "alpha", "a.md") {
+		t.Fatal("a plain file reported as linked")
+	}
+	if !linkedPath(context.Background(), noLinkInfo{e.store}, "alpha", "a.md") {
+		t.Fatal("a backend without SymlinkChecker was trusted")
+	}
+}
+
+// The wrapping test stores forward the symlink check to the real backend, as
+// production wrappers do (TestStacksImplementSymlinkCheckerAndAnnotator).
+func forwardHasSymlink(inner storage.Storage, ctx context.Context, ns, rel string) (bool, error) {
+	return inner.(storage.SymlinkChecker).HasSymlink(ctx, ns, rel)
+}
+
+func (f *failingStore) HasSymlink(ctx context.Context, ns, rel string) (bool, error) {
+	return forwardHasSymlink(f.Storage, ctx, ns, rel)
+}
+
+func (a *annotatingStore) HasSymlink(ctx context.Context, ns, rel string) (bool, error) {
+	return forwardHasSymlink(a.Storage, ctx, ns, rel)
+}

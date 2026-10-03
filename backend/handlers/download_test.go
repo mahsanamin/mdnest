@@ -290,7 +290,9 @@ func TestDownload_CancelStopsAndReleases(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the download did not stop after cancellation")
 	}
-	if n := cs.opens.Load(); n > 2 {
+	if n := cs.opens.Load(); n == 0 {
+		t.Fatal("the download never started, so cancellation was not exercised")
+	} else if n > 2 {
 		t.Fatalf("kept reading after cancel: %d of 50 files opened", n)
 	}
 	if h.slots.inUse() != 0 {
@@ -352,4 +354,8 @@ func TestNamespaces_Detail(t *testing.T) {
 	if !strings.Contains(w.Body.String(), `{"name":"beta","canRead":true,"canWrite":true}`) {
 		t.Fatalf("single mode detail: %s", w.Body.String())
 	}
+}
+
+func (c *countingStore) HasSymlink(ctx context.Context, ns, rel string) (bool, error) {
+	return forwardHasSymlink(c.Storage, ctx, ns, rel)
 }
