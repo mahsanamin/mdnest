@@ -65,7 +65,16 @@ assert_fails() {
 
 m() { "$MDNEST_BIN" "$@"; }
 
-cleanup() { m delete "$ROOT" >/dev/null 2>&1 || true; }
+# Optional second namespace for the cross-namespace move/copy checks.
+NS2="${MDNEST_TEST_NS2:-}"
+ROOT2="${NS2:+${ALIAS:+@${ALIAS}/}${NS2}/${RUN_DIR}}"
+
+cleanup() {
+  m delete "$ROOT" >/dev/null 2>&1 || true
+  [ -n "$ROOT2" ] && m delete "$ROOT2" >/dev/null 2>&1
+  [ -n "${DL_DIR:-}" ] && rm -rf "$DL_DIR"
+  return 0
+}
 trap cleanup EXIT
 
 echo "=== mdnest CLI smoke test ==="
@@ -251,6 +260,33 @@ m write "$ROOT/edit.md" "keep a.*b keep" >/dev/null 2>&1
 assert_fails "a regex-looking needle does not match arbitrary text" -- \
   m edit "$ROOT/edit.md" "k...p a" "X"
 m delete "$ROOT/edit.md" >/dev/null 2>&1
+
+# ── 19. copy, download, and move/copy to another namespace (GH-114) ─────────
+m create "$ROOT/cp/one.md" "copy me" >/dev/null 2>&1
+assert_succeeds "copy a file in the namespace" -- m copy "$ROOT/cp/one.md" "${RUN_DIR}/cp/two.md"
+assert_eq "the copy has the content" "copy me" "$(m read "$ROOT/cp/two.md" 2>/dev/null)"
+assert_eq "the source is still there" "copy me" "$(m read "$ROOT/cp/one.md" 2>/dev/null)"
+assert_fails "copy never overwrites (409)" -- m copy "$ROOT/cp/one.md" "${RUN_DIR}/cp/two.md"
+
+DL_DIR="$(mktemp -d)"
+( cd "$DL_DIR" && m download "$ROOT/cp/one.md" >/dev/null 2>&1 )
+assert_eq "download a file under its own name" "copy me" "$(cat "$DL_DIR/one.md" 2>/dev/null)"
+assert_fails "download never overwrites a local file" -- sh -c "cd '$DL_DIR' && '$MDNEST_BIN' download '$ROOT/cp/one.md'"
+( cd "$DL_DIR" && m download "$ROOT/cp" >/dev/null 2>&1 )
+assert_eq "download a folder as a zip" "PK" "$(head -c 2 "$DL_DIR/cp.zip" 2>/dev/null)"
+assert_succeeds "download to a chosen output file" -- m download "$ROOT/cp/one.md" "$DL_DIR/chosen.md"
+assert_fails "download of a missing path fails" -- m download "$ROOT/cp/nope.md" "$DL_DIR/nope.md"
+assert_fails "a failed download leaves no file" -- test -e "$DL_DIR/nope.md"
+
+if [ -n "$NS2" ]; then
+  assert_succeeds "copy to another namespace (--to-ns)" -- m copy "$ROOT/cp/one.md" "${RUN_DIR}/one.md" --to-ns "$NS2"
+  assert_eq "it landed in the other namespace" "copy me" "$(m read "$ROOT2/one.md" 2>/dev/null)"
+  assert_succeeds "move to another namespace (full destination)" -- m move "$ROOT/cp/two.md" "$ROOT2/moved.md"
+  assert_eq "the moved note is in the other namespace" "copy me" "$(m read "$ROOT2/moved.md" 2>/dev/null)"
+  assert_fails "and gone from the source" -- m read "$ROOT/cp/two.md"
+else
+  echo "  SKIP cross-namespace move/copy (set MDNEST_TEST_NS2)"
+fi
 
 # ── Summary ─────────────────────────────────────────────────────────────────
 echo
