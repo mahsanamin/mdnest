@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"log"
+	"path"
 )
 
 // Writer is the out-of-process single writer. It owns the durable git tree
@@ -61,6 +62,11 @@ func (w *Writer) hydrate(ctx context.Context) error {
 			if info.IsDir || info.Size > w.maxBytes {
 				return nil
 			}
+			// App replicas cannot resolve a link, so a linked path is not
+			// served from the working set at all (see LinkResolver).
+			if linkedPath(ctx, w.dst, ns, relPath) {
+				return nil
+			}
 			data, rerr := w.dst.ReadFile(ctx, ns, relPath)
 			if rerr != nil {
 				return nil // skip unreadable entries, keep hydrating
@@ -93,6 +99,16 @@ func (w *Writer) hydrate(ctx context.Context) error {
 // apply applies one durability op to the git tree and reflects the outcome into
 // the working set. It is idempotent so an at-least-once redelivery converges.
 func (w *Writer) apply(ctx context.Context, op DurabilityOp) error {
+	// The app replica that accepted this op authorised the paths it was
+	// given and cannot see links. An op whose path runs through a linked
+	// folder would land wherever that link points, which the grant may not
+	// cover: refuse it (ack, so the queue keeps moving). A link as the final
+	// component of a remove or rename is fine — that acts on the link itself.
+	if linkedOp(ctx, w.dst, op) {
+		log.Printf("storage: writer refused a %s through a symlink: %s:%s", op.Kind, op.NS, op.Path)
+		_ = w.ws.Delete(ctx, op.NS, op.Path)
+		return nil
+	}
 	switch op.Kind {
 	case OpWrite:
 		if err := w.dst.MkdirAll(ctx, op.NS, ""); err != nil {
@@ -156,13 +172,16 @@ func (w *Writer) apply(ctx context.Context, op DurabilityOp) error {
 // file and a moved directory subtree so app replicas (which read only from the
 // working set) can see the destination immediately after a rename.
 func (w *Writer) recacheDest(ctx context.Context, ns, path string) {
+	if linkedPath(ctx, w.dst, ns, path) {
+		return
+	}
 	if data, err := w.dst.ReadFile(ctx, ns, path); err == nil {
 		cacheBody(ctx, w.ws, ns, path, data, w.maxBytes)
 		return
 	}
 	// Not a file (directory, or gone): re-hydrate every moved file under it.
 	_ = w.dst.Walk(ctx, ns, path, func(relPath string, info FileInfo) error {
-		if info.IsDir || info.Size > w.maxBytes {
+		if info.IsDir || info.Size > w.maxBytes || linkedPath(ctx, w.dst, ns, relPath) {
 			return nil
 		}
 		if data, rerr := w.dst.ReadFile(ctx, ns, relPath); rerr == nil {
@@ -170,4 +189,24 @@ func (w *Writer) recacheDest(ctx context.Context, ns, path string) {
 		}
 		return nil
 	})
+}
+
+// linkedOp reports whether op reaches anything through a symbolic link (see
+// Writer.apply). Writes and mkdirs are judged on the whole path; removes and
+// renames on the parent folders, since they act on a final-component link
+// itself rather than on its target.
+func linkedOp(ctx context.Context, dst Storage, op DurabilityOp) bool {
+	parentLinked := func(p string) bool {
+		dir := path.Dir(p)
+		return dir != "." && dir != "/" && linkedPath(ctx, dst, op.NS, dir)
+	}
+	switch op.Kind {
+	case OpWrite, OpMkdir:
+		return op.Path != "" && linkedPath(ctx, dst, op.NS, op.Path)
+	case OpRemove, OpRemoveAll:
+		return op.Path != "" && parentLinked(op.Path)
+	case OpRename:
+		return parentLinked(op.Path) || parentLinked(op.To)
+	}
+	return false
 }

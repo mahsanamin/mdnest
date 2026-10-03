@@ -301,6 +301,26 @@ if [ "$RUN_E2E" -eq 1 ] && [ "${MDNEST_SKIP_E2E:-0}" != "1" ]; then
     FAILED=1
   fi
 
+  # 9a. Multi-mode access (v4.6.2+): Postgres, path-scoped and group grants,
+  # an API token, TOTP step tokens, symlinks, .git paths and live collab,
+  # against the backend built from the working tree.
+  echo -n "End-to-end (multi-mode access)... "
+  if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+    echo "SKIPPED (docker not available — run 'bash tests/e2e-sec-multi.sh' before merging)"
+  else
+    bash tests/e2e-sec-multi.sh > /tmp/mdnest-e2e-sec.log 2>&1
+    rc=$?
+    if [ "$rc" -eq 0 ]; then
+      echo "OK"
+    elif [ "$rc" -eq 2 ]; then
+      echo "SKIPPED (prerequisites missing — see /tmp/mdnest-e2e-sec.log)"
+    else
+      echo "FAILED"
+      echo "  See /tmp/mdnest-e2e-sec.log — reproduce with: bash tests/e2e-sec-multi.sh"
+      FAILED=1
+    fi
+  fi
+
   # 9b. Browser end-to-end (Playwright): boot the FULL stack (nginx frontend +
   # backend) and drive the important UI flows in a real browser — login, tree,
   # open/render a note, Live + Basic editors, search, create. Needs node +

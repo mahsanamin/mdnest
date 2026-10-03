@@ -124,6 +124,16 @@ authorization, are minted with a deliberately short **12-hour** TTL
 long a stale snapshot can outlive a change at the IdP. Password-login TTLs are
 unchanged.
 
+**Login step tokens are not sessions** *(v4.6.2+)*. Between the password and
+the second factor (or a forced password change, or forced 2FA setup) the server
+issues a 10-minute token carrying a `purpose` claim. It is signed with the same
+secret, so the rule is positive: a session JWT has **no** `purpose` claim, and
+the auth middleware and the live-collab socket both refuse any token that has
+one (`middleware.ParseSessionToken`). Each step endpoint accepts only its own
+purpose (`totp`, `totp_setup`, `change_password`), and forced setup refuses a
+user who already has 2FA. Before v4.6.2 the step token worked as a full session,
+so the password alone got past TOTP.
+
 If you need to revoke someone *now*, rotate `MDNEST_JWT_SECRET` — that
 invalidates every active session immediately.
 
@@ -146,6 +156,8 @@ For headless callers (CLI, MCP server, scripts):
 - Revoking a user's grant immediately revokes their tokens for that namespace — there's no lag, no per-token cache.
 
 This was a behaviour change from pre-v3.5.0 where any admin token had unconditional global bypass.
+
+**Ownerless tokens are refused in multi mode** *(v4.6.2+)*. A token minted in single mode (by `mdnest-server create-token` or the single-mode UI) has no owner. If the install later switches to multi mode, the one-time `tokens.json` import carries it into Postgres with no user. Such a token used to reach the permission layer with no user context, which means single mode (allow everything). The auth middleware now answers 401 for it; create a new token in Settings → API Tokens. Deleting a user deletes their tokens (`ON DELETE CASCADE`), so that does not produce ownerless tokens.
 
 ### Stickies *(v4.5.0+)*
 
@@ -198,6 +210,25 @@ When mdnest is upgraded from a pre-v3.5.0 install, migration `007_namespace_admi
 - `permission` is `read` or `write`. A `write` grant satisfies a `read` request automatically.
 - Grants stack — a user can have multiple grants on the same namespace at different paths.
 
+**Every route checks the path it serves** *(v4.6.2+)*. Grants can be path-scoped, so "has some grant in the namespace" (`RequireNsAccess`) is only enough for routes that serve nothing per note. The route table lives in `backend/routes.go` and is driven over HTTP by `backend/routes_test.go`:
+
+| Route | Check |
+|---|---|
+| `/api/note`, `/api/tasks`, `/api/chat` | read for GET, write otherwise, on `?path=` |
+| `/api/board` | read on `?path=` for GET; changing the namespace's columns needs write on the namespace root |
+| `/api/note/history`, `/api/note/at`, `/api/note/attribution`, `/api/comments` (all methods) | read on `?path=` |
+| `/api/folder`, `/api/upload` (plus the file actually written), `/api/chat/convert` | write on `?path=` |
+| `/api/move` | write on both `from` and `to` |
+| `/api/files/<ns>/<path>` | read, in the handler |
+| `/api/search`, `/api/chat/gifs`, `/api/admin/sync-status` | namespace access, then **each result** read-checked |
+| `/api/tasks/all`, `/api/chats` | namespace filter, then **each task / chat** read-checked by its note |
+| `/api/tree` | grant-filtered listing (names only) |
+| `/api/ws` (live collaboration) | read on the note to join; only writers' edits and cursors are relayed |
+
+Listings filter with `PermissionChecker.ReadFilter`, which loads the user's grants once and matches with the same `store.GrantsAllow` the grant store uses. It is reached through `middleware.ReadFilterFor`, which fails closed: a multi-mode request without the checker attached sees nothing.
+
+**Symbolic links are authorised for what they reach** *(v4.6.2+)*. Storage keeps every link inside its namespace, but inside it a link can point from a folder you may read to one you may not. The local backend refuses any path whose resolved target leaves the namespace, reaches a `.git` folder, or is a dangling link, for every caller. The checker also resolves the path (`storage.LinkResolver`), refuses a target under `.git` or `.mdnest`, and requires the grant on both the name and the target, so `Shared/link.md → Private/p.md` is refused to a `/Shared` user and a link within `/Shared` keeps working. App replicas (`MDNEST_ROLE=app`) have no filesystem to resolve against, so the writer never caches a linked path for them and refuses a queued write through one.
+
 ### Access Groups *(v4.2.0+)*
 
 `access_groups` + `access_group_members` + `access_group_grants` add a second,
@@ -249,6 +280,7 @@ The backend cannot read or write outside your mounted directories, regardless of
 - Cleaned path must not be absolute.
 - Cleaned path must not start with `..`.
 - After joining with the namespace base directory, the resolved path (with symlinks followed) must remain within the base directory.
+- No segment may be `.git` or `.mdnest` *(v4.6.2+)*, compared case-insensitively and ignoring trailing dots/spaces and zero-width characters. A write into `.git` (`core.fsmonitor`, a hook) runs commands the next time git touches the tree, and `.mdnest` holds every note's comment thread. The rule lives in `relpath.Clean`, which both the permission middleware and the handlers use, so no route can skip it; the local storage backend refuses `.git` again on its own. Server-built `.mdnest` paths (comment sidecars, `board.json`) never come from a request and are unaffected.
 
 `RequireNamespace` validates that `?ns=<name>` is a simple identifier (no slashes, no `.` prefix) and that the directory exists under `NOTES_DIR`.
 

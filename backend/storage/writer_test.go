@@ -3,6 +3,8 @@ package storage
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -183,5 +185,54 @@ func TestWriterHydrateLoadsCorpus(t *testing.T) {
 	}
 	if _, ok, _ := ws.Get(ctx, "ns", "big.md"); ok {
 		t.Fatal("oversize body was hydrated into the working set")
+	}
+}
+
+// App replicas read only the working set and have no filesystem to resolve a
+// link against, so the writer must never cache a linked path's body, nor apply
+// a queued write through one: either would hand a folder grant's holder the
+// file the link points at.
+func TestWriterNeverServesOrWritesThroughALink(t *testing.T) {
+	ctx := context.Background()
+	w, q, ws, gs := newTestWriter(t)
+	base := filepath.Join(gs.root, "ns")
+	os.MkdirAll(filepath.Join(base, "Private"), 0o755)
+	os.MkdirAll(filepath.Join(base, "Shared"), 0o755)
+	os.WriteFile(filepath.Join(base, "Private", "p.md"), []byte("SECRET"), 0o644)
+	if err := os.Symlink(filepath.Join(base, "Private", "p.md"), filepath.Join(base, "Shared", "link.md")); err != nil {
+		t.Skip("no symlinks")
+	}
+	os.Symlink(filepath.Join(base, "Private"), filepath.Join(base, "Shared", "ldir"))
+
+	if err := w.hydrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"Shared/link.md", "Shared/ldir/p.md"} {
+		if _, ok, _ := ws.Get(ctx, "ns", p); ok {
+			t.Errorf("hydrate cached the linked path %s", p)
+		}
+	}
+	if _, ok, _ := ws.Get(ctx, "ns", "Private/p.md"); !ok {
+		t.Fatal("hydrate lost a plain file")
+	}
+
+	os.WriteFile(filepath.Join(base, "Shared", "mine.md"), []byte("MINE"), 0o644)
+	_ = q.Enqueue(ctx, DurabilityOp{Kind: OpRename, NS: "ns", Path: "Shared/mine.md", To: "Shared/ldir/p.md"})
+	_ = q.Enqueue(ctx, DurabilityOp{Kind: OpMkdir, NS: "ns", Path: "Shared/ldir/made"})
+	_ = q.Enqueue(ctx, DurabilityOp{Kind: OpRemove, NS: "ns", Path: "Shared/ldir/p.md"})
+	_ = q.Enqueue(ctx, DurabilityOp{Kind: OpWrite, NS: "ns", Path: "Shared/link.md", Data: []byte("OVERWRITTEN")})
+	_ = q.Enqueue(ctx, DurabilityOp{Kind: OpWrite, NS: "ns", Path: "Shared/ldir/p.md", Data: []byte("OVERWRITTEN")})
+	_ = w.Run(ctx)
+	if b, _ := os.ReadFile(filepath.Join(base, "Private", "p.md")); string(b) != "SECRET" {
+		t.Fatalf("a queued write went through a link: %q", b)
+	}
+	if _, ok, _ := ws.Get(ctx, "ns", "Shared/link.md"); ok {
+		t.Fatal("a refused write was still cached")
+	}
+	if _, err := os.Stat(filepath.Join(base, "Private", "made")); err == nil {
+		t.Fatal("a queued mkdir went through a linked folder")
+	}
+	if _, err := os.Stat(filepath.Join(base, "Shared", "mine.md")); err != nil {
+		t.Fatal("a queued rename into a linked folder moved the file")
 	}
 }

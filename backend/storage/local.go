@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"github.com/mdnest/mdnest/backend/relpath"
 	"io"
 	"os"
 	"path/filepath"
@@ -48,10 +49,72 @@ func (l *LocalStorage) abs(ns, relPath string) string {
 	if target != nsDir && !strings.HasPrefix(target, nsDir+string(filepath.Separator)) {
 		return ""
 	}
+	// A repository's internals are never note storage. Nothing in mdnest reads
+	// or writes .git through this layer (git runs as its own process), and a
+	// write there — core.fsmonitor, a hook — runs commands the next time git
+	// touches the tree. Request paths are already refused by relpath.Clean;
+	// this is the backstop for any path that reaches storage another way.
+	for _, seg := range strings.Split(filepath.ToSlash(relPath), "/") {
+		if relpath.IsGitSegment(seg) {
+			return ""
+		}
+	}
 	if !containedAfterSymlinks(nsDir, target) {
 		return ""
 	}
+	// The checks above judge the path's parent folder. The filesystem also
+	// follows a link in the LAST component, so judge what the path really
+	// reaches: still inside the namespace (a link to ../../other/x.md served
+	// another namespace's file), not a dangling link (a write through one
+	// creates its target wherever it points), and not inside .git (a link to
+	// ../.git/config is the fsmonitor attack again by another name).
+	if !reachesSafely(nsDir, target) {
+		return ""
+	}
 	return target
+}
+
+// reachesSafely reports whether target, once every symbolic link in it is
+// followed, stays inside nsDir and outside any .git folder. A target that does
+// not exist yet is judged by its nearest existing ancestor. A dangling link is
+// refused.
+func reachesSafely(nsDir, target string) bool {
+	nsReal, err := filepath.EvalSymlinks(nsDir)
+	if err != nil {
+		return false
+	}
+	existing, rest := target, ""
+	for {
+		fi, err := os.Lstat(existing)
+		if err == nil {
+			if fi.Mode()&os.ModeSymlink != 0 && rest == "" {
+				if _, err := os.Stat(existing); err != nil {
+					return false // dangling link
+				}
+			}
+			break
+		}
+		parent := filepath.Dir(existing)
+		if parent == existing {
+			return false
+		}
+		rest = filepath.Join(filepath.Base(existing), rest)
+		existing = parent
+	}
+	real, err := filepath.EvalSymlinks(existing)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(nsReal, filepath.Join(real, rest))
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false
+	}
+	for _, seg := range strings.Split(filepath.ToSlash(rel), "/") {
+		if relpath.IsGitSegment(seg) {
+			return false
+		}
+	}
+	return true
 }
 
 // containedAfterSymlinks reports whether target stays within base once
@@ -310,4 +373,54 @@ func (l *LocalStorage) Walk(ctx context.Context, ns, root string, fn WalkFunc) e
 		}
 		return werr
 	})
+}
+
+// ResolveLinks returns the namespace-relative path relPath really reaches once
+// every symbolic link in it is followed (see LinkResolver). Components that do
+// not exist yet are kept as written, so a path being created resolves through
+// its existing parent folders. A link whose target leaves the namespace, or a
+// dangling link, is an error.
+func (l *LocalStorage) ResolveLinks(ctx context.Context, ns, relPath string) (string, error) {
+	relPath = strings.Trim(filepath.ToSlash(relPath), "/")
+	if relPath == "" {
+		return "", nil
+	}
+	nsDir := filepath.Join(l.root, ns)
+	nsReal, err := filepath.EvalSymlinks(nsDir)
+	if os.IsNotExist(err) {
+		return relPath, nil // nothing exists yet, so nothing is a link
+	}
+	if err != nil {
+		return "", err
+	}
+	segs := strings.Split(relPath, "/")
+	existing := nsDir
+	i := 0
+	for ; i < len(segs); i++ {
+		next := filepath.Join(existing, segs[i])
+		if _, err := os.Lstat(next); err != nil {
+			break
+		}
+		existing = next
+	}
+	real, err := filepath.EvalSymlinks(existing)
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(nsReal, real)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", ErrNotExist
+	}
+	out := filepath.ToSlash(rel)
+	if out == "." {
+		out = ""
+	}
+	if rest := strings.Join(segs[i:], "/"); rest != "" {
+		if out == "" {
+			out = rest
+		} else {
+			out += "/" + rest
+		}
+	}
+	return out, nil
 }

@@ -27,7 +27,8 @@ func ValidNamespaceName(ns string) bool {
 
 // SafeRelPath validates a namespace-relative request path lexically and
 // returns it cleaned with forward-slash separators. It returns ("", false)
-// if the path is empty, absolute or attempts traversal. Unlike SafePath it
+// if the path is empty, absolute, attempts traversal, or names a reserved
+// segment (.git, .mdnest). Unlike SafePath it
 // does no filesystem access, so it is valid for object-store backends too.
 // It is relpath.Clean, which the permission middleware also uses, so the path
 // a request is authorised for is the path the handler acts on.
@@ -69,6 +70,11 @@ func SafePath(baseDir, reqPath string) string {
 
 	cleaned := filepath.Clean(reqPath)
 	if filepath.IsAbs(cleaned) || strings.HasPrefix(cleaned, "..") {
+		return ""
+	}
+	// Same reserved segments as relpath.Clean (.git, .mdnest): a request may
+	// never reach a repository's internals or mdnest's own per-namespace data.
+	if relpath.HasReservedSegment(cleaned) {
 		return ""
 	}
 

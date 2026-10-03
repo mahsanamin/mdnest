@@ -248,7 +248,7 @@ func (h *TOTPHandler) HandleSetupTOTPWithTemp(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	claims, err := parseTempToken(req.TempToken, h.secret)
+	claims, err := parseTempToken(req.TempToken, h.secret, "totp_setup")
 	if err != nil {
 		http.Error(w, `{"error":"invalid or expired token"}`, http.StatusUnauthorized)
 		return
@@ -258,6 +258,17 @@ func (h *TOTPHandler) HandleSetupTOTPWithTemp(w http.ResponseWriter, r *http.Req
 	user, err := h.userStore.GetUserByID(userID)
 	if err != nil || user == nil {
 		http.Error(w, `{"error":"user not found"}`, http.StatusNotFound)
+		return
+	}
+
+	// Forced setup is for a user with no second factor yet. Once one is
+	// enabled, a new secret goes through the authenticated settings flow; a
+	// login step token must never be able to replace it.
+	if _, enabled, _, err := h.totpStore.Get(user.ID); err != nil {
+		http.Error(w, `{"error":"failed to read 2FA state"}`, http.StatusInternalServerError)
+		return
+	} else if enabled {
+		http.Error(w, `{"error":"2FA is already enabled"}`, http.StatusConflict)
 		return
 	}
 
@@ -362,7 +373,7 @@ func (h *TOTPHandler) HandleVerifyLoginTOTP(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Validate temp token
-	claims, err := parseTempToken(req.TempToken, h.secret)
+	claims, err := parseTempToken(req.TempToken, h.secret, "totp")
 	if err != nil {
 		http.Error(w, `{"error":"invalid or expired token"}`, http.StatusUnauthorized)
 		return
@@ -476,7 +487,12 @@ func CreateTempToken(user *store.User, secret []byte, purpose string) (string, e
 	return token.SignedString(secret)
 }
 
-func parseTempToken(tokenString string, secret []byte) (jwt.MapClaims, error) {
+// parseTempToken validates a login step token for exactly one step: purpose
+// must match the claim the step was issued with. Before v4.6.2 any valid JWT
+// was accepted here, so the "totp" token a user holds after the password —
+// before the code — could enrol a fresh TOTP secret at setup-with-temp, or a
+// full session token could stand in for any step.
+func parseTempToken(tokenString string, secret []byte, purpose string) (jwt.MapClaims, error) {
 	token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method")
@@ -488,6 +504,12 @@ func parseTempToken(tokenString string, secret []byte) (jwt.MapClaims, error) {
 	}
 	claims, ok := token.Claims.(jwt.MapClaims)
 	if !ok {
+		return nil, fmt.Errorf("invalid claims")
+	}
+	if p, _ := claims["purpose"].(string); p == "" || p != purpose {
+		return nil, fmt.Errorf("wrong token purpose")
+	}
+	if _, ok := claims["user_id"].(float64); !ok {
 		return nil, fmt.Errorf("invalid claims")
 	}
 	return claims, nil

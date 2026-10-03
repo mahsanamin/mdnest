@@ -122,3 +122,120 @@ func TestLocalStorageOpenSeek(t *testing.T) {
 		t.Fatalf("missing file: got err=%v, want ErrNotExist", err)
 	}
 }
+
+// ResolveLinks answers "which file does this request really reach?" so the
+// permission layer can authorise the target as well as the name.
+func TestLocalResolveLinks(t *testing.T) {
+	root := t.TempDir()
+	base := filepath.Join(root, "ns")
+	os.MkdirAll(filepath.Join(base, "Private"), 0o755)
+	os.MkdirAll(filepath.Join(base, "Shared"), 0o755)
+	os.WriteFile(filepath.Join(base, "Private", "p.md"), []byte("x"), 0o644)
+	os.WriteFile(filepath.Join(base, "Shared", "a.md"), []byte("x"), 0o644)
+	if err := os.Symlink(filepath.Join(base, "Private", "p.md"), filepath.Join(base, "Shared", "link.md")); err != nil {
+		t.Skip("no symlinks")
+	}
+	os.Symlink(filepath.Join(base, "Private"), filepath.Join(base, "Shared", "ldir"))
+	os.Symlink("a.md", filepath.Join(base, "Shared", "rel.md")) // relative target
+	l, _ := NewLocalStorage(root)
+	for in, want := range map[string]string{
+		"Shared/a.md":          "Shared/a.md",
+		"Shared/link.md":       "Private/p.md",
+		"Shared/ldir/p.md":     "Private/p.md",
+		"Shared/ldir/new/x.md": "Private/new/x.md", // does not exist yet
+		"Shared/rel.md":        "Shared/a.md",
+		"Shared/missing.md":    "Shared/missing.md",
+		"":                     "",
+	} {
+		got, err := l.ResolveLinks(context.Background(), "ns", in)
+		if err != nil || got != want {
+			t.Errorf("ResolveLinks(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+}
+
+// Every storage stack a deployment builds must answer the link question; a
+// wrapper that forgot to forward it would make the permission layer refuse
+// (fail closed) every request.
+func TestStacksImplementLinkResolver(t *testing.T) {
+	root := t.TempDir()
+	local, _ := NewLocalStorage(root)
+	git, err := NewGitStorage(root, NoopCommitter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, s := range map[string]Storage{
+		"local": local, "git": git,
+		"coherent(range)": newCoherentStorage(git, nil, 0),
+		"coherent":        &CoherentStorage{Storage: git},
+	} {
+		if _, ok := s.(LinkResolver); !ok {
+			t.Errorf("%s does not implement LinkResolver", name)
+		}
+	}
+}
+
+// The local backend refuses a .git path segment outright, whatever the caller
+// validated: nothing in mdnest reads or writes a repository's internals
+// through storage, and a write there (core.fsmonitor, a hook) runs commands.
+func TestLocalRefusesGitInternals(t *testing.T) {
+	root := t.TempDir()
+	os.MkdirAll(filepath.Join(root, "ns", ".git"), 0o755)
+	l, _ := NewLocalStorage(root)
+	ctx := context.Background()
+	for _, p := range []string{".git/config", ".GIT/config", "sub/.git/hooks/pre-commit", ".git"} {
+		if err := l.WriteFile(ctx, "ns", p, []byte("x")); err == nil {
+			t.Errorf("WriteFile(%q) succeeded", p)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "ns", ".git", "config")); err == nil {
+		t.Fatal(".git/config was written")
+	}
+}
+
+// A link is followed by the filesystem, so containment and the .git rule must
+// hold for the file it REACHES, not just for its name: a link to .git/config
+// let a write plant core.fsmonitor, and a link out of the namespace was
+// served whole. Links that stay inside the namespace (including into
+// .mdnest, which the server itself writes) keep working.
+func TestLocalRefusesLinksIntoGitOrOutOfNamespace(t *testing.T) {
+	root := t.TempDir()
+	ns := filepath.Join(root, "ns")
+	for _, d := range []string{".git", "Shared", ".mdnest/comments"} {
+		os.MkdirAll(filepath.Join(ns, d), 0o755)
+	}
+	os.MkdirAll(filepath.Join(root, "other"), 0o755)
+	os.WriteFile(filepath.Join(ns, ".git", "config"), []byte("[core]\n"), 0o644)
+	os.WriteFile(filepath.Join(root, "other", "secret.md"), []byte("OTHER-SECRET"), 0o644)
+	os.WriteFile(filepath.Join(ns, "Shared", "a.md"), []byte("ok"), 0o644)
+	os.WriteFile(filepath.Join(ns, ".mdnest", "comments", "x.jsonl"), []byte("c"), 0o644)
+	if err := os.Symlink("../.git/config", filepath.Join(ns, "Shared", "cfg.md")); err != nil {
+		t.Skip("no symlinks")
+	}
+	os.Symlink("../.git", filepath.Join(ns, "Shared", "gitdir"))
+	os.Symlink("../../other/secret.md", filepath.Join(ns, "Shared", "out.md"))
+	os.Symlink("../../other/new.md", filepath.Join(ns, "Shared", "dangling.md"))
+	os.Symlink("a.md", filepath.Join(ns, "Shared", "ok.md"))
+	os.Symlink("../.mdnest/comments/x.jsonl", filepath.Join(ns, "Shared", "srv.md"))
+	l, _ := NewLocalStorage(root)
+	ctx := context.Background()
+	for _, p := range []string{"Shared/cfg.md", "Shared/gitdir/config", "Shared/out.md", "Shared/dangling.md"} {
+		if b, err := l.ReadFile(ctx, "ns", p); err == nil {
+			t.Errorf("ReadFile(%q) followed the link: %q", p, b)
+		}
+		if err := l.WriteFile(ctx, "ns", p, []byte("[core]\n\tfsmonitor = x\n")); err == nil {
+			t.Errorf("WriteFile(%q) followed the link", p)
+		}
+	}
+	if b, _ := os.ReadFile(filepath.Join(ns, ".git", "config")); string(b) != "[core]\n" {
+		t.Fatalf(".git/config was written through a link: %q", b)
+	}
+	if _, err := os.Stat(filepath.Join(root, "other", "new.md")); err == nil {
+		t.Fatal("a dangling link created a file outside the namespace")
+	}
+	for _, p := range []string{"Shared/ok.md", "Shared/srv.md"} {
+		if _, err := l.ReadFile(ctx, "ns", p); err != nil {
+			t.Errorf("ReadFile(%q) of an in-namespace link: %v", p, err)
+		}
+	}
+}

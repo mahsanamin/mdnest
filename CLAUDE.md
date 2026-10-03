@@ -39,6 +39,7 @@ router. See also the **Release Process** section below (the skills implement it)
 ```
 backend/
   main.go                    # Entry point, route registration, AUTH_MODE branching
+  routes.go                  # v4.6.2+ — the content-route table (registerContentRoutes): which guard wraps which route, in one function. routes_test.go builds it with fake grant stores and drives it over HTTP through the real auth middleware — a guard that is wrong in the WIRING (not in a handler) fails there. A route that serves one note needs read/write on that note's path (RequireRead / ReadWriteRouter), never just RequireNsAccess: grants can be path-scoped. A listing that spans a namespace filters each item with middleware.ReadFilterFor (fails closed if the checker isn't attached).
   handlers/
     auth.go                  # POST /api/auth/login (JWT)
     namespaces.go            # GET /api/namespaces (lists mounted dirs)

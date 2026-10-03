@@ -4,6 +4,103 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v4.6.2 — Security release: protect repository internals, enforce 2FA and folder grants
+
+A security release. **Upgrade every install now.** The first fix applies
+to every install, in both single-user and multi-user mode. The rest apply
+to multi-user installs (`AUTH_MODE=multi`), each with the setup it affects
+named below.
+
+### Security
+
+- **A user who could edit notes could run commands on the server.** *Who
+  is affected:* every install, in either auth mode. The risk is highest when
+  git runs inside a namespace (git-sync, or `STORAGE_BACKEND=git`). The notes
+  API accepted paths inside a namespace's `.git` folder, so anyone with
+  write access could change the repository's configuration. Git runs
+  commands named there the next time it touches the tree, and mdnest's
+  background commit and the git-sync sidecar both do that, so a writer
+  could run commands in the backend or git-sync container. Anyone with
+  read access could also read `.git/config`, which can hold the remote's
+  credentials. Every request path is now refused if any folder in it is
+  `.git` or `.mdnest` (mdnest's own comment and board data), whatever the
+  case or spelling tricks a filesystem may ignore. This applies to notes,
+  files, uploads (the folder and the file name), folders, moves, history,
+  comments, tasks, chat and live collaboration. A symbolic link is held to
+  the same rule by what it points at, and the storage layer refuses anything
+  that reaches `.git` or leaves the namespace on its own, as a second layer.
+  **After upgrading:** check
+  each namespace's `.git/config` and `.git/hooks` for entries you did not
+  add (for example `fsmonitor`, `hooksPath` or `sshCommand`). Rotate any
+  git remote credentials stored in `.git/config`, because a reader could
+  have seen them.
+- **Two-factor sign-in could be skipped with the password alone.** *Who is
+  affected:* multi-user installs where people use TOTP two-factor
+  sign-in, or where an admin forces a password change. After the password
+  is accepted, the server hands out a short-lived token for the next step.
+  That token was accepted as a full session by every API, so the second
+  factor never stopped anyone. The same step token could also enrol a new
+  authenticator over the old one, or change the password without the code.
+  Step tokens now work only at the one endpoint for their own step. A
+  forced password change on an install that requires 2FA now leads to 2FA
+  setup instead of straight into the app.
+- **Folder grants did not cover every endpoint.** *Who is affected:*
+  multi-user installs that give people access to a folder rather than a
+  whole namespace (per-user or group grants). Several endpoints checked
+  only that a user had some access to the namespace. Search returned notes
+  and snippets from other folders. The global task board listed their
+  tasks. Comments, note history (including a note's full content at any
+  past version) and edit attribution were served for any note, and anyone
+  with write on one note could replace the task board's columns for the
+  whole namespace. Each one now checks the right path, and listings filter
+  every result.
+- **Symbolic links could carry access across a folder grant.** *Who is
+  affected:* the same multi-user installs, where a namespace contains
+  symlinks (they arrive through git-sync, git storage or edits on the
+  host; mdnest never creates them). A link inside a granted folder that
+  pointed into another folder let a user read, and with write access
+  overwrite, the file behind it, and a link out of the namespace could
+  show another namespace's file in search results. A link is now checked
+  for the file it reaches as well as its own name, and a link that leaves
+  the namespace is never followed. Links that stay inside what you may
+  read keep working. On the multi-replica app tier, linked paths are not
+  served at all.
+- **Live collaboration had no access check.** *Who is affected:* multi-user
+  installs with `ENABLE_LIVE_COLLAB=true`. Anyone signed in could join any
+  note's live session, see the text other people were typing, and push
+  text into their editors. Joining now needs read access to the note, and
+  only users with write access can send edits or cursor positions.
+- **An API token without an owner had full access.** *Who is affected:*
+  multi-user installs that were once single-user installs and still have
+  an API token created back then. After the switch, such a token reached
+  the server as no user at all, which the permission layer treated as
+  single-user mode (everything allowed). It is now refused. Create a new
+  token under **Settings → API Tokens**, which ties it to your account.
+- **A note could take another note's comment thread.** *Who is affected:*
+  multi-user installs with live collaboration (comments). A note's hidden
+  ID marker decides which comments belong to it. Creating a note, or
+  adding text to the start or end of one, kept an ID marker included in
+  the text, so a writer who knew another note's ID could read and post in
+  that note's thread. Incoming markers are now removed on every write path
+  (create, edit, append, chat post), and a note keeps exactly its own ID. A
+  forced-password-change step can also be used only once.
+- **Git sync status no longer shows the remote's credentials, or other
+  workspaces.** *Who is affected:* multi-user installs with git-sync. Any
+  signed-in user could read any namespace's sync status, including a
+  remote URL that may contain a token. The status now needs access to
+  that namespace, and credentials are removed from the URL it shows.
+- **Smaller fixes.** File names and display names are kept to one line in
+  git commit messages, so a crafted name cannot add a line such as a
+  `Co-authored-by` trailer. A namespace admin no longer sees the full file
+  tree of a different namespace where they only have a folder grant.
+
+### Upgrading
+
+Nothing to configure. Single-user installs behave exactly as before,
+apart from the `.git`/`.mdnest` path rule.
+
+---
+
 ## v4.6.1 — Rebuild works after leaving Docker Desktop
 
 ### Fixed
