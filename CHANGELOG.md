@@ -4,6 +4,24 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v4.6.1 — Rebuild works after leaving Docker Desktop
+
+### Fixed
+
+- **`./mdnest-server rebuild` (and `start`, `update`, `reload`) no longer
+  fails with `error getting credentials … docker-credential-desktop:
+  executable file not found in $PATH`.** Docker asks the credential helper
+  named in `~/.docker/config.json` before every image pull, and a helper that
+  isn't installed is a hard error. The usual cause is `"credsStore":
+  "desktop"` left behind after moving from Docker Desktop to Colima or
+  OrbStack. Nothing in mdnest changed, but the build broke anyway.
+  `mdnest-server` now spots a missing helper (`credsStore` or any
+  `credHelpers` entry), warns once naming the entry to remove, and pulls
+  anonymously for that run. Your Docker config is never modified. See
+  *Troubleshooting* in `docs/setup.md`.
+
+---
+
 ## v4.6.0 — Chat: people and agents in one room
 
 Any note can now be a chat room, where you, your team and your AI agents

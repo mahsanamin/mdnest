@@ -713,6 +713,12 @@ Docker Desktop requires explicit file sharing permissions for host directories. 
 3. Add the parent directory of your notes folders.
 4. Restart Docker Desktop and re-run `./mdnest-server rebuild`.
 
+### `error getting credentials … docker-credential-desktop … not found`
+
+Your `~/.docker/config.json` names a credential helper that isn't installed, usually `"credsStore": "desktop"` left behind after moving from Docker Desktop to Colima or OrbStack. Docker consults it before every image pull, so any build fails, not just mdnest's.
+
+`mdnest-server` (v4.6.1+) detects this, prints a warning, and pulls anonymously for that run. To make the warning go away, remove the `credsStore` line (or the `credHelpers` entry) from `~/.docker/config.json`, or install the helper it names. A plain `docker compose build` outside `mdnest-server` still fails until you do.
+
 ### Port conflicts
 
 If port `8286` or `3236` is already in use, change `BACKEND_PORT` or `FRONTEND_PORT` in `mdnest.conf` and re-run `./mdnest-server rebuild`.
