@@ -304,6 +304,9 @@ func (l *LocalStorage) Walk(ctx context.Context, ns, root string, fn WalkFunc) e
 			Size:    info.Size(),
 			IsDir:   info.IsDir(),
 			ModTime: info.ModTime(),
+			// filepath.Walk uses Lstat, so a link is reported as itself and
+			// never descended into.
+			IsSymlink: info.Mode()&os.ModeSymlink != 0,
 		})
 		if werr == SkipDir {
 			return filepath.SkipDir

@@ -47,6 +47,10 @@ type FileInfo struct {
 	Size    int64     // length in bytes; 0 for directories
 	IsDir   bool      // true for directories / prefixes
 	ModTime time.Time // last modification time (zero if unknown)
+	// IsSymlink is true when Walk reports an entry that is itself a symbolic
+	// link (it is never followed). Only filesystem backends set it; callers
+	// that export or copy a tree skip such entries rather than following them.
+	IsSymlink bool
 }
 
 // DirEntry is a single child returned by ReadDir.
@@ -140,4 +144,12 @@ type RangeReadable interface {
 	// metadata. The caller must Close the reader. It returns ErrNotExist if
 	// the file is missing.
 	OpenSeek(ctx context.Context, ns, relPath string) (io.ReadSeekCloser, FileInfo, error)
+}
+
+// Annotator is an optional capability of backends that keep history (git): it
+// adds a free-text line to the body of the namespace's next commit, so a
+// change that spans two namespaces (a cross-namespace move) can say where the
+// other half went. Backends without history do not implement it.
+type Annotator interface {
+	Annotate(ns, line string)
 }

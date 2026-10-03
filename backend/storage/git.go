@@ -90,6 +90,14 @@ func (g *GitStorage) Attribute(ns, relPath, name, email string) {
 	}
 }
 
+// Annotate adds a line to the body of ns's next commit (see Annotator). No-op
+// unless the git backend uses the interval committer.
+func (g *GitStorage) Annotate(ns, line string) {
+	if c, ok := g.committer.(*intervalCommitter); ok {
+		c.Annotate(ns, line)
+	}
+}
+
 // --- mutations: do the filesystem op, then record the namespace as dirty ---
 
 func (g *GitStorage) WriteFile(ctx context.Context, ns, relPath string, data []byte) error {
@@ -226,6 +234,10 @@ type intervalCommitter struct {
 	// can aggregate several files by several people, which is exactly what
 	// this captures. Populated via Attribute, drained at commit time.
 	contrib map[string]map[string]map[ident]struct{} // ns -> path -> set(ident)
+
+	// notes holds free-text lines for each namespace's next commit body (see
+	// Annotate). Guarded by mu, drained at commit time like contrib.
+	notes map[string][]string
 
 	// Push backoff state, touched only from the (serialized) Flush path.
 	pushNext  map[string]time.Time // ns -> earliest next push attempt
@@ -366,6 +378,35 @@ func (c *intervalCommitter) Attribute(ns, path, name, email string) {
 	set[ident{name: name, email: email}] = struct{}{}
 }
 
+// Annotate queues a line for the body of ns's next commit. A cross-namespace
+// move is two commits in two repositories; this is how each one names the
+// other ("moved to shared:Project/x.md"). Duplicate lines are kept once.
+func (c *intervalCommitter) Annotate(ns, line string) {
+	if line == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.notes == nil {
+		c.notes = make(map[string][]string)
+	}
+	for _, l := range c.notes[ns] {
+		if l == line {
+			return
+		}
+	}
+	c.notes[ns] = append(c.notes[ns], line)
+}
+
+// takeNotes removes and returns the queued annotation lines for ns.
+func (c *intervalCommitter) takeNotes(ns string) []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	lines := c.notes[ns]
+	delete(c.notes, ns)
+	return lines
+}
+
 // takeContrib removes and returns the accumulated attribution for ns. Called at
 // commit time so each contributor is credited exactly once, in the commit that
 // carries their change.
@@ -385,7 +426,16 @@ func (c *intervalCommitter) takeContrib(ns string) map[string]map[ident]struct{}
 // participant. With no attribution (single-user mode, CLI writes, remote
 // merges) the message is exactly the previous timestamp-only form.
 func (c *intervalCommitter) commitMessage(files map[string]map[ident]struct{}) string {
+	return c.commitMessageWith(files, nil)
+}
+
+// commitMessageWith is commitMessage plus the namespace's annotation lines
+// (see Annotate), which open the body ahead of the per-file attribution.
+func (c *intervalCommitter) commitMessageWith(files map[string]map[ident]struct{}, notes []string) string {
 	subject := "mdnest: " + time.Now().UTC().Format("2006-01-02 15:04:05 UTC")
+	if len(notes) > 0 {
+		subject += "\n\n" + strings.Join(notes, "\n")
+	}
 	if len(files) == 0 {
 		return subject
 	}
@@ -571,7 +621,7 @@ func (c *intervalCommitter) commit(ctx context.Context, ns string) error {
 	}
 	// Commit only when the index has staged changes.
 	if c.git(ctx, dir, "diff", "--cached", "--quiet") != nil {
-		msg := c.commitMessage(c.takeContrib(ns))
+		msg := c.commitMessageWith(c.takeContrib(ns), c.takeNotes(ns))
 		if err := c.git(ctx, dir, "commit", "--quiet", "-m", msg); err != nil {
 			return fmt.Errorf("git commit %s: %w", ns, err)
 		}
