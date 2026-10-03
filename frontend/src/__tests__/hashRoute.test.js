@@ -26,4 +26,14 @@ describe('hash routes', () => {
   it('an empty hash is nothing', () => {
     expect(parseRoute('')).toEqual({ ns: null, path: null, stickies: false, board: false });
   });
+  it('the chats view round-trips, with and without an open chat', () => {
+    expect(formatRoute({ chats: true })).toBe('#!chats');
+    expect(parseRoute('#!chats')).toMatchObject({ chats: true, chat: null, board: false, stickies: false });
+    const h = formatRoute({ chats: true, chat: { ns: 'my notes', path: 'Chats/q4 plan.md' }, ns: 'other' });
+    expect(h).toBe('#!chats/my%20notes/Chats/q4%20plan.md');
+    expect(parseRoute(h).chat).toEqual({ ns: 'my notes', path: 'Chats/q4 plan.md' });
+  });
+  it('a namespace literally called "chats" is still a note route', () => {
+    expect(parseRoute('#chats/x.md')).toEqual({ ns: 'chats', path: 'x.md', stickies: false, board: false });
+  });
 });

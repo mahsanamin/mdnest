@@ -948,3 +948,50 @@ export async function adminDeleteGroupGrant(id) {
 }
 
 export { getToken, setToken, clearToken, PermissionError };
+
+// --- File-based chat (ENABLE_CHAT) ---
+// A chat is a note tagged `mdnest-chat: true`; posting appends to it.
+
+async function chatError(res, fallback) {
+  const data = await res.json().catch(() => ({}));
+  return new Error(data.error || fallback);
+}
+
+// ns: only that namespace's chats (what the chats view shows). Omit for every
+// namespace you can read.
+export async function listChats(ns) {
+  const res = await request(ns ? `/chats?ns=${encodeURIComponent(ns)}` : '/chats');
+  if (!res.ok) throw await chatError(res, 'Failed to load chats');
+  return (await res.json()).chats || [];
+}
+
+// after: only messages after #N (the chat's message count you already have).
+export async function getChat(ns, path, after = 0) {
+  const res = await request(`/chat?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}&after=${after}`);
+  if (!res.ok) throw await chatError(res, 'Failed to load chat');
+  return res.json();
+}
+
+export async function postChatMessage(ns, path, text, as) {
+  const res = await request(`/chat?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}&as=${encodeURIComponent(as || '')}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body: text,
+  });
+  if (!res.ok) throw await chatError(res, 'Failed to send');
+  return res.json();
+}
+
+// The namespace's chat images (ChatGifs/): reactions and avatar-NAME files.
+export async function listChatGifs(ns) {
+  const res = await request(`/chat/gifs?ns=${encodeURIComponent(ns)}`);
+  if (!res.ok) return [];
+  return (await res.json()).gifs || [];
+}
+
+// Creates the note when it does not exist; otherwise tags it as a chat in place.
+export async function convertToChat(ns, path, title) {
+  const res = await request(`/chat/convert?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}&title=${encodeURIComponent(title || '')}`, { method: 'POST' });
+  if (!res.ok) throw await chatError(res, 'Failed to create chat');
+  return res.json();
+}

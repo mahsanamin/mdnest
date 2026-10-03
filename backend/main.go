@@ -433,6 +433,12 @@ func main() {
 	// ENABLE_EXCALIDRAW opens .excalidraw.md files in the drawing editor. Off by
 	// default so an operator who just wants notes carries none of its chunk.
 	enableExcalidraw := env("ENABLE_EXCALIDRAW", "false") == "true"
+	// Chat: a note tagged `mdnest-chat: true` is a channel people and agents
+	// append to. On by default (single and multi mode alike), ENABLE_CHAT=false
+	// turns it off, and the multi-replica app role keeps it off unless set
+	// to true; see handlers.ChatEnabled. When off, the /api/chat* routes are
+	// never registered and the frontend never loads the chat chunk.
+	enableChat := handlers.ChatEnabled(env("ENABLE_CHAT", ""), env("MDNEST_ROLE", "single"))
 
 	// Live collaboration hub (optional, multi mode only)
 	enableCollab := multiMode && env("ENABLE_LIVE_COLLAB", "false") == "true"
@@ -514,6 +520,19 @@ func main() {
 		taskCanWrite = func(_ *http.Request, _, _ string) bool { return true }
 	}
 	taskHandler := handlers.NewTaskHandler(stg, taskNsFilter, taskCanWrite)
+	// Chat's cross-namespace list is guarded the same way as the global task
+	// view: the namespace filter plus a per-chat read check (grants can be
+	// path-scoped, so seeing a namespace is not the same as reading every note).
+	var chatCanRead func(r *http.Request, ns, path string) bool
+	if perms != nil {
+		chatCanRead = perms.CheckRead
+	} else {
+		chatCanRead = func(_ *http.Request, _, _ string) bool { return true }
+	}
+	chatHandler := handlers.NewChatHandler(stg, taskNsFilter, chatCanRead, env("MDNEST_USER", "admin"), multiMode)
+	if collabHub != nil {
+		chatHandler.SetCollabHub(collabHub)
+	}
 	// API tokens live in Postgres in multi mode (shared across replicas, no
 	// ReadWriteMany secrets volume) and in the tokens.json file in single mode
 	// (no database dependency for a single-box install).
@@ -619,6 +638,7 @@ func main() {
 	configHandler.SetMarp(enableMarp)
 	configHandler.SetMarpThemes(enableMarpThemes)
 	configHandler.SetExcalidraw(enableExcalidraw)
+	configHandler.SetChat(enableChat)
 	configHandler.SetDefaultTheme(env("DEFAULT_THEME", "auto"))
 	if enableExcalidraw {
 		// Operator-provided default Excalidraw libraries: comma-separated URLs to
@@ -753,6 +773,17 @@ func main() {
 				mux.Handle("/api/namespace/users", authMiddleware.Wrap(perms.RequireNsAccess(http.HandlerFunc(teamHandler.HandleNamespaceUsers))))
 			}
 		}
+		if enableChat {
+			// Read a chat = read the note; post or convert = write it.
+			mux.Handle("/api/chat", authMiddleware.Wrap(perms.ReadWriteRouter(invalidateSearch(http.HandlerFunc(chatHandler.Handle)))))
+			mux.Handle("/api/chat/convert", authMiddleware.Wrap(perms.RequireWrite(invalidateSearch(http.HandlerFunc(chatHandler.HandleConvert)))))
+			// Cross-namespace: self-filters, like /api/tasks/all.
+			mux.Handle("/api/chats", authMiddleware.Wrap(http.HandlerFunc(chatHandler.HandleList)))
+			// The chat image library: any access to the namespace may list it;
+			// each image is still read-checked when /api/files serves it.
+			mux.Handle("/api/chat/gifs", authMiddleware.Wrap(perms.RequireNsAccess(http.HandlerFunc(chatHandler.HandleGifs))))
+			mux.HandleFunc(handlers.BuiltinGifRoute, handlers.HandleBuiltinGif)
+		}
 		mux.Handle("/api/files/", authMiddleware.Wrap(http.HandlerFunc(uploadHandler.HandleServeFile))) // files endpoint extracts ns from URL, handled differently
 	} else {
 		mux.Handle("/api/namespaces", authMiddleware.Wrap(http.HandlerFunc(nsHandler.ListNamespaces)))
@@ -773,6 +804,13 @@ func main() {
 			// Single mode: one user owns every namespace, so the global view
 			// aggregates them all (nil namespace filter).
 			mux.Handle("/api/tasks/all", authMiddleware.Wrap(http.HandlerFunc(taskHandler.HandleGlobalTasks)))
+		}
+		if enableChat {
+			mux.Handle("/api/chat", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(chatHandler.Handle))))
+			mux.Handle("/api/chat/convert", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(chatHandler.HandleConvert))))
+			mux.Handle("/api/chats", authMiddleware.Wrap(http.HandlerFunc(chatHandler.HandleList)))
+			mux.Handle("/api/chat/gifs", authMiddleware.Wrap(http.HandlerFunc(chatHandler.HandleGifs)))
+			mux.HandleFunc(handlers.BuiltinGifRoute, handlers.HandleBuiltinGif)
 		}
 		mux.Handle("/api/files/", authMiddleware.Wrap(http.HandlerFunc(uploadHandler.HandleServeFile)))
 	}

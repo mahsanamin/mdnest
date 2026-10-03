@@ -157,7 +157,9 @@ test('reveal-in-tree button keeps the active file visible', async ({ page }) => 
 
 test('Settings → CLI tab has working copy buttons', async ({ page }) => {
   await login(page);
-  await page.click('button[title="Settings"]');
+  // Settings lives in the ⋯ menu (Toolbar.jsx) on every screen size.
+  await page.click('.toolbar-more-btn');
+  await page.click('.toolbar-more-settings');
   await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
   await page.click('.settings-tabs button:has-text("CLI")');
   const copyBtns = page.locator('.settings-copy-btn');

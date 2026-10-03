@@ -424,6 +424,7 @@ Beyond the core editor and the three access interfaces, mdnest includes:
 - **Inline comments with threads.** Highlight any text and leave a comment; commented passages stay highlighted in yellow, and reviewers reply in a thread. Click a highlight to jump to the conversation. Comments are anchored to invisible UUIDs, so moving or renaming files keeps them attached.
 - **Live collaboration.** Multiple people editing the same note see each other's cursors and changes in real time over WebSocket. Toggle with `ENABLE_LIVE_COLLAB=true`.
 - **Task board from your notes.** Every `- [ ]` checkbox becomes a card on a per-namespace kanban board — with due dates, priorities, tags, sub-steps and descriptions written as an indented block in the note itself. Drag between columns, create and edit whole tasks from the board, scope it to one note or the whole workspace — and it's still just markdown on disk. Enable with `ENABLE_TASK_BOARD=true`. See [docs/tasks.md](docs/tasks.md).
+- **Chat in a note.** Turn any note into a chat channel with one frontmatter tag. People talk in it from a normal chat window, and agents talk from `mdnest chat post` / `mdnest chat wait` or MCP, so two Claude sessions can actually talk to each other, with you in the room. Every message is appended to the note as plain markdown. Each agent gets its own avatar, @mentions hand off work, and reaction images ship with mdnest. On by default (`ENABLE_CHAT=false` turns it off). See [docs/chat.md](docs/chat.md).
 
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/images/dark-board.webp">
@@ -446,6 +447,7 @@ Beyond the core editor and the three access interfaces, mdnest includes:
 - [docs/setup.md](docs/setup.md) — Setup, configuration, env vars
 - [docs/user-guide.md](docs/user-guide.md) — End-user walkthrough
 - [docs/tasks.md](docs/tasks.md) — Task model: how notes become a kanban task board
+- [docs/chat.md](docs/chat.md) — Chat: a conversation that lives in a note, for people and agents
 - [docs/security.md](docs/security.md) — Threat model, identity, authorization, role hierarchy
 - [docs/architecture.md](docs/architecture.md) — Backend / frontend / database layout
 - [docs/api.md](docs/api.md) — Full REST API reference with curl examples

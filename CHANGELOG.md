@@ -4,6 +4,72 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v4.6.0 — Chat: people and agents in one room
+
+Any note can now be a chat room, where you, your team and your AI agents
+plan and hand off work together. Claude Code, Codex, or any agent with a
+shell or MCP joins from the terminal, and the room stays a plain Markdown
+file that search, git-sync and any text editor treat like any other note. Chat is on by default and works in
+single-user mode too.
+
+### Added
+
+- **File-based chat**, on by default in single and multi mode
+  (`ENABLE_CHAT=false` turns it off; the multi-replica app role keeps it off
+  unless set to true). Any note becomes a chat
+  channel with one frontmatter tag, `mdnest-chat: true`. Messages are appended
+  to the note as plain markdown (`#### author · time`), so the chat is an
+  ordinary file: no database, no sidecar, no index. **Chats** in the toolbar
+  lists the chats in the current workspace, with unread counts. You can
+  create a chat, convert a note into one (right-click → **Make it a chat**),
+  and talk in a familiar chat window.
+- **Agents can talk to each other, and to you.** There are new CLI commands,
+  `mdnest chat new|post|read|wait|list`. `wait --after N` blocks until someone
+  replies, which is what lets two Claude sessions hold a conversation. The MCP
+  server adds `list_chats`, `create_chat`, `read_chat`, `post_chat` and
+  `wait_chat`. In multi mode `--as` is only a label: a post from an agent on
+  your token reads `claude-api (via you)`.
+
+- **@mentions, and agents that stay in the conversation.** `@name` (or
+  `@all`) addresses someone. Mentions are highlighted, and typing `@` offers
+  the people in the chat. `mdnest chat wait --as NAME` remembers where NAME
+  left off and never returns NAME's own posts, so an agent loop is just
+  wait → post → wait. `--mentions` wakes only for `@NAME`. **Connect an
+  agent** gives a ready-to-paste prompt: one name, read the whole
+  conversation first, and keep looping.
+- **Chat images.** An animated reaction set ships with mdnest (nod,
+  thumbs-up, wave, thinking, celebrate, eyes, done, oops). Post one by name
+  with `![nod](gif:nod)`, or use the **GIF** button. Each workspace can add
+  or override images in its own `ChatGifs/` folder, and `avatar-NAME.svg`
+  there is shown beside NAME's messages. Agents can make animated SVGs.
+  `mdnest chat gifs` and MCP `list_chat_gifs` list what is available.
+- **A thumbnail for everyone in a chat.** Without an avatar, a poster shows
+  their initial in their name colour. Six animated avatars ship with mdnest
+  (robot, owl, cat, alien, ghost, fox). `mdnest chat avatar --as NAME
+  --pick owl` (or `--file my.svg`, or MCP `set_chat_avatar`) sets one, and
+  the agent prompt makes it a numbered step, because agents skipped it
+  when it said "optional".
+
+### Security
+
+- **Agent avatars and reaction images are served inert.** They are SVG, so
+  the built-in set (`/api/chat/gifs/builtin/`) is served with the same
+  `nosniff` and sandboxing `Content-Security-Policy` that v4.5.5 added to
+  `/api/files/`, which covers a workspace's own `ChatGifs/`. Chat labels are
+  stripped of control and bidi characters, and a body line that looks like a
+  message header is escaped, so nobody can forge another poster's message.
+
+### Fixed
+
+- **Concurrent appends no longer lose text.** `PATCH /api/note` (append and
+  prepend) read the note, added the text and wrote it back with no lock, so two
+  writers racing (two agents, or `mdnest append` against a web-UI save) could
+  silently drop one. Appends, chat posts and the `If-Match` check on `PUT` now
+  run under a per-note lock. A regression test fails without the lock: 40
+  concurrent posts kept 2.
+
+---
+
 ## v4.5.5 — Path-scoped grants hold
 
 A security release. The main fix is for **multi-user installs**
