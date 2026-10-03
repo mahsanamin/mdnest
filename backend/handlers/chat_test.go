@@ -434,6 +434,9 @@ func TestChatGifsMergesWorkspaceAndBuiltins(t *testing.T) {
 	if g := byName["avatar-codxu"]; g.Avatar != "codxu" {
 		t.Fatalf("avatar not recognised: %+v", g)
 	}
+	if g := byName["owl"]; g.Kind != "avatar-choice" || g.Avatar != "" || g.Path != BuiltinGifRoute+"avatars/owl.svg" {
+		t.Fatalf("built-in avatar choices must be listed as choices, not as anyone's avatar: %+v", g)
+	}
 	if _, ok := byName["notes"]; ok {
 		t.Fatal("non-image files must not be listed")
 	}
@@ -457,7 +460,12 @@ func TestBuiltinGifIsServedInert(t *testing.T) {
 	if !strings.Contains(rec.Header().Get("Content-Security-Policy"), "sandbox") || rec.Header().Get("X-Content-Type-Options") != "nosniff" {
 		t.Fatalf("built-in SVG must carry the sandbox CSP and nosniff: %v", rec.Header())
 	}
-	for _, bad := range []string{"../chat.go", "missing.svg", ""} {
+	rec = httptest.NewRecorder()
+	HandleBuiltinGif(rec, httptest.NewRequest(http.MethodGet, BuiltinGifRoute+"avatars/owl.svg", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Header().Get("Content-Security-Policy"), "sandbox") {
+		t.Fatalf("avatar choice: status %d, headers %v", rec.Code, rec.Header())
+	}
+	for _, bad := range []string{"../chat.go", "missing.svg", "", "avatars/../nod.svg", "avatars/x/owl.svg", "avatars/"} {
 		rec := httptest.NewRecorder()
 		HandleBuiltinGif(rec, httptest.NewRequest(http.MethodGet, BuiltinGifRoute+bad, nil))
 		if rec.Code != http.StatusNotFound {

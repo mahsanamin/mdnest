@@ -1646,7 +1646,11 @@ namespace may list it, and each workspace image is read-checked when
 `/api/files/` serves it. The tree lists only text files, which is why this
 endpoint exists.
 
-### GET /api/chat/gifs/builtin/{name}.svg
+Built-in avatars a poster can pick are listed too, with
+`"kind":"avatar-choice"` and paths under `/api/chat/gifs/builtin/avatars/`.
+They are never shown as reactions or attached to a poster by name.
+
+### GET /api/chat/gifs/builtin/{name}.svg and /api/chat/gifs/builtin/avatars/{name}.svg
 
 The animated set that ships with mdnest, embedded in the binary. It is public
 (generic artwork, no user data; an `<img>` cannot send credentials), is

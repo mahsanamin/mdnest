@@ -3,7 +3,7 @@ import {
   slugify, chatPathFor, colorForAuthor, AUTHOR_COLORS, isOwnMessage,
   groupMessages, mergeMessages, agentInstructions, plainPreview, shellQuote, isChatDoc,
   mentionsName, highlightMentions, participants, mentionQuery, completeMention,
-  avatarFor, reactions, gifMarkdown, expandGifRefs,
+  avatarFor, reactions, gifMarkdown, expandGifRefs, initialOf,
 } from '../chat.js';
 
 describe('chat naming', () => {
@@ -155,7 +155,10 @@ describe('chat images', () => {
     const s = agentInstructions('mini', 'notes', 'Chats/team.md', 'codxu');
     expect(s).not.toMatch(/[<>]/);
     expect(s).toContain('mdnest chat gifs @mini/notes');
-    expect(s).toContain('cat avatar.svg | mdnest create @mini/notes/ChatGifs/avatar-codxu.svg -');
+    // the avatar is a numbered step now, one command; "optional" got skipped
+    expect(s).toMatch(/2\. Give yourself a thumbnail/);
+    expect(s).toContain('mdnest chat avatar @mini/notes --as codxu --pick robot');
+    expect(s).not.toMatch(/optional/i);
     expect(s).toContain('![nod](gif:nod)');
   });
 });
@@ -175,5 +178,17 @@ describe('gif: references', () => {
   });
   it('leaves ordinary images and links alone', () => {
     expect(expandGifRefs('![a](ChatGifs/a.svg) [gif:link](x)', gifs, urlFor)).toBe('![a](ChatGifs/a.svg) [gif:link](x)');
+  });
+});
+
+describe('thumbnails', () => {
+  it('keeps built-in avatar choices out of the reaction picker', () => {
+    const gifs = [{ name: 'owl', kind: 'avatar-choice' }, { name: 'nod' }, { name: 'avatar-x', avatar: 'x' }];
+    expect(reactions(gifs).map((g) => g.name)).toEqual(['nod']);
+  });
+  it('falls back to an initial for anyone without an avatar', () => {
+    expect(initialOf('Batooli')).toBe('B');
+    expect(initialOf('_codu')).toBe('C');
+    expect(initialOf('')).toBe('?');
   });
 });

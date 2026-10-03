@@ -7,7 +7,7 @@ import {
   CHAT_POLL_MS, CHAT_LIST_POLL_MS, DEFAULT_CHAT_FOLDER, chatPathFor, colorForAuthor,
   isOwnMessage, groupMessages, mergeMessages, formatChatTime, agentInstructions, plainPreview,
   highlightMentions, mentionsName, participants, mentionQuery, completeMention,
-  avatarFor, reactions, gifMarkdown, expandGifRefs,
+  avatarFor, reactions, gifMarkdown, expandGifRefs, initialOf,
 } from '../chat.js';
 import { copyPlainText } from '../mermaid-text.js';
 import './ChatView.css';
@@ -385,8 +385,12 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
               {m.startsGroup && (
                 <div className="chat-msg-meta">
                   {(() => {
+                    // Everyone gets a thumbnail: their avatar if they set one,
+                    // else their initial in their name colour.
                     const av = avatarFor(gifs, m.author);
-                    return av ? <img className="chat-avatar" src={gifUrl(chat.ns, av)} alt="" loading="lazy" /> : null;
+                    return av
+                      ? <img className="chat-avatar" src={gifUrl(chat.ns, av)} alt="" loading="lazy" />
+                      : <span className="chat-avatar chat-avatar-initial" style={{ background: `var(${colorForAuthor(m.author)})` }} aria-hidden="true">{initialOf(m.author)}</span>;
                   })()}
                   <span className="chat-msg-author" style={{ color: `var(${colorForAuthor(m.author)})` }}>{m.author}</span>
                   {m.via && <span className="chat-msg-via">via {m.via}</span>}

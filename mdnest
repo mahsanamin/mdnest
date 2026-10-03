@@ -1334,6 +1334,7 @@ chat_usage() {
 Usage:
   mdnest chat list [@alias]
   mdnest chat gifs @alias/namespace          (images to post as ![nod](gif:nod), and avatars)
+  mdnest chat avatar @alias/namespace --as name [--pick owl | --file my.svg]
   mdnest chat new  @alias/namespace/path.md ["Title"]
   mdnest chat post @alias/namespace/path.md <text|-> [--as name]
   mdnest chat read @alias/namespace/path.md [--as name] [--after N]
@@ -1351,7 +1352,9 @@ Images: post one by name, ![nod](gif:nod). `chat gifs` lists the names: the set
 that ships with mdnest plus the namespace's ChatGifs/ folder, where a file with
 a built-in's name replaces it. Add your own (animated SVG works well):
   cat wave.svg | mdnest create @alias/namespace/ChatGifs/wave.svg -
-A file named avatar-NAME.* is shown beside NAME's messages.
+Your thumbnail: `chat avatar --as NAME --pick owl` uses a built-in one (run it
+without --pick to see the choices); `--file my.svg` uses your own drawing. It is
+saved as ChatGifs/avatar-NAME.svg. Without one, your initial is shown.
 USAGE
 }
 
@@ -1397,6 +1400,55 @@ cmd_chat() {
       else
         printf '%s\n' "$gifs"
       fi
+      ;;
+    avatar)
+      # Give a poster a thumbnail: copy a built-in avatar, or upload an SVG,
+      # to ChatGifs/avatar-NAME.svg (what the chat window shows beside NAME).
+      parse_path "${1:-}"
+      require_server
+      if [ -z "$PARSED_NS" ]; then chat_usage; exit 1; fi
+      shift
+      local as="${MDNEST_CHAT_AS:-}" pick="" file=""
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --as) [ $# -ge 2 ] || { echo "Error: --as needs a name" >&2; exit 1; }; as="$2"; shift 2 ;;
+          --as=*) as="${1#--as=}"; shift ;;
+          --pick) [ $# -ge 2 ] || { echo "Error: --pick needs a choice, e.g. owl" >&2; exit 1; }; pick="$2"; shift 2 ;;
+          --pick=*) pick="${1#--pick=}"; shift ;;
+          --file) [ $# -ge 2 ] || { echo "Error: --file needs a path to an .svg" >&2; exit 1; }; file="$2"; shift 2 ;;
+          --file=*) file="${1#--file=}"; shift ;;
+          *) chat_usage; exit 1 ;;
+        esac
+      done
+      if [ -z "$pick" ] && [ -z "$file" ]; then
+        local choices
+        choices=$(api GET "/chat/gifs?ns=$(urlencode "$PARSED_NS")&format=text") || exit 1
+        echo "Built-in avatars (use one with: mdnest chat avatar @${PARSED_ALIAS:-myserver}/${PARSED_NS} --as yourname --pick owl):"
+        printf '%s\n' "$choices" | awk -F'\t' '$1 == "avatar choice" { print "  " $2 }'
+        echo "Or draw your own animated SVG and use --file my.svg."
+        printf '%s\n' "$choices" | awk -F'\t' '/^avatar of / { print "Already set: " $1 }'
+        return 0
+      fi
+      case "$as" in
+        ''|*[!A-Za-z0-9._-]*) echo "Error: --as needs a name made of letters, digits, dot, dash or underscore" >&2; exit 1 ;;
+      esac
+      local svg=""
+      if [ -n "$pick" ]; then
+        case "$pick" in ''|*[!a-z0-9-]*) echo "Error: --pick takes a choice name such as owl (run without --pick to list them)" >&2; exit 1 ;; esac
+        svg=$(curl -sf --connect-timeout "${MDNEST_TIMEOUT:-10}" "${MDNEST_URL}/api/chat/gifs/builtin/avatars/${pick}.svg") || svg=""
+        if [ -z "$svg" ]; then echo "Error: no built-in avatar called '$pick' (run without --pick to list them)" >&2; exit 1; fi
+      else
+        case "$file" in *.svg|*.SVG) ;; *) echo "Error: --file must be an .svg (agents can write one as plain text)" >&2; exit 1 ;; esac
+        [ -f "$file" ] || { echo "Error: no such file: $file" >&2; exit 1; }
+        svg=$(cat "$file") || svg=""
+        [ -n "$svg" ] || { echo "Error: $file is empty" >&2; exit 1; }
+      fi
+      local target_qs; target_qs="ns=$(urlencode "$PARSED_NS")&path=$(urlencode "ChatGifs/avatar-${as}.svg")"
+      # Create, or replace an avatar that is already there.
+      if ! api POST "/note?$target_qs" "$svg" >/dev/null 2>&1; then
+        api PUT "/note?$target_qs" "$svg" >/dev/null || exit 1
+      fi
+      echo "Avatar set for ${as}: ${PARSED_NS}/ChatGifs/avatar-${as}.svg"
       ;;
     new)
       chat_target "${1:-}"

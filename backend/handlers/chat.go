@@ -327,7 +327,7 @@ const ChatGifDir = "ChatGifs"
 // artwork, no user data, and an <img> cannot send an Authorization header.
 const BuiltinGifRoute = "/api/chat/gifs/builtin/"
 
-//go:embed chatgifs/*.svg
+//go:embed chatgifs/*.svg chatgifs/avatars/*.svg
 var builtinGifFS embed.FS
 
 var chatGifExts = map[string]bool{".gif": true, ".svg": true, ".png": true, ".webp": true, ".jpg": true, ".jpeg": true}
@@ -338,14 +338,27 @@ type ChatGif struct {
 	Path   string `json:"path"`             // namespace-relative ("ChatGifs/nod.svg") or, for a built-in, the absolute route
 	Scope  string `json:"scope"`            // "workspace" or "builtin"
 	Avatar string `json:"avatar,omitempty"` // set for avatar-NAME files: the poster it belongs to
+	// Kind is "avatar-choice" for the built-in avatars a poster can pick
+	// (`mdnest chat avatar --pick owl`). They are never shown as reactions and
+	// never attached to a poster by name: picking one copies it to
+	// ChatGifs/avatar-NAME.svg.
+	Kind string `json:"kind,omitempty"`
 }
 
 func builtinGifs() []ChatGif {
 	entries, _ := fs.ReadDir(builtinGifFS, "chatgifs")
 	out := make([]ChatGif, 0, len(entries))
 	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
 		name := strings.TrimSuffix(e.Name(), path.Ext(e.Name()))
 		out = append(out, ChatGif{Name: name, Path: BuiltinGifRoute + e.Name(), Scope: "builtin"})
+	}
+	avatars, _ := fs.ReadDir(builtinGifFS, "chatgifs/avatars")
+	for _, e := range avatars {
+		name := strings.TrimSuffix(e.Name(), path.Ext(e.Name()))
+		out = append(out, ChatGif{Name: name, Path: BuiltinGifRoute + "avatars/" + e.Name(), Scope: "builtin", Kind: "avatar-choice"})
 	}
 	return out
 }
@@ -384,7 +397,7 @@ func (h *ChatHandler) HandleGifs(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Slice(gifs, func(i, j int) bool { return gifs[i].Path < gifs[j].Path })
 	for _, g := range builtinGifs() {
-		if !have[strings.ToLower(g.Name)] {
+		if g.Kind == "avatar-choice" || !have[strings.ToLower(g.Name)] {
 			gifs = append(gifs, g)
 		}
 	}
@@ -393,6 +406,8 @@ func (h *ChatHandler) HandleGifs(w http.ResponseWriter, r *http.Request) {
 		var b strings.Builder
 		for _, g := range gifs {
 			switch {
+			case g.Kind == "avatar-choice":
+				fmt.Fprintf(&b, "avatar choice\t%s\t(mdnest chat avatar ... --pick %s)\n", g.Name, g.Name)
 			case g.Avatar != "":
 				fmt.Fprintf(&b, "avatar of %s\t%s (%s)\n", g.Avatar, g.Path, g.Scope)
 			default:
@@ -412,12 +427,19 @@ func HandleBuiltinGif(w http.ResponseWriter, r *http.Request) {
 		chatJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	name := path.Base(strings.TrimPrefix(r.URL.Path, BuiltinGifRoute))
-	if name == "" || name == "." || name == "/" || strings.Contains(name, "..") {
+	// Either "<name>.svg" (a reaction) or "avatars/<name>.svg" (an avatar
+	// choice). Nothing else: the embedded FS holds only these two folders,
+	// and anything with ".." or more segments is refused before the lookup.
+	rel := strings.TrimPrefix(r.URL.Path, BuiltinGifRoute)
+	dir, name := "", rel
+	if strings.HasPrefix(rel, "avatars/") {
+		dir, name = "avatars/", strings.TrimPrefix(rel, "avatars/")
+	}
+	if name == "" || strings.ContainsAny(name, "/\\") || strings.Contains(name, "..") {
 		http.NotFound(w, r)
 		return
 	}
-	data, err := builtinGifFS.ReadFile("chatgifs/" + name)
+	data, err := builtinGifFS.ReadFile("chatgifs/" + dir + name)
 	if err != nil {
 		http.NotFound(w, r)
 		return

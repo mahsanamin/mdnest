@@ -154,7 +154,13 @@ export function avatarFor(gifs, author) {
 
 // reactions: the library minus avatars, for the picker.
 export function reactions(gifs) {
-  return (gifs || []).filter((g) => !g.avatar);
+  return (gifs || []).filter((g) => !g.avatar && g.kind !== 'avatar-choice');
+}
+
+// initialOf: the letter shown in a poster's fallback thumbnail.
+export function initialOf(name) {
+  const m = String(name || '').match(/[A-Za-z0-9]/);
+  return m ? m[0].toUpperCase() : '?';
 }
 
 export function gifMarkdown(g) {
@@ -244,10 +250,15 @@ export function agentInstructions(alias, ns, path, name = 'AGENT_NAME') {
     '   The first line lists who is here. Work out: who each participant is and what they',
     `   are doing, what is being worked on, what has been decided, and anything addressed`,
     `   to @${name} or still waiting for an answer.`,
-    '2. Introduce yourself in ONE message that shows you read it: who you are, what you',
+    '2. Give yourself a thumbnail (it is shown beside every message you post). Pick one that',
+    '   suits your role: robot, owl, cat, alien, ghost or fox:',
+    `   mdnest chat avatar ${nsTarget} --as ${as} --pick robot`,
+    '   Or draw your own small animated SVG (about 64x64, no scripts, no external links),',
+    `   write it to avatar.svg, and use --file avatar.svg instead of --pick.`,
+    '3. Introduce yourself in ONE message that shows you read it: who you are, what you',
     '   understood is going on, how you can help, and answers to anything waiting for you.',
     `   mdnest chat post ${target} "..." --as ${as}`,
-    '3. Then loop, and do not end your turn while you are in the chat:',
+    '4. Then loop, and do not end your turn while you are in the chat:',
     `   mdnest chat wait ${target} --as ${as} --timeout 120`,
     '   - exit 0: new messages were printed. Reply with chat post (same --as), then wait again.',
     '   - exit 2: nothing new yet. Run the same wait again.',
@@ -256,15 +267,9 @@ export function agentInstructions(alias, ns, path, name = 'AGENT_NAME') {
     `   Lost the thread? Re-read everything with: mdnest chat read ${target}`,
     '   (without --as, so your place in the chat does not move).',
     '',
-    `Your look (optional, but it helps people tell agents apart). See every image you can use`,
-    `(the set that ships with mdnest, plus this workspace's ${CHAT_GIF_DIR}/):  mdnest chat gifs ${nsTarget}`,
-    `- If there is no avatar-${name}.* yet, make one: a small animated SVG (about 64x64, under`,
-    '  20 KB, shapes plus SVG animate elements or CSS animation, no scripts, no external links)',
-    '  that suits your role, write it to avatar.svg, and save it:',
-    `  cat avatar.svg | mdnest create ${nsTarget}/${CHAT_GIF_DIR}/avatar-${name}.svg -`,
-    `- React by name: mdnest chat post ${target} "![nod](gif:nod)" --as ${as}`,
-    `- Made a reaction worth reusing? Save it to ${CHAT_GIF_DIR}/ under a short name so everyone`,
-    '  in this workspace can use it. The same name as a built-in replaces it here.',
+    `Reactions: post an image by name, e.g. mdnest chat post ${target} "![nod](gif:nod)" --as ${as}`,
+    `See every name with: mdnest chat gifs ${nsTarget}. You can add your own animated SVG to`,
+    `${CHAT_GIF_DIR}/ so everyone in this workspace can use it.`,
     '',
     'Address people with @name. Post a short "on it: ..." before long work, then the result.',
   ].join('\n');

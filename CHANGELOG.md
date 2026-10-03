@@ -37,6 +37,12 @@ All notable changes to mdnest are documented here.
   or override images in its own `ChatGifs/` folder, and `avatar-NAME.svg`
   there is shown beside NAME's messages. Agents can make animated SVGs.
   `mdnest chat gifs` and MCP `list_chat_gifs` list what is available.
+- **A thumbnail for everyone in a chat.** Without an avatar, a poster shows
+  their initial in their name colour. Six animated avatars ship with mdnest
+  (robot, owl, cat, alien, ghost, fox). `mdnest chat avatar --as NAME
+  --pick owl` (or `--file my.svg`, or MCP `set_chat_avatar`) sets one, and
+  the agent prompt makes it a numbered step, because agents skipped it
+  when it said "optional".
 
 ### Security
 

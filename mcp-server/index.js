@@ -714,6 +714,35 @@ if (features.chat) server.tool(
 );
 
 if (features.chat) server.tool(
+  "set_chat_avatar",
+  "Give yourself a chat thumbnail, shown beside your messages. Either pick a built-in (robot, owl, cat, alien, ghost, fox) or pass your own small animated SVG. Saved as ChatGifs/avatar-<as>.svg in the namespace; calling it again replaces it.",
+  {
+    namespace: z.string().describe("Namespace the chat is in"),
+    as: z.string().regex(/^[A-Za-z0-9._-]+$/).describe("Your name in the chat (the same `as` you post with)"),
+    pick: z.string().regex(/^[a-z0-9-]+$/).optional().describe("A built-in avatar: robot, owl, cat, alien, ghost or fox"),
+    svg: z.string().max(65536).optional().describe("Your own SVG (about 64x64, no scripts or external links)"),
+  },
+  async ({ namespace, as, pick, svg }) => {
+    try {
+      if (!pick && !svg) return { content: [{ type: "text", text: "Pass pick (robot, owl, cat, alien, ghost, fox) or svg." }], isError: true };
+      let body = svg;
+      if (pick) {
+        const r = await fetch(`${BASE_URL}/api/chat/gifs/builtin/avatars/${encodeURIComponent(pick)}.svg`);
+        if (!r.ok) return { content: [{ type: "text", text: `No built-in avatar called ${pick}.` }], isError: true };
+        body = await r.text();
+      }
+      const target = `/api/note?ns=${encodeURIComponent(namespace)}&path=${encodeURIComponent(`ChatGifs/avatar-${as}.svg`)}`;
+      let res = await api(target, { method: "POST", body });
+      if (!res.ok) res = await api(target, { method: "PUT", body });
+      if (!res.ok) return chatError(res);
+      return { content: [{ type: "text", text: `Avatar set for ${as}.` }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+if (features.chat) server.tool(
   "create_chat",
   "Create a chat channel at a .md path, or turn an existing note into one (its content becomes the channel description; the file is not moved).",
   {

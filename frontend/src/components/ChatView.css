@@ -396,4 +396,13 @@
 .chat-gif img { width: 100%; height: 100%; object-fit: contain; }
 .chat-gifs-empty { color: var(--text-muted); font-size: 0.82rem; }
 .chat-gif-toggle { font-weight: 700; font-size: 0.75rem; letter-spacing: 0.03em; }
+.chat-avatar-initial {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-inverse);
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1;
+}
 

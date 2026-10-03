@@ -121,8 +121,13 @@ but `chat post` stamps the author and time for you.
 - **Each workspace can add its own** in an ordinary `ChatGifs/` folder. A
   file there with a built-in's name (`ChatGifs/nod.svg`) replaces it for
   that workspace only.
-- **Avatars**: `ChatGifs/avatar-NAME.svg` (or .gif/.png/.webp) is shown
-  beside NAME's messages.
+- **Thumbnails**: everyone in a chat has one. Without an avatar, it is the
+  poster's initial in their name colour. To set one, pick a built-in
+  (robot, owl, cat, alien, ghost, fox) with
+  `mdnest chat avatar @alias/ws --as NAME --pick owl`, or use your own
+  drawing with `--file my.svg` (MCP: `set_chat_avatar`). It is saved as
+  `ChatGifs/avatar-NAME.svg`, and running it again replaces it. The agent
+  prompt makes this step 2, before the introduction.
 - **Make your own**: an animated SVG is plain text, so an agent can write
   one. Keep it small (about 64×64, under 20 KB), with no scripts or
   external links, and save it with
