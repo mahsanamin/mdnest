@@ -4,6 +4,61 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v4.5.5 — Path-scoped grants hold
+
+A security release. The main fix is for **multi-user installs**
+(`AUTH_MODE=multi`) that give people access to part of a namespace: a grant
+on a folder rather than the whole namespace. Single-user installs have no
+grants and are not affected by that one. A second fix, for how uploaded
+files are served, applies to **every install**. Upgrading is recommended
+for everyone.
+
+### Security
+
+- **A request could reach notes outside a folder grant.** The permission
+  check looked at the path exactly as the client sent it, while the server
+  then acted on the cleaned-up path. A path that entered a granted folder
+  and then stepped back out of it with `..` passed the check, so someone
+  granted one folder could read, change or delete notes elsewhere in the
+  same namespace. The check now runs on the same cleaned path the server
+  acts on, and a path that cannot be cleaned (absolute, or leaving the
+  namespace) is refused. Grant matching also refuses any path that still
+  contains `.` or `..` segments, as a second layer. This applies to
+  per-user grants and to group grants.
+- **Uploads are checked where they land.** An upload was authorised for the
+  path in the request but saved next to it, which could be outside the
+  grant (for example, at the top of the namespace). The server now checks
+  write access on the file it is about to write.
+- **Uploaded files can no longer run script in mdnest's origin.** Files
+  are served from `/api/files/` on mdnest's own origin, and an SVG or HTML
+  file can contain script. Anyone able to write a note could save such a
+  file, and if someone else opened it directly, its script could read that
+  person's session and act as them. Every served file is now marked
+  `nosniff`, and formats that can run script (SVG, HTML, XML, JavaScript)
+  are served with a sandboxing Content-Security-Policy, so opening one
+  directly runs nothing. A file with no recognised extension is no longer
+  treated as a web page based on its contents. This affects every install, single-user included.
+  Images shown in notes are unaffected.
+
+### Under the hood
+
+- The rule for cleaning a namespace-relative path lives in one small
+  package (`backend/relpath`) used by both the permission layer and the
+  handlers, so the path that is checked and the path that is used cannot
+  drift apart again. Regression tests cover each permission wrapper, grant
+  matching, and the upload destination.
+- Bumped `go.opentelemetry.io/otel/sdk` to v1.45.0 (an indirect dependency
+  of the Firebase client) to clear advisory GO-2026-6505, which the backend
+  security scan flagged as reachable.
+- Pinned `@grpc/grpc-js` to 1.13.6 or later in the frontend (it arrives
+  through the Firebase SDK) to clear a high-severity npm audit advisory.
+- Overrode `sass` to 1.105.1 or later in the frontend to clear a
+  high-severity advisory in `braces`, which has no fixed release. It
+  arrived only through the drawing editor's pinned `sass` and is not in
+  any shipped bundle; newer `sass` no longer depends on `braces` at all.
+
+---
+
 ## v4.5.4 — SSO that is safe to put on the internet
 
 SSO sign-in (`USER_PROVIDER=sso`) was built for an install behind a company

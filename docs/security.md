@@ -268,6 +268,30 @@ Before v3.11.7 it enforced **nothing**: the route was registered with authentica
 
 If you add a route whose namespace isn't in `?ns=`, the check must be explicit in the handler — the middleware cannot see it. `backend/handlers/upload_test.go` pins this behaviour.
 
+### Files that could run script are served inert *(v4.5.5+)*
+
+Anyone who can write a note can save a `.svg` or `.html` file next to it.
+Opened directly from `/api/files/`, such a file is a document on mdnest's
+own origin, where a `<script>` inside it could read the viewer's session
+token. Two headers stop that:
+
+- Every file is served with `X-Content-Type-Options: nosniff`, so a
+  browser never guesses a more powerful type than the one declared.
+- Active formats (`.svg`, `.svgz`, `.html`, `.htm`, `.xhtml`, `.xml`,
+  `.js`, `.mjs`) also get
+  `Content-Security-Policy: default-src 'none'; … sandbox`. A directly
+  opened file then runs no script, in a unique origin. Images shown
+  through `<img>` are unaffected.
+- A file whose extension has no known type is served as
+  `application/octet-stream` rather than left for the browser (or Go's
+  `http.ServeContent`) to guess from its bytes, so an extension-less file
+  containing HTML is never served as a page. The sandbox is also applied
+  to any HTML, XML or JavaScript type the host's mime table maps an
+  extension to, not only the extensions listed above.
+
+`TestServeFileActiveContentIsSandboxed` in `backend/handlers/upload_test.go`
+pins both headers.
+
 ---
 
 ## Layer 5 — Rendered content *(v3.11.7+)*

@@ -262,3 +262,65 @@ func TestUploadChecksWriteOnActualDestination(t *testing.T) {
 		}
 	})
 }
+
+// An SVG (or HTML) note opened directly from /api/files must not be able to
+// run script on mdnest's origin, where it could read the viewer's session
+// token. A CSP sandbox makes the directly-opened document inert; <img>
+// rendering is unaffected. nosniff goes on every file.
+func TestServeFileActiveContentIsSandboxed(t *testing.T) {
+	notesDir := t.TempDir()
+	os.MkdirAll(filepath.Join(notesDir, "alpha"), 0o755)
+	os.WriteFile(filepath.Join(notesDir, "alpha", "x.svg"), []byte(`<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`), 0o644)
+	os.WriteFile(filepath.Join(notesDir, "alpha", "page.html"), []byte(`<script>alert(1)</script>`), 0o644)
+	os.WriteFile(filepath.Join(notesDir, "alpha", "a.png"), []byte("\x89PNG"), 0o644)
+	os.WriteFile(filepath.Join(notesDir, "alpha", "noext"), []byte(`<html><script>alert(1)</script></html>`), 0o644)
+	h := NewUploadHandler(localStore(t, notesDir), nil)
+
+	for _, f := range []string{"x.svg", "page.html"} {
+		rec := httptest.NewRecorder()
+		h.HandleServeFile(rec, httptest.NewRequest(http.MethodGet, "/api/files/alpha/"+f, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: status %d", f, rec.Code)
+		}
+		if csp := rec.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "sandbox") || !strings.Contains(csp, "default-src 'none'") {
+			t.Errorf("%s: active content served without a sandboxing CSP (got %q)", f, csp)
+		}
+		if rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+			t.Errorf("%s: missing nosniff", f)
+		}
+	}
+	rec := httptest.NewRecorder()
+	h.HandleServeFile(rec, httptest.NewRequest(http.MethodGet, "/api/files/alpha/a.png", nil))
+	if rec.Header().Get("Content-Security-Policy") != "" {
+		t.Errorf("a plain image must not get the sandbox CSP")
+	}
+	if rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Errorf("png: missing nosniff")
+	}
+
+	// No recognised extension: the type must be declared, never sniffed from
+	// the bytes, or HTML content would be served as text/html.
+	rec = httptest.NewRecorder()
+	h.HandleServeFile(rec, httptest.NewRequest(http.MethodGet, "/api/files/alpha/noext", nil))
+	if ct := rec.Header().Get("Content-Type"); strings.Contains(ct, "html") || ct == "" {
+		t.Errorf("extension-less file served as %q; want a declared, non-HTML type", ct)
+	}
+}
+
+func TestIsActiveContentType(t *testing.T) {
+	for ct, want := range map[string]bool{
+		"text/html; charset=utf-8":  true,
+		"application/xhtml+xml":     true,
+		"image/svg+xml":             true,
+		"text/xml":                  true,
+		"text/javascript":           true,
+		"image/png":                 false,
+		"application/pdf":           false,
+		"application/octet-stream":  false,
+		"text/plain; charset=utf-8": false,
+	} {
+		if got := isActiveContentType(ct); got != want {
+			t.Errorf("isActiveContentType(%q) = %v, want %v", ct, got, want)
+		}
+	}
+}
