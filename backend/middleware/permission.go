@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 
+	"github.com/mdnest/mdnest/backend/relpath"
 	"github.com/mdnest/mdnest/backend/store"
 )
 
@@ -143,18 +144,43 @@ func DenyJSON(w http.ResponseWriter) {
 	http.Error(w, `{"error":"access denied"}`, http.StatusForbidden)
 }
 
+// canonicalPath turns a namespace-relative query path into the absolute form
+// grants are matched against, cleaned with the same rule the handlers apply
+// (relpath.Clean). Checking the raw string instead let "Shared/../Private/x"
+// pass a /Shared grant while the handler acted on Private/x. An empty path
+// means the namespace root. ok is false when the path cannot be cleaned
+// (absolute, or escapes the namespace); callers must refuse the request then,
+// never fall back to the raw value.
+func canonicalPath(raw string) (string, bool) {
+	if raw == "" {
+		return "/", true
+	}
+	cleaned, ok := relpath.Clean(raw)
+	if !ok {
+		return "", false
+	}
+	return "/" + cleaned, true
+}
+
+func invalidPathJSON(w http.ResponseWriter) {
+	http.Error(w, `{"error":"invalid path"}`, http.StatusBadRequest)
+}
+
 // RequireRead wraps a handler and checks read access for the namespace/path
 // from query parameters. Admins and single-mode users pass through.
 func (pc *PermissionChecker) RequireRead(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ns := r.URL.Query().Get("ns")
-		path := r.URL.Query().Get("path")
-		if path == "" {
-			path = "/"
-		}
-		if ns != "" && !pc.CheckRead(r, ns, path) {
-			DenyJSON(w)
-			return
+		if ns != "" {
+			path, ok := canonicalPath(r.URL.Query().Get("path"))
+			if !ok {
+				invalidPathJSON(w)
+				return
+			}
+			if !pc.CheckRead(r, ns, path) {
+				DenyJSON(w)
+				return
+			}
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -165,13 +191,16 @@ func (pc *PermissionChecker) RequireRead(next http.Handler) http.Handler {
 func (pc *PermissionChecker) RequireWrite(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ns := r.URL.Query().Get("ns")
-		path := r.URL.Query().Get("path")
-		if path == "" {
-			path = "/"
-		}
-		if ns != "" && !pc.CheckWrite(r, ns, path) {
-			DenyJSON(w)
-			return
+		if ns != "" {
+			path, ok := canonicalPath(r.URL.Query().Get("path"))
+			if !ok {
+				invalidPathJSON(w)
+				return
+			}
+			if !pc.CheckWrite(r, ns, path) {
+				DenyJSON(w)
+				return
+			}
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -231,6 +260,11 @@ func (pc *PermissionChecker) CheckMoveAccess(r *http.Request) bool {
 	if ns == "" {
 		return true
 	}
+	from, okFrom := canonicalPath(from)
+	to, okTo := canonicalPath(to)
+	if !okFrom || !okTo {
+		return false
+	}
 	return pc.CheckWrite(r, ns, from) && pc.CheckWrite(r, ns, to)
 }
 
@@ -250,12 +284,13 @@ func (pc *PermissionChecker) RequireMove(next http.Handler) http.Handler {
 func (pc *PermissionChecker) ReadWriteRouter(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ns := r.URL.Query().Get("ns")
-		path := r.URL.Query().Get("path")
-		if path == "" {
-			path = "/"
-		}
 		if ns == "" {
 			next.ServeHTTP(w, r)
+			return
+		}
+		path, ok := canonicalPath(r.URL.Query().Get("path"))
+		if !ok {
+			invalidPathJSON(w)
 			return
 		}
 		switch r.Method {

@@ -70,6 +70,7 @@ backend/
     totp_store.go            # Firestore-backed store.TOTPStore impl
   secrets/                   # AES-256-GCM sealing for git credentials at rest (v4.0.0+)
     secrets.go               # DeriveKey/Encrypt/Decrypt — same construction as the MCP OAuth sealing
+  relpath/                   # The one lexical rule for namespace-relative paths (relpath.Clean). Leaf package on purpose: handlers.SafeRelPath IS relpath.Clean, and the permission middleware cleans ?path=/from=/to= with it before checking grants. Before v4.5.5 the middleware checked the raw string while handlers acted on the cleaned one, so a ".." segment walked a request out of a path-scoped grant. Never authorise a path you have not cleaned the same way the handler will.
   storage/                   # Pluggable note persistence behind STORAGE_BACKEND (v4.0.0+)
     storage.go               # Storage interface — namespace-scoped, backend-agnostic
     local.go                 # Default filesystem backend; owns the symlink-containment check
