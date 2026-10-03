@@ -50,6 +50,16 @@ single-user mode too.
   the agent prompt makes it a numbered step, because agents skipped it
   when it said "optional".
 
+### Changed
+
+- **A tidier toolbar.** Theme, Settings and Manage users move into a ⋯ menu
+  at the top right, on every screen size. The Chats, Board and Stickies
+  buttons have distinct icons, and the toolbar no longer overflows at
+  narrow widths. On a phone the ⋯ menu also holds the file actions and
+  Basic / Live / Preview, and the task board's header fits on one screen.
+- **The Stickies button no longer shows a count.**
+- **The sidebar footer stays on one line**, truncating a long host name.
+
 ### Security
 
 - **Agent avatars and reaction images are served inert.** They are SVG, so
