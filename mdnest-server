@@ -100,6 +100,79 @@ namespace_drift_report() {
   return 1
 }
 
+# Prints, one per line, every credential helper the Docker client config names
+# (`credsStore`, and each value under `credHelpers`) whose
+# docker-credential-<name> binary is not on PATH.
+#
+# Docker asks the configured helper for credentials before EVERY registry pull,
+# including anonymous ones, and a missing helper is a hard error rather than
+# "no credentials": `error getting credentials - err: exec:
+# "docker-credential-desktop": executable file not found in $PATH`. The usual
+# way to get there is moving from Docker Desktop to Colima or OrbStack, which
+# leaves `"credsStore": "desktop"` behind — so the first image build after the
+# switch fails, and it looks like mdnest broke.
+#
+# Parsed with grep/sed rather than python3/jq so it works on a bare host. Names
+# are restricted to [A-Za-z0-9._-]: they become a filename below.
+missing_cred_helpers() {
+  local cfg="$1" flat names name
+  [ -f "$cfg" ] || return 0
+  flat=$(tr '\n\r\t' '   ' < "$cfg")
+  names=$(
+    printf '%s' "$flat" | grep -o '"credsStore"[[:space:]]*:[[:space:]]*"[^"]*"' \
+      | sed 's/.*"\([^"]*\)"$/\1/' || true
+    printf '%s' "$flat" | grep -o '"credHelpers"[[:space:]]*:[[:space:]]*{[^}]*}' \
+      | sed 's/^[^{]*{//; s/}$//' | tr ',' '\n' \
+      | sed -n 's/.*:[[:space:]]*"\([^"]*\)".*/\1/p' || true
+  )
+  printf '%s\n' "$names" | sort -u | while IFS= read -r name; do
+    case "$name" in ''|*[!A-Za-z0-9._-]*) continue ;; esac
+    command -v "docker-credential-$name" >/dev/null 2>&1 || printf '%s\n' "$name"
+  done
+}
+
+# Writes a stand-in docker-credential-<name> into $1 that answers like a real
+# helper with an empty keychain: `get` replies with the exact not-found message
+# the Docker client recognises (credentials.errCredentialsNotFoundMessage), so
+# the pull continues anonymously — which is all the missing helper could ever
+# have given us. The user's config file is never modified.
+write_cred_helper_stub() {
+  local dir="$1" name="$2"
+  cat > "$dir/docker-credential-$name" <<'STUB'
+#!/bin/sh
+# Stand-in written by mdnest-server: the configured helper is not installed.
+case "$1" in
+  get)  cat >/dev/null; echo "credentials not found in native keychain"; exit 1 ;;
+  list) echo "{}" ;;
+  *)    cat >/dev/null ;;
+esac
+STUB
+  chmod +x "$dir/docker-credential-$name"
+}
+
+# Lets a build pull images when the Docker config names a helper that is not
+# installed: stands in for each missing one for this run only, and says so.
+guard_docker_cred_helpers() {
+  local cfg="${DOCKER_CONFIG:-$HOME/.docker}/config.json" missing name dir
+  missing=$(missing_cred_helpers "$cfg")
+  [ -n "$missing" ] || return 0
+  dir=$(mktemp -d "${TMPDIR:-/tmp}/mdnest-cred.XXXXXX")
+  # shellcheck disable=SC2064 # expand $dir now, the local is gone by EXIT
+  trap "rm -rf '$dir'" EXIT
+  for name in $missing; do
+    write_cred_helper_stub "$dir" "$name"
+    echo "⚠  $cfg names the Docker credential helper '$name', but"
+    echo "   docker-credential-$name is not installed (common after switching from"
+    echo "   Docker Desktop to Colima or OrbStack). Pulling images anonymously."
+  done
+  echo "   To silence this, remove that entry from $cfg"
+  echo "   (or install the helper)."
+  echo ""
+  PATH="$dir:$PATH"
+  export PATH
+  return 0
+}
+
 # Test hook, mirroring the client CLI's MDNEST_LIB: `MDNEST_SERVER_LIB=1 source
 # ./mdnest-server` loads the functions above WITHOUT dispatching a command, so
 # tests exercise the real namespace_drift_report rather than a copy of it. When
@@ -108,6 +181,12 @@ if [ -n "${MDNEST_SERVER_LIB:-}" ]; then return 0 2>/dev/null || exit 0; fi
 
 CMD="${1:-help}"
 shift 2>/dev/null || true
+
+# Every command that can build or pull an image.
+case "$CMD" in
+  start|restart|reload|rebuild|update|migrate|reset-password|create-token)
+    guard_docker_cred_helpers ;;
+esac
 
 case "$CMD" in
   setup)
