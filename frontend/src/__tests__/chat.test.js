@@ -68,6 +68,11 @@ describe('agent instructions', () => {
     // the old snippet's literal name is what agents posted as; it must be gone
     expect(s).not.toContain('my-agent');
     expect(s).not.toContain('--after');
+    // it must read the conversation before speaking, and know how to re-read
+    // without moving its place
+    expect(s).toMatch(/Read the WHOLE conversation before you say anything/);
+    expect(s).toContain('mdnest chat read @mini/notes/Chats/team.md --as codxu');
+    expect(s).toContain('Re-read everything with: mdnest chat read @mini/notes/Chats/team.md\n');
   });
 });
 

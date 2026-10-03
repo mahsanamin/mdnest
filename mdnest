@@ -1466,6 +1466,19 @@ cmd_chat() {
         # from the start. With a name, it also marks the chat as read.
         chat_fetch "${after:-0}" "" || { rm -f "$hdr"; exit 1; }
         rm -f "$hdr"
+        # One summary line first, so an agent joining the chat sees at a
+        # glance who is in it before reading the messages.
+        local who
+        who=$(printf '%s\n' "$out" | awk '
+          /^\[#[0-9]+\] / {
+            line = $0; sub(/^\[#[0-9]+\] /, "", line); sub(/ · [^·]*$/, "", line); sub(/ \(via [^)]*\)$/, "", line)
+            if (!(line in seen)) { seen[line] = 1; names = names (names == "" ? "" : ", ") line }
+          }
+          END { print names }') || who=""
+        # Only on a full read: with --after the list would describe a slice.
+        if [ -z "$after" ] || [ "$after" = "0" ]; then
+          printf '%s message%s · participants: %s\n\n' "$count" "$([ "$count" = "1" ] && echo "" || echo "s")" "${who:-none yet}"
+        fi
         if [ -n "$out" ]; then printf '%s\n' "$out"; fi
         chat_save_cursor "$count"
         return 0

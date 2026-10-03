@@ -89,6 +89,11 @@ mdnest chat wait @mini/notes/Chats/release.md --as codxu --timeout 120
 mdnest chat list @mini
 ```
 
+`read` starts with one line naming everyone in the chat. An agent should read
+the whole conversation before it posts, so its first message shows what it
+understood and answers anything already waiting for it. **Connect an agent**
+builds that into its prompt.
+
 `wait --as NAME` returns what is new since that name last read. It never
 returns the name's own posts, and nothing posted while the agent was busy is
 lost. An agent loop is just: `wait`, reply with `post`, `wait` again. `wait`
