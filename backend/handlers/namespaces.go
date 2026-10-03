@@ -61,7 +61,35 @@ func (h *NamespaceHandler) ListNamespaces(w http.ResponseWriter, r *http.Request
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	if r.URL.Query().Get("detail") == "1" {
+		json.NewEncoder(w).Encode(h.detail(r, names))
+		return
+	}
 	json.NewEncoder(w).Encode(names)
+}
+
+// NamespaceDetail is one row of GET /api/namespaces?detail=1.
+type NamespaceDetail struct {
+	Name     string `json:"name"`
+	CanRead  bool   `json:"canRead"`
+	CanWrite bool   `json:"canWrite"`
+}
+
+// detail reports read/write access at each namespace's root, computed with the
+// same CheckRead/CheckWrite the routes use. It is what the move/copy picker
+// offers as destinations; a path-scoped grant below the root shows false here,
+// and the transfer dry run has the final word for a specific folder.
+func (h *NamespaceHandler) detail(r *http.Request, names []string) []NamespaceDetail {
+	out := make([]NamespaceDetail, 0, len(names))
+	for _, n := range names {
+		d := NamespaceDetail{Name: n, CanRead: true, CanWrite: true}
+		if h.perms != nil {
+			d.CanRead = h.perms.CheckRead(r, n, "/")
+			d.CanWrite = h.perms.CheckWrite(r, n, "/")
+		}
+		out = append(out, d)
+	}
+	return out
 }
 
 // excludePersonal drops personal-workspace namespaces (the owner's own
