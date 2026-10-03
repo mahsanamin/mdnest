@@ -492,3 +492,39 @@ func TestChatEnabledDefaults(t *testing.T) {
 		}
 	}
 }
+
+// Stripping markers from incoming text (create, append, prepend) must never
+// touch a note's OWN marker: a chat keeps its ID, and so its comments, through
+// a chat post and a plain PATCH append from an agent. (A prepend keeping the
+// note's own ID is pinned in TestPatchNote_DropsIncomingMarker; prepending
+// above a chat's front matter un-chats it, which predates this change.)
+func TestChat_OwnMarkerSurvivesPostsAndAppends(t *testing.T) {
+	h, root := newChatTestHandler(t)
+	const own = "eeeeeeee-5555-4555-8555-555555555555"
+	chat := "---\nmdnest-chat: true\n---\n\n#### ahsan · 2026-10-03T10:00:00Z\nfirst\n"
+	p := filepath.Join(root, "work", "room.md")
+	if err := os.WriteFile(p, []byte(InjectNoteID(chat, own)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if w := chatDo(t, h.Handle, http.MethodPost, "/api/chat?ns=work&path=room.md&as=claude-a", "second", nil); w.Code != http.StatusCreated {
+		t.Fatalf("chat post: %d %s", w.Code, w.Body.String())
+	}
+	stg, _ := storage.NewLocalStorage(root)
+	nh := NewNoteHandler(stg)
+	w := httptest.NewRecorder()
+	nh.Handle(w, httptest.NewRequest(http.MethodPatch, "/api/note?ns=work&path=room.md", strings.NewReader("agent line\n")))
+	if w.Code != http.StatusOK {
+		t.Fatalf("PATCH append: %d", w.Code)
+	}
+	b, _ := os.ReadFile(p)
+	if id, _ := ExtractNoteID(string(b)); id != own {
+		t.Fatalf("the chat's own id changed to %q:\n%s", id, b)
+	}
+	if strings.Count(string(b), "<!-- mdnest:") != 1 {
+		t.Fatalf("marker count changed:\n%s", b)
+	}
+	doc := ParseChat(string(b))
+	if !doc.IsChat || len(doc.Messages) < 2 {
+		t.Fatalf("the chat lost messages: %+v", doc)
+	}
+}
