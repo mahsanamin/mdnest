@@ -178,7 +178,7 @@ func TestTransfer_CopyFreshIDsNoComments(t *testing.T) {
 
 	// File copy.
 	code, body, _ := doTransfer(t, e.h, transferReq("copy", "alpha", "F/one.md", "beta", "one.md"), false, nil)
-	if code != http.StatusOK || body["items"] != float64(1) {
+	if code != http.StatusOK || body["items"] != float64(1) || body["folder"] != false || body["bytes"].(float64) <= 0 {
 		t.Fatalf("file copy: %d %v", code, body)
 	}
 	got, _ := e.read(t, "beta", "one.md")
@@ -186,6 +186,10 @@ func TestTransfer_CopyFreshIDsNoComments(t *testing.T) {
 		t.Fatalf("file copy kept or lost the identity: %q", id)
 	}
 	// Folder copy.
+	code, body, _ = doTransfer(t, e.h, transferReq("copy", "alpha", "F", "beta", "G"), true, nil)
+	if code != http.StatusOK || body["items"] != float64(2) || body["folder"] != true {
+		t.Fatalf("folder copy dry run: %d %v", code, body)
+	}
 	code, body, _ = doTransfer(t, e.h, transferReq("copy", "alpha", "F", "beta", "G"), false, nil)
 	if code != http.StatusOK || body["items"] != float64(2) {
 		t.Fatalf("folder copy: %d %v", code, body)
@@ -968,5 +972,30 @@ func TestReservedSegmentIgnoresCase(t *testing.T) {
 	}
 	if hasReservedSegment("a/.gitignore") || hasReservedSegment("git/x") {
 		t.Error("an ordinary name treated as reserved")
+	}
+}
+
+// A destination folder that does not exist yet is created by the transfer
+// (the picker's "New folder" relies on it), and only once it is confirmed.
+func TestTransfer_IntoANewFolder(t *testing.T) {
+	e := newTEnv(t)
+	e.put(t, "alpha", "F/a.md", "a\n")
+	e.put(t, "alpha", "x.md", "x\n")
+	if code, body, _ := doTransfer(t, e.h, transferReq("move", "alpha", "F", "beta", "Fresh/Deeper/F"), true, nil); code != http.StatusOK {
+		t.Fatalf("dry run into a new folder: %d %v", code, body)
+	}
+	if _, err := os.Stat(filepath.Join(e.root, "beta", "Fresh")); err == nil {
+		t.Fatal("a dry run created the new folder")
+	}
+	for _, c := range []struct{ from, to string }{{"F", "Fresh/Deeper/F"}, {"x.md", "Other/x.md"}} {
+		if code, body, _ := doTransfer(t, e.h, transferReq("move", "alpha", c.from, "beta", c.to), false, nil); code != http.StatusOK {
+			t.Fatalf("%s: %d %v", c.from, code, body)
+		}
+	}
+	if got, _ := e.read(t, "beta", "Fresh/Deeper/F/a.md"); got != "a\n" {
+		t.Fatalf("folder move into a new folder: %q", got)
+	}
+	if got, _ := e.read(t, "beta", "Other/x.md"); got != "x\n" {
+		t.Fatalf("file move into a new folder: %q", got)
 	}
 }

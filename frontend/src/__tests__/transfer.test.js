@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   CLIPBOARD_MAX_BYTES, utf8Bytes, stripNoteMarker, buildClipboardPayload, parseClipboardPayload,
   safeFileName, suggestCopyName, localLinks, joinPath, isInvalidDestination, describeRefusal,
-  filenameFromDisposition,
+  filenameFromDisposition, newFolderError, transferSummary, isLargeTransfer,
 } from '../transfer.js';
 
 describe('clipboard payload', () => {
@@ -107,5 +107,25 @@ describe('the server answers in plain words', () => {
     expect(filenameFromDisposition(`attachment; filename="_______.md"; filename*=UTF-8''%D9%85%D9%84%D8%A7%D8%AD%D8%B8%D8%A7%D8%AA.md`, 'x')).toBe('ملاحظات.md');
     expect(filenameFromDisposition('attachment; filename="Proj.zip"', 'x')).toBe('Proj.zip');
     expect(filenameFromDisposition(null, 'fallback.zip')).toBe('fallback.zip');
+  });
+});
+
+describe('new folder in the picker, and the size of a transfer', () => {
+  it('accepts one plain folder name and explains a refusal', () => {
+    expect(newFolderError('Archive 2026')).toBe('');
+    expect(newFolderError('ملاحظات')).toBe('');
+    for (const bad of ['', '  ', '.', '..', 'a/b', 'a\\b', '.hidden', 'x\u0000y']) {
+      expect(newFolderError(bad)).not.toBe('');
+    }
+    expect(newFolderError('notes', ['Notes', 'Other'])).toMatch(/already here/);
+  });
+
+  it('summarises a folder by files and size, and flags a big one', () => {
+    expect(transferSummary({ folder: true, items: 37, bytes: 13 * 1024 * 1024 })).toBe('37 files (13 MB)');
+    expect(transferSummary({ folder: true, items: 1, bytes: 2048 })).toBe('1 file (2 KB)');
+    expect(transferSummary({ folder: false, items: 1, bytes: 10 })).toBe('');
+    expect(isLargeTransfer({ folder: true, items: 3, bytes: 100 })).toBe(false);
+    expect(isLargeTransfer({ folder: true, items: 60, bytes: 100 })).toBe(true);
+    expect(isLargeTransfer({ folder: true, items: 2, bytes: 50 * 1024 * 1024 })).toBe(true);
   });
 });

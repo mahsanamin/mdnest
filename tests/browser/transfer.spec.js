@@ -171,6 +171,46 @@ test.describe('move and copy between namespaces', () => {
   });
 });
 
+test.describe('a new folder in the picker', () => {
+  test('moves a folder into a folder created in the picker, sized up first', async ({ page }) => {
+    await login(page);
+    const dir = `nf-${Date.now()}`;
+    await seed(page, SRC, `${base}/${dir}/one.md`, 'one\n');
+    await seed(page, SRC, `${base}/${dir}/sub/two.md`, 'two\n');
+    await api(page, 'POST', `/folder?ns=${DST}&path=${base}`);
+    await reloadTree(page);
+    await openBase(page);
+    await menuOn(page, dir, 'Move to…');
+
+    const modal = page.getByTestId('transfer-modal');
+    await modal.getByTestId('transfer-namespace').selectOption(DST);
+    await modal.locator('.moveto-item', { hasText: base }).click();
+    await modal.getByTestId('transfer-new-folder').click();
+    // A name that would be refused explains itself and adds nothing.
+    await modal.getByTestId('transfer-new-folder-name').fill('a/b');
+    await modal.getByTestId('transfer-new-folder-add').click();
+    await expect(modal.locator('.moveto-newfolder-error')).toBeVisible();
+    await modal.getByTestId('transfer-new-folder-name').fill('Archive');
+    await modal.getByTestId('transfer-new-folder-name').press('Enter');
+
+    const row = modal.locator('.moveto-item', { hasText: 'Archive' });
+    await expect(row).toHaveAttribute('aria-selected', 'true');
+    await expect(row.locator('.moveto-new-badge')).toBeVisible();
+    const check = modal.getByTestId('transfer-check');
+    await expect(check).toContainText('Ready', { timeout: 10_000 });
+    await expect(check).toContainText('move 2 files');
+    await expect(check).toContainText(`creates the folder ${base}/Archive`);
+    // Nothing was created yet: cancelling now would leave no empty folder.
+    const before = await api(page, 'GET', `/tree?ns=${DST}`);
+    expect(before.text).not.toContain('Archive');
+
+    await modal.getByTestId('transfer-confirm').click();
+    await expect(modal).toBeHidden({ timeout: 10_000 });
+    expect((await api(page, 'GET', note(DST, `${base}/Archive/${dir}/sub/two.md`))).text).toContain('two');
+    expect((await api(page, 'GET', note(SRC, `${base}/${dir}/one.md`))).status).toBe(404);
+  });
+});
+
 test.describe('copy for another mdnest, paste here', () => {
   // A real paste event carrying the given text, as Ctrl/Cmd+V produces.
   async function pasteInto(page, text) {

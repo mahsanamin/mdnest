@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { getTree, getNamespacesDetail, transferItem } from '../api.js';
-import { baseName, joinPath, isInvalidDestination, describeRefusal } from '../transfer.js';
+import {
+  baseName, joinPath, isInvalidDestination, describeRefusal, newFolderError, transferSummary, isLargeTransfer,
+} from '../transfer.js';
 
 // Walks a tree and returns a flat list of {path, depth} for every folder.
 // Used as the "where to" list in the move modal.
@@ -25,6 +27,15 @@ const DRY_RUN_DELAY_MS = 250;
 // file or a folder, within the namespace or into another one. Opened from the
 // tree's context menu (a long-press on a phone).
 //
+// "+ New folder" adds a folder to the list without creating anything: the
+// transfer creates missing folders on confirm, so cancelling leaves no empty
+// folder behind, and the dry run already checks the new path.
+//
+// For a folder, the dry run's answer says how much will move ("37 files,
+// 12 MB"), with a warning when it is large, and the running transfer shows
+// how long it has been going. (A transfer is one request — copy, verify, then
+// delete the source — so there is no per-file progress to report.)
+//
 // It never guesses permissions: the namespace list comes from
 // /api/namespaces?detail=1 (the current namespace plus every one writable at
 // its root), and every choice of namespace, folder and name is checked with a
@@ -41,6 +52,10 @@ export default function MoveToModal({ mode = 'move', namespace, source, onClose,
   const [check, setCheck] = useState({ state: 'idle' }); // idle | checking | ok | refused
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  // Folders typed with "+ New folder" for this namespace: {path, name, parent}.
+  const [newFolders, setNewFolders] = useState([]);
+  const [adding, setAdding] = useState(null); // {parent, name, error} while typing
+  const [elapsed, setElapsed] = useState(0);
   const checkSeq = useRef(0);
 
   useEffect(() => {
@@ -61,6 +76,8 @@ export default function MoveToModal({ mode = 'move', namespace, source, onClose,
     let cancelled = false;
     setTree(null);
     setSelected(null);
+    setNewFolders([]);
+    setAdding(null);
     getTree(destNs)
       .then((t) => { if (!cancelled) setTree(t); })
       .catch((e) => { if (!cancelled) setError(e.message || 'Failed to load folders'); });
@@ -70,8 +87,34 @@ export default function MoveToModal({ mode = 'move', namespace, source, onClose,
   const destinations = useMemo(() => {
     if (!tree) return [];
     const list = [{ path: '/', name: '/ (root)', depth: 0 }, ...flattenFolders(tree.children || [], '', 1)];
+    // Each new folder sits right under its parent, marked as new.
+    for (const nf of newFolders) {
+      const at = list.findIndex((d) => d.path === nf.parent);
+      if (at < 0) continue;
+      list.splice(at + 1, 0, { path: nf.path, name: nf.name, depth: list[at].depth + 1, isNew: true });
+    }
     return list.filter((d) => !isInvalidDestination({ sourceNs: namespace, sourcePath, destNs, destFolder: d.path }));
-  }, [tree, namespace, sourcePath, destNs]);
+  }, [tree, newFolders, namespace, sourcePath, destNs]);
+
+  // The folder names already under a parent, real or new, for the name check.
+  const childNames = (parent) => {
+    const prefix = parent === '/' ? '/' : parent + '/';
+    return destinations
+      .filter((d) => d.path !== '/' && d.path.startsWith(prefix) && !d.path.slice(prefix.length).includes('/'))
+      .map((d) => d.name);
+  };
+
+  const startNewFolder = () => setAdding({ parent: selected?.path || '/', name: '', error: '' });
+  const addNewFolder = () => {
+    const name = adding.name.trim();
+    const err = newFolderError(name, childNames(adding.parent));
+    if (err) { setAdding({ ...adding, error: err }); return; }
+    const path = adding.parent === '/' ? '/' + name : adding.parent + '/' + name;
+    const nf = { path, name, parent: adding.parent };
+    setNewFolders((list) => [...list, nf]);
+    setSelected({ path, name, isNew: true });
+    setAdding(null);
+  };
 
   const trimmedName = name.trim();
   const toPath = selected && trimmedName ? joinPath(selected.path, trimmedName) : '';
@@ -86,13 +129,22 @@ export default function MoveToModal({ mode = 'move', namespace, source, onClose,
       try {
         const r = await transferItem(mode, { ns: namespace, path: sourcePath }, { ns: destNs, path: toPath }, { dryRun: true });
         if (seq !== checkSeq.current) return;
-        setCheck(r.status === 200 ? { state: 'ok' } : { state: 'refused', status: r.status, body: r.body });
+        setCheck(r.status === 200 ? { state: 'ok', body: r.body } : { state: 'refused', status: r.status, body: r.body });
       } catch (e) {
         if (seq === checkSeq.current) setCheck({ state: 'refused', status: 0, body: { error: e.message || 'network error' } });
       }
     }, DRY_RUN_DELAY_MS);
     return () => clearTimeout(timer);
   }, [mode, namespace, sourcePath, destNs, toPath]);
+
+  // While a transfer runs, count the seconds so a long one visibly moves.
+  useEffect(() => {
+    if (!busy) return undefined;
+    setElapsed(0);
+    const started = Date.now();
+    const t = setInterval(() => setElapsed(Math.round((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(t);
+  }, [busy]);
 
   const handleConfirm = async () => {
     if (check.state !== 'ok' || !toPath) return;
@@ -112,10 +164,14 @@ export default function MoveToModal({ mode = 'move', namespace, source, onClose,
   };
 
   const verb = mode === 'copy' ? 'Copy' : 'Move';
+  const verbing = mode === 'copy' ? 'Copying' : 'Moving';
   const collision = check.state === 'refused' && check.status === 409;
+  const summary = check.state === 'ok' ? transferSummary(check.body) : '';
+  const large = check.state === 'ok' && isLargeTransfer(check.body);
+  const newFolderPath = selected?.isNew ? selected.path.replace(/^\//, '') : '';
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop" onClick={busy ? undefined : onClose}>
       <div className="modal moveto-modal" onClick={(e) => e.stopPropagation()} data-testid="transfer-modal">
         <h3>{verb} to…</h3>
         <div className="moveto-source">
@@ -158,9 +214,36 @@ export default function MoveToModal({ mode = 'move', namespace, source, onClose,
                 >
                   <span className="moveto-icon" aria-hidden="true">📁</span>
                   <span className="moveto-name">{d.name}</span>
+                  {d.isNew && <span className="moveto-new-badge">new</span>}
                 </button>
               );
             })}
+          </div>
+        )}
+
+        {tree && !adding && (
+          <button type="button" className="moveto-newfolder" onClick={startNewFolder} disabled={busy} data-testid="transfer-new-folder">
+            + New folder{selected && selected.path !== '/' ? ` in ${selected.name}` : ''}
+          </button>
+        )}
+        {adding && (
+          <div className="moveto-newfolder-row">
+            <input
+              type="text"
+              autoFocus
+              placeholder="Folder name"
+              value={adding.name}
+              onChange={(e) => setAdding({ ...adding, name: e.target.value, error: '' })}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') { e.preventDefault(); addNewFolder(); }
+                if (e.key === 'Escape') { e.stopPropagation(); setAdding(null); }
+              }}
+              aria-label="New folder name"
+              data-testid="transfer-new-folder-name"
+            />
+            <button type="button" onClick={addNewFolder} data-testid="transfer-new-folder-add">Add</button>
+            <button type="button" onClick={() => setAdding(null)} aria-label="Cancel new folder">✕</button>
+            {adding.error && <div className="moveto-newfolder-error">{adding.error}</div>}
           </div>
         )}
 
@@ -179,9 +262,23 @@ export default function MoveToModal({ mode = 'move', namespace, source, onClose,
         <div className={`moveto-check moveto-check-${check.state}`} role="status" data-testid="transfer-check">
           {check.state === 'idle' && (selected ? 'Type a name.' : 'Choose a folder.')}
           {check.state === 'checking' && 'Checking…'}
-          {check.state === 'ok' && `Ready: ${destNs !== namespace ? destNs + ':' : ''}${toPath}`}
+          {check.state === 'ok' && !busy && (
+            <>
+              Ready: {destNs !== namespace ? destNs + ':' : ''}{toPath}
+              {summary && <> — {verb.toLowerCase()} {summary}</>}
+              {newFolderPath && <> · creates the folder {newFolderPath}</>}
+            </>
+          )}
+          {busy && `${verbing}${summary ? ' ' + summary : ''}… ${elapsed}s`}
           {check.state === 'refused' && describeRefusal(check.status, check.body)}
         </div>
+        {large && (
+          <div className="moveto-check moveto-check-warn" data-testid="transfer-large">
+            {busy
+              ? 'Large folders take a while. It finishes on the server even if you close this.'
+              : `This is a large folder. ${verbing} ${summary} can take a while, depending on its size.`}
+          </div>
+        )}
 
         <div className="moveto-actions">
           <button type="button" onClick={onClose} disabled={busy}>Cancel</button>
