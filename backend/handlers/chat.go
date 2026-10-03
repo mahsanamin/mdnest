@@ -22,7 +22,7 @@ import (
 // File-based chat (ENABLE_CHAT). Request handling only — the markdown format
 // lives in chat_markdown.go. Routes:
 //
-//	GET  /api/chat?ns=&path=[&after=N][&format=text]   read a chat
+//	GET  /api/chat?ns=&path=[&after=N][&exclude=label][&mention=label][&format=text]   read a chat
 //	POST /api/chat?ns=&path=[&as=label]                 post (body = message text)
 //	POST /api/chat/convert?ns=&path=[&title=]           make a note a chat (creates it if missing)
 //	GET  /api/chats[?format=text]                       every chat the caller can read
@@ -134,11 +134,23 @@ func (h *ChatHandler) read(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	after, _ := strconv.Atoi(r.URL.Query().Get("after"))
+	// exclude drops one poster's own messages, so an agent waiting for a
+	// reply is not woken by what it just posted itself. Matched on the
+	// label (the part before "(via …)"), sanitised the same way a post is.
+	exclude := sanitizeChatLabel(r.URL.Query().Get("exclude"))
+	// mention keeps only messages addressed to that name (@name, or @all /
+	// @everyone), so several agents can share a chat without each one
+	// answering everything.
+	mention := sanitizeChatLabel(r.URL.Query().Get("mention"))
 	msgs := []ChatMessage{}
 	for _, m := range doc.Messages {
-		if m.N > after {
-			msgs = append(msgs, m)
+		if m.N <= after || (exclude != "" && m.Author == exclude) {
+			continue
 		}
+		if mention != "" && !ChatMentions(m.Text, mention) {
+			continue
+		}
+		msgs = append(msgs, m)
 	}
 	if r.URL.Query().Get("format") == "text" {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")

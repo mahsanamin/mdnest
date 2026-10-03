@@ -1323,22 +1323,28 @@ cmd_append() {
 #   mdnest chat list [@alias]
 #   mdnest chat new  <path.md> ["Title"]          create a chat, or convert a note
 #   mdnest chat post <path.md> <text|-> [--as name]
-#   mdnest chat read <path.md> [--after N]
-#   mdnest chat wait <path.md> --after N [--timeout SECONDS]
+#   mdnest chat read <path.md> [--as NAME] [--after N]
+#   mdnest chat wait <path.md> --as NAME [--mentions] [--timeout SECONDS]
 #
-# `wait` is what lets two agents hold a conversation: post, note the #N it
-# printed, then `wait --after N` blocks until someone else replies.
+# `wait` is what lets agents hold a conversation: with --as NAME it returns
+# what is new since NAME last read, never NAME's own posts, so the loop is
+# wait → post → wait. --mentions wakes only on @NAME / @all.
 chat_usage() {
   cat >&2 <<'USAGE'
 Usage:
   mdnest chat list [@alias]
   mdnest chat new  @alias/namespace/path.md ["Title"]
   mdnest chat post @alias/namespace/path.md <text|-> [--as name]
-  mdnest chat read @alias/namespace/path.md [--after N]
-  mdnest chat wait @alias/namespace/path.md --after N [--timeout SECONDS]
+  mdnest chat read @alias/namespace/path.md [--as name] [--after N]
+  mdnest chat wait @alias/namespace/path.md [--as name] [--mentions] [--timeout SECONDS]
 
---as sets the name shown on your message (default: $MDNEST_CHAT_AS, else your
-account). Each agent in a conversation should use its own --as.
+--as is your name in the chat (default: $MDNEST_CHAT_AS, else your account).
+Give every agent its own and use it on EVERY command. With a name:
+  read   marks the chat as read for that name
+  wait   returns only what is new since that name last read, never its own
+         posts, so an agent loop is just: wait, reply with post, wait again
+  --mentions  wake only for messages that say @name (or @all / @everyone)
+Address someone with @name in a message. wait exits 2 on timeout: run it again.
 USAGE
 }
 
@@ -1398,39 +1404,101 @@ cmd_chat() {
     read|wait)
       chat_target "${1:-}"
       shift
-      local after=0 timeout="${MDNEST_CHAT_TIMEOUT:-600}"
+      local after="" timeout="${MDNEST_CHAT_TIMEOUT:-600}" as="${MDNEST_CHAT_AS:-}" mentions=0
       while [ $# -gt 0 ]; do
         case "$1" in
           --after) [ $# -ge 2 ] || { echo "Error: --after needs a number" >&2; exit 1; }; after="$2"; shift 2 ;;
           --after=*) after="${1#--after=}"; shift ;;
           --timeout) [ $# -ge 2 ] || { echo "Error: --timeout needs a number of seconds" >&2; exit 1; }; timeout="$2"; shift 2 ;;
           --timeout=*) timeout="${1#--timeout=}"; shift ;;
+          --as) [ $# -ge 2 ] || { echo "Error: --as needs a name" >&2; exit 1; }; as="$2"; shift 2 ;;
+          --as=*) as="${1#--as=}"; shift ;;
+          --mentions) mentions=1; shift ;;
           *) chat_usage; exit 1 ;;
         esac
       done
       local poll="${MDNEST_CHAT_POLL:-3}"
-      # All three reach $(( )) or curl; bash arithmetic evaluates `a[$(cmd)]`,
+      # All of these reach $(( )) or curl; bash arithmetic evaluates `a[$(cmd)]`,
       # so anything but digits is refused rather than interpreted.
-      case "$after" in ''|*[!0-9]*) echo "Error: --after takes a whole number" >&2; exit 1 ;; esac
+      case "$after" in *[!0-9]*) echo "Error: --after takes a whole number" >&2; exit 1 ;; esac
       case "$timeout" in ''|*[!0-9]*) echo "Error: --timeout takes a whole number of seconds" >&2; exit 1 ;; esac
       case "$poll" in ''|0|*[!0-9]*) echo "Error: MDNEST_CHAT_POLL must be a whole number of seconds (1 or more)" >&2; exit 1 ;; esac
-      local out
+      if [ "$mentions" = "1" ] && [ -z "$as" ]; then
+        echo "Error: --mentions needs --as (or MDNEST_CHAT_AS): whose mentions?" >&2; exit 1
+      fi
+
+      # With a name, the CLI remembers how far that name has read this chat,
+      # so an agent loop is just `wait --as NAME`, over and over. It never
+      # has to carry an --after number from one call to the next, which is
+      # the step agents got wrong (a fixed `--after 1` returned the whole
+      # backlog every time, including the agent's own post). An explicit
+      # --after still wins.
+      local cursor_file=""
+      if [ -n "$as" ]; then
+        local key
+        key=$(printf '%s|%s|%s|%s' "$MDNEST_URL" "$PARSED_NS" "$PARSED_PATH" "$as" | cksum | awk '{print $1}') || key=""
+        if [ -n "$key" ]; then
+          mkdir -p "$CONFIG_DIR/chat-cursors" 2>/dev/null || true
+          cursor_file="$CONFIG_DIR/chat-cursors/$key"
+        fi
+      fi
+      local hdr; hdr=$(mktemp "${TMPDIR:-/tmp}/mdnest-chat.XXXXXX") || { echo "Error: cannot create a temp file" >&2; exit 1; }
+      local qs_extra=""
+      if [ -n "$as" ]; then qs_extra="$qs_extra&exclude=$(urlencode "$as")"; fi
+      if [ "$mentions" = "1" ]; then qs_extra="$qs_extra&mention=$(urlencode "$as")"; fi
+
+      # fetch AFTER: prints the matching messages into $out and the chat's
+      # total message count into $count (from the X-Chat-Count header).
+      local out="" count=0
+      chat_fetch() {
+        out=$(api GET "/chat?$CHAT_QS&after=$1&format=text$2" "" "" "$hdr") || return 1
+        count=$(grep -i '^x-chat-count:' "$hdr" | tr -dc '0-9') || count=""
+        [ -n "$count" ] || count=0
+        return 0
+      }
+      chat_save_cursor() {
+        if [ -n "$cursor_file" ]; then printf '%s\n' "$1" > "$cursor_file" 2>/dev/null || true; fi
+        return 0
+      }
+
       if [ "$sub" = "read" ]; then
-        out=$(api GET "/chat?$CHAT_QS&after=$after&format=text") || exit 1
+        # read shows everything (your own posts included) after --after, or
+        # from the start. With a name, it also marks the chat as read.
+        chat_fetch "${after:-0}" "" || { rm -f "$hdr"; exit 1; }
+        rm -f "$hdr"
         if [ -n "$out" ]; then printf '%s\n' "$out"; fi
+        chat_save_cursor "$count"
         return 0
       fi
-      # wait: poll until a message after N exists. Plain polling on purpose —
-      # it works through every proxy and needs no websocket support in bash.
+
+      # wait: start from --after, else where this name last read, else "now".
+      if [ -z "$after" ] && [ -n "$cursor_file" ] && [ -f "$cursor_file" ]; then
+        after=$(tr -dc '0-9' < "$cursor_file") || after=""
+      fi
+      if [ -z "$after" ]; then
+        chat_fetch 0 "&exclude=$(urlencode "${as:-~}")&mention=$(urlencode "${as:-~}")" || { rm -f "$hdr"; exit 1; }
+        after="$count"
+      fi
+      # Plain polling on purpose: it works through every proxy and needs no
+      # websocket support in bash.
       local waited=0
       while :; do
-        out=$(api GET "/chat?$CHAT_QS&after=$after&format=text") || exit 1
+        chat_fetch "$after" "$qs_extra" || { rm -f "$hdr"; exit 1; }
         if [ -n "$out" ]; then
+          rm -f "$hdr"
           printf '%s\n' "$out"
+          chat_save_cursor "$count"
           return 0
         fi
+        # Nothing for us after #after: everything newer is our own post (or,
+        # with --mentions, not addressed to us), so the cursor can move on.
+        if [ "$count" -gt "$after" ]; then
+          after="$count"
+          chat_save_cursor "$after"
+        fi
         if [ "$waited" -ge "$timeout" ]; then
-          echo "No new messages after #${after} within ${timeout}s." >&2
+          rm -f "$hdr"
+          echo "No new messages within ${timeout}s (seen up to #${after}). Run wait again to keep listening." >&2
           exit 2
         fi
         sleep "$poll"
@@ -1635,7 +1703,7 @@ QUICK REFERENCE (for AI agents / LLMs)
   Search:       mdnest search @alias/namespace "query"
   List:         mdnest list   @alias/namespace
   Chat:         mdnest chat post @alias/namespace/chat.md "text" --as my-name
-                mdnest chat wait @alias/namespace/chat.md --after 7   (blocks for a reply)
+                mdnest chat wait @alias/namespace/chat.md --as my-name   (blocks for a reply)
 
   IMPORTANT: "create" = new file. "write" = overwrite EXISTING file (returns 404 if not found).
   Use "mdnest servers -v" to discover available @aliases and namespaces.
@@ -1678,8 +1746,8 @@ NOTE OPERATIONS
            [--json]               ...as the raw API JSON instead (for scripts)
   search   <ns-path> "query"      Search note contents
   chat     list|new|post|read|wait  File-based chat in a note (server: ENABLE_CHAT)
-           post <path> <text|-> [--as name]   read <path> [--after N]
-           wait <path> --after N [--timeout S]   new <path> ["Title"]
+           post <path> <text|-> --as NAME   read <path> --as NAME
+           wait <path> --as NAME [--mentions] [--timeout S]   new <path> ["Title"]
 
 OTHER
   version                         Show CLI version
@@ -1725,7 +1793,7 @@ EXAMPLES
   # Chat — two agents (or an agent and you) talking through one note
   mdnest chat new  @work/engineering/Chats/release.md "Release"
   mdnest chat post @work/engineering/Chats/release.md "Migrations done" --as api-agent
-  mdnest chat wait @work/engineering/Chats/release.md --after 1
+  mdnest chat wait @work/engineering/Chats/release.md --as api-agent --mentions
 
   # List — a tree for humans, --json for scripts
   mdnest list @work/engineering

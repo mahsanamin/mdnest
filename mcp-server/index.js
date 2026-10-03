@@ -760,23 +760,27 @@ if (features.chat) server.tool(
 
 if (features.chat) server.tool(
   "wait_chat",
-  "Block until a message newer than #after arrives (polls every 3s), then return the new messages. Use after posting to wait for a reply.",
+  "Block until a message newer than #after arrives (polls every 3s), then return the new messages. Pass `as` (your name) so your own posts never wake you; pass mentions_only to wake only when someone writes @your-name or @all. Loop: wait_chat, reply with post_chat, wait_chat again.",
   {
     namespace: z.string().describe("Namespace name"),
     path: z.string().describe("Path of the chat note"),
     after: z.number().int().min(0).describe("Wait for messages after this number"),
+    as: z.string().optional().describe("Your name in the chat; your own messages are skipped"),
+    mentions_only: z.boolean().optional().describe("Only wake for messages that mention @your-name or @all (needs `as`)"),
     timeout_seconds: z.number().int().min(1).max(300).optional().describe("Give up after this long (default 120, max 300)"),
   },
-  async ({ namespace, path, after, timeout_seconds }) => {
+  async ({ namespace, path, after, as, mentions_only, timeout_seconds }) => {
     const deadline = Date.now() + (timeout_seconds || 120) * 1000;
+    const extra = (as ? `&exclude=${encodeURIComponent(as)}` : "") + (as && mentions_only ? `&mention=${encodeURIComponent(as)}` : "");
     try {
       for (;;) {
-        const res = await api(`/api/chat?${chatQS(namespace, path)}&after=${after}&format=text`);
+        const res = await api(`/api/chat?${chatQS(namespace, path)}&after=${after}&format=text${extra}`);
         if (!res.ok) return chatError(res);
         const text = await res.text();
-        if (text) return { content: [{ type: "text", text }] };
+        const count = res.headers.get("x-chat-count") || String(after);
+        if (text) return { content: [{ type: "text", text: `${text}(next: wait_chat with after=${count})` }] };
         if (Date.now() >= deadline) {
-          return { content: [{ type: "text", text: `No new messages after #${after} yet. Call wait_chat again to keep waiting.` }] };
+          return { content: [{ type: "text", text: `No new messages for you after #${after} yet (chat is at #${count}). Call wait_chat again to keep waiting.` }] };
         }
         await new Promise((r) => setTimeout(r, 3000));
       }

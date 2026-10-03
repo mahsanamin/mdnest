@@ -172,6 +172,27 @@ func ParseChat(content string) ChatDoc {
 	return doc
 }
 
+// chatMentionRe finds @name tokens: an @ at the start or after a non-word
+// character (so an email address is not a mention), then a name made of the
+// characters a posting label usually has.
+var chatMentionRe = regexp.MustCompile(`(?:^|[^\w@])@([\w][\w.\-]*)`)
+
+// ChatMentions reports whether text addresses name: @name (case-insensitive)
+// or one of the broadcast forms @all / @everyone.
+func ChatMentions(text, name string) bool {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" {
+		return false
+	}
+	for _, m := range chatMentionRe.FindAllStringSubmatch(text, -1) {
+		got := strings.ToLower(strings.TrimRight(m[1], ".-"))
+		if got == name || got == "all" || got == "everyone" {
+			return true
+		}
+	}
+	return false
+}
+
 // escapeChatBody stops a message body from forging a message boundary: any
 // line that would parse as a header gets a leading backslash, which markdown
 // renders as a literal "#" and the parser no longer matches.

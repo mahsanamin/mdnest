@@ -127,14 +127,94 @@ export function shellQuote(word) {
   return `'${w.replace(/'/g, `'\\''`)}'`;
 }
 
-// The shell snippet shown in a chat's "Connect an agent" panel. It must be
-// pasteable as-is (pasteable-commands.test.js): no <angle-bracket> stand-ins,
-// and the target is quoted whenever it needs to be.
-export function agentInstructions(alias, ns, path) {
+// --- @mentions ---------------------------------------------------------
+// Same grammar as the backend's ChatMentions (chat_markdown.go): an @ at the
+// start or after a non-word character (so an email is not a mention), then a
+// name. @all / @everyone address everyone.
+const MENTION_RE = /(^|[^\w@])@([A-Za-z0-9_][\w.-]*)/g;
+const BROADCAST = new Set(['all', 'everyone']);
+
+function cleanName(raw) {
+  return raw.replace(/[.-]+$/, '');
+}
+
+// mentionsName: does this text address name (directly, or via @all)?
+export function mentionsName(text, name) {
+  const want = String(name || '').trim().toLowerCase();
+  if (!want) return false;
+  for (const m of String(text || '').matchAll(MENTION_RE)) {
+    const got = cleanName(m[2]).toLowerCase();
+    if (got === want || BROADCAST.has(got)) return true;
+  }
+  return false;
+}
+
+// highlightMentions wraps @name in a span before the markdown is rendered.
+// Code is left alone: inside a fence or `inline code` an @ is literal text.
+// The span survives sanitizeHtml (class and data-* are kept by design).
+export function highlightMentions(text) {
+  const parts = String(text || '').split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/g);
+  return parts.map((part, i) => {
+    if (i % 2 === 1) return part; // a code span or fence
+    return part.replace(MENTION_RE, (all, pre, raw) => {
+      const name = cleanName(raw);
+      const tail = raw.slice(name.length);
+      return `${pre}<span class="chat-mention" data-mention="${name.toLowerCase()}">@${name}</span>${tail}`;
+    });
+  }).join('');
+}
+
+// participants: everyone who has posted, most recent first, for @-completion.
+export function participants(messages) {
+  const seen = new Map();
+  for (const m of messages || []) seen.set(m.author, m.n);
+  return [...seen.entries()].sort((a, b) => b[1] - a[1]).map(([name]) => name);
+}
+
+// mentionQuery: if the caret sits right after "@abc", return "abc" (the
+// word being typed), else null.
+export function mentionQuery(text, caret) {
+  const before = String(text || '').slice(0, caret);
+  const m = before.match(/(?:^|[^\w@])@([\w.-]*)$/);
+  return m ? m[1] : null;
+}
+
+// completeMention replaces the "@abc" before the caret with "@name ".
+export function completeMention(text, caret, name) {
+  const before = text.slice(0, caret);
+  const after = text.slice(caret);
+  const start = before.lastIndexOf('@');
+  const head = before.slice(0, start) + '@' + name + ' ';
+  return { text: head + after, caret: head.length };
+}
+
+// The prompt shown in a chat's "Connect an agent" panel, to paste into an
+// agent as-is. Two lessons are built in:
+//   - one name, used on EVERY command. A literal `--as my-agent` in the old
+//     snippet is what agents posted as, whatever they were told they were
+//     called, and mentions only reach the name an agent actually uses;
+//   - an explicit loop. Some agents (Codex) end their turn once the listed
+//     commands are done, so "wait, reply, wait again, never stop" has to be
+//     spelled out, with short timeouts for tools that kill long commands.
+// It must stay pasteable (pasteable-commands.test.js): no <angle-bracket>
+// stand-ins, and the target is shell-quoted whenever it needs to be.
+export function agentInstructions(alias, ns, path, name = 'AGENT_NAME') {
   const target = shellQuote(`${alias ? `@${alias}/` : ''}${ns}/${path}`);
+  const as = shellQuote(name);
   return [
-    `mdnest chat read ${target}`,
-    `mdnest chat post ${target} "hello from my agent" --as my-agent`,
-    `mdnest chat wait ${target} --after 1`,
+    `You are ${name} in an mdnest chat. Use --as ${as} on EVERY command, and only that name.`,
+    '',
+    '1. Catch up (this also marks the chat as read for you):',
+    `   mdnest chat read ${target} --as ${as}`,
+    '2. Introduce yourself:',
+    `   mdnest chat post ${target} "Hi, ${name} here." --as ${as}`,
+    '3. Then loop, and do not end your turn while you are in the chat:',
+    `   mdnest chat wait ${target} --as ${as} --timeout 120`,
+    '   - exit 0: new messages were printed. Reply with chat post (same --as), then wait again.',
+    '   - exit 2: nothing new yet. Run the same wait again.',
+    `   It never returns your own posts, and nothing posted while you work is lost.`,
+    `   Add --mentions to wake only when someone writes @${name} (or @all).`,
+    '',
+    'Address people with @name. Post a short "on it: ..." before long work, then the result.',
   ].join('\n');
 }

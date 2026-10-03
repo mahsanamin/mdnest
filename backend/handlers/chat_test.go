@@ -351,3 +351,59 @@ func TestLargeChatStillListed(t *testing.T) {
 		t.Fatalf("large chat not listed correctly: %+v", resp.Chats)
 	}
 }
+
+// exclude lets a waiting agent ignore its own posts. The count header still
+// reports every message, so the agent can move its cursor past its own.
+func TestChatReadExcludesOneAuthor(t *testing.T) {
+	h, _ := newChatTestHandler(t)
+	chatDo(t, h.HandleConvert, http.MethodPost, "/api/chat/convert?ns=work&path=c.md", "", nil)
+	chatDo(t, h.Handle, http.MethodPost, "/api/chat?ns=work&path=c.md&as=codxu", "mine", nil)
+	chatDo(t, h.Handle, http.MethodPost, "/api/chat?ns=work&path=c.md&as=codu", "theirs", nil)
+	chatDo(t, h.Handle, http.MethodPost, "/api/chat?ns=work&path=c.md&as=codxu", "mine again", nil)
+
+	w := chatDo(t, h.Handle, http.MethodGet, "/api/chat?ns=work&path=c.md&exclude=codxu&format=text", "", nil)
+	out := w.Body.String()
+	if !strings.Contains(out, "theirs") || strings.Contains(out, "mine") {
+		t.Fatalf("exclude=codxu should return only codu's message:\n%s", out)
+	}
+	if got := w.Header().Get("X-Chat-Count"); got != "3" {
+		t.Fatalf("X-Chat-Count must count every message, got %q", got)
+	}
+	w = chatDo(t, h.Handle, http.MethodGet, "/api/chat?ns=work&path=c.md&after=2&exclude=codxu&format=text", "", nil)
+	if strings.TrimSpace(w.Body.String()) != "" {
+		t.Fatalf("after #2 only codxu has posted, so nothing should come back:\n%s", w.Body)
+	}
+}
+
+func TestChatMentions(t *testing.T) {
+	for _, tc := range []struct {
+		text, name string
+		want       bool
+	}{
+		{"@codxu can you take the frontend?", "codxu", true},
+		{"thanks @CodXu.", "codxu", true},
+		{"@all standup in 5", "codxu", true},
+		{"@everyone please read", "codxu", true},
+		{"@codu only", "codxu", false},
+		{"mail me at x@codxu.com", "codxu", false},
+		{"no mention here", "codxu", false},
+		{"@codxu-bot is someone else", "codxu", false},
+	} {
+		if got := ChatMentions(tc.text, tc.name); got != tc.want {
+			t.Errorf("ChatMentions(%q, %q) = %v, want %v", tc.text, tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestChatReadMentionFilter(t *testing.T) {
+	h, _ := newChatTestHandler(t)
+	chatDo(t, h.HandleConvert, http.MethodPost, "/api/chat/convert?ns=work&path=c.md", "", nil)
+	chatDo(t, h.Handle, http.MethodPost, "/api/chat?ns=work&path=c.md&as=ahsan", "@codu do the backend", nil)
+	chatDo(t, h.Handle, http.MethodPost, "/api/chat?ns=work&path=c.md&as=ahsan", "@codxu do the frontend", nil)
+	chatDo(t, h.Handle, http.MethodPost, "/api/chat?ns=work&path=c.md&as=ahsan", "@all lunch", nil)
+	w := chatDo(t, h.Handle, http.MethodGet, "/api/chat?ns=work&path=c.md&mention=codxu&format=text", "", nil)
+	out := w.Body.String()
+	if strings.Contains(out, "backend") || !strings.Contains(out, "frontend") || !strings.Contains(out, "lunch") {
+		t.Fatalf("mention=codxu should return the frontend and @all messages only:\n%s", out)
+	}
+}

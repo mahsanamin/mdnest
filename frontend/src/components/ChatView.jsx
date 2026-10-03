@@ -5,7 +5,9 @@ import { sanitizeHtml } from '../sanitize.js';
 import {
   CHAT_POLL_MS, CHAT_LIST_POLL_MS, DEFAULT_CHAT_FOLDER, chatPathFor, colorForAuthor,
   isOwnMessage, groupMessages, mergeMessages, formatChatTime, agentInstructions, plainPreview,
+  highlightMentions, mentionsName, participants, mentionQuery, completeMention,
 } from '../chat.js';
+import { copyPlainText } from '../mermaid-text.js';
 import './ChatView.css';
 
 // The chats view: every chat channel on the left, the open conversation on
@@ -16,7 +18,9 @@ import './ChatView.css';
 // multi-mode only, and a chat has to work on every install.
 
 const md = new Marked({ gfm: true, breaks: true });
-const renderMessage = (text) => sanitizeHtml(md.parse(text || ''));
+// @mentions are wrapped in a span before rendering (highlightMentions skips
+// code); sanitizeHtml keeps the span's class and data-mention by design.
+const renderMessage = (text) => sanitizeHtml(md.parse(highlightMentions(text || '')));
 
 const AS_KEY = 'mdnest_chat_as';
 const seenKey = (ns, path) => `mdnest_chat_seen:${ns}/${path}`;
@@ -143,6 +147,10 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
     try { return localStorage.getItem(AS_KEY) || ''; } catch { return ''; }
   });
   const [showAgent, setShowAgent] = useState(false);
+  const [agentName, setAgentName] = useState('');
+  const [copied, setCopied] = useState(false);
+  const [caret, setCaret] = useState(0);
+  const draftRef = useRef(null);
   const scrollRef = useRef(null);
   const stickToBottom = useRef(true);
   const countRef = useRef(0);
@@ -232,6 +240,11 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
   };
 
   const onKeyDown = (e) => {
+    if ((e.key === 'Tab' || e.key === 'Enter') && suggestions.length && !e.shiftKey && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      applySuggestion(suggestions[0]);
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       send();
@@ -244,6 +257,25 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
   };
 
   const grouped = useMemo(() => groupMessages(messages), [messages]);
+  // @-completion: while the word at the caret starts with @, offer the
+  // people in this chat (plus @all), most recent first.
+  const query = mentionQuery(draft, caret);
+  const suggestions = useMemo(() => {
+    if (query === null) return [];
+    const q = query.toLowerCase();
+    return [...participants(messages), 'all']
+      .filter((n) => n && n !== effectiveAs && n.toLowerCase().startsWith(q))
+      .slice(0, 6);
+  }, [query, messages, effectiveAs]);
+  const applySuggestion = (name) => {
+    const r = completeMention(draft, caret, name);
+    setDraft(r.text);
+    setCaret(r.caret);
+    requestAnimationFrame(() => {
+      const el = draftRef.current;
+      if (el) { el.focus(); el.setSelectionRange(r.caret, r.caret); }
+    });
+  };
 
   return (
     <section className="chat-room">
@@ -285,9 +317,28 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
       {showAgent && (
         <div className="chat-agent">
           <p>
-            Hand an agent this chat and it can talk here. Each agent should post under its own <code>--as</code> name; <code>wait</code> blocks until someone replies.
+            Paste this into the agent. Give it one name and it will use that name everywhere, so <code>@name</code> reaches it.
           </p>
-          <pre>{agentInstructions(serverAlias, chat.ns, chat.path)}</pre>
+          <div className="chat-agent-row">
+            <input
+              className="chat-input"
+              placeholder="Agent name, e.g. codxu"
+              value={agentName}
+              onChange={(e) => setAgentName(e.target.value.replace(/[^\w.-]/g, ''))}
+              maxLength={40}
+              aria-label="Agent name"
+            />
+            <button
+              className="chat-btn"
+              onClick={() => {
+                if (copyPlainText(agentInstructions(serverAlias, chat.ns, chat.path, agentName || 'AGENT_NAME'))) {
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1500);
+                }
+              }}
+            >{copied ? 'Copied!' : 'Copy prompt'}</button>
+          </div>
+          <pre>{agentInstructions(serverAlias, chat.ns, chat.path, agentName || 'AGENT_NAME')}</pre>
           <p className="chat-agent-mcp">MCP clients: <code>read_chat</code>, <code>post_chat</code>, <code>wait_chat</code>.</p>
         </div>
       )}
@@ -298,8 +349,9 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
         {doc && messages.length === 0 && <div className="chat-empty">No messages yet — say hello.</div>}
         {grouped.map((m) => {
           const own = isOwnMessage(m, account, effectiveAs);
+          const forMe = !own && mentionsName(m.text, effectiveAs);
           return (
-            <div key={m.n} className={`chat-msg${own ? ' own' : ''}${m.startsGroup ? ' first' : ''}`}>
+            <div key={m.n} className={`chat-msg${own ? ' own' : ''}${forMe ? ' mentions-me' : ''}${m.startsGroup ? ' first' : ''}`}>
               {m.startsGroup && (
                 <div className="chat-msg-meta">
                   <span className="chat-msg-author" style={{ color: `var(${colorForAuthor(m.author)})` }}>{m.author}</span>
@@ -315,6 +367,20 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
 
       {error && <div className="chat-error chat-room-error">{error}</div>}
 
+      {suggestions.length > 0 && (
+        <div className="chat-suggest" role="listbox" aria-label="Mention someone">
+          {suggestions.map((n, i) => (
+            <button
+              key={n}
+              role="option"
+              aria-selected={i === 0}
+              className={`chat-suggest-item${i === 0 ? ' first' : ''}`}
+              onMouseDown={(e) => { e.preventDefault(); applySuggestion(n); }}
+            >@{n}</button>
+          ))}
+          <span className="chat-suggest-hint">Tab to complete</span>
+        </div>
+      )}
       <div className="chat-composer">
         <label className="chat-as">
           <span>as</span>
@@ -328,12 +394,14 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
           />
         </label>
         <textarea
+          ref={draftRef}
           className="chat-input chat-draft"
           rows={Math.min(6, Math.max(1, draft.split('\n').length))}
           placeholder="Message"
           title="Enter to send, Shift+Enter for a new line"
           value={draft}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={(e) => { setDraft(e.target.value); setCaret(e.target.selectionStart); }}
+          onSelect={(e) => setCaret(e.target.selectionStart)}
           onKeyDown={onKeyDown}
           disabled={!doc}
         />

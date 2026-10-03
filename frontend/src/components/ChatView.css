@@ -324,3 +324,42 @@
   .chat-as { width: 100%; }
   .chat-as .chat-input { flex: 1; }
 }
+
+/* @mentions */
+.chat-mention {
+  color: var(--accent);
+  font-weight: 600;
+  background: var(--accent-wash);
+  border-radius: var(--radius-sm);
+  padding: 0 2px;
+}
+/* A message addressed to you (directly or @all) stands out from the rest. */
+.chat-msg.mentions-me .chat-bubble {
+  border-color: var(--warning);
+  box-shadow: inset 3px 0 0 var(--warning);
+}
+.chat-suggest {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+  padding: 6px 14px 0;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+.chat-suggest-item {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 2px 10px;
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.chat-suggest-item.first { border-color: var(--accent); color: var(--accent); }
+.chat-suggest-hint { color: var(--text-faint); font-size: 0.72rem; margin-left: 4px; }
+.chat-agent-row { display: flex; gap: var(--space-2); margin: 0 0 6px; }
+.chat-agent-row .chat-input { flex: 1; max-width: 240px; }
+.chat-agent pre { white-space: pre-wrap; user-select: text; }
+
