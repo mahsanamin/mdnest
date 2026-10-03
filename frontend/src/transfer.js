@@ -130,6 +130,34 @@ export function isInvalidDestination({ sourceNs, sourcePath, destNs, destFolder 
   return dir === sourcePath || dir.startsWith(sourcePath + '/');
 }
 
+// newFolderError checks a name typed for "New folder" in the picker. It
+// returns '' when the name is usable, else a short reason. The folder is not
+// created here — the transfer creates it on confirm — so this only has to
+// keep the name to one plain path segment the server will accept.
+export function newFolderError(name, siblings = []) {
+  const n = String(name || '').trim();
+  if (!n) return 'Type a folder name.';
+  if (n === '.' || n === '..') return 'That name is not allowed.';
+  if (/[\\/]/.test(n)) return 'A folder name cannot contain / or \\.';
+  if (/[\u0000-\u001f\u007f]/.test(n)) return 'That name has a control character.';
+  if (n.startsWith('.')) return 'A folder name cannot start with a dot.';
+  if (siblings.some((s) => s.toLowerCase() === n.toLowerCase())) return 'A folder with that name is already here — choose it from the list.';
+  return '';
+}
+
+// transferSummary says how much a confirm will carry, from the dry run's
+// answer: "37 files (12.4 MB)". Empty for a single file.
+export function transferSummary({ folder, items, bytes } = {}) {
+  if (!folder) return '';
+  const files = `${items ?? 0} file${items === 1 ? '' : 's'}`;
+  return `${files} (${formatBytes(bytes || 0)})`;
+}
+
+// isLargeTransfer: worth warning that it will take a while.
+export function isLargeTransfer({ folder, items, bytes } = {}) {
+  return !!folder && ((items || 0) >= 50 || (bytes || 0) >= 10 * 1024 * 1024);
+}
+
 // --- the server's answers in plain words -----------------------------------
 
 function formatBytes(n) {

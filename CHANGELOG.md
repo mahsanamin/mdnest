@@ -23,6 +23,11 @@ whole folder, and carry a note from one mdnest server to another
   - Between namespaces, the original is removed only after the copy has been
     verified.
   - The editor follows a moved open note.
+  - **+ New folder** in the picker. The folder is created on confirm, so
+    cancelling leaves nothing behind.
+  - For a folder, the picker says how much will move ("37 files, 12 MB")
+    before you confirm, warns when it is large, and shows the elapsed time
+    while it runs.
 - **Download / Download as zip.** A file downloads as itself and a folder as
   a zip that keeps its folders. Hidden files and empty folders are included;
   `.git`, `.mdnest` and symbolic links are left out. Folders over the limits

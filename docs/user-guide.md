@@ -528,7 +528,10 @@ The move happens within the same namespace. Cross-namespace moves are not suppor
 
 ## Moving, copying and downloading *(unreleased)*
 
-**Move to…** and **Copy to…** (right-click, or long-press on a phone) open one picker. Choose a namespace, a folder, and the name it should have there. While you choose, mdnest checks the destination with the server and tells you before you confirm:
+**Move to…** and **Copy to…** (right-click, or long-press on a phone) open one picker. Choose a namespace, a folder, and the name it should have there.
+
+- **+ New folder** adds a folder to the list, under the folder you selected. It is created only when you confirm, so cancelling leaves nothing behind.
+- For a folder, the picker says how much will move before you confirm, for example "move 37 files (12 MB)", and warns when a folder is large. While it runs, it shows how long it has been going. A large move finishes on the server even if you close the window. While you choose, mdnest checks the destination with the server and tells you before you confirm:
 
 - if something with that name is already there (nothing is ever overwritten; change the name or pick another folder),
 - if you lack access there, or

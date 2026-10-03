@@ -126,6 +126,10 @@ func (h *TransferHandler) HandleTransfer(w http.ResponseWriter, r *http.Request)
 		"mode":   t.mode,
 		"to":     map[string]string{"ns": t.toNS, "path": t.to},
 		"items":  t.plan.files,
+		// bytes and folder let the picker say how much a confirm will move
+		// ("37 files, 12 MB") before the user commits to it.
+		"bytes":  t.plan.bytes,
+		"folder": t.isDir,
 	}
 
 	// The collision check is repeated under a lock on the destination, so two

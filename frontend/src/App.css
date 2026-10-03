@@ -4956,6 +4956,59 @@ pre:hover .code-copy-btn {
   border-color: var(--danger);
   background: var(--danger-wash);
 }
+.moveto-newfolder {
+  align-self: flex-start;
+  margin-top: 6px;
+  padding: 6px 10px;
+  min-height: 36px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.moveto-newfolder:disabled { opacity: 0.5; cursor: not-allowed; }
+.moveto-newfolder-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+.moveto-newfolder-row input {
+  flex: 1;
+  min-width: 0;
+  min-height: 40px;
+  padding: 6px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--bg-deep);
+  color: var(--text);
+  font-size: 0.9rem;
+}
+.moveto-newfolder-row button {
+  min-height: 40px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+}
+.moveto-newfolder-error {
+  flex-basis: 100%;
+  font-size: 0.8rem;
+  color: var(--danger);
+}
+.moveto-new-badge {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--accent-wash-2);
+  color: var(--accent);
+}
 .moveto-check {
   min-height: 1.4em;
   font-size: 0.82rem;

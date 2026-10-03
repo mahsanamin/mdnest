@@ -1316,10 +1316,10 @@ Move or copy a file or folder to another namespace, or to another place in the s
 **Response** (200 OK):
 
 ```json
-{"status": "ok", "mode": "copy", "to": {"ns": "shared", "path": "Project/x.md"}, "items": 3}
+{"status": "ok", "mode": "copy", "to": {"ns": "shared", "path": "Project/x.md"}, "items": 3, "bytes": 52114, "folder": true}
 ```
 
-`items` is the number of files carried.
+`items` is the number of files carried, `bytes` their total size, and `folder` whether the source is a folder. A dry run returns the same numbers, so a client can say how much a confirm will move. Folders on `to.path` that do not exist yet are created by the transfer, never by a dry run.
 
 **Error responses** (checked in this order, all before anything is written):
 
