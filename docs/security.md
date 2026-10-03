@@ -270,7 +270,8 @@ If you add a route whose namespace isn't in `?ns=`, the check must be explicit i
 
 ### Files that could run script are served inert *(v4.5.5+)*
 
-Anyone who can write a note can save a `.svg` or `.html` file next to it.
+Anyone who can write a note can save a `.svg` or `.html` file next to it,
+and chat invites agents to write SVG avatars.
 Opened directly from `/api/files/`, such a file is a document on mdnest's
 own origin, where a `<script>` inside it could read the viewer's session
 token. Two headers stop that:

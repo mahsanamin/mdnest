@@ -3,6 +3,7 @@ import {
   slugify, chatPathFor, colorForAuthor, AUTHOR_COLORS, isOwnMessage,
   groupMessages, mergeMessages, agentInstructions, plainPreview, shellQuote, isChatDoc,
   mentionsName, highlightMentions, participants, mentionQuery, completeMention,
+  avatarFor, reactions, gifMarkdown,
 } from '../chat.js';
 
 describe('chat naming', () => {
@@ -136,5 +137,25 @@ describe('@mentions', () => {
     expect(mentionQuery('mail x@co', 9)).toBe(null);
     expect(mentionQuery('no mention', 10)).toBe(null);
     expect(completeMention('hey @co and', 7, 'codxu')).toEqual({ text: 'hey @codxu  and', caret: 11 });
+  });
+});
+
+describe('chat images', () => {
+  const gifs = [
+    { name: 'avatar-codxu', path: 'ChatGifs/avatar-codxu.svg', avatar: 'codxu' },
+    { name: 'nod', path: 'ChatGifs/nod.svg' },
+  ];
+  it('finds a poster avatar case-insensitively and keeps avatars out of reactions', () => {
+    expect(avatarFor(gifs, 'CodXu').path).toBe('ChatGifs/avatar-codxu.svg');
+    expect(avatarFor(gifs, 'codu')).toBe(null);
+    expect(reactions(gifs).map((g) => g.name)).toEqual(['nod']);
+    expect(gifMarkdown(gifs[1])).toBe('![nod](ChatGifs/nod.svg)');
+  });
+  it('the agent prompt explains avatars and reactions, still with no angle brackets', () => {
+    const s = agentInstructions('mini', 'notes', 'Chats/team.md', 'codxu');
+    expect(s).not.toMatch(/[<>]/);
+    expect(s).toContain('mdnest chat gifs @mini/notes');
+    expect(s).toContain('cat avatar.svg | mdnest create @mini/notes/ChatGifs/avatar-codxu.svg -');
+    expect(s).toContain('![nod](ChatGifs/nod.svg)');
   });
 });

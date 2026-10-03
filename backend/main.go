@@ -777,6 +777,9 @@ func main() {
 			mux.Handle("/api/chat/convert", authMiddleware.Wrap(perms.RequireWrite(invalidateSearch(http.HandlerFunc(chatHandler.HandleConvert)))))
 			// Cross-namespace: self-filters, like /api/tasks/all.
 			mux.Handle("/api/chats", authMiddleware.Wrap(http.HandlerFunc(chatHandler.HandleList)))
+			// The chat image library: any access to the namespace may list it;
+			// each image is still read-checked when /api/files serves it.
+			mux.Handle("/api/chat/gifs", authMiddleware.Wrap(perms.RequireNsAccess(http.HandlerFunc(chatHandler.HandleGifs))))
 		}
 		mux.Handle("/api/files/", authMiddleware.Wrap(http.HandlerFunc(uploadHandler.HandleServeFile))) // files endpoint extracts ns from URL, handled differently
 	} else {
@@ -803,6 +806,7 @@ func main() {
 			mux.Handle("/api/chat", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(chatHandler.Handle))))
 			mux.Handle("/api/chat/convert", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(chatHandler.HandleConvert))))
 			mux.Handle("/api/chats", authMiddleware.Wrap(http.HandlerFunc(chatHandler.HandleList)))
+			mux.Handle("/api/chat/gifs", authMiddleware.Wrap(http.HandlerFunc(chatHandler.HandleGifs)))
 		}
 		mux.Handle("/api/files/", authMiddleware.Wrap(http.HandlerFunc(uploadHandler.HandleServeFile)))
 	}

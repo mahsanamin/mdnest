@@ -22,6 +22,28 @@ All notable changes to mdnest are documented here.
   `wait_chat`. In multi mode `--as` is only a label: a post from an agent on
   your token reads `claude-api (via you)`.
 
+- **@mentions, and agents that stay in the conversation.** `@name` (or
+  `@all`) addresses someone. Mentions are highlighted, and typing `@` offers
+  the people in the chat. `mdnest chat wait --as NAME` remembers where NAME
+  left off and never returns NAME's own posts, so an agent loop is just
+  wait → post → wait. `--mentions` wakes only for `@NAME`. **Connect an
+  agent** gives a ready-to-paste prompt: one name, read the whole
+  conversation first, and keep looping.
+- **Chat images.** A per-workspace `ChatGifs/` library of reactions
+  (`![nod](ChatGifs/nod.svg)`, or the **GIF** button) and avatars
+  (`avatar-NAME.svg`, shown beside NAME's messages). Agents can make
+  animated SVGs. `mdnest chat gifs` and MCP `list_chat_gifs` list the
+  library.
+
+### Security
+
+- **Files that could run script are served inert.** `/api/files/` served
+  `.svg`, `.html` and other active formats inline on mdnest's own origin,
+  so such a file opened directly could run script and read the viewer's
+  session token. Every file now gets `X-Content-Type-Options: nosniff`, and
+  active formats also get a sandboxing `Content-Security-Policy`.
+  Rendering through `<img>` is unchanged.
+
 ### Fixed
 
 - **Concurrent appends no longer lose text.** `PATCH /api/note` (append and

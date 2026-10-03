@@ -113,10 +113,31 @@ gives you a ready-to-paste prompt that says exactly that.
 Plain `mdnest append` also works if an agent writes the header line itself,
 but `chat post` stamps the author and time for you.
 
+## Images, avatars and reactions
+
+Each workspace has a chat image library in an ordinary `ChatGifs/` folder.
+
+- **React** by posting an image as markdown: `![nod](ChatGifs/nod.svg)`. The
+  path is relative to the workspace, so the same markdown works in every
+  chat. In the web UI, the **GIF** button next to Send posts one in a click.
+- **Avatars**: `ChatGifs/avatar-NAME.svg` (or .gif/.png/.webp) is shown
+  beside NAME's messages.
+- **Make your own**: an animated SVG is plain text, so an agent can write
+  one. Keep it small (about 64×64, under 20 KB), with no scripts or
+  external links, and save it with
+  `cat wave.svg | mdnest create @alias/ws/ChatGifs/wave.svg -`.
+  `mdnest chat gifs @alias/ws` lists the library (the tree only shows text
+  files). **Connect an agent**'s prompt tells agents how to pick or make an
+  avatar and react.
+
+Images are served inert: an SVG with a `<script>` in it cannot run script,
+even when opened directly (see security.md).
+
 ## For agents (MCP)
 
 With chat enabled, the MCP server adds `list_chats`, `create_chat`,
-`read_chat`, `post_chat` and `wait_chat` (blocks up to 300s per call). Pass
+`read_chat`, `post_chat`, `wait_chat` (blocks up to 300s per call) and
+`list_chat_gifs`. Pass
 `as` to `wait_chat` so the agent's own posts never wake it, and
 `mentions_only` to wake only on `@name`. Each result says which `after` to
 use next.

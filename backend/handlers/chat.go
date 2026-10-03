@@ -310,6 +310,68 @@ func (h *ChatHandler) notify(r *http.Request, ns, relPath, content string) {
 	h.hub.BroadcastFileChanged(ns, relPath, userID, username, contentETag([]byte(canonicalForETag(clean))), "", "")
 }
 
+// ChatGifDir is the per-namespace folder of chat images: reactions anyone can
+// post (![nod](ChatGifs/nod.svg)) and avatars (avatar-NAME.svg) shown beside
+// a poster's messages. An ordinary folder on purpose: people see and manage
+// it in the tree and agents add to it with `mdnest create`.
+const ChatGifDir = "ChatGifs"
+
+var chatGifExts = map[string]bool{".gif": true, ".svg": true, ".png": true, ".webp": true, ".jpg": true, ".jpeg": true}
+
+// ChatGif is one image in the namespace's ChatGifDir.
+type ChatGif struct {
+	Name   string `json:"name"`             // file name without extension, e.g. "nod" or "avatar-codxu"
+	Path   string `json:"path"`             // namespace-relative, e.g. "ChatGifs/nod.svg"
+	Avatar string `json:"avatar,omitempty"` // set for avatar-NAME files: the poster it belongs to
+}
+
+// HandleGifs lists the namespace's chat images. The tree only shows text
+// files, so without this neither the UI nor an agent could see the library.
+func (h *ChatHandler) HandleGifs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		chatJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	ns := RequireNamespaceStore(r.Context(), h.store, w, r)
+	if ns == "" {
+		return
+	}
+	gifs := []ChatGif{}
+	entries, err := h.store.ReadDir(r.Context(), ns, ChatGifDir)
+	if err != nil && !errors.Is(err, storage.ErrNotExist) {
+		chatJSONError(w, http.StatusInternalServerError, "failed to list chat gifs")
+		return
+	}
+	for _, e := range entries {
+		ext := strings.ToLower(path.Ext(e.Name))
+		if e.IsDir || !chatGifExts[ext] || strings.HasPrefix(e.Name, ".") {
+			continue
+		}
+		name := strings.TrimSuffix(e.Name, path.Ext(e.Name))
+		g := ChatGif{Name: name, Path: ChatGifDir + "/" + e.Name}
+		if strings.HasPrefix(strings.ToLower(name), "avatar-") {
+			g.Avatar = name[len("avatar-"):]
+		}
+		gifs = append(gifs, g)
+	}
+	sort.Slice(gifs, func(i, j int) bool { return gifs[i].Path < gifs[j].Path })
+	if r.URL.Query().Get("format") == "text" {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		var b strings.Builder
+		for _, g := range gifs {
+			if g.Avatar != "" {
+				fmt.Fprintf(&b, "%s\tavatar of %s\n", g.Path, g.Avatar)
+			} else {
+				fmt.Fprintf(&b, "%s\t![%s](%s)\n", g.Path, g.Name, g.Path)
+			}
+		}
+		io.WriteString(w, b.String())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"gifs": gifs})
+}
+
 // HandleConvert makes a note a chat, creating it when it does not exist —
 // which is also how a brand-new chat is started.
 func (h *ChatHandler) HandleConvert(w http.ResponseWriter, r *http.Request) {

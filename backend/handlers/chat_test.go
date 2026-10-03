@@ -407,3 +407,26 @@ func TestChatReadMentionFilter(t *testing.T) {
 		t.Fatalf("mention=codxu should return the frontend and @all messages only:\n%s", out)
 	}
 }
+
+func TestChatGifsListsImagesAndAvatars(t *testing.T) {
+	h, root := newChatTestHandler(t)
+	dir := filepath.Join(root, "work", "ChatGifs")
+	os.MkdirAll(dir, 0o755)
+	for _, f := range []string{"nod.svg", "avatar-codxu.gif", "notes.md", ".hidden.svg"} {
+		os.WriteFile(filepath.Join(dir, f), []byte("x"), 0o644)
+	}
+	w := chatDo(t, h.HandleGifs, http.MethodGet, "/api/chat/gifs?ns=work", "", nil)
+	var resp struct{ Gifs []ChatGif }
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if len(resp.Gifs) != 2 {
+		t.Fatalf("want 2 images (not the .md, not the dotfile), got %+v", resp.Gifs)
+	}
+	if resp.Gifs[0].Path != "ChatGifs/avatar-codxu.gif" || resp.Gifs[0].Avatar != "codxu" || resp.Gifs[1].Name != "nod" {
+		t.Fatalf("unexpected listing: %+v", resp.Gifs)
+	}
+	// A namespace with no library is an empty list, not an error.
+	os.MkdirAll(filepath.Join(root, "other"), 0o755)
+	if w := chatDo(t, h.HandleGifs, http.MethodGet, "/api/chat/gifs?ns=other", "", nil); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"gifs":[]`) {
+		t.Fatalf("empty library should be 200 with []: %d %s", w.Code, w.Body)
+	}
+}

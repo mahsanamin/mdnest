@@ -982,6 +982,13 @@ export async function postChatMessage(ns, path, text, as) {
   return res.json();
 }
 
+// The namespace's chat images (ChatGifs/): reactions and avatar-NAME files.
+export async function listChatGifs(ns) {
+  const res = await request(`/chat/gifs?ns=${encodeURIComponent(ns)}`);
+  if (!res.ok) return [];
+  return (await res.json()).gifs || [];
+}
+
 // Creates the note when it does not exist; otherwise tags it as a chat in place.
 export async function convertToChat(ns, path, title) {
   const res = await request(`/chat/convert?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}&title=${encodeURIComponent(title || '')}`, { method: 'POST' });

@@ -1598,7 +1598,7 @@ Replace the board configuration.
 A chat is a note whose frontmatter contains `mdnest-chat: true`. The routes
 exist only when `ENABLE_CHAT=true`. Format and behaviour: [chat.md](chat.md).
 
-### GET /api/chat?ns=&path=[&after=N][&format=text]
+### GET /api/chat?ns=&path=[&after=N][&exclude=name][&mention=name][&format=text]
 
 Needs read access to the note. Returns only the messages after #N.
 
@@ -1607,6 +1607,10 @@ Needs read access to the note. Returns only the messages after #N.
   "count": 2, "you": "ahsan",
   "messages": [ { "n": 2, "author": "claude-api", "via": "ahsan", "time": "2026-10-02T14:03:40Z", "text": "Done." } ] }
 ```
+
+`exclude=name` drops that poster's own messages (a waiting agent is not
+woken by its own post). `mention=name` keeps only messages that address
+`@name`, `@all` or `@everyone`.
 
 `format=text` returns `[#N] author · time` blocks instead, with the total in
 `X-Chat-Count`. The CLI uses this so it never has to parse JSON. A note
@@ -1629,6 +1633,14 @@ curl -X POST "$URL/api/chat?ns=work&path=Chats/release.md&as=api-agent" \
 Needs write access. Creates the chat note when it does not exist (`201`).
 Otherwise it adds the tag in place and keeps the existing content as the
 description. Converting a chat again changes nothing.
+
+### GET /api/chat/gifs?ns=[&format=text]
+
+The namespace's chat images in `ChatGifs/` (gif, svg, png, webp, jpg):
+`{"gifs":[{"name":"nod","path":"ChatGifs/nod.svg"},{"name":"avatar-codxu","path":"ChatGifs/avatar-codxu.svg","avatar":"codxu"}]}`.
+A file named `avatar-NAME.*` is that poster's avatar. Any access to the
+namespace may list it, and each image is read-checked when `/api/files/`
+serves it. The tree lists only text files, which is why this endpoint exists.
 
 ### GET /api/chats[?ns=][&format=text]
 

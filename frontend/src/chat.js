@@ -127,6 +127,27 @@ export function shellQuote(word) {
   return `'${w.replace(/'/g, `'\\''`)}'`;
 }
 
+// --- chat images (ChatGifs/) ---------------------------------------------
+// An image in a chat message is namespace-relative ("ChatGifs/nod.svg"),
+// not relative to the chat note, so the same markdown works in every chat.
+export const CHAT_GIF_DIR = 'ChatGifs';
+
+// avatarFor finds the poster's avatar-NAME.* in the library (case-insensitive).
+export function avatarFor(gifs, author) {
+  const want = String(author || '').toLowerCase();
+  if (!want) return null;
+  return (gifs || []).find((g) => (g.avatar || '').toLowerCase() === want) || null;
+}
+
+// reactions: the library minus avatars, for the picker.
+export function reactions(gifs) {
+  return (gifs || []).filter((g) => !g.avatar);
+}
+
+export function gifMarkdown(g) {
+  return `![${g.name}](${g.path})`;
+}
+
 // --- @mentions ---------------------------------------------------------
 // Same grammar as the backend's ChatMentions (chat_markdown.go): an @ at the
 // start or after a non-word character (so an email is not a mention), then a
@@ -200,6 +221,7 @@ export function completeMention(text, caret, name) {
 // stand-ins, and the target is shell-quoted whenever it needs to be.
 export function agentInstructions(alias, ns, path, name = 'AGENT_NAME') {
   const target = shellQuote(`${alias ? `@${alias}/` : ''}${ns}/${path}`);
+  const nsTarget = shellQuote(`${alias ? `@${alias}/` : ''}${ns}`);
   const as = shellQuote(name);
   return [
     `You are ${name} in an mdnest chat. Use --as ${as} on EVERY command, and only that name.`,
@@ -220,6 +242,15 @@ export function agentInstructions(alias, ns, path, name = 'AGENT_NAME') {
     `   Add --mentions to wake only when someone writes @${name} (or @all).`,
     `   Lost the thread? Re-read everything with: mdnest chat read ${target}`,
     '   (without --as, so your place in the chat does not move).',
+    '',
+    `Your look (optional, but it helps people tell agents apart). The shared image library is`,
+    `${nsTarget}/${CHAT_GIF_DIR}:  mdnest chat gifs ${nsTarget}`,
+    `- If there is no avatar-${name}.* yet, make one: a small animated SVG (about 64x64, under`,
+    '  20 KB, shapes plus SVG animate elements or CSS animation, no scripts, no external links)',
+    '  that suits your role, write it to avatar.svg, and save it:',
+    `  cat avatar.svg | mdnest create ${nsTarget}/${CHAT_GIF_DIR}/avatar-${name}.svg -`,
+    `- React with any image from the library: mdnest chat post ${target} "![nod](${CHAT_GIF_DIR}/nod.svg)" --as ${as}`,
+    `- Made a reaction worth reusing? Save it to ${CHAT_GIF_DIR}/ under a short name so everyone can use it.`,
     '',
     'Address people with @name. Post a short "on it: ..." before long work, then the result.',
   ].join('\n');

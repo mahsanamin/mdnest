@@ -698,6 +698,22 @@ if (features.chat) server.tool(
 );
 
 if (features.chat) server.tool(
+  "list_chat_gifs",
+  "List a namespace's chat images (ChatGifs/): reactions to post as ![name](ChatGifs/name.svg), and avatar-NAME files shown beside NAME's messages. Add new ones with create_note at ChatGifs/<name>.svg (an animated SVG works well).",
+  { namespace: z.string().describe("Namespace name") },
+  async ({ namespace }) => {
+    try {
+      const res = await api(`/api/chat/gifs?ns=${encodeURIComponent(namespace)}&format=text`);
+      if (!res.ok) return chatError(res);
+      const text = await res.text();
+      return { content: [{ type: "text", text: text || `No chat images in ${namespace}/ChatGifs yet.` }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+if (features.chat) server.tool(
   "create_chat",
   "Create a chat channel at a .md path, or turn an existing note into one (its content becomes the channel description; the file is not moved).",
   {

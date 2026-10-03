@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Marked } from 'marked';
-import { listChats, getChat, postChatMessage, convertToChat } from '../api.js';
+import { listChats, getChat, postChatMessage, convertToChat, listChatGifs, getToken } from '../api.js';
+import { resolveImgSrc } from '../img-src.js';
 import { sanitizeHtml } from '../sanitize.js';
 import {
   CHAT_POLL_MS, CHAT_LIST_POLL_MS, DEFAULT_CHAT_FOLDER, chatPathFor, colorForAuthor,
   isOwnMessage, groupMessages, mergeMessages, formatChatTime, agentInstructions, plainPreview,
   highlightMentions, mentionsName, participants, mentionQuery, completeMention,
+  avatarFor, reactions, gifMarkdown,
 } from '../chat.js';
 import { copyPlainText } from '../mermaid-text.js';
 import './ChatView.css';
@@ -20,7 +22,23 @@ import './ChatView.css';
 const md = new Marked({ gfm: true, breaks: true });
 // @mentions are wrapped in a span before rendering (highlightMentions skips
 // code); sanitizeHtml keeps the span's class and data-mention by design.
-const renderMessage = (text) => sanitizeHtml(md.parse(highlightMentions(text || '')));
+// Images are namespace-relative (![nod](ChatGifs/nod.svg)), resolved with the
+// same rule as Preview (img-src.js): relative paths go through /api/files
+// with the session token, and absolute URLs pass through so the token never
+// reaches a foreign host.
+const fileBase = (ns) => `/api/files/${encodeURIComponent(ns)}/`;
+const fileUrl = (ns, p) => resolveImgSrc(p, fileBase(ns), getToken());
+function renderMessage(text, ns) {
+  const html = sanitizeHtml(md.parse(highlightMentions(text || '')));
+  if (!ns || !html.includes('<img')) return html;
+  const tpl = document.createElement('template');
+  tpl.innerHTML = html;
+  tpl.content.querySelectorAll('img').forEach((img) => {
+    img.setAttribute('src', fileUrl(ns, img.getAttribute('src') || ''));
+    img.setAttribute('loading', 'lazy');
+  });
+  return tpl.innerHTML;
+}
 
 const AS_KEY = 'mdnest_chat_as';
 const seenKey = (ns, path) => `mdnest_chat_seen:${ns}/${path}`;
@@ -151,6 +169,8 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
   const [copied, setCopied] = useState(false);
   const [caret, setCaret] = useState(0);
   const draftRef = useRef(null);
+  const [gifs, setGifs] = useState([]);
+  const [showGifs, setShowGifs] = useState(false);
   const scrollRef = useRef(null);
   const stickToBottom = useRef(true);
   const countRef = useRef(0);
@@ -186,6 +206,12 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
     return () => { cancelled = true; };
   }, [chat.ns, chat.path, reloadNonce]);
 
+  useEffect(() => {
+    let cancelled = false;
+    listChatGifs(chat.ns).then((g) => { if (!cancelled) setGifs(g); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [chat.ns, reloadNonce]);
+
   const poll = useCallback(async () => {
     try {
       const r = await getChat(chat.ns, chat.path, countRef.current);
@@ -219,13 +245,13 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
     if (el) stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
   };
 
-  const send = async () => {
-    const text = draft.trim();
+  const send = async (override) => {
+    const text = (typeof override === 'string' ? override : draft).trim();
     if (!text || sending) return;
     setSending(true);
     try {
       const r = await postChatMessage(chat.ns, chat.path, text, postingAs.trim());
-      setDraft('');
+      if (typeof override !== 'string') setDraft('');
       stickToBottom.current = true;
       setMessages((cur) => mergeMessages(cur, [r.message]));
       // Anything posted by others in between is fetched by the next poll,
@@ -344,7 +370,7 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
       )}
 
       <div className="chat-messages" ref={scrollRef} onScroll={onScroll}>
-        {doc?.description && <div className="chat-description" dangerouslySetInnerHTML={{ __html: renderMessage(doc.description) }} />}
+        {doc?.description && <div className="chat-description" dangerouslySetInnerHTML={{ __html: renderMessage(doc.description, chat.ns) }} />}
         {!doc && !error && <div className="chat-empty">Loading…</div>}
         {doc && messages.length === 0 && <div className="chat-empty">No messages yet — say hello.</div>}
         {grouped.map((m) => {
@@ -354,12 +380,16 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
             <div key={m.n} className={`chat-msg${own ? ' own' : ''}${forMe ? ' mentions-me' : ''}${m.startsGroup ? ' first' : ''}`}>
               {m.startsGroup && (
                 <div className="chat-msg-meta">
+                  {(() => {
+                    const av = avatarFor(gifs, m.author);
+                    return av ? <img className="chat-avatar" src={fileUrl(chat.ns, av.path)} alt="" loading="lazy" /> : null;
+                  })()}
                   <span className="chat-msg-author" style={{ color: `var(${colorForAuthor(m.author)})` }}>{m.author}</span>
                   {m.via && <span className="chat-msg-via">via {m.via}</span>}
                   <span className="chat-msg-time" title={m.time}>{formatChatTime(m.time)}</span>
                 </div>
               )}
-              <div className="chat-bubble" dangerouslySetInnerHTML={{ __html: renderMessage(m.text) }} />
+              <div className="chat-bubble" dangerouslySetInnerHTML={{ __html: renderMessage(m.text, chat.ns) }} />
             </div>
           );
         })}
@@ -367,6 +397,25 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
 
       {error && <div className="chat-error chat-room-error">{error}</div>}
 
+      {showGifs && (
+        <div className="chat-gifs" role="listbox" aria-label="React with an image">
+          {reactions(gifs).length === 0 ? (
+            <span className="chat-gifs-empty">
+              No reactions in {chat.ns}/ChatGifs yet. Agents can make them (see Connect an agent),
+              or add images to that folder.
+            </span>
+          ) : reactions(gifs).map((g) => (
+            <button
+              key={g.path}
+              className="chat-gif"
+              title={g.name}
+              onClick={() => { setShowGifs(false); send(gifMarkdown(g)); }}
+            >
+              <img src={fileUrl(chat.ns, g.path)} alt={g.name} loading="lazy" />
+            </button>
+          ))}
+        </div>
+      )}
       {suggestions.length > 0 && (
         <div className="chat-suggest" role="listbox" aria-label="Mention someone">
           {suggestions.map((n, i) => (
@@ -405,6 +454,13 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
           onKeyDown={onKeyDown}
           disabled={!doc}
         />
+        <button
+          className={`chat-btn chat-gif-toggle${showGifs ? ' active' : ''}`}
+          onClick={() => setShowGifs((v) => !v)}
+          disabled={!doc}
+          title="React with an image from ChatGifs"
+          aria-label="React with an image"
+        >GIF</button>
         <button className="chat-btn chat-btn-primary" onClick={send} disabled={!doc || sending || !draft.trim()}>
           Send
         </button>

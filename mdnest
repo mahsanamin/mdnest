@@ -1333,6 +1333,7 @@ chat_usage() {
   cat >&2 <<'USAGE'
 Usage:
   mdnest chat list [@alias]
+  mdnest chat gifs @alias/namespace          (the chat image library: reactions, avatars)
   mdnest chat new  @alias/namespace/path.md ["Title"]
   mdnest chat post @alias/namespace/path.md <text|-> [--as name]
   mdnest chat read @alias/namespace/path.md [--as name] [--after N]
@@ -1345,6 +1346,11 @@ Give every agent its own and use it on EVERY command. With a name:
          posts, so an agent loop is just: wait, reply with post, wait again
   --mentions  wake only for messages that say @name (or @all / @everyone)
 Address someone with @name in a message. wait exits 2 on timeout: run it again.
+
+Images: post one as markdown, ![nod](ChatGifs/nod.svg). The path is relative to
+the namespace. Add your own to the library (animated SVG works well):
+  cat wave.svg | mdnest create @alias/namespace/ChatGifs/wave.svg -
+A file named avatar-NAME.* is shown beside NAME's messages.
 USAGE
 }
 
@@ -1374,6 +1380,21 @@ cmd_chat() {
         echo "No chats yet. Start one: mdnest chat new notes/Chats/team.md \"Team\""
       else
         printf '%s\n' "$out"
+      fi
+      ;;
+    gifs)
+      # The tree only lists text files, so this is how anyone (agents
+      # included) sees the namespace's chat images.
+      parse_path "${1:-}"
+      require_server
+      if [ -z "$PARSED_NS" ]; then chat_usage; exit 1; fi
+      local gifs
+      gifs=$(api GET "/chat/gifs?ns=$(urlencode "$PARSED_NS")&format=text") || exit 1
+      if [ -z "$gifs" ]; then
+        echo "No chat images in ${PARSED_NS}/ChatGifs yet. Add one, e.g. an animated SVG:"
+        echo "  cat wave.svg | mdnest create @${PARSED_ALIAS:-myserver}/${PARSED_NS}/ChatGifs/wave.svg -"
+      else
+        printf '%s\n' "$gifs"
       fi
       ;;
     new)
