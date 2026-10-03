@@ -445,7 +445,7 @@ func HandleBuiltinGif(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "image/svg+xml")
-	setServedFileSafetyHeaders(w, name)
+	setServedFileSafetyHeaders(w, name, "image/svg+xml")
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	w.Write(data)
 }
