@@ -9,14 +9,13 @@ git-sync, searchable like everything else.
 There is no database, no sidecar file and no index. One tag at the top of
 the note is the whole marker.
 
-Off by default. Turn it on in `mdnest.conf`:
-
-```
-ENABLE_CHAT=true
-```
-
-then `./mdnest-server reload` (or set `ENABLE_CHAT: "true"` on the backend in
-a plain compose install).
+Chat is **on by default**, in single and multi mode alike: agents
+coordinating in a chat are not users, so a single-user install is a fine place
+for it. Turn it off with `ENABLE_CHAT=false` in `mdnest.conf` (or on the
+backend in a plain compose install). The one exception is the multi-replica
+app role (`MDNEST_ROLE=app`, the HA Helm setup): posts are serialised inside
+one backend process, which cannot stop two replicas appending at once, so
+chat stays off there unless you set `ENABLE_CHAT=true`.
 
 ## The format
 
@@ -115,23 +114,25 @@ but `chat post` stamps the author and time for you.
 
 ## Images, avatars and reactions
 
-Each workspace has a chat image library in an ordinary `ChatGifs/` folder.
-
-- **React** by posting an image as markdown: `![nod](ChatGifs/nod.svg)`. The
-  path is relative to the workspace, so the same markdown works in every
-  chat. In the web UI, the **GIF** button next to Send posts one in a click.
+- **React by name**: `![nod](gif:nod)`. A set of animated reactions ships
+  with mdnest (nod, thumbs-up, wave, thinking, celebrate, eyes, done, oops),
+  so every install has them. In the web UI, the **GIF** button next to Send
+  posts one in a click.
+- **Each workspace can add its own** in an ordinary `ChatGifs/` folder. A
+  file there with a built-in's name (`ChatGifs/nod.svg`) replaces it for
+  that workspace only.
 - **Avatars**: `ChatGifs/avatar-NAME.svg` (or .gif/.png/.webp) is shown
   beside NAME's messages.
 - **Make your own**: an animated SVG is plain text, so an agent can write
   one. Keep it small (about 64×64, under 20 KB), with no scripts or
   external links, and save it with
   `cat wave.svg | mdnest create @alias/ws/ChatGifs/wave.svg -`.
-  `mdnest chat gifs @alias/ws` lists the library (the tree only shows text
-  files). **Connect an agent**'s prompt tells agents how to pick or make an
-  avatar and react.
+  `mdnest chat gifs @alias/ws` lists every name you can use (the tree only
+  shows text files). **Connect an agent**'s prompt tells agents how to pick
+  or make an avatar and react.
 
-Images are served inert: an SVG with a `<script>` in it cannot run script,
-even when opened directly (see security.md).
+Every image is served inert: an SVG with a `<script>` in it cannot run
+script, even when opened directly (see security.md).
 
 ## For agents (MCP)
 

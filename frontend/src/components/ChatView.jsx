@@ -7,7 +7,7 @@ import {
   CHAT_POLL_MS, CHAT_LIST_POLL_MS, DEFAULT_CHAT_FOLDER, chatPathFor, colorForAuthor,
   isOwnMessage, groupMessages, mergeMessages, formatChatTime, agentInstructions, plainPreview,
   highlightMentions, mentionsName, participants, mentionQuery, completeMention,
-  avatarFor, reactions, gifMarkdown,
+  avatarFor, reactions, gifMarkdown, expandGifRefs,
 } from '../chat.js';
 import { copyPlainText } from '../mermaid-text.js';
 import './ChatView.css';
@@ -28,8 +28,12 @@ const md = new Marked({ gfm: true, breaks: true });
 // reaches a foreign host.
 const fileBase = (ns) => `/api/files/${encodeURIComponent(ns)}/`;
 const fileUrl = (ns, p) => resolveImgSrc(p, fileBase(ns), getToken());
-function renderMessage(text, ns) {
-  const html = sanitizeHtml(md.parse(highlightMentions(text || '')));
+// A listed image's URL: built-ins come from their own public route (an
+// absolute path, which resolveImgSrc leaves alone, so no token is attached).
+const gifUrl = (ns, g) => (g.scope === 'builtin' ? g.path : fileUrl(ns, g.path));
+function renderMessage(text, ns, gifs) {
+  const withGifs = expandGifRefs(text || '', gifs, (g) => gifUrl(ns, g));
+  const html = sanitizeHtml(md.parse(highlightMentions(withGifs)));
   if (!ns || !html.includes('<img')) return html;
   const tpl = document.createElement('template');
   tpl.innerHTML = html;
@@ -370,7 +374,7 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
       )}
 
       <div className="chat-messages" ref={scrollRef} onScroll={onScroll}>
-        {doc?.description && <div className="chat-description" dangerouslySetInnerHTML={{ __html: renderMessage(doc.description, chat.ns) }} />}
+        {doc?.description && <div className="chat-description" dangerouslySetInnerHTML={{ __html: renderMessage(doc.description, chat.ns, gifs) }} />}
         {!doc && !error && <div className="chat-empty">Loading…</div>}
         {doc && messages.length === 0 && <div className="chat-empty">No messages yet — say hello.</div>}
         {grouped.map((m) => {
@@ -382,14 +386,14 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
                 <div className="chat-msg-meta">
                   {(() => {
                     const av = avatarFor(gifs, m.author);
-                    return av ? <img className="chat-avatar" src={fileUrl(chat.ns, av.path)} alt="" loading="lazy" /> : null;
+                    return av ? <img className="chat-avatar" src={gifUrl(chat.ns, av)} alt="" loading="lazy" /> : null;
                   })()}
                   <span className="chat-msg-author" style={{ color: `var(${colorForAuthor(m.author)})` }}>{m.author}</span>
                   {m.via && <span className="chat-msg-via">via {m.via}</span>}
                   <span className="chat-msg-time" title={m.time}>{formatChatTime(m.time)}</span>
                 </div>
               )}
-              <div className="chat-bubble" dangerouslySetInnerHTML={{ __html: renderMessage(m.text, chat.ns) }} />
+              <div className="chat-bubble" dangerouslySetInnerHTML={{ __html: renderMessage(m.text, chat.ns, gifs) }} />
             </div>
           );
         })}
@@ -401,17 +405,17 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
         <div className="chat-gifs" role="listbox" aria-label="React with an image">
           {reactions(gifs).length === 0 ? (
             <span className="chat-gifs-empty">
-              No reactions in {chat.ns}/ChatGifs yet. Agents can make them (see Connect an agent),
-              or add images to that folder.
+              No images available. Add some to {chat.ns}/ChatGifs, or ask an agent to make one
+              (see Connect an agent).
             </span>
           ) : reactions(gifs).map((g) => (
             <button
               key={g.path}
               className="chat-gif"
-              title={g.name}
+              title={g.scope === 'workspace' ? `${g.name} (this workspace)` : g.name}
               onClick={() => { setShowGifs(false); send(gifMarkdown(g)); }}
             >
-              <img src={fileUrl(chat.ns, g.path)} alt={g.name} loading="lazy" />
+              <img src={gifUrl(chat.ns, g)} alt={g.name} loading="lazy" />
             </button>
           ))}
         </div>

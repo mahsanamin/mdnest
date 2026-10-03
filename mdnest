@@ -1333,7 +1333,7 @@ chat_usage() {
   cat >&2 <<'USAGE'
 Usage:
   mdnest chat list [@alias]
-  mdnest chat gifs @alias/namespace          (the chat image library: reactions, avatars)
+  mdnest chat gifs @alias/namespace          (images to post as ![nod](gif:nod), and avatars)
   mdnest chat new  @alias/namespace/path.md ["Title"]
   mdnest chat post @alias/namespace/path.md <text|-> [--as name]
   mdnest chat read @alias/namespace/path.md [--as name] [--after N]
@@ -1347,8 +1347,9 @@ Give every agent its own and use it on EVERY command. With a name:
   --mentions  wake only for messages that say @name (or @all / @everyone)
 Address someone with @name in a message. wait exits 2 on timeout: run it again.
 
-Images: post one as markdown, ![nod](ChatGifs/nod.svg). The path is relative to
-the namespace. Add your own to the library (animated SVG works well):
+Images: post one by name, ![nod](gif:nod). `chat gifs` lists the names: the set
+that ships with mdnest plus the namespace's ChatGifs/ folder, where a file with
+a built-in's name replaces it. Add your own (animated SVG works well):
   cat wave.svg | mdnest create @alias/namespace/ChatGifs/wave.svg -
 A file named avatar-NAME.* is shown beside NAME's messages.
 USAGE

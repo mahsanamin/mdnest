@@ -433,10 +433,12 @@ func main() {
 	// ENABLE_EXCALIDRAW opens .excalidraw.md files in the drawing editor. Off by
 	// default so an operator who just wants notes carries none of its chunk.
 	enableExcalidraw := env("ENABLE_EXCALIDRAW", "false") == "true"
-	// ENABLE_CHAT turns a note tagged `mdnest-chat: true` into a chat channel
-	// that humans and agents append to. Off by default; when off the /api/chat*
-	// routes are never registered and the frontend never loads the chat chunk.
-	enableChat := env("ENABLE_CHAT", "false") == "true"
+	// Chat: a note tagged `mdnest-chat: true` is a channel people and agents
+	// append to. On by default (single and multi mode alike), ENABLE_CHAT=false
+	// turns it off, and the multi-replica app role keeps it off unless set
+	// to true; see handlers.ChatEnabled. When off, the /api/chat* routes are
+	// never registered and the frontend never loads the chat chunk.
+	enableChat := handlers.ChatEnabled(env("ENABLE_CHAT", ""), env("MDNEST_ROLE", "single"))
 
 	// Live collaboration hub (optional, multi mode only)
 	enableCollab := multiMode && env("ENABLE_LIVE_COLLAB", "false") == "true"
@@ -780,6 +782,7 @@ func main() {
 			// The chat image library: any access to the namespace may list it;
 			// each image is still read-checked when /api/files serves it.
 			mux.Handle("/api/chat/gifs", authMiddleware.Wrap(perms.RequireNsAccess(http.HandlerFunc(chatHandler.HandleGifs))))
+			mux.HandleFunc(handlers.BuiltinGifRoute, handlers.HandleBuiltinGif)
 		}
 		mux.Handle("/api/files/", authMiddleware.Wrap(http.HandlerFunc(uploadHandler.HandleServeFile))) // files endpoint extracts ns from URL, handled differently
 	} else {
@@ -807,6 +810,7 @@ func main() {
 			mux.Handle("/api/chat/convert", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(chatHandler.HandleConvert))))
 			mux.Handle("/api/chats", authMiddleware.Wrap(http.HandlerFunc(chatHandler.HandleList)))
 			mux.Handle("/api/chat/gifs", authMiddleware.Wrap(http.HandlerFunc(chatHandler.HandleGifs)))
+			mux.HandleFunc(handlers.BuiltinGifRoute, handlers.HandleBuiltinGif)
 		}
 		mux.Handle("/api/files/", authMiddleware.Wrap(http.HandlerFunc(uploadHandler.HandleServeFile)))
 	}

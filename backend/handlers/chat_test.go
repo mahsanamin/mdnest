@@ -408,25 +408,79 @@ func TestChatReadMentionFilter(t *testing.T) {
 	}
 }
 
-func TestChatGifsListsImagesAndAvatars(t *testing.T) {
+func TestChatGifsMergesWorkspaceAndBuiltins(t *testing.T) {
 	h, root := newChatTestHandler(t)
 	dir := filepath.Join(root, "work", "ChatGifs")
 	os.MkdirAll(dir, 0o755)
-	for _, f := range []string{"nod.svg", "avatar-codxu.gif", "notes.md", ".hidden.svg"} {
+	for _, f := range []string{"nod.svg", "avatar-codxu.gif", "party.svg", "notes.md", ".hidden.svg"} {
 		os.WriteFile(filepath.Join(dir, f), []byte("x"), 0o644)
 	}
 	w := chatDo(t, h.HandleGifs, http.MethodGet, "/api/chat/gifs?ns=work", "", nil)
 	var resp struct{ Gifs []ChatGif }
 	json.Unmarshal(w.Body.Bytes(), &resp)
-	if len(resp.Gifs) != 2 {
-		t.Fatalf("want 2 images (not the .md, not the dotfile), got %+v", resp.Gifs)
+	byName := map[string]ChatGif{}
+	for _, g := range resp.Gifs {
+		if _, dup := byName[g.Name]; dup {
+			t.Fatalf("%q listed twice; a workspace file must REPLACE the built-in: %+v", g.Name, resp.Gifs)
+		}
+		byName[g.Name] = g
 	}
-	if resp.Gifs[0].Path != "ChatGifs/avatar-codxu.gif" || resp.Gifs[0].Avatar != "codxu" || resp.Gifs[1].Name != "nod" {
-		t.Fatalf("unexpected listing: %+v", resp.Gifs)
+	if g := byName["nod"]; g.Scope != "workspace" || g.Path != "ChatGifs/nod.svg" {
+		t.Fatalf("the workspace nod should override the built-in: %+v", g)
 	}
-	// A namespace with no library is an empty list, not an error.
+	if g := byName["done"]; g.Scope != "builtin" || g.Path != BuiltinGifRoute+"done.svg" {
+		t.Fatalf("built-ins must be listed: %+v", g)
+	}
+	if g := byName["avatar-codxu"]; g.Avatar != "codxu" {
+		t.Fatalf("avatar not recognised: %+v", g)
+	}
+	if _, ok := byName["notes"]; ok {
+		t.Fatal("non-image files must not be listed")
+	}
+	if _, ok := byName[".hidden"]; ok {
+		t.Fatal("dotfiles must not be listed")
+	}
+	// A namespace with no folder still gets the built-ins.
 	os.MkdirAll(filepath.Join(root, "other"), 0o755)
-	if w := chatDo(t, h.HandleGifs, http.MethodGet, "/api/chat/gifs?ns=other", "", nil); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"gifs":[]`) {
-		t.Fatalf("empty library should be 200 with []: %d %s", w.Code, w.Body)
+	w = chatDo(t, h.HandleGifs, http.MethodGet, "/api/chat/gifs?ns=other", "", nil)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"scope":"builtin"`) {
+		t.Fatalf("an empty namespace should still list the built-ins: %d %s", w.Code, w.Body)
+	}
+}
+
+func TestBuiltinGifIsServedInert(t *testing.T) {
+	rec := httptest.NewRecorder()
+	HandleBuiltinGif(rec, httptest.NewRequest(http.MethodGet, BuiltinGifRoute+"nod.svg", nil))
+	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "image/svg+xml" {
+		t.Fatalf("status %d type %q", rec.Code, rec.Header().Get("Content-Type"))
+	}
+	if !strings.Contains(rec.Header().Get("Content-Security-Policy"), "sandbox") || rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("built-in SVG must carry the sandbox CSP and nosniff: %v", rec.Header())
+	}
+	for _, bad := range []string{"../chat.go", "missing.svg", ""} {
+		rec := httptest.NewRecorder()
+		HandleBuiltinGif(rec, httptest.NewRequest(http.MethodGet, BuiltinGifRoute+bad, nil))
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%q: want 404, got %d", bad, rec.Code)
+		}
+	}
+}
+
+func TestChatEnabledDefaults(t *testing.T) {
+	for _, tc := range []struct {
+		setting, role string
+		want          bool
+	}{
+		{"", "single", true},  // on by default, single mode included
+		{"", "writer", true},  // the writer is a single process
+		{"", "app", false},    // replicas: the per-process lock cannot help
+		{"true", "app", true}, // an operator may opt in
+		{"false", "single", false},
+		{"FALSE", "single", false},
+		{"nonsense", "single", true},
+	} {
+		if got := ChatEnabled(tc.setting, tc.role); got != tc.want {
+			t.Errorf("ChatEnabled(%q, %q) = %v, want %v", tc.setting, tc.role, got, tc.want)
+		}
 	}
 }

@@ -3,7 +3,7 @@ import {
   slugify, chatPathFor, colorForAuthor, AUTHOR_COLORS, isOwnMessage,
   groupMessages, mergeMessages, agentInstructions, plainPreview, shellQuote, isChatDoc,
   mentionsName, highlightMentions, participants, mentionQuery, completeMention,
-  avatarFor, reactions, gifMarkdown,
+  avatarFor, reactions, gifMarkdown, expandGifRefs,
 } from '../chat.js';
 
 describe('chat naming', () => {
@@ -149,13 +149,31 @@ describe('chat images', () => {
     expect(avatarFor(gifs, 'CodXu').path).toBe('ChatGifs/avatar-codxu.svg');
     expect(avatarFor(gifs, 'codu')).toBe(null);
     expect(reactions(gifs).map((g) => g.name)).toEqual(['nod']);
-    expect(gifMarkdown(gifs[1])).toBe('![nod](ChatGifs/nod.svg)');
+    expect(gifMarkdown(gifs[1])).toBe('![nod](gif:nod)');
   });
   it('the agent prompt explains avatars and reactions, still with no angle brackets', () => {
     const s = agentInstructions('mini', 'notes', 'Chats/team.md', 'codxu');
     expect(s).not.toMatch(/[<>]/);
     expect(s).toContain('mdnest chat gifs @mini/notes');
     expect(s).toContain('cat avatar.svg | mdnest create @mini/notes/ChatGifs/avatar-codxu.svg -');
-    expect(s).toContain('![nod](ChatGifs/nod.svg)');
+    expect(s).toContain('![nod](gif:nod)');
+  });
+});
+
+describe('gif: references', () => {
+  const gifs = [
+    { name: 'nod', path: 'ChatGifs/nod.svg', scope: 'workspace' },
+    { name: 'done', path: '/api/chat/gifs/builtin/done.svg', scope: 'builtin' },
+  ];
+  const urlFor = (g) => (g.scope === 'builtin' ? g.path : `/api/files/ns/${g.path}`);
+  it('resolves by name (the server list already applies workspace-over-builtin)', () => {
+    expect(expandGifRefs('ok ![nod](gif:nod) and ![x](gif:DONE)', gifs, urlFor))
+      .toBe('ok ![nod](/api/files/ns/ChatGifs/nod.svg) and ![x](/api/chat/gifs/builtin/done.svg)');
+  });
+  it('an unknown name reads as text, not a broken image', () => {
+    expect(expandGifRefs('![x](gif:nope)', gifs, urlFor)).toBe('`:nope:`');
+  });
+  it('leaves ordinary images and links alone', () => {
+    expect(expandGifRefs('![a](ChatGifs/a.svg) [gif:link](x)', gifs, urlFor)).toBe('![a](ChatGifs/a.svg) [gif:link](x)');
   });
 });

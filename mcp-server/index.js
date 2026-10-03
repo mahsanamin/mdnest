@@ -699,7 +699,7 @@ if (features.chat) server.tool(
 
 if (features.chat) server.tool(
   "list_chat_gifs",
-  "List a namespace's chat images (ChatGifs/): reactions to post as ![name](ChatGifs/name.svg), and avatar-NAME files shown beside NAME's messages. Add new ones with create_note at ChatGifs/<name>.svg (an animated SVG works well).",
+  "List the images a chat in this namespace can use: the set that ships with mdnest plus the namespace's ChatGifs/ folder (a file there with a built-in's name replaces it). Post one by name as ![nod](gif:nod). avatar-NAME files are shown beside NAME's messages. Add new ones with create_note at ChatGifs/<name>.svg (an animated SVG works well).",
   { namespace: z.string().describe("Namespace name") },
   async ({ namespace }) => {
     try {

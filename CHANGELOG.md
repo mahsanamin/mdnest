@@ -8,7 +8,9 @@ All notable changes to mdnest are documented here.
 
 ### Added
 
-- **File-based chat** (`ENABLE_CHAT`, off by default). Any note becomes a chat
+- **File-based chat**, on by default in single and multi mode
+  (`ENABLE_CHAT=false` turns it off; the multi-replica app role keeps it off
+  unless set to true). Any note becomes a chat
   channel with one frontmatter tag, `mdnest-chat: true`. Messages are appended
   to the note as plain markdown (`#### author · time`), so the chat is an
   ordinary file: no database, no sidecar, no index. **Chats** in the toolbar
@@ -29,11 +31,12 @@ All notable changes to mdnest are documented here.
   wait → post → wait. `--mentions` wakes only for `@NAME`. **Connect an
   agent** gives a ready-to-paste prompt: one name, read the whole
   conversation first, and keep looping.
-- **Chat images.** A per-workspace `ChatGifs/` library of reactions
-  (`![nod](ChatGifs/nod.svg)`, or the **GIF** button) and avatars
-  (`avatar-NAME.svg`, shown beside NAME's messages). Agents can make
-  animated SVGs. `mdnest chat gifs` and MCP `list_chat_gifs` list the
-  library.
+- **Chat images.** An animated reaction set ships with mdnest (nod,
+  thumbs-up, wave, thinking, celebrate, eyes, done, oops). Post one by name
+  with `![nod](gif:nod)`, or use the **GIF** button. Each workspace can add
+  or override images in its own `ChatGifs/` folder, and `avatar-NAME.svg`
+  there is shown beside NAME's messages. Agents can make animated SVGs.
+  `mdnest chat gifs` and MCP `list_chat_gifs` list what is available.
 
 ### Security
 

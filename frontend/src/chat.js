@@ -127,10 +127,23 @@ export function shellQuote(word) {
   return `'${w.replace(/'/g, `'\\''`)}'`;
 }
 
-// --- chat images (ChatGifs/) ---------------------------------------------
-// An image in a chat message is namespace-relative ("ChatGifs/nod.svg"),
-// not relative to the chat note, so the same markdown works in every chat.
+// --- chat images -----------------------------------------------------------
+// A message names an image with ![nod](gif:nod). The list the server returns
+// (/api/chat/gifs) already applies the precedence: the workspace's own
+// ChatGifs/nod.* first, otherwise the built-in that ships with mdnest. A
+// namespace-relative path (![x](ChatGifs/x.svg)) also still works.
 export const CHAT_GIF_DIR = 'ChatGifs';
+
+// expandGifRefs rewrites ](gif:NAME) to ](URL) before the markdown is
+// rendered (DOMPurify would drop an unknown "gif:" scheme), using urlFor to
+// turn a listed image into a URL. An unknown name becomes plain text, so a
+// typo reads as a typo rather than a broken image.
+export function expandGifRefs(text, gifs, urlFor) {
+  return String(text || '').replace(/!\[([^\]]*)\]\(gif:([\w.-]+)\)/g, (all, alt, name) => {
+    const g = (gifs || []).find((x) => x.name.toLowerCase() === name.toLowerCase());
+    return g ? `![${alt}](${urlFor(g)})` : `\`:${name}:\``;
+  });
+}
 
 // avatarFor finds the poster's avatar-NAME.* in the library (case-insensitive).
 export function avatarFor(gifs, author) {
@@ -145,7 +158,7 @@ export function reactions(gifs) {
 }
 
 export function gifMarkdown(g) {
-  return `![${g.name}](${g.path})`;
+  return `![${g.name}](gif:${g.name})`;
 }
 
 // --- @mentions ---------------------------------------------------------
@@ -243,14 +256,15 @@ export function agentInstructions(alias, ns, path, name = 'AGENT_NAME') {
     `   Lost the thread? Re-read everything with: mdnest chat read ${target}`,
     '   (without --as, so your place in the chat does not move).',
     '',
-    `Your look (optional, but it helps people tell agents apart). The shared image library is`,
-    `${nsTarget}/${CHAT_GIF_DIR}:  mdnest chat gifs ${nsTarget}`,
+    `Your look (optional, but it helps people tell agents apart). See every image you can use`,
+    `(the set that ships with mdnest, plus this workspace's ${CHAT_GIF_DIR}/):  mdnest chat gifs ${nsTarget}`,
     `- If there is no avatar-${name}.* yet, make one: a small animated SVG (about 64x64, under`,
     '  20 KB, shapes plus SVG animate elements or CSS animation, no scripts, no external links)',
     '  that suits your role, write it to avatar.svg, and save it:',
     `  cat avatar.svg | mdnest create ${nsTarget}/${CHAT_GIF_DIR}/avatar-${name}.svg -`,
-    `- React with any image from the library: mdnest chat post ${target} "![nod](${CHAT_GIF_DIR}/nod.svg)" --as ${as}`,
-    `- Made a reaction worth reusing? Save it to ${CHAT_GIF_DIR}/ under a short name so everyone can use it.`,
+    `- React by name: mdnest chat post ${target} "![nod](gif:nod)" --as ${as}`,
+    `- Made a reaction worth reusing? Save it to ${CHAT_GIF_DIR}/ under a short name so everyone`,
+    '  in this workspace can use it. The same name as a built-in replaces it here.',
     '',
     'Address people with @name. Post a short "on it: ..." before long work, then the result.',
   ].join('\n');

@@ -1593,10 +1593,10 @@ Replace the board configuration.
 
 ---
 
-## Chat *(ENABLE_CHAT)*
+## Chat
 
 A chat is a note whose frontmatter contains `mdnest-chat: true`. The routes
-exist only when `ENABLE_CHAT=true`. Format and behaviour: [chat.md](chat.md).
+are on by default and absent when `ENABLE_CHAT=false`. Format and behaviour: [chat.md](chat.md).
 
 ### GET /api/chat?ns=&path=[&after=N][&exclude=name][&mention=name][&format=text]
 
@@ -1636,11 +1636,22 @@ description. Converting a chat again changes nothing.
 
 ### GET /api/chat/gifs?ns=[&format=text]
 
-The namespace's chat images in `ChatGifs/` (gif, svg, png, webp, jpg):
-`{"gifs":[{"name":"nod","path":"ChatGifs/nod.svg"},{"name":"avatar-codxu","path":"ChatGifs/avatar-codxu.svg","avatar":"codxu"}]}`.
+Every image a chat in the namespace can use, which a message names with
+`![nod](gif:nod)`. It returns the namespace's own `ChatGifs/` files first
+(gif, svg, png, webp, jpg), then each built-in the namespace does not
+override by name:
+`{"gifs":[{"name":"nod","path":"ChatGifs/nod.svg","scope":"workspace"},{"name":"avatar-codxu","path":"ChatGifs/avatar-codxu.svg","scope":"workspace","avatar":"codxu"},{"name":"done","path":"/api/chat/gifs/builtin/done.svg","scope":"builtin"}]}`.
 A file named `avatar-NAME.*` is that poster's avatar. Any access to the
-namespace may list it, and each image is read-checked when `/api/files/`
-serves it. The tree lists only text files, which is why this endpoint exists.
+namespace may list it, and each workspace image is read-checked when
+`/api/files/` serves it. The tree lists only text files, which is why this
+endpoint exists.
+
+### GET /api/chat/gifs/builtin/{name}.svg
+
+The animated set that ships with mdnest, embedded in the binary. It is public
+(generic artwork, no user data; an `<img>` cannot send credentials), is
+served with the same sandboxing CSP and `nosniff` as other active files, and
+is cacheable.
 
 ### GET /api/chats[?ns=][&format=text]
 

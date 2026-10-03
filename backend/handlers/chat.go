@@ -2,10 +2,12 @@ package handlers
 
 import (
 	"context"
+	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"path"
 	"sort"
@@ -310,23 +312,47 @@ func (h *ChatHandler) notify(r *http.Request, ns, relPath, content string) {
 	h.hub.BroadcastFileChanged(ns, relPath, userID, username, contentETag([]byte(canonicalForETag(clean))), "", "")
 }
 
-// ChatGifDir is the per-namespace folder of chat images: reactions anyone can
-// post (![nod](ChatGifs/nod.svg)) and avatars (avatar-NAME.svg) shown beside
-// a poster's messages. An ordinary folder on purpose: people see and manage
-// it in the tree and agents add to it with `mdnest create`.
+// Chat images come from two places, and a message names one with
+// ![nod](gif:nod):
+//   - the built-in set, embedded in the binary (chatgifs/*.svg), so every
+//     install has reactions with no setup;
+//   - the namespace's ChatGifDir, an ordinary folder people manage in the
+//     tree and agents add to with `mdnest create`. A file there with the
+//     same name as a built-in overrides it, for that namespace only.
+//
+// avatar-NAME.* (in the namespace folder) is shown beside NAME's messages.
 const ChatGifDir = "ChatGifs"
+
+// BuiltinGifRoute serves the embedded set. It is public on purpose: generic
+// artwork, no user data, and an <img> cannot send an Authorization header.
+const BuiltinGifRoute = "/api/chat/gifs/builtin/"
+
+//go:embed chatgifs/*.svg
+var builtinGifFS embed.FS
 
 var chatGifExts = map[string]bool{".gif": true, ".svg": true, ".png": true, ".webp": true, ".jpg": true, ".jpeg": true}
 
-// ChatGif is one image in the namespace's ChatGifDir.
+// ChatGif is one image a chat message can use.
 type ChatGif struct {
-	Name   string `json:"name"`             // file name without extension, e.g. "nod" or "avatar-codxu"
-	Path   string `json:"path"`             // namespace-relative, e.g. "ChatGifs/nod.svg"
+	Name   string `json:"name"`             // what gif:NAME refers to, e.g. "nod" or "avatar-codxu"
+	Path   string `json:"path"`             // namespace-relative ("ChatGifs/nod.svg") or, for a built-in, the absolute route
+	Scope  string `json:"scope"`            // "workspace" or "builtin"
 	Avatar string `json:"avatar,omitempty"` // set for avatar-NAME files: the poster it belongs to
 }
 
-// HandleGifs lists the namespace's chat images. The tree only shows text
-// files, so without this neither the UI nor an agent could see the library.
+func builtinGifs() []ChatGif {
+	entries, _ := fs.ReadDir(builtinGifFS, "chatgifs")
+	out := make([]ChatGif, 0, len(entries))
+	for _, e := range entries {
+		name := strings.TrimSuffix(e.Name(), path.Ext(e.Name()))
+		out = append(out, ChatGif{Name: name, Path: BuiltinGifRoute + e.Name(), Scope: "builtin"})
+	}
+	return out
+}
+
+// HandleGifs lists every image a chat in this namespace can use: the
+// namespace's own, then the built-ins it does not override. The tree shows
+// only text files, so without this neither the UI nor an agent could see them.
 func (h *ChatHandler) HandleGifs(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		chatJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -337,6 +363,7 @@ func (h *ChatHandler) HandleGifs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	gifs := []ChatGif{}
+	have := map[string]bool{}
 	entries, err := h.store.ReadDir(r.Context(), ns, ChatGifDir)
 	if err != nil && !errors.Is(err, storage.ErrNotExist) {
 		chatJSONError(w, http.StatusInternalServerError, "failed to list chat gifs")
@@ -348,21 +375,28 @@ func (h *ChatHandler) HandleGifs(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		name := strings.TrimSuffix(e.Name, path.Ext(e.Name))
-		g := ChatGif{Name: name, Path: ChatGifDir + "/" + e.Name}
+		g := ChatGif{Name: name, Path: ChatGifDir + "/" + e.Name, Scope: "workspace"}
 		if strings.HasPrefix(strings.ToLower(name), "avatar-") {
 			g.Avatar = name[len("avatar-"):]
 		}
 		gifs = append(gifs, g)
+		have[strings.ToLower(name)] = true
 	}
 	sort.Slice(gifs, func(i, j int) bool { return gifs[i].Path < gifs[j].Path })
+	for _, g := range builtinGifs() {
+		if !have[strings.ToLower(g.Name)] {
+			gifs = append(gifs, g)
+		}
+	}
 	if r.URL.Query().Get("format") == "text" {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		var b strings.Builder
 		for _, g := range gifs {
-			if g.Avatar != "" {
-				fmt.Fprintf(&b, "%s\tavatar of %s\n", g.Path, g.Avatar)
-			} else {
-				fmt.Fprintf(&b, "%s\t![%s](%s)\n", g.Path, g.Name, g.Path)
+			switch {
+			case g.Avatar != "":
+				fmt.Fprintf(&b, "avatar of %s\t%s (%s)\n", g.Avatar, g.Path, g.Scope)
+			default:
+				fmt.Fprintf(&b, "![%s](gif:%s)\t%s\n", g.Name, g.Name, g.Scope)
 			}
 		}
 		io.WriteString(w, b.String())
@@ -370,6 +404,44 @@ func (h *ChatHandler) HandleGifs(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"gifs": gifs})
+}
+
+// HandleBuiltinGif serves one embedded image, inert and cacheable.
+func HandleBuiltinGif(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		chatJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	name := path.Base(strings.TrimPrefix(r.URL.Path, BuiltinGifRoute))
+	if name == "" || name == "." || name == "/" || strings.Contains(name, "..") {
+		http.NotFound(w, r)
+		return
+	}
+	data, err := builtinGifFS.ReadFile("chatgifs/" + name)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "image/svg+xml")
+	setServedFileSafetyHeaders(w, name)
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Write(data)
+}
+
+// ChatEnabled decides ENABLE_CHAT. Chat is on by default: it is a note plus
+// a handful of endpoints, and agents coordinating in a chat are not users,
+// so it is as useful in single mode as in multi. "false" turns it off. The
+// exception is the multi-replica app role (MDNEST_ROLE=app): posts are
+// serialised by a per-process lock, which cannot stop two replicas
+// appending at once, so there it stays off unless the operator opts in.
+func ChatEnabled(setting, role string) bool {
+	switch strings.ToLower(strings.TrimSpace(setting)) {
+	case "true", "1", "yes", "on":
+		return true
+	case "false", "0", "no", "off":
+		return false
+	}
+	return role != "app"
 }
 
 // HandleConvert makes a note a chat, creating it when it does not exist —

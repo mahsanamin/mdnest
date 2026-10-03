@@ -52,10 +52,18 @@ fi
 rm -rf "$sb"
 
 sb="$(generate 'ENABLE_TASK_BOARD=false')"
-if grep -qx 'ENABLE_CHAT=false' "$sb/.env" 2>/dev/null; then
-  ok "unset ENABLE_CHAT is written as false (off by default)"
+if grep -qx 'ENABLE_CHAT=true' "$sb/.env" 2>/dev/null; then
+  ok "unset ENABLE_CHAT is written as true (on by default)"
 else
-  bad "unset ENABLE_CHAT is written as false (off by default)" "got: $(grep '^ENABLE_CHAT=' "$sb/.env" 2>/dev/null || echo '<no ENABLE_CHAT line>')"
+  bad "unset ENABLE_CHAT is written as true (on by default)" "got: $(grep '^ENABLE_CHAT=' "$sb/.env" 2>/dev/null || echo '<no ENABLE_CHAT line>')"
+fi
+rm -rf "$sb"
+
+sb="$(generate 'ENABLE_CHAT=false')"
+if grep -qx 'ENABLE_CHAT=false' "$sb/.env" 2>/dev/null; then
+  ok "ENABLE_CHAT=false (the off switch) reaches .env"
+else
+  bad "ENABLE_CHAT=false (the off switch) reaches .env" "got: $(grep '^ENABLE_CHAT=' "$sb/.env" 2>/dev/null || echo '<no ENABLE_CHAT line>')"
 fi
 rm -rf "$sb"
 
