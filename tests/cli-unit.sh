@@ -415,6 +415,8 @@ run_transfer_suite() {
   eq "disposition: encoded folder" "bashrc"      "$(disposition_filename "attachment; filename*=UTF-8''..%2F.bashrc" x)"
   eq "disposition: no dotfile"    "hidden"       "$(disposition_filename 'attachment; filename=".hidden"' x)"
   eq "disposition: missing"       "fallback.md"  "$(disposition_filename '' fallback.md)"
+  eq "disposition: no leading dash" "target-directory=x" "$(disposition_filename "attachment; filename*=UTF-8''--target-directory%3Dx" x)"
+  eq "disposition: no control chars" "ab.md"     "$(disposition_filename "attachment; filename*=UTF-8''a%1Bb.md" x)"
 }
 
 run_errexit_lint() {

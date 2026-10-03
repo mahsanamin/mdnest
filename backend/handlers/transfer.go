@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"path"
+	"sort"
 	"strings"
 
 	"github.com/mdnest/mdnest/backend/middleware"
@@ -44,13 +46,21 @@ type TransferHandler struct {
 	// writer, which owns the durable tree (an app replica's working set holds
 	// neither attachments nor bodies over the cache cap).
 	writerProxy http.Handler
+	// slots bounds concurrent real transfers like zip downloads: one per user
+	// and DOWNLOAD_MAX_CONCURRENT in all. A dry run takes none, so the
+	// picker's checks can never starve a transfer.
+	slots *downloadSlots
 }
 
 // NewTransferHandler builds the handler. canRead and canWrite take a
 // namespace and an absolute path ("/a/b.md") like PermissionChecker.CheckRead.
 func NewTransferHandler(store storage.Storage, limits TreeLimits, canRead, canWrite func(r *http.Request, ns, path string) bool, onChange func(ns string)) *TransferHandler {
-	return &TransferHandler{store: store, limits: limits, canRead: canRead, canWrite: canWrite, onChange: onChange}
+	return &TransferHandler{store: store, limits: limits, canRead: canRead, canWrite: canWrite, onChange: onChange, slots: newDownloadSlots(2)}
 }
+
+// SetConcurrency sets the server-wide cap on concurrent transfers
+// (DOWNLOAD_MAX_CONCURRENT).
+func (h *TransferHandler) SetConcurrency(n int) { h.slots = newDownloadSlots(n) }
 
 // SetWriterProxy makes transfers reverse-proxy to the writer (MDNEST_ROLE=app).
 func (h *TransferHandler) SetWriterProxy(p http.Handler) { h.writerProxy = p }
@@ -94,6 +104,15 @@ func (h *TransferHandler) HandleTransfer(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	dryRun := r.URL.Query().Get("dryRun") == "1"
+	if !dryRun {
+		release, err := h.slots.acquire(slotKey(r))
+		if err != nil {
+			w.Header().Set("Retry-After", zipRetryAfter)
+			writeStatusJSON(w, http.StatusTooManyRequests, map[string]string{"error": "busy"})
+			return
+		}
+		defer release()
+	}
 
 	ctx := r.Context()
 	t, terr := h.prepare(ctx, r, req)
@@ -232,7 +251,7 @@ func (h *TransferHandler) prepare(ctx context.Context, r *http.Request, req tran
 	if !t.isDir {
 		t.plan = &treePlan{entries: []treeEntry{{rel: t.from, size: info.Size, mod: info.ModTime}}, files: 1, bytes: info.Size}
 	} else {
-		plan, err := planTree(ctx, h.store, t.fromNS, t.from)
+		plan, err := planTree(ctx, h.store, t.fromNS, t.from, h.limits)
 		if err != nil {
 			return nil, refuse(http.StatusInternalServerError, "failed to read source")
 		}
@@ -243,10 +262,7 @@ func (h *TransferHandler) prepare(ctx context.Context, r *http.Request, req tran
 		return nil, terr
 	}
 	if t.plan.tooLarge(h.limits) {
-		return nil, &transferError{status: http.StatusRequestEntityTooLarge, body: map[string]any{
-			"error": "too_large", "files": t.plan.files, "bytes": t.plan.bytes,
-			"maxFiles": h.limits.MaxFiles, "maxBytes": h.limits.MaxBytes,
-		}}
+		return nil, &transferError{status: http.StatusRequestEntityTooLarge, body: tooLargeBody(t.plan, h.limits)}
 	}
 	// A move deletes the source tree afterwards, so anything the copy would
 	// leave behind (a symlink, a nested .git or .mdnest) would be destroyed.
@@ -287,33 +303,26 @@ func isMarkdown(rel string) bool {
 	return strings.HasSuffix(strings.ToLower(rel), ".md")
 }
 
-// sidecarWrite remembers a comment sidecar written in the target so a failed
-// transfer can put it back the way it was.
-type sidecarWrite struct {
-	path  string
-	prior []byte // nil when the sidecar did not exist before
-}
-
 // execute performs a cross-namespace move or a copy: copy every entry, verify
 // the target, and for a move delete the source last.
 func (h *TransferHandler) execute(ctx context.Context, t *transfer) *transferError {
 	// Detached from the request: once writing starts, a client hanging up
 	// must not leave a half-copied tree behind or skip the rollback.
 	wctx := context.WithoutCancel(ctx)
-	var sidecars []sidecarWrite
-	var movedSidecars []string // source sidecars to remove after a move
+	var created []treeEntry    // destination entries this transfer created, in order
+	var sidecars []string      // destination comment files this transfer created
+	var movedSidecars []string // source comment files to remove after a move
 	var threads []movedNote    // moved notes that carry an ID
 
+	// Rollback removes exactly what this transfer created — never the whole
+	// destination path, which a concurrent upload or note create may have
+	// written into meanwhile. Folders go last, deepest first, and only when
+	// they are empty.
 	rollback := func() {
-		_ = h.store.RemoveAll(wctx, t.toNS, t.to)
 		for i := len(sidecars) - 1; i >= 0; i-- {
-			s := sidecars[i]
-			if s.prior == nil {
-				_ = h.store.Remove(wctx, t.toNS, s.path)
-			} else {
-				_ = h.store.WriteFile(wctx, t.toNS, s.path, s.prior)
-			}
+			_ = h.store.Remove(wctx, t.toNS, sidecars[i])
 		}
+		h.removeEntries(wctx, t.toNS, created)
 	}
 	fail := func(err error) *transferError {
 		log.Printf("transfer %s %s:%s -> %s:%s failed: %v", t.mode, t.fromNS, t.from, t.toNS, t.to, err)
@@ -344,6 +353,7 @@ func (h *TransferHandler) execute(ctx context.Context, t *transfer) *transferErr
 				}
 				data = []byte(InjectNoteID(clean, newID))
 			}
+			created = append(created, treeEntry{rel: dst})
 			if err := h.store.WriteFile(wctx, t.toNS, dst, data); err != nil {
 				return fail(err)
 			}
@@ -355,37 +365,46 @@ func (h *TransferHandler) execute(ctx context.Context, t *transfer) *transferErr
 			if err != nil {
 				return fail(err)
 			}
+			created = append(created, treeEntry{rel: dst})
 			err = h.store.WriteFrom(wctx, t.toNS, dst, rc, e.size)
 			rc.Close()
 			if err != nil {
 				return fail(err)
 			}
 		}
+		if e.isDir {
+			created = append(created, treeEntry{rel: dst, isDir: true})
+		}
 	}
 
-	// Comment threads follow their note, unless the ID is still claimed by a
-	// note left behind in the source namespace: two notes sharing one ID (a
-	// paste from before markers were stripped on create, or a marker written
-	// into a note by hand or by git) must not let a move take the other
-	// note's thread away. Such a thread stays where it is.
+	// Comment threads follow their note, with two exceptions where the thread
+	// is neither copied nor removed — it stays in the source untouched:
+	//   - the ID is still claimed by a note left behind, or the namespace is
+	//     too big to tell: two notes sharing an ID (an old paste, or a marker
+	//     planted by hand or by git) must not let a move take — or copy out —
+	//     the other note's thread;
+	//   - the destination already has a thread under that ID: a move never
+	//     merges into, or writes lines into, a thread that already exists.
 	if len(threads) > 0 {
-		claimed, err := h.idsClaimedOutside(wctx, t)
+		claimed, complete, err := h.idsClaimedOutside(wctx, t)
 		if err != nil {
 			return fail(err)
 		}
 		carried := map[string]bool{}
 		for _, n := range threads {
-			if claimed[n.id] || carried[n.id] {
+			if carried[n.id] || claimed[n.id] || !complete {
 				continue
 			}
 			carried[n.id] = true
-			sc, moved, err := h.carryComments(wctx, t, n.id, n.dst)
+			target, err := h.carryComments(wctx, t, n.id, n.dst)
+			if target != "" {
+				sidecars = append(sidecars, target) // recorded before the error check: a partial write is rolled back too
+			}
 			if err != nil {
 				return fail(err)
 			}
-			if sc != nil {
-				sidecars = append(sidecars, *sc)
-				movedSidecars = append(movedSidecars, moved)
+			if target != "" {
+				movedSidecars = append(movedSidecars, commentsPath(n.id))
 			}
 		}
 	}
@@ -416,9 +435,12 @@ func (h *TransferHandler) execute(ctx context.Context, t *transfer) *transferErr
 		return nil
 	}
 
-	// The target is complete and verified; only now does the source go.
-	if err := h.store.RemoveAll(wctx, t.fromNS, t.from); err != nil {
-		log.Printf("transfer: copied %s:%s to %s:%s but could not remove the source: %v", t.fromNS, t.from, t.toNS, t.to, err)
+	// The target is complete and verified; only now does the source go — and
+	// only what was planned and copied. A file that arrived in the source
+	// folder after planning was not copied, so it is kept (and with it the
+	// folder that holds it).
+	if !h.removeEntries(wctx, t.fromNS, t.plan.entries) {
+		log.Printf("transfer: copied %s:%s to %s:%s but could not remove all of the source", t.fromNS, t.from, t.toNS, t.to)
 		return refuse(http.StatusInternalServerError, "copied to the destination, but the source could not be removed")
 	}
 	for _, sc := range movedSidecars {
@@ -427,13 +449,45 @@ func (h *TransferHandler) execute(ctx context.Context, t *transfer) *transferErr
 	return nil
 }
 
+// removeEntries deletes the given files, then the given folders deepest first
+// when they are empty. It reports false when a file could not be removed;
+// a folder left non-empty by something written meanwhile is not an error.
+func (h *TransferHandler) removeEntries(ctx context.Context, ns string, entries []treeEntry) bool {
+	ok := true
+	var dirs []string
+	for _, e := range entries {
+		if e.isDir {
+			dirs = append(dirs, e.rel)
+			continue
+		}
+		if err := h.store.Remove(ctx, ns, e.rel); err != nil && !errors.Is(err, storage.ErrNotExist) {
+			ok = false
+		}
+	}
+	sort.Slice(dirs, func(i, j int) bool { return len(dirs[i]) > len(dirs[j]) })
+	for _, d := range dirs {
+		if list, err := h.store.ReadDir(ctx, ns, d); err == nil && len(list) == 0 {
+			_ = h.store.Remove(ctx, ns, d)
+		}
+	}
+	return ok
+}
+
 // movedNote is a moved note's ID and its destination path.
 type movedNote struct{ id, dst string }
 
+// maxClaimScan bounds how many notes a move reads to learn which IDs are still
+// claimed outside the moved set. Past it the answer is "unknown", and no
+// thread is carried: each stays, intact, in the source namespace. That costs
+// the moved notes their comments in the target, never anyone else's thread.
+const maxClaimScan = 5000
+
 // idsClaimedOutside returns every note ID carried by a note in the source
-// namespace that is not part of this move.
-func (h *TransferHandler) idsClaimedOutside(ctx context.Context, t *transfer) (map[string]bool, error) {
+// namespace that is not part of this move, and whether the scan was complete.
+func (h *TransferHandler) idsClaimedOutside(ctx context.Context, t *transfer) (map[string]bool, bool, error) {
 	claimed := map[string]bool{}
+	read := 0
+	errTooMany := errors.New("too many notes")
 	err := h.store.Walk(ctx, t.fromNS, "", func(rel string, info storage.FileInfo) error {
 		if rel == "" || rel == "." {
 			return nil
@@ -453,6 +507,9 @@ func (h *TransferHandler) idsClaimedOutside(ctx context.Context, t *transfer) (m
 		if info.IsSymlink || !isMarkdown(rel) {
 			return nil
 		}
+		if read++; read > maxClaimScan {
+			return errTooMany
+		}
 		data, err := h.store.ReadFile(ctx, t.fromNS, rel)
 		if err != nil {
 			return nil // vanished since the walk listed it
@@ -462,24 +519,27 @@ func (h *TransferHandler) idsClaimedOutside(ctx context.Context, t *transfer) (m
 		}
 		return nil
 	})
-	return claimed, err
+	if errors.Is(err, errTooMany) {
+		return claimed, false, nil
+	}
+	return claimed, true, err
 }
 
-// carryComments copies a moved note's comment sidecar to the target. It goes
-// under the ID the note actually carries in the target, which is normally the
-// same ID — but the git backend can restore an older marker on a path that
-// had a note before, and comments filed under the wrong ID would be orphaned.
-// An existing sidecar there is appended to, never replaced. It returns the
-// target write (nil when the note has no comments) and the source sidecar to
-// delete once the move completes.
-func (h *TransferHandler) carryComments(ctx context.Context, t *transfer, id, dst string) (*sidecarWrite, string, error) {
-	src := commentsPath(id)
-	data, err := h.store.ReadFile(ctx, t.fromNS, src)
+// carryComments writes a moved note's comment thread to the target, under
+// the ID the note actually carries there (the git backend can restore an
+// older marker on a path that had a note before; comments filed under the
+// moved ID would then be orphaned). It returns the target comment file it
+// created, or "" when it carried nothing: no thread, or the target already
+// has a thread under that ID — that one belongs to someone else and is never
+// merged into. Only lines that decode as a comment are carried, so a comment
+// file planted by hand cannot inject arbitrary content.
+func (h *TransferHandler) carryComments(ctx context.Context, t *transfer, id, dst string) (string, error) {
+	data, err := h.store.ReadFile(ctx, t.fromNS, commentsPath(id))
 	if errors.Is(err, storage.ErrNotExist) {
-		return nil, "", nil
+		return "", nil
 	}
 	if err != nil {
-		return nil, "", err
+		return "", err
 	}
 	landed := id
 	if b, err := h.store.ReadFile(ctx, t.toNS, dst); err == nil {
@@ -488,16 +548,33 @@ func (h *TransferHandler) carryComments(ctx context.Context, t *transfer, id, ds
 		}
 	}
 	target := commentsPath(landed)
-	sc := &sidecarWrite{path: target}
-	if prior, err := h.store.ReadFile(ctx, t.toNS, target); err == nil {
-		sc.prior = prior
-		if len(prior) > 0 && prior[len(prior)-1] != '\n' {
-			data = append([]byte("\n"), data...)
-		}
-		err = h.store.Append(ctx, t.toNS, target, data)
-		return sc, src, err
+	if _, err := h.store.Stat(ctx, t.toNS, target); err == nil {
+		return "", nil
 	}
-	return sc, src, h.store.WriteFile(ctx, t.toNS, target, data)
+	clean := validCommentLines(data)
+	if len(clean) == 0 {
+		return "", nil
+	}
+	return target, h.store.WriteFile(ctx, t.toNS, target, clean)
+}
+
+// validCommentLines keeps only the JSONL lines that decode as a Comment with
+// an ID.
+func validCommentLines(data []byte) []byte {
+	var out []byte
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		var c Comment
+		if json.Unmarshal(line, &c) != nil || c.ID == "" {
+			continue
+		}
+		out = append(out, line...)
+		out = append(out, '\n')
+	}
+	return out
 }
 
 // transferPermissionFuncs adapts a PermissionChecker (nil in single mode,

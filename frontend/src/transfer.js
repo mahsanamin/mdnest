@@ -149,7 +149,8 @@ export function describeRefusal(status, body = {}, { action = 'transfer' } = {})
     case 409:
       return `Something named "${b.path || 'that'}" already exists there. Nothing was overwritten. Pick another folder or name.`;
     case 413:
-      return `Too large: ${b.files} files, ${formatBytes(b.bytes || 0)}. The limit is ${b.maxFiles} files and ${formatBytes(b.maxBytes || 0)}. Choose a smaller subfolder.`;
+      // "partial": the server stopped counting once past a limit.
+      return `Too large: ${b.partial ? 'at least ' : ''}${b.files} files, ${formatBytes(b.bytes || 0)}. The limit is ${b.maxFiles} files and ${formatBytes(b.maxBytes || 0)}. Choose a smaller subfolder.`;
     case 429:
       return 'Another download is running. Try again in a few seconds.';
     case 403:

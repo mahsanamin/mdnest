@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -358,4 +359,56 @@ func TestNamespaces_Detail(t *testing.T) {
 
 func (c *countingStore) HasSymlink(ctx context.Context, ns, rel string) (bool, error) {
 	return forwardHasSymlink(c.Storage, ctx, ns, rel)
+}
+
+// The walk stops once past a limit (a huge namespace is not walked in full
+// just to be refused), and folders count toward an entry cap.
+func TestPlanTree_StopsEarly(t *testing.T) {
+	e := newTEnv(t)
+	for i := 0; i < 50; i++ {
+		e.put(t, "alpha", fmt.Sprintf("F/n%02d.md", i), "x")
+	}
+	for i := 0; i < 50; i++ {
+		os.MkdirAll(filepath.Join(e.root, "alpha", "D", fmt.Sprintf("d%02d", i)), 0o755)
+	}
+	l := TreeLimits{MaxFiles: 5, MaxBytes: 1 << 20}
+	cw := &countingWalk{Storage: e.store}
+	p, err := planTree(context.Background(), cw, "alpha", "F", l)
+	if err != nil || !p.partial || !p.tooLarge(l) || len(p.entries) > 10 {
+		t.Fatalf("files: err=%v partial=%v entries=%d", err, p.partial, len(p.entries))
+	}
+	if cw.visits > 10 {
+		t.Fatalf("the walk visited %d of 51 entries after passing a limit of 5", cw.visits)
+	}
+	l = TreeLimits{MaxFiles: 1, MaxBytes: 1 << 20} // entry cap = 1*4+1000
+	p, _ = planTree(context.Background(), e.store, "alpha", "D", l)
+	if p.partial {
+		t.Fatal("51 folders tripped the entry cap meant for thousands")
+	}
+}
+
+// A zip entry name never carries a backslash: Windows extractors read it as
+// a separator, so a crafted name could unpack outside the folder.
+func TestDownload_ZipNamesHaveNoBackslash(t *testing.T) {
+	e := newTEnv(t)
+	e.put(t, "alpha", `F/a\..\..\evil.bat`, "x")
+	w := download(NewDownloadHandler(e.store, DefaultTreeLimits, 2), httptest.NewRequest(http.MethodGet, "/api/download?ns=alpha&path=F", nil))
+	for name := range zipNames(t, w.Body.Bytes()) {
+		if strings.Contains(name, `\`) {
+			t.Fatalf("zip entry %q contains a backslash", name)
+		}
+	}
+}
+
+// countingWalk counts how many entries a Walk actually visits.
+type countingWalk struct {
+	storage.Storage
+	visits int
+}
+
+func (c *countingWalk) Walk(ctx context.Context, ns, root string, fn storage.WalkFunc) error {
+	return c.Storage.Walk(ctx, ns, root, func(rel string, info storage.FileInfo) error {
+		c.visits++
+		return fn(rel, info)
+	})
 }

@@ -1651,7 +1651,9 @@ function App() {
         setNotice({ kind: 'error', text: describeRefusal(r.status, r.body, { action: 'download' }) });
         return;
       }
-      const url = URL.createObjectURL(r.blob);
+      // Re-typed as a plain download: the object URL lives on mdnest's origin,
+      // and a server type such as text/html must not make it a page.
+      const url = URL.createObjectURL(new Blob([r.blob], { type: 'application/octet-stream' }));
       const a = document.createElement('a');
       a.href = url;
       a.download = filenameFromDisposition(r.disposition, label);

@@ -59,13 +59,18 @@ type treePlan struct {
 	bytes    int64
 	symlinks []string // namespace-relative paths of symlinks found
 	reserved []string // .git / .mdnest directories found below the root
+	// partial is set when the walk stopped early because a limit was already
+	// passed: files/bytes are then lower bounds ("at least"), not totals.
+	partial bool
 }
 
 // reservedDirName reports whether a directory name is app- or VCS-owned and
 // must never be exported or carried along: .git (history, possibly remote
 // credentials in config) and .mdnest (comment sidecars, board layout).
 func reservedDirName(name string) bool {
-	return name == ".git" || name == ".mdnest"
+	// Case-insensitive: on a case-insensitive mount (APFS behind Docker
+	// Desktop, for one) ".GIT" is the same folder as ".git".
+	return strings.EqualFold(name, ".git") || strings.EqualFold(name, ".mdnest")
 }
 
 // hasReservedSegment reports whether any segment of a cleaned relative path is
@@ -79,12 +84,24 @@ func hasReservedSegment(rel string) bool {
 	return false
 }
 
+// errPlanStop ends a walk that has already passed a limit.
+var errPlanStop = errors.New("plan: over the limit")
+
 // planTree walks root and collects what a download or transfer would carry.
 // Reserved directories and symlinks are skipped and recorded, never followed.
 // The context is checked on every entry, so a cancelled request stops the walk.
-func planTree(ctx context.Context, stg storage.Storage, ns, root string) (*treePlan, error) {
+// The walk stops as soon as a limit is passed — counting the rest of a huge
+// namespace (and holding every entry in memory) only to refuse it would be
+// unbounded work any reader could ask for. Folders count toward an entry cap
+// too, so a tree of empty folders cannot get round the file limit.
+func planTree(ctx context.Context, stg storage.Storage, ns, root string, l TreeLimits) (*treePlan, error) {
 	p := &treePlan{}
+	maxEntries := l.MaxFiles*4 + 1000
 	err := stg.Walk(ctx, ns, root, func(rel string, info storage.FileInfo) error {
+		if p.files > l.MaxFiles || p.bytes > l.MaxBytes || len(p.entries) > maxEntries {
+			p.partial = true
+			return errPlanStop
+		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -105,7 +122,7 @@ func planTree(ctx context.Context, stg storage.Storage, ns, root string) (*treeP
 		p.bytes += info.Size
 		return nil
 	})
-	if err != nil {
+	if err != nil && !errors.Is(err, errPlanStop) {
 		return nil, err
 	}
 	return p, nil
@@ -113,18 +130,28 @@ func planTree(ctx context.Context, stg storage.Storage, ns, root string) (*treeP
 
 // tooLarge reports whether the plan exceeds the limits.
 func (p *treePlan) tooLarge(l TreeLimits) bool {
-	return p.files > l.MaxFiles || p.bytes > l.MaxBytes
+	return p.partial || p.files > l.MaxFiles || p.bytes > l.MaxBytes
 }
 
 // writeTooLarge writes the 413 body shared by download and transfer.
 func writeTooLarge(w http.ResponseWriter, p *treePlan, l TreeLimits) {
-	writeStatusJSON(w, http.StatusRequestEntityTooLarge, map[string]any{
+	writeStatusJSON(w, http.StatusRequestEntityTooLarge, tooLargeBody(p, l))
+}
+
+// tooLargeBody is the 413 body shared by download and transfer. "partial"
+// says the counts are lower bounds: the walk stopped once past a limit.
+func tooLargeBody(p *treePlan, l TreeLimits) map[string]any {
+	b := map[string]any{
 		"error":    "too_large",
 		"files":    p.files,
 		"bytes":    p.bytes,
 		"maxFiles": l.MaxFiles,
 		"maxBytes": l.MaxBytes,
-	})
+	}
+	if p.partial {
+		b["partial"] = true
+	}
+	return b
 }
 
 func writeStatusJSON(w http.ResponseWriter, status int, v any) {

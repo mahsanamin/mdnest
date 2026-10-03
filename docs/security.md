@@ -283,11 +283,26 @@ Grants cover a path and everything below it, so checking the two roots covers ev
 What neither endpoint will carry:
 
 - **Symbolic links.** The local backend keeps a link inside its namespace, but inside it a link can lead from a folder you may read to one you may not, and the grant was checked against the link's name. Download and transfer refuse a path whose item or any parent folder is a link (`storage.SymlinkChecker`). A backend that cannot answer is refused too (fail closed). A zip skips links inside a folder; a transfer refuses the folder, because a move would delete them.
-- **`.git/` and `.mdnest/`.** History (and possibly remote credentials) and app data are never exported, and no path may start in or land in them.
+- **`.git/` and `.mdnest/`**, matched case-insensitively (a case-insensitive mount treats `.GIT` as `.git`). History, possibly remote credentials, and app data are never exported, and no path may start in or land in them.
+- **Backslashes in zip entry names.** One is an ordinary character in a Linux file name but a path separator to Windows extractors, so entry names have it replaced.
 
-**Note identity.** The `<!-- mdnest:<uuid> -->` marker names a note's comment thread. `POST /api/note` and `PATCH /api/note` (append/prepend) remove every marker from incoming text, so no client can give a note another note's identity and thread. A move carries a thread only when no note left behind still claims that ID. Commit-body annotations collapse control characters, so a file name holding a newline cannot forge a line such as a `Co-authored-by` trailer.
+**Note identity.** The `<!-- mdnest:<uuid> -->` marker names a note's comment thread.
 
-**Limits.** Folder downloads and transfers are capped by `DOWNLOAD_MAX_FILES` (500) and `DOWNLOAD_MAX_MB` (100). The tree is counted before anything is streamed or written, and a running byte budget stops a zip whose files grew in the meantime. Zip downloads hold one slot per user (an API token counts as its user; single mode is one user) and one of `DOWNLOAD_MAX_CONCURRENT` (2) server-wide. Slots are taken without blocking (a busy server answers 429) and released on every exit, including a client that hangs up. A dry run takes no slot.
+- `POST /api/note` and `PATCH /api/note` (append/prepend) remove every marker from incoming text in one linear pass, so no client can give a note another note's identity and thread. Stripping markers one at a time was quadratic, which made a 10 MB body of markers a CPU denial of service.
+- A move carries a thread only when no note left behind still claims that ID, and never into a destination that already has a thread under that ID.
+- Only lines that decode as comments are carried, so a comment file planted by hand, for example via upload, cannot inject content into another namespace.
+
+**Commit history.** Commit-body annotations collapse control characters, so a file name holding a newline cannot forge a line such as a `Co-authored-by` trailer. The annotations do name the *other* side's `namespace:path`, so a cross-namespace move records the source path in the destination's history and remote. That is by design.
+
+**Limits.** Folder downloads and transfers are capped by `DOWNLOAD_MAX_FILES` (500) and `DOWNLOAD_MAX_MB` (100).
+
+- The tree is counted before anything is streamed or written.
+- The count stops as soon as a limit is passed, and folders count toward an entry cap, so refusing a huge namespace costs a bounded walk, not a full one.
+- A running byte budget stops a zip whose files grew in the meantime.
+- Zip downloads and real transfers each hold one slot per user and one of `DOWNLOAD_MAX_CONCURRENT` (2) server-wide. An API token counts as its user; single mode is one user. A download takes its slot before the walk.
+- Slots are taken without blocking (a busy server answers 429) and released on every exit, including a client that hangs up.
+- A transfer dry run takes no slot, so the picker's checks can never starve a transfer.
+- A move reads at most 5,000 notes to learn which comment IDs are still claimed. Past that it carries no threads and leaves them in place.
 
 **`Content-Disposition`** carries an ASCII `filename=` (quotes, backslashes, control and non-ASCII characters replaced) and an RFC 5987 `filename*=` with every byte outside the attr-char set percent-encoded, so a name cannot break out of the header.
 

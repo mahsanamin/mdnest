@@ -399,7 +399,10 @@ disposition_filename() {
   name="${name//$'\r'/}"
   name="${name##*/}"
   name="${name##*\\}"
-  while [[ "$name" == .* ]]; do name="${name#.}"; done
+  name="${name//[[:cntrl:]]/}"
+  # No leading dot (a hidden file) and no leading dash (it would be read as an
+  # option by mv and friends).
+  while [[ "$name" == .* || "$name" == -* ]]; do name="${name#[.-]}"; done
   [ -z "$name" ] && name="$fallback"
   printf '%s' "$name"
 }
@@ -1896,7 +1899,7 @@ cmd_download() {
     fi
   fi
   rm -f "$headers"
-  mv "$tmp" "$out"
+  mv -- "$tmp" "$out"
   echo "Saved $out"
 }
 
