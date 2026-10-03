@@ -31,6 +31,24 @@ func ExtractNoteID(content string) (uuid string, body string) {
 	return uuid, body
 }
 
+// StripAllNoteIDs removes every marker line, not only the first, and returns
+// the first ID found (the one readers treat as the note's identity) and the
+// clean content. Content carrying two markers must not be able to keep the
+// second as an identity once the first is stripped.
+func StripAllNoteIDs(content string) (first string, body string) {
+	body = content
+	for {
+		id, clean := ExtractNoteID(body)
+		if id == "" {
+			return first, body
+		}
+		if first == "" {
+			first = id
+		}
+		body = clean
+	}
+}
+
 // InjectNoteID appends the mdnest UUID marker to the end of content.
 // If the content already has a marker, it's replaced.
 func InjectNoteID(content string, uuid string) string {

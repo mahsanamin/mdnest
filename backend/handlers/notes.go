@@ -363,7 +363,9 @@ func (h *NoteHandler) createNote(w http.ResponseWriter, r *http.Request) {
 	// thread, so a new note never keeps it; it gets its own ID through the
 	// normal lazy path. No first-party client sends one: GET strips it, the UI
 	// creates empty notes, and restores go through PUT, which keeps the ID.
-	if id, clean := ExtractNoteID(string(body)); id != "" {
+	// Every marker goes, not just the first: readers take the first match, so
+	// content carrying two would otherwise keep the second as its identity.
+	if id, clean := StripAllNoteIDs(string(body)); id != "" {
 		body = []byte(clean)
 	}
 	if err := h.store.WriteFile(ctx, ns, relPath, body); err != nil {
@@ -437,7 +439,13 @@ func (h *NoteHandler) patchNote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"failed to read body"}`, http.StatusBadRequest)
 		return
 	}
+	// Appended text must not carry an identity either: a marker prepended to
+	// a note becomes its first marker, which is what readers take as its ID
+	// (and so its comment thread). Same rule as create.
 	text := string(body)
+	if id, clean := StripAllNoteIDs(text); id != "" {
+		text = clean
+	}
 
 	// Serialise with any other append/chat post to this note: the read and
 	// the write below would otherwise interleave and drop one writer's text.

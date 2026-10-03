@@ -69,6 +69,12 @@ func (h *DownloadHandler) HandleDownload(w http.ResponseWriter, r *http.Request)
 		}
 		name = path.Base(rel)
 	}
+	// A linked path (the item or a parent folder) is not exported: the read
+	// grant was checked against the link's name, not where it leads.
+	if linkedPath(ctx, h.store, ns, rel) {
+		writeStatusJSON(w, http.StatusBadRequest, map[string]any{"error": "symlink", "path": rel})
+		return
+	}
 
 	info, err := h.store.Stat(ctx, ns, rel)
 	if err != nil {

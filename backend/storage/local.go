@@ -314,3 +314,30 @@ func (l *LocalStorage) Walk(ctx context.Context, ns, root string, fn WalkFunc) e
 		return werr
 	})
 }
+
+// HasSymlink reports whether relPath or any existing parent of it, below the
+// namespace directory, is a symbolic link (see SymlinkChecker). Components
+// that do not exist yet are not links.
+func (l *LocalStorage) HasSymlink(ctx context.Context, ns, relPath string) (bool, error) {
+	p := filepath.Join(l.root, ns)
+	for _, seg := range strings.Split(filepath.ToSlash(relPath), "/") {
+		if seg == "" || seg == "." {
+			continue
+		}
+		p = filepath.Join(p, seg)
+		fi, err := os.Lstat(p)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return false, nil
+			}
+			return false, err
+		}
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return true, nil
+		}
+		if !fi.IsDir() {
+			return false, nil // a plain file: nothing below it exists
+		}
+	}
+	return false, nil
+}

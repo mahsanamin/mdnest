@@ -215,6 +215,15 @@ func (h *TransferHandler) prepare(ctx context.Context, r *http.Request, req tran
 			return nil, refuse(http.StatusNotFound, "namespace not found")
 		}
 	}
+	// A link on either path (the item or a parent folder) could point from a
+	// folder the caller has a grant on to one they do not; the grant was
+	// checked against the link's name, not where it leads.
+	if linkedPath(ctx, h.store, t.fromNS, t.from) {
+		return nil, &transferError{status: http.StatusBadRequest, body: map[string]any{"error": "symlink", "path": t.from}}
+	}
+	if linkedPath(ctx, h.store, t.toNS, t.to) {
+		return nil, &transferError{status: http.StatusBadRequest, body: map[string]any{"error": "symlink", "path": t.to}}
+	}
 	info, err := h.store.Stat(ctx, t.fromNS, t.from)
 	if err != nil {
 		return nil, refuse(http.StatusNotFound, "source not found")
@@ -293,6 +302,7 @@ func (h *TransferHandler) execute(ctx context.Context, t *transfer) *transferErr
 	wctx := context.WithoutCancel(ctx)
 	var sidecars []sidecarWrite
 	var movedSidecars []string // source sidecars to remove after a move
+	var threads []movedNote    // moved notes that carry an ID
 
 	rollback := func() {
 		_ = h.store.RemoveAll(wctx, t.toNS, t.to)
@@ -325,7 +335,7 @@ func (h *TransferHandler) execute(ctx context.Context, t *transfer) *transferErr
 			if err != nil {
 				return fail(err)
 			}
-			id, clean := ExtractNoteID(string(data))
+			id, clean := StripAllNoteIDs(string(data))
 			if t.mode == "copy" && id != "" {
 				// A copy is a new note: new identity, no comments.
 				newID, err := GenerateNoteID()
@@ -338,14 +348,7 @@ func (h *TransferHandler) execute(ctx context.Context, t *transfer) *transferErr
 				return fail(err)
 			}
 			if t.mode == "move" && id != "" {
-				sc, moved, err := h.carryComments(wctx, t, id, dst)
-				if err != nil {
-					return fail(err)
-				}
-				if sc != nil {
-					sidecars = append(sidecars, *sc)
-					movedSidecars = append(movedSidecars, moved)
-				}
+				threads = append(threads, movedNote{id: id, dst: dst})
 			}
 		default:
 			rc, err := h.store.Open(wctx, t.fromNS, e.rel)
@@ -356,6 +359,33 @@ func (h *TransferHandler) execute(ctx context.Context, t *transfer) *transferErr
 			rc.Close()
 			if err != nil {
 				return fail(err)
+			}
+		}
+	}
+
+	// Comment threads follow their note, unless the ID is still claimed by a
+	// note left behind in the source namespace: two notes sharing one ID (a
+	// paste from before markers were stripped on create, or a marker written
+	// into a note by hand or by git) must not let a move take the other
+	// note's thread away. Such a thread stays where it is.
+	if len(threads) > 0 {
+		claimed, err := h.idsClaimedOutside(wctx, t)
+		if err != nil {
+			return fail(err)
+		}
+		carried := map[string]bool{}
+		for _, n := range threads {
+			if claimed[n.id] || carried[n.id] {
+				continue
+			}
+			carried[n.id] = true
+			sc, moved, err := h.carryComments(wctx, t, n.id, n.dst)
+			if err != nil {
+				return fail(err)
+			}
+			if sc != nil {
+				sidecars = append(sidecars, *sc)
+				movedSidecars = append(movedSidecars, moved)
 			}
 		}
 	}
@@ -395,6 +425,44 @@ func (h *TransferHandler) execute(ctx context.Context, t *transfer) *transferErr
 		_ = h.store.Remove(wctx, t.fromNS, sc)
 	}
 	return nil
+}
+
+// movedNote is a moved note's ID and its destination path.
+type movedNote struct{ id, dst string }
+
+// idsClaimedOutside returns every note ID carried by a note in the source
+// namespace that is not part of this move.
+func (h *TransferHandler) idsClaimedOutside(ctx context.Context, t *transfer) (map[string]bool, error) {
+	claimed := map[string]bool{}
+	err := h.store.Walk(ctx, t.fromNS, "", func(rel string, info storage.FileInfo) error {
+		if rel == "" || rel == "." {
+			return nil
+		}
+		if relUnder(rel, t.from) {
+			if info.IsDir {
+				return storage.SkipDir
+			}
+			return nil
+		}
+		if info.IsDir {
+			if reservedDirName(info.Name) {
+				return storage.SkipDir
+			}
+			return nil
+		}
+		if info.IsSymlink || !isMarkdown(rel) {
+			return nil
+		}
+		data, err := h.store.ReadFile(ctx, t.fromNS, rel)
+		if err != nil {
+			return nil // vanished since the walk listed it
+		}
+		for _, m := range noteIDRegex.FindAllStringSubmatch(string(data), -1) {
+			claimed[m[1]] = true
+		}
+		return nil
+	})
+	return claimed, err
 }
 
 // carryComments copies a moved note's comment sidecar to the target. It goes

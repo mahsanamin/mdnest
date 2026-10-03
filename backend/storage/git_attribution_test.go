@@ -166,3 +166,19 @@ func TestLocalWalk_ReportsSymlinks(t *testing.T) {
 		t.Fatal("Walk followed a symlink")
 	}
 }
+
+// A path is user-chosen and may hold a newline; an annotation must not be
+// able to add lines (a forged trailer) to the commit body.
+func TestCommitMessage_AnnotationCannotForgeLines(t *testing.T) {
+	c := &intervalCommitter{}
+	c.Annotate("ns", "moved from a:x\nCo-authored-by: Mallory <m@x>\r\n")
+	msg := c.commitMessageWith(nil, c.takeNotes("ns"))
+	for _, line := range strings.Split(msg, "\n") {
+		if strings.HasPrefix(line, "Co-authored-by:") {
+			t.Fatalf("annotation forged a trailer line: %q", msg)
+		}
+	}
+	if !strings.Contains(msg, "moved from a:x Co-authored-by: Mallory <m@x>") {
+		t.Fatalf("annotation not kept on one line: %q", msg)
+	}
+}

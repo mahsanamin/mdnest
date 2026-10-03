@@ -133,6 +133,18 @@ func writeStatusJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+// linkedPath reports whether relPath or one of its existing parent folders is
+// a symlink, on backends that can tell (see storage.SymlinkChecker). An error
+// counts as linked: the caller refuses rather than guesses.
+func linkedPath(ctx context.Context, stg storage.Storage, ns, relPath string) bool {
+	sc, ok := stg.(storage.SymlinkChecker)
+	if !ok {
+		return false
+	}
+	linked, err := sc.HasSymlink(ctx, ns, relPath)
+	return err != nil || linked
+}
+
 // relUnder reports whether rel is root itself or inside it.
 func relUnder(rel, root string) bool {
 	return rel == root || strings.HasPrefix(rel, root+"/")
