@@ -44,7 +44,8 @@ test('a drawing opens in the app theme and tracks it', async ({ page }) => {
   // Flipping the APP theme repaints the open canvas. This is the assertion
   // that matters now that the canvas has no switch of its own: without it a
   // drawing would sit in the previous theme until it was reopened.
-  await page.locator('.toolbar-theme').click();
+  await page.locator('.toolbar-more-btn').click(); // theme lives in the ⋯ menu
+    await page.locator('.toolbar-more-theme').click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
   await expect(page.locator('.excalidraw').first()).not.toHaveClass(/theme--dark/);
 

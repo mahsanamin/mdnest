@@ -603,7 +603,7 @@ function Sidebar({
           <UserFooter userInfo={userInfo} onLogout={onLogout} onAdminPanel={onAdminPanel} />
         )}
         <div className="sidebar-server-info" ref={versionInfoRef}>
-          <span>{window.location.host}</span>
+          <span className="sidebar-host" title={window.location.host}>{window.location.host}</span>
           {serverVersion && (
             <span className="sidebar-version">
               v{serverVersion}

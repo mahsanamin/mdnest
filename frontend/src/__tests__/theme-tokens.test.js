@@ -21,7 +21,7 @@ const SRC = join(dirname(fileURLToPath(import.meta.url)), '..');
 // The stylesheets that must be fully tokenised. MarpDeck.css is deliberately
 // absent: a slide deck is an authored artifact and does not follow the app
 // theme. vendor/ is third-party code we do not edit.
-const TOKENISED = ['App.css', 'index.css', 'components/TaskBoard.css'];
+const TOKENISED = ['App.css', 'index.css', 'components/TaskBoard.css', 'components/ChatView.css'];
 
 const read = (rel) => readFileSync(join(SRC, rel), 'utf-8');
 const stripComments = (css) => css.replace(/\/\*[\s\S]*?\*\//g, '');

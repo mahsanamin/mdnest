@@ -4,6 +4,7 @@
 //   #!board/ns[/path/to/note.md]  the task board, opened over that namespace
 //                                (and the note it was opened from, if any)
 //   #!stickies                   the full-screen sticky board
+//   #!chats[/ns/path/to/chat.md]  the chats view, optionally with one chat open
 //
 // The task board keeps its namespace and note in the URL, unlike the sticky
 // board: it is scoped to a namespace, its "This note" filter and its back
@@ -16,6 +17,9 @@
 // become unreachable. A leading "!" cannot be one.
 export const STICKIES_ROUTE = '!stickies';
 export const BOARD_ROUTE = '!board';
+// Chats span namespaces, so the ns/path here is the OPEN CHAT, not the note
+// underneath (the editor's note is left alone while the chats view is up).
+export const CHATS_ROUTE = '!chats';
 
 function parseNote(rest) {
   if (!rest) return { ns: null, path: null };
@@ -30,14 +34,26 @@ function parseNote(rest) {
 export function parseRoute(hash) {
   const h = (hash || '').replace(/^#\/?/, '');
   if (h === STICKIES_ROUTE) return { ns: null, path: null, stickies: true, board: false };
+  if (h === CHATS_ROUTE || h.startsWith(CHATS_ROUTE + '/')) {
+    const chat = parseNote(h.slice(CHATS_ROUTE.length + 1));
+    return { ns: null, path: null, stickies: false, board: false, chats: true,
+      chat: chat.ns && chat.path ? chat : null };
+  }
   if (h === BOARD_ROUTE || h.startsWith(BOARD_ROUTE + '/')) {
     return { ...parseNote(h.slice(BOARD_ROUTE.length + 1)), stickies: false, board: true };
   }
   return { ...parseNote(h), stickies: false, board: false };
 }
 
-export function formatRoute({ ns, path, stickies, board }) {
+function formatNote(ns, path) {
+  let note = encodeURIComponent(ns);
+  if (path) note += '/' + path.split('/').map(encodeURIComponent).join('/');
+  return note;
+}
+
+export function formatRoute({ ns, path, stickies, board, chats, chat }) {
   if (stickies) return '#' + STICKIES_ROUTE;
+  if (chats) return chat?.ns && chat?.path ? `#${CHATS_ROUTE}/${formatNote(chat.ns, chat.path)}` : '#' + CHATS_ROUTE;
   let note = '';
   if (ns) {
     note = encodeURIComponent(ns);

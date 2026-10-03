@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 
-function ContextMenu({ visible, x, y, target, onAction, onClose, canWrite, isAdmin, selectedNs, excalidraw }) {
+function ContextMenu({ visible, x, y, target, onAction, onClose, canWrite, isAdmin, selectedNs, excalidraw, chat }) {
   const menuRef = useRef(null);
 
   useEffect(() => {
@@ -66,10 +66,17 @@ function ContextMenu({ visible, x, y, target, onAction, onClose, canWrite, isAdm
     items.push({ label: 'New Note', action: 'new-note' });
     if (excalidraw) items.push({ label: 'New Drawing', action: 'new-drawing' });
     items.push({ label: 'New Folder', action: 'new-folder' });
+    if (chat) items.push({ label: 'New Chat', action: 'new-chat' });
   }
 
   if (isFile && hasWrite) {
     items.push({ label: 'Rename', action: 'rename' });
+    // Any plain note can become a chat in place. Drawings are excluded: their
+    // body is scene JSON, and appending messages to it would corrupt the scene.
+    const lower = targetPath.toLowerCase();
+    if (chat && lower.endsWith('.md') && !lower.endsWith('.excalidraw.md')) {
+      items.push({ label: 'Make it a chat', action: 'convert-chat' });
+    }
   }
 
   if (isFolder && hasWrite) {

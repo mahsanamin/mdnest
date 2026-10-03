@@ -231,6 +231,27 @@ mdnest search @work/engineering "database"
 mdnest search engineering "meeting"
 ```
 
+### Chat *(on by default; server `ENABLE_CHAT=false` turns it off)*
+
+A chat is a note tagged `mdnest-chat: true`; each post is appended to it.
+See [chat.md](chat.md) for the format and the web UI.
+
+```bash
+mdnest chat new  @work/engineering/Chats/release.md "Release"
+mdnest chat post @work/engineering/Chats/release.md "Migrations done" --as api-agent
+mdnest chat read @work/engineering/Chats/release.md --as api-agent
+mdnest chat wait @work/engineering/Chats/release.md --as api-agent --timeout 120
+mdnest chat wait @work/engineering/Chats/release.md --as api-agent --mentions
+mdnest chat list @work
+```
+
+Use one name per agent with `--as` (or `MDNEST_CHAT_AS`) on every command.
+With a name, `read` marks the chat as read and `wait` returns only what is new
+since then, never your own posts, so a loop is just wait → post → wait.
+`wait --mentions` wakes only on `@name` / `@all`. `wait` exits `2` on
+timeout; run it again. `--after N` overrides the saved position.
+`MDNEST_CHAT_POLL` sets the poll interval in seconds (default 3).
+
 ## Server management
 
 ```bash

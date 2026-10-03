@@ -32,6 +32,7 @@ type ConfigHandler struct {
 	devLoginEnabled bool                   // INSECURE_DEV_LOGIN is on (signals frontend to expose /?login=dev + warning bar)
 	grantMaxDepth   int                    // server-side ceiling on grant path depth (0 = no limit). PathPicker uses this to filter the dropdown.
 	taskBoard       bool                   // ENABLE_TASK_BOARD is on — the frontend may show the board button and load its chunk
+	chat            bool                   // ENABLE_CHAT is on — the frontend may show the Chats button and load its chunk
 	marp            bool                   // ENABLE_MARP is on — the frontend may render Marp-format notes as a slide deck (loads its chunk)
 	marpThemes      bool                   // ENABLE_MARP_THEMES is on — the centralized theme catalog + admin editor are available
 	excalidraw      bool                   // ENABLE_EXCALIDRAW is on — the frontend may open .excalidraw.md files in the drawing editor (loads its chunk)
@@ -91,6 +92,12 @@ func (h *ConfigHandler) SetGrantMaxDepth(depth int) {
 // operator who just wants notes from carrying the board's UI chunk.
 func (h *ConfigHandler) SetTaskBoard(enabled bool) {
 	h.taskBoard = enabled
+}
+
+// SetChat flips on the file-based chat signal. Off by default: when false the
+// /api/chat* routes are not registered, so the frontend must not offer Chats.
+func (h *ConfigHandler) SetChat(enabled bool) {
+	h.chat = enabled
 }
 
 // SetMarp flips on the Marp signal. Off by default: when false the frontend
@@ -156,7 +163,7 @@ func (h *ConfigHandler) HandleConfig(w http.ResponseWriter, r *http.Request) {
 		"liveCollab":   h.liveCollab,
 		"require2FA":   h.require2FA,
 		"userProvider": h.userProvider,
-		"version":      "4.5.5",
+		"version":      "4.6.0",
 		"commit":       Commit,
 		"buildTime":    BuildTime,
 		"defaultTheme": h.defaultThemeOrAuto(),
@@ -178,6 +185,9 @@ func (h *ConfigHandler) HandleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.taskBoard {
 		resp["taskBoard"] = true
+	}
+	if h.chat {
+		resp["chat"] = true
 	}
 	if h.marp {
 		resp["marp"] = true

@@ -230,25 +230,6 @@ export function boardExtent(cards, positions, viewportW, viewportH) {
   return { width: w, height: h };
 }
 
-// undoneCount drives the toolbar badge: unfinished checklist items across the
-// whole board. It counts ITEMS rather than cards because that is what the
-// number means to a reader — "3 things left", not "3 notes containing
-// something unfinished".
-//
-// An item with no text yet is the row you are about to type into, so it does
-// not count; otherwise clicking "+ item" bumps the badge before anything has
-// been written. A card with no checklist contributes nothing at all — it is a
-// note, and a note is not outstanding work.
-export function undoneCount(cards) {
-  let n = 0;
-  for (const c of cards) {
-    for (const i of c.items) {
-      if (!i.done && i.text.trim() !== '') n++;
-    }
-  }
-  return n;
-}
-
 // isBoardFull is asked before adding, so the "+" can be disabled with a reason
 // instead of the save failing after the fact.
 export function isBoardFull(cards) {

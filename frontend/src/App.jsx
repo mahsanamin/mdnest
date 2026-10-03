@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { parseRoute, formatRoute } from './hashRoute';
+import { chatPathFor, isChatDoc } from './chat.js';
 import Login from './components/Login.jsx';
 import LoginFirebase from './components/LoginFirebase.jsx';
 import LoginSSO from './components/LoginSSO.jsx';
@@ -26,6 +27,9 @@ const MarpDeck = lazy(() => loadWithRetry(() => import('./components/MarpDeck.js
 // Lazy Excalidraw drawing editor: pulls in the (large) Excalidraw bundle, off
 // by default (ENABLE_EXCALIDRAW), so notes-only installs never carry the chunk.
 const ExcalidrawEditor = lazy(() => loadWithRetry(() => import('./components/ExcalidrawEditor.jsx')));
+// Lazy chats view, off by default (ENABLE_CHAT): notes-only installs never
+// download it.
+const ChatView = lazy(() => loadWithRetry(() => import('./components/ChatView.jsx')));
 import Preview from './components/Preview.jsx';
 import ContextMenu from './components/ContextMenu.jsx';
 import Settings from './components/Settings.jsx';
@@ -40,7 +44,7 @@ import AttributionModal from './components/AttributionModal.jsx';
 import MoveToModal from './components/MoveToModal.jsx';
 import ReleaseNotesModal from './components/ReleaseNotesModal.jsx';
 import CollabClient from './collab.js';
-import { normalizeBoard, undoneCount } from './stickies.js';
+import { normalizeBoard } from './stickies.js';
 import { isMarpDoc, effectiveEditorMode } from './marp.js';
 import { isExcalidrawDoc } from './excalidraw.js';
 import { TREE_POLL_MS, shouldPollTree } from './tree-refresh.js';
@@ -62,8 +66,7 @@ import {
   fetchStickies,
   saveStickies,
   logout as apiLogout,
-  PermissionError,
-} from './api.js';
+  PermissionError, convertToChat } from './api.js';
 import { buildPathIndex } from './wikilink.js';
 import { createEchoGate } from './echo-gate.js';
 import { broadcastTabMessage, onTabMessage } from './tab-sync.js';
@@ -185,6 +188,10 @@ function App() {
   // An editor that debounces internally (the drawing canvas) registers a
   // callback here so its unsaved scene can be drained before we navigate.
   const editorFlushRef = useRef(null);
+  // Called by every note loader with the text it just loaded. Assigned after
+  // enterChats exists (further down) so the loaders, defined earlier, can
+  // reach it without depending on it.
+  const noteLoadedRef = useRef(null);
   const registerEditorFlush = useCallback((fn) => { editorFlushRef.current = fn; }, []);
   // Run a queued autosave now rather than discarding it.
   //
@@ -303,6 +310,29 @@ function App() {
   // close over a stale value.
   const stickiesLoadRef = useRef('loading');
   const [showTaskBoard, setShowTaskBoard] = useState(false);
+  // The chats view replaces the editor area like the board does. openChat is
+  // the conversation shown in it ({ns, path} | null) — chats span namespaces,
+  // so it is independent of the note open underneath.
+  const [chatsOpen, setChatsOpen] = useState(false);
+  const [openChat, setOpenChat] = useState(null);
+  // Chat mode is a place you visit and come back from. chatsReturnTo is the
+  // view you came from ('editor' | 'board'), so the one Back button lands you
+  // exactly there. chatNs is the workspace the chat LIST shows; it is
+  // deliberately separate from selectedNs, so browsing another workspace's
+  // chats does not swap the workspace (and note) you return to.
+  const [chatsReturnTo, setChatsReturnTo] = useState('editor');
+  // Set when chat mode was entered by NAVIGATING to a chat note (tree click,
+  // address bar): by then the note underneath is the chat itself, so Back
+  // must reopen the note you were on before, not the chat's raw markdown.
+  const [chatsReturnNote, setChatsReturnNote] = useState(null);
+  const chatRedirectFrom = useRef(null);
+  const [chatNs, setChatNs] = useState(null);
+  // Set to `${ns}/${path}` when the user NAVIGATES to a note (tree click,
+  // address bar). If that note turns out to be a chat, it opens in the chat
+  // view instead of the editor, so a chat always opens as a chat. "Open the
+  // note" from inside a chat does not set it, which is how you still reach
+  // the raw markdown on purpose.
+  const chatRedirectFor = useRef(null);
   // Bumped by the toolbar Refresh so the task board reloads its tasks too
   // (the board isn't part of the note/tree refresh path).
   const [boardRefreshNonce, setBoardRefreshNonce] = useState(0);
@@ -345,6 +375,7 @@ function App() {
   // ENABLE_TASK_BOARD on the backend. When off, /api/tasks and /api/board are
   // not registered at all, so the button must not be offered.
   const taskBoardEnabled = !!appConfig?.taskBoard;
+  const chatEnabled = !!appConfig?.chat;
 
   // "Basic" on a drawing shows the file's markdown source rather than the
   // canvas. Per-note and not persisted: a drawing should open as a drawing, so
@@ -359,7 +390,12 @@ function App() {
   // markdown and corrupts the frontmatter and slide breaks. Force Basic (raw)
   // editing for them, regardless of the user's editor-mode preference. A
   // drawing opened as source is raw scene JSON and carries the same hazard.
-  const editorModeForNote = effectiveEditorMode(editorMode, marpActive || drawingSource);
+  // A chat note is frontmatter-tagged like a Marp deck, and the Live editor
+  // destroys that frontmatter on autosave (`---` -> `***` + a setext
+  // heading), which silently turns the chat back into a plain note. So when
+  // one is opened as a note, it is locked to Basic exactly like Marp.
+  const chatNoteActive = chatEnabled && isChatDoc(content);
+  const editorModeForNote = effectiveEditorMode(editorMode, marpActive || drawingSource || chatNoteActive);
   // `.excalidraw.md` files open in the drawing editor (opt-in ENABLE_EXCALIDRAW),
   // bypassing the text editor/preview entirely.
   const excalidrawEnabled = !!appConfig?.excalidraw;
@@ -877,7 +913,13 @@ function App() {
       }
 
       const nsList = await loadNamespaces();
-      const { ns: hashNs, path: hashPath, stickies: hashStickies, board: hashBoard } = parseHash();
+      const { ns: hashNs, path: hashPath, stickies: hashStickies, board: hashBoard, chats: hashChats, chat: hashChat } = parseHash();
+      // Opened (or refreshed) on the chats view, possibly with one chat open.
+      if (hashChats) {
+        setChatsOpen(true);
+        setOpenChat(hashChat || null);
+        setChatNs(hashChat ? hashChat.ns : null);
+      }
       // Opened (or refreshed) on the task board: reopen it over the same
       // namespace and note.
       if (hashBoard) setShowTaskBoard(true);
@@ -886,9 +928,12 @@ function App() {
       // rather than on an empty editor.
       if (hashStickies) setStickiesView('board');
       let targetNs = null;
+      // A chat link names its chat's namespace; open that workspace so the
+      // (namespace-scoped) chat list matches the chat on screen.
+      const linkedNs = hashNs || (hashChats && hashChat ? hashChat.ns : null);
 
-      if (hashNs && nsList.includes(hashNs)) {
-        targetNs = hashNs;
+      if (linkedNs && nsList.includes(linkedNs)) {
+        targetNs = linkedNs;
       } else if (nsList.length > 0) {
         targetNs = nsList[0];
       }
@@ -909,7 +954,7 @@ function App() {
             setCurrentPath(last);
             // Not while the board route is what brought us here — writing the
             // note hash would overwrite the very URL being restored.
-            if (!hashStickies) setHash(targetNs, last);
+            if (!hashStickies && !hashChats) setHash(targetNs, last);
           }
         }
       }
@@ -933,7 +978,9 @@ function App() {
           // namespace. The per-file prefs (mdnest_file_prefs:<ns>/<path>)
           // hold the scrollPct from when they were last reading.
           restoreScrollPosition(selectedNs, currentPath);
+          noteLoadedRef.current?.(selectedNs, currentPath, text);
         }).catch(() => {
+          chatRedirectFor.current = null;
           // The saved/hash-pointed file is gone (deleted on disk, renamed
           // by another client). Clear so the user gets a clean slate, and
           // forget the stale last-path so the next ns switch doesn't try
@@ -1058,21 +1105,35 @@ function App() {
       setHash(null, null, true);
       return;
     }
+    // Same rule as the board: until config loads, keep a chats deep link.
+    if (chatsOpen && (!appConfig || chatEnabled)) {
+      window.history.replaceState(null, '', formatRoute({ chats: true, chat: openChat }));
+      return;
+    }
     if (selectedNs) {
       // Until the config has loaded we can't know whether the board is
       // enabled; keep the board route rather than rewriting a deep link away.
       setHash(selectedNs, currentPath, false, showTaskBoard && (!appConfig || taskBoardEnabled));
     }
-  }, [selectedNs, currentPath, stickiesView, showTaskBoard, appConfig, taskBoardEnabled]);
+  }, [selectedNs, currentPath, stickiesView, showTaskBoard, appConfig, taskBoardEnabled, chatsOpen, openChat, chatEnabled]);
 
   // Handle browser back/forward
   useEffect(() => {
     const onHashChange = () => {
-      const { ns, path, stickies, board } = parseHash();
+      const { ns, path, stickies, board, chats, chat } = parseHash();
       if (stickies) {
         setStickiesView('board');
         return; // the board route says nothing about which note is open
       }
+      if (chats) {
+        setShowTaskBoard(false);
+        setChatsReturnTo('editor');
+        setChatsOpen(true);
+        setOpenChat(chat || null);
+        if (chat) setChatNs(chat.ns);
+        return; // the chats route names a chat, not the note underneath
+      }
+      setChatsOpen(false);
       setStickiesView((v) => (v === 'board' ? 'closed' : v));
       setShowTaskBoard(board);
       if (ns && ns !== selectedNs) {
@@ -1080,6 +1141,7 @@ function App() {
       }
       if (path !== currentPath) {
         if (path && ns) {
+          chatRedirectFor.current = `${ns}/${path}`;
           hashNavPending.current = true;
           openNoteDirect(ns, path).finally(() => { hashNavPending.current = false; });
         } else {
@@ -1191,7 +1253,9 @@ function App() {
       if (commentsEnabled) {
         listComments(ns, path).then(setComments).catch(() => setComments([]));
       }
+      noteLoadedRef.current?.(ns, path, text);
     } catch (e) {
+      chatRedirectFor.current = null;
       console.error('Failed to open note:', e);
     }
   }, [restoreScrollPosition, commentsEnabled, flushPendingSave]);
@@ -1249,7 +1313,9 @@ function App() {
       if (commentsEnabled) {
         listComments(selectedNs, path).then(setComments).catch(() => setComments([]));
       }
+      noteLoadedRef.current?.(selectedNs, path, text);
     } catch (e) {
+      chatRedirectFor.current = null;
       if (e.name === 'PermissionError') {
         alert('Access denied: you do not have permission to read this file.');
       } else {
@@ -1262,6 +1328,105 @@ function App() {
   // memoised. An inline arrow here would be a new function on every App
   // render, so every card would re-render and the memo would buy nothing.
   const openNoteFromBoard = useCallback((p) => { setShowTaskBoard(false); openNote(p); }, [openNote]);
+
+  // Delete a chat = delete its note (the note IS the chat). Confirmed first,
+  // naming the note, because it removes every message too. Clears whatever
+  // still points at the note (the open file, the namespace's last-opened
+  // memory, the tree) exactly like deleting the file from the tree does.
+  const deleteChat = useCallback(async (ns, path, title) => {
+    if (!window.confirm(`Delete the chat "${title || path}"?\n\nThis deletes the note ${ns}/${path} and every message in it.`)) return false;
+    await deleteNote(ns, path);
+    if (ns === selectedNs && currentPath === path) { setCurrentPath(null); setContent(null); setSavedContent(''); }
+    if (getLastPath(ns) === path) setLastPath(ns, null);
+    if (ns === selectedNs) await refreshTree(undefined, { broadcast: true });
+    setOpenChat(null);
+    return true;
+  }, [selectedNs, currentPath, getLastPath, setLastPath, refreshTree]);
+
+  // "Open the note behind this chat": leave the chats view and open the file,
+  // switching namespace when the chat lives in another one.
+  // Open a note that may live in another workspace. Switching workspace and
+  // THEN loading raced the namespace effect, which reloads the OLD path in
+  // the new workspace and, on a miss, clears the editor, so the note just
+  // opened vanished. Like handleSelectNs: set workspace and path in one
+  // batch and let that effect load it.
+  const openNoteIn = useCallback((ns, p) => {
+    if (ns === selectedNs) { openNoteDirect(ns, p); return; }
+    flushPendingSave();
+    setSelectedNs(ns);
+    setCurrentPath(p);
+    setContent(null);
+    setSavedContent('');
+    setLastPath(ns, p);
+  }, [selectedNs, openNoteDirect, flushPendingSave, setLastPath]);
+  const openNoteFromChat = useCallback((ns, p) => {
+    setChatsOpen(false);
+    openNoteIn(ns, p);
+  }, [openNoteIn]);
+  // Every way into chat mode goes through enterChats, so Back always knows
+  // where it came from.
+  // returnNote: the note to reopen on Back ({ns, path}), 'none' when the
+  // only note underneath is the chat itself, or undefined to keep the
+  // current one.
+  const enterChats = useCallback((chat, returnNote) => {
+    // The editor is about to be swapped out. Its pending edits (and a
+    // drawing's 500ms debounce, which its unmount would cancel) must be
+    // written now: a queued save is flushed on navigation, never dropped.
+    flushPendingSave();
+    // Comments belong to the note, which chat mode is hiding.
+    setShowComments(false);
+    setChatsReturnTo(showTaskBoard ? 'board' : 'editor');
+    setChatsReturnNote(returnNote === undefined ? null : returnNote);
+    setShowTaskBoard(false);
+    setChatNs(chat?.ns || selectedNs);
+    setOpenChat(chat || null);
+    setChatsOpen(true);
+  }, [showTaskBoard, selectedNs, flushPendingSave]);
+  const leaveChats = useCallback(() => {
+    setChatsOpen(false);
+    if (chatsReturnTo === 'board') setShowTaskBoard(true);
+    if (chatsReturnNote === 'none') {
+      // Nothing to go back to but the chat's own raw markdown: land on an
+      // empty editor instead.
+      setCurrentPath(null); setContent(null); setSavedContent('');
+    } else if (chatsReturnNote) {
+      openNoteIn(chatsReturnNote.ns, chatsReturnNote.path);
+    } else if (currentPath) {
+      // Reload the note underneath: chat mode may have rewritten it (a post
+      // to that very chat, "Make it a chat" on the open note), and editing a
+      // stale copy would 409, or strip the chat tag if overwritten.
+      openNoteDirect(selectedNs, currentPath);
+    }
+    setChatsReturnNote(null);
+  }, [chatsReturnTo, chatsReturnNote, selectedNs, currentPath, openNoteIn, openNoteDirect]);
+  const setChatsActive = useCallback((on) => {
+    if (on) enterChats(null); else leaveChats();
+  }, [enterChats, leaveChats]);
+  // The "is this note a chat?" decision, made where a note finishes loading
+  // rather than in an effect on `content`: that effect stayed armed when the
+  // click reloaded identical text (or the load failed), then fired on the
+  // next keystroke.
+  noteLoadedRef.current = (ns, path, text) => {
+    const want = chatRedirectFor.current;
+    if (!want) return;
+    chatRedirectFor.current = null;
+    const from = chatRedirectFrom.current;
+    chatRedirectFrom.current = null;
+    if (want !== `${ns}/${path}` || !chatEnabled || !isChatDoc(text)) return;
+    enterChats({ ns, path }, from && !(from.ns === ns && from.path === path) ? from : 'none');
+  };
+  const chatsBackLabel = chatsReturnTo === 'board'
+    ? 'Task board'
+    : chatsReturnNote === 'none'
+      ? 'notes'
+      : (chatsReturnNote?.path || currentPath || '').split('/').pop() || 'notes';
+  const setBoardActive = useCallback((on) => {
+    if (on) {
+      flushPendingSave(); // the editor is swapped out; see enterChats
+      setChatsOpen(false);
+    }
+    setShowTaskBoard(on);
+  }, [flushPendingSave]);
 
 
   const refreshComments = useCallback(() => {
@@ -1503,6 +1668,30 @@ function App() {
         } catch (e) { alert('Failed to delete folder: ' + e.message); }
         break;
       }
+      case 'convert-chat': {
+        // Tag the note as a chat in place (its content becomes the channel
+        // description) and open it in the chats view. The file is not moved,
+        // so a path already handed to an agent keeps working.
+        if (target && selectedNs) {
+          try {
+            await convertToChat(selectedNs, target.path, '');
+            enterChats({ ns: selectedNs, path: target.path });
+          } catch (e) { alert('Failed to make a chat: ' + e.message); }
+        }
+        break;
+      }
+      case 'new-chat': {
+        if (!selectedNs) break;
+        const title = window.prompt('Chat name');
+        if (!title || !title.trim()) break;
+        const path = chatPathFor(title, target?.path || '');
+        try {
+          await convertToChat(selectedNs, path, title.trim());
+          await refreshTree(undefined, { broadcast: true });
+          enterChats({ ns: selectedNs, path });
+        } catch (e) { alert('Failed to create chat: ' + e.message); }
+        break;
+      }
       case 'copy-path': {
         if (target && selectedNs) {
           const alias = appConfig?.serverAlias ? `@${appConfig.serverAlias}/` : '';
@@ -1572,7 +1761,7 @@ function App() {
         break;
       }
     }
-  }, [selectedNs, currentPath, refreshTree, doCreateNote, doCreateDrawing, doCreateFolder, getLastPath, setLastPath]);
+  }, [selectedNs, currentPath, refreshTree, doCreateNote, doCreateDrawing, doCreateFolder, getLastPath, setLastPath, enterChats]);
 
   const handleTreeDrop = useCallback(async (fromPath, toFolderPath) => {
     if (!selectedNs) return;
@@ -1760,7 +1949,7 @@ function App() {
   }
 
   return (
-    <div className="app">
+    <div className={`app${chatsOpen && chatEnabled ? ' app--chats' : ''}`}>
       {appConfig?.devLoginEnabled && (
         // Small fixed-position warning pill — visible on every
         // authenticated screen but unobtrusive. Hover for the full
@@ -1784,7 +1973,7 @@ function App() {
         // Opening a file hands the create-target back to that file's folder,
         // so it tracks where you actually are rather than the last folder
         // you happened to expand.
-        onSelect={(p) => { setPickedFolder(null); openNote(p); }}
+        onSelect={(p) => { setPickedFolder(null); setChatsOpen(false); chatRedirectFor.current = `${selectedNs}/${p}`; chatRedirectFrom.current = currentPath ? { ns: selectedNs, path: currentPath } : null; openNote(p); }}
         currentPath={currentPath}
         namespaces={namespaces}
         selectedNs={selectedNs}
@@ -1828,6 +2017,7 @@ function App() {
       >
         <Toolbar
           currentPath={currentPath}
+          onManageUsers={isAdmin && isMulti ? () => setShowAdminPanel(true) : null}
           theme={resolvedTheme}
           onToggleTheme={toggleTheme}
           onToggleSidebar={() => setSidebarVisible((v) => !v)}
@@ -1849,8 +2039,14 @@ function App() {
             }
           }}
           editorMode={editorModeForNote}
-          marpLocked={marpActive}
-          onSetBoardActive={taskBoardEnabled && selectedNs ? setShowTaskBoard : null}
+          marpLocked={marpActive || chatNoteActive}
+          mobileView={mobileView}
+          onMobileViewChange={isMobile && currentPath && !excalidrawActive && !showTaskBoard && !chatsOpen ? (v) => { setMobileView(v); localStorage.setItem('mdnest_mobile_view', v); } : null}
+          liveLockReason={chatNoteActive && !marpActive ? 'Disabled for chats — the rich editor would rewrite the chat tag and turn it back into a plain note' : null}
+          onSetBoardActive={taskBoardEnabled && selectedNs ? setBoardActive : null}
+          onSetChatsActive={chatEnabled ? setChatsActive : null}
+          chatsBackLabel={chatsBackLabel}
+          chatsActive={chatsOpen && chatEnabled}
           drawingDoc={isDrawingDoc}
           drawingSource={drawingSource}
           onDrawingSourceChange={setDrawingSource}
@@ -1858,8 +2054,9 @@ function App() {
           onEditorModeChange={(mode) => {
             // Marp decks are locked to Basic — ignore attempts to switch to the
             // Live editor, which would reformat and break the slides.
-            if (marpActive && mode === 'live') return;
+            if ((marpActive || chatNoteActive) && mode === 'live') return;
             setShowTaskBoard(false);
+            setChatsOpen(false);
             setEditorMode(mode);
             localStorage.setItem('mdnest_editor_mode', mode);
             // User explicitly opted back into Live for this file — clear
@@ -1871,7 +2068,6 @@ function App() {
           }}
           onRefresh={handleRefresh}
           commentCount={commentsEnabled ? comments.filter(c => !c.parentId && !c.resolved).length : 0}
-          stickyCount={stickiesLoad === 'ready' ? undoneCount(stickies) : 0}
           stickiesOpen={stickiesView !== 'closed'}
           onToggleStickies={() => {
             // Two drawers, one strip of screen. Opening either closes the
@@ -1950,7 +2146,30 @@ function App() {
           {appConfig?.liveCollab && presenceUsers.length > 1 && (
             <PresenceBar users={presenceUsers} currentUserId={userInfo?.id} typingUsers={typingUsers} />
           )}
-          {showTaskBoard && taskBoardEnabled && selectedNs ? (
+          {chatsOpen && chatEnabled ? (
+            <ChunkErrorBoundary
+              label="chats"
+              resetKey="chats"
+              onDismiss={() => setChatsOpen(false)}
+              dismissLabel="Close chats"
+            >
+            <Suspense fallback={<div className="editor-loading">Loading chats...</div>}>
+              <ChatView
+                ns={chatNs || selectedNs}
+                namespaces={namespaces}
+                onSelectNs={(n) => { setChatNs(n); if (openChat && openChat.ns !== n) setOpenChat(null); }}
+                account={isMulti ? userInfo?.username : null}
+                serverAlias={appConfig?.serverAlias}
+                isMobile={isMobile}
+                openChat={openChat}
+                onSelectChat={setOpenChat}
+                onOpenNote={openNoteFromChat}
+                onDeleteChat={deleteChat}
+                onClose={leaveChats}
+              />
+            </Suspense>
+            </ChunkErrorBoundary>
+          ) : showTaskBoard && taskBoardEnabled && selectedNs ? (
             <ChunkErrorBoundary
               label="the task board"
               resetKey={selectedNs}
@@ -1995,10 +2214,8 @@ function App() {
               </div>
             ) : (
             <>
-              <div className="mobile-view-toggle">
-                <button className={mobileView === 'editor' ? 'active' : ''} onClick={() => { setMobileView('editor'); localStorage.setItem('mdnest_mobile_view', 'editor'); }}>Edit</button>
-                <button className={mobileView === 'preview' ? 'active' : ''} onClick={() => { setMobileView('preview'); localStorage.setItem('mdnest_mobile_view', 'preview'); }}>Preview</button>
-              </div>
+              {/* The phone's Edit/Preview switch lives in the toolbar now, as
+                  the third option of Basic | Live | Preview. */}
               {(isMobile ? mobileView === 'editor' : viewMode !== 'preview') && (
                 <div
                   ref={editorWrapperRef}
@@ -2191,6 +2408,7 @@ function App() {
         isAdmin={isAdmin && isMulti}
         selectedNs={selectedNs}
         excalidraw={excalidrawEnabled}
+        chat={chatEnabled}
       />
       {showReleaseNotes && appConfig?.latestRelease && (
         <ReleaseNotesModal

@@ -382,16 +382,6 @@
   background: var(--surface-3);
 }
 
-/* Theme toggle. Icon-only like the comments button next to it, so it reads as
-   part of that trailing group rather than as another labelled action. */
-.toolbar-theme {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.35rem 0.5rem;
-  flex-shrink: 0;
-}
-
 /* Appearance tab: one row per choice, because the third option ("match
    system") has an explanation and does not fit a two-state switch. */
 .theme-options {
@@ -457,18 +447,32 @@
   flex-shrink: 0;
 }
 
+/* One line, never two. It used to be space-between WITH wrapping, so a
+   narrow sidebar dropped the version onto its own line, left-aligned under
+   the host. Now the host gives way (ellipsis, full value in the tooltip)
+   and the version keeps its place on the right. The 14px side padding
+   lines the text up with the avatar above (footer 10px + row 4px), and the
+   bottom padding keeps it off the window's rounded corner. */
 .sidebar-server-info {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 2px 8px;
+  flex-wrap: nowrap;
+  gap: 8px;
   position: relative;
-  padding: 3px 12px;
-  font-size: 0.6rem;
+  padding: 6px 14px 8px;
+  font-size: 0.65rem;
+  line-height: 1.3;
   color: var(--text-faintest);
   border-top: 1px solid var(--border-subtle);
   flex-shrink: 0;
+  min-width: 0;
+}
+.sidebar-host {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Version + clickable (i) build-details popover. */
@@ -476,6 +480,8 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .version-info-btn {
   display: inline-flex;
@@ -1812,19 +1818,6 @@ pre:hover .code-copy-btn {
   padding: 0 3px;
 }
 
-.toolbar-settings {
-  background: transparent !important;
-  border: none !important;
-  color: var(--text-muted) !important;
-  font-size: 1.1rem !important;
-  padding: 0.2rem 0.4rem !important;
-  cursor: pointer;
-}
-
-.toolbar-settings:hover {
-  color: var(--text) !important;
-}
-
 /* Comment Sidebar */
 .comment-sidebar {
   position: fixed;
@@ -2734,35 +2727,6 @@ pre:hover .code-copy-btn {
   transform: scale(0.95);
 }
 
-/* Mobile view toggle (editor/preview switch) */
-.mobile-view-toggle {
-  display: none;
-  gap: 6px;
-  padding: 6px 10px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-
-.mobile-view-toggle button {
-  flex: 1;
-  padding: 7px 0;
-  background: var(--bg);
-  color: var(--text-muted);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  font-size: 0.82rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.mobile-view-toggle button.active {
-  background: var(--accent);
-  color: var(--text-inverse);
-  border-color: var(--accent);
-}
-
 /* Responsive: Mobile (<768px) */
 @media (max-width: 768px) {
   .toolbar-hamburger {
@@ -2817,7 +2781,8 @@ pre:hover .code-copy-btn {
     z-index: 7000;
   }
 
-  /* Hide desktop view toggle on mobile — mobile-view-toggle handles this */
+  /* Hide the desktop view toggle on mobile: the toolbar's Basic | Live |
+     Preview control handles the editor/preview switch there. */
   .toolbar-view-toggle {
     display: none !important;
   }
@@ -2874,11 +2839,7 @@ pre:hover .code-copy-btn {
     height: 100%;
   }
 
-  /* Show mobile view toggle & FAB */
-  .mobile-view-toggle {
-    display: flex;
-  }
-
+  /* Show the FAB */
   .fab {
     display: none;
   }
@@ -5632,28 +5593,21 @@ pre:hover .code-copy-btn {
    shape — it looked like a smudge next to the crisp single-stroke icons
    beside it. currentColor ties the outline to the button's own text colour,
    so it darkens on hover with everything else. */
-.sticky-icon-back {
-  fill: var(--sticky-blue);
-  stroke: currentColor;
-  stroke-width: 1.5;
-}
-
 .sticky-icon-front {
-  fill: var(--sticky-yellow);
-  stroke: currentColor;
-  stroke-width: 1.5;
+  fill: var(--sticky-icon-paper);
+  stroke: var(--sticky-icon-ink);
+  stroke-width: 1.4;
 }
 
-/* The peeled corner: a different fill from the face so the fold reads as a
-   fold rather than a notch cut out of the card. */
+/* The peeled corner: darker than the face so it reads as a fold. */
 .sticky-icon-fold {
-  fill: var(--sticky-grey);
-  stroke: currentColor;
-  stroke-width: 1.5;
+  fill: var(--sticky-icon-fold);
+  stroke: var(--sticky-icon-ink);
+  stroke-width: 1.4;
 }
 
 .sticky-icon-ink {
-  stroke: var(--text-secondary);
+  stroke: var(--sticky-icon-ink);
   fill: none;
 }
 
@@ -6193,3 +6147,260 @@ pre:hover .code-copy-btn {
   font-weight: 600;
   cursor: pointer;
 }
+
+/* The ⋯ menu: on every screen size it holds theme, Settings and Manage
+   users; on a phone it also takes everything the narrow bar cannot show
+   (those entries carry .more-phone). */
+.toolbar-more { position: relative; }
+/* The menu drops below the bar, over the editor; the bar must be the higher
+   layer on every screen size or the editor's own toolbar paints over the
+   menu and swallows its clicks. */
+.toolbar { position: relative; z-index: 30; }
+/* .more-file entries (Show in tree, Reload, Rename, Delete) are on the bar
+   when it has room; the container query further down moves them into the
+   menu when the toolbar gets narrow, on a desktop window too. */
+@media (min-width: 769px) {
+  .toolbar-more-menu .more-phone { display: none; }
+  .toolbar-more-menu .more-file { display: none; }
+  /* Desktop shows the status pill on the bar; the dot is phone-only. */
+  .toolbar-more-dot { display: none; }
+}
+
+/* Phone toolbar: the bar keeps only what is used on every note, and the rest
+   moves into the ⋯ menu (Toolbar.jsx). Two rows:
+     row 1  sidebar · [back to editor] · filename ......... comments · ⋯
+     row 2  Basic | Live | Preview
+   Before this it showed ~11 controls over two or three rows, in mixed
+   styles, and pushed the note a third of the way down the screen. Rows are
+   filled by `order`, not DOM position, because the DOM order is the desktop
+   reading order. */
+@media (max-width: 768px) {
+  .toolbar {
+    padding: 6px 10px;
+    gap: 6px;
+    row-gap: 6px;
+  }
+  .toolbar > .toolbar-group:first-child { order: 1; gap: 4px; }
+  .toolbar > .toolbar-path {
+    order: 2;
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: none;
+  }
+  .toolbar-utility {
+    order: 3;
+    margin-left: auto;
+    padding-left: 0;
+    border-left: none;
+    gap: 4px;
+  }
+  .toolbar > .editor-mode-toggle {
+    order: 4;
+    flex: 1 0 100%;
+    display: flex;
+  }
+  .toolbar > .editor-mode-toggle button { flex: 1; padding: 6px 0; }
+
+  /* Moved into the ⋯ menu. */
+  .toolbar .toolbar-view-btn.toolbar-view-board,
+  .toolbar .toolbar-view-btn.toolbar-view-chats,
+  .toolbar-utility .ws-status,
+  .toolbar-utility .toolbar-stickies,
+  .toolbar-path .toolbar-inline-reveal,
+  .toolbar-path .toolbar-inline-refresh,
+  .toolbar-path-actions { display: none; }
+
+  /* One look for every icon button left on the bar: same square, no box. */
+  /* Prefixed with .toolbar: the generic `.toolbar button` rule near the top
+     of this file outranks a bare class and boxed the sidebar and ⋯ buttons. */
+  .toolbar .toolbar-hamburger,
+  .toolbar .toolbar-view-btn,
+  .toolbar .toolbar-comments,
+  .toolbar .toolbar-more-btn {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius);
+    color: var(--text-secondary);
+    position: relative;
+  }
+  .toolbar .toolbar-hamburger:active,
+  .toolbar .toolbar-comments:active,
+  .toolbar .toolbar-more-btn:active,
+  .toolbar .toolbar-more-btn.active { background: var(--surface-2); color: var(--text); }
+  .toolbar-path-base { font-weight: 600; font-size: 0.95rem; }
+}
+
+.toolbar-more-btn { cursor: pointer; }
+.toolbar-more-dot {
+  position: absolute;
+  top: 5px;
+  right: 3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--warning);
+  box-shadow: 0 0 0 2px var(--surface);
+}
+.toolbar-more-dot.disconnected { background: var(--danger); }
+.toolbar-more-dot.superseded { background: var(--orange); }
+
+.toolbar-more-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 220px;
+  max-width: calc(100vw - 20px);
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 12px 32px var(--shadow-color-strong);
+  display: flex;
+  flex-direction: column;
+}
+.toolbar-more-menu > button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  background: none;
+  border: none;
+  border-radius: var(--radius);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.95rem;
+  text-align: left;
+  cursor: pointer;
+}
+.toolbar-more-menu > button:active,
+.toolbar-more-menu > button:hover { background: var(--surface-2); }
+.toolbar-more-menu > button svg { flex: 0 0 auto; color: var(--text-secondary); }
+.toolbar-more-menu > button.danger,
+.toolbar-more-menu > button.danger svg { color: var(--danger); }
+.toolbar-more-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px 10px;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+.toolbar-more-sep { height: 1px; margin: 4px 6px; background: var(--border); }
+
+/* Desktop: keep the toolbar on ONE row as it fills up. It is measured as a
+   container, not by viewport, because what decides the space is the
+   (resizable) sidebar beside it: 1280px wide with the sidebar open leaves
+   the toolbar ~1020px, a few pixels short of one row once Chats was added.
+   Shed words, never controls, in order of how little they say. */
+.toolbar { container: toolbar / inline-size; }
+@container toolbar (max-width: 1120px) {
+  /* Board / Chats keep their icons; the name is in the tooltip. */
+  .toolbar-view-btn > span { display: none; }
+  .toolbar-view-btn { padding: 4px 8px; }
+}
+@container toolbar (max-width: 980px) {
+  .toolbar-utility .ws-status-text { display: none; }
+}
+/* Too narrow for one row even after shedding words: the utilities wrap. Then
+   they sit at the right of their own row instead of starting it with the
+   divider that only means something when a group is beside them. */
+@container toolbar (max-width: 860px) {
+  .toolbar-utility {
+    margin-left: auto;
+    padding-left: 0;
+    border-left: none;
+  }
+  /* A narrow desktop window (half a laptop screen, say) wrapped the bar to
+     three rows. The open file's own actions move into the ⋯ menu, which
+     keeps navigation, the mode switch, the filename, the view switch and
+     the utilities on one row. */
+  .toolbar-path .toolbar-inline-reveal,
+  .toolbar-path .toolbar-inline-refresh,
+  .toolbar-path-actions { display: none; }
+  .toolbar-more-menu .more-file { display: flex; }
+  .toolbar-more-menu .toolbar-more-sep.more-file { display: block; }
+  /* The old "under 900px, the path gets its own line" rule existed to make
+     room for Rename/Delete beside it. They are in the menu now, so the path
+     stays inline and ellipsizes instead of costing a row. */
+  .toolbar > .toolbar-path {
+    order: 0;
+    flex: 1 1 0;
+    flex-basis: 0;
+    min-width: 0;
+  }
+}
+
+
+/* The formatting bars stay one row and scroll sideways instead of wrapping
+   to two, which cost a second row of screen above every note on a phone or
+   a narrow window. On a wide screen they fit and nothing scrolls. */
+.live-toolbar,
+.editor-toolbar {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.live-toolbar::-webkit-scrollbar,
+.editor-toolbar::-webkit-scrollbar { display: none; }
+.live-toolbar > *,
+.editor-toolbar > * { flex-shrink: 0; }
+
+/* The view title is phone-only; desktop names the view in the Board/Chats
+   button itself. */
+.toolbar-view-title { display: none; }
+
+/* Phone, on the task board or the chats view: the bar is sidebar · title ·
+   ⋯. The note underneath is not on screen, so its filename and comments go,
+   and so does the toolbar's Editor button: both views carry their own way
+   back, and two back buttons on one screen was the confusing part. */
+@media (max-width: 768px) {
+  .toolbar--view .toolbar-path,
+  .toolbar--view .toolbar-comments,
+  .toolbar.toolbar--view .toolbar-view-btn.toolbar-view-editor { display: none; }
+  .toolbar--view .toolbar-view-title {
+    display: block;
+    order: 2;
+    flex: 1 1 0;
+    min-width: 0;
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+/* Chat mode is full screen. The file tree and the open note's controls
+   (filename, Rename/Delete, the editor view switch, comments) are about a
+   note that is not on screen, so they go; the chats list is the left panel
+   and the workspace switcher moves into its header (ChatView NsPicker).
+   Desktop only for the sidebar: on a phone it is already an off-canvas
+   drawer behind ☰, and that stays the way to reach the tree. */
+@media (min-width: 769px) {
+  .app--chats .sidebar { display: none; }
+}
+.toolbar--chats .toolbar-path,
+.toolbar--chats .toolbar-comments,
+.toolbar--chats .toolbar-view-toggle { display: none; }
+
+/* In chat mode the bar's middle (the note's path and controls) is hidden,
+   so nothing pushed the utilities right and they drifted left beside the
+   Back button. Pin them to the right edge. */
+.toolbar--chats .toolbar-utility { margin-left: auto; }
+/* On a phone the chats header has its own ←; the bar stays ☰ · title · ⋯. */
+@media (max-width: 768px) {
+  .toolbar .toolbar-chats-back { display: none; }
+}
+

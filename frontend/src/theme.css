@@ -144,6 +144,13 @@
   --sticky-blue: #22334c;
   --sticky-green: #26382b;
   --sticky-grey: #2b2c3c;
+  /* The toolbar's Stickies ICON, not the cards. The card fills above are
+     deliberately muted backgrounds, and painted at 16px they read as a grey
+     smudge beside the comment and chat icons. The icon is one bright note
+     with dark ink in BOTH themes, so its colour alone says "sticky". */
+  --sticky-icon-paper: #f9e2af;
+  --sticky-icon-fold: #e0bf7a;
+  --sticky-icon-ink: #5c4a1e;
 
   /* --- Semantics: scrims and shadows ------------------------------------ */
   --scrim: #00000080;
@@ -294,6 +301,9 @@
   --sticky-blue: #d9e6ff;
   --sticky-green: #d8f0d5;
   --sticky-grey: #e3e6ef;
+  --sticky-icon-paper: #f6d365;
+  --sticky-icon-fold: #dcae38;
+  --sticky-icon-ink: #5c430c;
 
   /* Scrims stay black — a dim behind a modal is black on any ground — but
      shadows lighten, because a shadow tuned for a dark UI reads as a smudge
