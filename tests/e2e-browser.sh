@@ -61,6 +61,9 @@ pass "images built"
 
 # ── Boot the stack ───────────────────────────────────────────────────────────
 mkdir -p "$NOTES_DIR/testing_workspace"
+# A second namespace for the move/copy-between-namespaces specs. Named to sort
+# after testing_workspace, which stays the namespace every other spec opens in.
+mkdir -p "$NOTES_DIR/zz_e2e_target"
 docker network create "$NET" >/dev/null
 
 log "Starting backend (network alias 'backend' so nginx can proxy to it)"
