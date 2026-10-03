@@ -808,6 +808,13 @@ List all available namespaces. A namespace corresponds to a mounted directory (a
 
 Returns a sorted JSON array of namespace name strings. Hidden directories (those starting with `.`) are excluded.
 
+**`?detail=1`** *(unreleased)* returns the same namespaces with the caller's access at each namespace's root, computed with the same checks the routes use. The move/copy picker uses it to decide which namespaces to offer. A grant scoped to a folder below the root shows `false` here; a transfer dry run (below) has the final word for a specific folder. The plain form is unchanged.
+
+```json
+[{"name": "personal", "canRead": true, "canWrite": true},
+ {"name": "shared", "canRead": true, "canWrite": false}]
+```
+
 **Example:**
 
 ```bash
@@ -931,6 +938,8 @@ Create a new note. Fails if the file already exists.
 | `path` | yes | Relative path for the new file |
 
 **Request body:** Raw text content for the note (can be empty).
+
+Any `<!-- mdnest:<uuid> -->` note-ID marker in the body is removed *(unreleased)*. The marker is a note's identity, and it names the note's comment thread, so a new note never takes one from its content. It gets its own ID the first time one is needed. To keep a note's ID, edit it with `PUT`, which preserves it.
 
 **Response** (201 Created):
 
@@ -1077,7 +1086,7 @@ Append or prepend text to a note. Creates the file if it doesn't exist.
 | `path` | yes | Relative path to the note |
 | `position` | no | `top` (prepend) or `bottom` (append, default) |
 
-**Request body:** Plain text to append/prepend.
+**Request body:** Plain text to append/prepend. As with `POST`, any note-ID marker in the text is removed *(unreleased)*; the note's own marker is untouched.
 
 **Response** (200 OK):
 
@@ -1269,6 +1278,108 @@ curl -X POST "http://localhost:8286/api/move?ns=personal&from=drafts&to=archive/
 | 400 | `{"error":"invalid source path"}` | Source path is empty or attempts directory traversal |
 | 400 | `{"error":"invalid destination path"}` | Destination path is empty or attempts directory traversal |
 | 404 | `{"error":"source not found"}` | Source file or folder does not exist |
+
+---
+
+## Transfer *(unreleased)*
+
+### POST /api/transfer
+
+Move or copy a file or folder to another namespace, or to another place in the same namespace.
+
+**Query parameters:**
+
+| Param | Required | Description |
+|-------|----------|-------------|
+| `dryRun` | no | `1` runs every check and returns exactly what the real call would, writing nothing |
+
+**Request body:**
+
+```json
+{"mode": "move", "from": {"ns": "personal", "path": "Notes/x.md"}, "to": {"ns": "shared", "path": "Project/x.md"}}
+```
+
+`mode` is `move` or `copy`. `to.path` is the full destination path including the name, so moving and renaming is one call.
+
+**Access** is checked in the handler for both sides, because the request names two namespaces. A copy needs read on the source; a move needs write on the source (the same as `/api/move`). Both need write on the destination. Grants, group grants and namespace admins all count. An API token gets exactly its user's access.
+
+**What happens:**
+
+- **Never overwrites.** If the destination exists, or a parent of it is a file, the answer is `409` with the colliding path. A folder never merges into an existing one.
+- **Copy:** every note gets a fresh ID, and comments are not copied.
+- **Move:** every note keeps its ID, and its comment thread (`.mdnest/comments/<uuid>.jsonl`) moves with it. The exception is a thread whose ID is also carried by a note left behind; that thread stays where it is.
+- **Moving between namespaces** never renames across them, since they may be separate mounts with separate git repos. It copies everything, checks the target, and only then deletes the source. A failure before the delete removes the partial target and leaves the source untouched.
+- **Same namespace with `move`** is a plain rename, exactly like `/api/move`.
+- On a git-backed namespace, each side's next commit names the other side (`moved to shared:Project/x.md` / `moved from personal:Notes/x.md`).
+- The search cache and live tree of both namespaces refresh.
+
+**Response** (200 OK):
+
+```json
+{"status": "ok", "mode": "copy", "to": {"ns": "shared", "path": "Project/x.md"}, "items": 3}
+```
+
+`items` is the number of files carried.
+
+**Error responses** (checked in this order, all before anything is written):
+
+| Status | Body | Cause |
+|--------|------|-------|
+| 400 | `{"error":"..."}` | Bad JSON or mode; an invalid path; the namespace root as source or destination; a path inside `.git` or `.mdnest`; the destination equals the source; a folder into itself or a descendant |
+| 403 | `{"error":"access denied"}` | Missing access on either side |
+| 404 | `{"error":"namespace not found"}` / `{"error":"source not found"}` | |
+| 400 | `{"error":"symlink","path":"..."}` | The item, a parent folder, or anything inside it is a symbolic link |
+| 409 | `{"error":"exists","path":"Project/x.md"}` | The destination (or a parent that is a file) exists |
+| 413 | `{"error":"too_large","files":612,"bytes":146800640,"maxFiles":500,"maxBytes":104857600}` | Over `DOWNLOAD_MAX_FILES` / `DOWNLOAD_MAX_MB` |
+| 400 | `{"error":"reserved","path":"..."}` | The folder contains a nested `.git` or `.mdnest` |
+
+**Example:**
+
+```bash
+curl -X POST "http://localhost:8286/api/transfer?dryRun=1" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"mode":"copy","from":{"ns":"personal","path":"Notes"},"to":{"ns":"shared","path":"Archive/Notes"}}'
+```
+
+On `MDNEST_ROLE=app` replicas, the request is forwarded to the writer, which owns the durable tree. Edits still waiting in the durability queue may not have reached the writer yet, so a transfer started within a moment of a save can carry the previous version.
+
+---
+
+## Download *(unreleased)*
+
+### GET /api/download
+
+Download a file, or a folder as a zip.
+
+**Query parameters:**
+
+| Param | Required | Description |
+|-------|----------|-------------|
+| `ns` | yes | Namespace name |
+| `path` | no | File or folder; empty means the whole namespace (`<ns>.zip`) |
+
+Access is read on the cleaned `path` (path-scoped, like `GET /api/note`).
+
+- **A file** is sent as an attachment, with range support.
+- **A folder** is streamed as `<folder>.zip`. Paths inside start at the folder's name (`Project/sub/note.md`). Hidden files and empty folders are included. `.git/`, `.mdnest/` and symbolic links are left out.
+- **Content-Disposition** carries an ASCII `filename=` and, for other names, an RFC 5987 `filename*=UTF-8''...`.
+
+**Error responses:**
+
+| Status | Body | Cause |
+|--------|------|-------|
+| 400 | `{"error":"invalid path"}` / `{"error":"symlink","path":"..."}` | Traversal, a `.git`/`.mdnest` path, or a linked path |
+| 403 | `{"error":"access denied"}` | No read access to that path |
+| 404 | `{"error":"not found"}` | |
+| 413 | same body as transfer | A folder over the limits, refused before any byte is sent |
+| 429 | `{"error":"busy"}` plus `Retry-After` | The caller already has a zip download running, or `DOWNLOAD_MAX_CONCURRENT` are running server-wide |
+
+A cancelled download stops at the next read and frees its slots. Folder downloads only are limited and slotted; a single file is served like `/api/files/`.
+
+```bash
+curl -OJ "http://localhost:8286/api/download?ns=personal&path=Project" \
+  -H "Authorization: Bearer $TOKEN"
+```
 
 ---
 

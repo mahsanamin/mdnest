@@ -15,7 +15,7 @@ transports**:
 
 > **Available tools:** `list_namespaces`, `list_tree`, `read_note`,
 > `write_note`, `edit_note`, `append_note`, `prepend_note`, `create_note`, `create_folder`,
-> `delete_item`, `move_item`, `search_notes`, `list_tasks`, `create_task`,
+> `delete_item`, `move_item` (optionally into another namespace), `copy_item`, `search_notes`, `list_tasks`, `create_task`,
 > `move_task`, `edit_task`, `set_task_field`, `toggle_task`, `delete_task`,
 > `search_tasks`, `create_excalidraw`, `draw_excalidraw`, `read_excalidraw`,
 > `edit_excalidraw_node`, `edit_excalidraw_edge`, `delete_excalidraw_element`,
