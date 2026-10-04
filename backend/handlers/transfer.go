@@ -191,9 +191,6 @@ func cleanSide(s transferSide, which string) (string, *transferError) {
 	if !ok {
 		return "", refuse(http.StatusBadRequest, "invalid "+which+" path")
 	}
-	if hasReservedSegment(rel) {
-		return "", refuse(http.StatusBadRequest, "invalid "+which+" path")
-	}
 	return rel, nil
 }
 
@@ -237,15 +234,6 @@ func (h *TransferHandler) prepare(ctx context.Context, r *http.Request, req tran
 		if ok, err := h.store.NamespaceExists(ctx, ns); err != nil || !ok {
 			return nil, refuse(http.StatusNotFound, "namespace not found")
 		}
-	}
-	// A link on either path (the item or a parent folder) could point from a
-	// folder the caller has a grant on to one they do not; the grant was
-	// checked against the link's name, not where it leads.
-	if linkedPath(ctx, h.store, t.fromNS, t.from) {
-		return nil, &transferError{status: http.StatusBadRequest, body: map[string]any{"error": "symlink", "path": t.from}}
-	}
-	if linkedPath(ctx, h.store, t.toNS, t.to) {
-		return nil, &transferError{status: http.StatusBadRequest, body: map[string]any{"error": "symlink", "path": t.to}}
 	}
 	info, err := h.store.Stat(ctx, t.fromNS, t.from)
 	if err != nil {

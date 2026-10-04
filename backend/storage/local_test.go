@@ -240,14 +240,20 @@ func TestLocalRefusesLinksIntoGitOrOutOfNamespace(t *testing.T) {
 	}
 }
 
-// CoherentStorage over a backend that cannot answer the symlink question
-// says "linked", keeping download/transfer fail-closed.
-type noSymlinkInfo struct{ Storage }
-
-func TestCoherentHasSymlinkFailsClosed(t *testing.T) {
-	local, _ := NewLocalStorage(t.TempDir())
-	c := &CoherentStorage{Storage: noSymlinkInfo{local}}
-	if linked, _ := c.HasSymlink(context.Background(), "ns", "x"); !linked {
-		t.Fatal("coherent tier over an unknowing backend reported no link")
+// A cross-namespace move notes the other side in each commit; every git
+// stack must keep that capability (a wrapper that forgot to forward it would
+// silently drop the note).
+func TestStacksImplementAnnotator(t *testing.T) {
+	root := t.TempDir()
+	git, err := NewGitStorage(root, NoopCommitter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, s := range map[string]Storage{
+		"git": git, "coherent(range)": newCoherentStorage(git, nil, 0), "coherent": &CoherentStorage{Storage: git},
+	} {
+		if _, ok := s.(Annotator); !ok {
+			t.Errorf("%s does not implement Annotator", name)
+		}
 	}
 }

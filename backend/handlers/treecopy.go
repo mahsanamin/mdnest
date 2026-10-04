@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/mdnest/mdnest/backend/middleware"
+	"github.com/mdnest/mdnest/backend/relpath"
 	"github.com/mdnest/mdnest/backend/storage"
 )
 
@@ -66,22 +67,10 @@ type treePlan struct {
 
 // reservedDirName reports whether a directory name is app- or VCS-owned and
 // must never be exported or carried along: .git (history, possibly remote
-// credentials in config) and .mdnest (comment sidecars, board layout).
+// credentials in config) and .mdnest (comment sidecars, board settings). It
+// is relpath's rule, so a walk skips exactly what a request may not name.
 func reservedDirName(name string) bool {
-	// Case-insensitive: on a case-insensitive mount (APFS behind Docker
-	// Desktop, for one) ".GIT" is the same folder as ".git".
-	return strings.EqualFold(name, ".git") || strings.EqualFold(name, ".mdnest")
-}
-
-// hasReservedSegment reports whether any segment of a cleaned relative path is
-// a reserved directory. A transfer may not start from or land inside one.
-func hasReservedSegment(rel string) bool {
-	for _, seg := range strings.Split(rel, "/") {
-		if reservedDirName(seg) {
-			return true
-		}
-	}
-	return false
+	return relpath.IsReservedSegment(name)
 }
 
 // errPlanStop ends a walk that has already passed a limit.
@@ -158,20 +147,6 @@ func writeStatusJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
-}
-
-// linkedPath reports whether relPath or one of its existing parent folders is
-// a symlink (see storage.SymlinkChecker). It fails closed: an error, or a
-// backend that cannot answer, counts as linked and the caller refuses. The one
-// exception is the app tier's working set, which is a Redis key space with no
-// links at all (and whose download/transfer requests go to the writer anyway).
-func linkedPath(ctx context.Context, stg storage.Storage, ns, relPath string) bool {
-	sc, ok := stg.(storage.SymlinkChecker)
-	if !ok {
-		return stg.Kind() != "app"
-	}
-	linked, err := sc.HasSymlink(ctx, ns, relPath)
-	return err != nil || linked
 }
 
 // relUnder reports whether rel is root itself or inside it.

@@ -357,10 +357,6 @@ func TestNamespaces_Detail(t *testing.T) {
 	}
 }
 
-func (c *countingStore) HasSymlink(ctx context.Context, ns, rel string) (bool, error) {
-	return forwardHasSymlink(c.Storage, ctx, ns, rel)
-}
-
 // The walk stops once past a limit (a huge namespace is not walked in full
 // just to be refused), and folders count toward an entry cap.
 func TestPlanTree_StopsEarly(t *testing.T) {

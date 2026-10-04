@@ -122,15 +122,6 @@ func (c *CoherentStorage) Annotate(ns, line string) {
 	}
 }
 
-// HasSymlink forwards to the inner backend (see SymlinkChecker). An inner
-// backend that cannot answer counts as linked, keeping the check fail-closed.
-func (c *CoherentStorage) HasSymlink(ctx context.Context, ns, relPath string) (bool, error) {
-	if sc, ok := c.Storage.(SymlinkChecker); ok {
-		return sc.HasSymlink(ctx, ns, relPath)
-	}
-	return true, nil
-}
-
 // Close tears down the inner backend (if it is a Closer, e.g. GitStorage stops
 // its committer) and the working set connection.
 func (c *CoherentStorage) Close() error {

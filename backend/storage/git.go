@@ -384,14 +384,8 @@ func (c *intervalCommitter) Attribute(ns, path, name, email string) {
 func (c *intervalCommitter) Annotate(ns, line string) {
 	// The line carries user-chosen paths, and a file name may contain a
 	// newline: kept raw, it could forge extra lines in the commit body (a
-	// Co-authored-by trailer, say). Control characters become spaces, so an
-	// annotation is always exactly one line.
-	line = strings.TrimSpace(strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f {
-			return ' '
-		}
-		return r
-	}, line))
+	// Co-authored-by trailer, say). oneLine keeps it to exactly one line.
+	line = oneLine(line)
 	if line == "" {
 		return
 	}

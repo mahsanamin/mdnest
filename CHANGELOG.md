@@ -71,8 +71,9 @@ whole folder, and carry a note from one mdnest server to another
 - Download is guarded by path-scoped read (like reading a note), not by
   namespace access, so a grant on one folder cannot zip another. Transfer
   checks both namespaces in the handler before writing anything.
-- Download and transfer refuse a path where the item or a parent folder is a
-  symbolic link. A link could lead out of the folder a grant covers.
+- Download and transfer go through the v4.6.2 checks, which authorise a
+  symbolic link for the file it reaches and refuse `.git`/`.mdnest` paths. A
+  zip leaves links out, and a transfer refuses a folder that holds one.
 - Commit-body annotations cannot carry a newline, so a file name cannot forge
   a commit trailer.
 - A move never writes into a comment thread that already exists at the

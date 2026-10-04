@@ -63,17 +63,11 @@ func (h *DownloadHandler) HandleDownload(w http.ResponseWriter, r *http.Request)
 	if raw := r.URL.Query().Get("path"); raw != "" {
 		var ok bool
 		rel, ok = SafeRelPath(raw)
-		if !ok || hasReservedSegment(rel) {
+		if !ok {
 			http.Error(w, `{"error":"invalid path"}`, http.StatusBadRequest)
 			return
 		}
 		name = path.Base(rel)
-	}
-	// A linked path (the item or a parent folder) is not exported: the read
-	// grant was checked against the link's name, not where it leads.
-	if linkedPath(ctx, h.store, ns, rel) {
-		writeStatusJSON(w, http.StatusBadRequest, map[string]any{"error": "symlink", "path": rel})
-		return
 	}
 
 	info, err := h.store.Stat(ctx, ns, rel)

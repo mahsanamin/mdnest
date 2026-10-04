@@ -738,10 +738,12 @@ func TestTransferAndDownload_ProxyToWriter(t *testing.T) {
 	}
 }
 
-// A link anywhere on either path is refused: a grant is checked against the
-// link's name, not where it leads, so Shared/link -> Private would let a
-// /Shared reader copy or download /Private.
-func TestTransferAndDownload_RefuseLinkedPaths(t *testing.T) {
+// A link is authorised for the file it reaches (develop's permission layer
+// resolves it), so a /Shared reader cannot copy, move or download /Private
+// through Shared/link.md or a linked folder, nor write through a linked
+// destination folder. A folder holding a link is refused outright, since a
+// move would delete the link with the source.
+func TestTransferAndDownload_LinksAreAuthorisedForTheirTarget(t *testing.T) {
 	e := newTEnv(t)
 	e.put(t, "alpha", "Private/p.md", "secret\n")
 	e.put(t, "alpha", "Shared/a.md", "a\n")
@@ -750,7 +752,14 @@ func TestTransferAndDownload_RefuseLinkedPaths(t *testing.T) {
 		t.Skip("symlinks unavailable")
 	}
 	os.Symlink(filepath.Join(e.root, "alpha", "Private"), filepath.Join(e.root, "alpha", "Shared", "ldir"))
-	os.Symlink(filepath.Join(e.root, "beta"), filepath.Join(e.root, "beta", "Inbox", "out"))
+	os.MkdirAll(filepath.Join(e.root, "beta", "Elsewhere"), 0o755)
+	os.Symlink(filepath.Join(e.root, "beta", "Elsewhere"), filepath.Join(e.root, "beta", "Inbox", "out"))
+
+	grants := &pathGrants{grants: [][3]string{{"alpha", "/Shared", "read"}, {"beta", "/Inbox", "write"}}}
+	pc := middleware.NewPermissionChecker(grants, fakeNsAdminStore{}, nil)
+	pc.SetStorage(e.store)
+	e.h.canRead, e.h.canWrite = TransferPermissionFuncs(pc)
+	user := &middleware.UserContext{ID: 1}
 	before := e.snapshot(t)
 	for _, c := range []struct {
 		name string
@@ -758,22 +767,27 @@ func TestTransferAndDownload_RefuseLinkedPaths(t *testing.T) {
 	}{
 		{"linked file", transferReq("copy", "alpha", "Shared/link.md", "beta", "Inbox/x.md")},
 		{"file under a linked folder", transferReq("copy", "alpha", "Shared/ldir/p.md", "beta", "Inbox/x.md")},
-		{"linked folder", transferReq("move", "alpha", "Shared/ldir", "beta", "Inbox/D")},
 		{"destination under a linked folder", transferReq("copy", "alpha", "Shared/a.md", "beta", "Inbox/out/a.md")},
 	} {
-		code, body, _ := doTransfer(t, e.h, c.req, false, nil)
-		if code != http.StatusBadRequest || body["error"] != "symlink" {
-			t.Errorf("%s: got %d %v, want 400 symlink", c.name, code, body)
+		if code, body, _ := doTransfer(t, e.h, c.req, false, user); code != http.StatusForbidden {
+			t.Errorf("%s: got %d %v, want 403", c.name, code, body)
 		}
+	}
+	// A folder that holds a link is refused whoever asks (single mode here).
+	e2 := newTEnv(t)
+	e2.put(t, "alpha", "F/a.md", "a\n")
+	os.Symlink(filepath.Join(e2.root, "alpha", "F", "a.md"), filepath.Join(e2.root, "alpha", "F", "l.md"))
+	if code, body, _ := doTransfer(t, e2.h, transferReq("move", "alpha", "F", "beta", "F"), false, nil); code != http.StatusBadRequest || body["error"] != "symlink" {
+		t.Errorf("folder with a link: %d %v", code, body)
 	}
 	if !reflect.DeepEqual(before, e.snapshot(t)) {
 		t.Fatal("a refused linked transfer changed the disk")
 	}
-	d := NewDownloadHandler(e.store, DefaultTreeLimits, 2)
+	d := pc.RequireRead(http.HandlerFunc(NewDownloadHandler(e.store, DefaultTreeLimits, 2).HandleDownload))
 	for _, p := range []string{"Shared/link.md", "Shared/ldir/p.md", "Shared/ldir"} {
 		w := httptest.NewRecorder()
-		d.HandleDownload(w, httptest.NewRequest(http.MethodGet, "/api/download?ns=alpha&path="+p, nil))
-		if w.Code != http.StatusBadRequest || strings.Contains(w.Body.String(), "secret") {
+		d.ServeHTTP(w, middleware.WithUser(httptest.NewRequest(http.MethodGet, "/api/download?ns=alpha&path="+p, nil), user))
+		if w.Code != http.StatusForbidden || strings.Contains(w.Body.String(), "secret") {
 			t.Errorf("download %s: %d %q", p, w.Code, w.Body.String())
 		}
 	}
@@ -805,35 +819,6 @@ func TestTransfer_SharedIDThreadStays(t *testing.T) {
 	if _, ok := e.read(t, "alpha", ".mdnest/comments/"+idB+".jsonl"); ok {
 		t.Fatal("the moved thread is still in the source")
 	}
-}
-
-// noLinkInfo hides the symlink capability, as an unknown backend would.
-type noLinkInfo struct{ storage.Storage }
-
-// A backend that cannot say whether a path is linked is refused, not trusted.
-func TestLinkedPath_FailsClosed(t *testing.T) {
-	e := newTEnv(t)
-	e.put(t, "alpha", "a.md", "a\n")
-	if linkedPath(context.Background(), e.store, "alpha", "a.md") {
-		t.Fatal("a plain file reported as linked")
-	}
-	if !linkedPath(context.Background(), noLinkInfo{e.store}, "alpha", "a.md") {
-		t.Fatal("a backend without SymlinkChecker was trusted")
-	}
-}
-
-// The wrapping test stores forward the symlink check to the real backend, as
-// production wrappers do (TestStacksImplementSymlinkCheckerAndAnnotator).
-func forwardHasSymlink(inner storage.Storage, ctx context.Context, ns, rel string) (bool, error) {
-	return inner.(storage.SymlinkChecker).HasSymlink(ctx, ns, rel)
-}
-
-func (f *failingStore) HasSymlink(ctx context.Context, ns, rel string) (bool, error) {
-	return forwardHasSymlink(f.Storage, ctx, ns, rel)
-}
-
-func (a *annotatingStore) HasSymlink(ctx context.Context, ns, rel string) (bool, error) {
-	return forwardHasSymlink(a.Storage, ctx, ns, rel)
 }
 
 // A move never merges into, or writes lines into, a thread that already
@@ -937,10 +922,6 @@ func (l *lateArrival) WriteFile(ctx context.Context, ns, rel string, data []byte
 	return l.Storage.WriteFile(ctx, ns, rel, data)
 }
 
-func (l *lateArrival) HasSymlink(ctx context.Context, ns, rel string) (bool, error) {
-	return forwardHasSymlink(l.Storage, ctx, ns, rel)
-}
-
 // A real transfer holds a slot (one per user, a global cap); a dry run never.
 func TestTransfer_SlotsAndDryRun(t *testing.T) {
 	e := newTEnv(t)
@@ -960,18 +941,6 @@ func TestTransfer_SlotsAndDryRun(t *testing.T) {
 	}
 	if e.h.slots.inUse() != 0 {
 		t.Fatal("a finished transfer kept its slot")
-	}
-}
-
-// Reserved folders are matched case-insensitively.
-func TestReservedSegmentIgnoresCase(t *testing.T) {
-	for _, p := range []string{".git/config", "a/.GIT/x", ".Mdnest/comments/x.jsonl", "a/.MDNEST"} {
-		if !hasReservedSegment(p) {
-			t.Errorf("%q not treated as reserved", p)
-		}
-	}
-	if hasReservedSegment("a/.gitignore") || hasReservedSegment("git/x") {
-		t.Error("an ordinary name treated as reserved")
 	}
 }
 

@@ -314,8 +314,8 @@ Grants cover a path and everything below it, so checking the two roots covers ev
 
 What neither endpoint will carry:
 
-- **Symbolic links.** The local backend keeps a link inside its namespace, but inside it a link can lead from a folder you may read to one you may not, and the grant was checked against the link's name. Download and transfer refuse a path whose item or any parent folder is a link (`storage.SymlinkChecker`). A backend that cannot answer is refused too (fail closed). A zip skips links inside a folder; a transfer refuses the folder, because a move would delete them.
-- **`.git/` and `.mdnest/`**, matched case-insensitively (a case-insensitive mount treats `.GIT` as `.git`). History, possibly remote credentials, and app data are never exported, and no path may start in or land in them.
+- **Symbolic links.** Both endpoints authorise through `CheckRead`/`CheckWrite`, which since v4.6.2 resolve a link and authorise the file it reaches as well as its name (`storage.LinkResolver`). So `Shared/link.md -> Private/p.md`, a linked folder, or a linked destination folder gets a /Shared user a 403. Inside a folder, a zip leaves links out, and a transfer refuses the folder, because a move would delete them.
+- **`.git/` and `.mdnest/`.** `relpath.Clean` refuses them on both sides of a transfer and on a download path, case-insensitively (the v4.6.2 rule). A walk skips nested ones by the same rule (`relpath.IsReservedSegment`), so history, possibly remote credentials, and app data are never exported or carried along.
 - **Backslashes in zip entry names.** One is an ordinary character in a Linux file name but a path separator to Windows extractors, so entry names have it replaced.
 
 **Note identity.** The `<!-- mdnest:<uuid> -->` marker names a note's comment thread.
