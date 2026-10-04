@@ -263,6 +263,10 @@ All traffic goes to the frontend Service, which proxies `/api` and `/api/ws` (We
 | collab.redis.username | string | `"default"` | Redis username (compose mode). |
 | commonAnnotations | object | `{}` | Annotations added to every resource created by the chart. |
 | commonLabels | object | `{}` | Labels added to every resource created by the chart. |
+| download | object | `{"maxConcurrent":2,"maxFiles":500,"maxMB":100}` | --------------------------------------------------------------------------- |
+| download.maxConcurrent | int | `2` | Concurrent zip downloads per backend pod (`DOWNLOAD_MAX_CONCURRENT`); each user may hold one. With MDNEST_ROLE=app the zip is built on the writer, so this caps the writer. |
+| download.maxFiles | int | `500` | Most files one folder download or cross-namespace transfer may hold (`DOWNLOAD_MAX_FILES`). Larger folders are refused up front with a 413 naming the counts. |
+| download.maxMB | int | `100` | Most megabytes one folder download or transfer may hold (`DOWNLOAD_MAX_MB`). |
 | excalidraw | object | `{"enabled":false,"libraries":[]}` | --------------------------------------------------------------------------- |
 | excalidraw.enabled | bool | `false` | Enable the Excalidraw drawing editor (`ENABLE_EXCALIDRAW`). Off by default; when off `.excalidraw.md` files open as plain text and the (large) editor chunk is never loaded. |
 | excalidraw.libraries | list | `[]` | Operator-provided default Excalidraw libraries (`EXCALIDRAW_LIBRARIES`): a list of URLs to `.excalidrawlib` files, preloaded into every drawing so an organisation can ship a shared shape set. The URLs must be reachable by the browser (CORS-enabled or same-origin). |

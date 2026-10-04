@@ -7,6 +7,7 @@ package main
 // not in a handler, fails here.
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -18,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -287,6 +289,8 @@ func newTestServer(t *testing.T, multi bool) *testServer {
 		history:    handlers.NewHistoryHandler(root),
 		upload:     handlers.NewUploadHandler(stg, perms),
 		move:       handlers.NewMoveHandler(stg),
+		download:   handlers.NewDownloadHandler(stg, handlers.DefaultTreeLimits, 2),
+		transfer:   handlers.NewTransferHandler(stg, handlers.DefaultTreeLimits, canRead, canWrite, search.InvalidateCache),
 		search:     search,
 		tasks:      tasks,
 		chat:       chat,
@@ -564,6 +568,7 @@ func testReservedPathsRefused(t *testing.T, multi bool) {
 			{http.MethodPatch, "/api/tasks?ns=alpha&path=" + q},
 			{http.MethodGet, "/api/chat?ns=alpha&path=" + q},
 			{http.MethodPost, "/api/chat/convert?ns=alpha&path=" + q},
+			{http.MethodGet, "/api/download?ns=alpha&path=" + q},
 		}
 		if multi {
 			checks = append(checks,
@@ -574,6 +579,20 @@ func testReservedPathsRefused(t *testing.T, multi bool) {
 			code, body := ts.do(tok, c.method, c.path, strings.NewReader(payload), "")
 			if code < 400 || code == http.StatusInternalServerError || strings.Contains(body, "[core]") || strings.Contains(body, "PRIVATE-COMMENT") {
 				t.Errorf("%s %s: %d %s", c.method, c.path, code, body)
+			}
+		}
+	}
+	// A transfer names its paths in the BODY: neither side may be reserved.
+	for _, p := range reservedPaths() {
+		for _, body := range []string{
+			`{"mode":"copy","from":{"ns":"alpha","path":"Shared/a.md"},"to":{"ns":"alpha","path":` + strconv.Quote(p) + `}}`,
+			`{"mode":"move","from":{"ns":"alpha","path":` + strconv.Quote(p) + `},"to":{"ns":"alpha","path":"Shared/stolen"}}`,
+		} {
+			for _, q := range []string{"", "?dryRun=1"} {
+				code, resp := ts.do(tok, http.MethodPost, "/api/transfer"+q, strings.NewReader(body), "application/json")
+				if code != http.StatusBadRequest || strings.Contains(resp, "[core]") {
+					t.Errorf("transfer%s %s: %d %s", q, body, code, resp)
+				}
 			}
 		}
 	}
@@ -857,5 +876,154 @@ func TestRoutes_BoardWriteNeedsNamespaceWrite(t *testing.T) {
 	code, _ = ts.get(jwtFor(t, uidPat, "collaborator", nil), "/api/board?ns=alpha&path=Shared/a.md")
 	if code != http.StatusOK {
 		t.Errorf("a /Shared user lost read of the board layout: %d", code)
+	}
+}
+
+// --- download and transfer (issue #114) ---------------------------------------
+
+func zipEntries(t *testing.T, body string) map[string]string {
+	t.Helper()
+	zr, err := zip.NewReader(strings.NewReader(body), int64(len(body)))
+	if err != nil {
+		t.Fatalf("not a zip: %v", err)
+	}
+	out := map[string]string{}
+	for _, f := range zr.File {
+		rc, _ := f.Open()
+		b, _ := io.ReadAll(rc)
+		rc.Close()
+		out[f.Name] = string(b)
+	}
+	return out
+}
+
+// A folder download goes through path-scoped read: a /Shared reader zips
+// /Shared (without its links), never /Private, the namespace root, or
+// anything a link reaches.
+func TestRoutes_DownloadStaysInsideFolderGrant(t *testing.T) {
+	ts := newTestServer(t, true)
+	secrets := []string{"TOP-SECRET", "PRIVATE-COMMENT", "s3cr3t-pat", "BETA-SECRET"}
+	for _, tok := range []string{jwtFor(t, uidPat, "collaborator", nil), jwtFor(t, uidGus, "collaborator", nil)} {
+		code, body := ts.get(tok, "/api/download?ns=alpha&path=Shared")
+		if code != 200 {
+			t.Fatalf("download of the granted folder: %d %s", code, body)
+		}
+		for name, content := range zipEntries(t, body) {
+			for _, s := range secrets {
+				if strings.Contains(content, s) {
+					t.Errorf("zip entry %s carries %s", name, s)
+				}
+			}
+			if strings.Contains(name, "link") || strings.Contains(name, "ldir") || strings.Contains(name, "cfg") || strings.Contains(name, "out.md") || strings.Contains(name, "thread") {
+				t.Errorf("zip carries a link: %s", name)
+			}
+		}
+		for _, p := range []string{"Private", "Private/p.md", "Shared/../Private", "Shared/link.md", "Shared/ldir", "Shared/ldir/p.md", "Shared/cfg.md", "Shared/thread.md", "Shared/out.md", ""} {
+			code, body := ts.get(tok, "/api/download?ns=alpha&path="+url.QueryEscape(p))
+			if code < 400 {
+				t.Errorf("download %q: %d", p, code)
+			}
+			for _, s := range secrets {
+				if strings.Contains(body, s) {
+					t.Errorf("download %q leaked %s", p, s)
+				}
+			}
+		}
+	}
+	// A reader of the whole namespace gets it all, minus .git, .mdnest and links.
+	code, body := ts.get(jwtFor(t, uidOwen, "collaborator", nil), "/api/download?ns=alpha")
+	if code != 200 {
+		t.Fatalf("full reader, root download: %d", code)
+	}
+	for name, content := range zipEntries(t, body) {
+		if strings.Contains(name, ".git/") || strings.Contains(name, ".mdnest/") || strings.Contains(content, "s3cr3t-pat") || strings.Contains(content, "PRIVATE-COMMENT") || strings.Contains(content, "BETA-SECRET") {
+			t.Errorf("root zip entry %s exposes internals", name)
+		}
+	}
+}
+
+// Transfer names two namespaces in its body; the route table gives it no
+// middleware, so this pins that the handler's own checks are the real ones.
+func TestRoutes_TransferChecksBothSides(t *testing.T) {
+	ts := newTestServer(t, true)
+	pat := jwtFor(t, uidPat, "collaborator", nil) // write alpha:/Shared
+	adele := jwtFor(t, uidAdele, "admin", nil)    // read alpha:/Shared, admin of beta
+	gus := jwtFor(t, uidGus, "collaborator", nil) // group read alpha:/Shared
+	req := func(mode, fns, fp, tns, tp string) string {
+		return `{"mode":"` + mode + `","from":{"ns":"` + fns + `","path":` + strconv.Quote(fp) + `},"to":{"ns":"` + tns + `","path":` + strconv.Quote(tp) + `}}`
+	}
+	denied := []struct {
+		tok, body string
+	}{
+		{pat, req("copy", "alpha", "Shared/a.md", "beta", "a.md")},          // no grant on beta
+		{pat, req("copy", "alpha", "Private/p.md", "alpha", "Shared/p.md")}, // cannot read /Private
+		{pat, req("copy", "alpha", "Shared/../Private/p.md", "alpha", "Shared/p.md")},
+		{pat, req("copy", "alpha", "Shared/link.md", "alpha", "Shared/l2.md")}, // a link out of the grant
+		{pat, req("copy", "alpha", "Shared/ldir/p.md", "alpha", "Shared/l3.md")},
+		{pat, req("move", "alpha", "Shared/a.md", "alpha", "Private/a.md")},     // cannot write /Private
+		{pat, req("copy", "alpha", "Shared/a.md", "alpha", "Shared/ldir/a.md")}, // writes through a link into /Private
+		{adele, req("move", "alpha", "Shared/a.md", "beta", "a.md")},            // move needs write on the source
+		{gus, req("copy", "alpha", "Shared/a.md", "alpha", "Shared/g.md")},      // read-only group grant
+	}
+	for _, d := range denied {
+		for _, q := range []string{"?dryRun=1", ""} {
+			code, body := ts.do(d.tok, http.MethodPost, "/api/transfer"+q, strings.NewReader(d.body), "application/json")
+			if code != http.StatusForbidden || strings.Contains(body, "TOP-SECRET") {
+				t.Errorf("%s%s: %d %s", d.body, q, code, body)
+			}
+		}
+	}
+	if got := ts.readFile("alpha/Private/a.md") + ts.readFile("alpha/Shared/p.md") + ts.readFile("beta/a.md"); got != "" {
+		t.Fatalf("a denied transfer wrote something: %q", got)
+	}
+	// Allowed: a copy inside the writable folder, and a namespace admin
+	// copying what they may read into their namespace.
+	for _, a := range []struct{ tok, body, file string }{
+		{pat, req("copy", "alpha", "Shared/a.md", "alpha", "Shared/copy.md"), "alpha/Shared/copy.md"},
+		{adele, req("copy", "alpha", "Shared/a.md", "beta", "from-alpha.md"), "beta/from-alpha.md"},
+	} {
+		code, body := ts.do(a.tok, http.MethodPost, "/api/transfer", strings.NewReader(a.body), "application/json")
+		if code != 200 || !strings.Contains(ts.readFile(a.file), "shared words") {
+			t.Errorf("%s: %d %s", a.body, code, body)
+		}
+	}
+	// A folder holding links is refused rather than half-copied.
+	owen := jwtFor(t, uidOwen, "collaborator", nil)
+	code, body := ts.do(owen, http.MethodPost, "/api/transfer", strings.NewReader(req("copy", "alpha", "Shared", "alpha", "Copied")), "application/json")
+	if code != http.StatusBadRequest || !strings.Contains(body, "symlink") {
+		t.Errorf("folder with links: %d %s", code, body)
+	}
+	// An ownerless legacy token is not single mode here either.
+	legacy, _, _ := ts.tokens.CreateAPIToken("legacy", 0, "admin", "")
+	code, _ = ts.do(legacy, http.MethodPost, "/api/transfer", strings.NewReader(req("copy", "alpha", "Private/p.md", "beta", "p.md")), "application/json")
+	if code != http.StatusUnauthorized {
+		t.Errorf("ownerless token transfer: %d", code)
+	}
+	code, _ = ts.get(legacy, "/api/download?ns=alpha&path=Private")
+	if code != http.StatusUnauthorized {
+		t.Errorf("ownerless token download: %d", code)
+	}
+}
+
+// Single mode: one owner, so download and transfer work across the board.
+func TestRoutes_SingleModeDownloadAndTransfer(t *testing.T) {
+	ts := newTestServer(t, false)
+	tok := jwtFor(t, 0, "", nil)
+	code, body := ts.get(tok, "/api/download?ns=alpha&path=Private")
+	if code != 200 || !strings.Contains(strings.Join(func() []string {
+		var v []string
+		for _, c := range zipEntries(t, body) {
+			v = append(v, c)
+		}
+		return v
+	}(), ""), "TOP-SECRET") {
+		t.Errorf("single-mode download: %d", code)
+	}
+	code, body = ts.do(tok, http.MethodPost, "/api/transfer", strings.NewReader(`{"mode":"move","from":{"ns":"alpha","path":"Private/p.md"},"to":{"ns":"beta","path":"moved/p.md"}}`), "application/json")
+	if code != 200 || !strings.Contains(ts.readFile("beta/moved/p.md"), "TOP-SECRET") || ts.readFile("alpha/Private/p.md") != "" {
+		t.Errorf("single-mode move: %d %s", code, body)
+	}
+	if !strings.Contains(ts.readFile("beta/.mdnest/comments/"+privateID+".jsonl"), "PRIVATE-COMMENT") {
+		t.Errorf("the moved note's comments did not follow it")
 	}
 }

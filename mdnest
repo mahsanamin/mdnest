@@ -357,6 +357,56 @@ urldecode() {
   printf '%b' "${s//%/\\x}"
 }
 
+# json_str <text> — prints <text> as a JSON string literal, quotes included.
+# Pure bash so it works on every tier: escapes backslash and double quote, the
+# usual \n \r \t, and any other control character as \u00XX. Used to build the
+# small request bodies (paths) for /api/transfer.
+json_str() {
+  local s="$1" out="" i c code
+  local LC_ALL=C
+  for (( i=0; i<${#s}; i++ )); do
+    c="${s:i:1}"
+    case "$c" in
+      '"')  out+='\"' ;;
+      '\') out+='\\' ;;
+      $'\n') out+='\n' ;;
+      $'\r') out+='\r' ;;
+      $'\t') out+='\t' ;;
+      *)
+        printf -v code '%d' "'$c"
+        if [ "$code" -ge 0 ] && [ "$code" -lt 32 ]; then
+          out+=$(printf '\\u%04x' "$code")
+        else
+          out+="$c"
+        fi
+        ;;
+    esac
+  done
+  printf '"%s"' "$out"
+}
+
+# disposition_filename <Content-Disposition value> <fallback> — the file name a
+# download should be saved as: the RFC 5987 UTF-8 name when present, else the
+# plain one, reduced to a bare name (no folder part, no leading dots) so a
+# server cannot steer where the file lands.
+disposition_filename() {
+  local h="$1" fallback="$2" name=""
+  if [[ "$h" =~ filename\*=UTF-8\'\'([^\;]+) ]]; then
+    name=$(urldecode "${BASH_REMATCH[1]}") || name=""
+  elif [[ "$h" =~ filename=\"([^\"]*)\" ]]; then
+    name="${BASH_REMATCH[1]}"
+  fi
+  name="${name//$'\r'/}"
+  name="${name##*/}"
+  name="${name##*\\}"
+  name="${name//[[:cntrl:]]/}"
+  # No leading dot (a hidden file) and no leading dash (it would be read as an
+  # option by mv and friends).
+  while [[ "$name" == .* || "$name" == -* ]]; do name="${name#[.-]}"; done
+  [ -z "$name" ] && name="$fallback"
+  printf '%s' "$name"
+}
+
 # json_top_string <field>  — reads JSON on stdin, prints the value of a
 # TOP-LEVEL string field. Prefers python3, then jq; the bash fallback is
 # brace-depth aware so it never returns a value from a nested object (e.g. it
@@ -1709,33 +1759,148 @@ cmd_delete() {
   api DELETE "/note?ns=$(urlencode "$PARSED_NS")&path=$(urlencode "$PARSED_PATH")"
 }
 
-cmd_move() {
-  parse_path "$1"
-  require_server
-  local to="$2"
-  [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] || [ -z "$to" ] && { echo "Usage: mdnest move @alias/namespace/old-path new-path" >&2; exit 1; }
-
-  # Normalize the destination to a namespace-relative path. Users naturally
-  # paste the full "@alias/namespace/path" (same style as the source); passing
-  # that through raw made the server treat "@alias/namespace/" as folder names
-  # and relocate the file to a bogus "<ns>/@alias/namespace/..." path — the
-  # destination then read empty and write/delete 404'd (apparent data loss).
-  # Reject cross-namespace moves (move is within one namespace).
+# resolve_dest <destination> — sets DEST_NS / DEST_PATH for move and copy.
+# A destination is "new/path.md" (same namespace as the source),
+# "<source-namespace>/new/path.md", or the full "@alias/namespace/path" — the
+# last is how another namespace is named. --to-ns NAME (parsed by the caller)
+# overrides the namespace. Copying between two servers is not a server-side
+# operation, so a different @alias is refused rather than guessed at.
+resolve_dest() {
+  local to="$1"
+  DEST_NS="$PARSED_NS"
+  DEST_PATH=""
   if [[ "$to" == @* ]]; then
-    local r="${to#@}"; r="${r#*/}"            # drop "@alias/"
-    local to_ns="${r%%/*}" to_path=""
-    [[ "$r" == */* ]] && to_path="${r#*/}"
-    if [ "$to_ns" != "$PARSED_NS" ]; then
-      echo "Error: move stays within one namespace (source: $PARSED_NS, destination: $to_ns)" >&2
+    local r="${to#@}" alias
+    alias="${r%%/*}"
+    r="${r#*/}"
+    if [ -n "$PARSED_ALIAS" ] && [ "$alias" != "$PARSED_ALIAS" ]; then
+      echo "Error: source and destination are on different servers (@$PARSED_ALIAS, @$alias). Read it from one and create it on the other." >&2
       exit 1
     fi
-    to="$to_path"
+    DEST_NS="${r%%/*}"
+    [[ "$r" == */* ]] && DEST_PATH="${r#*/}"
   elif [[ "$to" == "$PARSED_NS"/* ]]; then
-    to="${to#"$PARSED_NS"/}"                  # strip a leading "<namespace>/"
+    DEST_PATH="${to#"$PARSED_NS"/}"          # strip a leading "<namespace>/"
+  else
+    DEST_PATH="$to"
   fi
-  [ -z "$to" ] && { echo "Error: destination path is empty" >&2; exit 1; }
+  if [ -n "${TO_NS:-}" ]; then DEST_NS="$TO_NS"; fi
+  if [ -z "$DEST_PATH" ]; then
+    echo "Error: destination path is empty" >&2
+    exit 1
+  fi
+  return 0
+}
 
-  api POST "/move?ns=$(urlencode "$PARSED_NS")&from=$(urlencode "$PARSED_PATH")&to=$(urlencode "$to")"
+# split_to_ns — pulls "--to-ns NAME" out of the arguments into TO_NS and
+# leaves the rest in ARGS.
+split_to_ns() {
+  TO_NS=""
+  ARGS=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --to-ns) TO_NS="${2:-}"; shift 2 || shift ;;
+      --to-ns=*) TO_NS="${1#--to-ns=}"; shift ;;
+      *) ARGS+=("$1"); shift ;;
+    esac
+  done
+  return 0
+}
+
+# transfer <move|copy> — POST /api/transfer for PARSED_* -> DEST_*.
+transfer() {
+  local body
+  body="{\"mode\":\"$1\",\"from\":{\"ns\":$(json_str "$PARSED_NS"),\"path\":$(json_str "$PARSED_PATH")},\"to\":{\"ns\":$(json_str "$DEST_NS"),\"path\":$(json_str "$DEST_PATH")}}"
+  api POST "/transfer" "$body"
+}
+
+cmd_move() {
+  split_to_ns "$@"
+  set -- "${ARGS[@]+"${ARGS[@]}"}"
+  parse_path "${1:-}"
+  require_server
+  if [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] || [ -z "${2:-}" ]; then
+    echo "Usage: mdnest move @alias/namespace/old-path new-path [--to-ns namespace]" >&2
+    exit 1
+  fi
+  # Users naturally paste the full "@alias/namespace/path" (same style as the
+  # source); passing that through raw made the server treat
+  # "@alias/namespace/" as folder names and relocate the file to a bogus path
+  # (apparent data loss), so resolve_dest normalises it.
+  resolve_dest "$2"
+  if [ "$DEST_NS" = "$PARSED_NS" ]; then
+    api POST "/move?ns=$(urlencode "$PARSED_NS")&from=$(urlencode "$PARSED_PATH")&to=$(urlencode "$DEST_PATH")"
+  else
+    # Another namespace: the server copies, verifies, then removes the source,
+    # carries comments along, and never overwrites (409 names the collision).
+    transfer move
+  fi
+}
+
+cmd_copy() {
+  split_to_ns "$@"
+  set -- "${ARGS[@]+"${ARGS[@]}"}"
+  parse_path "${1:-}"
+  require_server
+  if [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] || [ -z "${2:-}" ]; then
+    echo "Usage: mdnest copy @alias/namespace/path new-path [--to-ns namespace]" >&2
+    exit 1
+  fi
+  resolve_dest "$2"
+  transfer copy
+}
+
+# download <path> [output-file] — a file as itself, a folder as a zip. Saves
+# under the server's file name in the current folder unless an output file is
+# given, and never overwrites an existing file.
+cmd_download() {
+  parse_path "${1:-}"
+  require_server
+  if [ -z "$PARSED_NS" ]; then
+    echo "Usage: mdnest download @alias/namespace/path [output-file]" >&2
+    exit 1
+  fi
+  local out="${2:-}" dir="." tmp headers code curl_rc=0
+  if [ -n "$out" ]; then
+    if [ -e "$out" ]; then
+      echo "Error: $out already exists; choose another output file." >&2
+      exit 1
+    fi
+    dir=$(dirname "$out") || dir="."
+  fi
+  tmp=$(mktemp "$dir/.mdnest-download.XXXXXX") || { echo "Error: cannot write to $dir" >&2; exit 1; }
+  headers=$(mktemp) || headers=""
+  local q="ns=$(urlencode "$PARSED_NS")"
+  [ -n "$PARSED_PATH" ] && q+="&path=$(urlencode "$PARSED_PATH")"
+  local args=(-s -o "$tmp" -D "$headers" -w "%{http_code}" --connect-timeout "${MDNEST_TIMEOUT:-10}" -H "Authorization: Bearer $MDNEST_TOKEN")
+  # Guarded on the same line: see api() for why an unguarded assignment from a
+  # command substitution kills the script under set -e.
+  code=$(curl "${args[@]}" "${MDNEST_URL}/api/download?$q") || curl_rc=$?
+  if [ "$curl_rc" != "0" ]; then
+    rm -f "$tmp" "$headers"
+    echo "Error: couldn't download from ${MDNEST_URL}: $(curl_reason "$curl_rc")." >&2
+    exit 1
+  fi
+  if [ "$code" -ge 400 ] 2>/dev/null; then
+    echo "Error ($code): $(cat "$tmp")" >&2
+    rm -f "$tmp" "$headers"
+    exit 1
+  fi
+  if [ -z "$out" ]; then
+    local cd_header fallback
+    cd_header=$(grep -i '^content-disposition:' "$headers" | head -1) || cd_header=""
+    fallback="${PARSED_PATH##*/}"
+    [ -z "$fallback" ] && fallback="$PARSED_NS"
+    out=$(disposition_filename "$cd_header" "$fallback") || out="$fallback"
+    if [ -e "$out" ]; then
+      rm -f "$tmp" "$headers"
+      echo "Error: $out already exists here; pass an output file: mdnest download @myserver/notes/folder other-name.zip" >&2
+      exit 1
+    fi
+  fi
+  rm -f "$headers"
+  mv -- "$tmp" "$out"
+  echo "Saved $out"
 }
 
 cmd_search() {
@@ -1828,7 +1993,9 @@ NOTE OPERATIONS
   append   <path> <content|->     Append text to end (creates file if not found)
   prepend  <path> <content|->     Prepend text to start (creates file if not found)
   delete   <path>                 Delete a note or folder
-  move     <path> <new-path>      Move/rename within the same namespace
+  move     <path> <new-path>      Move/rename; another namespace via @alias/ns/path or --to-ns
+  copy     <path> <new-path>      Copy a file or folder (same options as move)
+  download <path> [output-file]   Save a file, or a folder as a .zip
   list     [@alias/namespace]     List namespaces, or a namespace/folder as a tree
            [--json]               ...as the raw API JSON instead (for scripts)
   search   <ns-path> "query"      Search note contents
@@ -1876,6 +2043,14 @@ EXAMPLES
 
   # Search
   mdnest search @work/engineering "database schema"
+
+  # Move or copy to another namespace (never overwrites; comments travel on move)
+  mdnest move @work/personal/Notes/plan.md @work/shared/Project/plan.md
+  mdnest copy @work/personal/Notes plan-archive --to-ns shared
+
+  # Download a note, or a whole folder as a zip
+  mdnest download @work/engineering/Architecture
+  mdnest download @work/engineering/notes/meeting.md ./meeting.md
 
   # Chat — two agents (or an agent and you) talking through one note
   mdnest chat new  @work/engineering/Chats/release.md "Release"
@@ -1927,6 +2102,8 @@ case "$CMD" in
   prepend)  load_default; warn_if_default_alias; cmd_prepend "$@" ;;
   delete)   load_default; warn_if_default_alias; cmd_delete "$@" ;;
   move)     load_default; warn_if_default_alias; cmd_move "$@" ;;
+  copy)     load_default; warn_if_default_alias; cmd_copy "$@" ;;
+  download) load_default; warn_if_default_alias; cmd_download "$@" ;;
   search)   load_default; warn_if_default_alias; cmd_search "$@" ;;
   chat)     load_default; warn_if_default_alias; cmd_chat "$@" ;;
   note)     cmd_note_legacy "$@" ;;

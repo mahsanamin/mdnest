@@ -394,6 +394,31 @@ alpha" "$(replace_first_literal "$h" "alpha" "")"
   rm -f "$hf"
 }
 
+# move/copy/download helpers (GH-114). json_str builds the /api/transfer body
+# from user paths, so a quote or backslash in a name must not break the JSON;
+# disposition_filename decides where a download lands, so a server-chosen name
+# must never carry a folder part. Both are pure bash: run once per tier.
+run_transfer_suite() {
+  echo "-- transfer helpers ($1)"
+  eq "json_str: plain"            '"Notes/plan.md"'           "$(json_str 'Notes/plan.md')"
+  eq "json_str: quote+backslash"  '"a\"b\\c.md"'              "$(json_str 'a"b\c.md')"
+  eq "json_str: newline/tab"      '"a\nb\tc"'                 "$(json_str $'a\nb\tc')"
+  eq "json_str: control char"     '"x\u0001y"'                "$(json_str $'x\x01y')"
+  eq "json_str: utf-8 untouched"  '"ملاحظات.md"'              "$(json_str 'ملاحظات.md')"
+  if have python3; then
+    eq "json_str: python parses it back" $'q"\\\nz' \
+       "$(python3 -S -E -c 'import json,sys; sys.stdout.write(json.loads(sys.argv[1]))' "$(json_str $'q"\\\nz')" 2>/dev/null)"
+  fi
+  eq "disposition: plain"         "Proj.zip"     "$(disposition_filename 'Content-Disposition: attachment; filename="Proj.zip"' x)"
+  eq "disposition: utf-8 wins"    "ملاحظات.md"   "$(disposition_filename "Content-Disposition: attachment; filename=\"_______.md\"; filename*=UTF-8''%D9%85%D9%84%D8%A7%D8%AD%D8%B8%D8%A7%D8%AA.md" x)"
+  eq "disposition: no folder"     "passwd"       "$(disposition_filename 'attachment; filename="../../etc/passwd"' x)"
+  eq "disposition: encoded folder" "bashrc"      "$(disposition_filename "attachment; filename*=UTF-8''..%2F.bashrc" x)"
+  eq "disposition: no dotfile"    "hidden"       "$(disposition_filename 'attachment; filename=".hidden"' x)"
+  eq "disposition: missing"       "fallback.md"  "$(disposition_filename '' fallback.md)"
+  eq "disposition: no leading dash" "target-directory=x" "$(disposition_filename "attachment; filename*=UTF-8''--target-directory%3Dx" x)"
+  eq "disposition: no control chars" "ab.md"     "$(disposition_filename "attachment; filename*=UTF-8''a%1Bb.md" x)"
+}
+
 run_errexit_lint() {
   echo "── errexit lint (mdnest, install-cli.sh) ──"
   # install-cli.sh is linted too: it runs under `set -e` and is no longer a
@@ -584,6 +609,7 @@ else
 fi
 run_list_suite "list rendering"
 run_splice_suite
+run_transfer_suite "python3"
 
 # Passes 2 and 3 need a python3 stand-in on PATH, so they're driven through a
 # shim directory. This is the issue-#87 class of bug: on the reporter's Fedora
@@ -638,6 +664,7 @@ run_list_suite "list rendering (no python3/jq)"
 # Pure bash, so it must be identical with and without a parser — a difference
 # here means a python3/jq/sed tier crept into the splicing.
 run_splice_suite
+run_transfer_suite "no python3/jq"
 
 # Argument handling is pure bash and parser-independent, so it runs once. It
 # needs SHIM_DIR for its throwaway HOMEs, hence its place at the end.
