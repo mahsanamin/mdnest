@@ -4,6 +4,29 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v4.6.3 — Security release: saving a note can no longer tie up the server
+
+A security release. **Upgrading is recommended for every install.**
+
+### Security
+
+- **A few requests could keep the server's CPU busy for minutes.** *Who is
+  affected:* any install where someone you do not fully trust can write
+  notes, through the web app, the CLI, the MCP server or an API token, in
+  either auth mode. When a note is created, saved, appended to, prepended
+  to, or posted to as a chat, mdnest removes its own hidden note-ID lines
+  from the incoming text. That cleanup took time that grew with the square
+  of the input, so one large, specially shaped request could occupy a CPU
+  core for many minutes, and a handful of them could make the server
+  unresponsive for everyone. No note is read, changed or exposed by this:
+  the effect is slowness only, and it ends when those requests finish. The
+  cleanup now runs in one pass, in time proportional to the size of the
+  note, with the same result as before. A regression test checks that the
+  result is unchanged and that four times the input costs about four times
+  the time.
+
+---
+
 ## v4.6.2 — Security release: protect repository internals, enforce 2FA and folder grants
 
 A security release. **Upgrade every install now.** The first fix applies

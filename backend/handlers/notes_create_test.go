@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mdnest/mdnest/backend/storage"
 )
@@ -126,5 +127,63 @@ func TestPutNote_KeepsOwnIDAgainstPlantedMarkers(t *testing.T) {
 	b, _ := os.ReadFile(filepath.Join(root, "alpha", "n.md"))
 	if id, _ := ExtractNoteID(string(b)); id != own || strings.Contains(string(b), victim) {
 		t.Fatalf("PUT let the body set the note's identity: %q", b)
+	}
+}
+
+// StripAllNoteIDs must agree with stripping one marker at a time, and stay
+// linear: a 10 MB body of markers is something any writer can send.
+func TestStripAllNoteIDs_EquivalentAndLinear(t *testing.T) {
+	const a = "aaaaaaaa-1111-4111-8111-111111111111"
+	const b = "bbbbbbbb-2222-4222-8222-222222222222"
+	slow := func(s string) (string, string) {
+		first := ""
+		for {
+			id, clean := ExtractNoteID(s)
+			if id == "" {
+				return first, s
+			}
+			if first == "" {
+				first = id
+			}
+			s = clean
+		}
+	}
+	for _, in := range []string{
+		"no marker\n",
+		"no trailing newline",
+		InjectNoteID("body\n", a),
+		"<!-- mdnest:" + a + " -->\ntop\n\nbody\n",
+		"x\n<!-- mdnest:" + b + " -->\nmid\n<!-- mdnest:" + a + " -->  \nend\n\n\n",
+		"<!-- mdnest:" + a + " -->",
+		"inline <!-- mdnest:" + a + " --> stays\n",
+	} {
+		f1, b1 := slow(in)
+		f2, b2 := StripAllNoteIDs(in)
+		if f1 != f2 || b1 != b2 {
+			t.Errorf("StripAllNoteIDs(%q) = (%q, %q), want (%q, %q)", in, f2, b2, f1, b1)
+		}
+	}
+	// Linear, not quadratic: four times the markers must cost about four
+	// times the time, not sixteen. A ratio, not a wall-clock bound, so the
+	// race detector's slowdown does not matter. The old one-at-a-time strip
+	// measured ~16x here.
+	timeIt := func(n int) time.Duration {
+		big := strings.Repeat("<!-- mdnest:a -->\n", n)
+		best := time.Duration(1 << 62)
+		for i := 0; i < 3; i++ {
+			start := time.Now()
+			id, body := StripAllNoteIDs(big)
+			if d := time.Since(start); d < best {
+				best = d
+			}
+			if id != "a" || strings.Contains(body, "mdnest:") {
+				t.Fatalf("n=%d: id=%q, %d bytes left", n, id, len(body))
+			}
+		}
+		return best
+	}
+	small, large := timeIt(5000), timeIt(20000)
+	if ratio := float64(large) / float64(small); ratio > 9 {
+		t.Fatalf("4x the markers took %.1fx the time (%v vs %v); the strip is not linear", ratio, large, small)
 	}
 }
