@@ -141,3 +141,27 @@ type RangeReadable interface {
 	// the file is missing.
 	OpenSeek(ctx context.Context, ns, relPath string) (io.ReadSeekCloser, FileInfo, error)
 }
+
+// LinkResolver is an optional capability of filesystem backends: it returns
+// the namespace-relative path a request path really reaches once symbolic
+// links are followed. The local backend keeps every link inside its namespace,
+// but inside it a link can still point from a folder a user may read to one
+// they may not, so the permission layer authorises the resolved path as well
+// as the requested one. Every storage stack a single box or a writer builds
+// implements it; the app tier's working set (Redis keys) has no links, and the
+// writer never caches or applies a linked path for it.
+type LinkResolver interface {
+	ResolveLinks(ctx context.Context, ns, relPath string) (string, error)
+}
+
+// linkedPath reports whether relPath reaches a different file than it names on
+// s (see LinkResolver). An error counts as linked: callers refuse rather than
+// guess. A backend without links has none.
+func linkedPath(ctx context.Context, s Storage, ns, relPath string) bool {
+	lr, ok := s.(LinkResolver)
+	if !ok {
+		return false
+	}
+	real, err := lr.ResolveLinks(ctx, ns, relPath)
+	return err != nil || real != relPath
+}

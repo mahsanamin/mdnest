@@ -68,11 +68,20 @@ func (a *AuthMiddleware) Wrap(next http.Handler) http.Handler {
 		// Check if it's an API token (starts with mdnest_)
 		if strings.HasPrefix(tokenString, "mdnest_") {
 			if a.tokenValidator != nil && a.tokenValidator.ValidateAPIToken(tokenString) {
-				// In multi mode, resolve the user context for this API token
-				if a.multiMode && a.tokenResolver != nil {
-					if uc := a.tokenResolver.ResolveAPITokenUser(tokenString); uc != nil {
-						r = WithUser(r, uc)
+				// In multi mode an API token acts as its owner. A token with no
+				// owner (one minted in single mode and imported when the install
+				// switched to multi mode) would reach the permission layer with
+				// no user, which is single mode's "everything" — refuse it.
+				if a.multiMode {
+					var uc *UserContext
+					if a.tokenResolver != nil {
+						uc = a.tokenResolver.ResolveAPITokenUser(tokenString)
 					}
+					if uc == nil {
+						http.Error(w, `{"error":"this API token has no owner; create a new one in Settings → API Tokens"}`, http.StatusUnauthorized)
+						return
+					}
+					r = WithUser(r, uc)
 				}
 				next.ServeHTTP(w, r)
 				return
@@ -81,42 +90,68 @@ func (a *AuthMiddleware) Wrap(next http.Handler) http.Handler {
 			return
 		}
 
-		// Otherwise validate as JWT
-		token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
-			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, jwt.ErrSignatureInvalid
-			}
-			return a.secret, nil
-		})
-		if err != nil || !token.Valid {
+		// Otherwise validate as a session JWT.
+		claims, err := ParseSessionToken(a.secret, tokenString)
+		if err != nil {
 			http.Error(w, `{"error":"invalid or expired token"}`, http.StatusUnauthorized)
 			return
 		}
 
 		// In multi mode, extract user context from JWT claims
 		if a.multiMode {
-			if claims, ok := token.Claims.(jwt.MapClaims); ok {
-				uc := &UserContext{}
-				if v, ok := claims["user_id"].(float64); ok {
-					uc.ID = int(v)
-				}
-				if v, ok := claims["sub"].(string); ok {
-					uc.Username = v
-				}
-				if v, ok := claims["role"].(string); ok {
-					uc.Role = v
-				}
-				if raw, ok := claims["groups"].([]interface{}); ok {
-					for _, g := range raw {
-						if s, ok := g.(string); ok && s != "" {
-							uc.Groups = append(uc.Groups, s)
-						}
-					}
-				}
-				r = WithUser(r, uc)
-			}
+			r = WithUser(r, UserFromClaims(claims))
 		}
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// ParseSessionToken validates a session JWT: signed with secret by HMAC, not
+// expired, and carrying no "purpose" claim. A purpose marks a login step token
+// (TOTP code, forced TOTP setup, forced password change). Those are signed
+// with the same secret, so without this rule the token a user holds after the
+// password and BEFORE the second factor worked as a full session everywhere.
+// A step token is good only at the one endpoint that consumes its step, which
+// parses it itself. Every JWT this server mints as a session — password and
+// TOTP logins, SSO, Firebase, dev login — has no purpose claim.
+func ParseSessionToken(secret []byte, tokenString string) (jwt.MapClaims, error) {
+	token, err := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, jwt.ErrSignatureInvalid
+		}
+		return secret, nil
+	})
+	if err != nil || !token.Valid {
+		return nil, jwt.ErrTokenInvalidClaims
+	}
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return nil, jwt.ErrTokenInvalidClaims
+	}
+	if _, isStep := claims["purpose"]; isStep {
+		return nil, jwt.ErrTokenInvalidClaims
+	}
+	return claims, nil
+}
+
+// UserFromClaims builds the request's user from session claims (multi mode).
+func UserFromClaims(claims jwt.MapClaims) *UserContext {
+	uc := &UserContext{}
+	if v, ok := claims["user_id"].(float64); ok {
+		uc.ID = int(v)
+	}
+	if v, ok := claims["sub"].(string); ok {
+		uc.Username = v
+	}
+	if v, ok := claims["role"].(string); ok {
+		uc.Role = v
+	}
+	if raw, ok := claims["groups"].([]interface{}); ok {
+		for _, g := range raw {
+			if s, ok := g.(string); ok && s != "" {
+				uc.Groups = append(uc.Groups, s)
+			}
+		}
+	}
+	return uc
 }

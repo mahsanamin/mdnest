@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/mdnest/mdnest/backend/middleware"
 	"github.com/mdnest/mdnest/backend/storage"
 )
 
@@ -355,10 +356,14 @@ func (h *TaskHandler) aggregate(w http.ResponseWriter, r *http.Request) {
 
 	var files []string
 	if p := strings.TrimSpace(r.URL.Query().Get("path")); p != "" {
-		// Scope to a single note (the "this note" board view).
-		if rel, ok := SafeRelPath(p); ok {
-			files = []string{rel}
+		// Scope to a single note (the "this note" board view). A path that
+		// does not validate is refused, never widened to the whole namespace.
+		rel, ok := SafeRelPath(p)
+		if !ok {
+			http.Error(w, `{"error":"invalid path"}`, http.StatusBadRequest)
+			return
 		}
+		files = []string{rel}
 	}
 
 	var tasks []Task
@@ -498,7 +503,15 @@ func (h *TaskHandler) HandleGlobalTasks(w http.ResponseWriter, r *http.Request) 
 			defer wg.Done()
 			defer func() { <-sem }()
 			board := h.loadBoard(ctx, ns)
-			ts := h.namespaceTasks(ctx, ns, board, force)
+			// The namespace filter admits the namespace; each task is still
+			// read-checked by its note, since grants can be path-scoped.
+			canRead := middleware.ReadFilterFor(r, ns)
+			var ts []Task
+			for _, t := range h.namespaceTasks(ctx, ns, board, force) {
+				if canRead(t.Path) {
+					ts = append(ts, t)
+				}
+			}
 			mu.Lock()
 			allTasks = append(allTasks, ts...)
 			boards = append(boards, board)

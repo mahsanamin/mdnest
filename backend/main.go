@@ -361,6 +361,8 @@ func main() {
 		nsAdminStore = store.NewPostgresNamespaceAdminStore(db)
 		groupStore = store.NewPostgresGroupStore(db)
 		perms = middleware.NewPermissionChecker(grantStore, nsAdminStore, groupStore)
+		// Authorise a symlinked path for the file it reaches, too.
+		perms.SetStorage(stg)
 		noteActivityStore = store.NewPostgresNoteActivityStore(db)
 
 		// Per-workspace git remote overrides: the store decrypts credentials and
@@ -737,84 +739,6 @@ func main() {
 		mux.HandleFunc("/api/auth/totp/setup-with-temp", totpHandler.HandleSetupTOTPWithTemp) // no auth — uses temp token for forced setup
 	}
 
-	// Apply permission checks in multi mode, passthrough in single mode
-	if perms != nil {
-		mux.Handle("/api/namespaces", authMiddleware.Wrap(http.HandlerFunc(nsHandler.ListNamespaces)))
-		mux.Handle("/api/tree", authMiddleware.Wrap(perms.RequireNsAccess(http.HandlerFunc(treeHandler.GetTree))))
-		mux.Handle("/api/note", authMiddleware.Wrap(perms.ReadWriteRouter(invalidateSearch(http.HandlerFunc(noteHandler.Handle)))))
-		// History endpoints — read-only, gate on read access (anyone who
-		// can read the file can see its version history).
-		mux.Handle("/api/note/history", authMiddleware.Wrap(perms.RequireNsAccess(http.HandlerFunc(historyHandler.HandleHistory))))
-		mux.Handle("/api/note/at", authMiddleware.Wrap(perms.RequireNsAccess(http.HandlerFunc(historyHandler.HandleNoteAt))))
-		if attributionHandler != nil {
-			mux.Handle("/api/note/attribution", authMiddleware.Wrap(perms.RequireNsAccess(http.HandlerFunc(attributionHandler.HandleAttribution))))
-		}
-		if commentsHandler != nil {
-			mux.Handle("/api/comments", authMiddleware.Wrap(perms.RequireNsAccess(http.HandlerFunc(commentsHandler.Handle))))
-		}
-		mux.Handle("/api/folder", authMiddleware.Wrap(perms.RequireWrite(invalidateSearch(http.HandlerFunc(uploadHandler.HandleFolder)))))
-		mux.Handle("/api/upload", authMiddleware.Wrap(perms.RequireWrite(invalidateSearch(http.HandlerFunc(uploadHandler.HandleUpload)))))
-		mux.Handle("/api/move", authMiddleware.Wrap(perms.RequireMove(invalidateSearch(http.HandlerFunc(moveHandler.HandleMove)))))
-		mux.Handle("/api/search", authMiddleware.Wrap(perms.RequireNsAccess(http.HandlerFunc(searchHandler.HandleSearch))))
-		// Task aggregation: GET reads notes, PATCH rewrites a task line in a note,
-		// so route by method (read vs write) and invalidate the search cache on
-		// mutation just like /api/note.
-		if enableTaskBoard {
-			mux.Handle("/api/tasks", authMiddleware.Wrap(perms.ReadWriteRouter(invalidateSearch(http.HandlerFunc(taskHandler.HandleTasks)))))
-			mux.Handle("/api/board", authMiddleware.Wrap(perms.ReadWriteRouter(http.HandlerFunc(taskHandler.HandleBoard))))
-			// Cross-namespace view: aggregates the caller's accessible namespaces.
-			// Auth-only here — the handler self-filters via the namespace filter,
-			// so it must not be wrapped in the single-namespace RequireNsAccess.
-			mux.Handle("/api/tasks/all", authMiddleware.Wrap(http.HandlerFunc(taskHandler.HandleGlobalTasks)))
-			// Namespace members for the task assignee picker. Read-access gated:
-			// anyone who can see the namespace may list who else is on it.
-			if pg, ok := grantStore.(*store.PostgresGrantStore); ok {
-				teamHandler := handlers.NewTeamHandler(stg, pg)
-				mux.Handle("/api/namespace/users", authMiddleware.Wrap(perms.RequireNsAccess(http.HandlerFunc(teamHandler.HandleNamespaceUsers))))
-			}
-		}
-		if enableChat {
-			// Read a chat = read the note; post or convert = write it.
-			mux.Handle("/api/chat", authMiddleware.Wrap(perms.ReadWriteRouter(invalidateSearch(http.HandlerFunc(chatHandler.Handle)))))
-			mux.Handle("/api/chat/convert", authMiddleware.Wrap(perms.RequireWrite(invalidateSearch(http.HandlerFunc(chatHandler.HandleConvert)))))
-			// Cross-namespace: self-filters, like /api/tasks/all.
-			mux.Handle("/api/chats", authMiddleware.Wrap(http.HandlerFunc(chatHandler.HandleList)))
-			// The chat image library: any access to the namespace may list it;
-			// each image is still read-checked when /api/files serves it.
-			mux.Handle("/api/chat/gifs", authMiddleware.Wrap(perms.RequireNsAccess(http.HandlerFunc(chatHandler.HandleGifs))))
-			mux.HandleFunc(handlers.BuiltinGifRoute, handlers.HandleBuiltinGif)
-		}
-		mux.Handle("/api/files/", authMiddleware.Wrap(http.HandlerFunc(uploadHandler.HandleServeFile))) // files endpoint extracts ns from URL, handled differently
-	} else {
-		mux.Handle("/api/namespaces", authMiddleware.Wrap(http.HandlerFunc(nsHandler.ListNamespaces)))
-		mux.Handle("/api/tree", authMiddleware.Wrap(http.HandlerFunc(treeHandler.GetTree)))
-		mux.Handle("/api/note", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(noteHandler.Handle))))
-		// History endpoints work in single mode too — git-sync runs
-		// orthogonally to AUTH_MODE.
-		mux.Handle("/api/note/history", authMiddleware.Wrap(http.HandlerFunc(historyHandler.HandleHistory)))
-		mux.Handle("/api/note/at", authMiddleware.Wrap(http.HandlerFunc(historyHandler.HandleNoteAt)))
-		// /api/comments intentionally unregistered in single mode.
-		mux.Handle("/api/folder", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(uploadHandler.HandleFolder))))
-		mux.Handle("/api/upload", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(uploadHandler.HandleUpload))))
-		mux.Handle("/api/move", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(moveHandler.HandleMove))))
-		mux.Handle("/api/search", authMiddleware.Wrap(http.HandlerFunc(searchHandler.HandleSearch)))
-		if enableTaskBoard {
-			mux.Handle("/api/tasks", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(taskHandler.HandleTasks))))
-			mux.Handle("/api/board", authMiddleware.Wrap(http.HandlerFunc(taskHandler.HandleBoard)))
-			// Single mode: one user owns every namespace, so the global view
-			// aggregates them all (nil namespace filter).
-			mux.Handle("/api/tasks/all", authMiddleware.Wrap(http.HandlerFunc(taskHandler.HandleGlobalTasks)))
-		}
-		if enableChat {
-			mux.Handle("/api/chat", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(chatHandler.Handle))))
-			mux.Handle("/api/chat/convert", authMiddleware.Wrap(invalidateSearch(http.HandlerFunc(chatHandler.HandleConvert))))
-			mux.Handle("/api/chats", authMiddleware.Wrap(http.HandlerFunc(chatHandler.HandleList)))
-			mux.Handle("/api/chat/gifs", authMiddleware.Wrap(http.HandlerFunc(chatHandler.HandleGifs)))
-			mux.HandleFunc(handlers.BuiltinGifRoute, handlers.HandleBuiltinGif)
-		}
-		mux.Handle("/api/files/", authMiddleware.Wrap(http.HandlerFunc(uploadHandler.HandleServeFile)))
-	}
-
 	// Centralized Marp themes: a global, read-for-all / write-for-superadmin
 	// catalog stored in a reserved hidden namespace. Decks reference a theme by
 	// name (`theme: <name>`) instead of embedding a per-deck style block. Opt-in
@@ -888,19 +812,35 @@ func main() {
 
 	// Git sync endpoints (admin-only in multi mode, always allowed in single)
 	syncHandler := handlers.NewSyncHandler(absNotesDir, searchHandler.InvalidateCache, nsAdminStore)
-	if multiMode {
-		mux.Handle("/api/admin/sync", authMiddleware.Wrap(middleware.RequireAdmin(http.HandlerFunc(syncHandler.HandleSync))))
-		mux.Handle("/api/admin/sync-status", authMiddleware.Wrap(http.HandlerFunc(syncHandler.HandleSyncStatus)))
-	} else {
-		mux.Handle("/api/admin/sync", authMiddleware.Wrap(http.HandlerFunc(syncHandler.HandleSync)))
-		mux.Handle("/api/admin/sync-status", authMiddleware.Wrap(http.HandlerFunc(syncHandler.HandleSyncStatus)))
-	}
 
-	// WebSocket route for live collaboration (no auth middleware — JWT verified in handler)
-	if enableCollab {
-		wsHandler := handlers.NewWSHandler(collabHub, jwtSecret)
-		mux.HandleFunc("/api/ws", wsHandler.HandleWS)
+	routes := contentRoutes{
+		auth:        authMiddleware.Wrap,
+		perms:       perms,
+		invalidate:  invalidateSearch,
+		ns:          nsHandler,
+		tree:        treeHandler,
+		note:        noteHandler,
+		history:     historyHandler,
+		attribution: attributionHandler,
+		comments:    commentsHandler,
+		upload:      uploadHandler,
+		move:        moveHandler,
+		search:      searchHandler,
+		sync:        syncHandler,
 	}
+	if enableTaskBoard {
+		routes.tasks = taskHandler
+		if pg, ok := grantStore.(*store.PostgresGrantStore); ok && perms != nil {
+			routes.team = http.HandlerFunc(handlers.NewTeamHandler(stg, pg).HandleNamespaceUsers)
+		}
+	}
+	if enableChat {
+		routes.chat = chatHandler
+	}
+	if enableCollab {
+		routes.ws = handlers.NewWSHandler(collabHub, jwtSecret, perms)
+	}
+	registerContentRoutes(mux, routes)
 
 	// Trust all mounted directories for git operations
 	exec.Command("git", "config", "--global", "safe.directory", "*").Run()

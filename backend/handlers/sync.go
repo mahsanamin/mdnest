@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -109,7 +110,7 @@ func (h *SyncHandler) HandleSyncStatus(w http.ResponseWriter, r *http.Request) {
 
 		// Get remote URL
 		if out, err := gitCmd(gitDir, "remote", "get-url", "origin"); err == nil {
-			resp.RemoteURL = out
+			resp.RemoteURL = redactRemoteURL(out)
 			resp.HasRemote = true
 		}
 
@@ -346,4 +347,21 @@ func findGitDir(dir string) string {
 		}
 		dir = parent
 	}
+}
+
+// redactRemoteURL drops the userinfo of a URL-style remote. A remote written
+// as https://user:token@host/... carries a credential in .git/config, and the
+// status endpoint is readable by anyone with access to the namespace. An
+// scp-style SSH remote (git@host:path) names a login, not a secret, and is
+// kept as is.
+func redactRemoteURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		if strings.Contains(raw, "://") {
+			return "" // unparseable URL-style remote: show nothing rather than a secret
+		}
+		return raw
+	}
+	u.User = nil
+	return u.String()
 }

@@ -120,3 +120,24 @@ func TestGitStorage_AttributedCommit(t *testing.T) {
 		t.Errorf("second commit should carry no stale attribution:\n%s", body2)
 	}
 }
+
+// A path or a display name is user-chosen and may hold a newline; the commit
+// body lists both, so either could forge extra lines (a Co-authored-by trailer)
+// unless every listed value is kept to one line.
+func TestCommitMessage_PathsAndNamesCannotForgeLines(t *testing.T) {
+	c := &intervalCommitter{}
+	files := map[string]map[ident]struct{}{
+		"evil\nCo-authored-by: Mallory <m@x>.md": {{name: "Ann", email: "ann@x"}: {}},
+		"ok.md":                                  {{name: "Bob\nCo-authored-by: Eve <e@x>", email: "bob@x\nSigned-off-by: z"}: {}},
+	}
+	msg := c.commitMessage(files)
+	for _, line := range strings.Split(msg, "\n") {
+		if strings.HasPrefix(line, "Co-authored-by: Mallory") || strings.HasPrefix(line, "Co-authored-by: Eve") ||
+			strings.HasPrefix(line, "Signed-off-by:") {
+			t.Fatalf("a forged line reached the commit body:\n%s", msg)
+		}
+	}
+	if !strings.Contains(msg, "Co-authored-by: Ann <ann@x>") {
+		t.Fatalf("a real trailer was lost:\n%s", msg)
+	}
+}

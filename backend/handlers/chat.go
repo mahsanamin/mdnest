@@ -382,9 +382,12 @@ func (h *ChatHandler) HandleGifs(w http.ResponseWriter, r *http.Request) {
 		chatJSONError(w, http.StatusInternalServerError, "failed to list chat gifs")
 		return
 	}
+	// The library is a folder of the namespace: list only what the user may
+	// read (grants can be path-scoped; /api/files checks each image again).
+	canRead := middleware.ReadFilterFor(r, ns)
 	for _, e := range entries {
 		ext := strings.ToLower(path.Ext(e.Name))
-		if e.IsDir || !chatGifExts[ext] || strings.HasPrefix(e.Name, ".") {
+		if e.IsDir || !chatGifExts[ext] || strings.HasPrefix(e.Name, ".") || !canRead(ChatGifDir+"/"+e.Name) {
 			continue
 		}
 		name := strings.TrimSuffix(e.Name, path.Ext(e.Name))

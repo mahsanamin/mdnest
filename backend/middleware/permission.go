@@ -1,9 +1,12 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
+	"strings"
 
 	"github.com/mdnest/mdnest/backend/relpath"
+	"github.com/mdnest/mdnest/backend/storage"
 	"github.com/mdnest/mdnest/backend/store"
 )
 
@@ -12,7 +15,38 @@ import (
 type PermissionChecker struct {
 	grantStore   store.GrantStore
 	nsAdminStore store.NamespaceAdminStore
-	groupStore   store.GroupStore // role-based "Groups" access; nil disables it
+	groupStore   store.GroupStore     // role-based "Groups" access; nil disables it
+	links        storage.LinkResolver // nil: the storage has no symlinks (app tier)
+}
+
+// SetStorage tells the checker which storage the paths it authorises live on,
+// so a path that reaches another file through a symbolic link is authorised
+// for that file too (see storage.LinkResolver). A storage without links (the
+// app tier's working set) leaves every path as named.
+func (pc *PermissionChecker) SetStorage(stg storage.Storage) {
+	if lr, ok := stg.(storage.LinkResolver); ok {
+		pc.links = lr
+	}
+}
+
+// resolve returns the canonical ("/a/b") path p really reaches once symbolic
+// links are followed. ok is false when that cannot be determined (a dangling
+// link, a link out of the namespace, an I/O error): callers refuse.
+func (pc *PermissionChecker) resolve(ctx context.Context, ns, p string) (string, bool) {
+	rel := strings.TrimPrefix(p, "/")
+	if pc.links == nil || rel == "" {
+		return p, true
+	}
+	real, err := pc.links.ResolveLinks(ctx, ns, rel)
+	if err != nil {
+		return "", false
+	}
+	// A link is held to the request-path rules too: one that reaches .git or
+	// .mdnest is refused, whatever the user's grant.
+	if relpath.HasReservedSegment(real) {
+		return "", false
+	}
+	return "/" + real, true
 }
 
 // NewPermissionChecker creates a new PermissionChecker. nsAdminStore is
@@ -38,6 +72,12 @@ func (pc *PermissionChecker) hasAdminScope(uc *UserContext, namespace string) bo
 	return false
 }
 
+// HasAdminScope is hasAdminScope for handlers that filter on their own (the
+// tree): a namespace-scoped admin of THIS namespace sees all of it.
+func (pc *PermissionChecker) HasAdminScope(uc *UserContext, namespace string) bool {
+	return pc.hasAdminScope(uc, namespace)
+}
+
 // CheckRead returns true if the user can read the given namespace/path.
 // Admins always have access. In single-user mode (no user context), access is granted.
 func (pc *PermissionChecker) CheckRead(r *http.Request, namespace, path string) bool {
@@ -57,6 +97,24 @@ func (pc *PermissionChecker) check(r *http.Request, namespace, path, permission 
 	if pc.hasAdminScope(uc, namespace) {
 		return true
 	}
+	if !pc.granted(uc, namespace, path, permission) {
+		return false
+	}
+	// A symbolic link is authorised for the file it reaches as well as for its
+	// own name: Shared/link.md -> Private/p.md must not hand a /Shared grant
+	// the /Private file. A link that stays inside what the user may access
+	// keeps working.
+	real, ok := pc.resolve(r.Context(), namespace, path)
+	if !ok {
+		return false
+	}
+	if real != "/"+strings.TrimPrefix(path, "/") {
+		return pc.granted(uc, namespace, real, permission)
+	}
+	return true
+}
+
+func (pc *PermissionChecker) granted(uc *UserContext, namespace, path, permission string) bool {
 	if pc.grantStore.CheckAccess(uc.ID, namespace, path, permission) {
 		return true
 	}
@@ -66,6 +124,83 @@ func (pc *PermissionChecker) check(r *http.Request, namespace, path, permission 
 		return pc.groupStore.CheckGroupAccess(uc.ID, uc.Groups, namespace, path, permission)
 	}
 	return false
+}
+
+// ReadFilter returns, for one request and namespace, a predicate telling
+// whether the user may read a namespace-relative path. It is CheckRead for
+// listings that span a namespace (search, the global task view, the chat gif
+// library): the user's grants and group grants are loaded ONCE and matched
+// with the same rule the grant stores use (store.GrantsAllow /
+// GroupGrantsAllow), instead of two queries per file. Seeing a namespace is
+// not the same as reading every note in it — grants can be path-scoped.
+func (pc *PermissionChecker) ReadFilter(r *http.Request, namespace string) func(relPath string) bool {
+	uc := UserFromContext(r.Context())
+	if uc == nil {
+		return func(string) bool { return true } // single-user mode, as check()
+	}
+	if pc.hasAdminScope(uc, namespace) {
+		return func(string) bool { return true }
+	}
+	var grants []store.Grant
+	if all, err := pc.grantStore.GetGrantsForUser(uc.ID); err == nil {
+		grants = all
+	}
+	var groupGrants []store.GroupGrant
+	if pc.groupStore != nil {
+		if gg, err := pc.groupStore.MemberGroupGrants(uc.ID, uc.Groups, namespace); err == nil {
+			groupGrants = gg
+		}
+	}
+	allowed := func(p string) bool {
+		return store.GrantsAllow(grants, namespace, p, "read") || store.GroupGrantsAllow(groupGrants, p, "read")
+	}
+	// A reader of the whole namespace may read every file in it. Storage
+	// refuses a link that leaves the namespace or reaches .git, so nothing
+	// needs resolving here; a link into .mdnest can only show this reader
+	// comment data of notes they can already read.
+	if allowed("/") {
+		return func(relPath string) bool { _, ok := canonicalPath(relPath); return ok }
+	}
+	ctx := r.Context()
+	return func(relPath string) bool {
+		p, ok := canonicalPath(relPath)
+		if !ok || !allowed(p) {
+			return false
+		}
+		real, ok := pc.resolve(ctx, namespace, p)
+		return ok && (real == p || allowed(real))
+	}
+}
+
+type checkerKey struct{}
+
+// Attach makes the checker available to the handlers behind it, for the
+// listings that filter per item (see ReadFilterFor).
+func (pc *PermissionChecker) Attach(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), checkerKey{}, pc)))
+	})
+}
+
+// CheckerFrom returns the checker attached to the request, or nil.
+func CheckerFrom(ctx context.Context) *PermissionChecker {
+	pc, _ := ctx.Value(checkerKey{}).(*PermissionChecker)
+	return pc
+}
+
+// ReadFilterFor is the per-item read filter for a handler that lists across a
+// namespace. It fails closed: a request that carries a user (multi mode) but
+// reached the handler without a checker attached gets a filter that allows
+// nothing, so forgetting to wire Attach serves an empty list rather than every
+// note. Single-user mode (no user, no checker) reads everything.
+func ReadFilterFor(r *http.Request, namespace string) func(relPath string) bool {
+	if pc := CheckerFrom(r.Context()); pc != nil {
+		return pc.ReadFilter(r, namespace)
+	}
+	if UserFromContext(r.Context()) != nil {
+		return func(string) bool { return false }
+	}
+	return func(string) bool { return true }
 }
 
 // FilterNamespaces returns only the namespaces the user has (data) access to.
