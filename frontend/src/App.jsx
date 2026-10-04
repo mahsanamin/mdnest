@@ -42,6 +42,12 @@ import ShareDialog from './components/ShareDialog.jsx';
 import HistoryModal from './components/HistoryModal.jsx';
 import AttributionModal from './components/AttributionModal.jsx';
 import MoveToModal from './components/MoveToModal.jsx';
+import PasteModal from './components/PasteModal.jsx';
+import { copyPlainText } from './mermaid-text.js';
+import {
+  baseName, buildClipboardPayload, describeRefusal, filenameFromDisposition, formatBytes,
+  localLinks, CLIPBOARD_MAX_BYTES,
+} from './transfer.js';
 import ReleaseNotesModal from './components/ReleaseNotesModal.jsx';
 import CollabClient from './collab.js';
 import { normalizeBoard } from './stickies.js';
@@ -59,6 +65,7 @@ import {
   createFolder,
   deleteNote,
   moveItem,
+  downloadItem,
   fetchConfig,
   fetchMe,
   fetchPreferences,
@@ -465,6 +472,13 @@ function App() {
   // false on tree rows) and is also available from the context menu on
   // desktop as a more accessible alternative to dragging.
   const [moveModal, setMoveModal] = useState(null);
+  // "Paste here" target: {ns, folder}.
+  const [pasteModal, setPasteModal] = useState(null);
+  // One status line at the bottom for downloads and clipboard copies:
+  // {kind: 'running'|'ok'|'error'|'info', text, cancel?, action?: {label, run}}.
+  const [notice, setNotice] = useState(null);
+  // A save that found its note gone (moved or deleted elsewhere): {ns, path}.
+  const [missingNote, setMissingNote] = useState(null);
   const [updateAvailable, setUpdateAvailable] = useState(null); // {current, latest}
   // Click feedback for the "Refresh Now" button — without this, clicking
   // can feel like nothing happened because the new bundle download +
@@ -1472,6 +1486,10 @@ function App() {
       } catch (e) {
         if (e.status === 409) {
           setConflictBanner({ username: 'another user', etag: e.etag });
+        } else if (e.status === 404) {
+          // Moved or deleted elsewhere. The PUT does not re-create the note
+          // at its old path; say so, and keep the text on screen to copy.
+          setMissingNote({ ns: selectedNs, path: currentPath });
         } else if (e.name === 'PermissionError') {
           console.error('Save blocked: no write permission');
         } else {
@@ -1612,6 +1630,91 @@ function App() {
     }
   }, [selectedNs, getTargetDir, refreshTree]);
 
+  useEffect(() => {
+    if (!notice || (notice.kind !== 'ok' && notice.kind !== 'info') || notice.action) return undefined;
+    const t = setTimeout(() => setNotice(null), 6000);
+    return () => clearTimeout(t);
+  }, [notice]);
+
+  // Download a file, or a folder as a zip. fetch + Blob rather than a bare
+  // link, so a 413/429 shows its real reason and the download can be
+  // cancelled (which also frees the server's slot).
+  const runDownload = useCallback(async (ns, target) => {
+    if (!ns || !target?.path) return;
+    const isFolder = target.type === 'folder' || target.type === 'directory';
+    const label = (target.name || baseName(target.path)) + (isFolder ? '.zip' : '');
+    const ctrl = new AbortController();
+    setNotice({ kind: 'running', text: `Downloading ${label}…`, cancel: () => ctrl.abort() });
+    try {
+      const r = await downloadItem(ns, target.path, ctrl.signal);
+      if (!r.ok) {
+        setNotice({ kind: 'error', text: describeRefusal(r.status, r.body, { action: 'download' }) });
+        return;
+      }
+      // Re-typed as a plain download: the object URL lives on mdnest's origin,
+      // and a server type such as text/html must not make it a page.
+      const url = URL.createObjectURL(new Blob([r.blob], { type: 'application/octet-stream' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filenameFromDisposition(r.disposition, label);
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      // Revoke once the save has been handed to the browser; the short delay
+      // is for engines that start reading the URL asynchronously.
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setNotice(null);
+    } catch (e) {
+      if (e.name === 'AbortError') setNotice({ kind: 'info', text: 'Download cancelled.' });
+      else setNotice({ kind: 'error', text: `Download failed: ${e.message}` });
+    }
+  }, []);
+
+  // "Copy for another mdnest": one note on the clipboard as a small JSON
+  // payload another mdnest's "Paste here" understands. Plain-HTTP installs
+  // have no async Clipboard API, so the hidden-textarea route is the fallback;
+  // if the browser refuses both (the fetch above used up the click's
+  // activation), the notice offers a button that copies synchronously.
+  const copyForAnotherMdnest = useCallback(async (ns, target) => {
+    let text;
+    try {
+      ({ text } = await getNote(ns, target.path));
+    } catch (e) {
+      setNotice({ kind: 'error', text: `Could not read the note: ${e.message}` });
+      return;
+    }
+    const name = target.name || baseName(target.path);
+    const p = buildClipboardPayload(name, text);
+    if (!p.ok) {
+      setNotice({
+        kind: 'error',
+        text: `This note is ${formatBytes(p.bytes)}, over the ${formatBytes(CLIPBOARD_MAX_BYTES)} clipboard limit. Download it instead.`,
+        action: { label: 'Download', run: () => runDownload(ns, target) },
+      });
+      return;
+    }
+    const links = localLinks(text);
+    const done = `Copied "${name}". In the other mdnest, right-click a folder and choose Paste here.`
+      + (links.length ? ` ${links.length} linked file${links.length === 1 ? '' : 's'} on this server will not be copied.` : '');
+    let ok = false;
+    if (navigator.clipboard && window.isSecureContext) {
+      try { await navigator.clipboard.writeText(p.text); ok = true; } catch { /* fall back */ }
+    }
+    if (!ok) ok = copyPlainText(p.text);
+    if (ok) {
+      setNotice({ kind: 'ok', text: done });
+    } else {
+      setNotice({
+        kind: 'info',
+        text: `"${name}" is ready to copy.`,
+        action: {
+          label: 'Copy',
+          run: () => setNotice(copyPlainText(p.text) ? { kind: 'ok', text: done } : { kind: 'error', text: 'The browser blocked the clipboard.' }),
+        },
+      });
+    }
+  }, [runDownload]);
+
   const handleContextAction = useCallback(async (action, target) => {
     switch (action) {
       case 'new-note': await doCreateNote(target); break;
@@ -1647,12 +1750,33 @@ function App() {
         setAttributionModal({ ns: selectedNs, path: target.path });
         break;
       }
-      case 'move': {
+      case 'move':
+      case 'copy-to': {
         if (!target || !selectedNs) return;
-        // The MoveToModal handles the destination picking, the API
-        // call, and the validity filtering itself. We just open it
-        // with the target and hand back a refresh on success.
-        setMoveModal({ ns: selectedNs, target });
+        // Write out pending edits first: a move may take the open note to
+        // another namespace, and a copy should carry what is on screen.
+        await flushPendingSave();
+        // The MoveToModal handles the destination picking, the dry run, the
+        // API call and the validity filtering itself. We just open it with
+        // the target and follow the result.
+        setMoveModal({ ns: selectedNs, target, mode: action === 'copy-to' ? 'copy' : 'move' });
+        break;
+      }
+      case 'download': {
+        if (!target || !selectedNs) return;
+        await flushPendingSave();
+        runDownload(selectedNs, target);
+        break;
+      }
+      case 'copy-clipboard': {
+        if (!target || !selectedNs) return;
+        await flushPendingSave();
+        copyForAnotherMdnest(selectedNs, target);
+        break;
+      }
+      case 'paste-here': {
+        if (!selectedNs) return;
+        setPasteModal({ ns: selectedNs, folder: target?.path || '' });
         break;
       }
       case 'delete-folder': {
@@ -1761,7 +1885,7 @@ function App() {
         break;
       }
     }
-  }, [selectedNs, currentPath, refreshTree, doCreateNote, doCreateDrawing, doCreateFolder, getLastPath, setLastPath, enterChats]);
+  }, [selectedNs, currentPath, refreshTree, doCreateNote, doCreateDrawing, doCreateFolder, getLastPath, setLastPath, enterChats, flushPendingSave, runDownload, copyForAnotherMdnest]);
 
   const handleTreeDrop = useCallback(async (fromPath, toFolderPath) => {
     if (!selectedNs) return;
@@ -2122,6 +2246,13 @@ function App() {
             <button onClick={() => setConflictBanner(null)}>Dismiss</button>
           </div>
         )}
+        {missingNote && missingNote.ns === selectedNs && missingNote.path === currentPath && (
+          <div className="conflict-banner" data-testid="missing-note-banner">
+            This note is no longer here: it was moved or deleted. Your latest edits were not saved.
+            <button onClick={() => { copyPlainText(content || ''); setNotice({ kind: 'ok', text: 'Your text is on the clipboard.' }); }}>Copy my text</button>
+            <button onClick={() => setMissingNote(null)}>Dismiss</button>
+          </div>
+        )}
         {restoreBanner && (
           <div className="restore-banner">
             {restoreBanner.username} restored this file to an earlier version
@@ -2382,20 +2513,63 @@ function App() {
       )}
       {moveModal && (
         <MoveToModal
+          mode={moveModal.mode}
           namespace={moveModal.ns}
           source={moveModal.target}
           onClose={() => setMoveModal(null)}
-          onMoved={async (newPath) => {
+          onDone={async ({ mode, fromNs, fromPath, ns, path }) => {
             setMoveModal(null);
-            await refreshTree(undefined, { broadcast: true });
-            // If the user moved the file that's currently open, follow
-            // it to its new path so the editor stays in sync.
-            if (moveModal.target.path === currentPath) {
-              setCurrentPath(newPath);
-              setHash(selectedNs, newPath);
+            if (mode === 'copy') {
+              if (ns === selectedNs) await refreshTree(undefined, { broadcast: true });
+              setNotice({ kind: 'ok', text: `Copied to ${ns === fromNs ? '' : ns + ':'}${path}` });
+              return;
             }
+            // A move: follow anything that pointed at the old place — the open
+            // note, and each namespace's remembered last note.
+            const follow = (p) => (p === fromPath ? path : (p && p.startsWith(fromPath + '/') ? path + p.substring(fromPath.length) : null));
+            const lastFrom = getLastPath(fromNs);
+            const lastMoved = follow(lastFrom);
+            const openMoved = fromNs === selectedNs ? follow(currentPath) : null;
+            if (ns === fromNs) {
+              if (lastMoved) setLastPath(fromNs, lastMoved);
+              await refreshTree(undefined, { broadcast: true });
+              if (openMoved) {
+                setCurrentPath(openMoved);
+                setHash(selectedNs, openMoved);
+              }
+              return;
+            }
+            if (lastMoved) setLastPath(fromNs, null);
+            if (openMoved) {
+              // The open note now lives in another namespace: go with it.
+              setLastPath(ns, openMoved);
+              handleSelectNs(ns);
+            } else {
+              await refreshTree(undefined, { broadcast: true });
+            }
+            setNotice({ kind: 'ok', text: `Moved to ${ns}:${path}` });
           }}
         />
+      )}
+      {pasteModal && (
+        <PasteModal
+          namespace={pasteModal.ns}
+          folder={pasteModal.folder}
+          onClose={() => setPasteModal(null)}
+          onPasted={async (path) => {
+            setPasteModal(null);
+            await refreshTree(undefined, { broadcast: true });
+            openNote(path);
+          }}
+        />
+      )}
+      {notice && (
+        <div className={`download-bar ${notice.kind}`} role="status" data-testid="notice-bar">
+          <span>{notice.text}</span>
+          {notice.cancel && <button onClick={() => { notice.cancel(); }}>Cancel</button>}
+          {notice.action && <button onClick={() => notice.action.run()}>{notice.action.label}</button>}
+          {notice.kind !== 'running' && <button onClick={() => setNotice(null)} aria-label="Dismiss">✕</button>}
+        </div>
       )}
       <ContextMenu
         visible={ctxMenu.visible}

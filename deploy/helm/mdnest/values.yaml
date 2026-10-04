@@ -303,6 +303,17 @@ excalidraw:
   libraries: []
 
 # -----------------------------------------------------------------------------
+# Folder download (zip) and move/copy between namespaces.
+# -----------------------------------------------------------------------------
+download:
+  # -- Most files one folder download or cross-namespace transfer may hold (`DOWNLOAD_MAX_FILES`). Larger folders are refused up front with a 413 naming the counts.
+  maxFiles: 500
+  # -- Most megabytes one folder download or transfer may hold (`DOWNLOAD_MAX_MB`).
+  maxMB: 100
+  # -- Concurrent zip downloads per backend pod (`DOWNLOAD_MAX_CONCURRENT`); each user may hold one. With MDNEST_ROLE=app the zip is built on the writer, so this caps the writer.
+  maxConcurrent: 2
+
+# -----------------------------------------------------------------------------
 # SSO / OIDC (optional). Only rendered when sso.enabled=true.
 # -----------------------------------------------------------------------------
 sso:

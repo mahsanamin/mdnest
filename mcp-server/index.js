@@ -977,15 +977,45 @@ server.tool(
   }
 );
 
+// transferItem calls POST /api/transfer — a move or copy that may cross
+// namespaces. The backend checks access on both sides, never overwrites
+// (409 names the colliding path), carries comments on a move and gives a copy
+// fresh note IDs.
+async function transferItem(mode, namespace, from, to, targetNamespace) {
+  try {
+    const res = await api(`/api/transfer`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mode,
+        from: { ns: namespace, path: from },
+        to: { ns: targetNamespace || namespace, path: to },
+      }),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      return { content: [{ type: "text", text: `Error ${res.status}: ${text}` }], isError: true };
+    }
+    const data = await res.json();
+    return { content: [{ type: "text", text: JSON.stringify(data) }] };
+  } catch (err) {
+    return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+  }
+}
+
 server.tool(
   "move_item",
-  "Move a file or folder to a new location",
+  "Move a file or folder to a new location. Set targetNamespace to move it into another namespace (comments travel with it; nothing at the destination is ever overwritten).",
   {
     namespace: z.string().describe("Namespace name"),
     from: z.string().describe("Source path"),
-    to: z.string().describe("Destination path"),
+    to: z.string().describe("Destination path, including the new name"),
+    targetNamespace: z.string().optional().describe("Destination namespace, when different from namespace"),
   },
-  async ({ namespace, from, to }) => {
+  async ({ namespace, from, to, targetNamespace }) => {
+    if (targetNamespace && targetNamespace !== namespace) {
+      return transferItem("move", namespace, from, to, targetNamespace);
+    }
     try {
       const res = await api(
         `/api/move?ns=${encodeURIComponent(namespace)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
@@ -1001,6 +1031,18 @@ server.tool(
       return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
     }
   }
+);
+
+server.tool(
+  "copy_item",
+  "Copy a file or folder, optionally into another namespace. Copies get fresh note IDs and no comments; nothing at the destination is ever overwritten (a collision is an error naming the path).",
+  {
+    namespace: z.string().describe("Source namespace"),
+    from: z.string().describe("Source path"),
+    to: z.string().describe("Destination path, including the name"),
+    targetNamespace: z.string().optional().describe("Destination namespace (defaults to the source namespace)"),
+  },
+  async ({ namespace, from, to, targetNamespace }) => transferItem("copy", namespace, from, to, targetNamespace)
 );
 
 server.tool(

@@ -4,6 +4,80 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v4.7.0 — Move, copy and download across workspaces
+
+Move and copy notes and folders between namespaces, download a file or a
+whole folder, and carry a note from one mdnest server to another
+(issue #114).
+
+### Added
+
+- **Move to… / Copy to… another namespace.** The tree's right-click menu
+  (long-press on a phone) opens one picker for a namespace, a folder and a
+  name. Each choice is checked with the server (a dry run) before Confirm is
+  enabled, so a name that is already taken, a missing right or an oversized
+  folder shows up while choosing.
+  - Nothing is ever overwritten.
+  - A move keeps each note's identity, so its comments travel with it. A
+    copy starts fresh, with no comments.
+  - Between namespaces, the original is removed only after the copy has been
+    verified.
+  - The editor follows a moved open note.
+  - **+ New folder** in the picker. The folder is created on confirm, so
+    cancelling leaves nothing behind.
+  - For a folder, the picker says how much will move ("37 files, 12 MB")
+    before you confirm, warns when it is large, and shows the elapsed time
+    while it runs.
+- **Download / Download as zip.** A file downloads as itself and a folder as
+  a zip that keeps its folders. Hidden files and empty folders are included;
+  `.git`, `.mdnest` and symbolic links are left out. Folders over the limits
+  are refused up front with the real counts, and a running download can be
+  cancelled.
+- **Copy for another mdnest / Paste here.** Puts one note on the clipboard
+  as a small payload that any mdnest's **Paste here** turns into a note,
+  even on another server.
+  - It works over plain HTTP; paste only ever reads a real paste event.
+  - It is limited to 1 MB of UTF-8, with a Download hint above that.
+  - You are warned about linked images and attachments that do not travel.
+  - A name that is already taken is offered as "(copy)", never applied
+    silently.
+- **API:**
+  - `POST /api/transfer` (`mode` move|copy, `?dryRun=1`) and
+    `GET /api/download`.
+  - `GET /api/namespaces?detail=1` (`canRead`/`canWrite` at each root); the
+    plain form is unchanged.
+- **MCP:** `move_item` takes an optional `targetNamespace`, and there is a
+  new `copy_item`.
+- **CLI:** `mdnest move` accepts another namespace (`@alias/ns/path` or
+  `--to-ns`), plus new `mdnest copy` and `mdnest download`.
+- **Config:** `DOWNLOAD_MAX_FILES` (500), `DOWNLOAD_MAX_MB` (100) and
+  `DOWNLOAD_MAX_CONCURRENT` (2 zip downloads server-wide, one per user), in
+  `mdnest.conf`, the plain compose file and the Helm chart (`download.*`).
+
+### Changed
+
+- **An autosave that finds its note gone** (moved or deleted elsewhere) shows
+  a banner with "Copy my text" instead of failing silently. It never
+  re-creates the note at the old path.
+
+### Security
+
+- Download is guarded by path-scoped read (like reading a note), not by
+  namespace access, so a grant on one folder cannot zip another. Transfer
+  checks both namespaces in the handler before writing anything.
+- Download and transfer go through the v4.6.2 checks, which authorise a
+  symbolic link for the file it reaches and refuse `.git`/`.mdnest` paths. A
+  zip leaves links out, and a transfer refuses a folder that holds one.
+- Commit-body annotations cannot carry a newline, so a file name cannot forge
+  a commit trailer.
+- A move never writes into a comment thread that already exists at the
+  destination, and carries only valid comment lines.
+- Folder downloads and transfers stop counting once past a limit, and each
+  takes a concurrency slot (dry runs excepted), so neither can be used to
+  make the server walk a huge tree over and over.
+
+---
+
 ## v4.6.3 — Security release: saving a note can no longer tie up the server
 
 A security release. **Upgrading is recommended for every install.**

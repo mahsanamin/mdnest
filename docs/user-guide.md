@@ -133,13 +133,18 @@ Right-click (desktop) or long-press (mobile) on any folder in the tree to open a
 - Create a new note inside that folder
 - Create a new subfolder
 - Rename the folder
-- **Move to…** -- pick a destination folder from a touch-friendly list (added v3.8.0). Useful on mobile, where HTML5 drag-and-drop is disabled.
+- **Move to…** -- pick a destination folder from a touch-friendly list (added v3.8.0), now in this namespace or another one. Useful on mobile, where HTML5 drag-and-drop is disabled.
+- **Copy to…** -- the same picker, keeping the original
+- **Download as zip** -- the folder and everything in it, keeping its folders
+- **Paste here** -- create a note copied with "Copy for another mdnest"
 - Delete the folder and its contents
 
 Right-click or long-press on a file to:
 
 - Rename the file -- if you don't type an extension, the original one is preserved (so renaming `notes.md` to `summary` becomes `summary.md`).
-- **Move to…** -- pick a destination folder (added v3.8.0). Same picker as the folder context menu.
+- **Move to…** / **Copy to…** -- pick a namespace, a folder and a name. Same picker as the folder context menu.
+- **Download** -- save the file
+- **Copy for another mdnest** -- put the note on the clipboard for **Paste here** on another mdnest
 - Delete the file
 
 ---
@@ -521,6 +526,35 @@ The move happens within the same namespace. Cross-namespace moves are not suppor
 
 ---
 
+## Moving, copying and downloading *(v4.7.0+)*
+
+**Move to…** and **Copy to…** (right-click, or long-press on a phone) open one picker. Choose a namespace, a folder, and the name it should have there.
+
+- **+ New folder** adds a folder to the list, under the folder you selected. It is created only when you confirm, so cancelling leaves nothing behind.
+- For a folder, the picker says how much will move before you confirm, for example "move 37 files (12 MB)", and warns when a folder is large. While it runs, it shows how long it has been going. A large move finishes on the server even if you close the window. While you choose, mdnest checks the destination with the server and tells you before you confirm:
+
+- if something with that name is already there (nothing is ever overwritten; change the name or pick another folder),
+- if you lack access there, or
+- if the folder is too large.
+
+**Move** confirms only when the check passes.
+
+- **Moving** keeps each note's identity, so its comments travel with it. Between namespaces the original is removed only after the copy has been checked. If you move the note you have open, the editor follows it.
+- **Copying** makes new notes. They start with no comments.
+- Links (symbolic links) inside a folder stop it from being moved or copied.
+
+**Download** saves a file. **Download as zip** saves a folder with everything in it, keeping its folders; the `.git` and `.mdnest` folders are left out. Folders larger than the server's limits (500 files / 100 MB by default) are refused with the actual counts, so you can pick a subfolder. A large download can be cancelled from the status bar.
+
+**Between two mdnest servers:** right-click a note → **Copy for another mdnest**. In the other mdnest's browser, right-click a folder → **Paste here**, then press Ctrl+V (⌘V), or long-press the box and choose Paste.
+
+- The note is created there with that server's permissions. It is never written over an existing one; you are offered a "(copy)" name instead.
+- Images and attachments the note links to are not carried along; you are told which.
+- A note over 1 MB is too big for the clipboard. Download it instead.
+
+If someone moves or deletes the note you are editing, mdnest says so instead of saving it back at the old place. Copy your text from the banner if you need it.
+
+---
+
 ## Context Menu
 
 The context menu provides quick actions for files and folders in the sidebar.
@@ -535,11 +569,17 @@ The context menu provides quick actions for files and folders in the sidebar.
 - New Note -- create a note inside this folder
 - New Folder -- create a subfolder
 - Rename -- rename the folder
+- Move to… / Copy to… -- to another folder or namespace (see *Moving, copying and downloading*)
+- Download as zip -- the whole folder
+- Paste here -- a note copied from another mdnest
 - Delete Folder -- remove the folder and all its contents
 
 **File context menu options:**
 
 - Rename -- rename the file
+- Move to… / Copy to… -- to another folder or namespace
+- Download -- save the file
+- Copy for another mdnest -- for Paste here on another server
 - Delete -- remove the file
 - Attribution *(v4.2.0+, multi mode)* -- who created the note, who last edited it, and everyone who has contributed. Built from an activity trail of every save, cross-checked against the note's git history so edits made outside the app are still credited. Single-mode installs have no user identities to attribute, so the entry is hidden.
 

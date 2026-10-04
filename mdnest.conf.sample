@@ -41,6 +41,12 @@ GIT_AUTHOR_EMAIL=you@example.com
 # SEARCH_WORKERS=8               # Parallel file readers
 # SEARCH_CACHE_TTL=30            # File list cache lifetime (seconds)
 
+# Folder download (zip) and move/copy between namespaces (optional).
+# A folder over either limit is refused up front with the real counts.
+# DOWNLOAD_MAX_FILES=500         # Most files one folder download or transfer may hold
+# DOWNLOAD_MAX_MB=100            # Most megabytes one folder download or transfer may hold
+# DOWNLOAD_MAX_CONCURRENT=2      # Zip downloads at once, server-wide (one per user)
+
 # Auth mode: "single" (default) or "multi"
 # Single mode: one user, file-based auth (current behavior, no database needed)
 # Multi mode: multiple users with roles & permissions, requires PostgreSQL
