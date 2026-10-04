@@ -300,6 +300,46 @@ Before v3.11.7 it enforced **nothing**: the route was registered with authentica
 
 If you add a route whose namespace isn't in `?ns=`, the check must be explicit in the handler — the middleware cannot see it. `backend/handlers/upload_test.go` pins this behaviour.
 
+### Download and transfer *(v4.7.0+)*
+
+**`GET /api/download`** is guarded by `RequireRead` on the cleaned `?path=`, the same check as reading a note. It is deliberately not `RequireNsAccess`, which only asks whether the caller has *some* grant in the namespace: with that, a user granted `/Shared` could zip `/Private`.
+
+**`POST /api/transfer`** names two namespaces in its JSON body, so the query-param middleware cannot guard it. The handler checks both sides itself:
+
+- a copy needs read on the source;
+- a move needs write on the source (what `/api/move` requires);
+- both need write on the destination.
+
+Grants cover a path and everything below it, so checking the two roots covers every file carried. Paths are cleaned with `relpath.Clean` before they are authorised, exactly as they are used. The check functions are required constructor arguments, and a nil one denies. Every refusal (400/403/404/409/413) happens before the first write.
+
+What neither endpoint will carry:
+
+- **Symbolic links.** Both endpoints authorise through `CheckRead`/`CheckWrite`, which since v4.6.2 resolve a link and authorise the file it reaches as well as its name (`storage.LinkResolver`). So `Shared/link.md -> Private/p.md`, a linked folder, or a linked destination folder gets a /Shared user a 403. Inside a folder, a zip leaves links out, and a transfer refuses the folder, because a move would delete them.
+- **`.git/` and `.mdnest/`.** `relpath.Clean` refuses them on both sides of a transfer and on a download path, case-insensitively (the v4.6.2 rule). A walk skips nested ones by the same rule (`relpath.IsReservedSegment`), so history, possibly remote credentials, and app data are never exported or carried along.
+- **Backslashes in zip entry names.** One is an ordinary character in a Linux file name but a path separator to Windows extractors, so entry names have it replaced.
+
+**Note identity.** The `<!-- mdnest:<uuid> -->` marker names a note's comment thread.
+
+- `POST /api/note` and `PATCH /api/note` (append/prepend) remove every marker from incoming text in one linear pass, so no client can give a note another note's identity and thread. Stripping markers one at a time was quadratic, which made a 10 MB body of markers a CPU denial of service.
+- A move carries a thread only when no note left behind still claims that ID, and never into a destination that already has a thread under that ID.
+- Only lines that decode as comments are carried, so a comment file planted by hand, for example via upload, cannot inject content into another namespace.
+
+**Commit history.** Commit-body annotations collapse control characters, so a file name holding a newline cannot forge a line such as a `Co-authored-by` trailer. The annotations do name the *other* side's `namespace:path`, so a cross-namespace move records the source path in the destination's history and remote. That is by design.
+
+**Limits.** Folder downloads and transfers are capped by `DOWNLOAD_MAX_FILES` (500) and `DOWNLOAD_MAX_MB` (100).
+
+- The tree is counted before anything is streamed or written.
+- The count stops as soon as a limit is passed, and folders count toward an entry cap, so refusing a huge namespace costs a bounded walk, not a full one.
+- A running byte budget stops a zip whose files grew in the meantime.
+- Zip downloads and real transfers each hold one slot per user and one of `DOWNLOAD_MAX_CONCURRENT` (2) server-wide. An API token counts as its user; single mode is one user. A download takes its slot before the walk.
+- Slots are taken without blocking (a busy server answers 429) and released on every exit, including a client that hangs up.
+- A transfer dry run takes no slot, so the picker's checks can never starve a transfer.
+- A move reads at most 5,000 notes to learn which comment IDs are still claimed. Past that it carries no threads and leaves them in place.
+
+**`Content-Disposition`** carries an ASCII `filename=` (quotes, backslashes, control and non-ASCII characters replaced) and an RFC 5987 `filename*=` with every byte outside the attr-char set percent-encoded, so a name cannot break out of the header.
+
+**App tier.** On `MDNEST_ROLE=app` replicas, both endpoints forward to the writer (as uploads and history do), which owns the durable tree. Edits still in the durability queue may not have reached it yet.
+
 ### Files that could run script are served inert *(v4.5.5+)*
 
 Anyone who can write a note can save a `.svg` or `.html` file next to it,
@@ -452,6 +492,9 @@ Both base images are pinned to moving tags (`golang:1.26-alpine`, `node:20-alpin
 | Note content (create/update) | 10 MB |
 | File upload | 32 MB |
 | Search results | 30 per query (configurable via `SEARCH_MAX_RESULTS`) |
+| Folder download / transfer *(v4.7.0+)* | 500 files, 100 MB (`DOWNLOAD_MAX_FILES`, `DOWNLOAD_MAX_MB`) |
+| Concurrent zip downloads *(v4.7.0+)* | 1 per user, 2 server-wide (`DOWNLOAD_MAX_CONCURRENT`) |
+| Clipboard copy between servers *(v4.7.0+)* | 1 MB of UTF-8 |
 | JWT expiry | 30 days |
 | Login rate limit | none (relies on network boundary) |
 | API token expiry | none (revoke manually) |

@@ -290,6 +290,13 @@ export async function saveNote(ns, path, content, ifMatch, opts = {}) {
     err.etag = data.etag;
     throw err;
   }
+  if (res.status === 404) {
+    // The note is gone from this path (moved to another place or namespace,
+    // or deleted). PUT never re-creates it; the caller says so instead.
+    const err = new Error('This note no longer exists here');
+    err.status = 404;
+    throw err;
+  }
   if (!res.ok) throw new Error('Failed to save note');
   return res.json();
 }
@@ -506,6 +513,69 @@ export async function moveItem(ns, fromPath, toPath) {
   });
   if (!res.ok) throw new Error('Failed to move item');
   return res.json();
+}
+
+// --- Download, move/copy between namespaces, cross-server paste ---
+//
+// These return {status, body} instead of throwing on a refusal: the UI shows
+// the server's 409/413/429/403 bodies (the colliding path, the real counts)
+// rather than a generic "failed".
+
+async function requestStatus(path, options) {
+  try {
+    const res = await request(path, options);
+    const body = await res.json().catch(() => ({}));
+    return { status: res.status, body };
+  } catch (e) {
+    if (e.name === 'PermissionError') return { status: 403, body: { error: e.message } };
+    throw e;
+  }
+}
+
+// getNamespacesDetail: [{name, canRead, canWrite}] at each namespace's root.
+export async function getNamespacesDetail() {
+  const res = await request('/namespaces?detail=1');
+  if (!res.ok) throw new Error('Failed to load namespaces');
+  return res.json();
+}
+
+// transferItem moves or copies {ns, path} to {ns, path}. With dryRun the
+// server runs every check and writes nothing.
+export async function transferItem(mode, from, to, { dryRun = false } = {}) {
+  return requestStatus(`/transfer${dryRun ? '?dryRun=1' : ''}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode, from, to }),
+  });
+}
+
+// downloadItem fetches a file, or a folder as a zip. It resolves to
+// {ok:true, blob, disposition} or {ok:false, status, body}. Pass an
+// AbortSignal to cancel; the server stops and frees its slot.
+export async function downloadItem(ns, path, signal) {
+  const q = `ns=${encodeURIComponent(ns)}${path ? `&path=${encodeURIComponent(path)}` : ''}`;
+  let res;
+  try {
+    res = await request(`/download?${q}`, { signal });
+  } catch (e) {
+    if (e.name === 'PermissionError') return { ok: false, status: 403, body: { error: e.message } };
+    throw e;
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    return { ok: false, status: res.status, body };
+  }
+  const blob = await res.blob();
+  return { ok: true, blob, disposition: res.headers.get('Content-Disposition') };
+}
+
+// createNoteWithContent creates a note (POST, never overwrites: 409 when the
+// path exists). Used by "Paste here".
+export async function createNoteWithContent(ns, path, content) {
+  return requestStatus(`/note?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}`, {
+    method: 'POST',
+    body: content,
+  });
 }
 
 // --- Admin (multi mode) ---

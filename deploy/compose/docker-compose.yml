@@ -55,6 +55,11 @@ services:
       # ENABLE_MARP: "true"           # Marp slide decks
       # DEFAULT_THEME: auto           # auto | dark | light
 
+      # Optional: folder download (zip) and cross-namespace move/copy limits.
+      # DOWNLOAD_MAX_FILES: "500"
+      # DOWNLOAD_MAX_MB: "100"
+      # DOWNLOAD_MAX_CONCURRENT: "2"   # zip downloads at once (one per user)
+
       # Optional: search tuning.
       # SEARCH_MAX_RESULTS: "30"
       # SEARCH_WORKERS: "8"

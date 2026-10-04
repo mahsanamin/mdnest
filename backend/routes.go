@@ -24,6 +24,8 @@ type contentRoutes struct {
 	comments    *handlers.CommentsHandler    // nil unless live collab is on
 	upload      *handlers.UploadHandler
 	move        *handlers.MoveHandler
+	download    *handlers.DownloadHandler // GET /api/download (issue #114)
+	transfer    *handlers.TransferHandler // POST /api/transfer (issue #114)
 	search      *handlers.SearchHandler
 	tasks       *handlers.TaskHandler // nil unless the task board is on
 	team        http.Handler          // nil unless multi mode with Postgres grants
@@ -64,6 +66,13 @@ func registerContentRoutes(mux *http.ServeMux, c contentRoutes) {
 		mux.Handle("/api/folder", auth(perms.RequireWrite(invalidateSearch(http.HandlerFunc(c.upload.HandleFolder)))))
 		mux.Handle("/api/upload", auth(perms.RequireWrite(invalidateSearch(http.HandlerFunc(c.upload.HandleUpload)))))
 		mux.Handle("/api/move", auth(perms.RequireMove(invalidateSearch(http.HandlerFunc(c.move.HandleMove)))))
+		// Path-scoped read, not RequireNsAccess: a grant on /Shared must not be
+		// able to zip /Private. Grants cover everything below their path, and
+		// the zip walk leaves out links, so the folder's check covers its files.
+		mux.Handle("/api/download", auth(perms.RequireRead(http.HandlerFunc(c.download.HandleDownload))))
+		// Two namespaces in the body: the handler checks both sides itself
+		// (the checks are its required constructor arguments).
+		mux.Handle("/api/transfer", auth(http.HandlerFunc(c.transfer.HandleTransfer)))
 		// Search spans the namespace: it filters each hit by read access.
 		mux.Handle("/api/search", auth(perms.RequireNsAccess(http.HandlerFunc(c.search.HandleSearch))))
 		// Task aggregation: GET reads notes, PATCH rewrites a task line in a note,
@@ -110,6 +119,8 @@ func registerContentRoutes(mux *http.ServeMux, c contentRoutes) {
 		mux.Handle("/api/folder", auth(invalidateSearch(http.HandlerFunc(c.upload.HandleFolder))))
 		mux.Handle("/api/upload", auth(invalidateSearch(http.HandlerFunc(c.upload.HandleUpload))))
 		mux.Handle("/api/move", auth(invalidateSearch(http.HandlerFunc(c.move.HandleMove))))
+		mux.Handle("/api/download", auth(http.HandlerFunc(c.download.HandleDownload)))
+		mux.Handle("/api/transfer", auth(http.HandlerFunc(c.transfer.HandleTransfer)))
 		mux.Handle("/api/search", auth(http.HandlerFunc(c.search.HandleSearch)))
 		if c.tasks != nil {
 			mux.Handle("/api/tasks", auth(invalidateSearch(http.HandlerFunc(c.tasks.HandleTasks))))

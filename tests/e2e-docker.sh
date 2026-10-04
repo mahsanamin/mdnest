@@ -57,7 +57,7 @@ fi
 pass "backend image built"
 
 # ── Start a throwaway single-mode instance ───────────────────────────────────
-mkdir -p "$NOTES_DIR/testing_workspace"
+mkdir -p "$NOTES_DIR/testing_workspace" "$NOTES_DIR/testing_workspace_2"
 docker network create "$NET" >/dev/null
 
 log "Starting disposable single-mode backend"
@@ -97,7 +97,7 @@ pass "token minted"
 # ── Layer A: host CLI (python3 present) ───────────────────────────────────────
 log "Layer A — host CLI against the live backend (normal machine)"
 HOME="$CLI_HOME" "$REPO_ROOT/mdnest" login @e2e "$BASE_URL" "$TOKEN" >/dev/null 2>&1
-if HOME="$CLI_HOME" MDNEST_BIN="$REPO_ROOT/mdnest" MDNEST_TEST_ALIAS=e2e \
+if HOME="$CLI_HOME" MDNEST_BIN="$REPO_ROOT/mdnest" MDNEST_TEST_ALIAS=e2e MDNEST_TEST_NS2=testing_workspace_2 \
      bash "$REPO_ROOT/tests/cli-smoke-test.sh"; then
   pass "Layer A (host CLI) passed"
 else
@@ -125,7 +125,7 @@ if docker run --rm --network "$NET" \
        # a read-only mount). /bin/bash exists after the apk add above.
        cp /src/mdnest /usr/local/bin/mdnest && chmod +x /usr/local/bin/mdnest
        /usr/local/bin/mdnest login @e2e "$BE_URL" "$TOKEN" >/dev/null 2>&1
-       MDNEST_BIN=/usr/local/bin/mdnest MDNEST_TEST_ALIAS=e2e bash /src/tests/cli-smoke-test.sh
+       MDNEST_BIN=/usr/local/bin/mdnest MDNEST_TEST_ALIAS=e2e MDNEST_TEST_NS2=testing_workspace_2 bash /src/tests/cli-smoke-test.sh
      '; then
   pass "Layer B (no-python3 CLI) passed"
 else

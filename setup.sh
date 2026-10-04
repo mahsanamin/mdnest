@@ -45,6 +45,10 @@ COMPOSE_PROJECT_NAME=""
 SSO_DISABLE_PASSWORD_LOGIN=""
 SSO_AUTOPROVISION_USERS=""
 OIDC_GROUPS_CLAIM=""
+# Folder download / transfer limits: only mdnest.conf sets them.
+DOWNLOAD_MAX_FILES=""
+DOWNLOAD_MAX_MB=""
+DOWNLOAD_MAX_CONCURRENT=""
 declare -a MOUNT_NAMES=()
 declare -a MOUNT_PATHS=()
 
@@ -90,6 +94,9 @@ while IFS= read -r line; do
     SEARCH_MAX_FILE_SIZE) SEARCH_MAX_FILE_SIZE="$value" ;;
     SEARCH_WORKERS) SEARCH_WORKERS="$value" ;;
     SEARCH_CACHE_TTL) SEARCH_CACHE_TTL="$value" ;;
+    DOWNLOAD_MAX_FILES) DOWNLOAD_MAX_FILES="$value" ;;
+    DOWNLOAD_MAX_MB) DOWNLOAD_MAX_MB="$value" ;;
+    DOWNLOAD_MAX_CONCURRENT) DOWNLOAD_MAX_CONCURRENT="$value" ;;
     USER_PROVIDER) USER_PROVIDER="$value" ;;
     FIREBASE_PROJECT_ID) FIREBASE_PROJECT_ID="$value" ;;
     FIREBASE_SERVICE_ACCOUNT) FIREBASE_SERVICE_ACCOUNT="$value" ;;
@@ -250,6 +257,17 @@ case "${DEFAULT_THEME:-auto}" in
     ;;
 esac
 
+# Folder download / transfer limits must be positive whole numbers. The
+# backend ignores a value it cannot use and falls back to its default, so a
+# typo here would silently mean "the default" — refuse it instead.
+for knob in DOWNLOAD_MAX_FILES DOWNLOAD_MAX_MB DOWNLOAD_MAX_CONCURRENT; do
+  val="${!knob:-}"
+  if [ -n "$val" ] && ! [[ "$val" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Error: $knob must be a positive whole number (got '$val')."
+    exit 1
+  fi
+done
+
 # Generate .env
 cat > .env <<EOF
 MDNEST_USER=$MDNEST_USER
@@ -262,6 +280,9 @@ SEARCH_MAX_RESULTS=${SEARCH_MAX_RESULTS:-30}
 SEARCH_MAX_FILE_SIZE=${SEARCH_MAX_FILE_SIZE:-1048576}
 SEARCH_WORKERS=${SEARCH_WORKERS:-8}
 SEARCH_CACHE_TTL=${SEARCH_CACHE_TTL:-30}
+DOWNLOAD_MAX_FILES=${DOWNLOAD_MAX_FILES:-500}
+DOWNLOAD_MAX_MB=${DOWNLOAD_MAX_MB:-100}
+DOWNLOAD_MAX_CONCURRENT=${DOWNLOAD_MAX_CONCURRENT:-2}
 AUTH_MODE=${AUTH_MODE}
 ENABLE_LIVE_COLLAB=${ENABLE_LIVE_COLLAB:-false}
 ENABLE_TASK_BOARD=${ENABLE_TASK_BOARD:-false}

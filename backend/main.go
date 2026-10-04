@@ -475,6 +475,9 @@ func main() {
 	}
 	treeHandler := handlers.NewTreeHandler(stg, grantStore, groupStore)
 	uploadHandler := handlers.NewUploadHandler(stg, perms)
+	// writerProxy is set on MDNEST_ROLE=app replicas; endpoints that need the
+	// durable tree (attachments, history, download, transfer) forward to it.
+	var writerProxy http.Handler
 	// Stateless app replicas own no attachment bytes: proxy attachment traffic
 	// (upload + serve) to the writer, which owns the git tree, when WRITER_URL is
 	// configured.
@@ -484,7 +487,7 @@ func main() {
 			if perr != nil {
 				log.Fatalf("invalid WRITER_URL %q: %v", writerURL, perr)
 			}
-			writerProxy := httputil.NewSingleHostReverseProxy(u)
+			writerProxy = httputil.NewSingleHostReverseProxy(u)
 			uploadHandler.SetWriterProxy(writerProxy)
 			// The git tree — and therefore per-file commit history — lives only on
 			// the writer, so history reads must be proxied there too. Without this,
@@ -501,6 +504,30 @@ func main() {
 	}
 	moveHandler := handlers.NewMoveHandler(stg)
 	searchHandler := handlers.NewSearchHandler(stg)
+
+	// Folder download (zip) and cross-namespace move/copy share one set of
+	// limits: DOWNLOAD_MAX_FILES / DOWNLOAD_MAX_MB per request, and
+	// DOWNLOAD_MAX_CONCURRENT zip downloads server-wide (one per user).
+	treeLimits := handlers.TreeLimitsFromEnv()
+	downloadMaxConcurrent := envInt("DOWNLOAD_MAX_CONCURRENT", 2)
+	if downloadMaxConcurrent <= 0 {
+		downloadMaxConcurrent = 2
+	}
+	log.Printf("download/transfer limits: max_files=%d, max_bytes=%d, max_concurrent_downloads=%d",
+		treeLimits.MaxFiles, treeLimits.MaxBytes, downloadMaxConcurrent)
+	downloadHandler := handlers.NewDownloadHandler(stg, treeLimits, downloadMaxConcurrent)
+	transferCanRead, transferCanWrite := handlers.TransferPermissionFuncs(perms)
+	transferHandler := handlers.NewTransferHandler(stg, treeLimits, transferCanRead, transferCanWrite, func(ns string) {
+		searchHandler.InvalidateCache(ns)
+		if collabHub != nil {
+			collabHub.BroadcastTreeChanged(ns)
+		}
+	})
+	transferHandler.SetConcurrency(downloadMaxConcurrent)
+	if writerProxy != nil {
+		downloadHandler.SetWriterProxy(writerProxy)
+		transferHandler.SetWriterProxy(writerProxy)
+	}
 	// The global (cross-namespace) task view is access-controlled entirely by
 	// this filter. Multi mode enforces per-user access (perms.FilterNamespaces);
 	// single mode has one owner of every namespace, so an explicit all-access
@@ -825,6 +852,8 @@ func main() {
 		comments:    commentsHandler,
 		upload:      uploadHandler,
 		move:        moveHandler,
+		download:    downloadHandler,
+		transfer:    transferHandler,
 		search:      searchHandler,
 		sync:        syncHandler,
 	}

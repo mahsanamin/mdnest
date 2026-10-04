@@ -114,6 +114,14 @@ func (c *CoherentStorage) ResolveLinks(ctx context.Context, ns, relPath string) 
 	return relPath, nil
 }
 
+// Annotate forwards a commit-body line to the inner git storage (see
+// Annotator). No-op when the inner backend keeps no git history.
+func (c *CoherentStorage) Annotate(ns, line string) {
+	if a, ok := c.Storage.(Annotator); ok {
+		a.Annotate(ns, line)
+	}
+}
+
 // Close tears down the inner backend (if it is a Closer, e.g. GitStorage stops
 // its committer) and the working set connection.
 func (c *CoherentStorage) Close() error {
