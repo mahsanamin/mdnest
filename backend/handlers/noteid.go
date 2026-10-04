@@ -35,18 +35,26 @@ func ExtractNoteID(content string) (uuid string, body string) {
 // the first ID found (the one readers treat as the note's identity) and the
 // clean content. Content carrying two markers must not be able to keep the
 // second as an identity once the first is stripped.
+//
+// One linear pass: removing markers one at a time with ExtractNoteID copied
+// the whole body per marker, so a 10 MB body of markers was quadratic work a
+// single request could ask for. The result matches the repeated ExtractNoteID
+// form: each marker line goes, and the body ends in exactly one newline.
 func StripAllNoteIDs(content string) (first string, body string) {
-	body = content
-	for {
-		id, clean := ExtractNoteID(body)
-		if id == "" {
-			return first, body
-		}
-		if first == "" {
-			first = id
-		}
-		body = clean
+	matches := noteIDRegex.FindAllStringSubmatchIndex(content, -1)
+	if len(matches) == 0 {
+		return "", content
 	}
+	first = content[matches[0][2]:matches[0][3]]
+	var b strings.Builder
+	b.Grow(len(content))
+	prev := 0
+	for _, m := range matches {
+		b.WriteString(content[prev:m[0]])
+		prev = m[1]
+	}
+	b.WriteString(content[prev:])
+	return first, strings.TrimRight(b.String(), "\n") + "\n"
 }
 
 // InjectNoteID appends the mdnest UUID marker to the end of content.
