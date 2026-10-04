@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
 )
 
 // AccessGroup is a named, superadmin-managed set used for role-based access.
@@ -310,12 +309,18 @@ func (s *PostgresGroupStore) MemberGroupGrants(userID int, oidcGroups []string, 
 }
 
 func (s *PostgresGroupStore) CheckGroupAccess(userID int, oidcGroups []string, namespace, path, requiredPermission string) bool {
-	if !strings.HasPrefix(path, "/") {
-		path = "/" + path
-	}
 	grants, err := s.MemberGroupGrants(userID, oidcGroups, namespace)
 	if err != nil {
 		return false
+	}
+	return GroupGrantsAllow(grants, path, requiredPermission)
+}
+
+// GroupGrantsAllow is GrantsAllow for group grants already narrowed to one
+// namespace (MemberGroupGrants): the same coverage and permission rule.
+func GroupGrantsAllow(grants []GroupGrant, path, requiredPermission string) bool {
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
 	}
 	for _, g := range grants {
 		grantPath := g.Path

@@ -17,8 +17,13 @@ const (
 // Conn wraps a WebSocket connection with user identity.
 type Conn struct {
 	User UserInfo
-	ws   *websocket.Conn
-	send chan []byte
+	// ReadOnly marks a viewer without write access to the note: it receives
+	// the room's events but its own cursor, selection and content messages
+	// are dropped, so a reader can neither push text into a writer's editor
+	// nor pose as an editor. Set before the read loop starts.
+	ReadOnly bool
+	ws       *websocket.Conn
+	send     chan []byte
 }
 
 // NewConn creates a new connection wrapper.
@@ -62,6 +67,9 @@ func (c *Conn) ReadLoop(ctx context.Context, hub *Hub, ns, path string) {
 			return // Connection closed
 		}
 
+		if c.ReadOnly {
+			continue
+		}
 		var msg IncomingMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			continue

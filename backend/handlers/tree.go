@@ -53,7 +53,10 @@ func (h *TreeHandler) GetTree(w http.ResponseWriter, r *http.Request) {
 	// In multi mode, filter tree to only show paths the user has access to
 	if h.grantStore != nil {
 		uc := middleware.UserFromContext(r.Context())
-		if uc != nil && uc.Role != "admin" {
+		// Only an admin of THIS namespace sees all of it. role=admin alone
+		// (an admin of some other namespace) is filtered like anyone else.
+		pc := middleware.CheckerFrom(r.Context())
+		if uc != nil && !(pc != nil && pc.HasAdminScope(uc, ns)) {
 			grants, _ := h.grantStore.GetGrantsForUser(uc.ID)
 			var nsGrants []store.Grant
 			for _, g := range grants {
@@ -163,10 +166,10 @@ func isPathCovered(nodePath string, grantPaths []string) bool {
 // File extensions shown in the tree — markdown + a few common text formats.
 var textExtensions = map[string]bool{
 	".md": true, ".markdown": true,
-	".txt": true,
+	".txt":  true,
 	".json": true,
-	".sql": true,
-	".csv": true,
+	".sql":  true,
+	".csv":  true,
 	".yaml": true, ".yml": true,
 }
 

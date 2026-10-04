@@ -13,14 +13,15 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/mdnest/mdnest/backend/middleware"
 	"github.com/mdnest/mdnest/backend/storage"
 )
 
 // SearchConfig holds tunable search parameters.
 type SearchConfig struct {
-	MaxResults  int   // Max results to return (default 30)
-	MaxFileSize int64 // Skip files larger than this in bytes (default 1MB)
-	Workers     int   // Concurrent file readers (default 8)
+	MaxResults  int           // Max results to return (default 30)
+	MaxFileSize int64         // Skip files larger than this in bytes (default 1MB)
+	Workers     int           // Concurrent file readers (default 8)
 	CacheTTL    time.Duration // How long the file list cache lives (default 30s)
 }
 
@@ -32,9 +33,9 @@ type fileEntry struct {
 
 // nsCache caches the file list for a namespace.
 type nsCache struct {
-	files   []fileEntry
-	built   time.Time
-	mu      sync.Mutex
+	files []fileEntry
+	built time.Time
+	mu    sync.Mutex
 }
 
 type SearchHandler struct {
@@ -122,7 +123,16 @@ func (h *SearchHandler) HandleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	files := h.getFiles(ctx, ns)
+	// The namespace check let the user in; each note is still read-checked.
+	// Grants can be path-scoped, and a symlink is checked for its target.
+	canRead := middleware.ReadFilterFor(r, ns)
+	cached := h.getFiles(ctx, ns)
+	files := make([]fileEntry, 0, len(cached))
+	for _, f := range cached {
+		if canRead(f.relPath) {
+			files = append(files, f)
+		}
+	}
 
 	// Phase 1: filename matches (instant, no file I/O)
 	var results []SearchResult

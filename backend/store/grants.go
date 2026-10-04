@@ -243,32 +243,33 @@ func (s *PostgresGrantStore) queryGrants(query string, args ...interface{}) ([]G
 //   - "write" permission implies "read".
 //   - If no matching grant exists, access is denied.
 func (s *PostgresGrantStore) CheckAccess(userID int, namespace, path, requiredPermission string) bool {
-	// Normalize path: ensure it starts with /
-	if !strings.HasPrefix(path, "/") {
-		path = "/" + path
-	}
-
 	grants, err := s.GetGrantsForUser(userID)
 	if err != nil {
 		return false
 	}
+	return GrantsAllow(grants, namespace, path, requiredPermission)
+}
 
+// GrantsAllow is the one rule for whether a user's grants allow a permission
+// on namespace/path: a grant in that namespace whose path covers the requested
+// path (PathCovers), where a write grant also satisfies read. CheckAccess uses
+// it, and so does the permission layer when it loads a user's grants once to
+// filter a whole listing, so the two can never disagree.
+func GrantsAllow(grants []Grant, namespace, path, requiredPermission string) bool {
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
 	for _, g := range grants {
 		if g.Namespace != namespace {
 			continue
 		}
-
-		// Check if the grant's path covers the requested path
 		grantPath := g.Path
 		if !strings.HasPrefix(grantPath, "/") {
 			grantPath = "/" + grantPath
 		}
-
 		if !PathCovers(grantPath, path) {
 			continue
 		}
-
-		// Check permission level
 		if requiredPermission == "read" {
 			// Both "read" and "write" grants satisfy a "read" requirement
 			return true

@@ -89,14 +89,14 @@ func ssoJWTTTL() time.Duration {
 }
 
 type loginResponse struct {
-	Token    string `json:"token,omitempty"`
-	Status   string `json:"status,omitempty"`   // "ok", "change_password_required", "totp_required"
+	Token     string `json:"token,omitempty"`
+	Status    string `json:"status,omitempty"`    // "ok", "change_password_required", "totp_required"
 	TempToken string `json:"tempToken,omitempty"` // short-lived token for multi-step login
 }
 
 type changePasswordRequest struct {
 	CurrentPassword string `json:"currentPassword"`
-	NewUsername      string `json:"newUsername"`
+	NewUsername     string `json:"newUsername"`
 	NewPassword     string `json:"newPassword"`
 }
 
@@ -456,7 +456,7 @@ func (h *AuthHandler) HandleForcedPasswordChange(w http.ResponseWriter, r *http.
 		return
 	}
 
-	claims, err := parseTempToken(req.TempToken, h.secret)
+	claims, err := parseTempToken(req.TempToken, h.secret, "change_password")
 	if err != nil {
 		http.Error(w, `{"error":"invalid or expired token"}`, http.StatusUnauthorized)
 		return
@@ -466,6 +466,12 @@ func (h *AuthHandler) HandleForcedPasswordChange(w http.ResponseWriter, r *http.
 	user, err := h.userStore.GetUserByID(userID)
 	if err != nil || user == nil {
 		http.Error(w, `{"error":"user not found"}`, http.StatusNotFound)
+		return
+	}
+	// The step is good once: after the forced change the token (valid for
+	// ten minutes) must not be able to set the password again.
+	if !user.MustChangePassword {
+		http.Error(w, `{"error":"invalid or expired token"}`, http.StatusUnauthorized)
 		return
 	}
 
@@ -493,6 +499,22 @@ func (h *AuthHandler) HandleForcedPasswordChange(w http.ResponseWriter, r *http.
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(loginResponse{
 			Status:    "totp_required",
+			TempToken: tempToken,
+		})
+		return
+	}
+
+	// 2FA required but not set up yet: the next step is forced setup, exactly
+	// as at login. Issuing a session here skipped it.
+	if h.require2FA {
+		tempToken, err := CreateTempToken(user, h.secret, "totp_setup")
+		if err != nil {
+			http.Error(w, `{"error":"failed to generate token"}`, http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(loginResponse{
+			Status:    "totp_setup_required",
 			TempToken: tempToken,
 		})
 		return

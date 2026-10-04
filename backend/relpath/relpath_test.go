@@ -21,3 +21,25 @@ func TestClean(t *testing.T) {
 		}
 	}
 }
+
+// .git and .mdnest are never request paths: a write into .git runs commands
+// (core.fsmonitor, hooks) the next time git touches the tree, and .mdnest holds
+// comment threads and board settings for the whole namespace. Matched per
+// segment, case-insensitively (mounts can be case-insensitive), and ignoring
+// what a case-insensitive or Windows-style filesystem would also ignore.
+func TestCleanRefusesReservedSegments(t *testing.T) {
+	for _, in := range []string{
+		".git", ".git/config", ".GIT/config", ".Git/hooks/pre-commit", "Shared/.git/config",
+		"Shared/../.git/config", ".git/", ".git.", ".git ", "git~1/config", ".g‌it/config",
+		".mdnest", ".mdnest/comments/x.jsonl", ".MDNEST/board.json", "a/.mdnest/x",
+	} {
+		if got, valid := Clean(in); valid {
+			t.Errorf("Clean(%q) = (%q, true), want rejection", in, got)
+		}
+	}
+	for _, in := range []string{".gitkeep", ".gitignore", "a/.gitkeep", ".mdnest-sync-status.json", "git/x.md", ".github/x.md", "x.git", "my.mdnest.md"} {
+		if _, valid := Clean(in); !valid {
+			t.Errorf("Clean(%q) rejected an ordinary name", in)
+		}
+	}
+}

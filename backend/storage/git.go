@@ -402,11 +402,12 @@ func (c *intervalCommitter) commitMessage(files map[string]map[ident]struct{}) s
 		set := files[p]
 		names := make([]string, 0, len(set))
 		for id := range set {
+			id = ident{name: oneLine(id.name), email: oneLine(id.email)}
 			names = append(names, id.name)
 			coauthors[id.name+"\x00"+id.email] = id
 		}
 		sort.Strings(names)
-		fmt.Fprintf(&body, "%s \u2014 %s\n", p, strings.Join(names, ", "))
+		fmt.Fprintf(&body, "%s \u2014 %s\n", oneLine(p), strings.Join(names, ", "))
 	}
 
 	trailers := make([]string, 0, len(coauthors))
@@ -416,6 +417,20 @@ func (c *intervalCommitter) commitMessage(files map[string]map[ident]struct{}) s
 	sort.Strings(trailers)
 
 	return subject + "\n\n" + strings.TrimRight(body.String(), "\n") + "\n\n" + strings.Join(trailers, "\n") + "\n"
+}
+
+// oneLine keeps a user-chosen value (a file path, a display name, an email) to
+// a single line of the commit body. A file name can contain a newline, and a
+// name or email comes from an IdP or a user profile: kept raw, either could
+// forge extra lines in the message, such as a Co-authored-by trailer. Control
+// characters become spaces.
+func oneLine(s string) string {
+	return strings.TrimSpace(strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f || r == 0x2028 || r == 0x2029 || r == 0x85 {
+			return ' '
+		}
+		return r
+	}, s))
 }
 
 // coauthoredBy formats an identity as the "Name <email>" value of a

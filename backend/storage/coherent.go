@@ -33,6 +33,12 @@ func makeReflector(inner Storage, ws WorkingSet, maxBytes int64) reconcileFn {
 			_ = ws.Delete(ctx, ns, p)
 		}
 		for _, p := range changed {
+			// A linked path is never published: app replicas read it with no
+			// filesystem to resolve the link against (see LinkResolver).
+			if linkedPath(ctx, inner, ns, p) {
+				_ = ws.Delete(ctx, ns, p)
+				continue
+			}
 			data, err := inner.ReadFile(ctx, ns, p)
 			if err != nil {
 				continue
@@ -97,6 +103,15 @@ func (c *CoherentStorage) Attribute(ns, relPath, name, email string) {
 	}); ok {
 		g.Attribute(ns, relPath, name, email)
 	}
+}
+
+// ResolveLinks forwards to the inner backend (see LinkResolver); a backend
+// without links resolves every path to itself.
+func (c *CoherentStorage) ResolveLinks(ctx context.Context, ns, relPath string) (string, error) {
+	if lr, ok := c.Storage.(LinkResolver); ok {
+		return lr.ResolveLinks(ctx, ns, relPath)
+	}
+	return relPath, nil
 }
 
 // Close tears down the inner backend (if it is a Closer, e.g. GitStorage stops

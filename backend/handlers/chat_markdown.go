@@ -254,6 +254,11 @@ func RenderChatMessage(author, via string, at time.Time, text string) string {
 // AppendChatMessage appends a rendered message to a chat note, keeping the
 // note-ID marker (if any) at the very end where the comments feature expects it.
 func AppendChatMessage(content, block string) string {
+	// A message never carries an identity: a marker line in it would become
+	// the id of a chat that has none yet (and so its comment thread).
+	if id, clean := StripAllNoteIDs(block); id != "" {
+		block = clean
+	}
 	id, body := ExtractNoteID(content)
 	out := strings.TrimRight(body, "\n") + "\n" + block
 	if id != "" {
