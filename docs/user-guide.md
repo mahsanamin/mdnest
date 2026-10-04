@@ -526,7 +526,7 @@ The move happens within the same namespace. Cross-namespace moves are not suppor
 
 ---
 
-## Moving, copying and downloading *(unreleased)*
+## Moving, copying and downloading *(v4.7.0+)*
 
 **Move to…** and **Copy to…** (right-click, or long-press on a phone) open one picker. Choose a namespace, a folder, and the name it should have there.
 

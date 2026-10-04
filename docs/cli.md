@@ -224,7 +224,7 @@ mdnest delete @work/engineering/old-doc.md
 mdnest move @work/engineering/old-name.md new-name.md
 ```
 
-To another namespace *(unreleased)*, give the full destination or `--to-ns`:
+To another namespace *(v4.7.0+)*, give the full destination or `--to-ns`:
 
 ```bash
 mdnest move @work/personal/Notes/plan.md @work/shared/Project/plan.md
@@ -233,7 +233,7 @@ mdnest move @work/personal/Notes/plan.md Project/plan.md --to-ns shared
 
 The server copies, checks the copy, then removes the original. Comments travel with the note, and nothing at the destination is ever overwritten (a collision is an error that names the path). A destination on a different `@alias` is refused: copying between servers is not a server-side operation.
 
-### Copy *(unreleased)*
+### Copy *(v4.7.0+)*
 
 ```bash
 mdnest copy @work/engineering/Specs Specs-2026            # same namespace
@@ -242,7 +242,7 @@ mdnest copy @work/personal/Notes Archive/Notes --to-ns shared
 
 Same destination rules as `move`. Copies get new note IDs and no comments.
 
-### Download *(unreleased)*
+### Download *(v4.7.0+)*
 
 ```bash
 mdnest download @work/engineering/Architecture              # saves Architecture.zip here

@@ -300,7 +300,7 @@ Before v3.11.7 it enforced **nothing**: the route was registered with authentica
 
 If you add a route whose namespace isn't in `?ns=`, the check must be explicit in the handler — the middleware cannot see it. `backend/handlers/upload_test.go` pins this behaviour.
 
-### Download and transfer *(unreleased)*
+### Download and transfer *(v4.7.0+)*
 
 **`GET /api/download`** is guarded by `RequireRead` on the cleaned `?path=`, the same check as reading a note. It is deliberately not `RequireNsAccess`, which only asks whether the caller has *some* grant in the namespace: with that, a user granted `/Shared` could zip `/Private`.
 
@@ -492,9 +492,9 @@ Both base images are pinned to moving tags (`golang:1.26-alpine`, `node:20-alpin
 | Note content (create/update) | 10 MB |
 | File upload | 32 MB |
 | Search results | 30 per query (configurable via `SEARCH_MAX_RESULTS`) |
-| Folder download / transfer *(unreleased)* | 500 files, 100 MB (`DOWNLOAD_MAX_FILES`, `DOWNLOAD_MAX_MB`) |
-| Concurrent zip downloads *(unreleased)* | 1 per user, 2 server-wide (`DOWNLOAD_MAX_CONCURRENT`) |
-| Clipboard copy between servers *(unreleased)* | 1 MB of UTF-8 |
+| Folder download / transfer *(v4.7.0+)* | 500 files, 100 MB (`DOWNLOAD_MAX_FILES`, `DOWNLOAD_MAX_MB`) |
+| Concurrent zip downloads *(v4.7.0+)* | 1 per user, 2 server-wide (`DOWNLOAD_MAX_CONCURRENT`) |
+| Clipboard copy between servers *(v4.7.0+)* | 1 MB of UTF-8 |
 | JWT expiry | 30 days |
 | Login rate limit | none (relies on network boundary) |
 | API token expiry | none (revoke manually) |

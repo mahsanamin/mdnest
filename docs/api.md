@@ -808,7 +808,7 @@ List all available namespaces. A namespace corresponds to a mounted directory (a
 
 Returns a sorted JSON array of namespace name strings. Hidden directories (those starting with `.`) are excluded.
 
-**`?detail=1`** *(unreleased)* returns the same namespaces with the caller's access at each namespace's root, computed with the same checks the routes use. The move/copy picker uses it to decide which namespaces to offer. A grant scoped to a folder below the root shows `false` here; a transfer dry run (below) has the final word for a specific folder. The plain form is unchanged.
+**`?detail=1`** *(v4.7.0+)* returns the same namespaces with the caller's access at each namespace's root, computed with the same checks the routes use. The move/copy picker uses it to decide which namespaces to offer. A grant scoped to a folder below the root shows `false` here; a transfer dry run (below) has the final word for a specific folder. The plain form is unchanged.
 
 ```json
 [{"name": "personal", "canRead": true, "canWrite": true},
@@ -939,7 +939,7 @@ Create a new note. Fails if the file already exists.
 
 **Request body:** Raw text content for the note (can be empty).
 
-Any `<!-- mdnest:<uuid> -->` note-ID marker in the body is removed *(unreleased)*. The marker is a note's identity, and it names the note's comment thread, so a new note never takes one from its content. It gets its own ID the first time one is needed. To keep a note's ID, edit it with `PUT`, which preserves it.
+Any `<!-- mdnest:<uuid> -->` note-ID marker in the body is removed *(v4.6.2+)*. The marker is a note's identity, and it names the note's comment thread, so a new note never takes one from its content. It gets its own ID the first time one is needed. To keep a note's ID, edit it with `PUT`, which preserves it.
 
 **Response** (201 Created):
 
@@ -1086,7 +1086,7 @@ Append or prepend text to a note. Creates the file if it doesn't exist.
 | `path` | yes | Relative path to the note |
 | `position` | no | `top` (prepend) or `bottom` (append, default) |
 
-**Request body:** Plain text to append/prepend. As with `POST`, any note-ID marker in the text is removed *(unreleased)*; the note's own marker is untouched.
+**Request body:** Plain text to append/prepend. As with `POST`, any note-ID marker in the text is removed *(v4.6.2+)*; the note's own marker is untouched.
 
 **Response** (200 OK):
 
@@ -1281,7 +1281,7 @@ curl -X POST "http://localhost:8286/api/move?ns=personal&from=drafts&to=archive/
 
 ---
 
-## Transfer *(unreleased)*
+## Transfer *(v4.7.0+)*
 
 ### POST /api/transfer
 
@@ -1346,7 +1346,7 @@ On `MDNEST_ROLE=app` replicas, the request is forwarded to the writer, which own
 
 ---
 
-## Download *(unreleased)*
+## Download *(v4.7.0+)*
 
 ### GET /api/download
 

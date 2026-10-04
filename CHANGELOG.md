@@ -4,7 +4,7 @@ All notable changes to mdnest are documented here.
 
 ---
 
-## Unreleased
+## v4.7.0 — Move, copy and download across workspaces
 
 Move and copy notes and folders between namespaces, download a file or a
 whole folder, and carry a note from one mdnest server to another
@@ -56,12 +56,6 @@ whole folder, and carry a note from one mdnest server to another
 
 ### Changed
 
-- **A created, appended or prepended note never takes a note ID from its
-  text.** The `<!-- mdnest:<uuid> -->` marker names a note's comment thread.
-  Content that carried one (a paste of another note, or a prepend) used to
-  give the note that identity, so two notes could share one thread. The
-  server now strips every incoming marker. Edits with PUT keep the note's own
-  ID, as before.
 - **An autosave that finds its note gone** (moved or deleted elsewhere) shows
   a banner with "Copy my text" instead of failing silently. It never
   re-creates the note at the old path.
