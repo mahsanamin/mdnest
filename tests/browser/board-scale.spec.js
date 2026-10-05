@@ -37,6 +37,10 @@ test('the board offers a visible way back to the note', async ({ page }) => {
   // Open a note first, so there is something to go back to. A namespace can
   // have only folders at its root, so expand one if no file is on screen yet.
   const fileRow = () => page.locator('.tree-row').filter({ has: page.locator('.tree-icon-svg.file') }).first();
+  // Wait for the tree to load before counting: counting at once raced the
+  // first tree fetch, found no file, and then failed looking for a folder.
+  await expect(page.locator('.tree-row:not(.tree-root-row)').first())
+    .toBeVisible({ timeout: 20_000 });
   if (!(await fileRow().count())) {
     const folder = page.locator('.tree-row')
       .filter({ has: page.locator('.tree-icon-svg.folder-full, .tree-icon-svg.folder-empty') })
