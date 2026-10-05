@@ -134,6 +134,31 @@ export function isInvalidDestination({ sourceNs, sourcePath, destNs, destFolder 
 // returns '' when the name is usable, else a short reason. The folder is not
 // created here — the transfer creates it on confirm — so this only has to
 // keep the name to one plain path segment the server will accept.
+// The Move to / Copy to search. Every word of the query must appear in the
+// folder's path (case-insensitive, any order), so "proj api" finds
+// /Projects/backend/api. Best matches first: the folder's own name is the
+// last word, then starts with it, then contains it, then only the path
+// matches; ties keep
+// the tree order. The root is not a search result. An empty query returns
+// the list unchanged.
+export function filterFolders(folders, query) {
+  const words = String(query || '').toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return folders;
+  const last = words[words.length - 1];
+  const rank = (f) => {
+    const n = f.name.toLowerCase();
+    if (n === last) return 0;
+    if (n.startsWith(last)) return 1;
+    if (n.includes(last)) return 2;
+    return 3;
+  };
+  return folders
+    .map((f, i) => ({ f, i }))
+    .filter(({ f }) => f.path !== '/' && words.every((w) => f.path.toLowerCase().includes(w)))
+    .sort((a, b) => rank(a.f) - rank(b.f) || a.i - b.i)
+    .map(({ f }) => f);
+}
+
 export function newFolderError(name, siblings = []) {
   const n = String(name || '').trim();
   if (!n) return 'Type a folder name.';

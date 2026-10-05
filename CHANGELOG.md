@@ -4,15 +4,21 @@ All notable changes to mdnest are documented here.
 
 ---
 
-## v4.8.0: Agents with a job, a tidier right-click menu, and three fixes
+## v4.8.0: Agents with a job, folder search when moving, a tidier right-click menu, and three fixes
 
 Tell an agent what it is for when you connect it, give each agent its own
-thumbnail, and find actions faster in the tree's right-click menu. Also
+thumbnail, search for the destination in Move to… and Copy to…, and find
+actions faster in the tree's right-click menu. Also
 fixes `mdnest chat wait` giving up on a blip, Settings slipping out of the
 top-right corner, and the Live editor's handle sliding beside a selection.
 
 ### Added
 
+- **Search in Move to… and Copy to….** The folder picker has a search box,
+  focused when it opens. Every word you type must appear in the folder's
+  path, so `proj api` finds `Projects/backend/api`. Results show their full
+  path, exact names come first, and Enter picks the top match. Finding a
+  destination no longer means scrolling a long tree.
 - **Connect an agent: say what the agent is for.** Under the agent's name
   there is now a box for what it should do in this chat. The text goes into
   the prompt as "Your job in this chat", the same way the name does, so the
