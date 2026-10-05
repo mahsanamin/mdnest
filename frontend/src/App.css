@@ -2664,7 +2664,7 @@ pre:hover .code-copy-btn {
   border: 1px solid var(--border-strong);
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
-  min-width: 140px;
+  min-width: 200px;
   padding: 4px 0;
   animation: ctxFadeIn 0.1s ease-out;
 }
@@ -2680,11 +2680,24 @@ pre:hover .code-copy-btn {
   }
 }
 
+/* The clicked item's name, above the actions. Not a .context-menu-item, so
+   nothing that looks for an action by its text can hit it. */
+.context-menu-title {
+  max-width: 240px;
+  padding: 6px 12px 4px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .context-menu-item {
-  height: 36px;
+  height: 34px;
   display: flex;
   align-items: center;
-  padding: 0 12px;
+  gap: 10px;
+  padding: 0 14px 0 12px;
   font-size: 0.85rem;
   color: var(--text);
   cursor: pointer;
@@ -2695,7 +2708,13 @@ pre:hover .code-copy-btn {
   background: var(--surface-3);
 }
 
-.context-menu-item.danger {
+.context-menu-item .context-menu-icon {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+}
+
+.context-menu-item.danger,
+.context-menu-item.danger .context-menu-icon {
   color: var(--danger);
 }
 

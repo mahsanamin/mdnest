@@ -20,6 +20,17 @@ All notable changes to mdnest are documented here.
   the robot. The MCP tool `set_chat_avatar` takes `pick: "auto"` too.
   `tests/cli-chat-avatar-auto.sh` and `mcp-server/test_avatar.mjs` pin it.
 
+### Changed
+
+- **The right-click menu is arranged in groups.** It shows the item's name at
+  the top, then: create (New note, folder, drawing, chat, Paste here), organize
+  (Rename, Move to…, Copy to…), share (Download, Copy for another mdnest, Copy
+  path), info (History, Authors), admin (Manage access), and Delete last on its
+  own in red. Every item has an icon. Before, Delete sat in the middle of the
+  file menu and the copy actions were split up. Authors is now offered only in
+  multi-user mode, where it works, and "Make it a chat" is gone: a chat is made
+  with New chat. The order is pinned in `contextMenuItems.test.js`.
+
 ### Fixed
 
 - **`mdnest chat wait` no longer stops listening after one failed poll.** A

@@ -63,7 +63,7 @@ On it — frontend checks green.
 - **+ New** creates one in the current workspace: give it a name and a folder
   (`Chats/` by default). The name becomes a shell-safe filename,
   e.g. `Chats/release-coordination.md`.
-- Right-click any note → **Make it a chat**, or a folder → **New Chat**.
+- Right-click a folder → **New chat** creates one inside it.
 - **Enter** sends, **Shift+Enter** adds a new line. The **as** box sets the
   name on your messages.
 - Type `@` to mention someone: the names in the chat are offered (Tab
