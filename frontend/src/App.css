@@ -4894,6 +4894,31 @@ pre:hover .code-copy-btn {
   font-size: 0.82rem;
   margin-bottom: 8px;
 }
+.moveto-search {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 6px;
+  padding: 6px 10px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 0.85rem;
+}
+.moveto-search:focus { outline: none; border-color: var(--accent); }
+/* A search result: the folders above it are muted and give way first when
+   the row is too narrow, so the folder's own name is never the part cut off. */
+.moveto-name-path { display: flex; min-width: 0; }
+.moveto-parent {
+  color: var(--text-muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.moveto-leaf { flex: 0 0 auto; }
+
 .moveto-list {
   flex: 1;
   overflow-y: auto;

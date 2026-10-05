@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   CLIPBOARD_MAX_BYTES, utf8Bytes, stripNoteMarker, buildClipboardPayload, parseClipboardPayload,
   safeFileName, suggestCopyName, localLinks, joinPath, isInvalidDestination, describeRefusal,
-  filenameFromDisposition, newFolderError, transferSummary, isLargeTransfer,
+  filenameFromDisposition, newFolderError, transferSummary, isLargeTransfer, filterFolders,
 } from '../transfer.js';
 
 describe('clipboard payload', () => {
@@ -127,5 +127,42 @@ describe('new folder in the picker, and the size of a transfer', () => {
     expect(isLargeTransfer({ folder: true, items: 3, bytes: 100 })).toBe(false);
     expect(isLargeTransfer({ folder: true, items: 60, bytes: 100 })).toBe(true);
     expect(isLargeTransfer({ folder: true, items: 2, bytes: 50 * 1024 * 1024 })).toBe(true);
+  });
+});
+
+describe('Move to / Copy to folder search', () => {
+  const folders = [
+    { path: '/', name: '/ (root)' },
+    { path: '/Archive', name: 'Archive' },
+    { path: '/Archive/api-old', name: 'api-old' },
+    { path: '/Projects', name: 'Projects' },
+    { path: '/Projects/backend', name: 'backend' },
+    { path: '/Projects/backend/api', name: 'api' },
+    { path: '/Projects/frontend', name: 'frontend' },
+    { path: '/Rapid', name: 'Rapid' },
+  ];
+  const paths = (list) => list.map((f) => f.path);
+
+  it('an empty query leaves the list as it is', () => {
+    expect(filterFolders(folders, '')).toBe(folders);
+    expect(filterFolders(folders, '   ')).toBe(folders);
+  });
+  it('matches anywhere in the path, ignoring case', () => {
+    expect(paths(filterFolders(folders, 'BACKEND'))).toEqual(['/Projects/backend', '/Projects/backend/api']);
+  });
+  it('every word must match, in any order', () => {
+    expect(paths(filterFolders(folders, 'api proj'))).toEqual(['/Projects/backend/api']);
+    expect(paths(filterFolders(folders, 'proj api'))).toEqual(['/Projects/backend/api']);
+  });
+  it('an exact name first, then names starting with the word, then names containing it', () => {
+    expect(paths(filterFolders(folders, 'api'))).toEqual(['/Projects/backend/api', '/Archive/api-old', '/Rapid']);
+  });
+  it('name matches beat path-only matches', () => {
+    // Projects' children match "proj" only through their path.
+    expect(paths(filterFolders(folders, 'proj'))[0]).toBe('/Projects');
+  });
+  it('the root is never a search result, and no match is an empty list', () => {
+    expect(paths(filterFolders(folders, 'root'))).toEqual([]);
+    expect(filterFolders(folders, 'zzz')).toEqual([]);
   });
 });

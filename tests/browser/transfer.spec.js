@@ -386,3 +386,42 @@ test.describe('on a phone', () => {
     expect((await api(page, 'GET', note(DST, `${base}/${name}`))).status).toBe(200);
   });
 });
+
+test.describe('searching the picker', () => {
+  test('typing finds a deep folder, Enter picks it, and the move lands there', async ({ page }) => {
+    await login(page);
+    const name = `s-${Date.now()}.md`;
+    await seed(page, SRC, `${base}/${name}`, 'searched\n');
+    // Enough folders that scrolling for the right one is the slow way.
+    for (const d of ['Archive/2024', 'Archive/2025', 'Clients/acme/notes', 'Projects/backend/api', 'Projects/frontend']) {
+      expect((await api(page, 'POST', `/folder?ns=${SRC}&path=${encodeURIComponent(`${base}/${d}`)}`)).status).toBeLessThan(300);
+    }
+    await reloadTree(page);
+    await openBase(page);
+    await menuOn(page, name, 'Move to…');
+
+    const modal = page.getByTestId('transfer-modal');
+    const search = modal.getByTestId('transfer-search');
+    await expect(search).toBeFocused();
+    await search.fill('proj api');
+    const items = modal.locator('.moveto-item');
+    await expect(items).toHaveCount(1);
+    // Shown with its path, so it is clear which "api" this is.
+    await expect(items.first()).toContainText(`${base}/Projects/backend/api`);
+
+    await search.fill('zzz-nothing');
+    await expect(modal.locator('.moveto-empty')).toContainText('No folder matches');
+
+    await search.fill('backend api');
+    await search.press('Enter');
+    // Enter picks the top match and clears the search, so the tree is back
+    // with the chosen folder selected.
+    await expect(search).toHaveValue('');
+    await expect(modal.locator('.moveto-item.selected')).toContainText('api');
+    await expect(modal.getByTestId('transfer-check')).toContainText(`Ready: ${base}/Projects/backend/api/${name}`, { timeout: 10_000 });
+    await modal.getByTestId('transfer-confirm').click();
+    await expect(modal).toBeHidden({ timeout: 10_000 });
+    expect((await api(page, 'GET', note(SRC, `${base}/Projects/backend/api/${name}`))).text).toContain('searched');
+    expect((await api(page, 'GET', note(SRC, `${base}/${name}`))).status).toBe(404);
+  });
+});
