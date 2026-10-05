@@ -170,6 +170,14 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
   });
   const [showAgent, setShowAgent] = useState(false);
   const [agentName, setAgentName] = useState('');
+  const [agentIntent, setAgentIntent] = useState('');
+  // Esc closes the agent panel from anywhere in the chat, besides its × button.
+  useEffect(() => {
+    if (!showAgent) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape' && !e.defaultPrevented) setShowAgent(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [showAgent]);
   const [copied, setCopied] = useState(false);
   const [caret, setCaret] = useState(0);
   const draftRef = useRef(null);
@@ -346,6 +354,17 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
 
       {showAgent && (
         <div className="chat-agent">
+          <div className="chat-agent-head">
+            <strong>Connect an agent</strong>
+            <button
+              className="chat-btn chat-btn-icon chat-agent-close"
+              onClick={() => setShowAgent(false)}
+              title="Close (Esc)"
+              aria-label="Close"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+            </button>
+          </div>
           <p>
             Paste this into the agent. Give it one name and it will use that name everywhere, so <code>@name</code> reaches it.
           </p>
@@ -361,14 +380,26 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
             <button
               className="chat-btn"
               onClick={() => {
-                if (copyPlainText(agentInstructions(serverAlias, chat.ns, chat.path, agentName || 'AGENT_NAME'))) {
+                if (copyPlainText(agentInstructions(serverAlias, chat.ns, chat.path, agentName || 'AGENT_NAME', agentIntent))) {
                   setCopied(true);
                   setTimeout(() => setCopied(false), 1500);
                 }
               }}
             >{copied ? 'Copied!' : 'Copy prompt'}</button>
           </div>
-          <pre>{agentInstructions(serverAlias, chat.ns, chat.path, agentName || 'AGENT_NAME')}</pre>
+          {/* What the agent is for, in the person's own words. It goes into the
+              prompt after the name, so the agent starts with its job instead
+              of asking for one. */}
+          <textarea
+            className="chat-input chat-agent-intent"
+            placeholder="What should this agent do here? e.g. Review the API pull requests and flag anything touching auth. (optional)"
+            value={agentIntent}
+            onChange={(e) => setAgentIntent(e.target.value)}
+            maxLength={2000}
+            rows={2}
+            aria-label="What this agent should do"
+          />
+          <pre>{agentInstructions(serverAlias, chat.ns, chat.path, agentName || 'AGENT_NAME', agentIntent)}</pre>
           <p className="chat-agent-mcp">MCP clients: <code>read_chat</code>, <code>post_chat</code>, <code>wait_chat</code>.</p>
         </div>
       )}

@@ -89,6 +89,16 @@ else
   FAILED=1
 fi
 
+# 2b-iv. `mdnest chat avatar --pick auto` skips built-ins others already wear.
+echo -n "CLI chat avatar auto-pick... "
+if bash tests/cli-chat-avatar-auto.sh > /dev/null 2>&1; then
+  echo "OK"
+else
+  echo "FAILED"
+  echo "  Run: bash tests/cli-chat-avatar-auto.sh"
+  FAILED=1
+fi
+
 # 2c. Server CLI unit tests: pure helpers in mdnest-server (namespace drift
 # reporting). Also fast and Docker-free.
 echo -n "Server CLI unit tests... "
