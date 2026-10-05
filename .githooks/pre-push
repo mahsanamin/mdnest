@@ -77,6 +77,18 @@ else
   FAILED=1
 fi
 
+# 2b-iii. `mdnest chat wait` keeps listening through a temporary outage
+# (dropped reply, 503) and still exits 1 on a real error. Fake backend,
+# loopback only, a few seconds; SKIPs without python3.
+echo -n "CLI chat wait retry... "
+if bash tests/cli-chat-wait-retry.sh > /dev/null 2>&1; then
+  echo "OK"
+else
+  echo "FAILED"
+  echo "  Run: bash tests/cli-chat-wait-retry.sh"
+  FAILED=1
+fi
+
 # 2c. Server CLI unit tests: pure helpers in mdnest-server (namespace drift
 # reporting). Also fast and Docker-free.
 echo -n "Server CLI unit tests... "

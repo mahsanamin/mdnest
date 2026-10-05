@@ -246,6 +246,11 @@ api() {
   # with curl's 28. Do NOT re-add a following `curl_rc=$?`: it would overwrite
   # the real curl code with the status of the now-successful assignment.
   response=$(curl "${args[@]}" -X "$method" "${MDNEST_URL}/api${path}") || curl_rc=$?
+  # A caller that can retry sets API_TEMPFAIL_RC (e.g. `local API_TEMPFAIL_RC=75`)
+  # and gets that status instead of 1 for a failure that is usually over in
+  # seconds: refused, timed out, empty reply, reset, or a proxy's 502/503/504
+  # while the backend restarts. Opt-in, so every other command keeps exiting 1.
+  local fail_rc=1
   if [ "$curl_rc" != "0" ]; then
     case "$curl_rc" in
       6)  echo "Error: can't resolve host for ${MDNEST_URL} (DNS)." >&2 ;;
@@ -253,14 +258,16 @@ api() {
       28) echo "Error: timed out connecting to ${MDNEST_URL} (set MDNEST_TIMEOUT to raise the limit)." >&2 ;;
       *)  echo "Error: couldn't reach ${MDNEST_URL} (curl exit $curl_rc)." >&2 ;;
     esac
-    return 1
+    case "$curl_rc" in 7|28|52|55|56) fail_rc="${API_TEMPFAIL_RC:-1}" ;; esac
+    return "$fail_rc"
   fi
   local http_code="${response##*$'\n'}"
   local resp_body="${response%$'\n'*}"
 
   if [ "$http_code" -ge 400 ] 2>/dev/null; then
     echo "Error ($http_code): $resp_body" >&2
-    return 1
+    case "$http_code" in 502|503|504) fail_rc="${API_TEMPFAIL_RC:-1}" ;; esac
+    return "$fail_rc"
   fi
   echo "$resp_body"
 }
@@ -1575,7 +1582,9 @@ cmd_chat() {
       # total message count into $count (from the X-Chat-Count header).
       local out="" count=0
       chat_fetch() {
-        out=$(api GET "/chat?$CHAT_QS&after=$1&format=text$2" "" "" "$hdr") || return 1
+        local rc=0
+        out=$(api GET "/chat?$CHAT_QS&after=$1&format=text$2" "" "" "$hdr") || rc=$?
+        [ "$rc" = "0" ] || return "$rc"
         count=$(grep -i '^x-chat-count:' "$hdr" | tr -dc '0-9') || count=""
         [ -n "$count" ] || count=0
         return 0
@@ -1618,11 +1627,37 @@ cmd_chat() {
       fi
       # Plain polling on purpose: it works through every proxy and needs no
       # websocket support in bash.
-      local waited=0
+      #
+      # One dropped poll must not end the wait: an agent loses its listener
+      # over a blip (a server restart, an empty reply) that is over in
+      # seconds. A temporary failure is retried with a growing pause until
+      # --timeout; only a real error (401, 404, bad host) or a server that
+      # stays down past --timeout exits 1.
+      local waited=0 fetch_rc backoff="$poll" down=0
+      local API_TEMPFAIL_RC=75
       while :; do
-        chat_fetch "$after" "$qs_extra" || { rm -f "$hdr"; exit 1; }
+        fetch_rc=0
+        chat_fetch "$after" "$qs_extra" 2>"$hdr.err" || fetch_rc=$?
+        if [ "$fetch_rc" = "75" ] && [ "$waited" -lt "$timeout" ]; then
+          if [ "$down" = "0" ]; then
+            sed 's/^Error: //' "$hdr.err" | sed 's/^/Warning: /' >&2
+            echo "Warning: retrying until the server answers (up to ${timeout}s in total)." >&2
+          fi
+          down=1
+          sleep "$backoff"
+          waited=$((waited + backoff))
+          backoff=$((backoff * 2)); [ "$backoff" -le 30 ] || backoff=30
+          continue
+        fi
+        if [ "$fetch_rc" != "0" ]; then
+          cat "$hdr.err" >&2
+          rm -f "$hdr" "$hdr.err"
+          exit 1
+        fi
+        if [ "$down" = "1" ]; then echo "Warning: server is reachable again." >&2; fi
+        down=0; backoff="$poll"
         if [ -n "$out" ]; then
-          rm -f "$hdr"
+          rm -f "$hdr" "$hdr.err"
           printf '%s\n' "$out"
           chat_save_cursor "$count"
           return 0
@@ -1634,7 +1669,7 @@ cmd_chat() {
           chat_save_cursor "$after"
         fi
         if [ "$waited" -ge "$timeout" ]; then
-          rm -f "$hdr"
+          rm -f "$hdr" "$hdr.err"
           echo "No new messages within ${timeout}s (seen up to #${after}). Run wait again to keep listening." >&2
           exit 2
         fi
