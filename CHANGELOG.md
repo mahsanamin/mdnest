@@ -24,6 +24,13 @@ All notable changes to mdnest are documented here.
   width and shortens with "…" instead of wrapping the row, and the ⋯ menu
   keeps to the right edge on any row it does wrap onto. Pinned in
   `tests/browser/toolbar-fit.spec.js`.
+- **Selecting text in the Live editor no longer sets the gutter handle
+  sliding.** The "+" and drag handle beside each block follows the mouse and
+  animates there, so during a drag selection it glided up and down next to the
+  selected text, which looked like the text was jumping. It is now hidden
+  while the mouse button is held for a selection and comes back on the next
+  hover. Dragging a block by its handle is unchanged. Pinned in
+  `tests/browser/live-select-handle.spec.js`.
 
 ---
 

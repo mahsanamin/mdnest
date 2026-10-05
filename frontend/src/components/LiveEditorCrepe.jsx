@@ -229,6 +229,7 @@ export default function LiveEditorCrepe({
   wikiIndex,
 }) {
   const rootRef = useRef(null);
+  const paneRef = useRef(null);
   const crepeRef = useRef(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
@@ -591,6 +592,32 @@ export default function LiveEditorCrepe({
     };
   }, [innerEditor, onComment]);
 
+  // Hide the block handle while a mouse selection is being dragged. Crepe
+  // animates the handle (`transition: all 0.2s`) to whichever block is under
+  // the pointer, so during a drag it glides up and down beside the text being
+  // selected, which reads as the text itself jumping. A press that starts ON
+  // the handle is a block drag or a `+` click and is left alone. Toggled on
+  // the DOM, not in state, so a drag causes no React re-render.
+  useEffect(() => {
+    const root = rootRef.current;
+    const pane = paneRef.current;
+    if (!root || !pane) return;
+    const onDown = (e) => {
+      if (e.button !== 0) return;
+      if (e.target.closest && e.target.closest('.milkdown-block-handle')) return;
+      pane.classList.add('selecting');
+    };
+    const onUp = () => pane.classList.remove('selecting');
+    root.addEventListener('mousedown', onDown);
+    document.addEventListener('mouseup', onUp);
+    window.addEventListener('blur', onUp);
+    return () => {
+      root.removeEventListener('mousedown', onDown);
+      document.removeEventListener('mouseup', onUp);
+      window.removeEventListener('blur', onUp);
+    };
+  }, []);
+
   // Listen for the `mermaid-fullscreen` custom event the MermaidBlock node
   // view dispatches when the user clicks the expand button — open the
   // viewer modal with the SVG payload.
@@ -823,7 +850,7 @@ export default function LiveEditorCrepe({
   }, [ns, currentPath, readOnly]);
 
   return (
-    <div className={`live-editor-pane${handlesHidden ? ' handles-hidden' : ''}`}>
+    <div ref={paneRef} className={`live-editor-pane${handlesHidden ? ' handles-hidden' : ''}`}>
       {readOnly && <div className="editor-readonly-bar">Read-only</div>}
       {!readOnly && <LiveToolbar editor={innerEditor} handlesHidden={handlesHidden} onToggleHandles={toggleHandles} />}
       <div className="live-editor-wrapper" style={{ position: 'relative', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>

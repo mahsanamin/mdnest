@@ -3209,6 +3209,17 @@ pre:hover .code-copy-btn {
   padding-left: 1rem;
 }
 
+/* While a mouse selection is dragged (LiveEditorCrepe adds .selecting), the
+   handle stays out of the way. Crepe animates it to the block under the
+   pointer, so mid-drag it slid up and down beside the selected text and the
+   text looked like it was jumping. No transition, so it does not fade out
+   while still moving; the gutter is kept, so the text does not move either. */
+.live-editor-pane.selecting .milkdown .milkdown-block-handle {
+  opacity: 0;
+  pointer-events: none;
+  transition: none;
+}
+
 .editor-wrapper .milkdown .ProseMirror h1 {
   font-size: 1.8rem;
   font-weight: 700;
