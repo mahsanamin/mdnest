@@ -8,6 +8,11 @@ All notable changes to mdnest are documented here.
 
 ### Added
 
+- **Search in Move to… and Copy to….** The folder picker has a search box,
+  focused when it opens. Every word you type must appear in the folder's
+  path, so `proj api` finds `Projects/backend/api`. Results show their full
+  path, exact names come first, and Enter picks the top match. Finding a
+  destination no longer means scrolling a long tree.
 - **Connect an agent: say what the agent is for.** Under the agent's name
   there is now a box for what it should do in this chat. The text goes into
   the prompt as "Your job in this chat", the same way the name does, so the

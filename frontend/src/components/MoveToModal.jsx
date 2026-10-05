@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { getTree, getNamespacesDetail, transferItem } from '../api.js';
 import {
   baseName, joinPath, isInvalidDestination, describeRefusal, newFolderError, transferSummary, isLargeTransfer,
+  filterFolders,
 } from '../transfer.js';
 
 // Walks a tree and returns a flat list of {path, depth} for every folder.
@@ -56,6 +57,10 @@ export default function MoveToModal({ mode = 'move', namespace, source, onClose,
   const [newFolders, setNewFolders] = useState([]);
   const [adding, setAdding] = useState(null); // {parent, name, error} while typing
   const [elapsed, setElapsed] = useState(0);
+  // Folder search: with many folders, scrolling the tree for the right one
+  // was the slow part of moving anything.
+  const [query, setQuery] = useState('');
+  const listRef = useRef(null);
   const checkSeq = useRef(0);
 
   useEffect(() => {
@@ -78,6 +83,7 @@ export default function MoveToModal({ mode = 'move', namespace, source, onClose,
     setSelected(null);
     setNewFolders([]);
     setAdding(null);
+    setQuery('');
     getTree(destNs)
       .then((t) => { if (!cancelled) setTree(t); })
       .catch((e) => { if (!cancelled) setError(e.message || 'Failed to load folders'); });
@@ -95,6 +101,16 @@ export default function MoveToModal({ mode = 'move', namespace, source, onClose,
     }
     return list.filter((d) => !isInvalidDestination({ sourceNs: namespace, sourcePath, destNs, destFolder: d.path }));
   }, [tree, newFolders, namespace, sourcePath, destNs]);
+
+  const searching = query.trim() !== '';
+  const shown = useMemo(() => filterFolders(destinations, query), [destinations, query]);
+
+  // Leaving a search puts the full tree back; keep the chosen folder in view.
+  useEffect(() => {
+    if (searching) return;
+    const el = listRef.current?.querySelector('.moveto-item.selected');
+    if (el) el.scrollIntoView({ block: 'nearest' });
+  }, [searching]);
 
   // The folder names already under a parent, real or new, for the name check.
   const childNames = (parent) => {
@@ -197,9 +213,31 @@ export default function MoveToModal({ mode = 'move', namespace, source, onClose,
         {!tree && !error && <div className="moveto-loading">Loading folders…</div>}
 
         {tree && (
-          <div className="moveto-list" role="listbox" aria-label="Destination folder">
+          <input
+            type="search"
+            className="moveto-search"
+            placeholder="Search folders…"
+            value={query}
+            autoFocus
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              // Enter takes the best match; Esc clears the search first.
+              if (e.key === 'Enter' && searching && shown.length > 0) { e.preventDefault(); setSelected(shown[0]); setQuery(''); }
+              if (e.key === 'Escape' && query) { e.preventDefault(); e.stopPropagation(); setQuery(''); }
+            }}
+            disabled={busy}
+            aria-label="Search folders"
+            data-testid="transfer-search"
+          />
+        )}
+
+        {tree && (
+          <div className="moveto-list" role="listbox" aria-label="Destination folder" ref={listRef}>
             {destinations.length === 0 && <div className="moveto-empty">No valid destinations.</div>}
-            {destinations.map((d) => {
+            {searching && destinations.length > 0 && shown.length === 0 && (
+              <div className="moveto-empty">No folder matches “{query.trim()}”.</div>
+            )}
+            {shown.map((d) => {
               const isSelected = selected?.path === d.path;
               return (
                 <button
@@ -208,12 +246,22 @@ export default function MoveToModal({ mode = 'move', namespace, source, onClose,
                   role="option"
                   aria-selected={isSelected}
                   className={`moveto-item${isSelected ? ' selected' : ''}`}
-                  style={{ paddingLeft: `${d.depth * 0.75 + 0.75}rem` }}
+                  style={{ paddingLeft: searching ? '0.75rem' : `${d.depth * 0.75 + 0.75}rem` }}
                   onClick={() => setSelected(d)}
                   disabled={busy}
+                  title={d.path}
                 >
                   <span className="moveto-icon" aria-hidden="true">📁</span>
-                  <span className="moveto-name">{d.name}</span>
+                  {/* A search result is shown with its whole path: without its
+                      parents above it, a bare name is hard to place. */}
+                  {searching ? (
+                    <span className="moveto-name moveto-name-path">
+                      <span className="moveto-parent">{d.path.slice(1, d.path.length - d.name.length)}</span>
+                      <span className="moveto-leaf">{d.name}</span>
+                    </span>
+                  ) : (
+                    <span className="moveto-name">{d.name}</span>
+                  )}
                   {d.isNew && <span className="moveto-new-badge">new</span>}
                 </button>
               );
