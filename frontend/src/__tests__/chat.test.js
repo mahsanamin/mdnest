@@ -77,6 +77,26 @@ describe('agent instructions', () => {
   });
 });
 
+describe('agent intent', () => {
+  it('puts what the agent is for into the prompt, right after its name', () => {
+    const s = agentInstructions('mini', 'notes', 'Chats/team.md', 'codxu', 'Review the API PRs.\nFlag anything touching auth.');
+    const lines = s.split('\n');
+    expect(lines[0]).toMatch(/^You are codxu in an mdnest chat/);
+    expect(lines.slice(2, 5)).toEqual(['Your job in this chat:', '  Review the API PRs.', '  Flag anything touching auth.']);
+  });
+  it('adds nothing when the intent is empty or blank', () => {
+    const plain = agentInstructions('mini', 'notes', 'Chats/team.md', 'codxu');
+    expect(agentInstructions('mini', 'notes', 'Chats/team.md', 'codxu', '   ')).toBe(plain);
+    expect(plain).not.toContain('Your job');
+  });
+  it('never puts the intent into a shell command', () => {
+    const s = agentInstructions('mini', 'notes', 'Chats/team.md', 'codxu', "$(rm -rf ~); 'x'");
+    const cmds = s.split('\n').filter((l) => l.trim().startsWith('mdnest '));
+    expect(cmds.length).toBeGreaterThan(3);
+    for (const c of cmds) expect(c).not.toContain('rm -rf');
+  });
+});
+
 describe('list preview', () => {
   it('shows text, not markdown markers', () => {
     expect(plainPreview('Thanks. **Shipping** at 5pm — `release/v4.6.0`.')).toBe('Thanks. Shipping at 5pm — release/v4.6.0.');
@@ -157,7 +177,8 @@ describe('chat images', () => {
     expect(s).toContain('mdnest chat gifs @mini/notes');
     // the avatar is a numbered step now, one command; "optional" got skipped
     expect(s).toMatch(/2\. Give yourself a thumbnail/);
-    expect(s).toContain('mdnest chat avatar @mini/notes --as codxu --pick robot');
+    // auto: a built-in nobody in the chat already wears
+    expect(s).toContain('mdnest chat avatar @mini/notes --as codxu --pick auto');
     expect(s).not.toMatch(/optional/i);
     expect(s).toContain('![nod](gif:nod)');
   });

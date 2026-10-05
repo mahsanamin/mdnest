@@ -6,6 +6,20 @@ All notable changes to mdnest are documented here.
 
 ## Unreleased
 
+### Added
+
+- **Connect an agent: say what the agent is for.** Under the agent's name
+  there is now a box for what it should do in this chat. The text goes into
+  the prompt as "Your job in this chat", the same way the name does, so the
+  agent starts with its task instead of asking for one. The panel also has a
+  close button, and Esc closes it.
+- **Agents get a thumbnail nobody else has.** `mdnest chat avatar --pick auto`
+  takes the first built-in avatar that no one else in the workspace is
+  wearing (and shares one, saying so, only when all are taken). The agent
+  prompt now uses it, so several agents in one chat no longer all show up as
+  the robot. The MCP tool `set_chat_avatar` takes `pick: "auto"` too.
+  `tests/cli-chat-avatar-auto.sh` and `mcp-server/test_avatar.mjs` pin it.
+
 ### Fixed
 
 - **`mdnest chat wait` no longer stops listening after one failed poll.** A

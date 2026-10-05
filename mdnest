@@ -1391,7 +1391,7 @@ chat_usage() {
 Usage:
   mdnest chat list [@alias]
   mdnest chat gifs @alias/namespace          (images to post as ![nod](gif:nod), and avatars)
-  mdnest chat avatar @alias/namespace --as name [--pick owl | --file my.svg]
+  mdnest chat avatar @alias/namespace --as name [--pick owl | --pick auto | --file my.svg]
   mdnest chat new  @alias/namespace/path.md ["Title"]
   mdnest chat post @alias/namespace/path.md <text|-> [--as name]
   mdnest chat read @alias/namespace/path.md [--as name] [--after N]
@@ -1410,7 +1410,8 @@ that ships with mdnest plus the namespace's ChatGifs/ folder, where a file with
 a built-in's name replaces it. Add your own (animated SVG works well):
   cat wave.svg | mdnest create @alias/namespace/ChatGifs/wave.svg -
 Your thumbnail: `chat avatar --as NAME --pick owl` uses a built-in one (run it
-without --pick to see the choices); `--file my.svg` uses your own drawing. It is
+without --pick to see the choices); `--pick auto` takes the first one nobody
+in the namespace uses yet; `--file my.svg` uses your own drawing. It is
 saved as ChatGifs/avatar-NAME.svg. Without one, your initial is shown.
 USAGE
 }
@@ -1482,6 +1483,7 @@ cmd_chat() {
         choices=$(api GET "/chat/gifs?ns=$(urlencode "$PARSED_NS")&format=text") || exit 1
         echo "Built-in avatars (use one with: mdnest chat avatar @${PARSED_ALIAS:-myserver}/${PARSED_NS} --as yourname --pick owl):"
         printf '%s\n' "$choices" | awk -F'\t' '$1 == "avatar choice" { print "  " $2 }'
+        echo "Or let it choose one nobody here uses yet: --pick auto"
         echo "Or draw your own animated SVG and use --file my.svg."
         printf '%s\n' "$choices" | awk -F'\t' '/^avatar of / { print "Already set: " $1 }'
         return 0
@@ -1490,7 +1492,38 @@ cmd_chat() {
         ''|*[!A-Za-z0-9._-]*) echo "Error: --as needs a name made of letters, digits, dot, dash or underscore" >&2; exit 1 ;;
       esac
       local svg=""
-      if [ -n "$pick" ]; then
+      if [ "$pick" = "auto" ]; then
+        # The first built-in nobody else in this workspace wears yet. An
+        # avatar is stored as an exact copy of the built-in it came from, so
+        # "in use" is a content match against every other avatar-*.svg.
+        local listing
+        listing=$(api GET "/chat/gifs?ns=$(urlencode "$PARSED_NS")&format=text") || exit 1
+        local worn="" owner apath body
+        while IFS=$'\t' read -r owner apath; do
+          owner="${owner#avatar of }"
+          [ "$owner" = "$as" ] && continue
+          apath="${apath% (*}"
+          body=$(api GET "/note?ns=$(urlencode "$PARSED_NS")&path=$(urlencode "$apath")" 2>/dev/null) || body=""
+          [ -n "$body" ] && worn="${worn}${body}"$'\n\x1e\n'
+        done < <(printf '%s\n' "$listing" | grep '^avatar of ' || true)
+        local choice candidate="" first=""
+        for choice in $(printf '%s\n' "$listing" | awk -F'\t' '$1 == "avatar choice" { print $2 }'); do
+          case "$choice" in ''|*[!a-z0-9-]*) continue ;; esac
+          body=$(curl -sf --connect-timeout "${MDNEST_TIMEOUT:-10}" "${MDNEST_URL}/api/chat/gifs/builtin/avatars/${choice}.svg") || body=""
+          [ -n "$body" ] || continue
+          [ -n "$first" ] || { first="$choice"; svg="$body"; }
+          case "$worn" in *"${body}"$'\n\x1e\n'*) continue ;; esac
+          candidate="$choice"; svg="$body"
+          break
+        done
+        if [ -z "$first" ]; then echo "Error: this server offers no built-in avatars" >&2; exit 1; fi
+        if [ -z "$candidate" ]; then
+          echo "Note: every built-in avatar is already in use here, so ${as} shares '${first}'. Draw your own with --file to stand out." >&2
+          pick="$first"
+        else
+          pick="$candidate"
+        fi
+      elif [ -n "$pick" ]; then
         case "$pick" in ''|*[!a-z0-9-]*) echo "Error: --pick takes a choice name such as owl (run without --pick to list them)" >&2; exit 1 ;; esac
         svg=$(curl -sf --connect-timeout "${MDNEST_TIMEOUT:-10}" "${MDNEST_URL}/api/chat/gifs/builtin/avatars/${pick}.svg") || svg=""
         if [ -z "$svg" ]; then echo "Error: no built-in avatar called '$pick' (run without --pick to list them)" >&2; exit 1; fi
@@ -1505,7 +1538,7 @@ cmd_chat() {
       if ! api POST "/note?$target_qs" "$svg" >/dev/null 2>&1; then
         api PUT "/note?$target_qs" "$svg" >/dev/null || exit 1
       fi
-      echo "Avatar set for ${as}: ${PARSED_NS}/ChatGifs/avatar-${as}.svg"
+      echo "Avatar set for ${as}${pick:+ (${pick})}: ${PARSED_NS}/ChatGifs/avatar-${as}.svg"
       ;;
     new)
       chat_target "${1:-}"
