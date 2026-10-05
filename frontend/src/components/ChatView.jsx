@@ -152,7 +152,7 @@ function ChatList({ chats, loading, error, openChat, onSelect, filter, onFilter 
       </ul>
       {!loading && chats.length === 0 && (
         <div className="chat-empty">
-          No chats in this workspace yet. Create one, or right-click any note and choose <b>Make it a chat</b>.
+          No chats in this workspace yet. Create one with <b>+ New</b>, or right-click a folder and choose <b>New chat</b>.
         </div>
       )}
     </>

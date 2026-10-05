@@ -1407,7 +1407,7 @@ function App() {
       openNoteIn(chatsReturnNote.ns, chatsReturnNote.path);
     } else if (currentPath) {
       // Reload the note underneath: chat mode may have rewritten it (a post
-      // to that very chat, "Make it a chat" on the open note), and editing a
+      // to that very chat, or the open note turned into one), and editing a
       // stale copy would 409, or strip the chat tag if overwritten.
       openNoteDirect(selectedNs, currentPath);
     }
@@ -1790,18 +1790,6 @@ function App() {
           if (lastForNs && lastForNs.startsWith(target.path)) setLastPath(selectedNs, null);
           await refreshTree(undefined, { broadcast: true });
         } catch (e) { alert('Failed to delete folder: ' + e.message); }
-        break;
-      }
-      case 'convert-chat': {
-        // Tag the note as a chat in place (its content becomes the channel
-        // description) and open it in the chats view. The file is not moved,
-        // so a path already handed to an agent keeps working.
-        if (target && selectedNs) {
-          try {
-            await convertToChat(selectedNs, target.path, '');
-            enterChats({ ns: selectedNs, path: target.path });
-          } catch (e) { alert('Failed to make a chat: ' + e.message); }
-        }
         break;
       }
       case 'new-chat': {
@@ -2580,6 +2568,7 @@ function App() {
         onClose={handleCloseContextMenu}
         canWrite={canWrite}
         isAdmin={isAdmin && isMulti}
+        multi={isMulti}
         selectedNs={selectedNs}
         excalidraw={excalidrawEnabled}
         chat={chatEnabled}
