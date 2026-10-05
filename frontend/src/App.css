@@ -327,11 +327,16 @@
 }
 
 .toolbar-path {
-  /* Not flex: 1. Growing to fill the row means the actions inside it sit at the
-     far right with nowhere to go, so they overflowed onto the group beside
-     them. margin-right: auto still pushes that group to the edge, but the bar
-     now wraps before anything collides. */
-  flex: 0 1 auto;
+  /* A fixed starting width, not `auto`. The bar wraps, and a wrapping flex row
+     decides where to break from each item's STARTING width: with `auto` that
+     was the whole filename, so a long name (or a wider sidebar, or the stickies
+     panel open) pushed the view switch, the utilities and the ⋯ menu onto
+     second and third rows at the left, and Settings was no longer in the
+     top-right corner. 14rem keeps the filename, its icons and Rename/Delete
+     readable; past that the name ellipsizes and the row stays one row. It
+     grows into spare room, and the items inside it pack left, so the actions
+     stay next to the name rather than at the far right. */
+  flex: 1 1 14rem;
   margin-right: auto;
   display: flex;
   align-items: center;
@@ -2659,7 +2664,7 @@ pre:hover .code-copy-btn {
   border: 1px solid var(--border-strong);
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
-  min-width: 140px;
+  min-width: 200px;
   padding: 4px 0;
   animation: ctxFadeIn 0.1s ease-out;
 }
@@ -2675,11 +2680,24 @@ pre:hover .code-copy-btn {
   }
 }
 
+/* The clicked item's name, above the actions. Not a .context-menu-item, so
+   nothing that looks for an action by its text can hit it. */
+.context-menu-title {
+  max-width: 240px;
+  padding: 6px 12px 4px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .context-menu-item {
-  height: 36px;
+  height: 34px;
   display: flex;
   align-items: center;
-  padding: 0 12px;
+  gap: 10px;
+  padding: 0 14px 0 12px;
   font-size: 0.85rem;
   color: var(--text);
   cursor: pointer;
@@ -2690,7 +2708,13 @@ pre:hover .code-copy-btn {
   background: var(--surface-3);
 }
 
-.context-menu-item.danger {
+.context-menu-item .context-menu-icon {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+}
+
+.context-menu-item.danger,
+.context-menu-item.danger .context-menu-icon {
   color: var(--danger);
 }
 
@@ -3202,6 +3226,17 @@ pre:hover .code-copy-btn {
 }
 .live-editor-pane.handles-hidden .milkdown .ProseMirror {
   padding-left: 1rem;
+}
+
+/* While a mouse selection is dragged (LiveEditorCrepe adds .selecting), the
+   handle stays out of the way. Crepe animates it to the block under the
+   pointer, so mid-drag it slid up and down beside the selected text and the
+   text looked like it was jumping. No transition, so it does not fade out
+   while still moving; the gutter is kept, so the text does not move either. */
+.live-editor-pane.selecting .milkdown .milkdown-block-handle {
+  opacity: 0;
+  pointer-events: none;
+  transition: none;
 }
 
 .editor-wrapper .milkdown .ProseMirror h1 {
@@ -6304,7 +6339,10 @@ pre:hover .code-copy-btn {
 /* The ⋯ menu: on every screen size it holds theme, Settings and Manage
    users; on a phone it also takes everything the narrow bar cannot show
    (those entries carry .more-phone). */
-.toolbar-more { position: relative; }
+/* margin-left: auto keeps the ⋯ menu (and Settings in it) at the right edge
+   even on a row it had to wrap onto; on a single row the path's growth leaves
+   no free space, so this changes nothing there. */
+.toolbar-more { position: relative; margin-left: auto; }
 /* The menu drops below the bar, over the editor; the bar must be the higher
    layer on every screen size or the editor's own toolbar paints over the
    menu and swallows its clicks. */

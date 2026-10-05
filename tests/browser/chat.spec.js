@@ -155,3 +155,37 @@ test('Delete removes the chat note after confirming, and Cancel keeps it', async
     await cleanup(page, plain, chat);
   }
 });
+
+test('the agent panel puts the typed intent into the prompt, and × or Esc closes it', async ({ page }) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  const { plain, chat, title } = await seed(page);
+  try {
+    await page.goto(`/#!chats/${NS}/${chat}`);
+    await expect(page.locator('.chat-room-title h2')).toHaveText(title, { timeout: 20_000 });
+
+    const openBtn = page.locator('.chat-btn', { hasText: /Connect an agent|Agents/ }).first();
+    await openBtn.click();
+    const panel = page.locator('.chat-agent');
+    await expect(panel).toBeVisible();
+    await panel.locator('input[aria-label="Agent name"]').fill('reviewer');
+    await panel.locator('textarea.chat-agent-intent').fill('Review the API pull requests.');
+    const prompt = panel.locator('pre');
+    await expect(prompt).toContainText('You are reviewer in an mdnest chat');
+    await expect(prompt).toContainText('Your job in this chat:\n  Review the API pull requests.');
+    await expect(prompt).toContainText('--as reviewer --pick auto');
+
+    // A visible close button, not only "click Connect an agent again".
+    await panel.locator('.chat-agent-close').click();
+    await expect(panel).toHaveCount(0);
+
+    // And Esc, with focus anywhere in the chat.
+    await openBtn.click();
+    await expect(panel).toBeVisible();
+    await page.locator('.chat-room-title h2').click();
+    await page.keyboard.press('Escape');
+    await expect(panel).toHaveCount(0);
+  } finally {
+    await cleanup(page, plain, chat);
+  }
+});

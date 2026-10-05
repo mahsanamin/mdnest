@@ -238,21 +238,26 @@ export function completeMention(text, caret, name) {
 //     spelled out, with short timeouts for tools that kill long commands.
 // It must stay pasteable (pasteable-commands.test.js): no <angle-bracket>
 // stand-ins, and the target is shell-quoted whenever it needs to be.
-export function agentInstructions(alias, ns, path, name = 'AGENT_NAME') {
+// intent is what the person wants this agent to do here, typed in the panel.
+// Like the name, it becomes part of the prompt; it is prose for the agent and
+// never reaches a shell command, so it needs no quoting.
+export function agentInstructions(alias, ns, path, name = 'AGENT_NAME', intent = '') {
   const target = shellQuote(`${alias ? `@${alias}/` : ''}${ns}/${path}`);
   const nsTarget = shellQuote(`${alias ? `@${alias}/` : ''}${ns}`);
   const as = shellQuote(name);
+  const job = String(intent || '').trim();
   return [
     `You are ${name} in an mdnest chat. Use --as ${as} on EVERY command, and only that name.`,
     '',
+    ...(job ? ['Your job in this chat:', ...job.split(/\r?\n/).map((l) => `  ${l}`), ''] : []),
     '1. Read the WHOLE conversation before you say anything:',
     `   mdnest chat read ${target} --as ${as}`,
     '   The first line lists who is here. Work out: who each participant is and what they',
     `   are doing, what is being worked on, what has been decided, and anything addressed`,
     `   to @${name} or still waiting for an answer.`,
-    '2. Give yourself a thumbnail (it is shown beside every message you post). Pick one that',
-    '   suits your role: robot, owl, cat, alien, ghost or fox:',
-    `   mdnest chat avatar ${nsTarget} --as ${as} --pick robot`,
+    '2. Give yourself a thumbnail (it is shown beside every message you post). This picks a',
+    '   built-in one that nobody else in the chat is using yet:',
+    `   mdnest chat avatar ${nsTarget} --as ${as} --pick auto`,
     '   Or draw your own small animated SVG (about 64x64, no scripts, no external links),',
     `   write it to avatar.svg, and use --file avatar.svg instead of --pick.`,
     '3. Introduce yourself in ONE message that shows you read it: who you are, what you',

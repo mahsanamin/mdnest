@@ -4,6 +4,66 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v4.8.0: Agents with a job, a tidier right-click menu, and three fixes
+
+Tell an agent what it is for when you connect it, give each agent its own
+thumbnail, and find actions faster in the tree's right-click menu. Also
+fixes `mdnest chat wait` giving up on a blip, Settings slipping out of the
+top-right corner, and the Live editor's handle sliding beside a selection.
+
+### Added
+
+- **Connect an agent: say what the agent is for.** Under the agent's name
+  there is now a box for what it should do in this chat. The text goes into
+  the prompt as "Your job in this chat", the same way the name does, so the
+  agent starts with its task instead of asking for one. The panel also has a
+  close button, and Esc closes it.
+- **Agents get a thumbnail nobody else has.** `mdnest chat avatar --pick auto`
+  takes the first built-in avatar that no one else in the workspace is
+  wearing (and shares one, saying so, only when all are taken). The agent
+  prompt now uses it, so several agents in one chat no longer all show up as
+  the robot. The MCP tool `set_chat_avatar` takes `pick: "auto"` too.
+  `tests/cli-chat-avatar-auto.sh` and `mcp-server/test_avatar.mjs` pin it.
+
+### Changed
+
+- **The right-click menu is arranged in groups.** It shows the item's name at
+  the top, then: create (New note, folder, drawing, chat, Paste here), organize
+  (Rename, Move to…, Copy to…), share (Download, Copy for another mdnest, Copy
+  path), info (History, Authors), admin (Manage access), and Delete last on its
+  own in red. Every item has an icon. Before, Delete sat in the middle of the
+  file menu and the copy actions were split up. Authors is now offered only in
+  multi-user mode, where it works, and "Make it a chat" is gone: a chat is made
+  with New chat. The order is pinned in `contextMenuItems.test.js`.
+
+### Fixed
+
+- **`mdnest chat wait` no longer stops listening after one failed poll.** A
+  dropped connection, an empty reply, a timeout or a proxy's 502/503/504
+  (what a server restart looks like from the client) used to exit 1 at once,
+  so an agent waiting on a chat silently stopped hearing it. `wait` now
+  retries those with a growing pause (up to 30 s) until `--timeout`, says
+  when it starts retrying and when the server is back, and exits 1 only on a
+  real error (401, 404, bad host) or a server that stays down. Other commands
+  keep their exit codes. `tests/cli-chat-wait-retry.sh` pins it against a
+  fake backend and runs in the pre-push hook.
+- **The ⋯ menu (and Settings in it) stays in the top-right corner.** A long
+  note name, a wider sidebar or the stickies panel made the toolbar wrap, and
+  the ⋯ menu dropped to a second or third row on the left, so Settings seemed
+  to disappear on some screen sizes. The note path now has a fixed starting
+  width and shortens with "…" instead of wrapping the row, and the ⋯ menu
+  keeps to the right edge on any row it does wrap onto. Pinned in
+  `tests/browser/toolbar-fit.spec.js`.
+- **Selecting text in the Live editor no longer sets the gutter handle
+  sliding.** The "+" and drag handle beside each block follows the mouse and
+  animates there, so during a drag selection it glided up and down next to the
+  selected text, which looked like the text was jumping. It is now hidden
+  while the mouse button is held for a selection and comes back on the next
+  hover. Dragging a block by its handle is unchanged. Pinned in
+  `tests/browser/live-select-handle.spec.js`.
+
+---
+
 ## v4.7.0 — Move, copy and download across workspaces
 
 Move and copy notes and folders between namespaces, download a file or a

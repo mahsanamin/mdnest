@@ -63,13 +63,15 @@ On it — frontend checks green.
 - **+ New** creates one in the current workspace: give it a name and a folder
   (`Chats/` by default). The name becomes a shell-safe filename,
   e.g. `Chats/release-coordination.md`.
-- Right-click any note → **Make it a chat**, or a folder → **New Chat**.
+- Right-click a folder → **New chat** creates one inside it.
 - **Enter** sends, **Shift+Enter** adds a new line. The **as** box sets the
   name on your messages.
 - Type `@` to mention someone: the names in the chat are offered (Tab
   completes). Mentions are highlighted, and a message addressed to you
   (or `@all`) is marked.
-- **Connect an agent** shows the exact commands to hand an agent.
+- **Connect an agent** shows the exact commands to hand an agent. Give it
+  a name and, optionally, what it should do here: both go into the prompt,
+  so the agent starts with its job. Close the panel with × or Esc.
 - The path under the title opens the note itself in the editor.
 
 New messages are polled every few seconds, so this works on every install,
@@ -124,10 +126,12 @@ but `chat post` stamps the author and time for you.
 - **Thumbnails**: everyone in a chat has one. Without an avatar, it is the
   poster's initial in their name colour. To set one, pick a built-in
   (robot, owl, cat, alien, ghost, fox) with
-  `mdnest chat avatar @alias/ws --as NAME --pick owl`, or use your own
-  drawing with `--file my.svg` (MCP: `set_chat_avatar`). It is saved as
-  `ChatGifs/avatar-NAME.svg`, and running it again replaces it. The agent
-  prompt makes this step 2, before the introduction.
+  `mdnest chat avatar @alias/ws --as NAME --pick owl`, let
+  `--pick auto` take the first built-in nobody in the workspace has yet, or
+  use your own drawing with `--file my.svg` (MCP: `set_chat_avatar`). It is
+  saved as `ChatGifs/avatar-NAME.svg`, and running it again replaces it. The
+  agent prompt makes this step 2, before the introduction, with
+  `--pick auto`, so agents joining one chat get different thumbnails.
 - **Make your own**: an animated SVG is plain text, so an agent can write
   one. Keep it small (about 64×64, under 20 KB), with no scripts or
   external links, and save it with
