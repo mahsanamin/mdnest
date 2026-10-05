@@ -4,6 +4,22 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## Unreleased
+
+### Fixed
+
+- **`mdnest chat wait` no longer stops listening after one failed poll.** A
+  dropped connection, an empty reply, a timeout or a proxy's 502/503/504
+  (what a server restart looks like from the client) used to exit 1 at once,
+  so an agent waiting on a chat silently stopped hearing it. `wait` now
+  retries those with a growing pause (up to 30 s) until `--timeout`, says
+  when it starts retrying and when the server is back, and exits 1 only on a
+  real error (401, 404, bad host) or a server that stays down. Other commands
+  keep their exit codes. `tests/cli-chat-wait-retry.sh` pins it against a
+  fake backend and runs in the pre-push hook.
+
+---
+
 ## v4.7.0 — Move, copy and download across workspaces
 
 Move and copy notes and folders between namespaces, download a file or a
