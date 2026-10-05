@@ -17,6 +17,13 @@ All notable changes to mdnest are documented here.
   real error (401, 404, bad host) or a server that stays down. Other commands
   keep their exit codes. `tests/cli-chat-wait-retry.sh` pins it against a
   fake backend and runs in the pre-push hook.
+- **The ⋯ menu (and Settings in it) stays in the top-right corner.** A long
+  note name, a wider sidebar or the stickies panel made the toolbar wrap, and
+  the ⋯ menu dropped to a second or third row on the left, so Settings seemed
+  to disappear on some screen sizes. The note path now has a fixed starting
+  width and shortens with "…" instead of wrapping the row, and the ⋯ menu
+  keeps to the right edge on any row it does wrap onto. Pinned in
+  `tests/browser/toolbar-fit.spec.js`.
 
 ---
 
