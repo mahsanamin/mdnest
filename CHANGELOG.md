@@ -67,6 +67,15 @@ All notable changes to mdnest are documented here.
 
 ### Fixed
 
+- **Selecting text with comments on no longer makes the note flicker.** On a
+  server with live collaboration, selecting shows a Comment button. It was
+  positioned by adding the editor's scroll offset to a box that does not
+  scroll, so in a scrolled note it landed far below the screen. That box then
+  grew a scrollbar, the editor lost about 8 px of width and every line
+  rewrapped, then snapped back when the button went away. The button now sits
+  just under the selection, moves with the text as you scroll, and the box
+  around the editor can no longer scroll. Found with the reporter's own
+  console trace; pinned in `tests/browser/live-select-scroll.spec.js`.
 - **Typing in a chat is fast again.** Every keystroke re-rendered every
   message in the conversation (markdown and sanitizing), so a long chat
   lagged: about 66 ms a key with 300 messages. The conversation now renders

@@ -3128,7 +3128,11 @@ pre:hover .code-copy-btn {
 
 .live-editor-wrapper {
   flex: 1;
-  overflow-y: auto;
+  /* Not a scroller: the Crepe root inside it scrolls. With overflow-y: auto
+     (left over from when this was the scroller) a child placed too low gave
+     the wrapper a second scrollbar, which narrowed the editor and rewrapped
+     every line. */
+  overflow: hidden;
   padding: 0;
   /* position: relative so the floating Comment button and any other
      absolutely-positioned children anchor to the scrollable content area
