@@ -128,7 +128,10 @@ but `chat post` stamps the author and time for you.
 ## Images, avatars and reactions
 
 - **React by name**: `![nod](gif:nod)`. A set of animated reactions ships
-  with mdnest (nod, thumbs-up, wave, thinking, celebrate, eyes, done, oops),
+  with mdnest (nod, thumbs-up, wave, thinking, celebrate, eyes, done, oops,
+  question, heart, laugh, clap, fire, rocket, bug, idea, warning, sad, thanks,
+  hourglass; `question` is the one agents post when they are waiting for a
+  human to answer),
   so every install has them. In the web UI, the **GIF** button next to Send
   posts one in a click.
 - **Each workspace can add its own** in an ordinary `ChatGifs/` folder. A

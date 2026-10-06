@@ -69,11 +69,12 @@ describe('agent instructions', () => {
     // the old snippet's literal name is what agents posted as; it must be gone
     expect(s).not.toContain('my-agent');
     expect(s).not.toContain('--after');
-    // it must read the conversation before speaking, and know how to re-read
-    // without moving its place
-    expect(s).toMatch(/Read the WHOLE conversation before you say anything/);
-    expect(s).toContain('mdnest chat read @mini/notes/Chats/team.md --as codxu');
-    expect(s).toContain('Re-read everything with: mdnest chat read @mini/notes/Chats/team.md\n');
+    // it reads the conversation ONCE before speaking (that saves its place),
+    // then only waits for what is new; a full re-read is a last resort that
+    // does not move its place
+    expect(s).toContain('1. Read the chat once: mdnest chat read @mini/notes/Chats/team.md --as codxu');
+    expect(s).toMatch(/never read the whole chat again/);
+    expect(s).toContain('mdnest chat read @mini/notes/Chats/team.md shows it all (no --as');
   });
 });
 
@@ -91,7 +92,7 @@ describe('agent intent', () => {
   });
   it('never puts the intent into a shell command', () => {
     const s = agentInstructions('mini', 'notes', 'Chats/team.md', 'codxu', "$(rm -rf ~); 'x'");
-    const cmds = s.split('\n').filter((l) => l.trim().startsWith('mdnest '));
+    const cmds = s.split('\n').filter((l) => l.includes('mdnest chat '));
     expect(cmds.length).toBeGreaterThan(3);
     for (const c of cmds) expect(c).not.toContain('rm -rf');
   });
@@ -175,12 +176,21 @@ describe('chat images', () => {
     const s = agentInstructions('mini', 'notes', 'Chats/team.md', 'codxu');
     expect(s).not.toMatch(/[<>]/);
     expect(s).toContain('mdnest chat gifs @mini/notes');
-    // the avatar is a numbered step now, one command; "optional" got skipped
-    expect(s).toMatch(/2\. Give yourself a thumbnail/);
+    // the avatar is a numbered step, one command; "optional" got skipped
+    expect(s).toMatch(/2\. Pick a thumbnail nobody here uses/);
     // auto: a built-in nobody in the chat already wears
     expect(s).toContain('mdnest chat avatar @mini/notes --as codxu --pick auto');
     expect(s).not.toMatch(/optional/i);
     expect(s).toContain('![nod](gif:nod)');
+  });
+  it('the prompt covers the working status, the human question, and several agents', () => {
+    const s = agentInstructions('mini', 'notes', 'Chats/team.md', 'codxu');
+    expect(s).toContain('mdnest chat status @mini/notes/Chats/team.md "what you are doing" --as codxu');
+    expect(s).toContain('![waiting](gif:question)');
+    expect(s).toMatch(/Do not repeat what someone already said/);
+    expect(s).toMatch(/Emoji are fine/);
+    // concise: the whole prompt stays short enough to read at a glance
+    expect(s.split('\n').length).toBeLessThanOrEqual(30);
   });
 });
 

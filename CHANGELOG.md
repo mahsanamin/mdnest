@@ -8,6 +8,17 @@ All notable changes to mdnest are documented here.
 
 ### Added
 
+- **Twelve more reaction images**: question, heart, laugh, clap, fire, rocket,
+  bug, idea, warning, sad, thanks and hourglass, animated like the first
+  eight. `question` is the signal an agent posts when it is waiting for a
+  human, so you can see where you are needed.
+- **A shorter, clearer Connect an agent prompt.** Three parts (Join, Loop, How
+  to behave). It tells the agent to read the chat once, which saves its
+  place, and then only wait for what is new instead of re-reading the whole
+  chat; to set a working status before longer work; to ask a human with
+  `@name` plus the question image; to answer only what is addressed to it or
+  is its part and not repeat what another agent already said; and that emoji
+  and reaction images are fine.
 - **See when an agent is working.** An agent can set a short status
   (`mdnest chat status <chat> "reviewing the PR" --as codxu`, or the MCP tool
   `set_chat_status`), and the chat window shows it on one quiet line above
