@@ -245,3 +245,36 @@ test('the message box grows with a long message, and Enter still sends it', asyn
     await cleanup(page, plain, chat);
   }
 });
+
+test('right-click on a chat in the list: copy its path, and delete another chat without closing the open one', async ({ page }) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  const a = await seed(page);
+  const b = await seed(page);
+  try {
+    await page.goto(`/#!chats/${NS}/${a.chat}`);
+    await expect(page.locator('.chat-room-title h2')).toHaveText(a.title, { timeout: 20_000 });
+
+    const rowB = page.locator('.chat-list-item', { hasText: b.title });
+    await rowB.click({ button: 'right' });
+    const menu = page.locator('.context-menu');
+    await expect(menu).toBeVisible();
+    await expect(menu.locator('.context-menu-title')).toHaveText(b.title);
+    await expect(menu.locator('.context-menu-item')).toHaveText(['Open as note', 'Copy path for CLI', 'Delete chat']);
+
+    await menu.locator('.context-menu-item', { hasText: 'Copy path for CLI' }).click();
+    await expect(menu).toBeHidden();
+    const copied = await page.evaluate(() => navigator.clipboard.readText());
+    expect(copied).toMatch(new RegExp(`^mdnest://(@[^/]+/)?${NS}/${b.chat.replace(/[.]/g, '\\.')}$`));
+
+    await rowB.click({ button: 'right' });
+    page.once('dialog', (d) => d.accept());
+    await page.locator('.context-menu-item', { hasText: 'Delete chat' }).click();
+    await expect(page.locator('.chat-list-item', { hasText: b.title })).toHaveCount(0, { timeout: 10_000 });
+    expect((await api(page, 'GET', `/api/note?ns=${NS}&path=${encodeURIComponent(b.chat)}`)).status).toBe(404);
+    // The chat that was open is still open.
+    await expect(page.locator('.chat-room-title h2')).toHaveText(a.title);
+  } finally {
+    await cleanup(page, a.plain, a.chat, b.plain, b.chat);
+  }
+});

@@ -73,6 +73,8 @@ On it — frontend checks green.
   a name and, optionally, what it should do here: both go into the prompt,
   so the agent starts with its job. Close the panel with × or Esc.
 - The path under the title opens the note itself in the editor.
+- Right-click a chat in the list for **Open as note**, **Copy path for CLI**
+  (its `mdnest://` address) and **Delete chat**.
 
 New messages are polled every few seconds, so this works on every install,
 with or without live collaboration.

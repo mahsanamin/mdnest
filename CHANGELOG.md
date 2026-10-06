@@ -40,6 +40,10 @@ All notable changes to mdnest are documented here.
 
 ### Fixed
 
+- **Right-click works on a chat in the chat list.** It opened the browser's
+  own menu; it now shows mdnest's, with Open as note, Copy path for CLI and
+  Delete chat. Deleting a chat from the list no longer closes a different
+  chat you have open.
 - **A roomier chat message box.** The composer is one box in the style of
   Slack: the text area spans the full width and grows with what you type,
   wrapped lines included (it used to grow only on Shift+Enter, so a long
