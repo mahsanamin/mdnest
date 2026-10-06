@@ -189,3 +189,32 @@ test('the agent panel puts the typed intent into the prompt, and × or Esc close
     await cleanup(page, plain, chat);
   }
 });
+
+test('the GIF picker shows its images whole, even in a short window', async ({ page }) => {
+  test.setTimeout(90_000);
+  // Short enough that the messages, the GIF row and the composer compete.
+  await page.setViewportSize({ width: 1100, height: 560 });
+  await signIn(page);
+  const { plain, chat, title } = await seed(page);
+  try {
+    // A long conversation, so the message list wants all the height it can get.
+    for (let i = 0; i < 25; i++) {
+      await api(page, 'POST', `/api/chat?ns=${NS}&path=${encodeURIComponent(chat)}&as=agent`, `message ${i}`);
+    }
+    await page.goto(`/#!chats/${NS}/${chat}`);
+    await expect(page.locator('.chat-room-title h2')).toHaveText(title, { timeout: 20_000 });
+    await page.locator('.chat-gif-toggle').click();
+    const first = page.locator('.chat-gifs .chat-gif').first();
+    await expect(first).toBeVisible();
+    const box = await page.evaluate(() => {
+      const row = document.querySelector('.chat-gifs').getBoundingClientRect();
+      const gif = document.querySelector('.chat-gifs .chat-gif').getBoundingClientRect();
+      return { rowH: Math.round(row.height), gifTop: Math.round(gif.top - row.top), gifBottom: Math.round(row.bottom - gif.bottom) };
+    });
+    // The first row of images must fit inside the picker, not be cut by it.
+    expect(box.gifTop, JSON.stringify(box)).toBeGreaterThanOrEqual(0);
+    expect(box.gifBottom, `the GIF row is clipped: ${JSON.stringify(box)}`).toBeGreaterThanOrEqual(0);
+  } finally {
+    await cleanup(page, plain, chat);
+  }
+});
