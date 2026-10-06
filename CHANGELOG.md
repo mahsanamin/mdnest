@@ -61,6 +61,12 @@ All notable changes to mdnest are documented here.
 
 ### Fixed
 
+- **Grammar-checking extensions stay off mdnest's editors.** With Grammarly
+  (or a tool that copies its convention) attached to the Live editor,
+  selecting a word made the text rewrap and added empty scroll space under the
+  note until the next click. The Live editor, the Basic editor, the chat box,
+  comments, Mermaid source, stickies and task notes now carry the attributes
+  those extensions honour. The browser's own spell-check is unaffected.
 - **Right-click works on a chat in the chat list.** It opened the browser's
   own menu; it now shows mdnest's, with Open as note, Copy path for CLI and
   Delete chat. Deleting a chat from the list no longer closes a different

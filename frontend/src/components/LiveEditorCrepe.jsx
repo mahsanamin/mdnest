@@ -57,6 +57,7 @@ import {
 
 import '@milkdown/crepe/theme/common/style.css';
 import '@milkdown/crepe/theme/frame-dark.css';
+import { markNoGrammarAssist } from '../noGrammarAssist.js';
 
 // Detect plain text that looks like mermaid diagram source. Strict on
 // purpose:
@@ -447,6 +448,8 @@ export default function LiveEditorCrepe({
 
     crepe.create().then(() => {
       crepeRef.current = crepe;
+      // Keep grammar-checking extensions off the editor (noGrammarAssist.js).
+      try { crepe.editor.action((ctx) => markNoGrammarAssist(ctx.get(editorViewCtx).dom)); } catch { /* not ready */ }
       // The initial document is in; anything after this is a user edit.
       suppressSaveRef.current = false;
       setInnerEditor(crepe.editor);
