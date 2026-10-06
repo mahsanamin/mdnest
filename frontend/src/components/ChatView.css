@@ -342,6 +342,14 @@
 }
 .chat-working-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-working-dots { display: inline-flex; gap: 3px; flex: 0 0 auto; }
+/* Someone is here and waiting: a still dot, so listening never looks busy. */
+.chat-listening-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+  flex: 0 0 auto;
+}
 .chat-working-dots i {
   width: 4px;
   height: 4px;

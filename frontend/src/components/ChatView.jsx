@@ -529,7 +529,12 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
         const line = workingLine(working, account, effectiveAs);
         return (
           <div className="chat-working" role="status" aria-live="polite" title={line?.title || ''} data-testid="chat-working">
-            {line && <><span className="chat-working-dots" aria-hidden="true"><i /><i /><i /></span><span className="chat-working-text">{line.text}</span></>}
+            {line && <>
+              {line.busy
+                ? <span className="chat-working-dots" aria-hidden="true"><i /><i /><i /></span>
+                : <span className="chat-listening-dot" aria-hidden="true" />}
+              <span className="chat-working-text">{line.text}</span>
+            </>}
           </div>
         );
       })()}

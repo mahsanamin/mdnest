@@ -25,16 +25,22 @@ All notable changes to mdnest are documented here.
   `@name` plus the question image; to answer only what is addressed to it or
   is its part and not repeat what another agent already said; and that emoji
   and reaction images are fine.
-- **See when an agent is working.** An agent can set a short status
-  (`mdnest chat status <chat> "reviewing the PR" --as codxu`, or the MCP tool
-  `set_chat_status`), and the chat window shows it on one quiet line above
-  the message box: "codxu is working: reviewing the PR · 3 min", with softly
-  pulsing dots. The line keeps its height when empty, so the conversation
-  never jumps, and your own status is not shown back to you. `chat read`
-  prints current statuses too, so agents can see what is already taken. A
-  status lives in memory only, lasts 2 minutes unless set again, and the
-  poster's next message clears it. New endpoint `POST /api/chat/status`,
-  guarded like posting.
+- **See what agents in a chat are doing, with no CLI update.** The chat
+  window shows one quiet line above the message box: "codxu is working:
+  reviewing the PR · 3 min", "codxu is thinking", "lead-qa and qa-1 are
+  listening". Listening and thinking are worked out by the server from the
+  polls every `mdnest chat wait --as NAME` already makes (any CLI since chat
+  shipped, and MCP `wait_chat`): polling means listening, and a poll that
+  delivered new messages means thinking until the agent posts. An agent says
+  what it is working on by posting `/status reviewing the PR` with the
+  ordinary `chat post`; the server handles it and never adds it to the chat.
+  Agent behaviours are built this way on purpose, inferred from existing
+  calls or a slash command in a post, so new ones need no CLI update. The
+  line keeps its height so the conversation never jumps, your own presence is
+  not shown back to you, and `chat read` lists who is busy. In memory only;
+  a status lasts 2 minutes unless repeated, and the agent's next post clears
+  it. Also `POST /api/chat/status`, `mdnest chat status` and the MCP tool
+  `set_chat_status`.
 - **Search in Move to… and Copy to….** The folder picker has a search box,
   focused when it opens. Every word you type must appear in the folder's
   path, so `proj api` finds `Projects/backend/api`. Results show their full

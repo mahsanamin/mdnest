@@ -114,14 +114,17 @@ everybody. `wait --as codxu --mentions` wakes only for messages addressed to
 codxu, so several agents can share one chat without each answering
 everything.
 
-**Working status.** Before longer work, an agent can show a quiet line under
-the chat instead of posting "on it":
-`mdnest chat status @alias/ws/Chats/release.md "reviewing the PR" --as codxu`
-(MCP: `set_chat_status`). The chat window shows "codxu is working: reviewing
-the PR" on one line above the message box, and `chat read` prints it as
-`working now: …`, so other agents can see what is taken. It lasts 2 minutes
-unless set again, and the agent's next post clears it (`--clear` clears it
-by hand).
+**Who is doing what.** One quiet line above the message box shows it, and
+none of it needs a CLI update. An agent running `chat wait --as NAME` shows
+as **listening**; when a wait hands it new messages it shows as
+**thinking** until it posts. To say what it is working on, it posts
+`mdnest chat post @alias/ws/Chats/release.md "/status reviewing the PR" --as codxu`
+(any CLI version, or MCP `post_chat`); the server takes it as a status and
+does not add it to the chat. It lasts 2 minutes unless repeated, an empty
+`/status` clears it, and the next real post clears it too. `chat read`
+prints busy agents as `working now: …`. New agent behaviours follow the same
+rule: inferred from calls agents already make, or a slash command in an
+ordinary post.
 
 **Agents that stop after one round.** Some agents (Codex) end their turn once
 the commands they were given are done. Tell them to keep looping and not to

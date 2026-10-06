@@ -185,7 +185,9 @@ describe('chat images', () => {
   });
   it('the prompt covers the working status, the human question, and several agents', () => {
     const s = agentInstructions('mini', 'notes', 'Chats/team.md', 'codxu');
-    expect(s).toContain('mdnest chat status @mini/notes/Chats/team.md "what you are doing" --as codxu');
+    // A /status post works with every CLI version (the server handles it).
+    expect(s).toContain('mdnest chat post @mini/notes/Chats/team.md "/status what you are doing" --as codxu');
+    expect(s).not.toContain('mdnest chat status');
     expect(s).toContain('![waiting](gif:question)');
     expect(s).toMatch(/Do not repeat what someone already said/);
     expect(s).toMatch(/Emoji are fine/);
@@ -226,26 +228,35 @@ describe('thumbnails', () => {
 
 describe('working line', () => {
   const now = Date.parse('2026-10-06T10:05:30Z');
-  const w = (author, text, since, via) => ({ author, text, since, ...(via ? { via } : {}) });
-  it('names who is working on what, with minutes once it runs long', () => {
-    const line = workingLine([w('codxu', 'reviewing the PR', '2026-10-06T10:02:00Z')], 'ahsan', 'ahsan', now);
+  const w = (author, kind, since, extra = {}) => ({ author, kind, since, ...extra });
+  it('a /status reads as working on something, with minutes once it runs long', () => {
+    const line = workingLine([w('codxu', 'working', '2026-10-06T10:02:00Z', { text: 'reviewing the PR' })], 'ahsan', 'ahsan', now);
     expect(line.text).toBe('codxu is working: reviewing the PR · 3 min');
+    expect(line.busy).toBe(true);
   });
-  it('no minutes in the first minute', () => {
-    expect(workingLine([w('codxu', 'thinking', '2026-10-06T10:05:00Z')], 'ahsan', 'ahsan', now).text).toBe('codxu is working: thinking');
+  it('an agent that just got new messages is thinking', () => {
+    expect(workingLine([w('codxu', 'thinking', '2026-10-06T10:05:00Z')], 'ahsan', 'ahsan', now).text).toBe('codxu is thinking');
   });
-  it('leaves out your own status and is null when nobody else works', () => {
-    expect(workingLine([w('ahsan', 'typing', '2026-10-06T10:05:00Z')], 'ahsan', 'ahsan', now)).toBeNull();
+  it('waiting agents are named together as listening, after the busy ones', () => {
+    const line = workingLine([
+      w('qa-1', 'listening', '2026-10-06T10:05:20Z'),
+      w('codxu', 'thinking', '2026-10-06T10:05:00Z'),
+      w('lead-qa', 'listening', '2026-10-06T10:05:20Z'),
+    ], 'ahsan', 'ahsan', now);
+    expect(line.text).toBe('codxu is thinking  ·  qa-1 and lead-qa are listening');
+    expect(line.title.split('\n')).toEqual(['codxu is thinking', 'qa-1 is listening', 'lead-qa is listening']);
+  });
+  it('one listener alone; three listeners get a comma list', () => {
+    expect(workingLine([w('codxu', 'listening', '2026-10-06T10:05:20Z')], 'ahsan', 'ahsan', now).text).toBe('codxu is listening');
+    expect(workingLine(['a', 'b', 'c'].map((n) => w(n, 'listening', '2026-10-06T10:05:20Z')), 'me', 'me', now).text).toBe('a, b and c are listening');
+  });
+  it('leaves out your own presence and is null when nobody else is here', () => {
+    expect(workingLine([w('ahsan', 'listening', '2026-10-06T10:05:00Z')], 'ahsan', 'ahsan', now)).toBeNull();
     expect(workingLine([], 'ahsan', 'ahsan', now)).toBeNull();
     expect(workingLine(undefined, 'ahsan', 'ahsan', now)).toBeNull();
   });
   it('an agent on my token under its own name is someone else, not me', () => {
-    const line = workingLine([w('claude-a', 'running tests', '2026-10-06T10:05:00Z', 'ahsan')], 'ahsan', 'ahsan', now);
-    expect(line.text).toContain('claude-a is working');
-  });
-  it('several posters share the line; the tooltip lists each on its own line', () => {
-    const line = workingLine([w('a', 'x', '2026-10-06T10:05:00Z'), w('b', 'y', '2026-10-06T10:05:00Z')], 'me', 'me', now);
-    expect(line.count).toBe(2);
-    expect(line.title.split('\n')).toEqual(['a is working: x', 'b is working: y']);
+    const line = workingLine([w('claude-a', 'thinking', '2026-10-06T10:05:00Z', { via: 'ahsan' })], 'ahsan', 'ahsan', now);
+    expect(line.text).toContain('claude-a is thinking');
   });
 });
