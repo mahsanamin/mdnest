@@ -73,3 +73,13 @@ export function contextMenuGroups({
 
   return [create, organize, share, info, admin, danger].filter((g) => g.length > 0);
 }
+
+// The chat list's right-click menu (one chat). Same component and look as the
+// tree's; open is the plain click, so the menu holds what a click cannot do.
+export function chatMenuGroups({ canDelete = false } = {}) {
+  return [
+    [{ label: 'Open as note', action: 'open-note', icon: 'note' }],
+    [{ label: 'Copy path for CLI', action: 'copy-path', icon: 'link', hint: 'Copies an mdnest:// address that the mdnest CLI and agents accept' }],
+    canDelete ? [{ label: 'Delete chat', action: 'delete-chat', icon: 'trash', danger: true }] : [],
+  ].filter((g) => g.length > 0);
+}

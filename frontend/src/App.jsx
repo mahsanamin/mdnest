@@ -44,6 +44,7 @@ import AttributionModal from './components/AttributionModal.jsx';
 import MoveToModal from './components/MoveToModal.jsx';
 import PasteModal from './components/PasteModal.jsx';
 import { copyPlainText } from './mermaid-text.js';
+import { mdnestUri } from './mdnestUri.js';
 import {
   baseName, buildClipboardPayload, describeRefusal, filenameFromDisposition, formatBytes,
   localLinks, CLIPBOARD_MAX_BYTES,
@@ -1353,7 +1354,9 @@ function App() {
     if (ns === selectedNs && currentPath === path) { setCurrentPath(null); setContent(null); setSavedContent(''); }
     if (getLastPath(ns) === path) setLastPath(ns, null);
     if (ns === selectedNs) await refreshTree(undefined, { broadcast: true });
-    setOpenChat(null);
+    // Close the room only if it is the chat that went: deleting another one
+    // from the list's right-click menu must leave the open chat alone.
+    setOpenChat((cur) => (cur && cur.ns === ns && cur.path === path ? null : cur));
     return true;
   }, [selectedNs, currentPath, getLastPath, setLastPath, refreshTree]);
 
@@ -1805,23 +1808,7 @@ function App() {
         break;
       }
       case 'copy-path': {
-        if (target && selectedNs) {
-          const alias = appConfig?.serverAlias ? `@${appConfig.serverAlias}/` : '';
-          // Percent-encode each path segment so spaces and other special
-          // characters don't make the copied URI ambiguous (a raw space in
-          // "19 Jun 2026.md" looked like three tokens to an LLM/shell and broke
-          // the path). Slashes and the scheme/alias stay readable.
-          const encPath = String(target.path).split('/').map(encodeURIComponent).join('/');
-          const fullPath = `mdnest://${alias}${encodeURIComponent(selectedNs)}/${encPath}`;
-          const textarea = document.createElement('textarea');
-          textarea.value = fullPath;
-          textarea.style.position = 'fixed';
-          textarea.style.opacity = '0';
-          document.body.appendChild(textarea);
-          textarea.select();
-          document.execCommand('copy');
-          document.body.removeChild(textarea);
-        }
+        if (target && selectedNs) copyPlainText(mdnestUri(appConfig?.serverAlias, selectedNs, target.path));
         break;
       }
       case 'manage-access': {

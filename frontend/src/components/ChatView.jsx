@@ -10,6 +10,9 @@ import {
   avatarFor, reactions, gifMarkdown, expandGifRefs, initialOf,
 } from '../chat.js';
 import { copyPlainText } from '../mermaid-text.js';
+import { mdnestUri } from '../mdnestUri.js';
+import { chatMenuGroups } from '../contextMenuItems.js';
+import ContextMenu from './ContextMenu.jsx';
 import './ChatView.css';
 
 // The chats view: every chat channel on the left, the open conversation on
@@ -116,7 +119,7 @@ function NewChatForm({ ns, onCreated, onCancel }) {
   );
 }
 
-function ChatList({ chats, loading, error, openChat, onSelect, filter, onFilter }) {
+function ChatList({ chats, loading, error, openChat, onSelect, filter, onFilter, onMenu }) {
   const f = filter.trim().toLowerCase();
   const shown = f
     ? chats.filter((c) => `${c.title} ${c.path}`.toLowerCase().includes(f))
@@ -133,7 +136,11 @@ function ChatList({ chats, loading, error, openChat, onSelect, filter, onFilter 
           const unread = active ? 0 : Math.max(0, c.count - readSeen(c.ns, c.path));
           return (
             <li key={`${c.ns}/${c.path}`}>
-              <button className={`chat-list-item${active ? ' active' : ''}`} onClick={() => onSelect({ ns: c.ns, path: c.path })}>
+              <button
+                className={`chat-list-item${active ? ' active' : ''}`}
+                onClick={() => onSelect({ ns: c.ns, path: c.path })}
+                onContextMenu={onMenu ? (e) => { e.preventDefault(); onMenu(e.clientX, e.clientY, c); } : undefined}
+              >
                 <span className="chat-list-top">
                   <span className="chat-list-title">{c.title}</span>
                   {c.lastTime && <span className="chat-list-time">{formatChatTime(c.lastTime)}</span>}
@@ -545,6 +552,7 @@ function ChatView({ ns, namespaces, onSelectNs, account, serverAlias, isMobile, 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
+  const [menu, setMenu] = useState(null); // {x, y, chat} while the right-click menu is open
   const [filter, setFilter] = useState('');
   const visible = useVisible();
 
@@ -611,7 +619,28 @@ function ChatView({ ns, namespaces, onSelectNs, account, serverAlias, isMobile, 
               onCreated={(c) => { setCreating(false); refresh(); onSelectChat(c); }}
             />
           )}
-          <ChatList chats={chats} loading={loading} error={error} openChat={openChat} onSelect={onSelectChat} filter={filter} onFilter={setFilter} />
+          <ChatList
+            chats={chats} loading={loading} error={error} openChat={openChat} onSelect={onSelectChat} filter={filter} onFilter={setFilter}
+            onMenu={(x, y, c) => setMenu({ x, y, chat: c })}
+          />
+          {/* Right-click on a chat: the same menu component as the file tree. */}
+          <ContextMenu
+            visible={!!menu}
+            x={menu?.x || 0}
+            y={menu?.y || 0}
+            target={menu?.chat || null}
+            title={menu?.chat?.title}
+            groups={chatMenuGroups({ canDelete: !!onDeleteChat })}
+            onClose={() => setMenu(null)}
+            onAction={async (action, c) => {
+              if (!c) return;
+              if (action === 'open-note') onOpenNote(c.ns, c.path);
+              if (action === 'copy-path') copyPlainText(mdnestUri(serverAlias, c.ns, c.path));
+              if (action === 'delete-chat' && onDeleteChat) {
+                try { if (await onDeleteChat(c.ns, c.path, c.title)) refresh(); } catch (e) { alert('Failed to delete the chat: ' + e.message); }
+              }
+            }}
+          />
         </aside>
       )}
       {showRoom ? (
