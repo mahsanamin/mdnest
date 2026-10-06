@@ -40,6 +40,12 @@ All notable changes to mdnest are documented here.
 
 ### Fixed
 
+- **Mermaid labels keep their colour when you zoom or open full screen.** A
+  label on a dark node (white text in light mode) turned dark-on-dark after a
+  zoom click, and always in the full-screen viewer. The colours are now
+  re-applied after every redraw, and the viewer's sanitized copy, whose label
+  wrappers are stripped, is coloured too. Edge labels keep the normal ink.
+  Pinned in `tests/browser/mermaid-zoom-color.spec.js`.
 - **`mdnest chat wait` no longer stops listening after one failed poll.** A
   dropped connection, an empty reply, a timeout or a proxy's 502/503/504
   (what a server restart looks like from the client) used to exit 1 at once,
