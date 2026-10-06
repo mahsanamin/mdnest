@@ -8,12 +8,12 @@
 //
 //   create    New note / folder / drawing / chat, Paste here   (folder, root)
 //   organize  Rename, Move to…, Copy to…
-//   share     Download, Copy for another mdnest, Copy path
+//   share     Download, Copy for another mdnest, Copy path for CLI
 //   info      History, Authors                                  (files)
 //   admin     Manage access
 //   danger    Delete
 //
-// Each group is a list of { label, action, icon, danger? }; the component
+// Each group is a list of { label, action, icon, hint?, danger? }; the component
 // draws a divider between non-empty groups. Labels are what the browser specs
 // click, so change one only together with tests/browser.
 
@@ -50,7 +50,9 @@ export function contextMenuGroups({
     if (isFile && (path.endsWith('.md') || path.endsWith('.txt'))) {
       share.push({ label: 'Copy for another mdnest', action: 'copy-clipboard', icon: 'clipboard' });
     }
-    share.push({ label: 'Copy path', action: 'copy-path', icon: 'link' });
+    // It copies an mdnest:// address for the CLI and agents, not a file-system
+    // path; the plain "Copy path" read as the latter.
+    share.push({ label: 'Copy path for CLI', action: 'copy-path', icon: 'link', hint: 'Copies an mdnest:// address that the mdnest CLI and agents accept' });
   }
 
   // History works for any readable file; the modal explains when git-sync is
