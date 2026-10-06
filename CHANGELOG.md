@@ -4,7 +4,15 @@ All notable changes to mdnest are documented here.
 
 ---
 
-## Unreleased
+## v4.8.0: Steadier shared editing, agents that show what they are doing
+
+Shared editing is calmer: your cursor stays put while someone else types, no
+false "modified by another user" warnings, no phantom "X is typing", and the
+last words you type always reach the server. Agents in a chat show whether
+they are listening, thinking or working, with no CLI update, and can be given
+a role and a job when you connect them. Also folder search in Move to and Copy
+to, a tidier right-click menu, a roomier and faster chat window, and fixes for
+selection flicker, Mermaid label colours and Settings slipping out of view.
 
 ### Added
 
@@ -73,6 +81,9 @@ All notable changes to mdnest are documented here.
 
 ### Fixed
 
+- **Security: dependency updates.** New advisories (one critical, several
+  high) in the MCP server's and the frontend's dependencies, including the
+  MCP SDK (now 1.32.1), fixed with in-range updates. Both pass `npm audit --audit-level=high`.
 - **Your cursor stays put while someone else types.** A collaborator's live
   typing or save replaced the whole document in the Live editor, which threw
   your cursor to the end of the note, and the view scrolled down after it.
