@@ -40,6 +40,9 @@ All notable changes to mdnest are documented here.
 
 ### Fixed
 
+- **The chat's GIF picker shows its images whole.** In a short window the
+  picker was squashed to a thin strip that cut every image in half; the
+  message list now gives up the room instead. Pinned in `chat.spec.js`.
 - **Mermaid labels keep their colour when you zoom or open full screen.** A
   label on a dark node (white text in light mode) turned dark-on-dark after a
   zoom click, and always in the full-screen viewer. The colours are now
