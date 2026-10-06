@@ -73,6 +73,18 @@ All notable changes to mdnest are documented here.
 
 ### Fixed
 
+- **"X is typing" only when X is typing, and no saves from an idle editor.**
+  When a collaborator's live typing or save reached a note open in the Live
+  editor, the editor reported the new text back as if its own user had typed
+  it (its change reports are debounced and arrived after the "not the user"
+  flag was cleared). So the idle side broadcast live text, and the other
+  person saw "X is typing" while X sat still, and it autosaved with an old
+  version, which the server rejected: another source of the false conflict
+  notice. The editor now drops the report of a document it was handed, text
+  equal to what is already saved is never broadcast or saved, and a rejected
+  save that only lagged behind text it had already seen is saved again
+  quietly. Pinned in `tests/browser/live-reload-echo.spec.js`; checked with
+  two editors on a shared note.
 - **No more false "modified by another user" warnings, and no lost last
   words.** Two autosaves could overlap on a slow link: the second left before
   the first returned, with the same version, and the server rejected it. On a

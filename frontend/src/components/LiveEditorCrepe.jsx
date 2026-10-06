@@ -257,6 +257,14 @@ export default function LiveEditorCrepe({
   // Last markdown we serialized OUT of the editor. Used to skip the
   // content-prop sync effect for our own saves (avoid replaceAll loops).
   const lastLocalContentRef = useRef(content);
+  // The serialized form of the last document we injected (a remote update,
+  // a restore). Milkdown's listener reports changes DEBOUNCED, so the report
+  // for an injection arrives after suppressSaveRef is already disarmed and
+  // looked like the user typing: the idle side of a shared note broadcast
+  // live "content" (others saw it as typing) and autosaved with a stale
+  // etag (a 409, the false conflict banner). A report that equals exactly
+  // this text is that echo and is dropped; anything the user types differs.
+  const injectedEchoRef = useRef(null);
   // Floating "💬 Comment" button shown when the user selects text inside
   // the editor. Position is in pixels relative to the wrapper.
   const [selectionPopup, setSelectionPopup] = useState(null);
@@ -441,6 +449,14 @@ export default function LiveEditorCrepe({
         // freshly opened note was silently dropped.
         if (suppressSaveRef.current) return;
         if (markdown === prev) return;
+        if ((injectedEchoRef.current !== null && restored === injectedEchoRef.current)
+          || restored === lastPropContentRef.current) {
+          // The injected document coming back (as the editor serialized it,
+          // or exactly as the parent handed it over): not a user edit.
+          injectedEchoRef.current = null;
+          return;
+        }
+        injectedEchoRef.current = null;
         const cb = onChangeRef.current;
         if (cb) cb(restored);
       });
@@ -493,6 +509,7 @@ export default function LiveEditorCrepe({
     try {
       crepeRef.current.editor.action(replaceAll(content));
       lastLocalContentRef.current = content;
+      try { injectedEchoRef.current = restoreWikilinks(crepeRef.current.getMarkdown()); } catch { injectedEchoRef.current = null; }
     } catch { /* editor not ready or replaceAll failed */ } finally {
       suppressSaveRef.current = false;
     }
