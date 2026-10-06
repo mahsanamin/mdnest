@@ -73,6 +73,16 @@ All notable changes to mdnest are documented here.
 
 ### Fixed
 
+- **No more false "modified by another user" warnings, and no lost last
+  words.** Two autosaves could overlap on a slow link: the second left before
+  the first returned, with the same version, and the server rejected it. On a
+  remote server every second save failed, the warning appeared with nobody
+  else editing, and when the last save was the rejected one the final words
+  never reached the server. Saves now run one at a time, and a rejected save
+  first checks whether the server already holds the same text before warning.
+- **The conflict and restore notices float in the corner.** They used to be
+  a row above the editor that pushed the whole document down when they
+  appeared. Pinned in `tests/browser/autosave-conflict.spec.js`.
 - **Selecting text with comments on no longer makes the note flicker.** On a
   server with live collaboration, selecting shows a Comment button. It was
   positioned by adding the editor's scroll offset to a box that does not

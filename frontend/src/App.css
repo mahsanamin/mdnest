@@ -4525,6 +4525,27 @@ pre:hover .code-copy-btn {
 .release-notes-link:hover { opacity: 0.9; }
 
 /* ===== Conflict banner ===== */
+/* The conflict and restore notices float over the editor instead of taking a
+   row above it. As a row, each one pushed the whole document (and the caret)
+   down when it appeared and back up when it went, and it appeared far more
+   often than real conflicts did. A card in the corner says the same thing
+   without moving anything. */
+.floating-notice {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 900;
+  max-width: min(440px, calc(100vw - 32px));
+  flex-wrap: wrap;
+  border: 1px solid var(--warning-wash-3);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
+}
+.restore-banner.floating-notice { border-color: var(--accent-wash-3); }
+@media (max-width: 768px) {
+  .floating-notice { left: 12px; right: 12px; bottom: 12px; max-width: none; }
+}
+
 .conflict-banner {
   display: flex;
   align-items: center;
