@@ -193,6 +193,15 @@ function App() {
   // The queued autosave itself, so navigating away can RUN it instead of
   // dropping it. Cleared as soon as it executes.
   const pendingSaveRef = useRef(null);
+  // Saves run one at a time. Two overlapping PUTs carried the same If-Match
+  // etag, so on a slow link every second save came back 409: a "modified by
+  // another user" banner with nobody else there, and when the last save was
+  // the rejected one the final words never reached the server. A save now
+  // waits for the one in flight (and so sends the etag it returned); a queued
+  // save that a newer one has superseded is skipped, since the newer one
+  // carries all of the text.
+  const saveChainRef = useRef(Promise.resolve());
+  const saveSeqRef = useRef(0);
   // An editor that debounces internally (the drawing canvas) registers a
   // callback here so its unsaved scene can be drained before we navigate.
   const editorFlushRef = useRef(null);
@@ -1467,8 +1476,8 @@ function App() {
     // navigates away before the debounce elapses. It closes over the path,
     // namespace and content of the edit that scheduled it, so running it late
     // still writes to the right file.
-    const runSave = async () => {
-      pendingSaveRef.current = null;
+    const doSave = async (seq) => {
+      if (seq !== saveSeqRef.current) return; // a newer save will write all of this
       if (!currentPath || !selectedNs) return;
       // Safety against destructive autosave: never write empty content
       // when we know the file had content when we loaded it. This is the
@@ -1488,7 +1497,18 @@ function App() {
         if (result.etag) { etagRef.current = result.etag; echoGate.rememberOwnEtag(result.etag); }
       } catch (e) {
         if (e.status === 409) {
-          setConflictBanner({ username: 'another user', etag: e.etag });
+          // Confirm it is a real conflict before saying so: if the server
+          // already holds exactly this text, adopt its etag and move on.
+          let same = false;
+          try {
+            const latest = await getNote(selectedNs, currentPath);
+            if (latest.text === newContent) {
+              same = true;
+              setSavedContent(newContent);
+              etagRef.current = latest.etag;
+            }
+          } catch { /* fall through to the banner */ }
+          if (!same) setConflictBanner({ username: 'another user', etag: e.etag });
         } else if (e.status === 404) {
           // Moved or deleted elsewhere. The PUT does not re-create the note
           // at its old path; say so, and keep the text on screen to copy.
@@ -1505,6 +1525,13 @@ function App() {
         // is closed and endSave returns nothing.)
         echoGate.endSave(saveToken).forEach(handleFileChanged);
       }
+    };
+    const runSave = () => {
+      pendingSaveRef.current = null;
+      const seq = ++saveSeqRef.current;
+      const job = saveChainRef.current.then(() => doSave(seq));
+      saveChainRef.current = job.catch(() => {});
+      return job;
     };
     pendingSaveRef.current = runSave;
     saveTimerRef.current = setTimeout(runSave, 800);
@@ -2215,7 +2242,7 @@ function App() {
           </div>
         )}
         {conflictBanner && (
-          <div className="conflict-banner">
+          <div className="conflict-banner floating-notice" role="alert">
             This file was modified by {conflictBanner.username}. Your changes may conflict.
             <button onClick={handleReloadNote}>Reload</button>
             <button onClick={() => setConflictBanner(null)}>Dismiss</button>
@@ -2229,7 +2256,7 @@ function App() {
           </div>
         )}
         {restoreBanner && (
-          <div className="restore-banner">
+          <div className="restore-banner floating-notice" role="status">
             {restoreBanner.username} restored this file to an earlier version
             {restoreBanner.ref ? ` (${restoreBanner.ref.slice(0, 7)})` : ''}.
             {restoreBanner.etag ? ' Your unsaved changes are kept until you reload.' : ' Content has been updated.'}
