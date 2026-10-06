@@ -40,6 +40,11 @@ All notable changes to mdnest are documented here.
 
 ### Fixed
 
+- **A roomier chat message box.** The composer is one box in the style of
+  Slack: the text area spans the full width and grows with what you type,
+  wrapped lines included (it used to grow only on Shift+Enter, so a long
+  message scrolled out of sight), and the posting name, GIF and Send sit in
+  a bar inside it. Message text is a little larger with more line spacing.
 - **The chat's GIF picker shows its images whole.** In a short window the
   picker was squashed to a thin strip that cut every image in half; the
   message list now gives up the room instead. Pinned in `chat.spec.js`.

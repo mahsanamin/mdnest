@@ -281,9 +281,9 @@
   background: var(--surface-2);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
-  padding: 6px 12px;
-  font-size: 0.92rem;
-  line-height: 1.45;
+  padding: 7px 12px;
+  font-size: 0.95rem;
+  line-height: 1.5;
   overflow-wrap: anywhere;
   max-width: 100%;
 }
@@ -306,13 +306,39 @@
 .chat-bubble code { font-size: 0.85em; }
 
 .chat-composer {
-  display: flex;
-  align-items: flex-end;
-  gap: var(--space-2);
-  padding: 10px 14px;
-  border-top: 1px solid var(--border);
+  padding: 8px 14px 12px;
   background: var(--surface);
+  border-top: 1px solid var(--border);
   flex: 0 0 auto;
+}
+.chat-compose-box {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+}
+.chat-compose-box:focus-within { border-color: var(--accent); }
+.chat-draft {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  padding: 10px 12px 4px;
+  resize: none;
+  min-height: 3.4em;
+}
+.chat-draft:focus { outline: none; }
+.chat-compose-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 4px 8px 6px;
 }
 .chat-as {
   display: flex;
@@ -322,8 +348,18 @@
   color: var(--text-muted);
   flex: 0 0 auto;
 }
-.chat-as .chat-input { width: 110px; font-size: 0.82rem; }
-.chat-draft { flex: 1; resize: none; line-height: 1.4; }
+.chat-as .chat-input { width: 110px; font-size: 0.8rem; padding: 3px 6px; }
+.chat-compose-hint {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+  font-size: 0.72rem;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-send { flex: 0 0 auto; }
 
 .chat-empty {
   padding: 18px;
@@ -341,9 +377,8 @@
   .chat-list { width: 100%; flex: 1 1 auto; border-right: none; }
   .chat-msg { max-width: 92%; }
   .chat-messages { padding: 10px; }
-  .chat-composer { flex-wrap: wrap; }
-  .chat-as { width: 100%; }
-  .chat-as .chat-input { flex: 1; }
+  .chat-compose-hint { visibility: hidden; }
+  .chat-as .chat-input { width: 90px; }
 }
 
 /* @mentions */
