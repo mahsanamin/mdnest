@@ -99,6 +99,9 @@ func registerContentRoutes(mux *http.ServeMux, c contentRoutes) {
 			// Read a chat = read the note; post or convert = write it.
 			mux.Handle("/api/chat", auth(perms.ReadWriteRouter(invalidateSearch(http.HandlerFunc(c.chat.Handle)))))
 			mux.Handle("/api/chat/convert", auth(perms.RequireWrite(invalidateSearch(http.HandlerFunc(c.chat.HandleConvert)))))
+			// A status is presence, not content: same right as posting, and
+			// nothing is written, so no search invalidation.
+			mux.Handle("/api/chat/status", auth(perms.RequireWrite(http.HandlerFunc(c.chat.HandleStatus))))
 			// Cross-namespace: self-filters, like /api/tasks/all.
 			mux.Handle("/api/chats", auth(http.HandlerFunc(c.chat.HandleList)))
 			// The chat image library: any access to the namespace may list it,
@@ -132,6 +135,7 @@ func registerContentRoutes(mux *http.ServeMux, c contentRoutes) {
 		if c.chat != nil {
 			mux.Handle("/api/chat", auth(invalidateSearch(http.HandlerFunc(c.chat.Handle))))
 			mux.Handle("/api/chat/convert", auth(invalidateSearch(http.HandlerFunc(c.chat.HandleConvert))))
+			mux.Handle("/api/chat/status", auth(http.HandlerFunc(c.chat.HandleStatus)))
 			mux.Handle("/api/chats", auth(http.HandlerFunc(c.chat.HandleList)))
 			mux.Handle("/api/chat/gifs", auth(http.HandlerFunc(c.chat.HandleGifs)))
 			mux.HandleFunc(handlers.BuiltinGifRoute, handlers.HandleBuiltinGif)

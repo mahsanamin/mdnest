@@ -278,3 +278,29 @@ test('right-click on a chat in the list: copy its path, and delete another chat 
     await cleanup(page, a.plain, a.chat, b.plain, b.chat);
   }
 });
+
+test('an agent\'s working status shows on one quiet line, and its post clears it', async ({ page }) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  const { plain, chat, title } = await seed(page);
+  try {
+    await page.goto(`/#!chats/${NS}/${chat}`);
+    await expect(page.locator('.chat-room-title h2')).toHaveText(title, { timeout: 20_000 });
+    const line = page.getByTestId('chat-working');
+    await expect(line).toHaveText('');
+    const heightIdle = (await line.boundingBox()).height;
+
+    const qs = `ns=${NS}&path=${encodeURIComponent(chat)}`;
+    expect((await api(page, 'POST', `/api/chat/status?${qs}&as=codxu`, 'reviewing the API PR')).status).toBe(200);
+    // The view polls every few seconds.
+    await expect(line).toContainText('codxu is working: reviewing the API PR', { timeout: 10_000 });
+    // Same height busy or idle, so the conversation never jumps.
+    expect((await line.boundingBox()).height).toBe(heightIdle);
+
+    await api(page, 'POST', `/api/chat?${qs}&as=codxu`, 'done: looks good');
+    await expect(line).toHaveText('', { timeout: 10_000 });
+    await expect(page.locator('.chat-bubble').last()).toContainText('done: looks good');
+  } finally {
+    await cleanup(page, plain, chat);
+  }
+});

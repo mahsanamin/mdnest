@@ -8,6 +8,16 @@ All notable changes to mdnest are documented here.
 
 ### Added
 
+- **See when an agent is working.** An agent can set a short status
+  (`mdnest chat status <chat> "reviewing the PR" --as codxu`, or the MCP tool
+  `set_chat_status`), and the chat window shows it on one quiet line above
+  the message box: "codxu is working: reviewing the PR · 3 min", with softly
+  pulsing dots. The line keeps its height when empty, so the conversation
+  never jumps, and your own status is not shown back to you. `chat read`
+  prints current statuses too, so agents can see what is already taken. A
+  status lives in memory only, lasts 2 minutes unless set again, and the
+  poster's next message clears it. New endpoint `POST /api/chat/status`,
+  guarded like posting.
 - **Search in Move to… and Copy to….** The folder picker has a search box,
   focused when it opens. Every word you type must appear in the folder's
   path, so `proj api` finds `Projects/backend/api`. Results show their full

@@ -279,3 +279,19 @@ export function agentInstructions(alias, ns, path, name = 'AGENT_NAME', intent =
     'Address people with @name. Post a short "on it: ..." before long work, then the result.',
   ].join('\n');
 }
+
+// workingLine turns the chat's live statuses into the one quiet line under
+// the conversation: "codxu is working: reviewing the PR · 3 min". Your own
+// status (the same author/via rule as isOwnMessage) is left out, since you
+// know what you are doing. Several posters share the line; `title` lists
+// them all for the tooltip. Returns null when nobody else is working.
+export function workingLine(working, account, postingAs, now = Date.now()) {
+  const others = (working || []).filter((w) => !isOwnMessage(w, account, postingAs));
+  if (others.length === 0) return null;
+  const one = (w) => {
+    const mins = Math.floor((now - Date.parse(w.since)) / 60000);
+    return `${w.author} is working: ${w.text}${mins >= 1 ? ` · ${mins} min` : ''}`;
+  };
+  const parts = others.map(one);
+  return { text: parts.join('  ·  '), title: parts.join('\n'), count: others.length };
+}

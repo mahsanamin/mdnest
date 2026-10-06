@@ -5,7 +5,7 @@ import { resolveImgSrc } from '../img-src.js';
 import { sanitizeHtml } from '../sanitize.js';
 import {
   CHAT_POLL_MS, CHAT_LIST_POLL_MS, DEFAULT_CHAT_FOLDER, chatPathFor, colorForAuthor,
-  isOwnMessage, groupMessages, mergeMessages, formatChatTime, agentInstructions, plainPreview,
+  isOwnMessage, groupMessages, mergeMessages, workingLine, formatChatTime, agentInstructions, plainPreview,
   highlightMentions, mentionsName, participants, mentionQuery, completeMention,
   avatarFor, reactions, gifMarkdown, expandGifRefs, initialOf,
 } from '../chat.js';
@@ -168,6 +168,7 @@ function ChatList({ chats, loading, error, openChat, onSelect, filter, onFilter,
 
 function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack, onActivity }) {
   const [doc, setDoc] = useState(null); // { title, description, you }
+  const [working, setWorking] = useState([]); // who said they are busy, from the server
   const [messages, setMessages] = useState([]);
   const [error, setError] = useState('');
   const [draft, setDraft] = useState('');
@@ -227,6 +228,7 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
         if (cancelled) return;
         setDoc({ title: r.title, description: r.description, you: r.you });
         setMessages(r.messages || []);
+        setWorking(r.working || []);
         countRef.current = r.count;
         writeSeen(chat.ns, chat.path, r.count);
       })
@@ -250,6 +252,7 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
       }
       countRef.current = Math.max(countRef.current, r.count);
       writeSeen(chat.ns, chat.path, countRef.current);
+      setWorking(r.working || []);
       setError('');
     } catch (e) {
       setError(e.message);
@@ -486,6 +489,17 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
           <span className="chat-suggest-hint">Tab to complete</span>
         </div>
       )}
+      {/* Who is busy, on one quiet line. It is always there (empty when
+          nobody is working) so the conversation above never jumps when an
+          agent starts or finishes. */}
+      {(() => {
+        const line = workingLine(working, account, effectiveAs);
+        return (
+          <div className="chat-working" role="status" aria-live="polite" title={line?.title || ''} data-testid="chat-working">
+            {line && <><span className="chat-working-dots" aria-hidden="true"><i /><i /><i /></span><span className="chat-working-text">{line.text}</span></>}
+          </div>
+        );
+      })()}
       {/* Slack-style: one roomy box. The text area spans the full width and
           grows with what you type (wrapped lines too, not only Shift+Enter
           ones); the posting name and the buttons sit in a bar inside it. The

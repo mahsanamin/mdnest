@@ -1394,6 +1394,7 @@ Usage:
   mdnest chat avatar @alias/namespace --as name [--pick owl | --pick auto | --file my.svg]
   mdnest chat new  @alias/namespace/path.md ["Title"]
   mdnest chat post @alias/namespace/path.md <text|-> [--as name]
+  mdnest chat status @alias/namespace/path.md "what you are doing" [--as name]   (or --clear)
   mdnest chat read @alias/namespace/path.md [--as name] [--after N]
   mdnest chat wait @alias/namespace/path.md [--as name] [--mentions] [--timeout SECONDS]
 
@@ -1404,6 +1405,8 @@ Give every agent its own and use it on EVERY command. With a name:
          posts, so an agent loop is just: wait, reply with post, wait again
   --mentions  wake only for messages that say @name (or @all / @everyone)
 Address someone with @name in a message. wait exits 2 on timeout: run it again.
+status shows a quiet "name is working: ..." line under the chat for 2 minutes
+(set it again to keep it); your next post clears it.
 
 Images: post one by name, ![nod](gif:nod). `chat gifs` lists the names: the set
 that ships with mdnest plus the namespace's ChatGifs/ folder, where a file with
@@ -1565,6 +1568,32 @@ cmd_chat() {
       n="${n%%[!0-9]*}"
       echo "posted #${n} to ${PARSED_NS}/${PARSED_PATH}"
       ;;
+    status)
+      # A short "working on it" line under the chat, so people see an agent is
+      # busy without a message in the conversation. It expires after 2 minutes
+      # unless set again, and your next post clears it. Empty text clears it.
+      chat_target "${1:-}"
+      shift
+      local status_text="" as="${MDNEST_CHAT_AS:-}" got_text=0
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --as) [ $# -ge 2 ] || { echo "Error: --as needs a name" >&2; exit 1; }; as="$2"; shift 2 ;;
+          --as=*) as="${1#--as=}"; shift ;;
+          --clear) status_text=""; got_text=1; shift ;;
+          *) status_text="$1"; got_text=1; shift ;;
+        esac
+      done
+      if [ "$got_text" = "0" ]; then
+        echo "Usage: mdnest chat status @alias/namespace/chat.md \"what you are doing\" --as name   (or --clear)" >&2
+        exit 1
+      fi
+      api POST "/chat/status?$CHAT_QS&as=$(urlencode "$as")" "$status_text" >/dev/null || exit 1
+      if [ -n "$status_text" ]; then
+        echo "status set: ${status_text}"
+      else
+        echo "status cleared"
+      fi
+      ;;
     read|wait)
       chat_target "${1:-}"
       shift
@@ -1631,6 +1660,9 @@ cmd_chat() {
         # read shows everything (your own posts included) after --after, or
         # from the start. With a name, it also marks the chat as read.
         chat_fetch "${after:-0}" "" || { rm -f "$hdr"; exit 1; }
+        # Read the working line now: the header file is removed just below.
+        local working
+        working=$(grep -i '^x-chat-working:' "$hdr" | sed 's/^[^:]*:[[:space:]]*//' | tr -d '\r') || working=""
         rm -f "$hdr"
         # One summary line first, so an agent joining the chat sees at a
         # glance who is in it before reading the messages.
@@ -1643,7 +1675,11 @@ cmd_chat() {
           END { print names }') || who=""
         # Only on a full read: with --after the list would describe a slice.
         if [ -z "$after" ] || [ "$after" = "0" ]; then
-          printf '%s message%s · participants: %s\n\n' "$count" "$([ "$count" = "1" ] && echo "" || echo "s")" "${who:-none yet}"
+          printf '%s message%s · participants: %s\n' "$count" "$([ "$count" = "1" ] && echo "" || echo "s")" "${who:-none yet}"
+          # Who has said they are busy (chat status), so an agent does not
+          # start a task someone is already doing.
+          if [ -n "$working" ]; then printf 'working now: %s\n' "$working"; fi
+          printf '\n'
         fi
         if [ -n "$out" ]; then printf '%s\n' "$out"; fi
         chat_save_cursor "$count"
@@ -2067,9 +2103,10 @@ NOTE OPERATIONS
   list     [@alias/namespace]     List namespaces, or a namespace/folder as a tree
            [--json]               ...as the raw API JSON instead (for scripts)
   search   <ns-path> "query"      Search note contents
-  chat     list|new|post|read|wait  File-based chat in a note (server: ENABLE_CHAT)
+  chat     list|new|post|status|read|wait  File-based chat in a note (server: ENABLE_CHAT)
            post <path> <text|-> --as NAME   read <path> --as NAME
            wait <path> --as NAME [--mentions] [--timeout S]   new <path> ["Title"]
+           status <path> "doing X" --as NAME   (a quiet working line; --clear)
 
 OTHER
   version                         Show CLI version
@@ -2124,6 +2161,7 @@ EXAMPLES
   mdnest chat new  @work/engineering/Chats/release.md "Release"
   mdnest chat post @work/engineering/Chats/release.md "Migrations done" --as api-agent
   mdnest chat wait @work/engineering/Chats/release.md --as api-agent --mentions
+  mdnest chat status @work/engineering/Chats/release.md "running the migration" --as api-agent
 
   # List — a tree for humans, --json for scripts
   mdnest list @work/engineering
