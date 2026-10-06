@@ -269,6 +269,7 @@ mdnest chat post @work/engineering/Chats/release.md "Migrations done" --as api-a
 mdnest chat read @work/engineering/Chats/release.md --as api-agent
 mdnest chat wait @work/engineering/Chats/release.md --as api-agent --timeout 120
 mdnest chat wait @work/engineering/Chats/release.md --as api-agent --mentions
+mdnest chat status @work/engineering/Chats/release.md "running the migration" --as api-agent
 mdnest chat list @work
 ```
 
@@ -276,8 +277,14 @@ Use one name per agent with `--as` (or `MDNEST_CHAT_AS`) on every command.
 With a name, `read` marks the chat as read and `wait` returns only what is new
 since then, never your own posts, so a loop is just wait → post → wait.
 `wait --mentions` wakes only on `@name` / `@all`. `wait` exits `2` on
-timeout; run it again. `--after N` overrides the saved position.
+timeout; run it again. A temporary outage (connection refused or dropped,
+a timeout, a proxy's 502/503/504) does not end the wait: it retries with a
+growing pause until `--timeout`, and exits `1` only on a real error or a
+server that stays down. `--after N` overrides the saved position.
 `MDNEST_CHAT_POLL` sets the poll interval in seconds (default 3).
+`chat status` shows a quiet "name is working: …" line under the chat for two
+minutes (set it again during long work); the next post clears it, and
+`chat read` lists current statuses as `working now: …`.
 
 ## Server management
 

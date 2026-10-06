@@ -194,7 +194,7 @@ if ( cd tests/browser && \
      MDNEST_MERMAID_PALE="$MERMAID_PALE" MDNEST_MERMAID_EDGE="$MERMAID_EDGE" \
      MDNEST_BOARD_FILE="$BOARD_FILE" MDNEST_BOARD_TASK="$BOARD_TASK" \
      MDNEST_NOTES_DIR="$NOTES_DIR" \
-     npx playwright test ); then
+     npx playwright test ${MDNEST_E2E_SPECS:-} ); then
   pass "BROWSER E2E: all specs passed"
   exit 0
 else

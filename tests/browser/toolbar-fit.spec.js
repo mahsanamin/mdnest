@@ -87,3 +87,42 @@ for (const width of [1440, 1024]) {
     expect(spill, 'the filename renders outside the path box').toBeLessThanOrEqual(1);
   });
 }
+
+// The ⋯ menu holds Settings, and people look for it in the top-right corner.
+// A long note name used to wrap the bar: the path was sized from its whole
+// filename when the row decided where to break, so the view switch, the
+// utilities and the ⋯ menu dropped to a second and third row, starting at the
+// LEFT. At 1280px with the name below the menu sat ~80px down and ~800px in.
+const LONG_NAME = 'e2e-toolbar-fit/a-really-quite-long-note-name-that-someone-might-use-for-meeting-notes.md';
+
+test('a long note name keeps the ⋯ menu in the top-right corner', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await signIn(page);
+  const create = (method) => page.evaluate(async ([m, ns, p]) => {
+    const r = await fetch(`/api/note?ns=${ns}&path=${encodeURIComponent(p)}`, {
+      method: m, headers: { Authorization: 'Bearer ' + localStorage.getItem('mdnest_token') },
+      body: m === 'POST' ? '# long name\n' : undefined,
+    });
+    return r.status;
+  }, [method, NS, LONG_NAME]);
+  await create('POST');
+  try {
+    await page.goto(`/#${NS}/${LONG_NAME}`);
+    await expect(page.locator('.toolbar-path-base')).toBeVisible({ timeout: 20_000 });
+    await page.waitForTimeout(800);
+    const pos = await page.evaluate(() => {
+      const bar = document.querySelector('.toolbar').getBoundingClientRect();
+      const btn = document.querySelector('.toolbar-more-btn').getBoundingClientRect();
+      return { fromTop: Math.round(btn.top - bar.top), fromRight: Math.round(bar.right - btn.right), barHeight: Math.round(bar.height) };
+    });
+    expect(pos.fromTop, `the ⋯ menu wrapped to a lower row (${JSON.stringify(pos)})`).toBeLessThan(20);
+    expect(pos.fromRight, `the ⋯ menu is not at the right edge (${JSON.stringify(pos)})`).toBeLessThan(40);
+    expect(pos.barHeight, 'the bar wrapped to more than one row').toBeLessThan(60);
+  } finally {
+    await page.evaluate(async ([ns]) => {
+      await fetch(`/api/note?ns=${ns}&path=e2e-toolbar-fit`, {
+        method: 'DELETE', headers: { Authorization: 'Bearer ' + localStorage.getItem('mdnest_token') },
+      });
+    }, [NS]);
+  }
+});

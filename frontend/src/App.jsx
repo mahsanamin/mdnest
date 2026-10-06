@@ -44,6 +44,7 @@ import AttributionModal from './components/AttributionModal.jsx';
 import MoveToModal from './components/MoveToModal.jsx';
 import PasteModal from './components/PasteModal.jsx';
 import { copyPlainText } from './mermaid-text.js';
+import { mdnestUri } from './mdnestUri.js';
 import {
   baseName, buildClipboardPayload, describeRefusal, filenameFromDisposition, formatBytes,
   localLinks, CLIPBOARD_MAX_BYTES,
@@ -192,6 +193,15 @@ function App() {
   // The queued autosave itself, so navigating away can RUN it instead of
   // dropping it. Cleared as soon as it executes.
   const pendingSaveRef = useRef(null);
+  // Saves run one at a time. Two overlapping PUTs carried the same If-Match
+  // etag, so on a slow link every second save came back 409: a "modified by
+  // another user" banner with nobody else there, and when the last save was
+  // the rejected one the final words never reached the server. A save now
+  // waits for the one in flight (and so sends the etag it returned); a queued
+  // save that a newer one has superseded is skipped, since the newer one
+  // carries all of the text.
+  const saveChainRef = useRef(Promise.resolve());
+  const saveSeqRef = useRef(0);
   // An editor that debounces internally (the drawing canvas) registers a
   // callback here so its unsaved scene can be drained before we navigate.
   const editorFlushRef = useRef(null);
@@ -837,6 +847,12 @@ function App() {
       }
     }, setWsStatus);
     collabRef.current = client;
+    // The connect effect below runs when the open note changes. If the config
+    // (liveCollab) arrived after a note was already open, as on a page load
+    // straight onto a note, that effect had run with no client and never ran
+    // again: no presence, no live updates, until you switched notes. Connect
+    // to the note that is already open now.
+    if (selectedNsRef.current && currentPathRef.current) client.connect(selectedNsRef.current, currentPathRef.current);
     return () => { client.disconnect(); collabRef.current = null; setWsStatus('disconnected'); };
   }, [appConfig?.liveCollab]);
 
@@ -1353,7 +1369,9 @@ function App() {
     if (ns === selectedNs && currentPath === path) { setCurrentPath(null); setContent(null); setSavedContent(''); }
     if (getLastPath(ns) === path) setLastPath(ns, null);
     if (ns === selectedNs) await refreshTree(undefined, { broadcast: true });
-    setOpenChat(null);
+    // Close the room only if it is the chat that went: deleting another one
+    // from the list's right-click menu must leave the open chat alone.
+    setOpenChat((cur) => (cur && cur.ns === ns && cur.path === path ? null : cur));
     return true;
   }, [selectedNs, currentPath, getLastPath, setLastPath, refreshTree]);
 
@@ -1407,7 +1425,7 @@ function App() {
       openNoteIn(chatsReturnNote.ns, chatsReturnNote.path);
     } else if (currentPath) {
       // Reload the note underneath: chat mode may have rewritten it (a post
-      // to that very chat, "Make it a chat" on the open note), and editing a
+      // to that very chat, or the open note turned into one), and editing a
       // stale copy would 409, or strip the chat tag if overwritten.
       openNoteDirect(selectedNs, currentPath);
     }
@@ -1450,6 +1468,11 @@ function App() {
   }, [selectedNs, currentPath]);
 
   const handleContentChange = useCallback((newContent) => {
+    // Text that equals what is already saved is not an edit: no "typing"
+    // signal to others, no save, no clearing of a real conflict notice. An
+    // editor re-reporting a document it was handed used to land here and
+    // broadcast as typing (others saw "X is typing" while X sat still).
+    if (newContent === savedContentRef.current && newContent === contentRef.current) return;
     setContent(newContent);
     setConflictBanner(null);
 
@@ -1464,8 +1487,12 @@ function App() {
     // navigates away before the debounce elapses. It closes over the path,
     // namespace and content of the edit that scheduled it, so running it late
     // still writes to the right file.
-    const runSave = async () => {
-      pendingSaveRef.current = null;
+    const doSave = async (seq) => {
+      if (seq !== saveSeqRef.current) return; // a newer save will write all of this
+      if (newContent === savedContentRef.current) return; // nothing new to write
+      // What this edit was made on top of: the text we last saved or were
+      // handed (a load, a remote save, someone's live typing).
+      const base = savedContentRef.current;
       if (!currentPath || !selectedNs) return;
       // Safety against destructive autosave: never write empty content
       // when we know the file had content when we loaded it. This is the
@@ -1485,7 +1512,27 @@ function App() {
         if (result.etag) { etagRef.current = result.etag; echoGate.rememberOwnEtag(result.etag); }
       } catch (e) {
         if (e.status === 409) {
-          setConflictBanner({ username: 'another user', etag: e.etag });
+          // Confirm it is a real conflict before saying so: if the server
+          // already holds exactly this text, adopt its etag and move on.
+          let resolved = false;
+          try {
+            const latest = await getNote(selectedNs, currentPath);
+            if (latest.text === newContent) {
+              resolved = true;
+              setSavedContent(newContent);
+              etagRef.current = latest.etag;
+            } else if (latest.text === base) {
+              // The server holds exactly what this edit was built on (we had
+              // already seen that text, e.g. through someone's live typing,
+              // only its etag was newer). Nothing of theirs is lost by
+              // writing ours on top, so save again with the current etag.
+              const retry = await saveNote(selectedNs, currentPath, newContent, latest.etag);
+              setSavedContent(newContent);
+              if (retry.etag) { etagRef.current = retry.etag; echoGate.rememberOwnEtag(retry.etag); }
+              resolved = true;
+            }
+          } catch { /* fall through to the banner */ }
+          if (!resolved) setConflictBanner({ username: 'another user', etag: e.etag });
         } else if (e.status === 404) {
           // Moved or deleted elsewhere. The PUT does not re-create the note
           // at its old path; say so, and keep the text on screen to copy.
@@ -1502,6 +1549,13 @@ function App() {
         // is closed and endSave returns nothing.)
         echoGate.endSave(saveToken).forEach(handleFileChanged);
       }
+    };
+    const runSave = () => {
+      pendingSaveRef.current = null;
+      const seq = ++saveSeqRef.current;
+      const job = saveChainRef.current.then(() => doSave(seq));
+      saveChainRef.current = job.catch(() => {});
+      return job;
     };
     pendingSaveRef.current = runSave;
     saveTimerRef.current = setTimeout(runSave, 800);
@@ -1792,18 +1846,6 @@ function App() {
         } catch (e) { alert('Failed to delete folder: ' + e.message); }
         break;
       }
-      case 'convert-chat': {
-        // Tag the note as a chat in place (its content becomes the channel
-        // description) and open it in the chats view. The file is not moved,
-        // so a path already handed to an agent keeps working.
-        if (target && selectedNs) {
-          try {
-            await convertToChat(selectedNs, target.path, '');
-            enterChats({ ns: selectedNs, path: target.path });
-          } catch (e) { alert('Failed to make a chat: ' + e.message); }
-        }
-        break;
-      }
       case 'new-chat': {
         if (!selectedNs) break;
         const title = window.prompt('Chat name');
@@ -1817,23 +1859,7 @@ function App() {
         break;
       }
       case 'copy-path': {
-        if (target && selectedNs) {
-          const alias = appConfig?.serverAlias ? `@${appConfig.serverAlias}/` : '';
-          // Percent-encode each path segment so spaces and other special
-          // characters don't make the copied URI ambiguous (a raw space in
-          // "19 Jun 2026.md" looked like three tokens to an LLM/shell and broke
-          // the path). Slashes and the scheme/alias stay readable.
-          const encPath = String(target.path).split('/').map(encodeURIComponent).join('/');
-          const fullPath = `mdnest://${alias}${encodeURIComponent(selectedNs)}/${encPath}`;
-          const textarea = document.createElement('textarea');
-          textarea.value = fullPath;
-          textarea.style.position = 'fixed';
-          textarea.style.opacity = '0';
-          document.body.appendChild(textarea);
-          textarea.select();
-          document.execCommand('copy');
-          document.body.removeChild(textarea);
-        }
+        if (target && selectedNs) copyPlainText(mdnestUri(appConfig?.serverAlias, selectedNs, target.path));
         break;
       }
       case 'manage-access': {
@@ -2240,7 +2266,7 @@ function App() {
           </div>
         )}
         {conflictBanner && (
-          <div className="conflict-banner">
+          <div className="conflict-banner floating-notice" role="alert">
             This file was modified by {conflictBanner.username}. Your changes may conflict.
             <button onClick={handleReloadNote}>Reload</button>
             <button onClick={() => setConflictBanner(null)}>Dismiss</button>
@@ -2254,7 +2280,7 @@ function App() {
           </div>
         )}
         {restoreBanner && (
-          <div className="restore-banner">
+          <div className="restore-banner floating-notice" role="status">
             {restoreBanner.username} restored this file to an earlier version
             {restoreBanner.ref ? ` (${restoreBanner.ref.slice(0, 7)})` : ''}.
             {restoreBanner.etag ? ' Your unsaved changes are kept until you reload.' : ' Content has been updated.'}
@@ -2580,6 +2606,7 @@ function App() {
         onClose={handleCloseContextMenu}
         canWrite={canWrite}
         isAdmin={isAdmin && isMulti}
+        multi={isMulti}
         selectedNs={selectedNs}
         excalidraw={excalidrawEnabled}
         chat={chatEnabled}

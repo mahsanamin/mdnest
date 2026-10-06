@@ -238,39 +238,76 @@ export function completeMention(text, caret, name) {
 //     spelled out, with short timeouts for tools that kill long commands.
 // It must stay pasteable (pasteable-commands.test.js): no <angle-bracket>
 // stand-ins, and the target is shell-quoted whenever it needs to be.
-export function agentInstructions(alias, ns, path, name = 'AGENT_NAME') {
+// intent is what the person wants this agent to do here, typed in the panel.
+// Like the name, it becomes part of the prompt; it is prose for the agent and
+// never reaches a shell command, so it needs no quoting.
+export function agentInstructions(alias, ns, path, name = 'AGENT_NAME', intent = '') {
   const target = shellQuote(`${alias ? `@${alias}/` : ''}${ns}/${path}`);
   const nsTarget = shellQuote(`${alias ? `@${alias}/` : ''}${ns}`);
   const as = shellQuote(name);
+  const job = String(intent || '').trim();
   return [
-    `You are ${name} in an mdnest chat. Use --as ${as} on EVERY command, and only that name.`,
+    `You are ${name} in an mdnest chat. Use --as ${as} on every command, and only that name.`,
     '',
-    '1. Read the WHOLE conversation before you say anything:',
-    `   mdnest chat read ${target} --as ${as}`,
-    '   The first line lists who is here. Work out: who each participant is and what they',
-    `   are doing, what is being worked on, what has been decided, and anything addressed`,
-    `   to @${name} or still waiting for an answer.`,
-    '2. Give yourself a thumbnail (it is shown beside every message you post). Pick one that',
-    '   suits your role: robot, owl, cat, alien, ghost or fox:',
-    `   mdnest chat avatar ${nsTarget} --as ${as} --pick robot`,
-    '   Or draw your own small animated SVG (about 64x64, no scripts, no external links),',
-    `   write it to avatar.svg, and use --file avatar.svg instead of --pick.`,
-    '3. Introduce yourself in ONE message that shows you read it: who you are, what you',
-    '   understood is going on, how you can help, and answers to anything waiting for you.',
+    ...(job ? ['Your job in this chat:', ...job.split(/\r?\n/).map((l) => `  ${l}`), ''] : []),
+    'Join',
+    `1. Read the chat once: mdnest chat read ${target} --as ${as}`,
+    '   This also saves your place. From then on, wait gives you only what is new,',
+    '   so never read the whole chat again.',
+    `2. Pick a thumbnail nobody here uses: mdnest chat avatar ${nsTarget} --as ${as} --pick auto`,
+    '3. Introduce yourself in one short message: who you are, what you will do, and',
+    '   answers to anything already waiting for you.',
     `   mdnest chat post ${target} "..." --as ${as}`,
-    '4. Then loop, and do not end your turn while you are in the chat:',
+    '',
+    'Loop (do not end your turn while you are in the chat)',
     `   mdnest chat wait ${target} --as ${as} --timeout 120`,
-    '   - exit 0: new messages were printed. Reply with chat post (same --as), then wait again.',
-    '   - exit 2: nothing new yet. Run the same wait again.',
-    `   It never returns your own posts, and nothing posted while you work is lost.`,
-    `   Add --mentions to wake only when someone writes @${name} (or @all).`,
-    `   Lost the thread? Re-read everything with: mdnest chat read ${target}`,
-    '   (without --as, so your place in the chat does not move).',
+    '   exit 0: new messages are printed. Reply if it is for you, then wait again.',
+    '   exit 2: nothing new yet. Run the same wait again.',
+    '   Your place is kept for you, so you never need to track message numbers.',
+    `   Truly lost track? mdnest chat read ${target} shows it all (no --as, so your place stays).`,
+    '   Leave only when your lead or a human says you are done: post a one-line goodbye, then stop.',
     '',
-    `Reactions: post an image by name, e.g. mdnest chat post ${target} "![nod](gif:nod)" --as ${as}`,
-    `See every name with: mdnest chat gifs ${nsTarget}. You can add your own animated SVG to`,
-    `${CHAT_GIF_DIR}/ so everyone in this workspace can use it.`,
-    '',
-    'Address people with @name. Post a short "on it: ..." before long work, then the result.',
+    'How to behave',
+    '- People can see when you are listening or thinking. Before anything that takes more than',
+    `  a minute, also say what: mdnest chat post ${target} "/status what you are doing" --as ${as}`,
+    '  It is not added to the chat. Repeat it every 2 minutes; your next real post clears it.',
+    '- Need a human to answer or decide? Ask them with @their-name and add ![waiting](gif:question),',
+    '  so they can see where they are needed.',
+    `- Other agents may be here. Answer only what is addressed to you (@${name}, @all) or is your part.`,
+    '  Do not repeat what someone already said: agree with ![nod](gif:nod) instead. Keep replies',
+    '  short and to the point. In a busy chat, add --mentions to wait.',
+    `- Emoji are fine. Images react too, e.g. ![done](gif:done). List them: mdnest chat gifs ${nsTarget}`,
   ].join('\n');
+}
+
+// workingLine turns the chat's presence into the one quiet line under the
+// conversation. The server infers most of it from the polls agents already
+// make (chat_status.go), so it needs no CLI update:
+//   working    codxu is working: reviewing the PR · 3 min   (a /status)
+//   thinking   codxu is thinking                            (got new messages)
+//   listening  lead-qa and qa-1 are listening               (waiting)
+// Busy posters come first; listeners are named together at the end. Your own
+// presence (the same author/via rule as isOwnMessage) is left out. `title`
+// lists everyone for the tooltip. Returns null when nobody else is here.
+export function workingLine(working, account, postingAs, now = Date.now()) {
+  const others = (working || []).filter((w) => !isOwnMessage(w, account, postingAs));
+  if (others.length === 0) return null;
+  const mins = (w) => Math.floor((now - Date.parse(w.since)) / 60000);
+  const after = (w) => (mins(w) >= 1 ? ` · ${mins(w)} min` : '');
+  const busy = [];
+  const listening = [];
+  for (const w of others) {
+    if (w.kind === 'listening') listening.push(w.author);
+    else if (w.kind === 'thinking') busy.push(`${w.author} is thinking${after(w)}`);
+    else busy.push(`${w.author} is working: ${w.text}${after(w)}`);
+  }
+  const names = (list) => (list.length <= 2 ? list.join(' and ') : `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`);
+  const parts = [...busy];
+  if (listening.length) parts.push(`${names(listening)} ${listening.length === 1 ? 'is' : 'are'} listening`);
+  return {
+    text: parts.join('  ·  '),
+    title: [...busy, ...listening.map((n) => `${n} is listening`)].join('\n'),
+    count: others.length,
+    busy: busy.length > 0,
+  };
 }

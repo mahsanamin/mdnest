@@ -715,18 +715,43 @@ if (features.chat) server.tool(
 
 if (features.chat) server.tool(
   "set_chat_avatar",
-  "Give yourself a chat thumbnail, shown beside your messages. Either pick a built-in (robot, owl, cat, alien, ghost, fox) or pass your own small animated SVG. Saved as ChatGifs/avatar-<as>.svg in the namespace; calling it again replaces it.",
+  "Give yourself a chat thumbnail, shown beside your messages. Pick a built-in (robot, owl, cat, alien, ghost, fox), pass pick \"auto\" for the first built-in nobody else in the namespace wears yet, or pass your own small animated SVG. Saved as ChatGifs/avatar-<as>.svg in the namespace; calling it again replaces it.",
   {
     namespace: z.string().describe("Namespace the chat is in"),
     as: z.string().regex(/^[A-Za-z0-9._-]+$/).describe("Your name in the chat (the same `as` you post with)"),
-    pick: z.string().regex(/^[a-z0-9-]+$/).optional().describe("A built-in avatar: robot, owl, cat, alien, ghost or fox"),
+    pick: z.string().regex(/^[a-z0-9-]+$/).optional().describe("A built-in avatar: robot, owl, cat, alien, ghost or fox, or \"auto\" for one nobody else here uses"),
     svg: z.string().max(65536).optional().describe("Your own SVG (about 64x64, no scripts or external links)"),
   },
   async ({ namespace, as, pick, svg }) => {
     try {
       if (!pick && !svg) return { content: [{ type: "text", text: "Pass pick (robot, owl, cat, alien, ghost, fox) or svg." }], isError: true };
       let body = svg;
-      if (pick) {
+      let note = "";
+      if (pick === "auto") {
+        // An avatar is an exact copy of the built-in it came from, so a
+        // built-in is "worn" when another poster's avatar file matches it.
+        const lr = await api(`/api/chat/gifs?ns=${encodeURIComponent(namespace)}`);
+        if (!lr.ok) return chatError(lr);
+        const gifs = (await lr.json()).gifs || [];
+        const worn = new Set();
+        for (const g of gifs.filter((x) => x.avatar && x.avatar !== as && x.scope === "workspace")) {
+          const r = await api(`/api/note?ns=${encodeURIComponent(namespace)}&path=${encodeURIComponent(g.path)}`);
+          if (r.ok) worn.add((await r.text()).replace(/\n+$/, ""));
+        }
+        let first = null;
+        for (const g of gifs.filter((x) => x.kind === "avatar-choice")) {
+          const r = await fetch(`${BASE_URL}/api/chat/gifs/builtin/avatars/${encodeURIComponent(g.name)}.svg`);
+          if (!r.ok) continue;
+          const text = await r.text();
+          if (!first) first = { name: g.name, text };
+          if (!worn.has(text.replace(/\n+$/, ""))) { pick = g.name; body = text; break; }
+        }
+        if (!first) return { content: [{ type: "text", text: "This server offers no built-in avatars." }], isError: true };
+        if (pick === "auto") {
+          pick = first.name; body = first.text;
+          note = ` Every built-in is already in use here, so ${as} shares ${first.name}; pass svg to stand out.`;
+        }
+      } else if (pick) {
         const r = await fetch(`${BASE_URL}/api/chat/gifs/builtin/avatars/${encodeURIComponent(pick)}.svg`);
         if (!r.ok) return { content: [{ type: "text", text: `No built-in avatar called ${pick}.` }], isError: true };
         body = await r.text();
@@ -735,7 +760,7 @@ if (features.chat) server.tool(
       let res = await api(target, { method: "POST", body });
       if (!res.ok) res = await api(target, { method: "PUT", body });
       if (!res.ok) return chatError(res);
-      return { content: [{ type: "text", text: `Avatar set for ${as}.` }] };
+      return { content: [{ type: "text", text: `Avatar set for ${as}${pick ? ` (${pick})` : ""}.${note}` }] };
     } catch (err) {
       return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
     }
@@ -797,6 +822,26 @@ if (features.chat) server.tool(
       if (!res.ok) return chatError(res);
       const data = await res.json();
       return { content: [{ type: "text", text: `posted #${data.count}` }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+if (features.chat) server.tool(
+  "set_chat_status",
+  "Show a short 'working on it' line under the chat (e.g. 'reviewing the API PR'), so people can see you are busy without a message in the conversation. It lasts 2 minutes: set it again to keep it during long work. Your next post_chat clears it; an empty text clears it now.",
+  {
+    namespace: z.string().describe("Namespace name"),
+    path: z.string().describe("Path of the chat note"),
+    text: z.string().max(200).describe("What you are doing, one short line. Empty to clear."),
+    as: z.string().optional().describe("Your name in the chat (the same `as` you post with)"),
+  },
+  async ({ namespace, path, text, as }) => {
+    try {
+      const res = await api(`/api/chat/status?${chatQS(namespace, path)}&as=${encodeURIComponent(as || "")}`, { method: "POST", body: text });
+      if (!res.ok) return chatError(res);
+      return { content: [{ type: "text", text: text.trim() ? `status set: ${text.trim()}` : "status cleared" }] };
     } catch (err) {
       return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
     }

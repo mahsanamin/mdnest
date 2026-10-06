@@ -327,11 +327,16 @@
 }
 
 .toolbar-path {
-  /* Not flex: 1. Growing to fill the row means the actions inside it sit at the
-     far right with nowhere to go, so they overflowed onto the group beside
-     them. margin-right: auto still pushes that group to the edge, but the bar
-     now wraps before anything collides. */
-  flex: 0 1 auto;
+  /* A fixed starting width, not `auto`. The bar wraps, and a wrapping flex row
+     decides where to break from each item's STARTING width: with `auto` that
+     was the whole filename, so a long name (or a wider sidebar, or the stickies
+     panel open) pushed the view switch, the utilities and the ⋯ menu onto
+     second and third rows at the left, and Settings was no longer in the
+     top-right corner. 14rem keeps the filename, its icons and Rename/Delete
+     readable; past that the name ellipsizes and the row stays one row. It
+     grows into spare room, and the items inside it pack left, so the actions
+     stay next to the name rather than at the far right. */
+  flex: 1 1 14rem;
   margin-right: auto;
   display: flex;
   align-items: center;
@@ -2659,7 +2664,7 @@ pre:hover .code-copy-btn {
   border: 1px solid var(--border-strong);
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
-  min-width: 140px;
+  min-width: 200px;
   padding: 4px 0;
   animation: ctxFadeIn 0.1s ease-out;
 }
@@ -2675,11 +2680,24 @@ pre:hover .code-copy-btn {
   }
 }
 
+/* The clicked item's name, above the actions. Not a .context-menu-item, so
+   nothing that looks for an action by its text can hit it. */
+.context-menu-title {
+  max-width: 240px;
+  padding: 6px 12px 4px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .context-menu-item {
-  height: 36px;
+  height: 34px;
   display: flex;
   align-items: center;
-  padding: 0 12px;
+  gap: 10px;
+  padding: 0 14px 0 12px;
   font-size: 0.85rem;
   color: var(--text);
   cursor: pointer;
@@ -2690,7 +2708,13 @@ pre:hover .code-copy-btn {
   background: var(--surface-3);
 }
 
-.context-menu-item.danger {
+.context-menu-item .context-menu-icon {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+}
+
+.context-menu-item.danger,
+.context-menu-item.danger .context-menu-icon {
   color: var(--danger);
 }
 
@@ -3104,7 +3128,11 @@ pre:hover .code-copy-btn {
 
 .live-editor-wrapper {
   flex: 1;
-  overflow-y: auto;
+  /* Not a scroller: the Crepe root inside it scrolls. With overflow-y: auto
+     (left over from when this was the scroller) a child placed too low gave
+     the wrapper a second scrollbar, which narrowed the editor and rewrapped
+     every line. */
+  overflow: hidden;
   padding: 0;
   /* position: relative so the floating Comment button and any other
      absolutely-positioned children anchor to the scrollable content area
@@ -3135,6 +3163,20 @@ pre:hover .code-copy-btn {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  /* Keep the scrollbar's room reserved, so a scroll area that grows or
+     shrinks never changes the text width. Without it, a note that just
+     fitted gained and lost a scrollbar as the block handle hid and showed,
+     and every line rewrapped (reported as "selecting a word moves the
+     text"). */
+  scrollbar-gutter: stable;
+}
+/* Crepe hides the block handle with opacity only (data-show="false") and
+   leaves it parked where it extends the scroll area by its own height
+   (~52px). The scroll height then grew and shrank as the handle hid and
+   showed: empty space under the note after a selection, gone on the next
+   click. A hidden handle now takes no space at all. */
+.live-editor-crepe-root .milkdown-block-handle[data-show='false'] {
+  display: none;
 }
 .live-editor-crepe-root .milkdown {
   height: 100%;
@@ -3202,6 +3244,17 @@ pre:hover .code-copy-btn {
 }
 .live-editor-pane.handles-hidden .milkdown .ProseMirror {
   padding-left: 1rem;
+}
+
+/* While a mouse selection is dragged (LiveEditorCrepe adds .selecting), the
+   handle stays out of the way. Crepe animates it to the block under the
+   pointer, so mid-drag it slid up and down beside the selected text and the
+   text looked like it was jumping. No transition, so it does not fade out
+   while still moving; the gutter is kept, so the text does not move either. */
+.live-editor-pane.selecting .milkdown .milkdown-block-handle {
+  opacity: 0;
+  pointer-events: none;
+  transition: none;
 }
 
 .editor-wrapper .milkdown .ProseMirror h1 {
@@ -4472,6 +4525,27 @@ pre:hover .code-copy-btn {
 .release-notes-link:hover { opacity: 0.9; }
 
 /* ===== Conflict banner ===== */
+/* The conflict and restore notices float over the editor instead of taking a
+   row above it. As a row, each one pushed the whole document (and the caret)
+   down when it appeared and back up when it went, and it appeared far more
+   often than real conflicts did. A card in the corner says the same thing
+   without moving anything. */
+.floating-notice {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 900;
+  max-width: min(440px, calc(100vw - 32px));
+  flex-wrap: wrap;
+  border: 1px solid var(--warning-wash-3);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
+}
+.restore-banner.floating-notice { border-color: var(--accent-wash-3); }
+@media (max-width: 768px) {
+  .floating-notice { left: 12px; right: 12px; bottom: 12px; max-width: none; }
+}
+
 .conflict-banner {
   display: flex;
   align-items: center;
@@ -4859,6 +4933,31 @@ pre:hover .code-copy-btn {
   font-size: 0.82rem;
   margin-bottom: 8px;
 }
+.moveto-search {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 6px;
+  padding: 6px 10px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 0.85rem;
+}
+.moveto-search:focus { outline: none; border-color: var(--accent); }
+/* A search result: the folders above it are muted and give way first when
+   the row is too narrow, so the folder's own name is never the part cut off. */
+.moveto-name-path { display: flex; min-width: 0; }
+.moveto-parent {
+  color: var(--text-muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.moveto-leaf { flex: 0 0 auto; }
+
 .moveto-list {
   flex: 1;
   overflow-y: auto;
@@ -6304,7 +6403,10 @@ pre:hover .code-copy-btn {
 /* The ⋯ menu: on every screen size it holds theme, Settings and Manage
    users; on a phone it also takes everything the narrow bar cannot show
    (those entries carry .more-phone). */
-.toolbar-more { position: relative; }
+/* margin-left: auto keeps the ⋯ menu (and Settings in it) at the right edge
+   even on a row it had to wrap onto; on a single row the path's growth leaves
+   no free space, so this changes nothing there. */
+.toolbar-more { position: relative; margin-left: auto; }
 /* The menu drops below the bar, over the editor; the bar must be the higher
    layer on every screen size or the editor's own toolbar paints over the
    menu and swallows its clicks. */

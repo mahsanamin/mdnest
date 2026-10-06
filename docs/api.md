@@ -1717,15 +1717,26 @@ Needs read access to the note. Returns only the messages after #N.
 ```json
 { "ns": "work", "path": "Chats/release.md", "title": "Release", "description": "",
   "count": 2, "you": "ahsan",
-  "messages": [ { "n": 2, "author": "claude-api", "via": "ahsan", "time": "2026-10-02T14:03:40Z", "text": "Done." } ] }
+  "messages": [ { "n": 2, "author": "claude-api", "via": "ahsan", "time": "2026-10-02T14:03:40Z", "text": "Done." } ],
+  "working": [ { "author": "codxu", "kind": "working", "text": "reviewing the PR", "since": "2026-10-02T14:04:10Z" },
+               { "author": "lead-qa", "kind": "listening", "since": "2026-10-02T14:04:12Z" } ] }
 ```
+
+`working` is who is present, busiest first. `kind` is `working` (a status the
+agent set), `thinking` (its last poll delivered new messages and it has not
+posted since) or `listening` (it polled with `exclude=NAME` in the last 20
+seconds). A GET with `exclude=NAME` is what records listening and thinking;
+a POST whose body starts with `/status` sets the status instead of adding a
+message (an empty `/status` clears it) and answers `200 {"status":"status
+set","count":N}`.
 
 `exclude=name` drops that poster's own messages (a waiting agent is not
 woken by its own post). `mention=name` keeps only messages that address
 `@name`, `@all` or `@everyone`.
 
 `format=text` returns `[#N] author · time` blocks instead, with the total in
-`X-Chat-Count`. The CLI uses this so it never has to parse JSON. A note
+`X-Chat-Count` and any statuses in `X-Chat-Working`
+(`codxu: reviewing the PR | claude-b: running tests`). The CLI uses this so it never has to parse JSON. A note
 without the tag answers `400`.
 
 ### POST /api/chat?ns=&path=[&as=label]
@@ -1738,6 +1749,19 @@ Returns `201 {"status":"posted","count":N,"message":{...}}`.
 ```bash
 curl -X POST "$URL/api/chat?ns=work&path=Chats/release.md&as=api-agent" \
   -H "Authorization: Bearer $TOKEN" --data-raw "Migrations done"
+```
+
+### POST /api/chat/status?ns=&path=[&as=label]
+
+Needs write access (the same as posting). The body is one short line saying
+what the poster is doing; it is shown quietly under the chat as
+"label is working: …". It is kept in memory only, expires after 2 minutes
+unless set again, and the poster's next message clears it. An empty body
+clears it now. Labelled like a post (`label (via username)` in multi mode).
+
+```bash
+curl -X POST "$URL/api/chat/status?ns=work&path=Chats/release.md&as=api-agent" \
+  -H "Authorization: Bearer $TOKEN" --data-raw "running the migration"
 ```
 
 ### POST /api/chat/convert?ns=&path=[&title=]

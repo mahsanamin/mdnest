@@ -288,6 +288,26 @@ else
   echo "  SKIP cross-namespace move/copy (set MDNEST_TEST_NS2)"
 fi
 
+# ── chat: status ────────────────────────────────────────────────────────────
+# A working status shows in `chat read` (so an agent does not start a task
+# someone is already doing) and the poster's next message clears it. Skipped
+# when the server has chat turned off.
+echo "── chat status ──"
+CHAT="$ROOT/Chats/smoke.md"
+if m chat new "$CHAT" "Smoke" >/dev/null 2>&1; then
+  assert_succeeds "chat status sets a working line" -- m chat status "$CHAT" "reviewing the PR" --as smoke-agent
+  assert_contains "chat read shows who is working" "working now: smoke-agent: reviewing the PR" "$(m chat read "$CHAT" 2>&1)"
+  m chat post "$CHAT" "done" --as smoke-agent >/dev/null 2>&1
+  case "$(m chat read "$CHAT" 2>&1)" in
+    *"working now:"*) bad "posting clears the poster's status" "still shown after the post" ;;
+    *) ok "posting clears the poster's status" ;;
+  esac
+  assert_fails "chat status without text is a usage error" -- m chat status "$CHAT" --as smoke-agent
+  assert_succeeds "chat status --clear" -- m chat status "$CHAT" --clear --as smoke-agent
+else
+  echo "  SKIP chat status (chat is off on this server)"
+fi
+
 # ── Summary ─────────────────────────────────────────────────────────────────
 echo
 echo "=== $((PASS+FAIL)) checks: $(green "$PASS passed"), $([ "$FAIL" -gt 0 ] && red "$FAIL failed" || echo "0 failed") ==="

@@ -128,24 +128,16 @@ selected.
 
 ### Context Menu
 
-Right-click (desktop) or long-press (mobile) on any folder in the tree to open a context menu with options to:
+Right-click (desktop) or long-press (mobile) on a file or folder in the tree. The menu shows the item's name at the top, then its actions in groups, always in the same order:
 
-- Create a new note inside that folder
-- Create a new subfolder
-- Rename the folder
-- **Move to…** -- pick a destination folder from a touch-friendly list (added v3.8.0), now in this namespace or another one. Useful on mobile, where HTML5 drag-and-drop is disabled.
-- **Copy to…** -- the same picker, keeping the original
-- **Download as zip** -- the folder and everything in it, keeping its folders
-- **Paste here** -- create a note copied with "Copy for another mdnest"
-- Delete the folder and its contents
+- **New note / New folder / New drawing / New chat, Paste here** (folders and the namespace root) -- create inside that folder. **Paste here** creates a note copied with "Copy for another mdnest".
+- **Rename, Move to…, Copy to…** -- renaming a file without an extension keeps the original one (`notes.md` renamed to `summary` becomes `summary.md`). **Move to…** and **Copy to…** open one picker for a namespace, a folder and a name; it is touch-friendly, which matters on mobile, where drag-and-drop is off.
+- **Download** (a file) or **Download as zip** (a folder, keeping its folders), **Copy for another mdnest** (notes), **Copy path for CLI** (an `mdnest://` address the CLI and agents accept)
+- **History** and, in multi-user mode, **Authors** (files)
+- **Manage access** (admins, on folders and the root)
+- **Delete** -- always last, on its own, in red
 
-Right-click or long-press on a file to:
-
-- Rename the file -- if you don't type an extension, the original one is preserved (so renaming `notes.md` to `summary` becomes `summary.md`).
-- **Move to…** / **Copy to…** -- pick a namespace, a folder and a name. Same picker as the folder context menu.
-- **Download** -- save the file
-- **Copy for another mdnest** -- put the note on the clipboard for **Paste here** on another mdnest
-- Delete the file
+Actions you have no right to (for example Rename on a read-only folder) are not shown.
 
 ---
 
@@ -490,9 +482,8 @@ See **[Task Model](tasks.md)** for the exact markdown a task compiles to, and th
 **Chats** in the toolbar lists the chats in the current workspace (a picker
 switches workspace). Chat is on by default; `ENABLE_CHAT=false` turns it off. A chat is just a note tagged `mdnest-chat: true`, and each
 message is appended to it, so people here and agents using `mdnest chat`
-talk in the same file. Create one with **+ New**, or right-click a note →
-**Make it a chat** (the note stays where it is, and its content becomes the
-channel description). **Connect an agent** gives a ready-to-paste prompt for
+talk in the same file. Create one with **+ New**, or right-click a folder →
+**New chat**. **Connect an agent** gives a ready-to-paste prompt for
 Claude Code, Codex or any agent with a shell. Type `@` to mention someone. Details: [chat.md](chat.md).
 
 ## Image Upload
@@ -528,7 +519,7 @@ The move happens within the same namespace. Cross-namespace moves are not suppor
 
 ## Moving, copying and downloading *(v4.7.0+)*
 
-**Move to…** and **Copy to…** (right-click, or long-press on a phone) open one picker. Choose a namespace, a folder, and the name it should have there.
+**Move to…** and **Copy to…** (right-click, or long-press on a phone) open one picker. Choose a namespace, a folder, and the name it should have there. With many folders, type in **Search folders…** above the list: every word you type must appear in the folder's path (so `proj api` finds `Projects/backend/api`), results show their full path, and Enter picks the top one.
 
 - **+ New folder** adds a folder to the list, under the folder you selected. It is created only when you confirm, so cancelling leaves nothing behind.
 - For a folder, the picker says how much will move before you confirm, for example "move 37 files (12 MB)", and warns when a folder is large. While it runs, it shows how long it has been going. A large move finishes on the server even if you close the window. While you choose, mdnest checks the destination with the server and tells you before you confirm:

@@ -4,6 +4,193 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v4.8.0: Steadier shared editing, agents that show what they are doing
+
+Shared editing is calmer: your cursor stays put while someone else types, no
+false "modified by another user" warnings, no phantom "X is typing", and the
+last words you type always reach the server. Agents in a chat show whether
+they are listening, thinking or working, with no CLI update, and can be given
+a role and a job when you connect them. Also folder search in Move to and Copy
+to, a tidier right-click menu, a roomier and faster chat window, and fixes for
+selection flicker, Mermaid label colours and Settings slipping out of view.
+
+### Added
+
+- **Role templates in Connect an agent.** Main Leader, Spec Expert, Analyzer,
+  Lead Coder, Coder, Lead QA and QA. Picking one fills a suggested name and a
+  one-line trait (both editable) that goes into the prompt. Lead Coder and
+  Lead QA start helper agents as their own sub-agents, who join the same chat
+  and leave when their lead says they are done; the prompt now says when an
+  agent may leave.
+- **Twelve more reaction images**: question, heart, laugh, clap, fire, rocket,
+  bug, idea, warning, sad, thanks and hourglass, animated like the first
+  eight. `question` is the signal an agent posts when it is waiting for a
+  human, so you can see where you are needed.
+- **A shorter, clearer Connect an agent prompt.** Three parts (Join, Loop, How
+  to behave). It tells the agent to read the chat once, which saves its
+  place, and then only wait for what is new instead of re-reading the whole
+  chat; to set a working status before longer work; to ask a human with
+  `@name` plus the question image; to answer only what is addressed to it or
+  is its part and not repeat what another agent already said; and that emoji
+  and reaction images are fine.
+- **See what agents in a chat are doing, with no CLI update.** The chat
+  window shows one quiet line above the message box: "codxu is working:
+  reviewing the PR · 3 min", "codxu is thinking", "lead-qa and qa-1 are
+  listening". Listening and thinking are worked out by the server from the
+  polls every `mdnest chat wait --as NAME` already makes (any CLI since chat
+  shipped, and MCP `wait_chat`): polling means listening, and a poll that
+  delivered new messages means thinking until the agent posts. An agent says
+  what it is working on by posting `/status reviewing the PR` with the
+  ordinary `chat post`; the server handles it and never adds it to the chat.
+  Agent behaviours are built this way on purpose, inferred from existing
+  calls or a slash command in a post, so new ones need no CLI update. The
+  line keeps its height so the conversation never jumps, your own presence is
+  not shown back to you, and `chat read` lists who is busy. In memory only;
+  a status lasts 2 minutes unless repeated, and the agent's next post clears
+  it. Also `POST /api/chat/status`, `mdnest chat status` and the MCP tool
+  `set_chat_status`.
+- **Search in Move to… and Copy to….** The folder picker has a search box,
+  focused when it opens. Every word you type must appear in the folder's
+  path, so `proj api` finds `Projects/backend/api`. Results show their full
+  path, exact names come first, and Enter picks the top match. Finding a
+  destination no longer means scrolling a long tree.
+- **Connect an agent: say what the agent is for.** Under the agent's name
+  there is now a box for what it should do in this chat. The text goes into
+  the prompt as "Your job in this chat", the same way the name does, so the
+  agent starts with its task instead of asking for one. The panel also has a
+  close button, and Esc closes it.
+- **Agents get a thumbnail nobody else has.** `mdnest chat avatar --pick auto`
+  takes the first built-in avatar that no one else in the workspace is
+  wearing (and shares one, saying so, only when all are taken). The agent
+  prompt now uses it, so several agents in one chat no longer all show up as
+  the robot. The MCP tool `set_chat_avatar` takes `pick: "auto"` too.
+  `tests/cli-chat-avatar-auto.sh` and `mcp-server/test_avatar.mjs` pin it.
+
+### Changed
+
+- **The right-click menu is arranged in groups.** It shows the item's name at
+  the top, then: create (New note, folder, drawing, chat, Paste here), organize
+  (Rename, Move to…, Copy to…), share (Download, Copy for another mdnest, Copy
+  path for CLI), info (History, Authors), admin (Manage access), and Delete last on its
+  own in red. Every item has an icon. Before, Delete sat in the middle of the
+  file menu and the copy actions were split up. Authors is now offered only in
+  multi-user mode, where it works, and "Make it a chat" is gone: a chat is made
+  with New chat. "Copy path" is now "Copy path for CLI": it copies an
+  `mdnest://` address for the CLI and agents, which the old name did not say.
+  The order is pinned in `contextMenuItems.test.js`.
+
+### Fixed
+
+- **Security: dependency updates.** New advisories (one critical, several
+  high) in the MCP server's and the frontend's dependencies, including the
+  MCP SDK (now 1.32.1), fixed with in-range updates. Both pass `npm audit --audit-level=high`.
+- **Your cursor stays put while someone else types.** A collaborator's live
+  typing or save replaced the whole document in the Live editor, which threw
+  your cursor to the end of the note, and the view scrolled down after it.
+  Their changes are now applied as the smallest changed part, so your cursor
+  and scroll stay where they were (shifting only if text above them changed),
+  and their edits stay out of your undo history. The diff ignores the heading
+  ids the editor adds after loading; with them the first heading always
+  looked changed.
+- **Live collaboration connects on a page opened straight onto a note.** If
+  the server settings arrived after the note opened, the page never
+  connected for that note (no presence or live updates) until you switched
+  notes. Pinned, with the cursor fix, in
+  `tests/browser/live-remote-keeps-cursor.spec.js`, which stands in for the
+  collaboration socket.
+- **"X is typing" only when X is typing, and no saves from an idle editor.**
+  When a collaborator's live typing or save reached a note open in the Live
+  editor, the editor reported the new text back as if its own user had typed
+  it (its change reports are debounced and arrived after the "not the user"
+  flag was cleared). So the idle side broadcast live text, and the other
+  person saw "X is typing" while X sat still, and it autosaved with an old
+  version, which the server rejected: another source of the false conflict
+  notice. The editor now drops the report of a document it was handed, text
+  equal to what is already saved is never broadcast or saved, and a rejected
+  save that only lagged behind text it had already seen is saved again
+  quietly. Pinned in `tests/browser/live-reload-echo.spec.js`; checked with
+  two editors on a shared note.
+- **No more false "modified by another user" warnings, and no lost last
+  words.** Two autosaves could overlap on a slow link: the second left before
+  the first returned, with the same version, and the server rejected it. On a
+  remote server every second save failed, the warning appeared with nobody
+  else editing, and when the last save was the rejected one the final words
+  never reached the server. Saves now run one at a time, and a rejected save
+  first checks whether the server already holds the same text before warning.
+- **The conflict and restore notices float in the corner.** They used to be
+  a row above the editor that pushed the whole document down when they
+  appeared. Pinned in `tests/browser/autosave-conflict.spec.js`.
+- **Selecting text with comments on no longer makes the note flicker.** On a
+  server with live collaboration, selecting shows a Comment button. It was
+  positioned by adding the editor's scroll offset to a box that does not
+  scroll, so in a scrolled note it landed far below the screen. That box then
+  grew a scrollbar, the editor lost about 8 px of width and every line
+  rewrapped, then snapped back when the button went away. The button now sits
+  just under the selection, moves with the text as you scroll, and the box
+  around the editor can no longer scroll. Found with the reporter's own
+  console trace; pinned in `tests/browser/live-select-scroll.spec.js`.
+- **Typing in a chat is fast again.** Every keystroke re-rendered every
+  message in the conversation (markdown and sanitizing), so a long chat
+  lagged: about 66 ms a key with 300 messages. The conversation now renders
+  only when its messages change, and a key paints in one frame.
+- **Grammar-checking extensions stay off mdnest's editors.** The Live and
+  Basic editors, the chat box, comments, Mermaid source, stickies and task
+  notes carry the attributes Grammarly and similar tools honour, so their
+  overlays no longer sit on top of the editing surface. The browser's own
+  spell-check is unaffected.
+- **Selecting text in the Live editor no longer moves it or adds empty space
+  under the note.** Crepe hides its block handle (the "+" and grip beside
+  each block) by making it transparent, but leaves it parked where it makes
+  the scroll area about 52 px taller. As the handle hid and showed (a
+  selection, the next click) the scroll area grew and shrank, and on a note
+  that just fitted a scrollbar came and went, so every line rewrapped. A
+  hidden handle now takes no space, and the editor keeps room for its
+  scrollbar so the text width never changes. Pinned in
+  `tests/browser/live-select-scroll.spec.js`, which turns on real scrollbars.
+- **Right-click works on a chat in the chat list.** It opened the browser's
+  own menu; it now shows mdnest's, with Open as note, Copy path for CLI and
+  Delete chat. Deleting a chat from the list no longer closes a different
+  chat you have open.
+- **A roomier chat message box.** The composer is one box in the style of
+  Slack: the text area spans the full width and grows with what you type,
+  wrapped lines included (it used to grow only on Shift+Enter, so a long
+  message scrolled out of sight), and the posting name, GIF and Send sit in
+  a bar inside it. Message text is a little larger with more line spacing.
+- **The chat's GIF picker shows its images whole.** In a short window the
+  picker was squashed to a thin strip that cut every image in half; the
+  message list now gives up the room instead. Pinned in `chat.spec.js`.
+- **Mermaid labels keep their colour when you zoom or open full screen.** A
+  label on a dark node (white text in light mode) turned dark-on-dark after a
+  zoom click, and always in the full-screen viewer. The colours are now
+  re-applied after every redraw, and the viewer's sanitized copy, whose label
+  wrappers are stripped, is coloured too. Edge labels keep the normal ink.
+  Pinned in `tests/browser/mermaid-zoom-color.spec.js`.
+- **`mdnest chat wait` no longer stops listening after one failed poll.** A
+  dropped connection, an empty reply, a timeout or a proxy's 502/503/504
+  (what a server restart looks like from the client) used to exit 1 at once,
+  so an agent waiting on a chat silently stopped hearing it. `wait` now
+  retries those with a growing pause (up to 30 s) until `--timeout`, says
+  when it starts retrying and when the server is back, and exits 1 only on a
+  real error (401, 404, bad host) or a server that stays down. Other commands
+  keep their exit codes. `tests/cli-chat-wait-retry.sh` pins it against a
+  fake backend and runs in the pre-push hook.
+- **The ⋯ menu (and Settings in it) stays in the top-right corner.** A long
+  note name, a wider sidebar or the stickies panel made the toolbar wrap, and
+  the ⋯ menu dropped to a second or third row on the left, so Settings seemed
+  to disappear on some screen sizes. The note path now has a fixed starting
+  width and shortens with "…" instead of wrapping the row, and the ⋯ menu
+  keeps to the right edge on any row it does wrap onto. Pinned in
+  `tests/browser/toolbar-fit.spec.js`.
+- **Selecting text in the Live editor no longer sets the gutter handle
+  sliding.** The "+" and drag handle beside each block follows the mouse and
+  animates there, so during a drag selection it glided up and down next to the
+  selected text, which looked like the text was jumping. It is now hidden
+  while the mouse button is held for a selection and comes back on the next
+  hover. Dragging a block by its handle is unchanged. Pinned in
+  `tests/browser/live-select-handle.spec.js`.
+
+---
+
 ## v4.7.0 — Move, copy and download across workspaces
 
 Move and copy notes and folders between namespaces, download a file or a

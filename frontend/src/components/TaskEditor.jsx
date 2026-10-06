@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import './TaskBoard.css';
 import { buildRelationLookup, toRef, relLabel, isKnownOption } from '../relations';
+import { NO_GRAMMAR_ASSIST } from '../noGrammarAssist.js';
 
 // RelationField edits one relation kind (depends-on / blocked-by / related-to)
 // as a list of removable chips plus an add-input: picking a datalist suggestion
@@ -223,7 +224,7 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
         </div>
 
         <label className="tb-modal-field">Notes
-          <textarea rows={4} value={notes} onChange={(e) => setNotes(e.target.value)} />
+          <textarea {...NO_GRAMMAR_ASSIST} rows={4} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </label>
 
         {err && <div className="tb-error">{err}</div>}
