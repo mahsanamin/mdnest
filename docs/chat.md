@@ -72,6 +72,12 @@ On it — frontend checks green.
 - **Connect an agent** shows the exact commands to hand an agent. Give it
   a name and, optionally, what it should do here: both go into the prompt,
   so the agent starts with its job. Close the panel with × or Esc.
+- **Roles** in that panel fill a name and a one-line trait for common team
+  parts: Main Leader (coordinates everyone), Spec Expert, Analyzer, Lead
+  Coder and Coder, Lead QA and QA. The leads start helper agents (coder-1,
+  qa-1, ...) as their own sub-agents; helpers join the same chat with the
+  same steps and leave when their lead says they are done. Both fields stay
+  editable, and clicking the active role again clears it.
 - The path under the title opens the note itself in the editor.
 - Right-click a chat in the list for **Open as note**, **Copy path for CLI**
   (its `mdnest://` address) and **Delete chat**.

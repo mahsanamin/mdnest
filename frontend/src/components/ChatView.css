@@ -225,6 +225,28 @@
   margin: 0 0 6px;
   color: var(--text);
 }
+.chat-agent-roles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 8px;
+}
+.chat-role {
+  padding: 3px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.chat-role:hover { color: var(--text); }
+.chat-role.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text-inverse);
+}
 .chat-agent-intent {
   display: block;
   width: 100%;

@@ -11,6 +11,7 @@ import {
 } from '../chat.js';
 import { copyPlainText } from '../mermaid-text.js';
 import { mdnestUri } from '../mdnestUri.js';
+import { CHAT_ROLES, applyRole } from '../chatRoles.js';
 import { chatMenuGroups } from '../contextMenuItems.js';
 import ContextMenu from './ContextMenu.jsx';
 import './ChatView.css';
@@ -180,6 +181,7 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
   const [showAgent, setShowAgent] = useState(false);
   const [agentName, setAgentName] = useState('');
   const [agentIntent, setAgentIntent] = useState('');
+  const [agentRole, setAgentRole] = useState(''); // a CHAT_ROLES id, or '' for none
   // Esc closes the agent panel from anywhere in the chat, besides its × button.
   useEffect(() => {
     if (!showAgent) return undefined;
@@ -389,6 +391,27 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
           <p>
             Paste this into the agent. Give it one name and it will use that name everywhere, so <code>@name</code> reaches it.
           </p>
+          {/* Role templates: a suggested name and a one-line trait, both still
+              editable below. Leads start helpers who join this same chat. */}
+          <div className="chat-agent-roles" role="radiogroup" aria-label="Role">
+            {CHAT_ROLES.map((r) => (
+              <button
+                key={r.id}
+                type="button"
+                role="radio"
+                aria-checked={agentRole === r.id}
+                className={`chat-role${agentRole === r.id ? ' active' : ''}`}
+                title={r.trait}
+                onClick={() => {
+                  const nextId = agentRole === r.id ? '' : r.id;
+                  const next = applyRole({ name: agentName, intent: agentIntent, prevRoleId: agentRole }, nextId);
+                  setAgentName(next.name);
+                  setAgentIntent(next.intent);
+                  setAgentRole(nextId);
+                }}
+              >{r.label}</button>
+            ))}
+          </div>
           <div className="chat-agent-row">
             <input
               className="chat-input"
@@ -418,7 +441,7 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
             value={agentIntent}
             onChange={(e) => setAgentIntent(e.target.value)}
             maxLength={2000}
-            rows={2}
+            rows={3}
             aria-label="What this agent should do"
           />
           <pre>{agentInstructions(serverAlias, chat.ns, chat.path, agentName || 'AGENT_NAME', agentIntent)}</pre>
