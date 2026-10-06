@@ -339,3 +339,43 @@ test('a role template fills the agent name and its trait into the prompt', async
     await cleanup(page, plain, chat);
   }
 });
+
+test('typing stays fast in a long chat', async ({ page }) => {
+  test.setTimeout(240_000);
+  await signIn(page);
+  const chat = `__chat-lag-${Date.now()}.md`;
+  await page.evaluate(async ([ns, p]) => {
+    const h = { Authorization: 'Bearer ' + localStorage.getItem('mdnest_token') };
+    await fetch(`/api/chat/convert?ns=${ns}&path=${encodeURIComponent(p)}&title=Lag`, { method: 'POST', headers: h });
+    const body = 'Here is **some** markdown with `code`, a [link](https://example.com), a list:\n\n- one\n- two\n\n```js\nconst x = 1;\n```\n\n![nod](gif:nod) @ahsan please check.';
+    for (let i = 0; i < 300; i++) await fetch(`/api/chat?ns=${ns}&path=${encodeURIComponent(p)}&as=agent-${i % 3}`, { method: 'POST', headers: h, body: `#${i} ` + body });
+  }, [NS, chat]);
+  await page.goto(`/#!chats/${NS}/${chat}`);
+  await expect(page.locator('.chat-bubble').nth(250)).toBeAttached({ timeout: 30_000 });
+  const box = page.locator('textarea.chat-draft');
+  await box.click();
+  // time from keydown to the next painted frame, per key
+  const times = await page.evaluate(async () => {
+    const el = document.querySelector('textarea.chat-draft');
+    const out = [];
+    for (const ch of 'the quick brown fox jumps over the lazy dog') {
+      const t0 = performance.now();
+      el.focus();
+      // simulate a real keystroke through React's onChange
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
+      setter.call(el, el.value + ch);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+      out.push(performance.now() - t0);
+    }
+    return out;
+  });
+  times.sort((a, b) => a - b);
+  const median = times[Math.floor(times.length / 2)];
+  // Each key used to re-render every message (marked + DOMPurify): a median
+  // of ~66ms with 300 messages. Now typing only touches the text box and a
+  // key paints in one frame (~17ms). 40ms leaves room for a slow machine and
+  // still fails the old behaviour.
+  expect(median, `median ms per key: ${median.toFixed(1)}`).toBeLessThan(40);
+  await page.evaluate(async ([ns, p]) => { await fetch(`/api/note?ns=${ns}&path=${encodeURIComponent(p)}`, { method: 'DELETE', headers: { Authorization: 'Bearer ' + localStorage.getItem('mdnest_token') } }); }, [NS, chat]);
+});
