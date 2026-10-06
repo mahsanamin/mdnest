@@ -562,12 +562,34 @@ export default function LiveEditorCrepe({
   // selection gesture that originated inside the editor, otherwise a
   // sidebar click that programmatically sets a selection would pop the
   // button at random positions.
+  // Position: the button is absolutely placed in .live-editor-wrapper, which
+  // does NOT scroll; the Crepe root inside it does. So the offset is the
+  // selection's on-screen position relative to the wrapper, with no scrollTop
+  // added. Adding the root's scrollTop (as this once did) put the button
+  // thousands of px down in a scrolled note: the wrapper overflowed, grew a
+  // scrollbar, the editor lost its width and every line rewrapped, then
+  // snapped back when the button went away (the selection "flicker"). The
+  // button is kept inside the wrapper, and re-placed as the editor scrolls.
+  const popupPosition = useCallback((view, end) => {
+    const root = rootRef.current;
+    const wrapper = root?.parentElement;
+    if (!root || !wrapper) return null;
+    const coords = view.coordsAtPos(end);
+    const wr = wrapper.getBoundingClientRect();
+    const rr = root.getBoundingClientRect();
+    if (coords.bottom < rr.top || coords.top > rr.bottom) return { hidden: true, top: 0, left: 0 };
+    const BTN_H = 32;
+    const top = Math.max(0, Math.min(coords.top - wr.top + 20, wrapper.clientHeight - BTN_H));
+    const left = Math.max(0, Math.min(coords.left - wr.left, wrapper.clientWidth - 120));
+    return { hidden: false, top, left };
+  }, []);
+
   useEffect(() => {
-    if (!innerEditor || !onComment) return;
+    if (!innerEditor || !onComment) return undefined;
     const checkSelection = (e) => {
-      const wrapper = rootRef.current;
-      if (!wrapper) return;
-      if (e && e.target && !wrapper.contains(e.target)) return;
+      const root = rootRef.current;
+      if (!root) return;
+      if (e && e.target && !root.contains(e.target)) return;
       try {
         innerEditor.action((ctx) => {
           const view = ctx.get(editorViewCtx);
@@ -575,25 +597,36 @@ export default function LiveEditorCrepe({
           if (to - from < 3) { setSelectionPopup(null); return; }
           const selectedText = view.state.doc.textBetween(from, to, ' ');
           if (!selectedText.trim()) { setSelectionPopup(null); return; }
-          const coords = view.coordsAtPos(to);
-          const rect = wrapper.getBoundingClientRect();
-          setSelectionPopup({
-            top: coords.top - rect.top + wrapper.scrollTop + 20,
-            left: Math.min(coords.left - rect.left, rect.width - 120),
-            text: selectedText,
-            start: from,
-            end: to,
-          });
+          const pos = popupPosition(view, to);
+          if (!pos) return;
+          setSelectionPopup({ ...pos, text: selectedText, start: from, end: to });
         });
       } catch { /* not ready */ }
     };
+    // Keep the button beside its text while the editor scrolls.
+    const onScroll = () => {
+      setSelectionPopup((cur) => {
+        if (!cur) return cur;
+        let next = cur;
+        try {
+          innerEditor.action((ctx) => {
+            const pos = popupPosition(ctx.get(editorViewCtx), cur.end);
+            if (pos) next = { ...cur, ...pos };
+          });
+        } catch { /* editor torn down */ }
+        return next;
+      });
+    };
+    const root = rootRef.current;
     document.addEventListener('mouseup', checkSelection);
     document.addEventListener('keyup', checkSelection);
+    root?.addEventListener('scroll', onScroll, { passive: true });
     return () => {
       document.removeEventListener('mouseup', checkSelection);
       document.removeEventListener('keyup', checkSelection);
+      root?.removeEventListener('scroll', onScroll);
     };
-  }, [innerEditor, onComment]);
+  }, [innerEditor, onComment, popupPosition]);
 
   // Hide the block handle while a mouse selection is being dragged. Crepe
   // animates the handle (`transition: all 0.2s`) to whichever block is under
@@ -858,7 +891,7 @@ export default function LiveEditorCrepe({
       {!readOnly && <LiveToolbar editor={innerEditor} handlesHidden={handlesHidden} onToggleHandles={toggleHandles} />}
       <div className="live-editor-wrapper" style={{ position: 'relative', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
         <div ref={rootRef} className="live-editor-crepe-root" />
-        {selectionPopup && onComment && (
+        {selectionPopup && !selectionPopup.hidden && onComment && (
           <button
             className="comment-selection-btn"
             style={{ top: selectionPopup.top, left: selectionPopup.left }}

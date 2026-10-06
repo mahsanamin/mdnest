@@ -79,3 +79,57 @@ test('the hidden block handle does not change the scroll area or the text width'
   expect(await width(), 'paragraph width after selecting a word').toBe(before);
   expect(await scroll(page), 'scroll area after selecting a word').toEqual({ sh: shown.sh, cw: shown.cw });
 });
+
+// With comments on (live collaboration), selecting shows a "Comment" button.
+// It was placed by adding the editor's scrollTop to a position in a box that
+// does not scroll, so in a scrolled note it landed thousands of px down: the
+// box grew a scrollbar, the editor lost ~8px of width and every line
+// rewrapped, then snapped back when the button went (the selection
+// "flicker"). Comments need multi mode, so the config is reported with
+// liveCollab on; the button itself is purely client-side.
+test('the Comment button lands beside the selection in a scrolled note, and nothing rewraps', async ({ page }) => {
+  await page.route('**/api/config', async (route) => {
+    const r = await route.fetch();
+    const j = await r.json();
+    await route.fulfill({ response: r, json: { ...j, liveCollab: true } });
+  });
+  let long = '# Long\n\n';
+  for (let i = 0; i < 60; i++) long += `Paragraph ${i}: the items are priced in different supplier currencies.\n\n`;
+  await api(page, 'PUT', FILE, long);
+  await page.goto(`/#${NS}/${FILE}`);
+  // The config was read at sign-in; a hash change does not re-read it.
+  await page.reload();
+  await page.click('.toolbar button[title="Live rich editor"]');
+  await expect(page.locator('.live-editor-crepe-root p').nth(50)).toBeAttached({ timeout: 20_000 });
+  await page.evaluate(() => { document.querySelector('.live-editor-crepe-root').scrollTop = 1200; });
+  await page.waitForTimeout(300);
+
+  const sizes = () => page.evaluate(() => {
+    const w = document.querySelector('.live-editor-wrapper');
+    const r = document.querySelector('.live-editor-crepe-root');
+    return { wrapperScroll: w.scrollHeight, wrapperView: w.clientHeight, rootWidth: r.clientWidth };
+  });
+  const before = await sizes();
+  const sel = await page.evaluate(() => {
+    const rr = document.querySelector('.live-editor-crepe-root').getBoundingClientRect();
+    const p = [...document.querySelectorAll('.live-editor-crepe-root p')].find((e) => e.getBoundingClientRect().top > rr.top + 200);
+    const t = p.firstChild; const i = t.textContent.indexOf('priced');
+    const r = document.createRange(); r.setStart(t, i); r.setEnd(t, i + 6);
+    const b = r.getBoundingClientRect();
+    return { x: b.left, y: b.top + b.height / 2, w: b.width, bottom: b.bottom };
+  });
+  await page.mouse.move(sel.x + 1, sel.y);
+  await page.mouse.down();
+  await page.mouse.move(sel.x + sel.w - 1, sel.y, { steps: 4 });
+  await page.mouse.up();
+
+  const btn = page.locator('.comment-selection-btn');
+  await expect(btn).toBeVisible({ timeout: 5_000 });
+  const top = (await btn.boundingBox()).y;
+  // Just under the selected word, not somewhere down the page.
+  expect(top, `button top ${top} vs selection bottom ${sel.bottom}`).toBeGreaterThanOrEqual(sel.bottom - 4);
+  expect(top).toBeLessThan(sel.bottom + 60);
+  const after = await sizes();
+  expect(after.wrapperScroll, 'the box around the editor must not become scrollable').toBe(after.wrapperView);
+  expect(after.rootWidth, 'the editor keeps its width (no rewrap)').toBe(before.rootWidth);
+});
