@@ -318,6 +318,40 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
   };
 
   const grouped = useMemo(() => groupMessages(messages), [messages]);
+  // The conversation, built only when the messages (or who "you" are) change.
+  // Rendering it on every keystroke ran marked + DOMPurify over every message
+  // in the chat, which made typing lag (~66ms a key with 300 messages).
+  const messageList = useMemo(() => (
+    <>
+        {doc?.description && <div className="chat-description" dangerouslySetInnerHTML={{ __html: renderMessage(doc.description, chat.ns, gifs) }} />}
+        {!doc && !error && <div className="chat-empty">Loading…</div>}
+        {doc && messages.length === 0 && <div className="chat-empty">No messages yet — say hello.</div>}
+        {grouped.map((m) => {
+          const own = isOwnMessage(m, account, effectiveAs);
+          const forMe = !own && mentionsName(m.text, effectiveAs);
+          return (
+            <div key={m.n} className={`chat-msg${own ? ' own' : ''}${forMe ? ' mentions-me' : ''}${m.startsGroup ? ' first' : ''}`}>
+              {m.startsGroup && (
+                <div className="chat-msg-meta">
+                  {(() => {
+                    // Everyone gets a thumbnail: their avatar if they set one,
+                    // else their initial in their name colour.
+                    const av = avatarFor(gifs, m.author);
+                    return av
+                      ? <img className="chat-avatar" src={gifUrl(chat.ns, av)} alt="" loading="lazy" />
+                      : <span className="chat-avatar chat-avatar-initial" style={{ background: `var(${colorForAuthor(m.author)})` }} aria-hidden="true">{initialOf(m.author)}</span>;
+                  })()}
+                  <span className="chat-msg-author" style={{ color: `var(${colorForAuthor(m.author)})` }}>{m.author}</span>
+                  {m.via && <span className="chat-msg-via">via {m.via}</span>}
+                  <span className="chat-msg-time" title={m.time}>{formatChatTime(m.time)}</span>
+                </div>
+              )}
+              <div className="chat-bubble" dangerouslySetInnerHTML={{ __html: renderMessage(m.text, chat.ns, gifs) }} />
+            </div>
+          );
+        })}
+    </>
+  ), [doc, error, messages.length, grouped, gifs, chat.ns, account, effectiveAs]);
   // @-completion: while the word at the caret starts with @, offer the
   // people in this chat (plus @all), most recent first.
   const query = mentionQuery(draft, caret);
@@ -450,33 +484,7 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
       )}
 
       <div className="chat-messages" ref={scrollRef} onScroll={onScroll}>
-        {doc?.description && <div className="chat-description" dangerouslySetInnerHTML={{ __html: renderMessage(doc.description, chat.ns, gifs) }} />}
-        {!doc && !error && <div className="chat-empty">Loading…</div>}
-        {doc && messages.length === 0 && <div className="chat-empty">No messages yet — say hello.</div>}
-        {grouped.map((m) => {
-          const own = isOwnMessage(m, account, effectiveAs);
-          const forMe = !own && mentionsName(m.text, effectiveAs);
-          return (
-            <div key={m.n} className={`chat-msg${own ? ' own' : ''}${forMe ? ' mentions-me' : ''}${m.startsGroup ? ' first' : ''}`}>
-              {m.startsGroup && (
-                <div className="chat-msg-meta">
-                  {(() => {
-                    // Everyone gets a thumbnail: their avatar if they set one,
-                    // else their initial in their name colour.
-                    const av = avatarFor(gifs, m.author);
-                    return av
-                      ? <img className="chat-avatar" src={gifUrl(chat.ns, av)} alt="" loading="lazy" />
-                      : <span className="chat-avatar chat-avatar-initial" style={{ background: `var(${colorForAuthor(m.author)})` }} aria-hidden="true">{initialOf(m.author)}</span>;
-                  })()}
-                  <span className="chat-msg-author" style={{ color: `var(${colorForAuthor(m.author)})` }}>{m.author}</span>
-                  {m.via && <span className="chat-msg-via">via {m.via}</span>}
-                  <span className="chat-msg-time" title={m.time}>{formatChatTime(m.time)}</span>
-                </div>
-              )}
-              <div className="chat-bubble" dangerouslySetInnerHTML={{ __html: renderMessage(m.text, chat.ns, gifs) }} />
-            </div>
-          );
-        })}
+        {messageList}
       </div>
 
       {error && <div className="chat-error chat-room-error">{error}</div>}

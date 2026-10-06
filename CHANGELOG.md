@@ -67,6 +67,10 @@ All notable changes to mdnest are documented here.
 
 ### Fixed
 
+- **Typing in a chat is fast again.** Every keystroke re-rendered every
+  message in the conversation (markdown and sanitizing), so a long chat
+  lagged: about 66 ms a key with 300 messages. The conversation now renders
+  only when its messages change, and a key paints in one frame.
 - **Grammar-checking extensions stay off mdnest's editors.** With Grammarly
   (or a tool that copies its convention) attached to the Live editor,
   selecting a word made the text rewrap and added empty scroll space under the
