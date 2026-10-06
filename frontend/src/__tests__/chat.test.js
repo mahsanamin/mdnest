@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   slugify, chatPathFor, colorForAuthor, AUTHOR_COLORS, isOwnMessage,
-  groupMessages, mergeMessages, agentInstructions, plainPreview, shellQuote, isChatDoc,
+  groupMessages, mergeMessages, agentInstructions, workingLine, plainPreview, shellQuote, isChatDoc,
   mentionsName, highlightMentions, participants, mentionQuery, completeMention,
   avatarFor, reactions, gifMarkdown, expandGifRefs, initialOf,
 } from '../chat.js';
@@ -211,5 +211,31 @@ describe('thumbnails', () => {
     expect(initialOf('Batooli')).toBe('B');
     expect(initialOf('_codu')).toBe('C');
     expect(initialOf('')).toBe('?');
+  });
+});
+
+describe('working line', () => {
+  const now = Date.parse('2026-10-06T10:05:30Z');
+  const w = (author, text, since, via) => ({ author, text, since, ...(via ? { via } : {}) });
+  it('names who is working on what, with minutes once it runs long', () => {
+    const line = workingLine([w('codxu', 'reviewing the PR', '2026-10-06T10:02:00Z')], 'ahsan', 'ahsan', now);
+    expect(line.text).toBe('codxu is working: reviewing the PR · 3 min');
+  });
+  it('no minutes in the first minute', () => {
+    expect(workingLine([w('codxu', 'thinking', '2026-10-06T10:05:00Z')], 'ahsan', 'ahsan', now).text).toBe('codxu is working: thinking');
+  });
+  it('leaves out your own status and is null when nobody else works', () => {
+    expect(workingLine([w('ahsan', 'typing', '2026-10-06T10:05:00Z')], 'ahsan', 'ahsan', now)).toBeNull();
+    expect(workingLine([], 'ahsan', 'ahsan', now)).toBeNull();
+    expect(workingLine(undefined, 'ahsan', 'ahsan', now)).toBeNull();
+  });
+  it('an agent on my token under its own name is someone else, not me', () => {
+    const line = workingLine([w('claude-a', 'running tests', '2026-10-06T10:05:00Z', 'ahsan')], 'ahsan', 'ahsan', now);
+    expect(line.text).toContain('claude-a is working');
+  });
+  it('several posters share the line; the tooltip lists each on its own line', () => {
+    const line = workingLine([w('a', 'x', '2026-10-06T10:05:00Z'), w('b', 'y', '2026-10-06T10:05:00Z')], 'me', 'me', now);
+    expect(line.count).toBe(2);
+    expect(line.title.split('\n')).toEqual(['a is working: x', 'b is working: y']);
   });
 });

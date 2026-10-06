@@ -829,6 +829,26 @@ if (features.chat) server.tool(
 );
 
 if (features.chat) server.tool(
+  "set_chat_status",
+  "Show a short 'working on it' line under the chat (e.g. 'reviewing the API PR'), so people can see you are busy without a message in the conversation. It lasts 2 minutes: set it again to keep it during long work. Your next post_chat clears it; an empty text clears it now.",
+  {
+    namespace: z.string().describe("Namespace name"),
+    path: z.string().describe("Path of the chat note"),
+    text: z.string().max(200).describe("What you are doing, one short line. Empty to clear."),
+    as: z.string().optional().describe("Your name in the chat (the same `as` you post with)"),
+  },
+  async ({ namespace, path, text, as }) => {
+    try {
+      const res = await api(`/api/chat/status?${chatQS(namespace, path)}&as=${encodeURIComponent(as || "")}`, { method: "POST", body: text });
+      if (!res.ok) return chatError(res);
+      return { content: [{ type: "text", text: text.trim() ? `status set: ${text.trim()}` : "status cleared" }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+if (features.chat) server.tool(
   "wait_chat",
   "Block until a message newer than #after arrives (polls every 3s), then return the new messages. Pass `as` (your name) so your own posts never wake you; pass mentions_only to wake only when someone writes @your-name or @all. Loop: wait_chat, reply with post_chat, wait_chat again.",
   {
