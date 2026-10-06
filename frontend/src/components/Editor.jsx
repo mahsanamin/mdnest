@@ -3,6 +3,7 @@ import { uploadImage } from '../api.js';
 import { htmlToMarkdown, hasRichContent } from '../html-to-md.js';
 import { looksLikeMarkdown } from '../markdown-utils.js';
 import EditorToolbar from './EditorToolbar.jsx';
+import { NO_GRAMMAR_ASSIST } from '../noGrammarAssist.js';
 
 function Editor({ content, onChange, currentPath, ns, readOnly, onCursorChange, onSelectionChange, remoteCursors }) {
   const textareaRef = useRef(null);
@@ -227,6 +228,7 @@ function Editor({ content, onChange, currentPath, ns, readOnly, onCursorChange, 
       {readOnly && <div className="editor-readonly-bar">Read-only</div>}
       <div className="editor-container">
         <textarea
+          {...NO_GRAMMAR_ASSIST}
           ref={textareaRef}
           className="editor-textarea"
           value={content}

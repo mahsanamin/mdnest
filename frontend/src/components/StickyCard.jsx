@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { NO_GRAMMAR_ASSIST } from '../noGrammarAssist.js';
 import {
   STICKY_COLORS,
   MAX_TITLE,
@@ -110,6 +111,7 @@ function StickyCard({ card, onCardChange, onDelete, style, dragHandleProps, drag
       )}
 
       <textarea
+        {...NO_GRAMMAR_ASSIST}
         className="sticky-body"
         value={card.body}
         maxLength={MAX_BODY}
@@ -141,6 +143,7 @@ function StickyCard({ card, onCardChange, onDelete, style, dragHandleProps, drag
                   — the text was still there, but you could only read the
                   first few words of it. This grows instead. */}
               <textarea
+                {...NO_GRAMMAR_ASSIST}
                 rows={1}
                 value={item.text}
                 maxLength={MAX_ITEM_LEN}

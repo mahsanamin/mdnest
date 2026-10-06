@@ -14,6 +14,7 @@ import { mdnestUri } from '../mdnestUri.js';
 import { chatMenuGroups } from '../contextMenuItems.js';
 import ContextMenu from './ContextMenu.jsx';
 import './ChatView.css';
+import { NO_GRAMMAR_ASSIST } from '../noGrammarAssist.js';
 
 // The chats view: every chat channel on the left, the open conversation on
 // the right. A chat is just a note (`mdnest-chat: true`), so everything shown
@@ -411,6 +412,7 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
               prompt after the name, so the agent starts with its job instead
               of asking for one. */}
           <textarea
+            {...NO_GRAMMAR_ASSIST}
             className="chat-input chat-agent-intent"
             placeholder="What should this agent do here? e.g. Review the API pull requests and flag anything touching auth. (optional)"
             value={agentIntent}
@@ -508,6 +510,7 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
       <div className="chat-composer">
         <div className="chat-compose-box">
           <textarea
+            {...NO_GRAMMAR_ASSIST}
             ref={draftRef}
             className="chat-draft"
             rows={2}

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import mermaid, { fixMermaidTextColors, applyMermaidTheme } from '../mermaid-config.js';
 import { useTheme } from '../useTheme.js';
+import { NO_GRAMMAR_ASSIST } from '../noGrammarAssist.js';
 
 function AutoSizeInput({ className, style, defaultValue, onConfirm, onCancel }) {
   const [value, setValue] = useState(defaultValue || '');
@@ -35,6 +36,7 @@ function AutoSizeInput({ className, style, defaultValue, onConfirm, onCancel }) 
         }}
       >{value || ' '}</span>
       <textarea
+        {...NO_GRAMMAR_ASSIST}
         ref={inputRef}
         className={className}
         style={{
@@ -375,6 +377,7 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
         </div>
       ) : (
         <textarea
+          {...NO_GRAMMAR_ASSIST}
           className="mermaid-live-source"
           value={editSource}
           onChange={(e) => setEditSource(e.target.value)}
