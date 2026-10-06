@@ -1462,6 +1462,11 @@ function App() {
   }, [selectedNs, currentPath]);
 
   const handleContentChange = useCallback((newContent) => {
+    // Text that equals what is already saved is not an edit: no "typing"
+    // signal to others, no save, no clearing of a real conflict notice. An
+    // editor re-reporting a document it was handed used to land here and
+    // broadcast as typing (others saw "X is typing" while X sat still).
+    if (newContent === savedContentRef.current && newContent === contentRef.current) return;
     setContent(newContent);
     setConflictBanner(null);
 
@@ -1478,6 +1483,10 @@ function App() {
     // still writes to the right file.
     const doSave = async (seq) => {
       if (seq !== saveSeqRef.current) return; // a newer save will write all of this
+      if (newContent === savedContentRef.current) return; // nothing new to write
+      // What this edit was made on top of: the text we last saved or were
+      // handed (a load, a remote save, someone's live typing).
+      const base = savedContentRef.current;
       if (!currentPath || !selectedNs) return;
       // Safety against destructive autosave: never write empty content
       // when we know the file had content when we loaded it. This is the
@@ -1499,16 +1508,25 @@ function App() {
         if (e.status === 409) {
           // Confirm it is a real conflict before saying so: if the server
           // already holds exactly this text, adopt its etag and move on.
-          let same = false;
+          let resolved = false;
           try {
             const latest = await getNote(selectedNs, currentPath);
             if (latest.text === newContent) {
-              same = true;
+              resolved = true;
               setSavedContent(newContent);
               etagRef.current = latest.etag;
+            } else if (latest.text === base) {
+              // The server holds exactly what this edit was built on (we had
+              // already seen that text, e.g. through someone's live typing,
+              // only its etag was newer). Nothing of theirs is lost by
+              // writing ours on top, so save again with the current etag.
+              const retry = await saveNote(selectedNs, currentPath, newContent, latest.etag);
+              setSavedContent(newContent);
+              if (retry.etag) { etagRef.current = retry.etag; echoGate.rememberOwnEtag(retry.etag); }
+              resolved = true;
             }
           } catch { /* fall through to the banner */ }
-          if (!same) setConflictBanner({ username: 'another user', etag: e.etag });
+          if (!resolved) setConflictBanner({ username: 'another user', etag: e.etag });
         } else if (e.status === 404) {
           // Moved or deleted elsewhere. The PUT does not re-create the note
           // at its old path; say so, and keep the text on screen to copy.
