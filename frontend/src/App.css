@@ -3159,6 +3159,20 @@ pre:hover .code-copy-btn {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  /* Keep the scrollbar's room reserved, so a scroll area that grows or
+     shrinks never changes the text width. Without it, a note that just
+     fitted gained and lost a scrollbar as the block handle hid and showed,
+     and every line rewrapped (reported as "selecting a word moves the
+     text"). */
+  scrollbar-gutter: stable;
+}
+/* Crepe hides the block handle with opacity only (data-show="false") and
+   leaves it parked where it extends the scroll area by its own height
+   (~52px). The scroll height then grew and shrank as the handle hid and
+   showed: empty space under the note after a selection, gone on the next
+   click. A hidden handle now takes no space at all. */
+.live-editor-crepe-root .milkdown-block-handle[data-show='false'] {
+  display: none;
 }
 .live-editor-crepe-root .milkdown {
   height: 100%;

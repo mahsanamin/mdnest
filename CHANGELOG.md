@@ -71,12 +71,20 @@ All notable changes to mdnest are documented here.
   message in the conversation (markdown and sanitizing), so a long chat
   lagged: about 66 ms a key with 300 messages. The conversation now renders
   only when its messages change, and a key paints in one frame.
-- **Grammar-checking extensions stay off mdnest's editors.** With Grammarly
-  (or a tool that copies its convention) attached to the Live editor,
-  selecting a word made the text rewrap and added empty scroll space under the
-  note until the next click. The Live editor, the Basic editor, the chat box,
-  comments, Mermaid source, stickies and task notes now carry the attributes
-  those extensions honour. The browser's own spell-check is unaffected.
+- **Grammar-checking extensions stay off mdnest's editors.** The Live and
+  Basic editors, the chat box, comments, Mermaid source, stickies and task
+  notes carry the attributes Grammarly and similar tools honour, so their
+  overlays no longer sit on top of the editing surface. The browser's own
+  spell-check is unaffected.
+- **Selecting text in the Live editor no longer moves it or adds empty space
+  under the note.** Crepe hides its block handle (the "+" and grip beside
+  each block) by making it transparent, but leaves it parked where it makes
+  the scroll area about 52 px taller. As the handle hid and showed (a
+  selection, the next click) the scroll area grew and shrank, and on a note
+  that just fitted a scrollbar came and went, so every line rewrapped. A
+  hidden handle now takes no space, and the editor keeps room for its
+  scrollbar so the text width never changes. Pinned in
+  `tests/browser/live-select-scroll.spec.js`, which turns on real scrollbars.
 - **Right-click works on a chat in the chat list.** It opened the browser's
   own menu; it now shows mdnest's, with Open as note, Copy path for CLI and
   Delete chat. Deleting a chat from the list no longer closes a different
