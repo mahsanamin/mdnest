@@ -304,3 +304,38 @@ test('an agent\'s working status shows on one quiet line, and its post clears it
     await cleanup(page, plain, chat);
   }
 });
+
+test('a role template fills the agent name and its trait into the prompt', async ({ page }) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  const { plain, chat, title } = await seed(page);
+  try {
+    await page.goto(`/#!chats/${NS}/${chat}`);
+    await expect(page.locator('.chat-room-title h2')).toHaveText(title, { timeout: 20_000 });
+    await page.locator('.chat-btn', { hasText: /Connect an agent|Agents/ }).first().click();
+    const panel = page.locator('.chat-agent');
+    const name = panel.locator('input[aria-label="Agent name"]');
+    const intent = panel.locator('textarea.chat-agent-intent');
+    const prompt = panel.locator('pre');
+
+    await panel.locator('.chat-role', { hasText: 'Lead Coder' }).click();
+    await expect(name).toHaveValue('lead-coder');
+    await expect(intent).toHaveValue(/You lead the coding/);
+    await expect(prompt).toContainText('You are lead-coder in an mdnest chat');
+    await expect(prompt).toContainText('start helper coders as your own sub-agents');
+
+    // Switching role swaps the untouched defaults.
+    await panel.locator('.chat-role', { hasText: /^Coder$/ }).click();
+    await expect(name).toHaveValue('coder-1');
+    await expect(intent).toHaveValue(/You do one task your lead gives you/);
+    await expect(panel.locator('.chat-role.active')).toHaveText('Coder');
+
+    // Clicking the active role again clears it.
+    await panel.locator('.chat-role', { hasText: /^Coder$/ }).click();
+    await expect(name).toHaveValue('');
+    await expect(intent).toHaveValue('');
+    await expect(panel.locator('.chat-role.active')).toHaveCount(0);
+  } finally {
+    await cleanup(page, plain, chat);
+  }
+});

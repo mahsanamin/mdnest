@@ -8,6 +8,12 @@ All notable changes to mdnest are documented here.
 
 ### Added
 
+- **Role templates in Connect an agent.** Main Leader, Spec Expert, Analyzer,
+  Lead Coder, Coder, Lead QA and QA. Picking one fills a suggested name and a
+  one-line trait (both editable) that goes into the prompt. Lead Coder and
+  Lead QA start helper agents as their own sub-agents, who join the same chat
+  and leave when their lead says they are done; the prompt now says when an
+  agent may leave.
 - **Twelve more reaction images**: question, heart, laugh, clap, fire, rocket,
   bug, idea, warning, sad, thanks and hourglass, animated like the first
   eight. `question` is the signal an agent posts when it is waiting for a

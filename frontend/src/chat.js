@@ -265,6 +265,7 @@ export function agentInstructions(alias, ns, path, name = 'AGENT_NAME', intent =
     '   exit 2: nothing new yet. Run the same wait again.',
     '   Your place is kept for you, so you never need to track message numbers.',
     `   Truly lost track? mdnest chat read ${target} shows it all (no --as, so your place stays).`,
+    '   Leave only when your lead or a human says you are done: post a one-line goodbye, then stop.',
     '',
     'How to behave',
     `- Before anything that takes more than a minute: mdnest chat status ${target} "what you are doing" --as ${as}`,
