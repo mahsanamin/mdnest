@@ -33,7 +33,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Crepe } from '@milkdown/crepe';
-import { editorViewCtx, nodeViewCtx, SchemaReady } from '@milkdown/core';
+import { editorViewCtx, nodeViewCtx, parserCtx, SchemaReady } from '@milkdown/core';
 import { TextSelection } from '@milkdown/prose/state';
 import { insert, markdownToSlice, replaceAll } from '@milkdown/utils';
 import { blockConfig } from '@milkdown/plugin-block';
@@ -494,6 +494,89 @@ export default function LiveEditorCrepe({
     }
   }, [readOnly]);
 
+  // Apply a document that arrived from outside (a collaborator's typing or
+  // save, a reload, a restore) by changing ONLY the part that differs.
+  // replaceAll swapped the whole document, which threw the caret to the end
+  // and scrolled there: "my cursor jumps to the end while someone else
+  // types". The standard ProseMirror diff (findDiffStart/findDiffEnd) yields
+  // the smallest changed range; ProseMirror then maps the selection through
+  // it, so the caret and scroll stay put (shifted only if text above them
+  // changed). Not added to undo history: Cmd+Z undoes your edits, not theirs.
+  const applyExternalDoc = useCallback((markdown) => (ctx) => {
+    const view = ctx.get(editorViewCtx);
+    const next = ctx.get(parserCtx)(markdown);
+    if (!next || typeof next === 'string') throw new Error('parse failed');
+    const cur = view.state.doc;
+    // Compare blocks ignoring generated heading ids: the live document's
+    // headings carry an id a plugin adds after load ("cursor"), a freshly
+    // parsed one has "". Compared as-is, the first heading always differed,
+    // the "changed range" began at 0, and the caret was swept to the end.
+    const strip = (j) => {
+      let o = j;
+      if (o.attrs && Object.prototype.hasOwnProperty.call(o.attrs, 'id')) o = { ...o, attrs: { ...o.attrs, id: '' } };
+      if (o.content) o = { ...o, content: o.content.map(strip) };
+      return o;
+    };
+    const key = (n) => JSON.stringify(strip(n.toJSON()));
+    // Changed ranges, as [fromA, toA, fromB, toB]. With the same number of
+    // blocks (the usual case: people edit inside paragraphs) each changed
+    // block is its own range, so an edit above the caret and another below
+    // it leave the caret's block untouched. Otherwise one range from the
+    // first to the last changed block.
+    const ranges = [];
+    if (cur.childCount === next.childCount) {
+      let posA = 0;
+      let posB = 0;
+      for (let i = 0; i < cur.childCount; i += 1) {
+        const ca = cur.child(i);
+        const nb = next.child(i);
+        if (key(ca) !== key(nb)) ranges.push([posA, posA + ca.nodeSize, posB, posB + nb.nodeSize]);
+        posA += ca.nodeSize;
+        posB += nb.nodeSize;
+      }
+    } else {
+      const min = Math.min(cur.childCount, next.childCount);
+      let pre = 0;
+      while (pre < min && key(cur.child(pre)) === key(next.child(pre))) pre += 1;
+      let suf = 0;
+      while (suf < min - pre && key(cur.child(cur.childCount - 1 - suf)) === key(next.child(next.childCount - 1 - suf))) suf += 1;
+      let fromA = 0;
+      let fromB = 0;
+      for (let i = 0; i < pre; i += 1) { fromA += cur.child(i).nodeSize; fromB += next.child(i).nodeSize; }
+      let toA = cur.content.size;
+      let toB = next.content.size;
+      for (let i = 0; i < suf; i += 1) { toA -= cur.child(cur.childCount - 1 - i).nodeSize; toB -= next.child(next.childCount - 1 - i).nodeSize; }
+      ranges.push([fromA, toA, fromB, toB]);
+    }
+    if (ranges.length === 0) return; // identical apart from generated ids
+    const tr = view.state.tr;
+    // Last range first, so earlier positions stay valid.
+    for (const [fromA, toA, fromB, toB] of ranges.reverse()) {
+      // Narrow to the exact change inside the range (ProseMirror's diff), so
+      // a caret in the same paragraph as the edit keeps its place too.
+      const a = cur.slice(fromA, toA).content;
+      const b = next.slice(fromB, toB).content;
+      const sd = a.findDiffStart(b);
+      let start = fromA;
+      let endA = toA;
+      let endB = toB;
+      if (sd != null) {
+        const e = a.findDiffEnd(b);
+        if (e) {
+          let ea = e.a;
+          let eb = e.b;
+          const overlap = sd - Math.min(ea, eb);
+          if (overlap > 0) { ea += overlap; eb += overlap; }
+          start = fromA + sd;
+          endA = fromA + ea;
+          endB = fromB + eb;
+        }
+      }
+      tr.replace(start, endA, next.slice(start - fromA + fromB, endB));
+    }
+    view.dispatch(tr.setMeta('addToHistory', false));
+  }, []);
+
   // External content sync (live-collab broadcast, history restore). When the
   // `content` prop drifts from what we last serialized, replace the editor's
   // doc — same pattern as the legacy MilkdownEditor. Suppress saves through
@@ -507,13 +590,18 @@ export default function LiveEditorCrepe({
     lastPropContentRef.current = content;
     suppressSaveRef.current = true;
     try {
-      crepeRef.current.editor.action(replaceAll(content));
+      try {
+        crepeRef.current.editor.action(applyExternalDoc(content));
+      } catch {
+        // Anything the diff path cannot handle falls back to a full replace.
+        crepeRef.current.editor.action(replaceAll(content));
+      }
       lastLocalContentRef.current = content;
       try { injectedEchoRef.current = restoreWikilinks(crepeRef.current.getMarkdown()); } catch { injectedEchoRef.current = null; }
     } catch { /* editor not ready or replaceAll failed */ } finally {
       suppressSaveRef.current = false;
     }
-  }, [content, innerEditor]);
+  }, [content, innerEditor, applyExternalDoc]);
 
   // Push active comment anchors into the highlight plugin whenever comments
   // change. Same logic as the legacy LiveEditor — top-level threads only,

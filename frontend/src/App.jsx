@@ -847,6 +847,12 @@ function App() {
       }
     }, setWsStatus);
     collabRef.current = client;
+    // The connect effect below runs when the open note changes. If the config
+    // (liveCollab) arrived after a note was already open, as on a page load
+    // straight onto a note, that effect had run with no client and never ran
+    // again: no presence, no live updates, until you switched notes. Connect
+    // to the note that is already open now.
+    if (selectedNsRef.current && currentPathRef.current) client.connect(selectedNsRef.current, currentPathRef.current);
     return () => { client.disconnect(); collabRef.current = null; setWsStatus('disconnected'); };
   }, [appConfig?.liveCollab]);
 

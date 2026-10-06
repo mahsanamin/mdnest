@@ -73,6 +73,20 @@ All notable changes to mdnest are documented here.
 
 ### Fixed
 
+- **Your cursor stays put while someone else types.** A collaborator's live
+  typing or save replaced the whole document in the Live editor, which threw
+  your cursor to the end of the note, and the view scrolled down after it.
+  Their changes are now applied as the smallest changed part, so your cursor
+  and scroll stay where they were (shifting only if text above them changed),
+  and their edits stay out of your undo history. The diff ignores the heading
+  ids the editor adds after loading; with them the first heading always
+  looked changed.
+- **Live collaboration connects on a page opened straight onto a note.** If
+  the server settings arrived after the note opened, the page never
+  connected for that note (no presence or live updates) until you switched
+  notes. Pinned, with the cursor fix, in
+  `tests/browser/live-remote-keeps-cursor.spec.js`, which stands in for the
+  collaboration socket.
 - **"X is typing" only when X is typing, and no saves from an idle editor.**
   When a collaborator's live typing or save reached a note open in the Live
   editor, the editor reported the new text back as if its own user had typed
