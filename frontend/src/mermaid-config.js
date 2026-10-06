@@ -259,6 +259,23 @@ export function fixMermaidTextColors(svgEl) {
     const color = inkFor(b, activeTheme);
     t.style.setProperty('color', color, 'important');
   });
+
+  // A label whose HTML wrapper is gone. sanitizeSvg unwraps the div/span
+  // inside a foreignObject (allowing them breaks DOMPurify's namespace check),
+  // so a sanitized copy, the full-screen viewer's, holds the text directly in
+  // the foreignObject and the loop above finds nothing to colour. The text
+  // inherits, so the colour goes on the foreignObject itself.
+  svgEl.querySelectorAll('foreignObject').forEach((fo) => {
+    const bare = [...fo.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
+    if (!bare) return;
+    // Only a label inside a node takes that node's fill. An edge label lost
+    // its painted chip with the wrapper, so it sits on the diagram ground;
+    // walking up from it lands on some unrelated node and inked it white on
+    // a pale canvas. No fill means the theme's ordinary ink.
+    const owner = fo.closest('.node, .cluster, .actor, .note');
+    const fill = htmlBackground(fo) || (owner ? getNodeFill(fo) : null);
+    fo.style.setProperty('color', inkFor(getBrightness(fill), activeTheme), 'important');
+  });
 }
 
 export default mermaid;

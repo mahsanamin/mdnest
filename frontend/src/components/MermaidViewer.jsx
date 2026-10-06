@@ -1,5 +1,6 @@
 import { useRef, useState, useEffect, useCallback } from 'react';
 import { sanitizeSvg } from '../sanitize.js';
+import { fixMermaidTextColors } from '../mermaid-config.js';
 import { extractDiagramText, copyPlainText } from '../mermaid-text.js';
 
 // Does this element belong to the diagram's text rather than its drawing?
@@ -40,6 +41,20 @@ function MermaidViewer({ svgContent, onClose }) {
     }, 50);
     return () => clearTimeout(timer);
   }, [svgContent]);
+
+  // The SVG arrives as the markup mermaid produced, without the per-label
+  // colours fixMermaidTextColors adds to the inline diagram (those are inline
+  // styles on that DOM, not part of the string). Without this, a label meant
+  // to be white on a dark fill came up in the theme's dark ink. Re-applied
+  // after every render, since a zoom or pan re-render can reset the markup.
+  useEffect(() => {
+    const fix = () => {
+      const svgEl = containerRef.current?.querySelector('svg');
+      if (svgEl) fixMermaidTextColors(svgEl);
+    };
+    const raf = requestAnimationFrame(fix);
+    return () => cancelAnimationFrame(raf);
+  });
 
   // Close on Escape
   useEffect(() => {
