@@ -21,7 +21,9 @@ const ICONS = {
   trash: <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/>,
 };
 
-function ContextMenu({ visible, x, y, target, onAction, onClose, canWrite, isAdmin, multi, selectedNs, excalidraw, chat }) {
+// `groups` and `title` let another surface (the chat list) reuse the menu
+// with its own items; without them it is the tree's menu for `target`.
+function ContextMenu({ visible, x, y, target, onAction, onClose, canWrite, isAdmin, multi, selectedNs, excalidraw, chat, groups: groupsProp, title: titleProp }) {
   const menuRef = useRef(null);
 
   useEffect(() => {
@@ -76,12 +78,12 @@ function ContextMenu({ visible, x, y, target, onAction, onClose, canWrite, isAdm
   // Check write permission for the target path
   const targetPath = target?.path || '';
   const hasWrite = !canWrite || canWrite(targetPath);
-  const groups = contextMenuGroups({ target, hasWrite, isAdmin, multi, excalidraw, chat });
+  const groups = groupsProp || contextMenuGroups({ target, hasWrite, isAdmin, multi, excalidraw, chat });
   if (groups.length === 0) return null;
 
   // The clicked item's name heads the menu, so it is clear what Rename or
   // Delete would act on. The namespace root shows the namespace.
-  const title = targetPath ? targetPath.split('/').pop() : selectedNs;
+  const title = titleProp || (targetPath ? targetPath.split('/').pop() : selectedNs);
 
   return (
     <div
@@ -99,6 +101,7 @@ function ContextMenu({ visible, x, y, target, onAction, onClose, canWrite, isAdm
               key={item.action}
               role="menuitem"
               className={`context-menu-item${item.danger ? ' danger' : ''}`}
+              title={item.hint}
               onClick={() => {
                 onAction(item.action, target);
                 onClose();

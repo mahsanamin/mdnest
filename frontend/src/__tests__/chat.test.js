@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   slugify, chatPathFor, colorForAuthor, AUTHOR_COLORS, isOwnMessage,
-  groupMessages, mergeMessages, agentInstructions, plainPreview, shellQuote, isChatDoc,
+  groupMessages, mergeMessages, agentInstructions, workingLine, plainPreview, shellQuote, isChatDoc,
   mentionsName, highlightMentions, participants, mentionQuery, completeMention,
   avatarFor, reactions, gifMarkdown, expandGifRefs, initialOf,
 } from '../chat.js';
@@ -69,11 +69,12 @@ describe('agent instructions', () => {
     // the old snippet's literal name is what agents posted as; it must be gone
     expect(s).not.toContain('my-agent');
     expect(s).not.toContain('--after');
-    // it must read the conversation before speaking, and know how to re-read
-    // without moving its place
-    expect(s).toMatch(/Read the WHOLE conversation before you say anything/);
-    expect(s).toContain('mdnest chat read @mini/notes/Chats/team.md --as codxu');
-    expect(s).toContain('Re-read everything with: mdnest chat read @mini/notes/Chats/team.md\n');
+    // it reads the conversation ONCE before speaking (that saves its place),
+    // then only waits for what is new; a full re-read is a last resort that
+    // does not move its place
+    expect(s).toContain('1. Read the chat once: mdnest chat read @mini/notes/Chats/team.md --as codxu');
+    expect(s).toMatch(/never read the whole chat again/);
+    expect(s).toContain('mdnest chat read @mini/notes/Chats/team.md shows it all (no --as');
   });
 });
 
@@ -91,7 +92,7 @@ describe('agent intent', () => {
   });
   it('never puts the intent into a shell command', () => {
     const s = agentInstructions('mini', 'notes', 'Chats/team.md', 'codxu', "$(rm -rf ~); 'x'");
-    const cmds = s.split('\n').filter((l) => l.trim().startsWith('mdnest '));
+    const cmds = s.split('\n').filter((l) => l.includes('mdnest chat '));
     expect(cmds.length).toBeGreaterThan(3);
     for (const c of cmds) expect(c).not.toContain('rm -rf');
   });
@@ -175,12 +176,23 @@ describe('chat images', () => {
     const s = agentInstructions('mini', 'notes', 'Chats/team.md', 'codxu');
     expect(s).not.toMatch(/[<>]/);
     expect(s).toContain('mdnest chat gifs @mini/notes');
-    // the avatar is a numbered step now, one command; "optional" got skipped
-    expect(s).toMatch(/2\. Give yourself a thumbnail/);
+    // the avatar is a numbered step, one command; "optional" got skipped
+    expect(s).toMatch(/2\. Pick a thumbnail nobody here uses/);
     // auto: a built-in nobody in the chat already wears
     expect(s).toContain('mdnest chat avatar @mini/notes --as codxu --pick auto');
     expect(s).not.toMatch(/optional/i);
     expect(s).toContain('![nod](gif:nod)');
+  });
+  it('the prompt covers the working status, the human question, and several agents', () => {
+    const s = agentInstructions('mini', 'notes', 'Chats/team.md', 'codxu');
+    // A /status post works with every CLI version (the server handles it).
+    expect(s).toContain('mdnest chat post @mini/notes/Chats/team.md "/status what you are doing" --as codxu');
+    expect(s).not.toContain('mdnest chat status');
+    expect(s).toContain('![waiting](gif:question)');
+    expect(s).toMatch(/Do not repeat what someone already said/);
+    expect(s).toMatch(/Emoji are fine/);
+    // concise: the whole prompt stays short enough to read at a glance
+    expect(s.split('\n').length).toBeLessThanOrEqual(30);
   });
 });
 
@@ -211,5 +223,40 @@ describe('thumbnails', () => {
     expect(initialOf('Batooli')).toBe('B');
     expect(initialOf('_codu')).toBe('C');
     expect(initialOf('')).toBe('?');
+  });
+});
+
+describe('working line', () => {
+  const now = Date.parse('2026-10-06T10:05:30Z');
+  const w = (author, kind, since, extra = {}) => ({ author, kind, since, ...extra });
+  it('a /status reads as working on something, with minutes once it runs long', () => {
+    const line = workingLine([w('codxu', 'working', '2026-10-06T10:02:00Z', { text: 'reviewing the PR' })], 'ahsan', 'ahsan', now);
+    expect(line.text).toBe('codxu is working: reviewing the PR · 3 min');
+    expect(line.busy).toBe(true);
+  });
+  it('an agent that just got new messages is thinking', () => {
+    expect(workingLine([w('codxu', 'thinking', '2026-10-06T10:05:00Z')], 'ahsan', 'ahsan', now).text).toBe('codxu is thinking');
+  });
+  it('waiting agents are named together as listening, after the busy ones', () => {
+    const line = workingLine([
+      w('qa-1', 'listening', '2026-10-06T10:05:20Z'),
+      w('codxu', 'thinking', '2026-10-06T10:05:00Z'),
+      w('lead-qa', 'listening', '2026-10-06T10:05:20Z'),
+    ], 'ahsan', 'ahsan', now);
+    expect(line.text).toBe('codxu is thinking  ·  qa-1 and lead-qa are listening');
+    expect(line.title.split('\n')).toEqual(['codxu is thinking', 'qa-1 is listening', 'lead-qa is listening']);
+  });
+  it('one listener alone; three listeners get a comma list', () => {
+    expect(workingLine([w('codxu', 'listening', '2026-10-06T10:05:20Z')], 'ahsan', 'ahsan', now).text).toBe('codxu is listening');
+    expect(workingLine(['a', 'b', 'c'].map((n) => w(n, 'listening', '2026-10-06T10:05:20Z')), 'me', 'me', now).text).toBe('a, b and c are listening');
+  });
+  it('leaves out your own presence and is null when nobody else is here', () => {
+    expect(workingLine([w('ahsan', 'listening', '2026-10-06T10:05:00Z')], 'ahsan', 'ahsan', now)).toBeNull();
+    expect(workingLine([], 'ahsan', 'ahsan', now)).toBeNull();
+    expect(workingLine(undefined, 'ahsan', 'ahsan', now)).toBeNull();
+  });
+  it('an agent on my token under its own name is someone else, not me', () => {
+    const line = workingLine([w('claude-a', 'thinking', '2026-10-06T10:05:00Z', { via: 'ahsan' })], 'ahsan', 'ahsan', now);
+    expect(line.text).toContain('claude-a is thinking');
   });
 });

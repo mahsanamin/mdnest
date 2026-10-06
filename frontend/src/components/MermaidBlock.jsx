@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import mermaid, { fixMermaidTextColors, applyMermaidTheme } from '../mermaid-config.js';
 import { useTheme } from '../useTheme.js';
+import { NO_GRAMMAR_ASSIST } from '../noGrammarAssist.js';
 
 function AutoSizeInput({ className, style, defaultValue, onConfirm, onCancel }) {
   const [value, setValue] = useState(defaultValue || '');
@@ -35,6 +36,7 @@ function AutoSizeInput({ className, style, defaultValue, onConfirm, onCancel }) 
         }}
       >{value || ' '}</span>
       <textarea
+        {...NO_GRAMMAR_ASSIST}
         ref={inputRef}
         className={className}
         style={{
@@ -129,8 +131,14 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
   // (dark text on light fills, light on dark). We deliberately do NOT inject a
   // blanket force-light override here — that's what made author-specified light
   // fills render light-text-on-light-fill (invisible). Per-node wins.
+  //
+  // It runs after EVERY render, not only when the SVG changes. The colours are
+  // inline styles on the live DOM, and a re-render (a zoom click is enough)
+  // can put the SVG markup back without them; in light mode that left white-
+  // needing labels in the theme's dark ink on a dark fill. The fix is
+  // idempotent, so running it again is safe.
   useEffect(() => {
-    if (!svgHtml) return;
+    if (!svgHtml) return undefined;
     const fix = () => {
       const container = previewRef.current;
       if (!container) return;
@@ -138,10 +146,10 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
       if (!svgEl) return;
       fixMermaidTextColors(svgEl);
     };
-    requestAnimationFrame(fix);
+    const raf = requestAnimationFrame(fix);
     const t1 = setTimeout(fix, 150);
-    return () => { clearTimeout(t1); };
-  }, [svgHtml]);
+    return () => { cancelAnimationFrame(raf); clearTimeout(t1); };
+  });
 
   // Make any mermaid text clickable — diagram-type agnostic.
   // Strategy: find the nearest <g> group, then find any text inside it.
@@ -369,6 +377,7 @@ function MermaidBlock({ source, onChange, onFullscreen, readOnly }) {
         </div>
       ) : (
         <textarea
+          {...NO_GRAMMAR_ASSIST}
           className="mermaid-live-source"
           value={editSource}
           onChange={(e) => setEditSource(e.target.value)}

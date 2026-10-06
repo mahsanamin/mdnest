@@ -43,6 +43,7 @@ type ChatHandler struct {
 	hub        *collab.Hub
 	now        func() time.Time
 	index      *chatIndex
+	status     *chatStatusStore // who is working on what (chat_status.go)
 }
 
 // NewChatHandler: nsFilter and canRead are REQUIRED. /api/chats spans
@@ -51,7 +52,7 @@ type ChatHandler struct {
 func NewChatHandler(stg storage.Storage, nsFilter func(*http.Request, []string) []string,
 	canRead func(*http.Request, string, string) bool, singleUser string, multiMode bool) *ChatHandler {
 	return &ChatHandler{store: stg, nsFilter: nsFilter, canRead: canRead, singleUser: singleUser, multiMode: multiMode,
-		now: time.Now, index: &chatIndex{entries: map[string]chatIndexEntry{}}}
+		now: time.Now, index: &chatIndex{entries: map[string]chatIndexEntry{}}, status: newChatStatusStore()}
 }
 
 // SetCollabHub lets a post notify an editor that has the same note open.
@@ -108,6 +109,8 @@ type chatResponse struct {
 	// You is the name a post from this caller gets when it sends no `as` —
 	// the UI's default "posting as" (single mode has no account to show).
 	You string `json:"you"`
+	// Working lists who has said they are busy, and on what (chat_status.go).
+	Working []ChatStatus `json:"working"`
 }
 
 func chatTitle(doc ChatDoc, relPath string) string {
@@ -154,9 +157,24 @@ func (h *ChatHandler) read(w http.ResponseWriter, r *http.Request) {
 		}
 		msgs = append(msgs, m)
 	}
+	// A poll that names its poster (exclude=NAME: every `chat wait --as`) is
+	// presence: NAME is listening, and thinking if this poll handed it new
+	// messages. Inferred here so it works with any CLI that can wait.
+	if exclude != "" && exclude != "~" {
+		if label, via, ok := h.authorFor(r, exclude); ok {
+			h.status.polled(ns, relPath, label, via, len(msgs) > 0, h.now())
+		}
+	}
 	if r.URL.Query().Get("format") == "text" {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Header().Set("X-Chat-Count", strconv.Itoa(len(doc.Messages)))
+		// Who is working on what, for an agent deciding whether to pick a task
+		// up: "codxu: reviewing the PR | claude-b: running tests". A header so
+		// the CLI reads it with grep, not a JSON parser; every part is already
+		// one terminal-safe line.
+		if hdr := busyHeader(h.status.list(ns, relPath, h.now())); hdr != "" {
+			w.Header().Set("X-Chat-Working", hdr)
+		}
 		var b strings.Builder
 		for _, m := range msgs {
 			b.WriteString(formatChatMessageText(m))
@@ -167,7 +185,8 @@ func (h *ChatHandler) read(w http.ResponseWriter, r *http.Request) {
 	you, _, _ := h.authorFor(r, "")
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(chatResponse{Namespace: ns, Path: relPath, Title: chatTitle(doc, relPath),
-		Description: doc.Description, Count: len(doc.Messages), Messages: msgs, You: you})
+		Description: doc.Description, Count: len(doc.Messages), Messages: msgs, You: you,
+		Working: h.status.list(ns, relPath, h.now())})
 }
 
 // formatChatMessageText is the terminal rendering the CLI prints verbatim, so
@@ -251,6 +270,12 @@ func (h *ChatHandler) post(w http.ResponseWriter, r *http.Request) {
 		chatJSONError(w, http.StatusBadRequest, "message is empty")
 		return
 	}
+	// "/status what I am doing" sets the poster's status instead of adding a
+	// message, so any CLI version (or MCP post_chat) can use it.
+	if st, isStatus := slashStatus(text); isStatus {
+		h.applyStatus(w, r, ns, relPath, st, http.StatusOK)
+		return
+	}
 	label, via, ok := h.author(r)
 	if !ok {
 		chatJSONError(w, http.StatusForbidden, "cannot attribute this post to a user")
@@ -291,6 +316,8 @@ func (h *ChatHandler) post(w http.ResponseWriter, r *http.Request) {
 
 	doc := ParseChat(updated)
 	msg := doc.Messages[len(doc.Messages)-1]
+	// The post is the result of whatever the poster said it was working on.
+	h.status.posted(ns, relPath, label)
 	h.notify(r, ns, relPath, updated)
 
 	w.Header().Set("Content-Type", "application/json")

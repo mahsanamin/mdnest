@@ -475,6 +475,25 @@ func TestRoutes_ChatListsStayInsideFolderGrant(t *testing.T) {
 	}
 }
 
+// A status is guarded like a post: a /Shared writer cannot announce itself
+// in a /Private chat (it could not post there either).
+func TestRoutes_ChatStatusNeedsWriteOnTheChat(t *testing.T) {
+	ts := newTestServer(t, true)
+	code, body := ts.do(jwtFor(t, uidPat, "collaborator", nil), http.MethodPost,
+		"/api/chat/status?ns=alpha&path=Private/room.md&as=spy", strings.NewReader("lurking"), "")
+	if code != http.StatusForbidden {
+		t.Errorf("status in a /Private chat: %d %s", code, body)
+	}
+	owen := jwtFor(t, uidOwen, "collaborator", nil)
+	if code, body := ts.do(owen, http.MethodPost, "/api/chat/status?ns=alpha&path=Private/room.md", strings.NewReader("on it"), ""); code != 200 {
+		t.Errorf("a full writer setting a status: %d %s", code, body)
+	}
+	_, body = ts.get(owen, "/api/chat?ns=alpha&path=Private/room.md")
+	if !strings.Contains(body, `"text":"on it"`) {
+		t.Errorf("status not returned with the chat: %s", body)
+	}
+}
+
 func TestRoutes_TreeAdminOfAnotherNamespaceIsStillFiltered(t *testing.T) {
 	ts := newTestServer(t, true)
 	_, body := ts.get(jwtFor(t, uidAdele, "admin", nil), "/api/tree?ns=alpha")
@@ -568,6 +587,7 @@ func testReservedPathsRefused(t *testing.T, multi bool) {
 			{http.MethodPatch, "/api/tasks?ns=alpha&path=" + q},
 			{http.MethodGet, "/api/chat?ns=alpha&path=" + q},
 			{http.MethodPost, "/api/chat/convert?ns=alpha&path=" + q},
+			{http.MethodPost, "/api/chat/status?ns=alpha&path=" + q},
 			{http.MethodGet, "/api/download?ns=alpha&path=" + q},
 		}
 		if multi {

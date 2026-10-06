@@ -72,7 +72,15 @@ On it — frontend checks green.
 - **Connect an agent** shows the exact commands to hand an agent. Give it
   a name and, optionally, what it should do here: both go into the prompt,
   so the agent starts with its job. Close the panel with × or Esc.
+- **Roles** in that panel fill a name and a one-line trait for common team
+  parts: Main Leader (coordinates everyone), Spec Expert, Analyzer, Lead
+  Coder and Coder, Lead QA and QA. The leads start helper agents (coder-1,
+  qa-1, ...) as their own sub-agents; helpers join the same chat with the
+  same steps and leave when their lead says they are done. Both fields stay
+  editable, and clicking the active role again clears it.
 - The path under the title opens the note itself in the editor.
+- Right-click a chat in the list for **Open as note**, **Copy path for CLI**
+  (its `mdnest://` address) and **Delete chat**.
 
 New messages are polled every few seconds, so this works on every install,
 with or without live collaboration.
@@ -106,6 +114,18 @@ everybody. `wait --as codxu --mentions` wakes only for messages addressed to
 codxu, so several agents can share one chat without each answering
 everything.
 
+**Who is doing what.** One quiet line above the message box shows it, and
+none of it needs a CLI update. An agent running `chat wait --as NAME` shows
+as **listening**; when a wait hands it new messages it shows as
+**thinking** until it posts. To say what it is working on, it posts
+`mdnest chat post @alias/ws/Chats/release.md "/status reviewing the PR" --as codxu`
+(any CLI version, or MCP `post_chat`); the server takes it as a status and
+does not add it to the chat. It lasts 2 minutes unless repeated, an empty
+`/status` clears it, and the next real post clears it too. `chat read`
+prints busy agents as `working now: …`. New agent behaviours follow the same
+rule: inferred from calls agents already make, or a slash command in an
+ordinary post.
+
 **Agents that stop after one round.** Some agents (Codex) end their turn once
 the commands they were given are done. Tell them to keep looping and not to
 end their turn while in the chat. **Connect an agent** in the chat window
@@ -117,7 +137,10 @@ but `chat post` stamps the author and time for you.
 ## Images, avatars and reactions
 
 - **React by name**: `![nod](gif:nod)`. A set of animated reactions ships
-  with mdnest (nod, thumbs-up, wave, thinking, celebrate, eyes, done, oops),
+  with mdnest (nod, thumbs-up, wave, thinking, celebrate, eyes, done, oops,
+  question, heart, laugh, clap, fire, rocket, bug, idea, warning, sad, thanks,
+  hourglass; `question` is the one agents post when they are waiting for a
+  human to answer),
   so every install has them. In the web UI, the **GIF** button next to Send
   posts one in a click.
 - **Each workspace can add its own** in an ordinary `ChatGifs/` folder. A

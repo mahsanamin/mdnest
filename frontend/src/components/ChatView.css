@@ -225,6 +225,28 @@
   margin: 0 0 6px;
   color: var(--text);
 }
+.chat-agent-roles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 8px;
+}
+.chat-role {
+  padding: 3px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.chat-role:hover { color: var(--text); }
+.chat-role.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--text-inverse);
+}
 .chat-agent-intent {
   display: block;
   width: 100%;
@@ -281,9 +303,9 @@
   background: var(--surface-2);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
-  padding: 6px 12px;
-  font-size: 0.92rem;
-  line-height: 1.45;
+  padding: 7px 12px;
+  font-size: 0.95rem;
+  line-height: 1.5;
   overflow-wrap: anywhere;
   max-width: 100%;
 }
@@ -305,14 +327,79 @@
 }
 .chat-bubble code { font-size: 0.85em; }
 
-.chat-composer {
-  display: flex;
-  align-items: flex-end;
-  gap: var(--space-2);
-  padding: 10px 14px;
+.chat-working {
   border-top: 1px solid var(--border);
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 16px;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  background: var(--surface);
+  overflow: hidden;
+}
+.chat-working-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-working-dots { display: inline-flex; gap: 3px; flex: 0 0 auto; }
+/* Someone is here and waiting: a still dot, so listening never looks busy. */
+.chat-listening-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+  flex: 0 0 auto;
+}
+.chat-working-dots i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  animation: chat-working-pulse 1.4s ease-in-out infinite;
+}
+.chat-working-dots i:nth-child(2) { animation-delay: 0.2s; }
+.chat-working-dots i:nth-child(3) { animation-delay: 0.4s; }
+@keyframes chat-working-pulse {
+  0%, 80%, 100% { opacity: 0.25; }
+  40% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-working-dots i { animation: none; opacity: 0.6; }
+}
+
+.chat-composer {
+  padding: 2px 14px 12px;
   background: var(--surface);
   flex: 0 0 auto;
+}
+.chat-compose-box {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+}
+.chat-compose-box:focus-within { border-color: var(--accent); }
+.chat-draft {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  padding: 10px 12px 4px;
+  resize: none;
+  min-height: 3.4em;
+}
+.chat-draft:focus { outline: none; }
+.chat-compose-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 4px 8px 6px;
 }
 .chat-as {
   display: flex;
@@ -322,8 +409,18 @@
   color: var(--text-muted);
   flex: 0 0 auto;
 }
-.chat-as .chat-input { width: 110px; font-size: 0.82rem; }
-.chat-draft { flex: 1; resize: none; line-height: 1.4; }
+.chat-as .chat-input { width: 110px; font-size: 0.8rem; padding: 3px 6px; }
+.chat-compose-hint {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+  font-size: 0.72rem;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-send { flex: 0 0 auto; }
 
 .chat-empty {
   padding: 18px;
@@ -341,9 +438,8 @@
   .chat-list { width: 100%; flex: 1 1 auto; border-right: none; }
   .chat-msg { max-width: 92%; }
   .chat-messages { padding: 10px; }
-  .chat-composer { flex-wrap: wrap; }
-  .chat-as { width: 100%; }
-  .chat-as .chat-input { flex: 1; }
+  .chat-compose-hint { visibility: hidden; }
+  .chat-as .chat-input { width: 90px; }
 }
 
 /* @mentions */
@@ -395,6 +491,11 @@
   align-self: center;
 }
 .chat-gifs {
+  /* Never shrink. The chat is a column where the message list takes the
+     spare height; a shrinkable picker was squashed to ~38px in a short
+     window and cut every image in half. The list gives way instead, and the
+     picker scrolls past its max-height. */
+  flex: 0 0 auto;
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);

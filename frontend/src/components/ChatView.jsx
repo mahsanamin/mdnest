@@ -1,16 +1,21 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Marked } from 'marked';
 import { listChats, getChat, postChatMessage, convertToChat, listChatGifs, getToken } from '../api.js';
 import { resolveImgSrc } from '../img-src.js';
 import { sanitizeHtml } from '../sanitize.js';
 import {
   CHAT_POLL_MS, CHAT_LIST_POLL_MS, DEFAULT_CHAT_FOLDER, chatPathFor, colorForAuthor,
-  isOwnMessage, groupMessages, mergeMessages, formatChatTime, agentInstructions, plainPreview,
+  isOwnMessage, groupMessages, mergeMessages, workingLine, formatChatTime, agentInstructions, plainPreview,
   highlightMentions, mentionsName, participants, mentionQuery, completeMention,
   avatarFor, reactions, gifMarkdown, expandGifRefs, initialOf,
 } from '../chat.js';
 import { copyPlainText } from '../mermaid-text.js';
+import { mdnestUri } from '../mdnestUri.js';
+import { CHAT_ROLES, applyRole } from '../chatRoles.js';
+import { chatMenuGroups } from '../contextMenuItems.js';
+import ContextMenu from './ContextMenu.jsx';
 import './ChatView.css';
+import { NO_GRAMMAR_ASSIST } from '../noGrammarAssist.js';
 
 // The chats view: every chat channel on the left, the open conversation on
 // the right. A chat is just a note (`mdnest-chat: true`), so everything shown
@@ -116,7 +121,7 @@ function NewChatForm({ ns, onCreated, onCancel }) {
   );
 }
 
-function ChatList({ chats, loading, error, openChat, onSelect, filter, onFilter }) {
+function ChatList({ chats, loading, error, openChat, onSelect, filter, onFilter, onMenu }) {
   const f = filter.trim().toLowerCase();
   const shown = f
     ? chats.filter((c) => `${c.title} ${c.path}`.toLowerCase().includes(f))
@@ -133,7 +138,11 @@ function ChatList({ chats, loading, error, openChat, onSelect, filter, onFilter 
           const unread = active ? 0 : Math.max(0, c.count - readSeen(c.ns, c.path));
           return (
             <li key={`${c.ns}/${c.path}`}>
-              <button className={`chat-list-item${active ? ' active' : ''}`} onClick={() => onSelect({ ns: c.ns, path: c.path })}>
+              <button
+                className={`chat-list-item${active ? ' active' : ''}`}
+                onClick={() => onSelect({ ns: c.ns, path: c.path })}
+                onContextMenu={onMenu ? (e) => { e.preventDefault(); onMenu(e.clientX, e.clientY, c); } : undefined}
+              >
                 <span className="chat-list-top">
                   <span className="chat-list-title">{c.title}</span>
                   {c.lastTime && <span className="chat-list-time">{formatChatTime(c.lastTime)}</span>}
@@ -161,6 +170,7 @@ function ChatList({ chats, loading, error, openChat, onSelect, filter, onFilter 
 
 function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack, onActivity }) {
   const [doc, setDoc] = useState(null); // { title, description, you }
+  const [working, setWorking] = useState([]); // who said they are busy, from the server
   const [messages, setMessages] = useState([]);
   const [error, setError] = useState('');
   const [draft, setDraft] = useState('');
@@ -171,6 +181,7 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
   const [showAgent, setShowAgent] = useState(false);
   const [agentName, setAgentName] = useState('');
   const [agentIntent, setAgentIntent] = useState('');
+  const [agentRole, setAgentRole] = useState(''); // a CHAT_ROLES id, or '' for none
   // Esc closes the agent panel from anywhere in the chat, besides its × button.
   useEffect(() => {
     if (!showAgent) return undefined;
@@ -181,6 +192,16 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
   const [copied, setCopied] = useState(false);
   const [caret, setCaret] = useState(0);
   const draftRef = useRef(null);
+  // The draft grows with its content, wrapped lines included, up to a cap
+  // (then it scrolls). Measured from scrollHeight after each change.
+  useLayoutEffect(() => {
+    const el = draftRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    const max = Math.max(120, Math.round(window.innerHeight * 0.4));
+    el.style.height = `${Math.min(el.scrollHeight, max)}px`;
+    el.style.overflowY = el.scrollHeight > max ? 'auto' : 'hidden';
+  }, [draft]);
   const [gifs, setGifs] = useState([]);
   const [showGifs, setShowGifs] = useState(false);
   const scrollRef = useRef(null);
@@ -210,6 +231,7 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
         if (cancelled) return;
         setDoc({ title: r.title, description: r.description, you: r.you });
         setMessages(r.messages || []);
+        setWorking(r.working || []);
         countRef.current = r.count;
         writeSeen(chat.ns, chat.path, r.count);
       })
@@ -233,6 +255,7 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
       }
       countRef.current = Math.max(countRef.current, r.count);
       writeSeen(chat.ns, chat.path, countRef.current);
+      setWorking(r.working || []);
       setError('');
     } catch (e) {
       setError(e.message);
@@ -295,6 +318,40 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
   };
 
   const grouped = useMemo(() => groupMessages(messages), [messages]);
+  // The conversation, built only when the messages (or who "you" are) change.
+  // Rendering it on every keystroke ran marked + DOMPurify over every message
+  // in the chat, which made typing lag (~66ms a key with 300 messages).
+  const messageList = useMemo(() => (
+    <>
+        {doc?.description && <div className="chat-description" dangerouslySetInnerHTML={{ __html: renderMessage(doc.description, chat.ns, gifs) }} />}
+        {!doc && !error && <div className="chat-empty">Loading…</div>}
+        {doc && messages.length === 0 && <div className="chat-empty">No messages yet — say hello.</div>}
+        {grouped.map((m) => {
+          const own = isOwnMessage(m, account, effectiveAs);
+          const forMe = !own && mentionsName(m.text, effectiveAs);
+          return (
+            <div key={m.n} className={`chat-msg${own ? ' own' : ''}${forMe ? ' mentions-me' : ''}${m.startsGroup ? ' first' : ''}`}>
+              {m.startsGroup && (
+                <div className="chat-msg-meta">
+                  {(() => {
+                    // Everyone gets a thumbnail: their avatar if they set one,
+                    // else their initial in their name colour.
+                    const av = avatarFor(gifs, m.author);
+                    return av
+                      ? <img className="chat-avatar" src={gifUrl(chat.ns, av)} alt="" loading="lazy" />
+                      : <span className="chat-avatar chat-avatar-initial" style={{ background: `var(${colorForAuthor(m.author)})` }} aria-hidden="true">{initialOf(m.author)}</span>;
+                  })()}
+                  <span className="chat-msg-author" style={{ color: `var(${colorForAuthor(m.author)})` }}>{m.author}</span>
+                  {m.via && <span className="chat-msg-via">via {m.via}</span>}
+                  <span className="chat-msg-time" title={m.time}>{formatChatTime(m.time)}</span>
+                </div>
+              )}
+              <div className="chat-bubble" dangerouslySetInnerHTML={{ __html: renderMessage(m.text, chat.ns, gifs) }} />
+            </div>
+          );
+        })}
+    </>
+  ), [doc, error, messages.length, grouped, gifs, chat.ns, account, effectiveAs]);
   // @-completion: while the word at the caret starts with @, offer the
   // people in this chat (plus @all), most recent first.
   const query = mentionQuery(draft, caret);
@@ -368,6 +425,27 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
           <p>
             Paste this into the agent. Give it one name and it will use that name everywhere, so <code>@name</code> reaches it.
           </p>
+          {/* Role templates: a suggested name and a one-line trait, both still
+              editable below. Leads start helpers who join this same chat. */}
+          <div className="chat-agent-roles" role="radiogroup" aria-label="Role">
+            {CHAT_ROLES.map((r) => (
+              <button
+                key={r.id}
+                type="button"
+                role="radio"
+                aria-checked={agentRole === r.id}
+                className={`chat-role${agentRole === r.id ? ' active' : ''}`}
+                title={r.trait}
+                onClick={() => {
+                  const nextId = agentRole === r.id ? '' : r.id;
+                  const next = applyRole({ name: agentName, intent: agentIntent, prevRoleId: agentRole }, nextId);
+                  setAgentName(next.name);
+                  setAgentIntent(next.intent);
+                  setAgentRole(nextId);
+                }}
+              >{r.label}</button>
+            ))}
+          </div>
           <div className="chat-agent-row">
             <input
               className="chat-input"
@@ -391,12 +469,13 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
               prompt after the name, so the agent starts with its job instead
               of asking for one. */}
           <textarea
+            {...NO_GRAMMAR_ASSIST}
             className="chat-input chat-agent-intent"
             placeholder="What should this agent do here? e.g. Review the API pull requests and flag anything touching auth. (optional)"
             value={agentIntent}
             onChange={(e) => setAgentIntent(e.target.value)}
             maxLength={2000}
-            rows={2}
+            rows={3}
             aria-label="What this agent should do"
           />
           <pre>{agentInstructions(serverAlias, chat.ns, chat.path, agentName || 'AGENT_NAME', agentIntent)}</pre>
@@ -405,33 +484,7 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
       )}
 
       <div className="chat-messages" ref={scrollRef} onScroll={onScroll}>
-        {doc?.description && <div className="chat-description" dangerouslySetInnerHTML={{ __html: renderMessage(doc.description, chat.ns, gifs) }} />}
-        {!doc && !error && <div className="chat-empty">Loading…</div>}
-        {doc && messages.length === 0 && <div className="chat-empty">No messages yet — say hello.</div>}
-        {grouped.map((m) => {
-          const own = isOwnMessage(m, account, effectiveAs);
-          const forMe = !own && mentionsName(m.text, effectiveAs);
-          return (
-            <div key={m.n} className={`chat-msg${own ? ' own' : ''}${forMe ? ' mentions-me' : ''}${m.startsGroup ? ' first' : ''}`}>
-              {m.startsGroup && (
-                <div className="chat-msg-meta">
-                  {(() => {
-                    // Everyone gets a thumbnail: their avatar if they set one,
-                    // else their initial in their name colour.
-                    const av = avatarFor(gifs, m.author);
-                    return av
-                      ? <img className="chat-avatar" src={gifUrl(chat.ns, av)} alt="" loading="lazy" />
-                      : <span className="chat-avatar chat-avatar-initial" style={{ background: `var(${colorForAuthor(m.author)})` }} aria-hidden="true">{initialOf(m.author)}</span>;
-                  })()}
-                  <span className="chat-msg-author" style={{ color: `var(${colorForAuthor(m.author)})` }}>{m.author}</span>
-                  {m.via && <span className="chat-msg-via">via {m.via}</span>}
-                  <span className="chat-msg-time" title={m.time}>{formatChatTime(m.time)}</span>
-                </div>
-              )}
-              <div className="chat-bubble" dangerouslySetInnerHTML={{ __html: renderMessage(m.text, chat.ns, gifs) }} />
-            </div>
-          );
-        })}
+        {messageList}
       </div>
 
       {error && <div className="chat-error chat-room-error">{error}</div>}
@@ -469,40 +522,68 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
           <span className="chat-suggest-hint">Tab to complete</span>
         </div>
       )}
+      {/* Who is busy, on one quiet line. It is always there (empty when
+          nobody is working) so the conversation above never jumps when an
+          agent starts or finishes. */}
+      {(() => {
+        const line = workingLine(working, account, effectiveAs);
+        return (
+          <div className="chat-working" role="status" aria-live="polite" title={line?.title || ''} data-testid="chat-working">
+            {line && <>
+              {line.busy
+                ? <span className="chat-working-dots" aria-hidden="true"><i /><i /><i /></span>
+                : <span className="chat-listening-dot" aria-hidden="true" />}
+              <span className="chat-working-text">{line.text}</span>
+            </>}
+          </div>
+        );
+      })()}
+      {/* Slack-style: one roomy box. The text area spans the full width and
+          grows with what you type (wrapped lines too, not only Shift+Enter
+          ones); the posting name and the buttons sit in a bar inside it. The
+          old composer was a one-row input squeezed between them, so a long
+          message scrolled out of sight while you were writing it. */}
       <div className="chat-composer">
-        <label className="chat-as">
-          <span>as</span>
-          <input
-            className="chat-input"
-            value={postingAs}
-            placeholder={doc?.you || account || 'me'}
-            onChange={(e) => savePostingAs(e.target.value)}
-            maxLength={60}
-            aria-label="Posting as"
+        <div className="chat-compose-box">
+          <textarea
+            {...NO_GRAMMAR_ASSIST}
+            ref={draftRef}
+            className="chat-draft"
+            rows={2}
+            placeholder={doc?.title ? `Message ${doc.title}` : 'Message'}
+            title="Enter to send, Shift+Enter for a new line"
+            value={draft}
+            onChange={(e) => { setDraft(e.target.value); setCaret(e.target.selectionStart); }}
+            onSelect={(e) => setCaret(e.target.selectionStart)}
+            onKeyDown={onKeyDown}
+            disabled={!doc}
+            aria-label="Message"
           />
-        </label>
-        <textarea
-          ref={draftRef}
-          className="chat-input chat-draft"
-          rows={Math.min(6, Math.max(1, draft.split('\n').length))}
-          placeholder="Message"
-          title="Enter to send, Shift+Enter for a new line"
-          value={draft}
-          onChange={(e) => { setDraft(e.target.value); setCaret(e.target.selectionStart); }}
-          onSelect={(e) => setCaret(e.target.selectionStart)}
-          onKeyDown={onKeyDown}
-          disabled={!doc}
-        />
-        <button
-          className={`chat-btn chat-gif-toggle${showGifs ? ' active' : ''}`}
-          onClick={() => setShowGifs((v) => !v)}
-          disabled={!doc}
-          title="React with an image from ChatGifs"
-          aria-label="React with an image"
-        >GIF</button>
-        <button className="chat-btn chat-btn-primary" onClick={send} disabled={!doc || sending || !draft.trim()}>
-          Send
-        </button>
+          <div className="chat-compose-bar">
+            <label className="chat-as">
+              <span>as</span>
+              <input
+                className="chat-input"
+                value={postingAs}
+                placeholder={doc?.you || account || 'me'}
+                onChange={(e) => savePostingAs(e.target.value)}
+                maxLength={60}
+                aria-label="Posting as"
+              />
+            </label>
+            <button
+              className={`chat-btn chat-gif-toggle${showGifs ? ' active' : ''}`}
+              onClick={() => setShowGifs((v) => !v)}
+              disabled={!doc}
+              title="React with an image from ChatGifs"
+              aria-label="React with an image"
+            >GIF</button>
+            <span className="chat-compose-hint">Enter to send · Shift+Enter for a new line</span>
+            <button className="chat-btn chat-btn-primary chat-send" onClick={send} disabled={!doc || sending || !draft.trim()}>
+              Send
+            </button>
+          </div>
+        </div>
       </div>
     </section>
   );
@@ -524,6 +605,7 @@ function ChatView({ ns, namespaces, onSelectNs, account, serverAlias, isMobile, 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
+  const [menu, setMenu] = useState(null); // {x, y, chat} while the right-click menu is open
   const [filter, setFilter] = useState('');
   const visible = useVisible();
 
@@ -590,7 +672,28 @@ function ChatView({ ns, namespaces, onSelectNs, account, serverAlias, isMobile, 
               onCreated={(c) => { setCreating(false); refresh(); onSelectChat(c); }}
             />
           )}
-          <ChatList chats={chats} loading={loading} error={error} openChat={openChat} onSelect={onSelectChat} filter={filter} onFilter={setFilter} />
+          <ChatList
+            chats={chats} loading={loading} error={error} openChat={openChat} onSelect={onSelectChat} filter={filter} onFilter={setFilter}
+            onMenu={(x, y, c) => setMenu({ x, y, chat: c })}
+          />
+          {/* Right-click on a chat: the same menu component as the file tree. */}
+          <ContextMenu
+            visible={!!menu}
+            x={menu?.x || 0}
+            y={menu?.y || 0}
+            target={menu?.chat || null}
+            title={menu?.chat?.title}
+            groups={chatMenuGroups({ canDelete: !!onDeleteChat })}
+            onClose={() => setMenu(null)}
+            onAction={async (action, c) => {
+              if (!c) return;
+              if (action === 'open-note') onOpenNote(c.ns, c.path);
+              if (action === 'copy-path') copyPlainText(mdnestUri(serverAlias, c.ns, c.path));
+              if (action === 'delete-chat' && onDeleteChat) {
+                try { if (await onDeleteChat(c.ns, c.path, c.title)) refresh(); } catch (e) { alert('Failed to delete the chat: ' + e.message); }
+              }
+            }}
+          />
         </aside>
       )}
       {showRoom ? (

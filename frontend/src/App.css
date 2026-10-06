@@ -3128,7 +3128,11 @@ pre:hover .code-copy-btn {
 
 .live-editor-wrapper {
   flex: 1;
-  overflow-y: auto;
+  /* Not a scroller: the Crepe root inside it scrolls. With overflow-y: auto
+     (left over from when this was the scroller) a child placed too low gave
+     the wrapper a second scrollbar, which narrowed the editor and rewrapped
+     every line. */
+  overflow: hidden;
   padding: 0;
   /* position: relative so the floating Comment button and any other
      absolutely-positioned children anchor to the scrollable content area
@@ -3159,6 +3163,20 @@ pre:hover .code-copy-btn {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  /* Keep the scrollbar's room reserved, so a scroll area that grows or
+     shrinks never changes the text width. Without it, a note that just
+     fitted gained and lost a scrollbar as the block handle hid and showed,
+     and every line rewrapped (reported as "selecting a word moves the
+     text"). */
+  scrollbar-gutter: stable;
+}
+/* Crepe hides the block handle with opacity only (data-show="false") and
+   leaves it parked where it extends the scroll area by its own height
+   (~52px). The scroll height then grew and shrank as the handle hid and
+   showed: empty space under the note after a selection, gone on the next
+   click. A hidden handle now takes no space at all. */
+.live-editor-crepe-root .milkdown-block-handle[data-show='false'] {
+  display: none;
 }
 .live-editor-crepe-root .milkdown {
   height: 100%;
@@ -4507,6 +4525,27 @@ pre:hover .code-copy-btn {
 .release-notes-link:hover { opacity: 0.9; }
 
 /* ===== Conflict banner ===== */
+/* The conflict and restore notices float over the editor instead of taking a
+   row above it. As a row, each one pushed the whole document (and the caret)
+   down when it appeared and back up when it went, and it appeared far more
+   often than real conflicts did. A card in the corner says the same thing
+   without moving anything. */
+.floating-notice {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 900;
+  max-width: min(440px, calc(100vw - 32px));
+  flex-wrap: wrap;
+  border: 1px solid var(--warning-wash-3);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
+}
+.restore-banner.floating-notice { border-color: var(--accent-wash-3); }
+@media (max-width: 768px) {
+  .floating-notice { left: 12px; right: 12px; bottom: 12px; max-width: none; }
+}
+
 .conflict-banner {
   display: flex;
   align-items: center;

@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { createComment, resolveComment, deleteComment, editComment } from '../api.js';
+import { NO_GRAMMAR_ASSIST } from '../noGrammarAssist.js';
 
 function CommentSidebar({ comments, ns, currentPath, onRefresh, onClose, userInfo, pendingSelection, onSelectionConsumed, onGoTo, highlightedId, onHighlightConsumed, width, onWidthChange }) {
   const [newComment, setNewComment] = useState('');
@@ -169,6 +170,7 @@ function CommentSidebar({ comments, ns, currentPath, onRefresh, onClose, userInf
     editingId === c.id ? (
       <div className="comment-edit-form">
         <textarea
+          {...NO_GRAMMAR_ASSIST}
           className="comment-edit-textarea"
           value={editBody}
           onChange={(e) => setEditBody(e.target.value)}
@@ -257,6 +259,7 @@ function CommentSidebar({ comments, ns, currentPath, onRefresh, onClose, userInf
       {replyingTo === c.id && (
         <div className="comment-reply-form">
           <textarea
+            {...NO_GRAMMAR_ASSIST}
             ref={replyRef}
             placeholder="Reply..."
             value={replyBody}
@@ -318,6 +321,7 @@ function CommentSidebar({ comments, ns, currentPath, onRefresh, onClose, userInf
           </div>
         )}
         <textarea
+          {...NO_GRAMMAR_ASSIST}
           ref={textareaRef}
           placeholder={pendingSelection ? "Comment on this selection..." : "Add a general comment..."}
           value={newComment}

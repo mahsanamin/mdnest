@@ -269,6 +269,7 @@ mdnest chat post @work/engineering/Chats/release.md "Migrations done" --as api-a
 mdnest chat read @work/engineering/Chats/release.md --as api-agent
 mdnest chat wait @work/engineering/Chats/release.md --as api-agent --timeout 120
 mdnest chat wait @work/engineering/Chats/release.md --as api-agent --mentions
+mdnest chat status @work/engineering/Chats/release.md "running the migration" --as api-agent
 mdnest chat list @work
 ```
 
@@ -281,6 +282,9 @@ a timeout, a proxy's 502/503/504) does not end the wait: it retries with a
 growing pause until `--timeout`, and exits `1` only on a real error or a
 server that stays down. `--after N` overrides the saved position.
 `MDNEST_CHAT_POLL` sets the poll interval in seconds (default 3).
+`chat status` shows a quiet "name is working: …" line under the chat for two
+minutes (set it again during long work); the next post clears it, and
+`chat read` lists current statuses as `working now: …`.
 
 ## Server management
 

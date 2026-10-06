@@ -33,7 +33,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Crepe } from '@milkdown/crepe';
-import { editorViewCtx, nodeViewCtx, SchemaReady } from '@milkdown/core';
+import { editorViewCtx, nodeViewCtx, parserCtx, SchemaReady } from '@milkdown/core';
 import { TextSelection } from '@milkdown/prose/state';
 import { insert, markdownToSlice, replaceAll } from '@milkdown/utils';
 import { blockConfig } from '@milkdown/plugin-block';
@@ -57,6 +57,7 @@ import {
 
 import '@milkdown/crepe/theme/common/style.css';
 import '@milkdown/crepe/theme/frame-dark.css';
+import { markNoGrammarAssist } from '../noGrammarAssist.js';
 
 // Detect plain text that looks like mermaid diagram source. Strict on
 // purpose:
@@ -256,6 +257,14 @@ export default function LiveEditorCrepe({
   // Last markdown we serialized OUT of the editor. Used to skip the
   // content-prop sync effect for our own saves (avoid replaceAll loops).
   const lastLocalContentRef = useRef(content);
+  // The serialized form of the last document we injected (a remote update,
+  // a restore). Milkdown's listener reports changes DEBOUNCED, so the report
+  // for an injection arrives after suppressSaveRef is already disarmed and
+  // looked like the user typing: the idle side of a shared note broadcast
+  // live "content" (others saw it as typing) and autosaved with a stale
+  // etag (a 409, the false conflict banner). A report that equals exactly
+  // this text is that echo and is dropped; anything the user types differs.
+  const injectedEchoRef = useRef(null);
   // Floating "💬 Comment" button shown when the user selects text inside
   // the editor. Position is in pixels relative to the wrapper.
   const [selectionPopup, setSelectionPopup] = useState(null);
@@ -440,6 +449,14 @@ export default function LiveEditorCrepe({
         // freshly opened note was silently dropped.
         if (suppressSaveRef.current) return;
         if (markdown === prev) return;
+        if ((injectedEchoRef.current !== null && restored === injectedEchoRef.current)
+          || restored === lastPropContentRef.current) {
+          // The injected document coming back (as the editor serialized it,
+          // or exactly as the parent handed it over): not a user edit.
+          injectedEchoRef.current = null;
+          return;
+        }
+        injectedEchoRef.current = null;
         const cb = onChangeRef.current;
         if (cb) cb(restored);
       });
@@ -447,6 +464,8 @@ export default function LiveEditorCrepe({
 
     crepe.create().then(() => {
       crepeRef.current = crepe;
+      // Keep grammar-checking extensions off the editor (noGrammarAssist.js).
+      try { crepe.editor.action((ctx) => markNoGrammarAssist(ctx.get(editorViewCtx).dom)); } catch { /* not ready */ }
       // The initial document is in; anything after this is a user edit.
       suppressSaveRef.current = false;
       setInnerEditor(crepe.editor);
@@ -475,6 +494,89 @@ export default function LiveEditorCrepe({
     }
   }, [readOnly]);
 
+  // Apply a document that arrived from outside (a collaborator's typing or
+  // save, a reload, a restore) by changing ONLY the part that differs.
+  // replaceAll swapped the whole document, which threw the caret to the end
+  // and scrolled there: "my cursor jumps to the end while someone else
+  // types". The standard ProseMirror diff (findDiffStart/findDiffEnd) yields
+  // the smallest changed range; ProseMirror then maps the selection through
+  // it, so the caret and scroll stay put (shifted only if text above them
+  // changed). Not added to undo history: Cmd+Z undoes your edits, not theirs.
+  const applyExternalDoc = useCallback((markdown) => (ctx) => {
+    const view = ctx.get(editorViewCtx);
+    const next = ctx.get(parserCtx)(markdown);
+    if (!next || typeof next === 'string') throw new Error('parse failed');
+    const cur = view.state.doc;
+    // Compare blocks ignoring generated heading ids: the live document's
+    // headings carry an id a plugin adds after load ("cursor"), a freshly
+    // parsed one has "". Compared as-is, the first heading always differed,
+    // the "changed range" began at 0, and the caret was swept to the end.
+    const strip = (j) => {
+      let o = j;
+      if (o.attrs && Object.prototype.hasOwnProperty.call(o.attrs, 'id')) o = { ...o, attrs: { ...o.attrs, id: '' } };
+      if (o.content) o = { ...o, content: o.content.map(strip) };
+      return o;
+    };
+    const key = (n) => JSON.stringify(strip(n.toJSON()));
+    // Changed ranges, as [fromA, toA, fromB, toB]. With the same number of
+    // blocks (the usual case: people edit inside paragraphs) each changed
+    // block is its own range, so an edit above the caret and another below
+    // it leave the caret's block untouched. Otherwise one range from the
+    // first to the last changed block.
+    const ranges = [];
+    if (cur.childCount === next.childCount) {
+      let posA = 0;
+      let posB = 0;
+      for (let i = 0; i < cur.childCount; i += 1) {
+        const ca = cur.child(i);
+        const nb = next.child(i);
+        if (key(ca) !== key(nb)) ranges.push([posA, posA + ca.nodeSize, posB, posB + nb.nodeSize]);
+        posA += ca.nodeSize;
+        posB += nb.nodeSize;
+      }
+    } else {
+      const min = Math.min(cur.childCount, next.childCount);
+      let pre = 0;
+      while (pre < min && key(cur.child(pre)) === key(next.child(pre))) pre += 1;
+      let suf = 0;
+      while (suf < min - pre && key(cur.child(cur.childCount - 1 - suf)) === key(next.child(next.childCount - 1 - suf))) suf += 1;
+      let fromA = 0;
+      let fromB = 0;
+      for (let i = 0; i < pre; i += 1) { fromA += cur.child(i).nodeSize; fromB += next.child(i).nodeSize; }
+      let toA = cur.content.size;
+      let toB = next.content.size;
+      for (let i = 0; i < suf; i += 1) { toA -= cur.child(cur.childCount - 1 - i).nodeSize; toB -= next.child(next.childCount - 1 - i).nodeSize; }
+      ranges.push([fromA, toA, fromB, toB]);
+    }
+    if (ranges.length === 0) return; // identical apart from generated ids
+    const tr = view.state.tr;
+    // Last range first, so earlier positions stay valid.
+    for (const [fromA, toA, fromB, toB] of ranges.reverse()) {
+      // Narrow to the exact change inside the range (ProseMirror's diff), so
+      // a caret in the same paragraph as the edit keeps its place too.
+      const a = cur.slice(fromA, toA).content;
+      const b = next.slice(fromB, toB).content;
+      const sd = a.findDiffStart(b);
+      let start = fromA;
+      let endA = toA;
+      let endB = toB;
+      if (sd != null) {
+        const e = a.findDiffEnd(b);
+        if (e) {
+          let ea = e.a;
+          let eb = e.b;
+          const overlap = sd - Math.min(ea, eb);
+          if (overlap > 0) { ea += overlap; eb += overlap; }
+          start = fromA + sd;
+          endA = fromA + ea;
+          endB = fromB + eb;
+        }
+      }
+      tr.replace(start, endA, next.slice(start - fromA + fromB, endB));
+    }
+    view.dispatch(tr.setMeta('addToHistory', false));
+  }, []);
+
   // External content sync (live-collab broadcast, history restore). When the
   // `content` prop drifts from what we last serialized, replace the editor's
   // doc — same pattern as the legacy MilkdownEditor. Suppress saves through
@@ -488,12 +590,18 @@ export default function LiveEditorCrepe({
     lastPropContentRef.current = content;
     suppressSaveRef.current = true;
     try {
-      crepeRef.current.editor.action(replaceAll(content));
+      try {
+        crepeRef.current.editor.action(applyExternalDoc(content));
+      } catch {
+        // Anything the diff path cannot handle falls back to a full replace.
+        crepeRef.current.editor.action(replaceAll(content));
+      }
       lastLocalContentRef.current = content;
+      try { injectedEchoRef.current = restoreWikilinks(crepeRef.current.getMarkdown()); } catch { injectedEchoRef.current = null; }
     } catch { /* editor not ready or replaceAll failed */ } finally {
       suppressSaveRef.current = false;
     }
-  }, [content, innerEditor]);
+  }, [content, innerEditor, applyExternalDoc]);
 
   // Push active comment anchors into the highlight plugin whenever comments
   // change. Same logic as the legacy LiveEditor — top-level threads only,
@@ -559,12 +667,34 @@ export default function LiveEditorCrepe({
   // selection gesture that originated inside the editor, otherwise a
   // sidebar click that programmatically sets a selection would pop the
   // button at random positions.
+  // Position: the button is absolutely placed in .live-editor-wrapper, which
+  // does NOT scroll; the Crepe root inside it does. So the offset is the
+  // selection's on-screen position relative to the wrapper, with no scrollTop
+  // added. Adding the root's scrollTop (as this once did) put the button
+  // thousands of px down in a scrolled note: the wrapper overflowed, grew a
+  // scrollbar, the editor lost its width and every line rewrapped, then
+  // snapped back when the button went away (the selection "flicker"). The
+  // button is kept inside the wrapper, and re-placed as the editor scrolls.
+  const popupPosition = useCallback((view, end) => {
+    const root = rootRef.current;
+    const wrapper = root?.parentElement;
+    if (!root || !wrapper) return null;
+    const coords = view.coordsAtPos(end);
+    const wr = wrapper.getBoundingClientRect();
+    const rr = root.getBoundingClientRect();
+    if (coords.bottom < rr.top || coords.top > rr.bottom) return { hidden: true, top: 0, left: 0 };
+    const BTN_H = 32;
+    const top = Math.max(0, Math.min(coords.top - wr.top + 20, wrapper.clientHeight - BTN_H));
+    const left = Math.max(0, Math.min(coords.left - wr.left, wrapper.clientWidth - 120));
+    return { hidden: false, top, left };
+  }, []);
+
   useEffect(() => {
-    if (!innerEditor || !onComment) return;
+    if (!innerEditor || !onComment) return undefined;
     const checkSelection = (e) => {
-      const wrapper = rootRef.current;
-      if (!wrapper) return;
-      if (e && e.target && !wrapper.contains(e.target)) return;
+      const root = rootRef.current;
+      if (!root) return;
+      if (e && e.target && !root.contains(e.target)) return;
       try {
         innerEditor.action((ctx) => {
           const view = ctx.get(editorViewCtx);
@@ -572,25 +702,36 @@ export default function LiveEditorCrepe({
           if (to - from < 3) { setSelectionPopup(null); return; }
           const selectedText = view.state.doc.textBetween(from, to, ' ');
           if (!selectedText.trim()) { setSelectionPopup(null); return; }
-          const coords = view.coordsAtPos(to);
-          const rect = wrapper.getBoundingClientRect();
-          setSelectionPopup({
-            top: coords.top - rect.top + wrapper.scrollTop + 20,
-            left: Math.min(coords.left - rect.left, rect.width - 120),
-            text: selectedText,
-            start: from,
-            end: to,
-          });
+          const pos = popupPosition(view, to);
+          if (!pos) return;
+          setSelectionPopup({ ...pos, text: selectedText, start: from, end: to });
         });
       } catch { /* not ready */ }
     };
+    // Keep the button beside its text while the editor scrolls.
+    const onScroll = () => {
+      setSelectionPopup((cur) => {
+        if (!cur) return cur;
+        let next = cur;
+        try {
+          innerEditor.action((ctx) => {
+            const pos = popupPosition(ctx.get(editorViewCtx), cur.end);
+            if (pos) next = { ...cur, ...pos };
+          });
+        } catch { /* editor torn down */ }
+        return next;
+      });
+    };
+    const root = rootRef.current;
     document.addEventListener('mouseup', checkSelection);
     document.addEventListener('keyup', checkSelection);
+    root?.addEventListener('scroll', onScroll, { passive: true });
     return () => {
       document.removeEventListener('mouseup', checkSelection);
       document.removeEventListener('keyup', checkSelection);
+      root?.removeEventListener('scroll', onScroll);
     };
-  }, [innerEditor, onComment]);
+  }, [innerEditor, onComment, popupPosition]);
 
   // Hide the block handle while a mouse selection is being dragged. Crepe
   // animates the handle (`transition: all 0.2s`) to whichever block is under
@@ -855,7 +996,7 @@ export default function LiveEditorCrepe({
       {!readOnly && <LiveToolbar editor={innerEditor} handlesHidden={handlesHidden} onToggleHandles={toggleHandles} />}
       <div className="live-editor-wrapper" style={{ position: 'relative', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
         <div ref={rootRef} className="live-editor-crepe-root" />
-        {selectionPopup && onComment && (
+        {selectionPopup && !selectionPopup.hidden && onComment && (
           <button
             className="comment-selection-btn"
             style={{ top: selectionPopup.top, left: selectionPopup.left }}
