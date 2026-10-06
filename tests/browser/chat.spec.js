@@ -379,3 +379,39 @@ test('typing stays fast in a long chat', async ({ page }) => {
   expect(median, `median ms per key: ${median.toFixed(1)}`).toBeLessThan(40);
   await page.evaluate(async ([ns, p]) => { await fetch(`/api/note?ns=${ns}&path=${encodeURIComponent(p)}`, { method: 'DELETE', headers: { Authorization: 'Bearer ' + localStorage.getItem('mdnest_token') } }); }, [NS, chat]);
 });
+
+test('presence comes from the polls an agent already makes: listening, thinking, working', async ({ page }) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  const { plain, chat, title } = await seed(page);
+  try {
+    await page.goto(`/#!chats/${NS}/${chat}`);
+    await expect(page.locator('.chat-room-title h2')).toHaveText(title, { timeout: 20_000 });
+    const line = page.getByTestId('chat-working');
+    const qs = `ns=${NS}&path=${encodeURIComponent(chat)}`;
+    // Exactly what `mdnest chat wait --as bot` sends, from any CLI version.
+    const poll = async (after) => api(page, 'GET', `/api/chat?${qs}&after=${after}&format=text&exclude=bot`);
+
+    await poll(99);
+    await expect(line).toContainText('bot is listening', { timeout: 10_000 });
+    await expect(line.locator('.chat-listening-dot')).toHaveCount(1);
+
+    await api(page, 'POST', `/api/chat?${qs}&as=ahsan`, 'bot, can you check this?');
+    await poll(0); // the poll hands bot the new message
+    await expect(line).toContainText('bot is thinking', { timeout: 10_000 });
+    await expect(line.locator('.chat-working-dots')).toHaveCount(1);
+
+    // A /status post (works from any CLI and MCP post_chat) is not a message.
+    const before = await page.locator('.chat-bubble').count();
+    const r = await api(page, 'POST', `/api/chat?${qs}&as=bot`, '/status reading the logs');
+    expect(r.status).toBe(200);
+    await expect(line).toContainText('bot is working: reading the logs', { timeout: 10_000 });
+    expect(await page.locator('.chat-bubble').count()).toBe(before);
+
+    await api(page, 'POST', `/api/chat?${qs}&as=bot`, 'found it: a typo');
+    await expect(line).toContainText('bot is listening', { timeout: 10_000 });
+    await expect(page.locator('.chat-bubble').last()).toContainText('found it: a typo');
+  } finally {
+    await cleanup(page, plain, chat);
+  }
+});

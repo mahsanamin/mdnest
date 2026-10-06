@@ -157,6 +157,14 @@ func (h *ChatHandler) read(w http.ResponseWriter, r *http.Request) {
 		}
 		msgs = append(msgs, m)
 	}
+	// A poll that names its poster (exclude=NAME: every `chat wait --as`) is
+	// presence: NAME is listening, and thinking if this poll handed it new
+	// messages. Inferred here so it works with any CLI that can wait.
+	if exclude != "" && exclude != "~" {
+		if label, via, ok := h.authorFor(r, exclude); ok {
+			h.status.polled(ns, relPath, label, via, len(msgs) > 0, h.now())
+		}
+	}
 	if r.URL.Query().Get("format") == "text" {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Header().Set("X-Chat-Count", strconv.Itoa(len(doc.Messages)))
@@ -164,12 +172,8 @@ func (h *ChatHandler) read(w http.ResponseWriter, r *http.Request) {
 		// up: "codxu: reviewing the PR | claude-b: running tests". A header so
 		// the CLI reads it with grep, not a JSON parser; every part is already
 		// one terminal-safe line.
-		if st := h.status.list(ns, relPath, h.now()); len(st) > 0 {
-			parts := make([]string, 0, len(st))
-			for _, s := range st {
-				parts = append(parts, s.Author+": "+s.Text)
-			}
-			w.Header().Set("X-Chat-Working", strings.Join(parts, " | "))
+		if hdr := busyHeader(h.status.list(ns, relPath, h.now())); hdr != "" {
+			w.Header().Set("X-Chat-Working", hdr)
 		}
 		var b strings.Builder
 		for _, m := range msgs {
@@ -266,6 +270,12 @@ func (h *ChatHandler) post(w http.ResponseWriter, r *http.Request) {
 		chatJSONError(w, http.StatusBadRequest, "message is empty")
 		return
 	}
+	// "/status what I am doing" sets the poster's status instead of adding a
+	// message, so any CLI version (or MCP post_chat) can use it.
+	if st, isStatus := slashStatus(text); isStatus {
+		h.applyStatus(w, r, ns, relPath, st, http.StatusOK)
+		return
+	}
 	label, via, ok := h.author(r)
 	if !ok {
 		chatJSONError(w, http.StatusForbidden, "cannot attribute this post to a user")
@@ -307,7 +317,7 @@ func (h *ChatHandler) post(w http.ResponseWriter, r *http.Request) {
 	doc := ParseChat(updated)
 	msg := doc.Messages[len(doc.Messages)-1]
 	// The post is the result of whatever the poster said it was working on.
-	h.status.clear(ns, relPath, label)
+	h.status.posted(ns, relPath, label)
 	h.notify(r, ns, relPath, updated)
 
 	w.Header().Set("Content-Type", "application/json")

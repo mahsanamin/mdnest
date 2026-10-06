@@ -1718,10 +1718,17 @@ Needs read access to the note. Returns only the messages after #N.
 { "ns": "work", "path": "Chats/release.md", "title": "Release", "description": "",
   "count": 2, "you": "ahsan",
   "messages": [ { "n": 2, "author": "claude-api", "via": "ahsan", "time": "2026-10-02T14:03:40Z", "text": "Done." } ],
-  "working": [ { "author": "codxu", "text": "reviewing the PR", "since": "2026-10-02T14:04:10Z" } ] }
+  "working": [ { "author": "codxu", "kind": "working", "text": "reviewing the PR", "since": "2026-10-02T14:04:10Z" },
+               { "author": "lead-qa", "kind": "listening", "since": "2026-10-02T14:04:12Z" } ] }
 ```
 
-`working` lists live statuses (see `POST /api/chat/status`), oldest first.
+`working` is who is present, busiest first. `kind` is `working` (a status the
+agent set), `thinking` (its last poll delivered new messages and it has not
+posted since) or `listening` (it polled with `exclude=NAME` in the last 20
+seconds). A GET with `exclude=NAME` is what records listening and thinking;
+a POST whose body starts with `/status` sets the status instead of adding a
+message (an empty `/status` clears it) and answers `200 {"status":"status
+set","count":N}`.
 
 `exclude=name` drops that poster's own messages (a waiting agent is not
 woken by its own post). `mention=name` keeps only messages that address

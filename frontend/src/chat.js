@@ -268,8 +268,9 @@ export function agentInstructions(alias, ns, path, name = 'AGENT_NAME', intent =
     '   Leave only when your lead or a human says you are done: post a one-line goodbye, then stop.',
     '',
     'How to behave',
-    `- Before anything that takes more than a minute: mdnest chat status ${target} "what you are doing" --as ${as}`,
-    '  People see a quiet "working" line. Set it again every 2 minutes; your next post clears it.',
+    '- People can see when you are listening or thinking. Before anything that takes more than',
+    `  a minute, also say what: mdnest chat post ${target} "/status what you are doing" --as ${as}`,
+    '  It is not added to the chat. Repeat it every 2 minutes; your next real post clears it.',
     '- Need a human to answer or decide? Ask them with @their-name and add ![waiting](gif:question),',
     '  so they can see where they are needed.',
     `- Other agents may be here. Answer only what is addressed to you (@${name}, @all) or is your part.`,
@@ -279,18 +280,34 @@ export function agentInstructions(alias, ns, path, name = 'AGENT_NAME', intent =
   ].join('\n');
 }
 
-// workingLine turns the chat's live statuses into the one quiet line under
-// the conversation: "codxu is working: reviewing the PR · 3 min". Your own
-// status (the same author/via rule as isOwnMessage) is left out, since you
-// know what you are doing. Several posters share the line; `title` lists
-// them all for the tooltip. Returns null when nobody else is working.
+// workingLine turns the chat's presence into the one quiet line under the
+// conversation. The server infers most of it from the polls agents already
+// make (chat_status.go), so it needs no CLI update:
+//   working    codxu is working: reviewing the PR · 3 min   (a /status)
+//   thinking   codxu is thinking                            (got new messages)
+//   listening  lead-qa and qa-1 are listening               (waiting)
+// Busy posters come first; listeners are named together at the end. Your own
+// presence (the same author/via rule as isOwnMessage) is left out. `title`
+// lists everyone for the tooltip. Returns null when nobody else is here.
 export function workingLine(working, account, postingAs, now = Date.now()) {
   const others = (working || []).filter((w) => !isOwnMessage(w, account, postingAs));
   if (others.length === 0) return null;
-  const one = (w) => {
-    const mins = Math.floor((now - Date.parse(w.since)) / 60000);
-    return `${w.author} is working: ${w.text}${mins >= 1 ? ` · ${mins} min` : ''}`;
+  const mins = (w) => Math.floor((now - Date.parse(w.since)) / 60000);
+  const after = (w) => (mins(w) >= 1 ? ` · ${mins(w)} min` : '');
+  const busy = [];
+  const listening = [];
+  for (const w of others) {
+    if (w.kind === 'listening') listening.push(w.author);
+    else if (w.kind === 'thinking') busy.push(`${w.author} is thinking${after(w)}`);
+    else busy.push(`${w.author} is working: ${w.text}${after(w)}`);
+  }
+  const names = (list) => (list.length <= 2 ? list.join(' and ') : `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`);
+  const parts = [...busy];
+  if (listening.length) parts.push(`${names(listening)} ${listening.length === 1 ? 'is' : 'are'} listening`);
+  return {
+    text: parts.join('  ·  '),
+    title: [...busy, ...listening.map((n) => `${n} is listening`)].join('\n'),
+    count: others.length,
+    busy: busy.length > 0,
   };
-  const parts = others.map(one);
-  return { text: parts.join('  ·  '), title: parts.join('\n'), count: others.length };
 }
