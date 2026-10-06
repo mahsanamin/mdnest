@@ -30,11 +30,13 @@ All notable changes to mdnest are documented here.
 - **The right-click menu is arranged in groups.** It shows the item's name at
   the top, then: create (New note, folder, drawing, chat, Paste here), organize
   (Rename, Move to…, Copy to…), share (Download, Copy for another mdnest, Copy
-  path), info (History, Authors), admin (Manage access), and Delete last on its
+  path for CLI), info (History, Authors), admin (Manage access), and Delete last on its
   own in red. Every item has an icon. Before, Delete sat in the middle of the
   file menu and the copy actions were split up. Authors is now offered only in
   multi-user mode, where it works, and "Make it a chat" is gone: a chat is made
-  with New chat. The order is pinned in `contextMenuItems.test.js`.
+  with New chat. "Copy path" is now "Copy path for CLI": it copies an
+  `mdnest://` address for the CLI and agents, which the old name did not say.
+  The order is pinned in `contextMenuItems.test.js`.
 
 ### Fixed
 

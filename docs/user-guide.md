@@ -132,7 +132,7 @@ Right-click (desktop) or long-press (mobile) on a file or folder in the tree. Th
 
 - **New note / New folder / New drawing / New chat, Paste here** (folders and the namespace root) -- create inside that folder. **Paste here** creates a note copied with "Copy for another mdnest".
 - **Rename, Move to…, Copy to…** -- renaming a file without an extension keeps the original one (`notes.md` renamed to `summary` becomes `summary.md`). **Move to…** and **Copy to…** open one picker for a namespace, a folder and a name; it is touch-friendly, which matters on mobile, where drag-and-drop is off.
-- **Download** (a file) or **Download as zip** (a folder, keeping its folders), **Copy for another mdnest** (notes), **Copy path**
+- **Download** (a file) or **Download as zip** (a folder, keeping its folders), **Copy for another mdnest** (notes), **Copy path for CLI** (an `mdnest://` address the CLI and agents accept)
 - **History** and, in multi-user mode, **Authors** (files)
 - **Manage access** (admins, on folders and the root)
 - **Delete** -- always last, on its own, in red

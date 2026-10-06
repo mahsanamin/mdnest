@@ -99,6 +99,7 @@ function ContextMenu({ visible, x, y, target, onAction, onClose, canWrite, isAdm
               key={item.action}
               role="menuitem"
               className={`context-menu-item${item.danger ? ' danger' : ''}`}
+              title={item.hint}
               onClick={() => {
                 onAction(item.action, target);
                 onClose();
