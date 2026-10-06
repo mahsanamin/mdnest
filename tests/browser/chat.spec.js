@@ -218,3 +218,30 @@ test('the GIF picker shows its images whole, even in a short window', async ({ p
     await cleanup(page, plain, chat);
   }
 });
+
+test('the message box grows with a long message, and Enter still sends it', async ({ page }) => {
+  test.setTimeout(90_000);
+  await page.setViewportSize({ width: 1100, height: 760 });
+  await signIn(page);
+  const { plain, chat, title } = await seed(page);
+  try {
+    await page.goto(`/#!chats/${NS}/${chat}`);
+    await expect(page.locator('.chat-room-title h2')).toHaveText(title, { timeout: 20_000 });
+    const box = page.locator('textarea.chat-draft');
+    const before = (await box.boundingBox()).height;
+    // One long line with no Enter in it: it wraps, and the box must grow to
+    // show it instead of scrolling it out of sight.
+    const long = 'How did you manage the status shift, like in the current system our last status is VISA_GEN_COMPLETED and later the status is set to booked by the worker. '.repeat(3);
+    await box.fill(long);
+    await expect.poll(async () => (await box.boundingBox()).height).toBeGreaterThan(before + 30);
+    const fits = await box.evaluate((el) => el.scrollHeight <= el.clientHeight + 1);
+    expect(fits, 'the whole message is visible without scrolling').toBe(true);
+
+    await box.press('Enter');
+    await expect(box).toHaveValue('');
+    await expect.poll(async () => (await box.boundingBox()).height, { timeout: 5_000 }).toBeLessThanOrEqual(before + 1);
+    await expect(page.locator('.chat-bubble').last()).toContainText('VISA_GEN_COMPLETED', { timeout: 10_000 });
+  } finally {
+    await cleanup(page, plain, chat);
+  }
+});

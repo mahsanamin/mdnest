@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Marked } from 'marked';
 import { listChats, getChat, postChatMessage, convertToChat, listChatGifs, getToken } from '../api.js';
 import { resolveImgSrc } from '../img-src.js';
@@ -181,6 +181,16 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
   const [copied, setCopied] = useState(false);
   const [caret, setCaret] = useState(0);
   const draftRef = useRef(null);
+  // The draft grows with its content, wrapped lines included, up to a cap
+  // (then it scrolls). Measured from scrollHeight after each change.
+  useLayoutEffect(() => {
+    const el = draftRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    const max = Math.max(120, Math.round(window.innerHeight * 0.4));
+    el.style.height = `${Math.min(el.scrollHeight, max)}px`;
+    el.style.overflowY = el.scrollHeight > max ? 'auto' : 'hidden';
+  }, [draft]);
   const [gifs, setGifs] = useState([]);
   const [showGifs, setShowGifs] = useState(false);
   const scrollRef = useRef(null);
@@ -469,40 +479,51 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
           <span className="chat-suggest-hint">Tab to complete</span>
         </div>
       )}
+      {/* Slack-style: one roomy box. The text area spans the full width and
+          grows with what you type (wrapped lines too, not only Shift+Enter
+          ones); the posting name and the buttons sit in a bar inside it. The
+          old composer was a one-row input squeezed between them, so a long
+          message scrolled out of sight while you were writing it. */}
       <div className="chat-composer">
-        <label className="chat-as">
-          <span>as</span>
-          <input
-            className="chat-input"
-            value={postingAs}
-            placeholder={doc?.you || account || 'me'}
-            onChange={(e) => savePostingAs(e.target.value)}
-            maxLength={60}
-            aria-label="Posting as"
+        <div className="chat-compose-box">
+          <textarea
+            ref={draftRef}
+            className="chat-draft"
+            rows={2}
+            placeholder={doc?.title ? `Message ${doc.title}` : 'Message'}
+            title="Enter to send, Shift+Enter for a new line"
+            value={draft}
+            onChange={(e) => { setDraft(e.target.value); setCaret(e.target.selectionStart); }}
+            onSelect={(e) => setCaret(e.target.selectionStart)}
+            onKeyDown={onKeyDown}
+            disabled={!doc}
+            aria-label="Message"
           />
-        </label>
-        <textarea
-          ref={draftRef}
-          className="chat-input chat-draft"
-          rows={Math.min(6, Math.max(1, draft.split('\n').length))}
-          placeholder="Message"
-          title="Enter to send, Shift+Enter for a new line"
-          value={draft}
-          onChange={(e) => { setDraft(e.target.value); setCaret(e.target.selectionStart); }}
-          onSelect={(e) => setCaret(e.target.selectionStart)}
-          onKeyDown={onKeyDown}
-          disabled={!doc}
-        />
-        <button
-          className={`chat-btn chat-gif-toggle${showGifs ? ' active' : ''}`}
-          onClick={() => setShowGifs((v) => !v)}
-          disabled={!doc}
-          title="React with an image from ChatGifs"
-          aria-label="React with an image"
-        >GIF</button>
-        <button className="chat-btn chat-btn-primary" onClick={send} disabled={!doc || sending || !draft.trim()}>
-          Send
-        </button>
+          <div className="chat-compose-bar">
+            <label className="chat-as">
+              <span>as</span>
+              <input
+                className="chat-input"
+                value={postingAs}
+                placeholder={doc?.you || account || 'me'}
+                onChange={(e) => savePostingAs(e.target.value)}
+                maxLength={60}
+                aria-label="Posting as"
+              />
+            </label>
+            <button
+              className={`chat-btn chat-gif-toggle${showGifs ? ' active' : ''}`}
+              onClick={() => setShowGifs((v) => !v)}
+              disabled={!doc}
+              title="React with an image from ChatGifs"
+              aria-label="React with an image"
+            >GIF</button>
+            <span className="chat-compose-hint">Enter to send · Shift+Enter for a new line</span>
+            <button className="chat-btn chat-btn-primary chat-send" onClick={send} disabled={!doc || sending || !draft.trim()}>
+              Send
+            </button>
+          </div>
+        </div>
       </div>
     </section>
   );
