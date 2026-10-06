@@ -82,8 +82,8 @@ selection flicker, Mermaid label colours and Settings slipping out of view.
 ### Fixed
 
 - **Security: dependency updates.** New advisories (one critical, several
-  high) in the MCP server's and the frontend's dependencies, fixed with
-  in-range updates. Both pass `npm audit --audit-level=high`.
+  high) in the MCP server's and the frontend's dependencies, including the
+  MCP SDK (now 1.32.1), fixed with in-range updates. Both pass `npm audit --audit-level=high`.
 - **Your cursor stays put while someone else types.** A collaborator's live
   typing or save replaced the whole document in the Live editor, which threw
   your cursor to the end of the note, and the view scrolled down after it.
