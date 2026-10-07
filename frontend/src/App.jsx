@@ -2213,6 +2213,9 @@ function App() {
           onSetBoardActive={taskBoardEnabled && selectedNs ? setBoardActive : null}
           onSetChatsActive={chatEnabled ? setChatsActive : null}
           chatsBackLabel={chatsBackLabel}
+          presence={appConfig?.liveCollab && presenceUsers.length > 1
+            ? <PresenceBar users={presenceUsers} currentUserId={userInfo?.id} typingUsers={typingUsers} />
+            : null}
           chatsActive={chatsOpen && chatEnabled}
           drawingDoc={isDrawingDoc}
           drawingSource={drawingSource}
@@ -2313,13 +2316,6 @@ function App() {
           </div>
         )}
         <div className="split-view">
-          {/* Rendered inside the content area, not above it: this is an overlay
-              and .split-view is the box it should be positioned against.
-              Placed in .main it floated over the toolbar and covered the
-              view-mode and settings buttons. */}
-          {appConfig?.liveCollab && presenceUsers.length > 1 && (
-            <PresenceBar users={presenceUsers} currentUserId={userInfo?.id} typingUsers={typingUsers} />
-          )}
           {chatsOpen && chatEnabled ? (
             <ChunkErrorBoundary
               label="chats"

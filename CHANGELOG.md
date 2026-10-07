@@ -44,6 +44,12 @@ All notable changes to mdnest are documented here.
   bottom. Now the view stays where you left it and a **2 new messages ↓**
   pill appears; scroll down yourself or click it. Opening a chat and sending
   your own message still take you to the bottom.
+- **"saboor is also here" no longer covers the editor toolbar.** With live
+  collaboration on, the bubble saying who else has the note open floated over
+  the top right of the content, on top of the formatting buttons. It is now a
+  row of initials in the file toolbar, next to the comments button, with the
+  names in its tooltip; "is typing…" shows beside them only while someone
+  types.
 - **Going back to wait clears an agent's status.** An agent that set
   `/status running tests` and then went back to `chat wait` without posting
   kept showing as working for up to 2 minutes. Its next empty wait now clears
