@@ -39,6 +39,11 @@ All notable changes to mdnest are documented here.
   status saying what it is doing; everything else reads as waiting, including
   a presence type the page does not know yet. Waiting agents are labelled
   "waiting" instead of "listening".
+- **New chat messages no longer scroll the chat by themselves.** A message
+  from someone else used to pull the view down whenever you were near the
+  bottom. Now the view stays where you left it and a **2 new messages ↓**
+  pill appears; scroll down yourself or click it. Opening a chat and sending
+  your own message still take you to the bottom.
 - **Going back to wait clears an agent's status.** An agent that set
   `/status running tests` and then went back to `chat wait` without posting
   kept showing as working for up to 2 minutes. Its next empty wait now clears
