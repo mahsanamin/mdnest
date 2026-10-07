@@ -200,7 +200,7 @@ flowchart TD
 
 **First-run bootstrap (v3.11.4+).** On a fresh multi-mode install (empty `users` table) the seeded account — from `MDNEST_USER` / `MDNEST_PASSWORD` — is created as `superadmin`. It's the operator by definition, so it must hold the global role; a namespace-scoped `admin` with no `namespace_admins` rows would see zero namespaces and have no way to grant itself access. The `count == 0` guard restricts this to the very first user, so later invitees are unaffected. (Set a strong `MDNEST_PASSWORD` before first boot — the seed uses it verbatim.)
 
-When mdnest is upgraded from a pre-v3.5.0 install, migration `007_namespace_admins` renames every existing `role='admin'` row to `role='superadmin'` so current operators retain full power. New admins post-upgrade are namespace-scoped — promoted via `POST /api/admin/namespace-admins` or the admin panel's "Namespace Admins" tab.
+When mdnest is upgraded from a pre-v3.5.0 install, migration `007_namespace_admins` renames every existing `role='admin'` row to `role='superadmin'` so current operators retain full power. New admins post-upgrade are namespace-scoped — promoted via `POST /api/admin/namespace-admins` or the admin panel (People or Namespaces tab).
 
 ### Grant model
 
@@ -518,7 +518,7 @@ Both base images are pinned to moving tags (`golang:1.26-alpine`, `node:20-alpin
 2. Use SSO (`USER_PROVIDER=sso`) so identity is centralized and MFA is enforced by the IdP.
 3. Set `SSO_ALLOWED_DOMAINS=<your domain>` as a belt-and-suspenders email-domain allowlist.
 4. Pre-invite users via the admin panel before their first sign-in (no auto-provisioning).
-5. Use `ADMIN_EMAILS` for one or two ops superadmins; assign per-team admins via the **Namespace Admins** tab.
+5. Use `ADMIN_EMAILS` for one or two ops superadmins; assign per-team admins from the **Namespaces** tab.
 6. Set a sane `GRANT_MAX_DEPTH` (default 3 fits most structures).
 7. Rotate `SSO_CLIENT_SECRET` and `MDNEST_JWT_SECRET` on a schedule that matches your org's policy.
 8. Snapshot Postgres regularly. Notes already go to Git via the optional sync sidecar.

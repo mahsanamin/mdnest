@@ -5759,6 +5759,124 @@ pre:hover .code-copy-btn {
   flex: 1;
 }
 
+/* ===== People / Namespaces admin tabs ===== */
+.adm-intro { margin: -6px 0 14px; font-style: normal; }
+.adm-header-actions { display: flex; align-items: center; gap: 8px; }
+.adm-search {
+  padding: 6px 10px;
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  width: 220px;
+}
+.adm-role { margin-left: 8px; vertical-align: 1px; font-size: 0.7rem; }
+.adm-sec { margin-top: 16px; }
+.adm-sec h4,
+.adm-invite-step h4 {
+  margin: 0 0 8px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.adm-optional { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--text-muted); margin-left: 4px; }
+.adm-note { margin: 6px 0 0; font-style: normal; font-size: 0.8rem; }
+.adm-check { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; cursor: pointer; margin-top: 8px; }
+.adm-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.adm-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 4px 3px 10px;
+  border-radius: 999px;
+  background: var(--accent-wash);
+  border: 1px solid var(--accent-wash-3);
+  color: var(--text);
+  font-size: 0.8rem;
+}
+.adm-chip.admin { background: var(--danger-wash); border-color: var(--danger-wash-3); }
+.adm-chip-x {
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.95rem;
+  line-height: 1;
+  padding: 0 4px;
+  border-radius: 999px;
+}
+.adm-chip-x:hover { color: var(--text); background: var(--surface-3); }
+.adm-chip-pick { padding: 3px 10px; cursor: pointer; background: var(--surface-2); border-color: var(--border-strong); }
+.adm-chip-pick input { margin: 0 2px 0 0; }
+.adm-chip-pick.on { background: var(--accent-wash); border-color: var(--accent); }
+.adm-pick {
+  padding: 3px 8px;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  border: 1px dashed var(--border-strong);
+  border-radius: 999px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.adm-add-row { margin-top: 8px; }
+.grants-add-row.adm-add-row select:first-child { flex: 0 1 280px; min-width: 0; }
+.adm-reach { border-collapse: collapse; font-size: 0.85rem; }
+.adm-reach td { padding: 4px 16px 4px 8px; }
+.adm-via { color: var(--text-muted); font-size: 0.8rem; }
+.adm-person-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+.adm-ns-avatar { background: var(--surface-3); color: var(--text); border-radius: 8px; }
+.adm-ns-row { align-items: flex-start; gap: 12px; }
+.adm-ns-who { flex: 0 0 180px; display: flex; align-items: center; min-width: 0; padding-top: 3px; }
+.adm-ns-rows { flex: 1; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.adm-ns-access { display: flex; align-items: center; gap: 10px; font-size: 0.85rem; }
+.adm-ns-access code { min-width: 90px; }
+.adm-perm-static { font-size: 0.8rem; color: var(--text-secondary); padding: 0 10px; }
+.adm-invite {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.adm-fields { display: flex; flex-wrap: wrap; gap: 8px; }
+.adm-fields input {
+  flex: 1 1 200px;
+  padding: 7px 10px;
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+.adm-invite-actions { display: flex; justify-content: flex-end; }
+.adm-invite-actions button {
+  background: var(--accent);
+  color: var(--text-inverse);
+  border: none;
+  padding: 7px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+}
+.adm-invite-actions button:disabled { opacity: 0.6; cursor: default; }
+@media (max-width: 768px) {
+  .adm-ns-row { flex-wrap: wrap; }
+  .adm-ns-who { flex-basis: 100%; }
+  .adm-search { width: 140px; }
+}
+
 /* Set the Delete-group action apart from the sections above it. */
 .group-delete-row {
   margin-top: 16px;

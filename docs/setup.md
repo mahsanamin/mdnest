@@ -388,7 +388,7 @@ MOUNT_ops=/srv/notes/ops
 What this gets you:
 
 - All identity centralized in your IdP — users sign in with their existing corporate account, MFA enforced where the IdP enforces it.
-- One or two SuperAdmins (the `ADMIN_EMAILS` list) who manage the system globally, plus per-team Admins assigned via the **Namespace Admins** tab in the admin UI. Each per-team Admin can invite their teammates and manage grants on their own namespace without seeing other teams.
+- One or two SuperAdmins (the `ADMIN_EMAILS` list) who manage the system globally, plus per-team Admins assigned from the **Namespaces** tab in the admin UI. Each per-team Admin can invite their teammates and manage grants on their own namespace without seeing other teams.
 - Public TLS via Caddy + Let's Encrypt, with the backend bound only to a Docker-internal network. The reverse proxy is the only thing exposed.
 - Live collaboration (cursors, presence, real-time comments) on by default for multi-user installs.
 - Per-team git backup if each `MOUNT_*` is a separate git repo with a deploy key in `git-sync/keys/<namespace>` — see [Git Sync](#git-sync) below.
