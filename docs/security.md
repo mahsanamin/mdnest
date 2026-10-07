@@ -66,6 +66,8 @@ Binding to all interfaces drops the network boundary entirely. Anyone on the sam
 
 `BIND_ADDRESS` accepts a comma-separated list — the published ports bind to each address independently. The common pattern is `BIND_ADDRESS=127.0.0.1,100.73.118.115`: localhost stays usable on the host, and the Tailscale / WireGuard / VPN address is reachable to your other devices on the overlay network — but the public NIC is still dark. This is strictly safer than `0.0.0.0` because traffic from the LAN or the public internet never reaches the listener at all.
 
+It has one operational catch. Docker publishes a port only if the IP exists when the container starts. A Tailscale or VPN address usually comes up after Docker does, so after a reboot or a Docker restart the containers can run with no port published: `docker ps` shows them as Up and every request is refused. `./mdnest-server status` reports this, and `./mdnest-server reload` fixes it until the next restart. The setup that survives restarts is `BIND_ADDRESS=127.0.0.1` with a reverse proxy listening on the overlay address (for Tailscale, `tailscale serve` does this with no extra software).
+
 ---
 
 ## Layer 2 — Identity
