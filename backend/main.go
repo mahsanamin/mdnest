@@ -459,6 +459,7 @@ func main() {
 	}
 
 	nsHandler := handlers.NewNamespaceHandler(stg, perms, workspaceStore)
+	nsHandler.SetNotesDir(absNotesDir)
 	noteHandler := handlers.NewNoteHandler(stg)
 	historyHandler := handlers.NewHistoryHandler(absNotesDir)
 	if collabHub != nil {
@@ -883,6 +884,7 @@ func main() {
 		}
 	}()
 	log.Printf("mdnest backend listening on :%s (NOTES_DIR=%s)", port, absNotesDir)
+	logNamespacesAtStartup(appCtx, stg, absNotesDir)
 
 	<-appCtx.Done()
 	log.Println("shutdown signal received, draining…")
@@ -972,4 +974,23 @@ func readFirebaseWebConfig(path string) (map[string]interface{}, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+// logNamespacesAtStartup says which namespaces the backend can see, and what
+// to check when it sees none, so `docker compose logs backend` answers "No
+// namespaces found" on its own (GitHub issue #123).
+func logNamespacesAtStartup(ctx context.Context, stg storage.Storage, notesDir string) {
+	names, err := stg.ListNamespaces(ctx)
+	if err != nil {
+		log.Printf("namespaces: could not list %s: %v", notesDir, err)
+		return
+	}
+	if len(names) > 0 {
+		log.Printf("namespaces: %d found in %s: %s", len(names), notesDir, strings.Join(names, ", "))
+		return
+	}
+	log.Printf("WARNING namespaces: none found in %s. Each namespace is a folder mounted into the BACKEND container at %s/<name>, "+
+		"e.g. \"./notes:%s/notes\" under the backend service's volumes (not the frontend's). Files placed directly in %s are not in any namespace. "+
+		"If the folder exists on the host but looks empty here, Docker cannot see it: on Docker Desktop add it under Settings > Resources > File sharing; on an SELinux host (Fedora, RHEL) add :z to the volume.",
+		notesDir, notesDir, notesDir, notesDir)
 }

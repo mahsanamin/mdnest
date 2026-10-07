@@ -246,6 +246,14 @@ export async function getNamespaces() {
   return res.json();
 }
 
+// getNamespaceList is getNamespaces plus, when the list is empty, the server's
+// reason (X-Namespaces-Empty-Reason: none-mounted | files-at-root | no-access).
+export async function getNamespaceList() {
+  const res = await request('/namespaces');
+  if (!res.ok) throw new Error('Failed to load namespaces');
+  return { names: await res.json(), emptyReason: res.headers.get('X-Namespaces-Empty-Reason') || '' };
+}
+
 // getManageableNamespaces returns the namespaces the caller may administer
 // (every namespace for a superadmin, the caller's scoped namespaces for a
 // namespace admin). Unlike getNamespaces() this is not limited to the

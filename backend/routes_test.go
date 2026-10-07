@@ -1047,3 +1047,24 @@ func TestRoutes_SingleModeDownloadAndTransfer(t *testing.T) {
 		t.Errorf("the moved note's comments did not follow it")
 	}
 }
+
+// GitHub issue #123: in multi mode a superadmin has no implicit data access, so
+// a fresh install shows no namespaces until a grant exists. The list must say
+// that (no-access) rather than look like nothing is mounted.
+func TestRoutes_EmptyNamespacesForANoAccessAccountSayNoAccess(t *testing.T) {
+	ts := newTestServer(t, true)
+	req, _ := http.NewRequest(http.MethodGet, ts.srv.URL+"/api/namespaces", nil)
+	req.Header.Set("Authorization", "Bearer "+jwtFor(t, 99, "superadmin", nil))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 || strings.TrimSpace(string(body)) != "[]" {
+		t.Fatalf("namespaces: %d %s", resp.StatusCode, body)
+	}
+	if got := resp.Header.Get("X-Namespaces-Empty-Reason"); got != "no-access" {
+		t.Fatalf("X-Namespaces-Empty-Reason = %q, want no-access", got)
+	}
+}
