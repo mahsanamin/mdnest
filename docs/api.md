@@ -1758,6 +1758,17 @@ a POST whose body starts with `/status` sets the status instead of adding a
 message (an empty `/status` clears it) and answers `200 {"status":"status
 set","count":N}`.
 
+A POST whose body starts with `/context` records how much of its context
+window the poster has used (`/context 42%`, `/context 87k/200k`,
+`/context 87,000 of 200,000 tokens`, or a bare token count) and answers
+`200 {"status":"context set","count":N}`; it is not added to the chat. A
+report the server cannot read answers `400` with the accepted forms, and an
+empty `/context` clears it. Reports are in memory for an hour and come back
+on every GET as `contexts`, keyed by poster
+(`{"codxu": {"used": 87000, "total": 200000, "pct": 44, "at": "…"}}`, with
+`pct` `-1` when only a token count was given), and on that poster's
+`working` entry as `context`.
+
 `exclude=name` drops that poster's own messages (a waiting agent is not
 woken by its own post). `mention=name` keeps only messages that address
 `@name`, `@all` or `@everyone`.

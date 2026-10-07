@@ -299,6 +299,17 @@
 .chat-msg-via,
 .chat-msg-time { color: var(--text-muted); }
 
+/* An agent's last /context report, by its name. */
+.chat-context {
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+.chat-context.high { color: var(--warning); border-color: var(--warning); background: var(--warning-wash); }
+
 .chat-bubble {
   background: var(--surface-2);
   border: 1px solid var(--border-subtle);
