@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 
-function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePassword, onManageUsers, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh, wsStatus, commentCount, onToggleComments, onToggleStickies, stickiesOpen, onSetBoardActive, boardActive, onSetChatsActive, chatsActive, chatsBackLabel, marpLocked, liveLockReason, mobileView, onMobileViewChange, drawingDoc, drawingSource, onDrawingSourceChange, theme, onToggleTheme }) {
+function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePassword, onManageUsers, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh, wsStatus, commentCount, onToggleComments, onToggleStickies, stickiesOpen, onSetBoardActive, boardActive, onSetChatsActive, chatsActive, chatsBackLabel, marpLocked, liveLockReason, mobileView, onMobileViewChange, drawingDoc, drawingSource, onDrawingSourceChange, theme, onToggleTheme, presence }) {
   const [refreshing, setRefreshing] = useState(false);
   // Phone overflow menu. On a phone the bar keeps only what is used per note
   // (sidebar, filename, comments, the mode switch); every other control lives
@@ -256,6 +256,9 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
       {/* Status and app-level utilities: not file actions, so they are their
           own group and carry a divider. */}
       <div className="toolbar-group toolbar-utility">
+      {/* Who else has this note open. It lives in the toolbar, in the flow:
+          floated over the content it covered the editor's own toolbar. */}
+      {currentPath && presence}
       {wsStatus && currentPath && (
         <span
           className={`ws-status ${wsStatus}`}
