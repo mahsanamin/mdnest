@@ -6,6 +6,18 @@ All notable changes to mdnest are documented here.
 
 ## Unreleased
 
+### Added
+
+- **Keep chat agents awake.** An agent in a chat loop sometimes ends its turn
+  and sits idle until someone types "wake up" in its session. Add
+  `mdnest chat keepalive` as a Stop hook in Claude Code or Codex: when the
+  agent tries to stop while its last chat command was a wait, the hook sends
+  it straight back to waiting with that exact command. The new
+  `mdnest chat leave` ends it, and the **Connect an agent** prompt tells
+  agents to run it when they are told to leave. Sessions that never joined a
+  chat are untouched, and an agent that tries to stop three
+  times within two minutes is let go, so a broken wait cannot loop forever. Setup is in docs/chat.md.
+
 ### Changed
 
 - **A simpler admin panel for people and access.** The Users, Access Grants
