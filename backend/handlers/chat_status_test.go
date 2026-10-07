@@ -205,7 +205,7 @@ func TestBusyHeaderForTextReads(t *testing.T) {
 	h, _ := newStatusTestChat(t)
 	chatDo(t, h.Handle, http.MethodPost, statusChatURL+"&as=codxu", "/status reviewing the PR", nil)
 	chatDo(t, h.Handle, http.MethodPost, statusChatURL+"&as=ahsan", "ping", nil)
-	chatDo(t, h.Handle, http.MethodGet, statusChatURL+"&after=0&exclude=lead-qa", "", nil) // thinking
+	chatDo(t, h.Handle, http.MethodGet, statusChatURL+"&after=0&exclude=lead-qa", "", nil)  // thinking
 	chatDo(t, h.Handle, http.MethodGet, statusChatURL+"&after=9&exclude=listener", "", nil) // listening
 	w := chatDo(t, h.Handle, http.MethodGet, statusChatURL+"&format=text", "", nil)
 	if got := w.Header().Get("X-Chat-Working"); got != "codxu: reviewing the PR | lead-qa: thinking" {

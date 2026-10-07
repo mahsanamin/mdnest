@@ -28,6 +28,8 @@ services:
     volumes:
       # Namespaces: each mount is one top-level workspace in the sidebar.
       # Format: <folder on your host>:/data/notes/<name shown in mdnest>
+      # These go on the backend (not the frontend). Empty sidebar? See
+      # "If mdnest says it has no namespaces" in docs/setup.md.
       - ./notes:/data/notes/notes
       # - /srv/work-notes:/data/notes/work          # Optional: a second namespace
 

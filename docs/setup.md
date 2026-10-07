@@ -101,6 +101,21 @@ the container.
 
 ---
 
+### If mdnest says it has no namespaces
+
+Each namespace is a folder mounted into the **backend** container at
+`/data/notes/<name>`. When the sidebar is empty, the page says which of these
+it is, and `docker compose logs backend` lists the namespaces it found at
+startup:
+
+| What you see | Cause | Fix |
+|---|---|---|
+| "No namespaces found" | nothing is mounted at `/data/notes/<name>` in the backend | put the volume under the **backend** service (not the frontend), e.g. `- ./notes:/data/notes/notes`, and recreate it |
+| "No namespaces found", but the folder exists | Docker cannot see the host folder, so it mounts an empty one | on Docker Desktop add the folder under Settings > Resources > File sharing; on an SELinux host (Fedora, RHEL) add `:z` |
+| "Your notes are mounted one level too high" | the folder is mounted at `/data/notes` itself, so its files are in no namespace | mount it one level down: `- ./notes:/data/notes/notes` |
+| "The notes folder cannot be read" | permissions, or SELinux without `:z` | fix the host permissions, or add `:z` to the volume |
+| "No namespaces you can open yet" | multi-user mode: your account has no grant (admins get none automatically) | grant access in **Manage users & access** |
+
 ## Guided setup
 
 ```bash
