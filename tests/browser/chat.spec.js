@@ -515,6 +515,18 @@ test('pin chats to the Pinned tab, and collapse the list to a strip', async ({ p
     await page.goto(`/#!chats`);
     const row = page.locator('.chat-list-row', { hasText: names[1] });
     await expect(row).toBeVisible({ timeout: 20_000 });
+    // The header's title and buttons share one line, and the title, the
+    // workspace row, the tabs and each chat start at the same left edge.
+    const layout = await page.evaluate(() => {
+      const box = (s) => document.querySelector(s).getBoundingClientRect();
+      const mid = (r) => r.top + r.height / 2;
+      return {
+        sameLine: Math.abs(mid(box('.chat-list-header h2')) - mid(box('.chat-list-actions'))) < 3,
+        lefts: ['.chat-list-header h2', '.chat-list-scope', '.chat-tab', '.chat-list-title', '.chat-list-path'].map((s) => Math.round(box(s).left)),
+      };
+    });
+    expect(layout.sameLine).toBe(true);
+    expect(new Set(layout.lefts).size, `left edges ${layout.lefts}`).toBe(1);
     await row.hover();
     await row.getByTestId('chat-pin').click();
     await expect(row.getByTestId('chat-pin')).toHaveAttribute('aria-pressed', 'true');
