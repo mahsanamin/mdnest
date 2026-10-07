@@ -2,7 +2,10 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"net/http"
+	"os"
 
 	"github.com/mdnest/mdnest/backend/middleware"
 	"github.com/mdnest/mdnest/backend/storage"
@@ -21,6 +24,48 @@ type NamespaceHandler struct {
 	// personal lists personal-workspace namespaces to exclude from the
 	// management plane; nil in single mode.
 	personal personalNamespaceLister
+	// notesDir is NOTES_DIR, used only to explain an empty list (files placed
+	// directly in it are not in any namespace). Empty: not checked.
+	notesDir string
+}
+
+// SetNotesDir lets an empty listing say when notes sit directly in NOTES_DIR.
+func (h *NamespaceHandler) SetNotesDir(dir string) { h.notesDir = dir }
+
+// Why a namespace list came back empty, sent as X-Namespaces-Empty-Reason so
+// the UI can say what to fix. The old message ("Check your mdnest.conf
+// mounts") was the same for every cause and named a file a plain Docker
+// Compose install does not have (GitHub issue #123).
+const (
+	// Nothing mounted: NOTES_DIR has no folders. Usually the volumes are on
+	// the frontend service instead of the backend, or not mounted at all.
+	emptyNoneMounted = "none-mounted"
+	// NOTES_DIR holds files but no folders: the notes folder was mounted at
+	// /data/notes itself instead of one level down (/data/notes/<name>).
+	emptyFilesAtRoot = "files-at-root"
+	// Namespaces exist but this account has access to none of them (multi
+	// mode: no grant yet; a superadmin has no implicit data access).
+	emptyNoAccess = "no-access"
+	// NOTES_DIR exists but cannot be read (permissions, SELinux without :z).
+	emptyUnreadable = "unreadable"
+)
+
+// emptyReason explains an empty result; mounted is how many namespaces exist
+// before access filtering.
+func (h *NamespaceHandler) emptyReason(mounted int) string {
+	if mounted > 0 {
+		return emptyNoAccess
+	}
+	if h.notesDir != "" {
+		if entries, err := os.ReadDir(h.notesDir); err == nil {
+			for _, e := range entries {
+				if !e.IsDir() && e.Type().IsRegular() && len(e.Name()) > 0 && e.Name()[0] != '.' {
+					return emptyFilesAtRoot
+				}
+			}
+		}
+	}
+	return emptyNoneMounted
 }
 
 // NewNamespaceHandler creates a new namespace handler.
@@ -37,9 +82,18 @@ func (h *NamespaceHandler) ListNamespaces(w http.ResponseWriter, r *http.Request
 
 	names, err := h.store.ListNamespaces(r.Context())
 	if err != nil {
+		// Unreadable NOTES_DIR: say so instead of a bare 500 the UI can only
+		// show as "no namespaces".
+		if errors.Is(err, fs.ErrPermission) || os.IsPermission(err) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("X-Namespaces-Empty-Reason", emptyUnreadable)
+			w.Write([]byte("[]\n"))
+			return
+		}
 		http.Error(w, `{"error":"failed to read namespaces"}`, http.StatusInternalServerError)
 		return
 	}
+	mounted := len(names)
 
 	// In multi mode, filter to namespaces the user has access to. The
 	// management plane (?scope=manage) instead lists the namespaces the
@@ -61,6 +115,9 @@ func (h *NamespaceHandler) ListNamespaces(w http.ResponseWriter, r *http.Request
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	if len(names) == 0 {
+		w.Header().Set("X-Namespaces-Empty-Reason", h.emptyReason(mounted))
+	}
 	if r.URL.Query().Get("detail") == "1" {
 		json.NewEncoder(w).Encode(h.detail(r, names))
 		return

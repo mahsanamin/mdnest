@@ -44,6 +44,7 @@ import AttributionModal from './components/AttributionModal.jsx';
 import MoveToModal from './components/MoveToModal.jsx';
 import PasteModal from './components/PasteModal.jsx';
 import { copyPlainText } from './mermaid-text.js';
+import { emptyNamespacesMessage } from './emptyNamespaces.js';
 import { mdnestUri } from './mdnestUri.js';
 import {
   baseName, buildClipboardPayload, describeRefusal, filenameFromDisposition, formatBytes,
@@ -62,6 +63,7 @@ import {
   saveNote,
   getTree,
   getNamespaces,
+  getNamespaceList,
   createNote,
   createFolder,
   deleteNote,
@@ -168,6 +170,7 @@ function App() {
   const [ssoError, setSsoError] = useState(() => consumeSSOHashOnLoad());
   const [authenticated, setAuthenticated] = useState(!!getToken());
   const [namespaces, setNamespaces] = useState([]);
+  const [namespacesEmptyReason, setNamespacesEmptyReason] = useState(''); // why the list is empty (issue #123)
   const [selectedNs, setSelectedNs] = useState(null);
   const [tree, setTree] = useState([]);
   // True while a getTree() request is in flight. Surfaced in the sidebar
@@ -880,8 +883,9 @@ function App() {
 
   const loadNamespaces = useCallback(async () => {
     try {
-      const data = await getNamespaces();
+      const { names: data, emptyReason } = await getNamespaceList();
       setNamespaces(data);
+      setNamespacesEmptyReason(emptyReason);
       return data;
     } catch (e) {
       console.error('Failed to load namespaces:', e);
@@ -2486,7 +2490,10 @@ function App() {
             )
           ) : (
             <div className="empty-state">
-              <p>{namespaces.length === 0 ? 'No namespaces found. Check your mdnest.conf mounts.' : 'Select a note or create one to get started.'}</p>
+              {namespaces.length === 0 ? (() => {
+                const m = emptyNamespacesMessage(namespacesEmptyReason, { isAdmin });
+                return <div className="empty-namespaces" data-testid="empty-namespaces"><p><strong>{m.title}</strong></p><p>{m.detail}</p></div>;
+              })() : <p>Select a note or create one to get started.</p>}
             </div>
           )}
         </div>
