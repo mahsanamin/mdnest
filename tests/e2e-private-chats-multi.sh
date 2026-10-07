@@ -44,6 +44,8 @@ mkdir -p "$NOTES_DIR"/alpha/Chats/Deep "$NOTES_DIR"/beta
 printf -- '---\nmdnest-chat: true\ntitle: Room\n---\n' > "$NOTES_DIR/alpha/Chats/room.md"
 printf -- '---\nmdnest-chat: true\ntitle: Deep\n---\n' > "$NOTES_DIR/alpha/Chats/Deep/inner.md"
 printf -- '---\nmdnest-chat: true\ntitle: Other\n---\n' > "$NOTES_DIR/alpha/Chats_x.md"
+mkdir -p "$NOTES_DIR/alpha/Legacy"
+printf -- '---\nmdnest-chat: true\ntitle: Legacy\n---\nLEGACY-SECRET\n' > "$NOTES_DIR/alpha/Legacy/Room.md"
 chmod -R a+rwX "$NOTES_DIR"
 
 docker network create "$NET" >/dev/null
@@ -60,6 +62,23 @@ BASE="http://127.0.0.1:$PORT"
 for _ in $(seq 1 40); do curl -fsS "$BASE/api/config" >/dev/null 2>&1 && break; sleep 1; done
 curl -fsS "$BASE/api/config" >/dev/null 2>&1 || { fail "backend never became healthy"; docker logs "$BE" | tail -30; exit 1; }
 pass "multi-mode backend up at $BASE"
+
+# Migration 018: the first develop build of this feature stored keys as
+# spelled. Seed such a row, run 018 again, and check it was lowered (the
+# Python checks below then confirm that chat is still closed).
+docker exec "$PG" psql -q -U mdnest -d mdnest -c \
+  "INSERT INTO chat_members (namespace, path, user_id) VALUES ('alpha', '/Legacy/Room.md', 999999); DELETE FROM schema_migrations WHERE name = '018_chat_members_lowercase_paths';" >/dev/null
+docker restart "$BE" >/dev/null
+# A restart publishes the port anew, on a new random host port.
+PORT="$(docker port "$BE" 8080/tcp | head -1 | sed 's/.*://')"
+BASE="http://127.0.0.1:$PORT"
+for _ in $(seq 1 40); do curl -fsS "$BASE/api/config" >/dev/null 2>&1 && break; sleep 1; done
+LEGACY_KEYS="$(docker exec "$PG" psql -tA -U mdnest -d mdnest -c "SELECT path FROM chat_members WHERE namespace = 'alpha' ORDER BY path")"
+if [ "$LEGACY_KEYS" = "/legacy/room.md" ]; then
+  pass "migration 018 lowered an existing mixed-case key"
+else
+  fail "migration 018: keys are [$LEGACY_KEYS]"; exit 1
+fi
 
 BASE="$BASE" NOTES="$NOTES_DIR" python3 - <<'PY'
 import json, os, sys, threading, urllib.request, urllib.error
@@ -125,6 +144,9 @@ def members(tok, ns, path):
 
 def can_read(tok, ns, path):
     return call("GET", f"/api/note?ns={ns}&path={path}", tok)[0] == 200
+
+print("── a chat stored before keys were lowercased stays private")
+check("Legacy/Room.md (key migrated by 018) is closed to nate", not can_read(nate, "alpha", "Legacy/Room.md"))
 
 print("── making an existing chat private needs a namespace admin")
 code, r = call("POST", "/api/chat/members?ns=alpha&path=Chats_x.md", nate, {"userId": ids["mia"]})

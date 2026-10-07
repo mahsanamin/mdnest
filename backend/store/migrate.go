@@ -340,6 +340,22 @@ var migrations = []struct {
 			);
 		`,
 	},
+	{
+		// Keys are compared lowercased (a case-insensitive mount serves
+		// CHATS/SECRET.md as Chats/secret.md). 017 shipped on develop
+		// storing them as spelled, so lower them here: a row left in its
+		// original case would no longer be found, and its chat would be
+		// silently OPEN. Copies first, then the old rows, so no moment has
+		// neither.
+		name: "018_chat_members_lowercase_paths",
+		sql: `
+			INSERT INTO chat_members (namespace, path, user_id, added_by, added_at)
+				SELECT namespace, lower(path), user_id, added_by, added_at
+				FROM chat_members WHERE path <> lower(path)
+				ON CONFLICT (namespace, path, user_id) DO NOTHING;
+			DELETE FROM chat_members WHERE path <> lower(path);
+		`,
+	},
 }
 
 // Migrate runs all pending migrations. Safe to call on every startup.

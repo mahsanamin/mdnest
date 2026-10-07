@@ -560,6 +560,16 @@ func (h *ChatHandler) HandleConvert(w http.ResponseWriter, r *http.Request) {
 			chatJSONError(w, http.StatusConflict, "private=1 only creates a new chat; use the chat's members to make an existing one private")
 			return
 		}
+		if !PrivateChatPathOK(relPath) {
+			chatJSONError(w, http.StatusBadRequest, "a private chat needs a plain ASCII path")
+			return
+		}
+		// The list is keyed by the lowercased path: on a case-sensitive disk
+		// it would also cover an existing note spelled with other capitals.
+		if foldedMatches(ctx, h.store, ns, relPath) > 0 {
+			chatJSONError(w, http.StatusConflict, "another note has this name in different letter case; pick another name")
+			return
+		}
 		uc := middleware.UserFromContext(ctx)
 		if h.members == nil || uc == nil || uc.ID <= 0 {
 			chatJSONError(w, http.StatusBadRequest, "private chats are not available here")

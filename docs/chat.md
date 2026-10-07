@@ -325,6 +325,16 @@ A few rules that follow from how it works:
 - **Letter case does not matter.** Member lists are matched without regard
   to case, because on some disks (Docker Desktop on macOS, network shares)
   `CHATS/SECRET.md` opens the same file as `Chats/secret.md`.
+- **A private chat's path is plain ASCII.** Such disks also treat some other
+  letters as the same (accents written two ways, for example), which a simple
+  case match cannot follow. So a private chat cannot be created at, or moved
+  to, a path with non-ASCII characters, and in a workspace with private chats
+  a request for a non-ASCII path must spell the name exactly as it is on
+  disk. Chats made with **+ New** already get plain filenames.
+- **Names that differ only in case.** Because lists ignore case, a chat
+  cannot be made private, created private, or moved in as a private chat
+  where another note has the same name in different capitals
+  (`Notes/A.md` next to `Notes/a.md`). Rename one of them first.
 - **A move never lands on an existing note.** `/api/move` refuses a
   destination that already exists, so nobody can drop a private chat over a
   shared note and take it away from everyone else.

@@ -161,7 +161,7 @@ func (h *TransferHandler) HandleTransfer(w http.ResponseWriter, r *http.Request)
 
 	// A copy of a private chat is private to the same people, and a moved
 	// one stays private: the member lists go first (see chat_members_follow.go).
-	copied, carried := chatMembersBeforeMove(h.chatMembers, t.fromNS, t.from, t.toNS, t.to)
+	copied, carried := chatMembersBeforeMove(ctx, h.store, h.chatMembers, t.fromNS, t.from, t.toNS, t.to)
 	if !carried {
 		writeStatusJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to carry chat members"})
 		return
