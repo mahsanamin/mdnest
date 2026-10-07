@@ -316,6 +316,30 @@ var migrations = []struct {
 			);
 		`,
 	},
+	{
+		// Private chats (issue #127). A chat with rows here is readable and
+		// writable only by the users listed; a chat with none is open, as
+		// before. Keyed by namespace + canonical note path, the form the
+		// permission checker matches, and moved along with the note by the
+		// routes that move, copy and delete. user_id deliberately has NO
+		// foreign key: with ON DELETE CASCADE, deleting the account of a
+		// chat's only member would leave it with no rows, and no rows means
+		// open, so the chat would silently become readable by everyone. A
+		// deleted user's row keeps the chat private, and ids are never
+		// reused (SERIAL), so it grants nothing. added_by is SET NULL so the
+		// record of an invite outlives the person who sent it.
+		name: "017_create_chat_members",
+		sql: `
+			CREATE TABLE IF NOT EXISTS chat_members (
+				namespace  TEXT NOT NULL,
+				path       TEXT NOT NULL,
+				user_id    INTEGER NOT NULL,
+				added_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+				added_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+				PRIMARY KEY (namespace, path, user_id)
+			);
+		`,
+	},
 }
 
 // Migrate runs all pending migrations. Safe to call on every startup.

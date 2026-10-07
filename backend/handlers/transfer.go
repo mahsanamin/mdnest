@@ -50,7 +50,13 @@ type TransferHandler struct {
 	// and DOWNLOAD_MAX_CONCURRENT in all. A dry run takes none, so the
 	// picker's checks can never starve a transfer.
 	slots *downloadSlots
+	// chatMembers carries private chats' member lists along (issue #127).
+	// Nil unless private chats are on.
+	chatMembers chatMembersFollow
 }
+
+// SetChatMembers makes a transfer carry private chats' member lists along.
+func (h *TransferHandler) SetChatMembers(m chatMembersFollow) { h.chatMembers = m }
 
 // NewTransferHandler builds the handler. canRead and canWrite take a
 // namespace and an absolute path ("/a/b.md") like PermissionChecker.CheckRead.
@@ -145,15 +151,28 @@ func (h *TransferHandler) HandleTransfer(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if t.fromNS == t.toNS && t.mode == "move" {
+	// A copy of a private chat is private to the same people, and a moved
+	// one stays private: the member lists go first (see chat_members_follow.go).
+	if !chatMembersBeforeMove(h.chatMembers, t.fromNS, t.from, t.toNS, t.to) {
+		writeStatusJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to carry chat members"})
+		return
+	}
+	moved := t.mode == "move"
+	if t.fromNS == t.toNS && moved {
 		// Same namespace: a plain rename, exactly what /api/move does.
-		if err := h.store.Rename(ctx, t.fromNS, t.from, t.to); err != nil {
+		err := h.store.Rename(ctx, t.fromNS, t.from, t.to)
+		chatMembersAfter(h.chatMembers, err == nil, true, t.fromNS, t.from, t.toNS, t.to)
+		if err != nil {
 			writeStatusJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to move item"})
 			return
 		}
-	} else if terr := h.execute(ctx, t); terr != nil {
-		writeStatusJSON(w, terr.status, terr.body)
-		return
+	} else {
+		terr := h.execute(ctx, t)
+		chatMembersAfter(h.chatMembers, terr == nil, moved, t.fromNS, t.from, t.toNS, t.to)
+		if terr != nil {
+			writeStatusJSON(w, terr.status, terr.body)
+			return
+		}
 	}
 
 	if h.onChange != nil {
@@ -576,5 +595,7 @@ func TransferPermissionFuncs(pc *middleware.PermissionChecker) (canRead, canWrit
 		allow := func(*http.Request, string, string) bool { return true }
 		return allow, allow
 	}
-	return pc.CheckRead, pc.CheckWrite
+	// The tree-aware checks: a folder holding a private chat the caller is
+	// not on can be neither copied out nor moved (issue #127).
+	return pc.CheckReadTree, pc.CheckWriteTree
 }

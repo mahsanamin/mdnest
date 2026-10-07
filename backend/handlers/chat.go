@@ -19,6 +19,7 @@ import (
 	"github.com/mdnest/mdnest/backend/collab"
 	"github.com/mdnest/mdnest/backend/middleware"
 	"github.com/mdnest/mdnest/backend/storage"
+	"github.com/mdnest/mdnest/backend/store"
 )
 
 // File-based chat (ENABLE_CHAT). Request handling only — the markdown format
@@ -28,6 +29,7 @@ import (
 //	POST /api/chat?ns=&path=[&as=label]                 post (body = message text)
 //	POST /api/chat/convert?ns=&path=[&title=]           make a note a chat (creates it if missing)
 //	GET  /api/chats[?format=text]                       every chat the caller can read
+//	GET/POST/DELETE /api/chat/members?ns=&path=          private chat members (chat_members.go)
 //
 // The note is the only state. Posting appends a block under the per-note lock
 // (notelock.go), so concurrent posters never drop each other's messages.
@@ -43,7 +45,9 @@ type ChatHandler struct {
 	hub        *collab.Hub
 	now        func() time.Time
 	index      *chatIndex
-	status     *chatStatusStore // who is working on what (chat_status.go)
+	status     *chatStatusStore      // who is working on what (chat_status.go)
+	members    store.ChatMemberStore // private chats (chat_members.go); nil = off
+	users      chatUserLookup
 }
 
 // NewChatHandler: nsFilter and canRead are REQUIRED. /api/chats spans
@@ -544,6 +548,20 @@ func (h *ChatHandler) HandleConvert(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	out := ConvertToChat(existing, title)
+	// ?private=1 makes the chat private to the caller. The member list is
+	// written BEFORE the note: a new chat must never exist, even briefly,
+	// as an open one that every reader of the namespace can see.
+	if r.URL.Query().Get("private") == "1" {
+		uc := middleware.UserFromContext(ctx)
+		if h.members == nil || uc == nil || uc.ID <= 0 {
+			chatJSONError(w, http.StatusBadRequest, "private chats are not available here")
+			return
+		}
+		if err := h.members.Add(ns, "/"+relPath, uc.ID, uc.ID); err != nil {
+			chatJSONError(w, http.StatusInternalServerError, "failed to make the chat private")
+			return
+		}
+	}
 	if out != existing {
 		if err := h.store.WriteFile(ctx, ns, relPath, []byte(out)); err != nil {
 			chatJSONError(w, http.StatusInternalServerError, "failed to write note")
@@ -573,6 +591,9 @@ type ChatSummary struct {
 	LastAuthor string `json:"lastAuthor,omitempty"`
 	LastTime   string `json:"lastTime,omitempty"`
 	LastText   string `json:"lastText,omitempty"`
+	// Private is true for a chat with a member list (chat_members.go). Only
+	// members ever see a private chat in the list.
+	Private bool `json:"private,omitempty"`
 }
 
 // chatIndex remembers, per file, whether it is a chat and its summary, keyed
@@ -629,8 +650,13 @@ func (h *ChatHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 
 	chats := []ChatSummary{}
 	for _, ns := range names {
+		var private map[string][]int
+		if h.members != nil {
+			private, _ = h.members.Restricted(ns)
+		}
 		for _, c := range h.scanNamespace(ctx, ns) {
 			if h.canRead(r, ns, "/"+c.Path) {
+				_, c.Private = private["/"+c.Path]
 				chats = append(chats, c)
 			}
 		}

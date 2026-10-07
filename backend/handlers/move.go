@@ -9,8 +9,12 @@ import (
 )
 
 type MoveHandler struct {
-	store storage.Storage
+	store       storage.Storage
+	chatMembers chatMembersFollow // nil unless private chats are on
 }
+
+// SetChatMembers makes a move carry private chats' member lists along.
+func (h *MoveHandler) SetChatMembers(m chatMembersFollow) { h.chatMembers = m }
 
 func NewMoveHandler(store storage.Storage) *MoveHandler {
 	return &MoveHandler{store: store}
@@ -47,7 +51,13 @@ func (h *MoveHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.store.Rename(ctx, ns, fromRel, toRel); err != nil {
+	if !chatMembersBeforeMove(h.chatMembers, ns, fromRel, ns, toRel) {
+		http.Error(w, `{"error":"failed to move item"}`, http.StatusInternalServerError)
+		return
+	}
+	err := h.store.Rename(ctx, ns, fromRel, toRel)
+	chatMembersAfter(h.chatMembers, err == nil, true, ns, fromRel, ns, toRel)
+	if err != nil {
 		http.Error(w, `{"error":"failed to move item"}`, http.StatusInternalServerError)
 		return
 	}

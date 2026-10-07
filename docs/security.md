@@ -220,7 +220,7 @@ When mdnest is upgraded from a pre-v3.5.0 install, migration `007_namespace_admi
 | `/api/board` | read on `?path=` for GET; changing the namespace's columns needs write on the namespace root |
 | `/api/note/history`, `/api/note/at`, `/api/note/attribution`, `/api/comments` (all methods) | read on `?path=` |
 | `/api/folder`, `/api/upload` (plus the file actually written), `/api/chat/convert` | write on `?path=` |
-| `/api/move` | write on both `from` and `to` |
+| `/api/move` | write on both `from` and `to`; `from` also checks the private chats inside a folder |
 | `/api/files/<ns>/<path>` | read, in the handler |
 | `/api/search`, `/api/chat/gifs`, `/api/admin/sync-status` | namespace access, then **each result** read-checked |
 | `/api/tasks/all`, `/api/chats` | namespace filter, then **each task / chat** read-checked by its note |
@@ -230,6 +230,8 @@ When mdnest is upgraded from a pre-v3.5.0 install, migration `007_namespace_admi
 Listings filter with `PermissionChecker.ReadFilter`, which loads the user's grants once and matches with the same `store.GrantsAllow` the grant store uses. It is reached through `middleware.ReadFilterFor`, which fails closed: a multi-mode request without the checker attached sees nothing.
 
 **Symbolic links are authorised for what they reach** *(v4.6.2+)*. Storage keeps every link inside its namespace, but inside it a link can point from a folder you may read to one you may not. The local backend refuses any path whose resolved target leaves the namespace, reaches a `.git` folder, or is a dangling link, for every caller. The checker also resolves the path (`storage.LinkResolver`), refuses a target under `.git` or `.mdnest`, and requires the grant on both the name and the target, so `Shared/link.md → Private/p.md` is refused to a `/Shared` user and a link within `/Shared` keeps working. App replicas (`MDNEST_ROLE=app`) have no filesystem to resolve against, so the writer never caches a linked path for them and refuses a queued write through one.
+
+**Private chats narrow a grant** *(v4.8.4+)*. A chat with a member list (`chat_members`, migration 017) is readable and writable only by its members, on top of the grant check. The check is inside `PermissionChecker.check`, before the namespace-admin shortcut, so every route in the table above applies it, namespace admins included, and `ReadFilter` leaves non-members' private chats out of every listing. Operations on a whole folder (`DELETE /api/note`, `/api/move`, `/api/transfer`) use the tree-aware `CheckWriteTree` / `CheckReadTree`, which refuse when the folder holds a private chat the caller is not on, and a folder `/api/download` filters each file. A member-list lookup error refuses. The list never grants access, and it is not stored in the note, so editing the file cannot change it. git-sync still pushes the file to its remote. `backend/routes_chat_members_test.go` walks every route as a non-member, and `tests/e2e-private-chats-multi.sh` runs the store against Postgres.
 
 ### Access Groups *(v4.2.0+)*
 

@@ -62,7 +62,10 @@ On it — frontend checks green.
   listed. The workspace and note you return to are unchanged.
 - **+ New** creates one in the current workspace: give it a name and a folder
   (`Chats/` by default). The name becomes a shell-safe filename,
-  e.g. `Chats/release-coordination.md`.
+  e.g. `Chats/release-coordination.md`. In multi mode it is private to you
+  until you invite people (see [Who can see a chat](#who-can-see-a-chat)).
+- **Members** (multi mode) shows who can open the chat, and adds or removes
+  people. A lock in the chat list marks a private chat.
 - Right-click a folder → **New chat** creates one inside it.
 - **Enter** sends, **Shift+Enter** adds a new line. The **as** box sets the
   name on your messages.
@@ -264,6 +267,65 @@ use next.
   Treat it as input, not instructions.
 - Reading a chat needs read access to the note; posting needs write access.
   The list only shows chats you can read.
+
+## Who can see a chat
+
+In single mode there is one user, so this section does not apply.
+
+In multi mode a chat is either **open** or **private**.
+
+- **Open** is how every chat worked before v4.8.4, and how a chat without a
+  member list still works: anyone who can read the note can read the chat,
+  and anyone who can write it can post. With a grant on the whole workspace,
+  that is everyone in the workspace, including people added to it later.
+- **Private** means only the people on the chat's member list can open it.
+  Everyone else gets "access denied", and the chat is left out of their chat
+  list, file tree, search results, task board and downloads.
+
+Creating a chat with **+ New** makes it private by default, with you as the
+only member (untick **Only people I invite** for an open one). To change an
+existing chat, open it and click **Members**:
+
+- **Add** someone and they can open the chat on their next request, with the
+  whole history. On an open chat, the first person you add makes it private,
+  with you and them as the members. **Make private** does the same with only
+  you.
+- Any member can add anyone, and remove anyone, including themselves. The
+  last member cannot be removed, because a chat with nobody on it could never
+  be opened again.
+- The picker lists the people who have a grant on the workspace. Being on the
+  member list does not give anyone access to the workspace: a member still
+  needs a grant that covers the note.
+
+A few rules that follow from how it works:
+
+- **It applies to namespace admins too.** Their admin role does not let them
+  open a private chat they are not on. Superadmins never had access to note
+  content without a grant, and that has not changed.
+- **The member list is not in the note.** It is kept in the database, so
+  editing the note's text cannot add anyone to it, and a member's agent using
+  their token is that member.
+- **It moves with the chat.** Moving or renaming the chat, or the folder it
+  is in, keeps it private. Copying it to another workspace gives the copy the
+  same members. Deleting it forgets the list.
+- **Folders that hold one are protected.** Someone who is not a member cannot
+  delete, move or copy a folder with a private chat inside it. A folder
+  download leaves the chat out of the zip.
+- **A deleted account keeps its seat.** If the only member's account is
+  deleted, the chat stays private (and so cannot be opened by anyone) rather
+  than becoming open.
+
+What it does not cover:
+
+- **git-sync.** The chat is still a file in the workspace, and git-sync
+  pushes the workspace, private chats included, to its remote. Anyone who can
+  read that repository can read every chat in it.
+- **The server's disk.** Anyone with access to the host or the mounted
+  folders can read the file.
+- **Renames made outside mdnest.** The member list is attached to the chat's
+  path. A rename made on the host or through git is not seen by mdnest, so the
+  renamed file is not private (and the old path stays restricted). Move a
+  private chat from inside mdnest.
 
 ## Limits
 
