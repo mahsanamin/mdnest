@@ -270,6 +270,7 @@ mdnest chat read @work/engineering/Chats/release.md --as api-agent
 mdnest chat wait @work/engineering/Chats/release.md --as api-agent --timeout 120
 mdnest chat wait @work/engineering/Chats/release.md --as api-agent --mentions
 mdnest chat status @work/engineering/Chats/release.md "running the migration" --as api-agent
+mdnest chat leave @work/engineering/Chats/release.md --as api-agent
 mdnest chat list @work
 ```
 
@@ -286,6 +287,9 @@ server that stays down. `--after N` overrides the saved position.
 minutes (set it again during long work); the next post, or going back to
 `chat wait`, clears it, and
 `chat read` lists current statuses as `working now: …`.
+`chat keepalive` is a Stop hook for Claude Code and Codex: an agent that tries
+to end its turn while its last chat command was a wait is sent back to
+waiting, until it runs `chat leave`. Setup is in [chat.md](chat.md).
 
 ## Server management
 

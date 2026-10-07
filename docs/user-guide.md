@@ -62,20 +62,31 @@ mdnest has three user roles. Most teammates are collaborators — only people wh
 
 Where each role comes from:
 
-- **Super-admin** is set in `mdnest.conf` via `ADMIN_EMAILS=ops@example.com,you@example.com` (auto-promoted on every server startup), or by another super-admin via the admin panel's role dropdown.
-- **Admin** is *namespace-scoped* — assigned per namespace. Open the admin panel → **Namespace Admins** tab → pick a namespace → pick a user → **Make admin of `<namespace>`**. The promotion auto-grants the user `write` access on `/` of that namespace and bumps their `users.role` from `collaborator` to `admin`.
+- **Super-admin** is set in `mdnest.conf` via `ADMIN_EMAILS=ops@example.com,you@example.com` (auto-promoted on every server startup), or by another super-admin: admin panel → **People** → open the person → tick **Super-admin**.
+- **Admin** is *namespace-scoped*, assigned per namespace. Admin panel → **People** → open the person → **Make admin of…**, or **Namespaces** → open the namespace → **Make admin** next to the person. The promotion auto-grants the user `write` access on `/` of that namespace and bumps their `users.role` from `collaborator` to `admin`; removing their last namespace turns them back into a collaborator.
 - **Collaborator** is the default for newly-invited users. They get explicit `access_grants` rows for the namespaces / paths the inviting admin scoped them to.
 
 If you can see the **Admin** button in the top-right of the app, you have at least namespace-admin scope. The admin panel shows your scope as a yellow `Admin of: <namespace list>` badge so you know what you're managing. Super-admins see "Admin of: (none)" and full reign over everything.
 
-### Inviting a user
+### The admin panel
 
-Open the admin panel → **Users** tab → **+ Invite User**. Fill in the form:
+The panel has three tabs for access, and each answers one question:
 
-- **Email** — required. In SSO / Firebase mode this is also the IdP login key; in local mode it's just an identifier.
-- **Username + password** — *only shown in local mode.* In SSO and Firebase mode, identity comes from the IdP and the form is email-only (the panel also displays a one-line note explaining this).
-- **Role** — Collaborator by default. Admins can also invite as **Admin (of this namespace)**. Super-admins additionally have **Super-admin (global)**.
-- **Namespace** — required when you're a namespace-admin (you can only invite into namespaces you administer). Optional for super-admins (they can grant access later via the **Access Grants** tab).
+- **People**: what can this person reach? Click a person to see their role, their groups, the namespaces they administer, their direct access, and a **Can reach** list that adds it all up, with the reason for each line ("via qa-team", "via Direct", "via Admin"). Everything about one person is changed from that card.
+- **Groups**: who is in a group, and what the group can reach. Give access to a group once and every member gets it.
+- **Namespaces**: who can reach this namespace? Each namespace lists everyone with access, directly or through a group, and who administers it. **Give access** takes a person or a group.
+
+Access from an IdP (OIDC) group is read from the sign-in token, so it is not part of **Can reach**.
+
+### Adding a person
+
+Admin panel → **People** → **+ Add person**:
+
+- **Email**: required. In SSO / Firebase mode this is also the IdP login key; in local mode it's just an identifier.
+- **Username + temporary password**: *only shown in local mode.* In SSO and Firebase mode, identity comes from the IdP and the form is email-only.
+- **Super-admin**: super-admins only.
+- **Groups** (optional, super-admins): tick the groups the person joins. To run access entirely through groups, tick a group and leave the namespace empty.
+- **Namespace access**: optional for super-admins; you choose the namespace, folder and permission, and can also make them admin of it. Required for a namespace admin, who can only add people to namespaces they administer.
 
 The invited user can sign in immediately — no email confirmation is sent. Tell them the URL and they're in.
 
@@ -85,8 +96,8 @@ A user forgot their password? Two paths, depending on what role they hold and wh
 
 **From the Admin Panel** (super-admins, for collaborators and namespace-admins):
 
-1. Open the admin panel → **Users** tab.
-2. Find the user. Click **Reset password**.
+1. Open the admin panel → **People**.
+2. Click the person, then **Reset password**.
 3. Type a temporary password twice. Send it over a secure channel (Slack DM, password manager — not email).
 4. The user logs in with the temp password and is immediately forced to pick their own. The temp password becomes single-use; nothing else in the app is reachable until they change it.
 

@@ -4,6 +4,42 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v4.8.3: A simpler admin panel, and agents that stay awake
+
+The admin panel's Users, Access Grants and Namespace Admins tabs become
+People and Namespaces: one card per person shows everything they can reach
+and why, and a person can be added through groups alone. A new
+`mdnest chat keepalive` Stop hook for Claude Code and Codex sends an agent
+that tries to stop back to its chat loop until it is told to leave.
+
+### Added
+
+- **Keep chat agents awake.** An agent in a chat loop sometimes ends its turn
+  and sits idle until someone types "wake up" in its session. Add
+  `mdnest chat keepalive` as a Stop hook in Claude Code or Codex: when the
+  agent tries to stop while its last chat command was a wait, the hook sends
+  it straight back to waiting with that exact command. The new
+  `mdnest chat leave` ends it, and the **Connect an agent** prompt tells
+  agents to run it when they are told to leave. Sessions that never joined a
+  chat are untouched, and an agent that tries to stop three
+  times within two minutes is let go, so a broken wait cannot loop forever. Setup is in docs/chat.md.
+
+### Changed
+
+- **A simpler admin panel for people and access.** The Users, Access Grants
+  and Namespace Admins tabs are replaced by **People** and **Namespaces**,
+  next to **Groups**. Click a person to see and change everything about
+  them in one place: super-admin, groups, the namespaces they administer,
+  their direct access, and a **Can reach** list that adds it all up with the
+  reason for each line ("via qa-team"). **Namespaces** shows who can reach
+  each namespace, directly or through a group, and who administers it, and
+  gives access to a person or a group. **+ Add person** no longer needs a
+  namespace: tick groups instead, or nothing, so a team run entirely
+  through groups works from the start. The namespace you do pick keeps the
+  folder and permission you chose.
+
+---
+
 ## v4.8.2: Pinned chats, heading links, and agents that show their context
 
 The chat list can collapse to a slim strip and has Pinned and All tabs. Each
