@@ -67,15 +67,17 @@ pass "multi-mode backend up at $BASE"
 # spelled. Seed such a row, run 018 again, and check it was lowered (the
 # Python checks below then confirm that chat is still closed).
 docker exec "$PG" psql -q -U mdnest -d mdnest -c \
-  "INSERT INTO chat_members (namespace, path, user_id) VALUES ('alpha', '/Legacy/Room.md', 999999); DELETE FROM schema_migrations WHERE name = '018_chat_members_lowercase_paths';" >/dev/null
+  "INSERT INTO chat_members (namespace, path, user_id) VALUES ('alpha', '/Legacy/Room.md', 999999), ('alpha', '/Équipe/Salle.md', 999999); DELETE FROM schema_migrations WHERE name = '018_chat_members_lowercase_paths';" >/dev/null
 docker restart "$BE" >/dev/null
 # A restart publishes the port anew, on a new random host port.
 PORT="$(docker port "$BE" 8080/tcp | head -1 | sed 's/.*://')"
 BASE="http://127.0.0.1:$PORT"
 for _ in $(seq 1 40); do curl -fsS "$BASE/api/config" >/dev/null 2>&1 && break; sleep 1; done
-LEGACY_KEYS="$(docker exec "$PG" psql -tA -U mdnest -d mdnest -c "SELECT path FROM chat_members WHERE namespace = 'alpha' ORDER BY path")"
-if [ "$LEGACY_KEYS" = "/legacy/room.md" ]; then
-  pass "migration 018 lowered an existing mixed-case key"
+LEGACY_KEYS="$(docker exec "$PG" psql -tA -U mdnest -d mdnest -c "SELECT path FROM chat_members WHERE namespace = 'alpha' ORDER BY path" | tr '\n' ' ')"
+# The non-ASCII key is lowered by Go (strings.ToLower), the way the
+# checker looks it up, not by Postgres lower().
+if [ "$LEGACY_KEYS" = "/legacy/room.md /équipe/salle.md " ]; then
+  pass "migration 018 + the Go pass lowered existing mixed-case keys"
 else
   fail "migration 018: keys are [$LEGACY_KEYS]"; exit 1
 fi
