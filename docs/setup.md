@@ -161,7 +161,7 @@ On first run, `setup.sh` copies `mdnest.conf.sample` to `mdnest.conf` and exits,
 | `FRONTEND_ORIGIN` | `http://localhost:<FRONTEND_PORT>` | The full URL where the frontend is served. Used for CORS. Update this if you use a custom domain or reverse proxy. |
 | `BACKEND_PORT` | `8286` | Host port mapped to the backend container (port 8080 internally) |
 | `FRONTEND_PORT` | `3236` | Host port mapped to the frontend container (port 80 internally) |
-| `BIND_ADDRESS` | `127.0.0.1` | Host IP(s) to bind the published ports to. Comma-separated for multi-IP (e.g. `127.0.0.1,100.73.118.115`) so you can expose mdnest over a Tailscale / VPN address while keeping the LAN dark, without falling back to `0.0.0.0`. |
+| `BIND_ADDRESS` | `127.0.0.1` | Host IP(s) to bind the published ports to. To reach mdnest over Tailscale, a VPN or the LAN, keep `127.0.0.1` and put a reverse proxy in front (Caddy, nginx, or `tailscale serve`). A comma-separated list (e.g. `127.0.0.1,100.73.118.115`) also works, but Docker only publishes a port if that IP exists when the container starts, so an address that comes up after Docker (a reboot, a Docker restart) leaves mdnest running with no port published. `setup.sh` warns about such an address, and `./mdnest-server status` reports ports that did not publish. |
 | `GIT_AUTHOR_NAME` | *(none)* | Name used for git commits when git-sync is enabled |
 | `GIT_AUTHOR_EMAIL` | *(none)* | Email used for git commits when git-sync is enabled |
 | `AUTH_MODE` | `single` | Auth mode: `single` (file-based, no DB) or `multi` (Postgres-backed users & permissions) |
