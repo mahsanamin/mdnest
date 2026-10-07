@@ -12,6 +12,7 @@ import (
 	"path"
 	"strings"
 
+	"github.com/mdnest/mdnest/backend/middleware"
 	"github.com/mdnest/mdnest/backend/storage"
 )
 
@@ -101,6 +102,17 @@ func (h *DownloadHandler) HandleDownload(w http.ResponseWriter, r *http.Request)
 		http.Error(w, `{"error":"failed to read folder"}`, http.StatusInternalServerError)
 		return
 	}
+	// The route checked the folder. A private chat inside it is readable only
+	// by its members (issue #127), so each file is checked on its own and the
+	// ones this user may not read are left out of the archive.
+	canRead := middleware.ReadFilterFor(r, ns)
+	kept := plan.entries[:0]
+	for _, e := range plan.entries {
+		if e.isDir || canRead(e.rel) {
+			kept = append(kept, e)
+		}
+	}
+	plan.entries = kept
 	if len(plan.entries) == 0 {
 		// The root itself was a symlink: nothing we are willing to export.
 		http.Error(w, `{"error":"not found"}`, http.StatusNotFound)

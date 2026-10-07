@@ -15,8 +15,100 @@ import (
 type PermissionChecker struct {
 	grantStore   store.GrantStore
 	nsAdminStore store.NamespaceAdminStore
-	groupStore   store.GroupStore     // role-based "Groups" access; nil disables it
-	links        storage.LinkResolver // nil: the storage has no symlinks (app tier)
+	groupStore   store.GroupStore      // role-based "Groups" access; nil disables it
+	links        storage.LinkResolver  // nil: the storage has no symlinks (app tier)
+	chatMembers  store.ChatMemberStore // private chats (issue #127); nil disables them
+}
+
+// SetChatMembers turns on private chats: a note with a member list is readable
+// and writable only by its members, on top of the usual grant check. It
+// applies to namespace admins too. The point of a private chat is that the
+// people in a workspace cannot read it unless invited, and an admin is one of
+// those people.
+func (pc *PermissionChecker) SetChatMembers(s store.ChatMemberStore) {
+	pc.chatMembers = s
+}
+
+// chatMemberOK reports whether uc may touch the note at path as far as chat
+// membership is concerned: true for anything that is not a private chat, and
+// for a member of one. A lookup error refuses, so a database hiccup never
+// opens a private chat.
+func (pc *PermissionChecker) chatMemberOK(uc *UserContext, namespace, path string) bool {
+	if pc.chatMembers == nil {
+		return true
+	}
+	ids, err := pc.chatMembers.Members(namespace, "/"+strings.Trim(path, "/"))
+	if err != nil {
+		return false
+	}
+	return len(ids) == 0 || containsID(ids, uc.ID)
+}
+
+func containsID(ids []int, id int) bool {
+	for _, v := range ids {
+		if v == id {
+			return true
+		}
+	}
+	return false
+}
+
+// chatFilter loads the namespace's private chats once and returns a predicate
+// that is false for a private chat uc is not on. For listings, which check
+// every path in a namespace. ok is false when the list cannot be loaded; the
+// caller must then refuse everything.
+func (pc *PermissionChecker) chatFilter(uc *UserContext, namespace string) (func(canonical string) bool, bool) {
+	if pc.chatMembers == nil || uc == nil {
+		return func(string) bool { return true }, true
+	}
+	restricted, err := pc.chatMembers.Restricted(namespace)
+	if err != nil {
+		return nil, false
+	}
+	if len(restricted) == 0 {
+		return func(string) bool { return true }, true
+	}
+	return func(p string) bool {
+		ids, private := restricted[p]
+		return !private || containsID(ids, uc.ID)
+	}, true
+}
+
+// PrivateChatFilter returns a predicate that is false for a private chat the
+// user is not a member of, for handlers that filter a listing on their own
+// (the tree). Fails closed: if the member lists cannot be loaded, nothing is
+// visible.
+func (pc *PermissionChecker) PrivateChatFilter(r *http.Request, namespace string) func(relPath string) bool {
+	f, ok := pc.chatFilter(UserFromContext(r.Context()), namespace)
+	if !ok {
+		return func(string) bool { return false }
+	}
+	return func(relPath string) bool {
+		p, ok := canonicalPath(relPath)
+		return ok && f(p)
+	}
+}
+
+// noForeignChatsUnder reports whether the folder at path holds no private chat
+// that uc is not a member of. Used for operations that act on a whole folder
+// (delete, move, copy to another namespace), where checking the folder alone
+// would let a non-member delete, carry off or copy someone else's chat.
+func (pc *PermissionChecker) noForeignChatsUnder(uc *UserContext, namespace, path string) bool {
+	if pc.chatMembers == nil || uc == nil {
+		return true
+	}
+	restricted, err := pc.chatMembers.Restricted(namespace)
+	if err != nil {
+		return false
+	}
+	root := "/" + strings.Trim(path, "/")
+	for p, ids := range restricted {
+		under := root == "/" || p == root || strings.HasPrefix(p, root+"/")
+		if under && !containsID(ids, uc.ID) {
+			return false
+		}
+	}
+	return true
 }
 
 // SetStorage tells the checker which storage the paths it authorises live on,
@@ -89,10 +181,28 @@ func (pc *PermissionChecker) CheckWrite(r *http.Request, namespace, path string)
 	return pc.check(r, namespace, path, "write")
 }
 
+// CheckReadTree is CheckRead for an operation that carries a whole folder off
+// (a copy to another namespace): it also refuses when the folder holds a
+// private chat the user is not a member of.
+func (pc *PermissionChecker) CheckReadTree(r *http.Request, namespace, path string) bool {
+	return pc.CheckRead(r, namespace, path) && pc.noForeignChatsUnder(UserFromContext(r.Context()), namespace, path)
+}
+
+// CheckWriteTree is CheckWrite for an operation on a whole folder (delete,
+// move): it also refuses when the folder holds a private chat the user is not
+// a member of. For a single note it is the same as CheckWrite.
+func (pc *PermissionChecker) CheckWriteTree(r *http.Request, namespace, path string) bool {
+	return pc.CheckWrite(r, namespace, path) && pc.noForeignChatsUnder(UserFromContext(r.Context()), namespace, path)
+}
+
 func (pc *PermissionChecker) check(r *http.Request, namespace, path, permission string) bool {
 	uc := UserFromContext(r.Context())
 	if uc == nil {
 		return true // single-user mode
+	}
+	// Before the admin shortcut: a private chat binds namespace admins too.
+	if !pc.chatMemberOK(uc, namespace, path) {
+		return false
 	}
 	if pc.hasAdminScope(uc, namespace) {
 		return true
@@ -109,7 +219,7 @@ func (pc *PermissionChecker) check(r *http.Request, namespace, path, permission 
 		return false
 	}
 	if real != "/"+strings.TrimPrefix(path, "/") {
-		return pc.granted(uc, namespace, real, permission)
+		return pc.chatMemberOK(uc, namespace, real) && pc.granted(uc, namespace, real, permission)
 	}
 	return true
 }
@@ -138,8 +248,15 @@ func (pc *PermissionChecker) ReadFilter(r *http.Request, namespace string) func(
 	if uc == nil {
 		return func(string) bool { return true } // single-user mode, as check()
 	}
+	chatOK, ok := pc.chatFilter(uc, namespace)
+	if !ok {
+		return func(string) bool { return false }
+	}
 	if pc.hasAdminScope(uc, namespace) {
-		return func(string) bool { return true }
+		return func(relPath string) bool {
+			p, ok := canonicalPath(relPath)
+			return ok && chatOK(p)
+		}
 	}
 	var grants []store.Grant
 	if all, err := pc.grantStore.GetGrantsForUser(uc.ID); err == nil {
@@ -159,16 +276,16 @@ func (pc *PermissionChecker) ReadFilter(r *http.Request, namespace string) func(
 	// needs resolving here; a link into .mdnest can only show this reader
 	// comment data of notes they can already read.
 	if allowed("/") {
-		return func(relPath string) bool { _, ok := canonicalPath(relPath); return ok }
+		return func(relPath string) bool { p, ok := canonicalPath(relPath); return ok && chatOK(p) }
 	}
 	ctx := r.Context()
 	return func(relPath string) bool {
 		p, ok := canonicalPath(relPath)
-		if !ok || !allowed(p) {
+		if !ok || !allowed(p) || !chatOK(p) {
 			return false
 		}
 		real, ok := pc.resolve(ctx, namespace, p)
-		return ok && (real == p || allowed(real))
+		return ok && (real == p || (allowed(real) && chatOK(real)))
 	}
 }
 
@@ -400,7 +517,7 @@ func (pc *PermissionChecker) CheckMoveAccess(r *http.Request) bool {
 	if !okFrom || !okTo {
 		return false
 	}
-	return pc.CheckWrite(r, ns, from) && pc.CheckWrite(r, ns, to)
+	return pc.CheckWriteTree(r, ns, from) && pc.CheckWrite(r, ns, to)
 }
 
 // RequireMove wraps a handler and checks write access on both from and to paths.
@@ -415,7 +532,8 @@ func (pc *PermissionChecker) RequireMove(next http.Handler) http.Handler {
 }
 
 // ReadWriteRouter wraps a handler and applies read check for GET/HEAD,
-// write check for POST/PUT/PATCH/DELETE. Used for the /api/note endpoint.
+// write check for POST/PUT/PATCH, and the folder-aware write check for
+// DELETE. Used for the /api/note endpoint.
 func (pc *PermissionChecker) ReadWriteRouter(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ns := r.URL.Query().Get("ns")
@@ -431,6 +549,13 @@ func (pc *PermissionChecker) ReadWriteRouter(next http.Handler) http.Handler {
 		switch r.Method {
 		case "GET", "HEAD":
 			if !pc.CheckRead(r, ns, path) {
+				DenyJSON(w)
+				return
+			}
+		case "DELETE":
+			// A folder delete removes every note under it, so it also needs
+			// membership of any private chat in there.
+			if !pc.CheckWriteTree(r, ns, path) {
 				DenyJSON(w)
 				return
 			}

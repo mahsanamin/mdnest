@@ -368,8 +368,15 @@ func (h *TaskHandler) aggregate(w http.ResponseWriter, r *http.Request) {
 
 	var tasks []Task
 	if files == nil {
-		// Whole namespace: cacheable.
-		tasks = h.namespaceTasks(ctx, ns, board, r.URL.Query().Get("refresh") == "1")
+		// Whole namespace: cacheable. The route checked read on the root,
+		// which covers every note except a private chat the caller is not
+		// on (issue #127), so each task is still checked by its note.
+		canRead := middleware.ReadFilterFor(r, ns)
+		for _, t := range h.namespaceTasks(ctx, ns, board, r.URL.Query().Get("refresh") == "1") {
+			if canRead(t.Path) {
+				tasks = append(tasks, t)
+			}
+		}
 	} else {
 		// A single note was named — one file, nothing worth caching.
 		tasks = h.collectTasks(ctx, ns, files, board)

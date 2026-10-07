@@ -1100,9 +1100,39 @@ export async function listChatGifs(ns) {
 }
 
 // Creates the note when it does not exist; otherwise tags it as a chat in place.
-export async function convertToChat(ns, path, title) {
-  const res = await request(`/chat/convert?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}&title=${encodeURIComponent(title || '')}`, { method: 'POST' });
+// isPrivate: only the creator can open it until they invite someone (multi mode).
+export async function convertToChat(ns, path, title, isPrivate = false) {
+  const res = await request(`/chat/convert?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}&title=${encodeURIComponent(title || '')}${isPrivate ? '&private=1' : ''}`, { method: 'POST' });
   if (!res.ok) throw await chatError(res, 'Failed to create chat');
+  return res.json();
+}
+
+// Private chat members (multi mode). Each returns { private, members: [{ id, username }] }.
+// getChatMembers returns null where private chats do not exist (single mode),
+// so the caller can leave the members control out.
+const membersUrl = (ns, path) => `/chat/members?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}`;
+export async function getChatMembers(ns, path) {
+  const res = await request(membersUrl(ns, path));
+  if (res.status === 404) return null;
+  if (!res.ok) throw await chatError(res, 'Failed to load members');
+  return res.json();
+}
+
+// Adds userId; on an open chat this also makes it private with you as the
+// first member. With no userId it only makes the chat private.
+export async function addChatMember(ns, path, userId) {
+  const res = await request(membersUrl(ns, path), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(userId ? { userId } : {}),
+  });
+  if (!res.ok) throw await chatError(res, 'Failed to add member');
+  return res.json();
+}
+
+export async function removeChatMember(ns, path, userId) {
+  const res = await request(`${membersUrl(ns, path)}&userId=${encodeURIComponent(userId)}`, { method: 'DELETE' });
+  if (!res.ok) throw await chatError(res, 'Failed to remove member');
   return res.json();
 }
 

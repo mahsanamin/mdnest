@@ -119,6 +119,13 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   overflow-wrap: anywhere;
 }
+.chat-new-private {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
 
 .chat-list-items {
   list-style: none;
@@ -148,6 +155,7 @@
 .chat-list-top,
 .chat-list-bottom { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
 .chat-list-title { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-list-lock { display: inline-flex; vertical-align: -1px; margin-right: 4px; color: var(--text-muted); }
 .chat-list-time { font-size: 0.75rem; color: var(--text-muted); flex: 0 0 auto; }
 .chat-list-preview {
   flex: 1;
@@ -651,3 +659,18 @@
   line-height: 1;
 }
 
+
+/* Private chat members (issue #127). */
+.chat-members-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+.chat-members-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 3px 0;
+  color: var(--text);
+}
+.chat-members-note { font-size: 0.78rem; color: var(--text-muted); }

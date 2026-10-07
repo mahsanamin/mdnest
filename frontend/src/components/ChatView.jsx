@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Marked } from 'marked';
-import { listChats, getChat, postChatMessage, convertToChat, listChatGifs, getToken, fetchPreferencesStrict, savePreferences } from '../api.js';
+import { listChats, getChat, postChatMessage, convertToChat, listChatGifs, getToken, fetchPreferencesStrict, savePreferences, getChatMembers, addChatMember, removeChatMember, getNamespaceUsers } from '../api.js';
 import { resolveImgSrc } from '../img-src.js';
 import { sanitizeHtml } from '../sanitize.js';
 import {
@@ -70,8 +70,11 @@ function useVisible() {
   return visible;
 }
 
-function NewChatForm({ ns, onCreated, onCancel }) {
+function NewChatForm({ ns, canPrivate, onCreated, onCancel }) {
   const [title, setTitle] = useState('');
+  // Private by default where it exists (multi mode): a new chat is for the
+  // people you invite, not everyone who can read the workspace.
+  const [isPrivate, setIsPrivate] = useState(true);
   const [folder, setFolder] = useState(DEFAULT_CHAT_FOLDER);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -83,7 +86,7 @@ function NewChatForm({ ns, onCreated, onCancel }) {
     setBusy(true);
     setError('');
     try {
-      await convertToChat(ns, path, title.trim());
+      await convertToChat(ns, path, title.trim(), canPrivate && isPrivate);
       onCreated({ ns, path });
     } catch (err) {
       setError(err.message);
@@ -111,6 +114,12 @@ function NewChatForm({ ns, onCreated, onCancel }) {
         />
       </div>
       <div className="chat-new-path" title="The note this chat is stored in">{ns}/{path}</div>
+      {canPrivate && (
+        <label className="chat-new-private">
+          <input type="checkbox" checked={isPrivate} onChange={(e) => setIsPrivate(e.target.checked)} data-testid="chat-new-private" />
+          Only people I invite
+        </label>
+      )}
       {error && <div className="chat-error">{error}</div>}
       <div className="chat-new-row">
         <button type="button" className="chat-btn" onClick={onCancel}>Cancel</button>
@@ -178,7 +187,10 @@ function ChatList({ chats, loading, error, openChat, onSelect, filter, onFilter,
                 onContextMenu={onMenu ? (e) => { e.preventDefault(); onMenu(e.clientX, e.clientY, c); } : undefined}
               >
                 <span className="chat-list-top">
-                  <span className="chat-list-title">{c.title}</span>
+                  <span className="chat-list-title">
+                    {c.private && <span className="chat-list-lock" title="Private: only invited people can open it" aria-label="Private"><LockIcon /></span>}
+                    {c.title}
+                  </span>
                   {c.lastTime && <span className="chat-list-time">{formatChatTime(c.lastTime)}</span>}
                 </span>
                 <span className="chat-list-bottom">
@@ -207,6 +219,118 @@ function ChatList({ chats, loading, error, openChat, onSelect, filter, onFilter,
   );
 }
 
+const LockIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" />
+  </svg>
+);
+
+// Who can read and post in this chat. An open chat is readable by everyone
+// with access to the workspace; inviting someone (or "Make private") limits it
+// to the people listed. Any member can add or remove anyone, and the server
+// refuses removing the last one. The list itself is enforced on the server for
+// every way of reaching the note, not just this view.
+function ChatMembers({ chat, account, onClose, onChanged }) {
+  const [state, setState] = useState(null); // { private, members }
+  const [users, setUsers] = useState([]);
+  const [pick, setPick] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let alive = true;
+    setState(null);
+    setError('');
+    getChatMembers(chat.ns, chat.path)
+      .then((s) => { if (alive) setState(s); })
+      .catch((e) => { if (alive) setError(e.message); });
+    getNamespaceUsers(chat.ns)
+      .then((u) => { if (alive) setUsers(u || []); })
+      .catch(() => { if (alive) setUsers([]); });
+    return () => { alive = false; };
+  }, [chat.ns, chat.path]);
+
+  const run = async (fn) => {
+    setBusy(true);
+    setError('');
+    try {
+      const next = await fn();
+      setState(next);
+      setPick('');
+      onChanged?.(next);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const memberIds = new Set((state?.members || []).map((m) => m.id));
+  const candidates = users.filter((u) => !memberIds.has(u.id) && u.username !== account);
+
+  return (
+    <div className="chat-agent chat-members" data-testid="chat-members">
+      <div className="chat-agent-head">
+        <strong>{state?.private ? 'Private chat' : 'Members'}</strong>
+        <button className="chat-btn chat-btn-icon chat-agent-close" onClick={onClose} title="Close" aria-label="Close">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      {!state && !error && <p>Loading…</p>}
+      {state && !state.private && (
+        <p>
+          Everyone with access to <b>{chat.ns}</b> can read and post here. Invite someone, or make it
+          private, and only the people listed will be able to open it.
+        </p>
+      )}
+      {state && state.private && (
+        <>
+          <p>Only these people can open this chat. Anyone you add can read the whole history.</p>
+          <ul className="chat-members-list">
+            {state.members.map((m) => (
+              <li key={m.id}>
+                <span>{m.username}{m.username === account ? ' (you)' : ''}</span>
+                <button
+                  className="chat-btn chat-btn-icon"
+                  disabled={busy || state.members.length === 1}
+                  onClick={() => run(() => removeChatMember(chat.ns, chat.path, m.id))}
+                  title={state.members.length === 1 ? 'The last member cannot be removed' : (m.username === account ? 'Leave this chat' : `Remove ${m.username}`)}
+                  aria-label={m.username === account ? 'Leave this chat' : `Remove ${m.username}`}
+                  data-testid="chat-member-remove"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+                </button>
+              </li>
+            ))}
+          </ul>
+          <p className="chat-members-note">
+            Membership limits who can open the chat here. A copy of the notes in a connected git
+            remote is not covered by it.
+          </p>
+        </>
+      )}
+      {state && (
+        <div className="chat-new-row">
+          <select className="chat-input" value={pick} onChange={(e) => setPick(e.target.value)} aria-label="Person to invite" data-testid="chat-member-pick">
+            <option value="">{candidates.length ? 'Invite someone…' : 'Nobody else to invite'}</option>
+            {candidates.map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}
+          </select>
+          <button className="chat-btn chat-btn-primary" disabled={busy || !pick}
+            onClick={() => run(() => addChatMember(chat.ns, chat.path, Number(pick)))} data-testid="chat-member-add">
+            Add
+          </button>
+          {!state.private && (
+            <button className="chat-btn" disabled={busy} onClick={() => run(() => addChatMember(chat.ns, chat.path))} data-testid="chat-make-private">
+              Make private
+            </button>
+          )}
+        </div>
+      )}
+      {error && <div className="chat-error">{error}</div>}
+    </div>
+  );
+}
+
 function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack, onActivity }) {
   const [doc, setDoc] = useState(null); // { title, description, you }
   const [working, setWorking] = useState([]); // who said they are busy, from the server
@@ -219,6 +343,7 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
     try { return localStorage.getItem(AS_KEY) || ''; } catch { return ''; }
   });
   const [showAgent, setShowAgent] = useState(false);
+  const [showMembers, setShowMembers] = useState(false);
   const [agentName, setAgentName] = useState('');
   const [agentIntent, setAgentIntent] = useState('');
   const [agentRole, setAgentRole] = useState(''); // a CHAT_ROLES id, or '' for none
@@ -460,7 +585,13 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
             {chat.ns}/{chat.path}
           </button>
         </div>
-        <button className={`chat-btn${showAgent ? ' active' : ''}`} onClick={() => setShowAgent((v) => !v)} title="How an agent joins this chat">
+        {account && (
+          <button className={`chat-btn${showMembers ? ' active' : ''}`} onClick={() => { setShowMembers((v) => !v); setShowAgent(false); }}
+            title="Who can open this chat" data-testid="chat-members-toggle">
+            Members
+          </button>
+        )}
+        <button className={`chat-btn${showAgent ? ' active' : ''}`} onClick={() => { setShowAgent((v) => !v); setShowMembers(false); }} title="How an agent joins this chat">
           <span className="chat-label-long">Connect an agent</span>
           <span className="chat-label-short">Agents</span>
         </button>
@@ -486,6 +617,10 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
           </button>
         )}
       </header>
+
+      {showMembers && account && (
+        <ChatMembers chat={chat} account={account} onClose={() => setShowMembers(false)} onChanged={() => onActivity?.()} />
+      )}
 
       {showAgent && (
         <div className="chat-agent">
@@ -572,7 +707,15 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
         )}
       </div>
 
-      {error && <div className="chat-error chat-room-error">{error}</div>}
+      {error && (
+        <div className="chat-error chat-room-error">
+          {/* The server says only "access denied", for a private chat and a
+              missing grant alike, so it does not reveal which one it is. */}
+          {error === 'access denied'
+            ? 'You cannot open this chat. It may be private: ask someone in it to add you.'
+            : error}
+        </div>
+      )}
 
       {showGifs && (
         <div className="chat-gifs" role="listbox" aria-label="React with an image">
@@ -822,6 +965,7 @@ function ChatView({ ns, namespaces, onSelectNs, account, serverAlias, isMobile, 
           {creating && (
             <NewChatForm
               ns={ns}
+              canPrivate={!!account}
               onCancel={() => setCreating(false)}
               onCreated={(c) => { setCreating(false); refresh(); onSelectChat(c); }}
             />

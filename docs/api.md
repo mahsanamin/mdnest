@@ -1805,11 +1805,42 @@ curl -X POST "$URL/api/chat/status?ns=work&path=Chats/release.md&as=api-agent" \
   -H "Authorization: Bearer $TOKEN" --data-raw "running the migration"
 ```
 
-### POST /api/chat/convert?ns=&path=[&title=]
+### POST /api/chat/convert?ns=&path=[&title=][&private=1]
 
 Needs write access. Creates the chat note when it does not exist (`201`).
 Otherwise it adds the tag in place and keeps the existing content as the
 description. Converting a chat again changes nothing.
+
+`private=1` (multi mode, *v4.8.4+*) makes the chat private with the caller
+as its only member. The member list is written before the note, so a new
+private chat never exists as an open one. Elsewhere it is a `400`.
+
+### GET/POST/DELETE /api/chat/members?ns=&path= *(v4.8.4+, multi mode)*
+
+The member list of a private chat. A chat with no list is open: anyone with
+read access to the note can read it. A chat with a list can be read and
+written only by the users on it, on every route that serves the note (note,
+chat, comments, history, attribution, files, download, search, tree, tasks,
+transfer, move, delete, websocket), namespace admins included. Not
+registered in single mode (`404`).
+
+- `GET` (read access): `{"private":true,"members":[{"id":3,"username":"mia","addedBy":2,"addedAt":"2026-10-08T00:12:00Z"}]}`.
+  An open chat answers `{"private":false,"members":[]}`.
+- `POST` (write access), body `{"userId":N}` or empty: adds the caller and,
+  if given, user `N`. On an open chat this is what makes it private. `404`
+  for a user that does not exist.
+- `DELETE ?...&userId=N` (write access): removes user `N`. `409` for the last
+  member.
+
+Each returns the list as `GET` does. `400` when the note is not a chat. A
+non-member gets `403` from all three, so they can neither see who is in a
+chat nor invite themselves.
+
+Folder operations check every chat inside: a non-member cannot delete
+(`DELETE /api/note`), move (`/api/move`) or copy or move to another namespace
+(`/api/transfer`) a folder that holds a private chat (`403`), and a folder
+`/api/download` leaves it out of the zip. A move or transfer by a member
+carries the list to the new path, and a delete forgets it.
 
 ### GET /api/chat/gifs?ns=[&format=text]
 
@@ -1837,7 +1868,9 @@ is cacheable.
 ### GET /api/chats[?ns=][&format=text]
 
 Every chat the caller can read, across namespaces, most recently active
-first: `{"chats":[{"ns","path","title","count","lastAuthor","lastTime","lastText"}]}`.
+first: `{"chats":[{"ns","path","title","count","lastAuthor","lastTime","lastText","private"}]}`.
+`private` is present and `true` for a private chat (only its members ever
+see it listed).
 It applies the same namespace filter as `/api/tasks/all`, plus a per-note
 read check.
 

@@ -357,6 +357,7 @@ func main() {
 	var groupStore store.GroupStore
 	var workspaceStore store.WorkspaceStore
 	var noteActivityStore store.NoteActivityStore
+	var chatMemberStore store.ChatMemberStore
 	if multiMode {
 		grantStore = store.NewPostgresGrantStore(db)
 		nsAdminStore = store.NewPostgresNamespaceAdminStore(db)
@@ -364,6 +365,11 @@ func main() {
 		perms = middleware.NewPermissionChecker(grantStore, nsAdminStore, groupStore)
 		// Authorise a symlinked path for the file it reaches, too.
 		perms.SetStorage(stg)
+		// Private chats (issue #127). Enforced whether or not chat is on
+		// right now: turning ENABLE_CHAT off must not open a private chat to
+		// everyone who can read the namespace.
+		chatMemberStore = store.NewPostgresChatMemberStore(db)
+		perms.SetChatMembers(chatMemberStore)
 		noteActivityStore = store.NewPostgresNoteActivityStore(db)
 
 		// Per-workspace git remote overrides: the store decrypts credentials and
@@ -505,6 +511,11 @@ func main() {
 		}
 	}
 	moveHandler := handlers.NewMoveHandler(stg)
+	if chatMemberStore != nil {
+		// Moves, copies and deletes carry private chats' member lists along.
+		moveHandler.SetChatMembers(chatMemberStore)
+		noteHandler.SetChatMembers(chatMemberStore)
+	}
 	searchHandler := handlers.NewSearchHandler(stg)
 
 	// Folder download (zip) and cross-namespace move/copy share one set of
@@ -526,6 +537,9 @@ func main() {
 		}
 	})
 	transferHandler.SetConcurrency(downloadMaxConcurrent)
+	if chatMemberStore != nil {
+		transferHandler.SetChatMembers(chatMemberStore)
+	}
 	if writerProxy != nil {
 		downloadHandler.SetWriterProxy(writerProxy)
 		transferHandler.SetWriterProxy(writerProxy)
@@ -563,6 +577,9 @@ func main() {
 	chatHandler := handlers.NewChatHandler(stg, taskNsFilter, chatCanRead, env("MDNEST_USER", "admin"), multiMode)
 	if collabHub != nil {
 		chatHandler.SetCollabHub(collabHub)
+	}
+	if chatMemberStore != nil {
+		chatHandler.SetMembers(chatMemberStore, userStore)
 	}
 	// API tokens live in Postgres in multi mode (shared across replicas, no
 	// ReadWriteMany secrets volume) and in the tokens.json file in single mode
@@ -868,6 +885,10 @@ func main() {
 	}
 	if enableTaskBoard {
 		routes.tasks = taskHandler
+	}
+	// The namespace member list feeds the task assignee picker and the
+	// private chat member picker, so either feature turns it on.
+	if enableTaskBoard || enableChat {
 		if pg, ok := grantStore.(*store.PostgresGrantStore); ok && perms != nil {
 			routes.team = http.HandlerFunc(handlers.NewTeamHandler(stg, pg).HandleNamespaceUsers)
 		}

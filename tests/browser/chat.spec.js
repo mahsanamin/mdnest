@@ -570,3 +570,25 @@ test('pin chats to the Pinned tab, and collapse the list to a strip', async ({ p
     }, [NS, names]);
   }
 });
+
+// Private chats (issue #127) exist only in multi mode, where there are other
+// people to keep out. This harness is single mode: there is one user, so the
+// members control and the "Only people I invite" option must not appear, and
+// a chat must work exactly as before.
+test('single mode shows no members control and no private option', async ({ page }) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  const { plain, chat, title } = await seed(page);
+  try {
+    await page.goto(`/#!chats/${NS}/${chat}`);
+    await expect(page.locator('.chat-room-title h2')).toHaveText(title, { timeout: 20_000 });
+    await expect(page.locator('[data-testid=chat-members-toggle]')).toHaveCount(0);
+    await expect(page.locator('.chat-list-lock')).toHaveCount(0);
+    await page.locator('button:has-text("+ New")').first().click();
+    await expect(page.locator('.chat-new')).toBeVisible();
+    await expect(page.locator('[data-testid=chat-new-private]')).toHaveCount(0);
+    expect((await api(page, 'GET', `/api/chat/members?ns=${NS}&path=${encodeURIComponent(chat)}`)).status).toBe(404);
+  } finally {
+    await cleanup(page, plain, chat);
+  }
+});
