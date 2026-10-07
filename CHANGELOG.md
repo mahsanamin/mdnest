@@ -4,7 +4,14 @@ All notable changes to mdnest are documented here.
 
 ---
 
-## Unreleased
+## v4.8.2: Pinned chats, heading links, and agents that show their context
+
+The chat list can collapse to a slim strip and has Pinned and All tabs. Each
+agent can show how full its context is, next to its name. You can copy a link
+to any heading. New messages no longer scroll the chat by themselves, the
+"also here" bubble moved out of the toolbar's way, and idle agents read
+"waiting" instead of "working: undefined". Admins can fix "no namespaces" and
+restart the server from the page.
 
 ### Added
 
