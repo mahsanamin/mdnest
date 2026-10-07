@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Marked } from 'marked';
-import { listChats, getChat, postChatMessage, convertToChat, listChatGifs, getToken } from '../api.js';
+import { listChats, getChat, postChatMessage, convertToChat, listChatGifs, getToken, fetchPreferencesStrict, savePreferences } from '../api.js';
 import { resolveImgSrc } from '../img-src.js';
 import { sanitizeHtml } from '../sanitize.js';
 import {
@@ -8,6 +8,7 @@ import {
   isOwnMessage, groupMessages, mergeMessages, workingLine, contextLabel, contextTitle, CONTEXT_HIGH, formatChatTime, agentInstructions, plainPreview,
   highlightMentions, mentionsName, participants, mentionQuery, completeMention,
   avatarFor, reactions, gifMarkdown, expandGifRefs, initialOf,
+  pinKey, parsePins, togglePin, chatsForTab, MAX_CHAT_PINS_LENGTH,
 } from '../chat.js';
 import { copyPlainText } from '../mermaid-text.js';
 import { mdnestUri } from '../mdnestUri.js';
@@ -121,23 +122,56 @@ function NewChatForm({ ns, onCreated, onCancel }) {
   );
 }
 
-function ChatList({ chats, loading, error, openChat, onSelect, filter, onFilter, onMenu }) {
+const PinIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M9 4h6l-1 6 3 3H7l3-3z" /><path d="M12 13v7" />
+  </svg>
+);
+
+// Pinned | All. Pinned shows only the chats you pinned, in pin order.
+function ChatTabs({ tab, onTab, pinnedCount, allCount }) {
+  return (
+    <div className="chat-tabs" role="tablist">
+      {[['pinned', `Pinned${pinnedCount ? ` ${pinnedCount}` : ''}`], ['all', `All ${allCount}`]].map(([id, label]) => (
+        <button key={id} role="tab" aria-selected={tab === id} className={`chat-tab${tab === id ? ' active' : ''}`}
+          onClick={() => onTab(id)} data-testid={`chat-tab-${id}`}>{label}</button>
+      ))}
+    </div>
+  );
+}
+
+function ChatList({ chats, loading, error, openChat, onSelect, filter, onFilter, onMenu, pins, onTogglePin, tab }) {
   const f = filter.trim().toLowerCase();
+  const inTab = chatsForTab(chats, pins || [], tab);
   const shown = f
-    ? chats.filter((c) => `${c.title} ${c.path}`.toLowerCase().includes(f))
-    : chats;
+    ? inTab.filter((c) => `${c.title} ${c.path}`.toLowerCase().includes(f))
+    : inTab;
   if (error) return <div className="chat-empty chat-error">{error}</div>;
   return (
     <>
-      {chats.length > 6 && (
+      {inTab.length > 6 && (
         <input className="chat-input chat-filter" placeholder="Filter chats" value={filter} onChange={(e) => onFilter(e.target.value)} />
       )}
       <ul className="chat-list-items">
         {shown.map((c) => {
           const active = openChat && openChat.ns === c.ns && openChat.path === c.path;
           const unread = active ? 0 : Math.max(0, c.count - readSeen(c.ns, c.path));
+          const pinned = !!pins && pins.includes(pinKey(c.ns, c.path));
           return (
-            <li key={`${c.ns}/${c.path}`}>
+            <li key={`${c.ns}/${c.path}`} className={`chat-list-row${pinned ? ' pinned' : ''}`}>
+              {/* A sibling of the row's button, not inside it: a button
+                  cannot hold another button. Hidden until hover, except on a
+                  pinned chat, where it shows the pin is on. */}
+              {pins && (
+                <button
+                  className={`chat-pin${pinned ? ' on' : ''}`}
+                  onClick={() => onTogglePin(c)}
+                  title={pinned ? 'Unpin' : 'Pin to the Pinned tab'}
+                  aria-label={pinned ? `Unpin ${c.title}` : `Pin ${c.title}`}
+                  aria-pressed={pinned}
+                  data-testid="chat-pin"
+                ><PinIcon /></button>
+              )}
               <button
                 className={`chat-list-item${active ? ' active' : ''}`}
                 onClick={() => onSelect({ ns: c.ns, path: c.path })}
@@ -159,6 +193,11 @@ function ChatList({ chats, loading, error, openChat, onSelect, filter, onFilter,
           );
         })}
       </ul>
+      {!loading && !error && chats.length > 0 && tab === 'pinned' && inTab.length === 0 && (
+        <div className="chat-empty">
+          Nothing pinned yet. Hover a chat in <b>All</b> and click the pin to keep it here.
+        </div>
+      )}
       {!loading && chats.length === 0 && (
         <div className="chat-empty">
           No chats in this workspace yet. Create one with <b>+ New</b>, or right-click a folder and choose <b>New chat</b>.
@@ -654,6 +693,35 @@ function ChatView({ ns, namespaces, onSelectNs, account, serverAlias, isMobile, 
   const [menu, setMenu] = useState(null); // {x, y, chat} while the right-click menu is open
   const [filter, setFilter] = useState('');
   const visible = useVisible();
+  // Per-browser view choices; failing storage just means the defaults.
+  const stored = (k, d) => { try { return localStorage.getItem(k) || d; } catch { return d; } };
+  const store = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private window */ } };
+  const [collapsed, setCollapsed] = useState(() => stored('mdnest_chat_list_collapsed', '') === '1');
+  const [tab, setTab] = useState(() => stored('mdnest_chat_tab', 'all'));
+  const chooseTab = (t) => { setTab(t); store('mdnest_chat_tab', t); };
+  const toggleCollapsed = () => setCollapsed((c) => { store('mdnest_chat_list_collapsed', c ? '' : '1'); return !c; });
+
+  // Pinned chats follow the person (the chat_pins preference). The list is
+  // saved WHOLE, so nothing is saved until a read has succeeded: a failed
+  // read is not "no pins", and saving over it would drop the real ones.
+  // null = not loaded (pin buttons hidden).
+  const [pins, setPins] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetchPreferencesStrict()
+      .then((p) => { if (!cancelled) setPins(parsePins(p?.chat_pins)); })
+      .catch(() => { if (!cancelled) setPins(null); });
+    return () => { cancelled = true; };
+  }, []);
+  const togglePinFor = (c) => {
+    if (!pins) return;
+    const next = togglePin(pins, pinKey(c.ns, c.path));
+    const value = JSON.stringify(next);
+    if (value.length > MAX_CHAT_PINS_LENGTH) { alert('Too many pinned chats. Unpin some first.'); return; }
+    const before = pins;
+    setPins(next);
+    savePreferences({ chat_pins: value }).catch(() => { setPins(before); alert('Could not save your pins. Try again.'); });
+  };
 
   // Scoped to the workspace you are in, like the rest of the sidebar. A chat
   // in another workspace is still reachable by its link (#!chats/ns/path).
@@ -684,10 +752,38 @@ function ChatView({ ns, namespaces, onSelectNs, account, serverAlias, isMobile, 
 
   const showList = !isMobile || !openChat;
   const showRoom = !!openChat;
+  const narrow = collapsed && !isMobile;
+  const pinnedHere = chatsForTab(chats, pins || [], 'pinned');
+  const railChats = tab === 'pinned' && pinnedHere.length ? pinnedHere : chats;
 
   return (
     <div className="chat-panel">
-      {showList && (
+      {showList && narrow && (
+        // Collapsed: a slim strip with the way back out and one initial per
+        // chat (the Pinned tab's chats when you are on it), unread marked.
+        <aside className="chat-list collapsed" data-testid="chat-list-collapsed">
+          <button className="chat-btn chat-btn-icon chat-collapse" onClick={toggleCollapsed}
+            title="Show the chat list" aria-label="Show the chat list" aria-expanded="false">&#187;</button>
+          <ul className="chat-rail">
+            {railChats.map((c) => {
+              const active = openChat && openChat.ns === c.ns && openChat.path === c.path;
+              const unread = active ? 0 : Math.max(0, c.count - readSeen(c.ns, c.path));
+              return (
+                <li key={`${c.ns}/${c.path}`}>
+                  <button className={`chat-rail-item${active ? ' active' : ''}`} title={c.title}
+                    aria-label={`${c.title}${unread ? `, ${unread} unread` : ''}`}
+                    style={{ background: `var(${colorForAuthor(c.title)})` }}
+                    onClick={() => onSelectChat({ ns: c.ns, path: c.path })}>
+                    {initialOf(c.title)}
+                    {unread > 0 && <span className="chat-rail-unread" aria-hidden="true" />}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </aside>
+      )}
+      {showList && !narrow && (
         <aside className="chat-list">
           <header className="chat-list-header">
             {/* Phone: the app bar already says "Chats", so this row is the
@@ -707,6 +803,10 @@ function ChatView({ ns, namespaces, onSelectNs, account, serverAlias, isMobile, 
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
               </button>
               <button className="chat-btn chat-btn-primary" onClick={() => setCreating((v) => !v)}>+ New</button>
+              {!isMobile && (
+                <button className="chat-btn chat-btn-icon chat-collapse" onClick={toggleCollapsed}
+                  title="Hide the chat list" aria-label="Hide the chat list" aria-expanded="true">&#171;</button>
+              )}
               {/* No ✕ on desktop: the toolbar's "← Back to …" is the way out,
                   and two exits for one view was the confusing part. */}
             </div>
@@ -718,9 +818,13 @@ function ChatView({ ns, namespaces, onSelectNs, account, serverAlias, isMobile, 
               onCreated={(c) => { setCreating(false); refresh(); onSelectChat(c); }}
             />
           )}
+          {chats.length > 0 && (
+            <ChatTabs tab={tab} onTab={chooseTab} pinnedCount={pinnedHere.length} allCount={chats.length} />
+          )}
           <ChatList
             chats={chats} loading={loading} error={error} openChat={openChat} onSelect={onSelectChat} filter={filter} onFilter={setFilter}
             onMenu={(x, y, c) => setMenu({ x, y, chat: c })}
+            pins={pins} onTogglePin={togglePinFor} tab={tab}
           />
           {/* Right-click on a chat: the same menu component as the file tree. */}
           <ContextMenu
@@ -729,10 +833,11 @@ function ChatView({ ns, namespaces, onSelectNs, account, serverAlias, isMobile, 
             y={menu?.y || 0}
             target={menu?.chat || null}
             title={menu?.chat?.title}
-            groups={chatMenuGroups({ canDelete: !!onDeleteChat })}
+            groups={chatMenuGroups({ canDelete: !!onDeleteChat, pinned: pins && menu?.chat ? pins.includes(pinKey(menu.chat.ns, menu.chat.path)) : undefined })}
             onClose={() => setMenu(null)}
             onAction={async (action, c) => {
               if (!c) return;
+              if (action === 'pin-chat' || action === 'unpin-chat') togglePinFor(c);
               if (action === 'open-note') onOpenNote(c.ns, c.path);
               if (action === 'copy-path') copyPlainText(mdnestUri(serverAlias, c.ns, c.path));
               if (action === 'delete-chat' && onDeleteChat) {

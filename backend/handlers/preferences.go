@@ -89,7 +89,9 @@ func (h *PreferencesHandler) get(w http.ResponseWriter, userID int) {
 // written by another tab is not wiped by a theme toggle here.
 func (h *PreferencesHandler) patch(w http.ResponseWriter, r *http.Request, userID int) {
 	var incoming store.Preferences
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&incoming); err != nil {
+	// Room for the largest value (chat_pins) after JSON escaping, which can
+	// double it; each value's own cap is still checked below.
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 3*store.MaxChatPinsValue)).Decode(&incoming); err != nil {
 		http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
 		return
 	}

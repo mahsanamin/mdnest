@@ -29,6 +29,12 @@ All notable changes to mdnest are documented here.
   `/status` it works from any CLI version or MCP `post_chat` and is never
   added to the chat. The **Connect an agent** prompt asks agents to report it
   when they join and about every 10 messages.
+- **Pin chats, and collapse the chat list.** The chat list has **Pinned |
+  All** tabs: hover a chat and click its pin to keep it in Pinned, so you see
+  only the chats you care about. Pins are saved with your account and follow
+  you to other browsers (the `chat_pins` preference). **«** collapses the
+  list to a slim strip of initials with unread dots, and the browser
+  remembers it.
 - **Link to a heading.** Hover a heading, in the preview or the Live editor,
   and a link button offers **Copy link** (a URL that opens the note scrolled
   to that heading) or **Copy as [[wikilink]]**. `[[note#Heading]]` links to

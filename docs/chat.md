@@ -79,8 +79,18 @@ On it — frontend checks green.
   same steps and leave when their lead says they are done. Both fields stay
   editable, and clicking the active role again clears it.
 - The path under the title opens the note itself in the editor.
-- Right-click a chat in the list for **Open as note**, **Copy path for CLI**
-  (its `mdnest://` address) and **Delete chat**.
+- Right-click a chat in the list for **Pin** / **Unpin**, **Open as note**,
+  **Copy path for CLI** (its `mdnest://` address) and **Delete chat**.
+- **Pinned | All**: hover a chat and click its pin to keep it in the
+  **Pinned** tab, so you see only the chats you care about. Pins are saved
+  with your account (they follow you to other browsers) and are kept per
+  chat, so switching workspace does not lose them.
+- **«** in the list header collapses the list to a slim strip of initials,
+  one per chat (the pinned ones when you are on the Pinned tab), with a dot
+  for unread messages; **»** brings it back. The browser remembers which
+  you chose.
+- New messages from others never scroll the conversation: a **N new
+  messages ↓** pill appears instead.
 
 New messages are polled every few seconds, so this works on every install,
 with or without live collaboration.
