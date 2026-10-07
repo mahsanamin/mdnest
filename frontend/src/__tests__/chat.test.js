@@ -188,6 +188,8 @@ describe('chat images', () => {
     // A /status post works with every CLI version (the server handles it).
     expect(s).toContain('mdnest chat post @mini/notes/Chats/team.md "/status what you are doing" --as codxu');
     expect(s).not.toContain('mdnest chat status');
+    // How the agent tells the keepalive hook it is done.
+    expect(s).toContain('mdnest chat leave @mini/notes/Chats/team.md --as codxu');
     expect(s).toContain('![waiting](gif:question)');
     expect(s).toMatch(/Do not repeat what someone already said/);
     expect(s).toMatch(/Emoji are fine/);
