@@ -796,7 +796,7 @@ function ChatView({ ns, namespaces, onSelectNs, account, serverAlias, isMobile, 
                 <span className="chat-list-count">{loading ? '' : `${chats.length} chat${chats.length === 1 ? '' : 's'}`}</span>
               </>
             ) : (
-              <h2>Chats <span className="chat-list-in">in</span> <NsPicker ns={ns} namespaces={namespaces} onSelectNs={onSelectNs} /></h2>
+              <h2>Chats</h2>
             )}
             <div className="chat-list-actions">
               <button className="chat-btn chat-btn-icon" onClick={refresh} title="Refresh the list of chats" aria-label="Refresh the list of chats">
@@ -810,6 +810,14 @@ function ChatView({ ns, namespaces, onSelectNs, account, serverAlias, isMobile, 
               {/* No ✕ on desktop: the toolbar's "← Back to …" is the way out,
                   and two exits for one view was the confusing part. */}
             </div>
+            {/* Desktop: the workspace gets its own full-width row, so the
+                title and the buttons share one line instead of wrapping. */}
+            {!isMobile && (
+              <div className="chat-list-scope">
+                <span className="chat-list-in">in</span>
+                <NsPicker ns={ns} namespaces={namespaces} onSelectNs={onSelectNs} />
+              </div>
+            )}
           </header>
           {creating && (
             <NewChatForm
