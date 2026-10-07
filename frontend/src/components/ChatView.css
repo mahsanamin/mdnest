@@ -27,7 +27,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: 10px 14px;
+  padding: 10px 16px;
   border-bottom: 1px solid var(--border);
   flex: 0 0 auto;
 }
@@ -45,7 +45,12 @@
 .chat-list-count { color: var(--text-muted); font-size: 0.85rem; }
 .chat-list-ns { color: var(--text-muted); font-weight: 400; font-size: 0.85rem; }
 .chat-list-in { color: var(--text-muted); font-weight: 400; font-size: 0.85rem; }
-.chat-list-header h2 { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.chat-list-header { flex-wrap: wrap; row-gap: 8px; }
+.chat-list-header h2 { min-width: 0; line-height: 28px; }
+.chat-list-header .chat-btn { height: 28px; display: inline-flex; align-items: center; justify-content: center; }
+.chat-list-header .chat-btn-icon { width: 28px; padding: 0; }
+.chat-list-scope { flex: 1 0 100%; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.chat-list-scope .chat-ns-select { flex: 1; height: 28px; }
 .chat-ns-select {
   max-width: 100%;
   min-width: 0;
@@ -118,7 +123,7 @@
 .chat-list-items {
   list-style: none;
   margin: 0;
-  padding: 6px;
+  padding: 6px 5px; /* 5 + 1px border + 10px item padding = the header's 16px */
   overflow-y: auto;
   flex: 1 1 auto;
   min-height: 0;
@@ -165,7 +170,7 @@
 .chat-list-row { position: relative; }
 .chat-pin {
   position: absolute;
-  right: 8px;
+  right: 12px;
   bottom: 7px;
   z-index: 1;
   display: flex;
@@ -188,7 +193,7 @@
 .chat-tabs {
   display: flex;
   gap: 4px;
-  padding: 8px 12px 0;
+  padding: 10px 16px 2px;
   flex: 0 0 auto;
 }
 .chat-tab {
