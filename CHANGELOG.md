@@ -4,6 +4,78 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v4.8.2: Pinned chats, heading links, and agents that show their context
+
+The chat list can collapse to a slim strip and has Pinned and All tabs. Each
+agent can show how full its context is, next to its name. You can copy a link
+to any heading. New messages no longer scroll the chat by themselves, the
+"also here" bubble moved out of the toolbar's way, and idle agents read
+"waiting" instead of "working: undefined". Admins can fix "no namespaces" and
+restart the server from the page.
+
+### Added
+
+- **Fix "no namespaces" from the page, not over SSH** (follow-up to GitHub
+  issue #123). When notes are mounted but your account has no access, an admin
+  now gets a **Give me access to all namespaces** button on the empty page. For
+  a mount problem the page shows the exact `docker-compose.yml` lines (and the
+  `mdnest.conf` line for a setup.sh install) with a Copy button, plus **Check
+  again**, which re-reads the list and opens the workspace as soon as the fix
+  is in, without a reload. The messages now say `docker compose up -d` for a
+  mount change, since a plain restart keeps the old mounts.
+- **Restart the server from Settings.** A new **Server** tab (superadmin only
+  in multi-user mode) restarts the backend. It drains requests, commits
+  pending git edits, and restarts in place, so it works without a Docker
+  restart policy. The page waits for the new process and reloads itself.
+  `POST /api/admin/restart`; `/api/config` now carries a `bootId` that changes
+  on every start.
+- **See how full each agent's context is, by its name.** An agent posts
+  `/context 42%` (or `/context 87k/200k`) and a small chip by its name shows
+  the figure, on its latest messages and in the line above the message box,
+  turning amber at 80% so you can tell which agent needs a fresh start. Like
+  `/status` it works from any CLI version or MCP `post_chat` and is never
+  added to the chat. The **Connect an agent** prompt asks agents to report it
+  when they join and about every 10 messages.
+- **Pin chats, and collapse the chat list.** The chat list has **Pinned |
+  All** tabs: hover a chat and click its pin to keep it in Pinned, so you see
+  only the chats you care about. Pins are saved with your account and follow
+  you to other browsers (the `chat_pins` preference). **«** collapses the
+  list to a slim strip of initials with unread dots, and the browser
+  remembers it.
+- **Link to a heading.** Hover a heading, in the preview or the Live editor,
+  and a link button offers **Copy link** (a URL that opens the note scrolled
+  to that heading) or **Copy as [[wikilink]]**. `[[note#Heading]]` links to
+  another note now scroll to the heading too; before, they only opened the
+  note.
+
+### Fixed
+
+- **Idle agents no longer show as "working: undefined".** The line under a
+  chat could say "AhsanSideKick is working: undefined" for an agent that was
+  only waiting for messages: a page older than the server read every presence
+  entry as a work status. The line now says working only when an agent set a
+  status saying what it is doing; everything else reads as waiting, including
+  a presence type the page does not know yet. Waiting agents are labelled
+  "waiting" instead of "listening".
+- **New chat messages no longer scroll the chat by themselves.** A message
+  from someone else used to pull the view down whenever you were near the
+  bottom. Now the view stays where you left it and a **2 new messages ↓**
+  pill appears; scroll down yourself or click it. Opening a chat and sending
+  your own message still take you to the bottom.
+- **"saboor is also here" no longer covers the editor toolbar.** With live
+  collaboration on, the bubble saying who else has the note open floated over
+  the top right of the content, on top of the formatting buttons. It is now a
+  row of initials in the file toolbar, next to the comments button, with the
+  names in its tooltip; "is typing…" shows beside them only while someone
+  types.
+- **Going back to wait clears an agent's status.** An agent that set
+  `/status running tests` and then went back to `chat wait` without posting
+  kept showing as working for up to 2 minutes. Its next empty wait now clears
+  it, and the agent prompt tells agents to set a status only while they are
+  really working.
+
+---
+
 ## v4.8.1: "No namespaces found" explains itself
 
 ### Fixed

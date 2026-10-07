@@ -260,7 +260,7 @@ test('right-click on a chat in the list: copy its path, and delete another chat 
     const menu = page.locator('.context-menu');
     await expect(menu).toBeVisible();
     await expect(menu.locator('.context-menu-title')).toHaveText(b.title);
-    await expect(menu.locator('.context-menu-item')).toHaveText(['Open as note', 'Copy path for CLI', 'Delete chat']);
+    await expect(menu.locator('.context-menu-item')).toHaveText(['Pin to the Pinned tab', 'Open as note', 'Copy path for CLI', 'Delete chat']);
 
     await menu.locator('.context-menu-item', { hasText: 'Copy path for CLI' }).click();
     await expect(menu).toBeHidden();
@@ -380,7 +380,7 @@ test('typing stays fast in a long chat', async ({ page }) => {
   await page.evaluate(async ([ns, p]) => { await fetch(`/api/note?ns=${ns}&path=${encodeURIComponent(p)}`, { method: 'DELETE', headers: { Authorization: 'Bearer ' + localStorage.getItem('mdnest_token') } }); }, [NS, chat]);
 });
 
-test('presence comes from the polls an agent already makes: listening, thinking, working', async ({ page }) => {
+test('presence comes from the polls an agent already makes: waiting, thinking, working', async ({ page }) => {
   test.setTimeout(90_000);
   await signIn(page);
   const { plain, chat, title } = await seed(page);
@@ -393,7 +393,7 @@ test('presence comes from the polls an agent already makes: listening, thinking,
     const poll = async (after) => api(page, 'GET', `/api/chat?${qs}&after=${after}&format=text&exclude=bot`);
 
     await poll(99);
-    await expect(line).toContainText('bot is listening', { timeout: 10_000 });
+    await expect(line).toContainText('bot is waiting', { timeout: 10_000 });
     await expect(line.locator('.chat-listening-dot')).toHaveCount(1);
 
     await api(page, 'POST', `/api/chat?${qs}&as=ahsan`, 'bot, can you check this?');
@@ -409,9 +409,152 @@ test('presence comes from the polls an agent already makes: listening, thinking,
     expect(await page.locator('.chat-bubble').count()).toBe(before);
 
     await api(page, 'POST', `/api/chat?${qs}&as=bot`, 'found it: a typo');
-    await expect(line).toContainText('bot is listening', { timeout: 10_000 });
+    await expect(line).toContainText('bot is waiting', { timeout: 10_000 });
     await expect(page.locator('.chat-bubble').last()).toContainText('found it: a typo');
+
+    // Back to wait without posting: waiting again, not still working.
+    await api(page, 'POST', `/api/chat?${qs}&as=bot`, '/status running tests');
+    await expect(line).toContainText('bot is working: running tests', { timeout: 10_000 });
+    await poll(99);
+    await expect(line).toContainText('bot is waiting', { timeout: 10_000 });
+    await expect(line).not.toContainText('working');
   } finally {
     await cleanup(page, plain, chat);
+  }
+});
+
+test('an agent\'s /context report shows by its name, not as a message', async ({ page }) => {
+  test.setTimeout(60_000);
+  await signIn(page);
+  const { plain, chat, title } = await seed(page);
+  try {
+    await page.goto(`/#!chats/${NS}/${chat}`);
+    await expect(page.locator('.chat-room-title h2')).toHaveText(title, { timeout: 20_000 });
+    const qs = `ns=${NS}&path=${encodeURIComponent(chat)}`;
+    await api(page, 'POST', `/api/chat?${qs}&as=bot`, 'hello, I am here');
+    await expect(page.locator('.chat-bubble').last()).toContainText('hello, I am here', { timeout: 10_000 });
+    const before = await page.locator('.chat-bubble').count();
+
+    const r = await api(page, 'POST', `/api/chat?${qs}&as=bot`, '/context 87k/200k');
+    expect(r.status).toBe(200);
+    const chip = page.getByTestId('chat-context');
+    await expect(chip).toHaveText('44%', { timeout: 10_000 });
+    await expect(chip).toHaveAttribute('title', /87k of 200k tokens/);
+    await expect(chip).not.toHaveClass(/high/);
+    expect(await page.locator('.chat-bubble').count()).toBe(before);
+
+    await api(page, 'POST', `/api/chat?${qs}&as=bot`, '/context 91%');
+    await expect(chip).toHaveText('91%', { timeout: 10_000 });
+    await expect(chip).toHaveClass(/high/);
+
+    const bad = await api(page, 'POST', `/api/chat?${qs}&as=bot`, '/context about half');
+    expect(bad.status).toBe(400);
+  } finally {
+    await cleanup(page, plain, chat);
+  }
+});
+
+// New messages from others must never move the view, even when you are at
+// the bottom: a pill says they are there and you scroll yourself.
+test('new messages show a pill instead of scrolling the chat', async ({ page }) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  const chat = `__chat-scroll-${Date.now()}.md`;
+  const qs = `ns=${NS}&path=${encodeURIComponent(chat)}`;
+  await page.evaluate(async ([ns, p]) => {
+    const h = { Authorization: 'Bearer ' + localStorage.getItem('mdnest_token') };
+    await fetch(`/api/chat/convert?ns=${ns}&path=${encodeURIComponent(p)}&title=Scroll`, { method: 'POST', headers: h });
+    for (let i = 0; i < 40; i++) await fetch(`/api/chat?ns=${ns}&path=${encodeURIComponent(p)}&as=agent-${i % 2}`, { method: 'POST', headers: h, body: `message ${i}\n\nwith a second line` });
+  }, [NS, chat]);
+  try {
+    await page.goto(`/#!chats/${NS}/${chat}`);
+    const list = page.locator('.chat-messages');
+    await expect(page.locator('.chat-bubble')).toHaveCount(40, { timeout: 20_000 });
+    const gap = () => list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight);
+    // Opening the chat lands at the bottom.
+    await expect.poll(gap).toBeLessThan(60);
+    const top = await list.evaluate((el) => el.scrollTop);
+
+    await api(page, 'POST', `/api/chat?${qs}&as=agent-0`, 'a new one\n\nthat is\n\ntall');
+    await api(page, 'POST', `/api/chat?${qs}&as=agent-1`, 'and another');
+    const pill = page.getByTestId('chat-new-pill');
+    await expect(pill).toHaveText('2 new messages ↓', { timeout: 15_000 });
+    expect(await list.evaluate((el) => el.scrollTop)).toBe(top);
+    expect(await gap()).toBeGreaterThan(30);
+
+    await pill.click();
+    await expect(pill).toHaveCount(0);
+    await expect.poll(gap).toBeLessThan(60);
+
+    // Your own post still takes you to it, and is not counted as new.
+    await list.evaluate((el) => { el.scrollTop = 0; });
+    await page.locator('textarea.chat-draft').fill('my reply');
+    await page.locator('textarea.chat-draft').press('Enter');
+    await expect(page.locator('.chat-bubble').last()).toContainText('my reply', { timeout: 10_000 });
+    await expect.poll(gap).toBeLessThan(60);
+    await page.waitForTimeout(4000); // let a poll bring the post back once more
+    await expect(pill).toHaveCount(0);
+  } finally {
+    await page.evaluate(async ([ns, p]) => { await fetch(`/api/note?ns=${ns}&path=${encodeURIComponent(p)}`, { method: 'DELETE', headers: { Authorization: 'Bearer ' + localStorage.getItem('mdnest_token') } }); }, [NS, chat]);
+  }
+});
+
+test('pin chats to the Pinned tab, and collapse the list to a strip', async ({ page }) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  const stamp = Date.now();
+  const names = [`__pin-a-${stamp}.md`, `__pin-b-${stamp}.md`];
+  await page.evaluate(async ([ns, ps]) => {
+    const h = { Authorization: 'Bearer ' + localStorage.getItem('mdnest_token') };
+    for (const p of ps) await fetch(`/api/chat/convert?ns=${ns}&path=${encodeURIComponent(p)}&title=${p.slice(2, 7)}`, { method: 'POST', headers: h });
+    await fetch('/api/preferences', { method: 'PATCH', headers: { ...h, 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_pins: '[]' }) });
+    localStorage.removeItem('mdnest_chat_tab');
+    localStorage.removeItem('mdnest_chat_list_collapsed');
+  }, [NS, names]);
+  try {
+    await page.goto(`/#!chats`);
+    const row = page.locator('.chat-list-row', { hasText: names[1] });
+    await expect(row).toBeVisible({ timeout: 20_000 });
+    await row.hover();
+    await row.getByTestId('chat-pin').click();
+    await expect(row.getByTestId('chat-pin')).toHaveAttribute('aria-pressed', 'true');
+
+    await page.getByTestId('chat-tab-pinned').click();
+    await expect(page.locator('.chat-list-row')).toHaveCount(1);
+    await expect(page.locator('.chat-list-row')).toContainText(names[1]);
+
+    // Saved with the account, not the page: still pinned after a reload.
+    await page.reload();
+    await expect(page.getByTestId('chat-tab-pinned')).toHaveAttribute('aria-selected', 'true', { timeout: 20_000 });
+    await expect(page.locator('.chat-list-row')).toHaveCount(1);
+    const saved = await page.evaluate(async () => (await (await fetch('/api/preferences', { headers: { Authorization: 'Bearer ' + localStorage.getItem('mdnest_token') } })).json()).chat_pins);
+    expect(JSON.parse(saved)).toEqual([`${NS}/${names[1]}`]);
+
+    // Collapse: the list becomes a strip of initials, and comes back.
+    const wide = await page.locator('.chat-list').boundingBox();
+    await page.getByRole('button', { name: 'Hide the chat list' }).click();
+    const strip = page.getByTestId('chat-list-collapsed');
+    await expect(strip).toBeVisible();
+    expect((await strip.boundingBox()).width).toBeLessThan(wide.width / 4);
+    await expect(strip.locator('.chat-rail-item')).toHaveCount(1); // the Pinned tab's chats
+    await strip.locator('.chat-rail-item').click();
+    await expect(page.locator('.chat-room-title h2')).toBeVisible({ timeout: 10_000 });
+    await page.reload();
+    await expect(page.getByTestId('chat-list-collapsed')).toBeVisible({ timeout: 20_000 });
+    await page.getByRole('button', { name: 'Show the chat list' }).click();
+    await expect(page.locator('.chat-list-row').first()).toBeVisible();
+
+    // Unpin from the right-click menu.
+    await page.locator('.chat-list-item', { hasText: names[1] }).click({ button: 'right' });
+    await page.getByText('Unpin', { exact: true }).click();
+    await expect(page.locator('.chat-list-row')).toHaveCount(0);
+  } finally {
+    await page.evaluate(async ([ns, ps]) => {
+      const h = { Authorization: 'Bearer ' + localStorage.getItem('mdnest_token') };
+      for (const p of ps) await fetch(`/api/note?ns=${ns}&path=${encodeURIComponent(p)}`, { method: 'DELETE', headers: h });
+      await fetch('/api/preferences', { method: 'PATCH', headers: { ...h, 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_pins: '[]' }) });
+      localStorage.removeItem('mdnest_chat_tab');
+      localStorage.removeItem('mdnest_chat_list_collapsed');
+    }, [NS, names]);
   }
 });

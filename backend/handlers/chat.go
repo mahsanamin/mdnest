@@ -111,6 +111,9 @@ type chatResponse struct {
 	You string `json:"you"`
 	// Working lists who has said they are busy, and on what (chat_status.go).
 	Working []ChatStatus `json:"working"`
+	// Contexts is each poster's last /context report, by label
+	// (chat_context.go), so the page can show it by their name.
+	Contexts map[string]ChatContext `json:"contexts"`
 }
 
 func chatTitle(doc ChatDoc, relPath string) string {
@@ -186,7 +189,7 @@ func (h *ChatHandler) read(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(chatResponse{Namespace: ns, Path: relPath, Title: chatTitle(doc, relPath),
 		Description: doc.Description, Count: len(doc.Messages), Messages: msgs, You: you,
-		Working: h.status.list(ns, relPath, h.now())})
+		Working: h.status.list(ns, relPath, h.now()), Contexts: h.status.contexts(ns, relPath, h.now())})
 }
 
 // formatChatMessageText is the terminal rendering the CLI prints verbatim, so
@@ -274,6 +277,11 @@ func (h *ChatHandler) post(w http.ResponseWriter, r *http.Request) {
 	// message, so any CLI version (or MCP post_chat) can use it.
 	if st, isStatus := slashStatus(text); isStatus {
 		h.applyStatus(w, r, ns, relPath, st, http.StatusOK)
+		return
+	}
+	// "/context 42%" reports how much of its context an agent has used.
+	if c, isContext := slashContext(text); isContext {
+		h.applyContext(w, r, ns, relPath, c)
 		return
 	}
 	label, via, ok := h.author(r)

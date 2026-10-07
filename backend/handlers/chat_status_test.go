@@ -128,6 +128,20 @@ func TestSlashStatusPostSetsStatusWithoutAMessage(t *testing.T) {
 	}
 }
 
+// "Working" only while working: an agent that set a status and went back to
+// wait without posting is waiting, not still working on it.
+func TestGoingBackToWaitClearsTheStatus(t *testing.T) {
+	h, _ := newStatusTestChat(t)
+	chatDo(t, h.Handle, http.MethodPost, statusChatURL+"&as=codxu", "/status running tests", nil)
+	if k := presenceKind(chatPresenceOf(t, h), "codxu"); k != statusWorking {
+		t.Fatalf("status not set, got %q", k)
+	}
+	chatDo(t, h.Handle, http.MethodGet, statusChatURL+"&after=0&exclude=codxu&format=text", "", nil)
+	if k := presenceKind(chatPresenceOf(t, h), "codxu"); k != statusListening {
+		t.Fatalf("an empty wait poll should mean waiting again, got %q", k)
+	}
+}
+
 func TestSlashStatusOnlyMatchesTheCommand(t *testing.T) {
 	for _, tc := range []struct {
 		in   string

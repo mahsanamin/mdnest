@@ -250,6 +250,33 @@ curl -X DELETE "http://localhost:8286/api/auth/tokens?id=a1b2c3d4" \
 
 ---
 
+## Server restart *(v4.8.2+)*
+
+### POST /api/admin/restart
+
+Restarts the backend, the same as **Settings > Server > Restart server**.
+Superadmin only in multi-user mode (others get 403); in single-user mode the
+signed-in user owns the server and may restart it.
+
+The response comes first (`202 {"status":"restarting"}`). The backend then
+stops taking requests, finishes the ones in flight (up to 15 seconds), commits
+pending edits when `STORAGE_BACKEND=git`, and starts itself again in place. It
+needs no restart policy from Docker or Kubernetes. Repeated calls while it is
+restarting start one restart.
+
+A restart keeps the container's mounts and environment, which Docker fixes when
+the container is created. To apply a change to `docker-compose.yml` or `.env`,
+run `docker compose up -d` on the server instead.
+
+To know when the new process is up, read `bootId` from `GET /api/config`
+before restarting and poll until it changes:
+
+```bash
+curl -X POST http://localhost:8286/api/admin/restart -H "Authorization: Bearer $TOKEN"
+```
+
+---
+
 ## Admin (multi-user mode only)
 
 These endpoints are only available when `AUTH_MODE=multi`. All require an admin role (`superadmin` or `admin`) — collaborators receive a 403.
@@ -635,13 +662,14 @@ Merges the supplied keys into the caller's preferences and returns the merged re
 
 **Errors:**
 
-- `400` — unknown key, value longer than 64 bytes, an empty object, or a body that is not a JSON object. The whole request is rejected rather than the valid subset stored, so a `200` never means "some of what you sent was saved".
+- `400` — unknown key, a value longer than its key allows (64 bytes for `theme`, 4096 for `chat_pins`), an empty object, or a body that is not a JSON object. The whole request is rejected rather than the valid subset stored, so a `200` never means "some of what you sent was saved".
 
 **Supported keys:**
 
 | Key | Values | Meaning |
 |---|---|---|
 | `theme` | `auto` \| `dark` \| `light` | Colour theme. Overrides the server's `DEFAULT_THEME`. |
+| `chat_pins` | JSON array of `"namespace/path"` strings, as a string | The chats pinned in the chat list, newest first. Saved whole, so the web UI only writes it after a successful read. |
 
 Preferences are stored server-side — Postgres (`user_preferences`) in multi mode, `preferences.json` in the secrets volume in single mode — so a theme follows the person across browsers and devices rather than living in one browser's local storage. The key set is an allowlist: this endpoint is writable by any authenticated user, so an open bag would be a per-user blob store anyone could fill.
 
@@ -1725,10 +1753,22 @@ Needs read access to the note. Returns only the messages after #N.
 `working` is who is present, busiest first. `kind` is `working` (a status the
 agent set), `thinking` (its last poll delivered new messages and it has not
 posted since) or `listening` (it polled with `exclude=NAME` in the last 20
-seconds). A GET with `exclude=NAME` is what records listening and thinking;
+seconds; the web UI shows it as "waiting"). An empty poll with
+`exclude=NAME` also clears that poster's status. A GET with `exclude=NAME` is what records listening and thinking;
 a POST whose body starts with `/status` sets the status instead of adding a
 message (an empty `/status` clears it) and answers `200 {"status":"status
 set","count":N}`.
+
+A POST whose body starts with `/context` records how much of its context
+window the poster has used (`/context 42%`, `/context 87k/200k`,
+`/context 87,000 of 200,000 tokens`, or a bare token count) and answers
+`200 {"status":"context set","count":N}`; it is not added to the chat. A
+report the server cannot read answers `400` with the accepted forms, and an
+empty `/context` clears it. Reports are in memory for an hour and come back
+on every GET as `contexts`, keyed by poster
+(`{"codxu": {"used": 87000, "total": 200000, "pct": 44, "at": "…"}}`, with
+`pct` `-1` when only a token count was given), and on that poster's
+`working` entry as `context`.
 
 `exclude=name` drops that poster's own messages (a waiting agent is not
 woken by its own post). `mention=name` keeps only messages that address
@@ -1756,8 +1796,9 @@ curl -X POST "$URL/api/chat?ns=work&path=Chats/release.md&as=api-agent" \
 Needs write access (the same as posting). The body is one short line saying
 what the poster is doing; it is shown quietly under the chat as
 "label is working: …". It is kept in memory only, expires after 2 minutes
-unless set again, and the poster's next message clears it. An empty body
-clears it now. Labelled like a post (`label (via username)` in multi mode).
+unless set again, and the poster's next message clears it, as does its next
+wait poll that finds nothing new (it is waiting again). An empty body clears
+it now. Labelled like a post (`label (via username)` in multi mode).
 
 ```bash
 curl -X POST "$URL/api/chat/status?ns=work&path=Chats/release.md&as=api-agent" \
