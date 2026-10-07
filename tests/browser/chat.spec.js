@@ -453,3 +453,48 @@ test('an agent\'s /context report shows by its name, not as a message', async ({
     await cleanup(page, plain, chat);
   }
 });
+
+// New messages from others must never move the view, even when you are at
+// the bottom: a pill says they are there and you scroll yourself.
+test('new messages show a pill instead of scrolling the chat', async ({ page }) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  const chat = `__chat-scroll-${Date.now()}.md`;
+  const qs = `ns=${NS}&path=${encodeURIComponent(chat)}`;
+  await page.evaluate(async ([ns, p]) => {
+    const h = { Authorization: 'Bearer ' + localStorage.getItem('mdnest_token') };
+    await fetch(`/api/chat/convert?ns=${ns}&path=${encodeURIComponent(p)}&title=Scroll`, { method: 'POST', headers: h });
+    for (let i = 0; i < 40; i++) await fetch(`/api/chat?ns=${ns}&path=${encodeURIComponent(p)}&as=agent-${i % 2}`, { method: 'POST', headers: h, body: `message ${i}\n\nwith a second line` });
+  }, [NS, chat]);
+  try {
+    await page.goto(`/#!chats/${NS}/${chat}`);
+    const list = page.locator('.chat-messages');
+    await expect(page.locator('.chat-bubble')).toHaveCount(40, { timeout: 20_000 });
+    const gap = () => list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight);
+    // Opening the chat lands at the bottom.
+    await expect.poll(gap).toBeLessThan(60);
+    const top = await list.evaluate((el) => el.scrollTop);
+
+    await api(page, 'POST', `/api/chat?${qs}&as=agent-0`, 'a new one\n\nthat is\n\ntall');
+    await api(page, 'POST', `/api/chat?${qs}&as=agent-1`, 'and another');
+    const pill = page.getByTestId('chat-new-pill');
+    await expect(pill).toHaveText('2 new messages ↓', { timeout: 15_000 });
+    expect(await list.evaluate((el) => el.scrollTop)).toBe(top);
+    expect(await gap()).toBeGreaterThan(30);
+
+    await pill.click();
+    await expect(pill).toHaveCount(0);
+    await expect.poll(gap).toBeLessThan(60);
+
+    // Your own post still takes you to it, and is not counted as new.
+    await list.evaluate((el) => { el.scrollTop = 0; });
+    await page.locator('textarea.chat-draft').fill('my reply');
+    await page.locator('textarea.chat-draft').press('Enter');
+    await expect(page.locator('.chat-bubble').last()).toContainText('my reply', { timeout: 10_000 });
+    await expect.poll(gap).toBeLessThan(60);
+    await page.waitForTimeout(4000); // let a poll bring the post back once more
+    await expect(pill).toHaveCount(0);
+  } finally {
+    await page.evaluate(async ([ns, p]) => { await fetch(`/api/note?ns=${ns}&path=${encodeURIComponent(p)}`, { method: 'DELETE', headers: { Authorization: 'Bearer ' + localStorage.getItem('mdnest_token') } }); }, [NS, chat]);
+  }
+});

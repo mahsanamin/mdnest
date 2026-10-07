@@ -206,7 +206,12 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
   const [gifs, setGifs] = useState([]);
   const [showGifs, setShowGifs] = useState(false);
   const scrollRef = useRef(null);
-  const stickToBottom = useRef(true);
+  // The view jumps to the bottom only when the chat opens and when you send.
+  // Messages from others never move it: they raise a "N new messages" pill
+  // instead, and you scroll yourself (or click it).
+  const followNext = useRef(true);
+  const [unseen, setUnseen] = useState(0);
+  const shownRef = useRef(new Set()); // message numbers already on screen
   const countRef = useRef(0);
   const visible = useVisible();
 
@@ -226,7 +231,8 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
     }
     setError('');
     countRef.current = 0;
-    stickToBottom.current = true;
+    followNext.current = true;
+    setUnseen(0);
     getChat(chat.ns, chat.path, 0)
       .then((r) => {
         if (cancelled) return;
@@ -252,6 +258,10 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
     try {
       const r = await getChat(chat.ns, chat.path, countRef.current);
       if (r.messages?.length) {
+        // Your own post comes back once more from the next poll (it starts
+        // from the old count); it is already on screen, so it is not new.
+        const fresh = r.messages.filter((m) => !shownRef.current.has(m.n)).length;
+        if (fresh) setUnseen((u) => u + fresh);
         setMessages((cur) => mergeMessages(cur, r.messages));
         onActivity?.();
       }
@@ -271,16 +281,29 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
     return () => clearInterval(id);
   }, [doc, visible, poll]);
 
-  // Follow new messages only if the reader is already at the bottom —
-  // scrolling up to read history must not be yanked back down by a poll.
+  const atBottom = (el) => el.scrollHeight - el.scrollTop - el.clientHeight < 60;
   useEffect(() => {
+    shownRef.current = new Set(messages.map((m) => m.n));
     const el = scrollRef.current;
-    if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    if (followNext.current && messages.length) {
+      el.scrollTop = el.scrollHeight;
+      followNext.current = false;
+      setUnseen(0);
+    } else if (el.scrollHeight <= el.clientHeight) {
+      setUnseen(0); // everything fits: nothing is out of sight
+    }
   }, [messages]);
 
   const onScroll = () => {
     const el = scrollRef.current;
-    if (el) stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    if (el && atBottom(el)) setUnseen(0);
+  };
+
+  const showNew = () => {
+    const el = scrollRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    setUnseen(0);
   };
 
   const send = async (override) => {
@@ -290,7 +313,7 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
     try {
       const r = await postChatMessage(chat.ns, chat.path, text, postingAs.trim());
       if (typeof override !== 'string') setDraft('');
-      stickToBottom.current = true;
+      followNext.current = true;
       setMessages((cur) => mergeMessages(cur, [r.message]));
       // Anything posted by others in between is fetched by the next poll,
       // which still starts from the old count.
@@ -499,8 +522,15 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
         </div>
       )}
 
-      <div className="chat-messages" ref={scrollRef} onScroll={onScroll}>
-        {messageList}
+      <div className="chat-messages-wrap">
+        <div className="chat-messages" ref={scrollRef} onScroll={onScroll}>
+          {messageList}
+        </div>
+        {unseen > 0 && (
+          <button className="chat-new-pill" onClick={showNew} data-testid="chat-new-pill">
+            {unseen} new message{unseen === 1 ? '' : 's'} ↓
+          </button>
+        )}
       </div>
 
       {error && <div className="chat-error chat-room-error">{error}</div>}
