@@ -335,3 +335,27 @@ export function workingLine(working, account, postingAs, now = Date.now()) {
     busy: busy.length > 0,
   };
 }
+
+// Pinned chats, saved as the chat_pins preference: a JSON array of "ns/path"
+// strings, newest pin first. Pins from other workspaces stay in the list, so
+// switching workspace does not lose them.
+export const MAX_CHAT_PINS_LENGTH = 4096; // store.MaxChatPinsValue
+export const pinKey = (ns, path) => `${ns}/${path}`;
+export function parsePins(raw) {
+  try {
+    const v = JSON.parse(raw || '[]');
+    return Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x) : [];
+  } catch {
+    return [];
+  }
+}
+export function togglePin(pins, key) {
+  return pins.includes(key) ? pins.filter((k) => k !== key) : [key, ...pins];
+}
+// The chats a tab shows. "pinned" keeps the pin order; "all" keeps the
+// list's own order (latest activity first).
+export function chatsForTab(chats, pins, tab) {
+  if (tab !== 'pinned') return chats;
+  const byKey = new Map(chats.map((c) => [pinKey(c.ns, c.path), c]));
+  return pins.map((k) => byKey.get(k)).filter(Boolean);
+}

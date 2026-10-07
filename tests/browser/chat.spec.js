@@ -260,7 +260,7 @@ test('right-click on a chat in the list: copy its path, and delete another chat 
     const menu = page.locator('.context-menu');
     await expect(menu).toBeVisible();
     await expect(menu.locator('.context-menu-title')).toHaveText(b.title);
-    await expect(menu.locator('.context-menu-item')).toHaveText(['Open as note', 'Copy path for CLI', 'Delete chat']);
+    await expect(menu.locator('.context-menu-item')).toHaveText(['Pin to the Pinned tab', 'Open as note', 'Copy path for CLI', 'Delete chat']);
 
     await menu.locator('.context-menu-item', { hasText: 'Copy path for CLI' }).click();
     await expect(menu).toBeHidden();
@@ -496,5 +496,65 @@ test('new messages show a pill instead of scrolling the chat', async ({ page }) 
     await expect(pill).toHaveCount(0);
   } finally {
     await page.evaluate(async ([ns, p]) => { await fetch(`/api/note?ns=${ns}&path=${encodeURIComponent(p)}`, { method: 'DELETE', headers: { Authorization: 'Bearer ' + localStorage.getItem('mdnest_token') } }); }, [NS, chat]);
+  }
+});
+
+test('pin chats to the Pinned tab, and collapse the list to a strip', async ({ page }) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  const stamp = Date.now();
+  const names = [`__pin-a-${stamp}.md`, `__pin-b-${stamp}.md`];
+  await page.evaluate(async ([ns, ps]) => {
+    const h = { Authorization: 'Bearer ' + localStorage.getItem('mdnest_token') };
+    for (const p of ps) await fetch(`/api/chat/convert?ns=${ns}&path=${encodeURIComponent(p)}&title=${p.slice(2, 7)}`, { method: 'POST', headers: h });
+    await fetch('/api/preferences', { method: 'PATCH', headers: { ...h, 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_pins: '[]' }) });
+    localStorage.removeItem('mdnest_chat_tab');
+    localStorage.removeItem('mdnest_chat_list_collapsed');
+  }, [NS, names]);
+  try {
+    await page.goto(`/#!chats`);
+    const row = page.locator('.chat-list-row', { hasText: names[1] });
+    await expect(row).toBeVisible({ timeout: 20_000 });
+    await row.hover();
+    await row.getByTestId('chat-pin').click();
+    await expect(row.getByTestId('chat-pin')).toHaveAttribute('aria-pressed', 'true');
+
+    await page.getByTestId('chat-tab-pinned').click();
+    await expect(page.locator('.chat-list-row')).toHaveCount(1);
+    await expect(page.locator('.chat-list-row')).toContainText(names[1]);
+
+    // Saved with the account, not the page: still pinned after a reload.
+    await page.reload();
+    await expect(page.getByTestId('chat-tab-pinned')).toHaveAttribute('aria-selected', 'true', { timeout: 20_000 });
+    await expect(page.locator('.chat-list-row')).toHaveCount(1);
+    const saved = await page.evaluate(async () => (await (await fetch('/api/preferences', { headers: { Authorization: 'Bearer ' + localStorage.getItem('mdnest_token') } })).json()).chat_pins);
+    expect(JSON.parse(saved)).toEqual([`${NS}/${names[1]}`]);
+
+    // Collapse: the list becomes a strip of initials, and comes back.
+    const wide = await page.locator('.chat-list').boundingBox();
+    await page.getByRole('button', { name: 'Hide the chat list' }).click();
+    const strip = page.getByTestId('chat-list-collapsed');
+    await expect(strip).toBeVisible();
+    expect((await strip.boundingBox()).width).toBeLessThan(wide.width / 4);
+    await expect(strip.locator('.chat-rail-item')).toHaveCount(1); // the Pinned tab's chats
+    await strip.locator('.chat-rail-item').click();
+    await expect(page.locator('.chat-room-title h2')).toBeVisible({ timeout: 10_000 });
+    await page.reload();
+    await expect(page.getByTestId('chat-list-collapsed')).toBeVisible({ timeout: 20_000 });
+    await page.getByRole('button', { name: 'Show the chat list' }).click();
+    await expect(page.locator('.chat-list-row').first()).toBeVisible();
+
+    // Unpin from the right-click menu.
+    await page.locator('.chat-list-item', { hasText: names[1] }).click({ button: 'right' });
+    await page.getByText('Unpin', { exact: true }).click();
+    await expect(page.locator('.chat-list-row')).toHaveCount(0);
+  } finally {
+    await page.evaluate(async ([ns, ps]) => {
+      const h = { Authorization: 'Bearer ' + localStorage.getItem('mdnest_token') };
+      for (const p of ps) await fetch(`/api/note?ns=${ns}&path=${encodeURIComponent(p)}`, { method: 'DELETE', headers: h });
+      await fetch('/api/preferences', { method: 'PATCH', headers: { ...h, 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_pins: '[]' }) });
+      localStorage.removeItem('mdnest_chat_tab');
+      localStorage.removeItem('mdnest_chat_list_collapsed');
+    }, [NS, names]);
   }
 });

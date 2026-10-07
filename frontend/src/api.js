@@ -187,6 +187,15 @@ export async function fetchPreferences() {
   }
 }
 
+// The same read, but a failure throws. For a preference that is saved WHOLE
+// (pinned chats), a soft {} would read as "nothing saved" and the next save
+// would replace the real value.
+export async function fetchPreferencesStrict() {
+  const res = await request('/preferences');
+  if (!res.ok) throw new Error('Could not load your preferences');
+  return res.json();
+}
+
 export async function savePreferences(prefs) {
   const res = await request('/preferences', {
     method: 'PATCH',

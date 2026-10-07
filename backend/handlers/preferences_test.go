@@ -101,7 +101,10 @@ func TestPreferencesRejectsUnknownAndOversized(t *testing.T) {
 		"unknown key":     `{"wallpaper":"cats.png"}`,
 		"oversized value": `{"theme":"` + strings.Repeat("x", store.MaxPreferenceValue+1) + `"}`,
 		"empty object":    `{}`,
-		"not an object":   `["theme"]`,
+		"oversized pins":  `{"chat_pins":"` + strings.Repeat("x", store.MaxChatPinsValue+1) + `"}`,
+		// theme keeps its own small cap even though chat_pins is larger
+		"theme past its cap": `{"theme":"` + strings.Repeat("x", 100) + `"}`,
+		"not an object":      `["theme"]`,
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -124,6 +127,48 @@ func TestPreferencesRejectedPatchDoesNotClobber(t *testing.T) {
 	json.Unmarshal(w.Body.Bytes(), &got)
 	if got["theme"] != "dark" {
 		t.Fatalf("a rejected PATCH changed stored state: got %v, want theme=dark", got)
+	}
+}
+
+// Pinned chats are a longer value than a theme, under their own cap.
+func TestPreferencesStoresChatPins(t *testing.T) {
+	s := store.NewFilePreferenceStore(t.TempDir())
+	pins := `[\"work/Chats/a.md\",\"work/Chats/b.md\"]`
+	if w := handlerOn(s, http.MethodPatch, `{"chat_pins":"`+pins+`"}`, 0); w.Code != http.StatusOK {
+		t.Fatalf("pins: %d %s", w.Code, w.Body)
+	}
+	w := handlerOn(s, http.MethodGet, "", 0)
+	var got map[string]string
+	json.Unmarshal(w.Body.Bytes(), &got)
+	if got["chat_pins"] != `["work/Chats/a.md","work/Chats/b.md"]` {
+		t.Fatalf("got %v", got)
+	}
+}
+
+// A pins value right at its cap still fits in the request once JSON escapes
+// its quotes, and a theme saved later does not drop it.
+func TestPreferencesChatPinsAtTheCap(t *testing.T) {
+	s := store.NewFilePreferenceStore(t.TempDir())
+	var b strings.Builder
+	b.WriteString("[")
+	for b.Len() < store.MaxChatPinsValue-40 {
+		if b.Len() > 1 {
+			b.WriteString(",")
+		}
+		b.WriteString(`"work/Chats/a-long-chat-name.md"`)
+	}
+	b.WriteString("]")
+	value := b.String()
+	body, _ := json.Marshal(map[string]string{"chat_pins": value})
+	if w := handlerOn(s, http.MethodPatch, string(body), 0); w.Code != http.StatusOK {
+		t.Fatalf("pins at the cap (%d bytes, body %d): %d %s", len(value), len(body), w.Code, w.Body)
+	}
+	handlerOn(s, http.MethodPatch, `{"theme":"dark"}`, 0)
+	w := handlerOn(s, http.MethodGet, "", 0)
+	var got map[string]string
+	json.Unmarshal(w.Body.Bytes(), &got)
+	if got["chat_pins"] != value || got["theme"] != "dark" {
+		t.Fatalf("a theme save must keep the pins: %d bytes of pins, theme %q", len(got["chat_pins"]), got["theme"])
 	}
 }
 

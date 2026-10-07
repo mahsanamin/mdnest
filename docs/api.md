@@ -662,13 +662,14 @@ Merges the supplied keys into the caller's preferences and returns the merged re
 
 **Errors:**
 
-- `400` — unknown key, value longer than 64 bytes, an empty object, or a body that is not a JSON object. The whole request is rejected rather than the valid subset stored, so a `200` never means "some of what you sent was saved".
+- `400` — unknown key, a value longer than its key allows (64 bytes for `theme`, 4096 for `chat_pins`), an empty object, or a body that is not a JSON object. The whole request is rejected rather than the valid subset stored, so a `200` never means "some of what you sent was saved".
 
 **Supported keys:**
 
 | Key | Values | Meaning |
 |---|---|---|
 | `theme` | `auto` \| `dark` \| `light` | Colour theme. Overrides the server's `DEFAULT_THEME`. |
+| `chat_pins` | JSON array of `"namespace/path"` strings, as a string | The chats pinned in the chat list, newest first. Saved whole, so the web UI only writes it after a successful read. |
 
 Preferences are stored server-side — Postgres (`user_preferences`) in multi mode, `preferences.json` in the secrets volume in single mode — so a theme follows the person across browsers and devices rather than living in one browser's local storage. The key set is an allowlist: this endpoint is writable by any authenticated user, so an open bag would be a per-user blob store anyone could fill.
 
