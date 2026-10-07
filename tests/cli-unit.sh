@@ -535,6 +535,49 @@ run_install_source_suite() {
 #
 # version_gt is pure bash on purpose (no python3, no jq, no `sort -V` — busybox
 # sort has no -V), so it runs on the fresh-machine tier like everything else.
+run_keepalive_suite() {
+  echo "── chat keepalive (Stop hook) ──"
+  local d; d=$(mktemp -d)
+  ka() { printf '{"session_id":"%s","transcript_path":"%s"}' "$1" "$2" | TMPDIR="$d" "$REPO_ROOT/mdnest" chat keepalive 2>/dev/null; }
+  # A Claude Code transcript: the pasted prompt names both commands, then the
+  # agent's own wait. The agent is in the chat, so stopping is blocked.
+  printf '%s\n' '{"message":"run mdnest chat wait @srv/notes/team.md --as bot; to leave run mdnest chat leave @srv/notes/team.md --as bot"}' \
+    '{"tool_use":{"input":{"command":"mdnest chat wait @srv/notes/team.md --as codxu --timeout 120"}}}' > "$d/claude.jsonl"
+  local out; out=$(ka s1 "$d/claude.jsonl")
+  eq "keepalive: blocks while the agent is in a chat" '{"decision":"block"' "${out:0:19}"
+  case "$out" in *'mdnest chat wait @srv/notes/team.md --as codxu --timeout 120'*) ok "keepalive: hands back the agent's own wait command" ;; *) bad "keepalive: hands back the agent's own wait command" "$out" ;; esac
+  # The harness writes our reason into the transcript. It must not read as a
+  # leave on the next stop.
+  printf '%s\n' "$out" >> "$d/claude.jsonl"
+  eq "keepalive: its own reason text is not a leave" '{"decision":"block"' "$(ka s1b "$d/claude.jsonl" | cut -c1-19)"
+  # A Codex rollout: the command is inside an escaped JS string, with a quoted
+  # path that has a space.
+  printf '%s\n' '{"payload":{"type":"custom_tool_call","input":"tools.exec_command({\"cmd\":\"mdnest chat wait '"'"'notes/Chats/my team.md'"'"' --as '"'"'gpt-a'"'"' --timeout 120\"})"}}' > "$d/codex.jsonl"
+  case "$(ka s2 "$d/codex.jsonl")" in *"mdnest chat wait 'notes/Chats/my team.md' --as gpt-a --timeout 120"*) ok "keepalive: reads a Codex rollout with a quoted path" ;; *) bad "keepalive: reads a Codex rollout with a quoted path" "$(ka s2x "$d/codex.jsonl")" ;; esac
+  # After chat leave, the agent may stop.
+  printf '%s\n' '{"x":"mdnest chat wait notes/c.md --as a"}' '{"x":"mdnest chat leave notes/c.md --as a"}' > "$d/left.jsonl"
+  eq "keepalive: chat leave lets the agent stop" "" "$(ka s3 "$d/left.jsonl")"
+  # Never in a chat, no transcript, garbage, or switched off: say nothing.
+  printf '%s\n' '{"x":"ls -la"}' > "$d/none.jsonl"
+  eq "keepalive: no chat, no block" "" "$(ka s4 "$d/none.jsonl")"
+  eq "keepalive: missing transcript, no block" "" "$(ka s5 "$d/nope.jsonl")"
+  eq "keepalive: garbage input, no block" "" "$(echo nonsense | TMPDIR="$d" "$REPO_ROOT/mdnest" chat keepalive 2>/dev/null)"
+  eq "keepalive: MDNEST_KEEPALIVE=0 turns it off" "" "$(printf '{"transcript_path":"%s"}' "$d/claude.jsonl" | MDNEST_KEEPALIVE=0 "$REPO_ROOT/mdnest" chat keepalive)"
+  # Runaway guard: three stops within two minutes, then it lets go. A wait
+  # that fails at once still lands in the transcript as a new wait, so the
+  # guard must not reset on that.
+  local i got=""
+  for i in 1 2 3 4; do
+    printf '%s\n' '{"x":"mdnest chat wait @srv/notes/team.md --as codxu"}' >> "$d/claude.jsonl"
+    got="$got$(ka loop "$d/claude.jsonl" | cut -c1-5 | tr -d '\n')|"
+  done
+  eq "keepalive: gives up after 3 quick stops, even with new waits" '{"dec|{"dec|{"dec||' "$got"
+  # Once the stops are spread out again, it blocks again.
+  eq "keepalive: blocks again once the window has passed" '{"dec' \
+     "$(printf '{"session_id":"loop","transcript_path":"%s"}' "$d/claude.jsonl" | TMPDIR="$d" MDNEST_KEEPALIVE_WINDOW=0 "$REPO_ROOT/mdnest" chat keepalive | cut -c1-5)"
+  rm -rf "$d"
+}
+
 run_version_suite() {
   echo "── version comparison ──"
   gt() { version_gt "$1" "$2" && echo yes || echo no; }
@@ -672,6 +715,7 @@ run_login_suite
 run_unreachable_suite
 run_install_source_suite
 run_version_suite
+run_keepalive_suite
 run_errexit_lint
 
 echo

@@ -151,6 +151,57 @@ the commands they were given are done. Tell them to keep looping and not to
 end their turn while in the chat. **Connect an agent** in the chat window
 gives you a ready-to-paste prompt that says exactly that.
 
+**Keep agents awake with a Stop hook.** Even with that prompt, an agent in a
+long loop sometimes ends its turn anyway, and then sits idle until someone
+types "wake up" in its session. mdnest cannot reach into a stopped session,
+but Claude Code and Codex both run a Stop hook whenever the agent tries to
+end its turn. Point it at `mdnest chat keepalive`:
+
+- If the agent's last chat command was `mdnest chat wait`, the hook answers
+  "block" with that exact wait command, and the agent goes straight back to
+  waiting.
+- `mdnest chat leave <chat> --as <name>` ends that. The **Connect an agent**
+  prompt tells agents to run it when they are told to leave.
+- Sessions that never joined a chat are not affected: the hook prints
+  nothing and they stop as usual.
+- If the agent tries to stop three times within two minutes (its wait fails
+  at once, say), the hook lets it stop instead of looping forever. A healthy
+  agent rarely tries to stop, since each wait already blocks for up to two
+  minutes. `MDNEST_KEEPALIVE=0` turns the hook off for one session.
+
+The hook finds the chat by reading the session transcript the harness passes
+it, so it needs no setup per chat. Codex says its transcript format may
+change between versions; if a Codex update stops the hook from finding the
+chat, the agent simply stops as before.
+
+Claude Code, in `~/.claude/settings.json` (or a project's
+`.claude/settings.json`):
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "mdnest chat keepalive" }] }
+    ]
+  }
+}
+```
+
+Codex, in `~/.codex/hooks.json` (Codex 0.160 or later, `hooks` feature on):
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "mdnest chat keepalive", "timeout": 30 }] }
+    ]
+  }
+}
+```
+
+The hook only helps an agent whose session is still open. It cannot restart a
+session that was closed.
+
 Plain `mdnest append` also works if an agent writes the header line itself,
 but `chat post` stamps the author and time for you.
 

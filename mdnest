@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-MDNEST_CLI_VERSION="4.8.2"
+MDNEST_CLI_VERSION="4.8.3"
 CONFIG_DIR="${HOME}/.config/mdnest"
 SERVERS_DIR="${CONFIG_DIR}/servers"
 DEFAULT_FILE="${CONFIG_DIR}/default"
@@ -1397,6 +1397,8 @@ Usage:
   mdnest chat status @alias/namespace/path.md "what you are doing" [--as name]   (or --clear)
   mdnest chat read @alias/namespace/path.md [--as name] [--after N]
   mdnest chat wait @alias/namespace/path.md [--as name] [--mentions] [--timeout SECONDS]
+  mdnest chat leave @alias/namespace/path.md [--as name]
+  mdnest chat keepalive      (a Stop hook for Claude Code / Codex; reads the hook JSON on stdin)
 
 --as is your name in the chat (default: $MDNEST_CHAT_AS, else your account).
 Give every agent its own and use it on EVERY command. With a name:
@@ -1411,6 +1413,12 @@ Set it only while you are really working: a waiting agent shows as waiting.
 Post "/context 42%" (or "/context 87k/200k") to show how full your context
 window is by your name; like /status it is not added to the chat.
 
+Keep agents awake: an agent sometimes ends its turn instead of waiting again.
+Add `mdnest chat keepalive` as a Stop hook in Claude Code or Codex (see
+docs/chat.md). When the agent tries to stop while its last chat command was a
+wait, the hook sends it back to waiting. `chat leave` ends that, so run it
+when you are told to leave the chat.
+
 Images: post one by name, ![nod](gif:nod). `chat gifs` lists the names: the set
 that ships with mdnest plus the namespace's ChatGifs/ folder, where a file with
 a built-in's name replaces it. Add your own (animated SVG works well):
@@ -1420,6 +1428,87 @@ without --pick to see the choices); `--pick auto` takes the first one nobody
 in the namespace uses yet; `--file my.svg` uses your own drawing. It is
 saved as ChatGifs/avatar-NAME.svg. Without one, your initial is shown.
 USAGE
+}
+
+# KEEPALIVE_PATTERN matches a chat wait or leave command as it appears in a
+# transcript: the chat path is bare (@alias/ns/x.md, ns/x.md) or in single
+# quotes when it has spaces, which is how the Connect an agent prompt writes it.
+KEEPALIVE_PATTERN="mdnest chat (wait|leave) ('[^']*'|[^ \"\\\\']+)[^\"\\\\]*"
+
+# chat_keepalive_target <transcript file> — the chat this agent session is
+# in, as "TARGET<TAB>NAME", or nothing. It is the last `mdnest chat wait` or
+# `mdnest chat leave` in the transcript: a wait means the agent is still in
+# the chat, a leave means it was told to go. Plain grep over the raw file, so
+# it reads Claude Code and Codex transcripts alike (the command is a JSON
+# string in both) and needs no python3 or jq.
+chat_keepalive_target() {
+  local last rest target as=""
+  last=$(grep -oE "$KEEPALIVE_PATTERN" "$1" 2>/dev/null | tail -n 1) || last=""
+  case "$last" in
+    "mdnest chat wait "*) rest="${last#mdnest chat wait }" ;;
+    *) return 0 ;;
+  esac
+  if [ "${rest:0:1}" = "'" ]; then
+    target="${rest#\'}"
+    target="'${target%%\'*}'"
+    rest="${rest#"$target"}"
+  else
+    target="${rest%% *}"
+    rest="${rest#"$target"}"
+  fi
+  if [[ "$rest" =~ --as[=\ ]\'?([^\'\ ]+) ]]; then as="${BASH_REMATCH[1]}"; fi
+  printf '%s\t%s\n' "$target" "$as"
+  return 0
+}
+
+# chat keepalive — a Stop hook for Claude Code and Codex. An agent in a chat
+# sometimes ends its turn instead of waiting again, and then sits idle until
+# someone types "wake up" in its session. The harness runs this hook whenever
+# the agent tries to stop; if the agent's last chat command was a wait (not a
+# leave), the hook answers "block" with the command to run, so the agent goes
+# straight back to waiting. Anything unexpected (no transcript, no chat,
+# MDNEST_KEEPALIVE=0) prints nothing and lets it stop.
+#
+# The reason text must never contain a full "mdnest chat leave <path>": the
+# harness records it in the transcript, and the next run would read it as the
+# agent having left.
+cmd_chat_keepalive() {
+  [ "${MDNEST_KEEPALIVE:-1}" = "0" ] && return 0
+  local input transcript found target as reason wait_cmd
+  input=$(cat 2>/dev/null) || input=""
+  transcript=$(printf '%s' "$input" | grep -oE '"(transcript_path|rollout_path)"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed -E 's/^.*:[[:space:]]*"(.*)"$/\1/') || transcript=""
+  transcript="${transcript//\\\//\/}"
+  [ -n "$transcript" ] && [ -r "$transcript" ] || return 0
+  found=$(chat_keepalive_target "$transcript") || found=""
+  [ -n "$found" ] || return 0
+  # Runaway guard: a healthy agent rarely tries to stop, because each wait
+  # already blocks for up to two minutes. Three stops within two minutes mean
+  # something is wrong (the wait fails at once, or is denied), so let it stop
+  # rather than loop forever. Counting new waits in the transcript is not
+  # enough: a wait that fails still shows up there as a new wait.
+  local sid now t recent="" n=0 state_dir state
+  sid=$(printf '%s' "$input" | grep -oE '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed -E 's/^.*:[[:space:]]*"(.*)"$/\1/') || sid=""
+  if [ -n "$sid" ]; then
+    now=$(date +%s) || now=0
+    state_dir="${TMPDIR:-/tmp}/mdnest-keepalive"
+    state="$state_dir/${sid//[^A-Za-z0-9_-]/_}"
+    mkdir -p "$state_dir" 2>/dev/null || true
+    if [ -r "$state" ]; then
+      for t in $(cat "$state" 2>/dev/null); do
+        case "$t" in ''|*[!0-9]*) continue ;; esac
+        if [ $(( now - t )) -lt "${MDNEST_KEEPALIVE_WINDOW:-120}" ]; then recent="$recent $t"; n=$((n + 1)); fi
+      done
+    fi
+    if [ "$n" -ge 3 ]; then rm -f "$state"; return 0; fi
+    printf '%s %s\n' "$recent" "$now" > "$state" 2>/dev/null || true
+  fi
+  target="${found%%$'\t'*}"
+  as="${found#*$'\t'}"
+  wait_cmd="mdnest chat wait $target"
+  [ -n "$as" ] && wait_cmd="$wait_cmd --as $as"
+  reason="You are still in the mdnest chat $target. Do not stop: run \`$wait_cmd --timeout 120\` now and keep the loop going (wait, reply if it is for you, wait again). Only when a person in the chat tells you to leave, run the chat leave command with the same chat and --as, then stop."
+  printf '{"decision":"block","reason":%s}\n' "$(json_str "$reason")"
+  return 0
 }
 
 chat_target() {
@@ -1570,6 +1659,12 @@ cmd_chat() {
       local n="${resp#*\"count\":}"
       n="${n%%[!0-9]*}"
       echo "posted #${n} to ${PARSED_NS}/${PARSED_PATH}"
+      ;;
+    leave)
+      # Tells the keepalive hook this agent is done with the chat, so the
+      # next time it stops it is allowed to. Nothing is posted.
+      chat_target "${1:-}"
+      echo "Left ${1}. You can stop now; the keepalive hook will not send you back."
       ;;
     status)
       # A short "working on it" line under the chat, so people see an agent is
@@ -2165,6 +2260,7 @@ EXAMPLES
   mdnest chat post @work/engineering/Chats/release.md "Migrations done" --as api-agent
   mdnest chat wait @work/engineering/Chats/release.md --as api-agent --mentions
   mdnest chat status @work/engineering/Chats/release.md "running the migration" --as api-agent
+  mdnest chat leave @work/engineering/Chats/release.md --as api-agent
 
   # List — a tree for humans, --json for scripts
   mdnest list @work/engineering
@@ -2214,7 +2310,8 @@ case "$CMD" in
   copy)     load_default; warn_if_default_alias; cmd_copy "$@" ;;
   download) load_default; warn_if_default_alias; cmd_download "$@" ;;
   search)   load_default; warn_if_default_alias; cmd_search "$@" ;;
-  chat)     load_default; warn_if_default_alias; cmd_chat "$@" ;;
+  chat)
+    if [ "${1:-}" = "keepalive" ]; then cmd_chat_keepalive; else load_default; warn_if_default_alias; cmd_chat "$@"; fi ;;
   note)     cmd_note_legacy "$@" ;;
   version|--version|-v) echo "mdnest CLI v${MDNEST_CLI_VERSION}" ;;
   docs)
