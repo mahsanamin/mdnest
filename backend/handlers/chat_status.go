@@ -21,7 +21,7 @@ import (
 // (any CLI since chat shipped) and the MCP wait_chat tool poll GET /api/chat
 // with exclude=NAME, so the server infers:
 //
-//   listening  NAME polled in the last chatListenWindow
+//   listening  NAME polled in the last chatListenWindow (shown as "waiting")
 //   thinking   NAME's last poll handed it new messages and it has neither
 //              posted nor polled empty since: it is reading or replying
 //
@@ -117,7 +117,10 @@ func (s *chatStatusStore) clearText(ns, relPath, author string) {
 }
 
 // polled records a wait/read poll by author; gotNew says whether it was
-// handed messages, which means it is now reading or working on a reply.
+// handed messages, which means it is now reading or working on a reply. An
+// empty poll means it is back to waiting, so it also drops an explicit
+// status: an agent that set "/status running tests" and went back to wait
+// without posting would otherwise read as working for up to 2 minutes.
 func (s *chatStatusStore) polled(ns, relPath, author, via string, gotNew bool, now time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -129,6 +132,7 @@ func (s *chatStatusStore) polled(ns, relPath, author, via string, gotNew bool, n
 		}
 	} else {
 		p.thinkingFrom = time.Time{}
+		p.text, p.textUntil = "", time.Time{}
 	}
 }
 

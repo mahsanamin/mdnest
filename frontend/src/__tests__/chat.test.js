@@ -237,18 +237,38 @@ describe('working line', () => {
   it('an agent that just got new messages is thinking', () => {
     expect(workingLine([w('codxu', 'thinking', '2026-10-06T10:05:00Z')], 'ahsan', 'ahsan', now).text).toBe('codxu is thinking');
   });
-  it('waiting agents are named together as listening, after the busy ones', () => {
+  it('waiting agents are named together, after the busy ones', () => {
     const line = workingLine([
       w('qa-1', 'listening', '2026-10-06T10:05:20Z'),
       w('codxu', 'thinking', '2026-10-06T10:05:00Z'),
       w('lead-qa', 'listening', '2026-10-06T10:05:20Z'),
     ], 'ahsan', 'ahsan', now);
-    expect(line.text).toBe('codxu is thinking  ·  qa-1 and lead-qa are listening');
-    expect(line.title.split('\n')).toEqual(['codxu is thinking', 'qa-1 is listening', 'lead-qa is listening']);
+    expect(line.text).toBe('codxu is thinking  ·  qa-1 and lead-qa are waiting');
+    expect(line.title.split('\n')).toEqual(['codxu is thinking', 'qa-1 is waiting', 'lead-qa is waiting']);
   });
-  it('one listener alone; three listeners get a comma list', () => {
-    expect(workingLine([w('codxu', 'listening', '2026-10-06T10:05:20Z')], 'ahsan', 'ahsan', now).text).toBe('codxu is listening');
-    expect(workingLine(['a', 'b', 'c'].map((n) => w(n, 'listening', '2026-10-06T10:05:20Z')), 'me', 'me', now).text).toBe('a, b and c are listening');
+  it('one waiting agent alone; three get a comma list', () => {
+    expect(workingLine([w('codxu', 'listening', '2026-10-06T10:05:20Z')], 'ahsan', 'ahsan', now).text).toBe('codxu is waiting');
+    expect(workingLine(['a', 'b', 'c'].map((n) => w(n, 'listening', '2026-10-06T10:05:20Z')), 'me', 'me', now).text).toBe('a, b and c are waiting');
+  });
+  // The reported bug: three idle bots read "is working: undefined". Only an
+  // entry with status text is working; anything else, including a kind this
+  // page does not know, is waiting.
+  it('never says working without saying on what', () => {
+    const line = workingLine([
+      w('AhsanSideKick', 'listening', '2026-10-06T10:05:20Z'),
+      w('MaintContextAgent', 'idle', '2026-10-06T10:05:20Z'),
+      w('codxuVerifier', undefined, '2026-10-06T10:05:20Z'),
+      w('qa-1', 'working', '2026-10-06T10:05:20Z'),
+    ], 'ahsan', 'ahsan', now);
+    expect(line.text).toBe('AhsanSideKick, MaintContextAgent, codxuVerifier and qa-1 are waiting');
+    expect(line.text).not.toMatch(/working|undefined/);
+    expect(line.busy).toBe(false);
+  });
+  it('the prompt tells agents to say working only while working', () => {
+    const s = agentInstructions('mini', 'notes', 'Chats/team.md', 'codxu');
+    expect(s).toMatch(/seen? you as waiting while you wait/);
+    expect(s).toMatch(/going back to wait, clears it/);
+    expect(s).not.toMatch(/listening/);
   });
   it('leaves out your own presence and is null when nobody else is here', () => {
     expect(workingLine([w('ahsan', 'listening', '2026-10-06T10:05:00Z')], 'ahsan', 'ahsan', now)).toBeNull();

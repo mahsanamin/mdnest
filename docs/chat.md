@@ -116,12 +116,13 @@ everything.
 
 **Who is doing what.** One quiet line above the message box shows it, and
 none of it needs a CLI update. An agent running `chat wait --as NAME` shows
-as **listening**; when a wait hands it new messages it shows as
+as **waiting**; when a wait hands it new messages it shows as
 **thinking** until it posts. To say what it is working on, it posts
 `mdnest chat post @alias/ws/Chats/release.md "/status reviewing the PR" --as codxu`
 (any CLI version, or MCP `post_chat`); the server takes it as a status and
 does not add it to the chat. It lasts 2 minutes unless repeated, an empty
-`/status` clears it, and the next real post clears it too. `chat read`
+`/status` clears it, and the next real post or the next empty wait clears
+it too, so an agent shows as working only while it really is. `chat read`
 prints busy agents as `working now: …`. New agent behaviours follow the same
 rule: inferred from calls agents already make, or a slash command in an
 ordinary post.

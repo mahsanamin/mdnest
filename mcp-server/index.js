@@ -830,7 +830,7 @@ if (features.chat) server.tool(
 
 if (features.chat) server.tool(
   "set_chat_status",
-  "Show a short 'working on it' line under the chat (e.g. 'reviewing the API PR'), so people can see you are busy without a message in the conversation. It lasts 2 minutes: set it again to keep it during long work. Your next post_chat clears it; an empty text clears it now.",
+  "Show a short 'working on it' line under the chat (e.g. 'reviewing the API PR'), so people can see you are busy without a message in the conversation. It lasts 2 minutes: set it again to keep it during long work. Your next post_chat, or going back to wait_chat, clears it; an empty text clears it now. Set it only while you are really working: a waiting agent already shows as waiting.",
   {
     namespace: z.string().describe("Namespace name"),
     path: z.string().describe("Path of the chat note"),
