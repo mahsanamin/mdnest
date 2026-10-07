@@ -292,10 +292,12 @@ existing chat, open it and click **Members**:
   you.
 - Any member can add anyone, and remove anyone, including themselves. The
   last member cannot be removed, because a chat with nobody on it could never
-  be opened again.
-- The picker lists the people who have a grant on the workspace. Being on the
-  member list does not give anyone access to the workspace: a member still
-  needs a grant that covers the note.
+  be opened again. A removed member loses access on their next request, and
+  if they have the note open in the live editor, that connection is closed.
+- The picker lists the people who have a grant on the workspace, and only
+  they can be added. Someone who reaches the workspace only through an access
+  group is not in that list yet. Being on the member list does not give anyone
+  access to the workspace: a member still needs a grant that covers the note.
 
 A few rules that follow from how it works:
 
@@ -307,13 +309,25 @@ A few rules that follow from how it works:
   their token is that member.
 - **It moves with the chat.** Moving or renaming the chat, or the folder it
   is in, keeps it private. Copying it to another workspace gives the copy the
-  same members. Deleting it forgets the list.
+  same members.
+- **The old path stays closed.** After a private chat is moved or deleted,
+  its old path keeps the member list, because the chat's history (History in
+  the editor, or a note at an earlier commit) is still looked up by that path.
+  Only those members can create a new note at that exact path. The leftover
+  list does not stop anyone managing the folder around it.
 - **Folders that hold one are protected.** Someone who is not a member cannot
   delete, move or copy a folder with a private chat inside it. A folder
   download leaves the chat out of the zip.
 - **A deleted account keeps its seat.** If the only member's account is
   deleted, the chat stays private (and so cannot be opened by anyone) rather
   than becoming open.
+
+- **Letter case does not matter.** Member lists are matched without regard
+  to case, because on some disks (Docker Desktop on macOS, network shares)
+  `CHATS/SECRET.md` opens the same file as `Chats/secret.md`.
+- **A move never lands on an existing note.** `/api/move` refuses a
+  destination that already exists, so nobody can drop a private chat over a
+  shared note and take it away from everyone else.
 
 What it does not cover:
 
@@ -322,10 +336,23 @@ What it does not cover:
   read that repository can read every chat in it.
 - **The server's disk.** Anyone with access to the host or the mounted
   folders can read the file.
+- **Images pasted into a private chat** are saved as ordinary files next to
+  it. Anyone who can read that folder can open them by name.
+- **Folder history.** History for a folder (`/api/note/history` on the
+  folder) lists the commits that touched the files in it, including a
+  private chat's file name, author and time, though not its text.
+- **Several backend replicas.** Removing a member closes their live editing
+  connection on the server that handled the removal. With the Redis backplane,
+  a connection held by another replica stays open until it reconnects.
 - **Renames made outside mdnest.** The member list is attached to the chat's
   path. A rename made on the host or through git is not seen by mdnest, so the
   renamed file is not private (and the old path stays restricted). Move a
   private chat from inside mdnest.
+- **Making an open chat private.** Anyone who can write an open chat can make
+  it private, which shuts out everyone they do not add. This is how existing
+  chats become private, and it is the same power as editing or deleting the
+  note, which they already have. A new chat can be created private only as a
+  new note: `private=1` never takes over an existing one.
 
 ## Limits
 

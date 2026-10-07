@@ -512,9 +512,8 @@ func main() {
 	}
 	moveHandler := handlers.NewMoveHandler(stg)
 	if chatMemberStore != nil {
-		// Moves, copies and deletes carry private chats' member lists along.
+		// Moves and copies carry private chats' member lists along.
 		moveHandler.SetChatMembers(chatMemberStore)
-		noteHandler.SetChatMembers(chatMemberStore)
 	}
 	searchHandler := handlers.NewSearchHandler(stg)
 
@@ -538,7 +537,7 @@ func main() {
 	})
 	transferHandler.SetConcurrency(downloadMaxConcurrent)
 	if chatMemberStore != nil {
-		transferHandler.SetChatMembers(chatMemberStore)
+		transferHandler.SetChatMembers(chatMemberStore, perms.CheckWriteDest)
 	}
 	if writerProxy != nil {
 		downloadHandler.SetWriterProxy(writerProxy)
@@ -579,7 +578,9 @@ func main() {
 		chatHandler.SetCollabHub(collabHub)
 	}
 	if chatMemberStore != nil {
-		chatHandler.SetMembers(chatMemberStore, userStore)
+		if pg, ok := grantStore.(*store.PostgresGrantStore); ok {
+			chatHandler.SetMembers(chatMemberStore, pg)
+		}
 	}
 	// API tokens live in Postgres in multi mode (shared across replicas, no
 	// ReadWriteMany secrets volume) and in the tokens.json file in single mode

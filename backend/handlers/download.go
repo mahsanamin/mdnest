@@ -107,9 +107,16 @@ func (h *DownloadHandler) HandleDownload(w http.ResponseWriter, r *http.Request)
 	// ones this user may not read are left out of the archive.
 	canRead := middleware.ReadFilterFor(r, ns)
 	kept := plan.entries[:0]
+	plan.files, plan.bytes = 0, 0
 	for _, e := range plan.entries {
 		if e.isDir || canRead(e.rel) {
 			kept = append(kept, e)
+			if !e.isDir {
+				// Recounted from what is kept, so a "too large" answer does
+				// not reveal the number or size of the files left out.
+				plan.files++
+				plan.bytes += e.size
+			}
 		}
 	}
 	plan.entries = kept

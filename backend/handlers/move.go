@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/mdnest/mdnest/backend/storage"
 )
@@ -50,13 +51,25 @@ func (h *MoveHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"source not found"}`, http.StatusNotFound)
 		return
 	}
+	// Never onto something that exists. The local backend's rename replaces
+	// a file silently, which loses its content, and with private chats it
+	// also lets a writer drop their own private chat over a shared note and
+	// take it away from everyone else (issue #127). /api/transfer already
+	// refuses an existing destination the same way.
+	// A rename that only changes letter case is the same file on a
+	// case-insensitive mount, so it is let through.
+	if _, err := h.store.Stat(ctx, ns, toRel); err == nil && !strings.EqualFold(fromRel, toRel) {
+		http.Error(w, `{"error":"destination already exists"}`, http.StatusConflict)
+		return
+	}
 
-	if !chatMembersBeforeMove(h.chatMembers, ns, fromRel, ns, toRel) {
+	copied, ok := chatMembersBeforeMove(h.chatMembers, ns, fromRel, ns, toRel)
+	if !ok {
 		http.Error(w, `{"error":"failed to move item"}`, http.StatusInternalServerError)
 		return
 	}
 	err := h.store.Rename(ctx, ns, fromRel, toRel)
-	chatMembersAfter(h.chatMembers, err == nil, true, ns, fromRel, ns, toRel)
+	chatMembersAfter(h.chatMembers, copied, err == nil)
 	if err != nil {
 		http.Error(w, `{"error":"failed to move item"}`, http.StatusInternalServerError)
 		return

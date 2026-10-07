@@ -1285,7 +1285,7 @@ Move a file or folder from one location to another within the same namespace.
 {"status": "moved"}
 ```
 
-The destination's parent directories are created automatically if they do not exist.
+The destination's parent directories are created automatically if they do not exist. The destination itself must not exist (*v4.8.4+*): a move never replaces a note or folder. A rename that only changes letter case (`a.md` to `A.md`) is allowed.
 
 **Example:**
 
@@ -1306,6 +1306,7 @@ curl -X POST "http://localhost:8286/api/move?ns=personal&from=drafts&to=archive/
 | 400 | `{"error":"invalid source path"}` | Source path is empty or attempts directory traversal |
 | 400 | `{"error":"invalid destination path"}` | Destination path is empty or attempts directory traversal |
 | 404 | `{"error":"source not found"}` | Source file or folder does not exist |
+| 409 | `{"error":"destination already exists"}` | Something is already at `to` (*v4.8.4+*; before, a file there was silently replaced) |
 
 ---
 
@@ -1813,7 +1814,9 @@ description. Converting a chat again changes nothing.
 
 `private=1` (multi mode, *v4.8.4+*) makes the chat private with the caller
 as its only member. The member list is written before the note, so a new
-private chat never exists as an open one. Elsewhere it is a `400`.
+private chat never exists as an open one. It only creates: on a note that
+already exists it is a `409` (use `/api/chat/members` to make an existing chat
+private). In single mode it is a `400`.
 
 ### GET/POST/DELETE /api/chat/members?ns=&path= *(v4.8.4+, multi mode)*
 
@@ -1827,10 +1830,12 @@ registered in single mode (`404`).
 - `GET` (read access): `{"private":true,"members":[{"id":3,"username":"mia","addedBy":2,"addedAt":"2026-10-08T00:12:00Z"}]}`.
   An open chat answers `{"private":false,"members":[]}`.
 - `POST` (write access), body `{"userId":N}` or empty: adds the caller and,
-  if given, user `N`. On an open chat this is what makes it private. `404`
-  for a user that does not exist.
+  if given, user `N`. On an open chat this is what makes it private. `N` must
+  hold a grant in the namespace (the `/api/namespace/users` list); anyone else
+  is a `404` "no such user in this workspace", whether or not the account
+  exists.
 - `DELETE ?...&userId=N` (write access): removes user `N`. `409` for the last
-  member.
+  member. Their live-collaboration connection to the note, if any, is closed.
 
 Each returns the list as `GET` does. `400` when the note is not a chat. A
 non-member gets `403` from all three, so they can neither see who is in a
@@ -1840,7 +1845,9 @@ Folder operations check every chat inside: a non-member cannot delete
 (`DELETE /api/note`), move (`/api/move`) or copy or move to another namespace
 (`/api/transfer`) a folder that holds a private chat (`403`), and a folder
 `/api/download` leaves it out of the zip. A move or transfer by a member
-carries the list to the new path, and a delete forgets it.
+carries the list to the new path, replacing any list left there. The old path
+keeps its list after a move or delete, because note history is served by
+path; a leftover list whose file is gone does not block folder operations.
 
 ### GET /api/chat/gifs?ns=[&format=text]
 

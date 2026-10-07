@@ -25,13 +25,7 @@ type NoteHandler struct {
 	hub      *collab.Hub      // nil when collab disabled
 	activity ActivityRecorder // nil in single mode: no identities to attribute
 	idents   IdentityResolver // nil unless multi mode: resolves git author email
-	// chatMembers forgets a deleted private chat's member list (issue #127).
-	chatMembers chatMembersFollow
 }
-
-// SetChatMembers makes a delete forget the member lists of the private chats
-// it removes.
-func (h *NoteHandler) SetChatMembers(m chatMembersFollow) { h.chatMembers = m }
 
 func NewNoteHandler(store storage.Storage) *NoteHandler {
 	return &NoteHandler{store: store}
@@ -413,14 +407,6 @@ func (h *NoteHandler) deleteNote(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, `{"error":"failed to delete"}`, http.StatusInternalServerError)
 		return
-	}
-	if h.chatMembers != nil {
-		// After the files, never before: dropping the list first would
-		// leave the chat open if the delete then failed. A list left
-		// behind refuses rather than opens.
-		if err := h.chatMembers.DeletePrefix(ns, "/"+relPath); err != nil {
-			log.Printf("chat members: forget %s/%s: %v", ns, relPath, err)
-		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})

@@ -6,54 +6,55 @@ import (
 	"github.com/mdnest/mdnest/backend/store"
 )
 
-// Private chats (issue #127) are keyed by note path, so a route that moves,
-// copies or deletes notes has to take the member lists along. These helpers
-// are the one place that order is decided.
+// Private chats (issue #127) are keyed by note path, so a route that moves or
+// copies notes has to take the member lists along. These helpers are the one
+// place that order is decided.
 //
-// The rows go to the destination BEFORE the files do. The other order would
+// The lists go to the destination BEFORE the files do. The other order would
 // leave a window, or after a failed update a permanent state, in which the
-// chat sits at its new path with no member list, which means open to
-// everyone. A row for a path with no file grants nothing, so the only cost of
-// a failure is a stale restriction, and that fails closed.
+// chat sits at its new path with no list, which means open to everyone.
+//
+// Nothing is removed from the source, on a move or on a delete. The chat's
+// git history is still served at its old path, so the old path stays
+// restricted (the permission checker ignores such rows for folder operations
+// once no file is there).
+//
+// A failed move undoes exactly what the copy wrote and nothing else. An
+// earlier version dropped every list under the destination, and a move aimed
+// at an existing folder (which fails) wiped the list of a private chat that
+// already lived there.
 
 // chatMembersFollow is the part of store.ChatMemberStore these routes need.
 // Nil (single mode, or no database) turns every helper into a no-op.
 type chatMembersFollow interface {
-	CopyPrefix(fromNS, from, toNS, to string) error
-	DeletePrefix(ns, path string) error
+	CopyPrefix(fromNS, from, toNS, to string) (*store.ChatCopy, error)
+	RestoreCopy(c *store.ChatCopy) error
 }
 
-// beforeMove copies the member lists under from to the same places under to.
-// A false return means the transfer must not go ahead.
-func chatMembersBeforeMove(m chatMembersFollow, fromNS, from, toNS, to string) bool {
+// chatMembersBeforeMove copies the member lists under from to the same
+// places under to. ok false means the move must not go ahead. The returned
+// copy is handed to chatMembersAfter.
+func chatMembersBeforeMove(m chatMembersFollow, fromNS, from, toNS, to string) (*store.ChatCopy, bool) {
 	if m == nil {
-		return true
+		return nil, true
 	}
-	if err := m.CopyPrefix(fromNS, "/"+from, toNS, "/"+to); err != nil {
+	c, err := m.CopyPrefix(fromNS, "/"+from, toNS, "/"+to)
+	if err != nil {
 		log.Printf("chat members: copy %s/%s -> %s/%s: %v", fromNS, from, toNS, to, err)
-		return false
+		return nil, false
 	}
-	return true
+	return c, true
 }
 
-// chatMembersAfter finishes what beforeMove started. ok is whether the files
-// moved: if they did and the source is gone (a move), the old rows go; if they
-// did not, the rows made for the destination go.
-func chatMembersAfter(m chatMembersFollow, ok, sourceGone bool, fromNS, from, toNS, to string) {
-	if m == nil {
+// chatMembersAfter undoes the copy if the files did not move.
+func chatMembersAfter(m chatMembersFollow, c *store.ChatCopy, ok bool) {
+	if m == nil || ok || c == nil {
 		return
 	}
-	var err error
-	switch {
-	case !ok:
-		err = m.DeletePrefix(toNS, "/"+to)
-	case sourceGone:
-		err = m.DeletePrefix(fromNS, "/"+from)
-	}
-	if err != nil {
-		// Left behind: a restriction on a path that has no chat any more.
-		// It refuses rather than opens, so log and carry on.
-		log.Printf("chat members: tidy after %s/%s -> %s/%s: %v", fromNS, from, toNS, to, err)
+	if err := m.RestoreCopy(c); err != nil {
+		// Left behind: a restriction on a path that has no chat. It
+		// refuses rather than opens, so log and carry on.
+		log.Printf("chat members: undo copy in %s: %v", c.NS, err)
 	}
 }
 
