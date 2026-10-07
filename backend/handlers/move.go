@@ -63,7 +63,7 @@ func (h *MoveHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	copied, ok := chatMembersBeforeMove(h.chatMembers, ns, fromRel, ns, toRel)
+	copied, ok := chatMembersBeforeMove(ctx, h.store, h.chatMembers, ns, fromRel, ns, toRel)
 	if !ok {
 		http.Error(w, `{"error":"failed to move item"}`, http.StatusInternalServerError)
 		return

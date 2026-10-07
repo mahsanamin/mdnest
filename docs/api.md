@@ -1837,7 +1837,9 @@ registered in single mode (`404`).
 - `DELETE ?...&userId=N` (write access): removes user `N`. `409` for the last
   member. Their live-collaboration connection to the note, if any, is closed.
 
-Each returns the list as `GET` does. `400` when the note is not a chat. A
+Each returns the list as `GET` does. `400` when the note is not a chat, or
+(for `POST`) when its path is not plain ASCII: private chat paths are kept
+ASCII so a case-insensitive disk cannot reach one by another spelling. A
 non-member gets `403` from all three, so they can neither see who is in a
 chat nor invite themselves.
 

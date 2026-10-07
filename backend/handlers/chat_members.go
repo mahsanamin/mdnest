@@ -63,6 +63,16 @@ func (h *ChatHandler) HandleMembers(w http.ResponseWriter, r *http.Request) {
 		chatJSONError(w, http.StatusBadRequest, "not a chat")
 		return
 	}
+	if r.Method == http.MethodPost && !PrivateChatPathOK(relPath) {
+		chatJSONError(w, http.StatusBadRequest, "a private chat needs a plain ASCII path; rename it first")
+		return
+	}
+	// The list is keyed by the lowercased path, so it would also cover any
+	// other file whose name differs only in letter case (case-sensitive disk).
+	if r.Method == http.MethodPost && foldedMatches(r.Context(), h.store, ns, relPath) > 1 {
+		chatJSONError(w, http.StatusConflict, "another note has this name in different letter case; rename one of them first")
+		return
+	}
 	key := "/" + relPath
 
 	switch r.Method {

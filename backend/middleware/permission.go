@@ -76,6 +76,55 @@ func (pc *PermissionChecker) chatFilter(uc *UserContext, namespace string) (func
 	}, true
 }
 
+// exactSpelling guards the member check against the file system's own idea
+// of which names are the same. Lists are keyed by the lowercased path, which
+// is exactly how a case-insensitive disk compares ASCII names. For other
+// letters it is not: such a disk may also fold the long s, the Kelvin sign
+// or a decomposed accent, so a non-ASCII spelling could open a private chat
+// without matching its key. So, in a namespace with private chats, a
+// non-ASCII path must name what is on disk byte for byte, or name nothing
+// at all (a new file). Private chat paths themselves are kept ASCII (see
+// handlers.PrivateChatPathOK), so an exact spelling can never alias one.
+func (pc *PermissionChecker) exactSpelling(r *http.Request, namespace, path string) bool {
+	if isASCII(path) || pc.stg == nil || !pc.hasPrivateChats(namespace) {
+		return true
+	}
+	ctx := r.Context()
+	rel := strings.Trim(path, "/")
+	dir := ""
+	for _, seg := range strings.Split(rel, "/") {
+		entries, err := pc.stg.ReadDir(ctx, namespace, dir)
+		if err != nil {
+			// The folder is not there: nothing below it exists to alias.
+			return errors.Is(err, storage.ErrNotExist)
+		}
+		exact := false
+		for _, e := range entries {
+			if e.Name == seg {
+				exact = true
+				break
+			}
+		}
+		if !exact {
+			// No entry by this exact name. If the disk still finds
+			// something, it matched another spelling: refuse.
+			_, err := pc.stg.Stat(ctx, namespace, rel)
+			return errors.Is(err, storage.ErrNotExist)
+		}
+		dir = strings.TrimPrefix(dir+"/"+seg, "/")
+	}
+	return true
+}
+
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return false
+		}
+	}
+	return true
+}
+
 // hasPrivateChats reports whether namespace has any member list. A lookup
 // error answers true, so the caller takes the careful path.
 func (pc *PermissionChecker) hasPrivateChats(namespace string) bool {
@@ -287,7 +336,7 @@ func (pc *PermissionChecker) check(r *http.Request, namespace, path, permission 
 		return true // single-user mode
 	}
 	// Before the admin shortcut: a private chat binds namespace admins too.
-	if !pc.chatMemberOK(uc, namespace, path) {
+	if !pc.chatMemberOK(uc, namespace, path) || !pc.exactSpelling(r, namespace, path) {
 		return false
 	}
 	if pc.hasAdminScope(uc, namespace) {

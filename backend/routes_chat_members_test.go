@@ -9,6 +9,7 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -204,6 +205,7 @@ func buildChatFixture(t *testing.T) string {
 type chatServer struct {
 	*testServer
 	members *memChatMembers
+	perms   *middleware.PermissionChecker
 }
 
 func newChatServer(t *testing.T) *chatServer {
@@ -283,7 +285,7 @@ func newChatServer(t *testing.T) *chatServer {
 	registerContentRoutes(mux, routes)
 	ts.srv = httptest.NewServer(mux)
 	t.Cleanup(ts.srv.Close)
-	return &chatServer{testServer: ts, members: members}
+	return &chatServer{testServer: ts, members: members, perms: perms}
 }
 
 func (cs *chatServer) exists(rel string) bool {
@@ -852,5 +854,102 @@ func TestPrivateChat_LinkToItStaysOutOfListings(t *testing.T) {
 		if code, _ := cs.get(tok, "/api/note?ns=alpha&path=Shared/x.md"); code != http.StatusForbidden {
 			t.Errorf("%s read the chat through the link: %d", name, code)
 		}
+	}
+}
+
+// foldingStorage stands in for a disk that matches names the way macOS does
+// (Docker Desktop): ToLower is not enough, it also folds the long s. Stat
+// finds secret.md when asked for ſecret.md. Only the checker gets this view.
+type foldingStorage struct{ storage.Storage }
+
+func (f foldingStorage) Stat(ctx context.Context, ns, rel string) (storage.FileInfo, error) {
+	real := ""
+	for _, seg := range strings.Split(strings.ReplaceAll(rel, "ſ", "s"), "/") {
+		entries, err := f.Storage.ReadDir(ctx, ns, real)
+		if err != nil {
+			return storage.FileInfo{}, err
+		}
+		match := ""
+		for _, e := range entries {
+			if strings.EqualFold(e.Name, seg) {
+				match = e.Name
+			}
+		}
+		if match == "" {
+			return storage.FileInfo{}, storage.ErrNotExist
+		}
+		real = strings.TrimPrefix(real+"/"+match, "/")
+	}
+	return f.Storage.Stat(ctx, ns, real)
+}
+
+// A non-ASCII spelling the disk folds onto a private chat must be refused,
+// and a private chat cannot be given a non-ASCII path in the first place.
+func TestPrivateChat_UnicodeSpellingCannotAliasIt(t *testing.T) {
+	cs := newChatServer(t)
+	stg, _ := storage.NewLocalStorage(cs.root)
+	cs.perms.SetStorage(foldingStorage{stg})
+	nate := jwtFor(t, uidNate, "collaborator", nil)
+	owen := jwtFor(t, uidOwen, "collaborator", nil)
+	for _, p := range []string{"Chats/ſecret.md", "Chats/ſECRET.md"} {
+		if code, _ := cs.get(nate, "/api/note?ns=alpha&path="+url.QueryEscape(p)); code != http.StatusForbidden {
+			t.Errorf("%s: %d", p, code)
+		}
+	}
+	// A real non-ASCII note, spelled exactly, still works.
+	os.WriteFile(filepath.Join(cs.root, "alpha", "Notes", "café.md"), []byte("fine"), 0o644)
+	if code, _ := cs.get(nate, "/api/note?ns=alpha&path="+url.QueryEscape("Notes/café.md")); code != http.StatusOK {
+		t.Errorf("an exactly spelled non-ASCII note: %d", code)
+	}
+	if code, _ := cs.do(owen, http.MethodPost, "/api/chat/convert?ns=alpha&path="+url.QueryEscape("Chats/équipe.md")+"&private=1", nil, ""); code != http.StatusBadRequest {
+		t.Errorf("private chat at a non-ASCII path: %d", code)
+	}
+	if code, _ := cs.do(owen, http.MethodPost, "/api/move?ns=alpha&from=Chats/secret.md&to="+url.QueryEscape("Équipe/secret.md"), nil, ""); code < 400 {
+		t.Errorf("moving a private chat to a non-ASCII path: %d", code)
+	}
+	if code, _ := cs.get(nate, "/api/note?ns=alpha&path="+url.QueryEscape("Équipe/secret.md")); code == http.StatusOK {
+		t.Errorf("the chat ended up open at a non-ASCII path")
+	}
+}
+
+// Lists are keyed by the lowercased path. On a case-sensitive disk a private
+// chat at Notes/A.md would therefore also cover the existing Notes/a.md, so
+// no list may be written where another spelling of the name exists.
+func TestPrivateChat_OtherSpellingCannotTakeANote(t *testing.T) {
+	cs := newChatServer(t)
+	nate := jwtFor(t, uidNate, "collaborator", nil)
+	owen := jwtFor(t, uidOwen, "collaborator", nil)
+	admin := jwtFor(t, uidAdmin, "admin", nil)
+	readable := func(why string) {
+		t.Helper()
+		if code, _ := cs.get(owen, "/api/note?ns=alpha&path=Notes/a.md"); code != http.StatusOK {
+			t.Errorf("%s: owen lost Notes/a.md: %d", why, code)
+		}
+	}
+	if code, _ := cs.do(nate, http.MethodPost, "/api/chat/convert?ns=alpha&path=Notes/A.md&private=1", nil, ""); code != http.StatusConflict {
+		t.Errorf("private chat at another spelling of a note: %d", code)
+	}
+	readable("convert")
+
+	cs.do(nate, http.MethodPost, "/api/chat/convert?ns=alpha&path=Mine/x.md&private=1", nil, "")
+	if code, _ := cs.do(nate, http.MethodPost, "/api/move?ns=alpha&from=Mine/x.md&to=Notes/A.md", nil, ""); code < 400 {
+		t.Errorf("move a private chat onto another spelling: %d", code)
+	}
+	readable("move")
+	body := `{"mode":"move","from":{"ns":"alpha","path":"Mine"},"to":{"ns":"alpha","path":"NOTES"}}`
+	os.Rename(filepath.Join(cs.root, "alpha", "Mine", "x.md"), filepath.Join(cs.root, "alpha", "Mine", "a.md"))
+	cs.members.Add("alpha", "/Mine/a.md", uidNate, uidNate)
+	if code, _ := cs.do(nate, http.MethodPost, "/api/transfer", strings.NewReader(body), "application/json"); code < 400 {
+		t.Errorf("transfer a folder holding a private chat onto another spelling: %d", code)
+	}
+	readable("transfer")
+
+	// Two chats whose names differ only in case: neither can be made private.
+	os.WriteFile(filepath.Join(cs.root, "alpha", "Chats", "OPEN.md"), []byte("---\nmdnest-chat: true\n---\n"), 0o644)
+	if code, _ := cs.do(admin, http.MethodPost, "/api/chat/members?ns=alpha&path=Chats/open.md", nil, ""); code != http.StatusConflict {
+		t.Errorf("making one of two same-name chats private: %d", code)
+	}
+	if code, _ := cs.get(nate, "/api/chat?ns=alpha&path=Chats/OPEN.md"); code != http.StatusOK {
+		t.Errorf("the other spelling was locked: %d", code)
 	}
 }
