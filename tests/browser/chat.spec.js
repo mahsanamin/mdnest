@@ -422,3 +422,34 @@ test('presence comes from the polls an agent already makes: waiting, thinking, w
     await cleanup(page, plain, chat);
   }
 });
+
+test('an agent\'s /context report shows by its name, not as a message', async ({ page }) => {
+  test.setTimeout(60_000);
+  await signIn(page);
+  const { plain, chat, title } = await seed(page);
+  try {
+    await page.goto(`/#!chats/${NS}/${chat}`);
+    await expect(page.locator('.chat-room-title h2')).toHaveText(title, { timeout: 20_000 });
+    const qs = `ns=${NS}&path=${encodeURIComponent(chat)}`;
+    await api(page, 'POST', `/api/chat?${qs}&as=bot`, 'hello, I am here');
+    await expect(page.locator('.chat-bubble').last()).toContainText('hello, I am here', { timeout: 10_000 });
+    const before = await page.locator('.chat-bubble').count();
+
+    const r = await api(page, 'POST', `/api/chat?${qs}&as=bot`, '/context 87k/200k');
+    expect(r.status).toBe(200);
+    const chip = page.getByTestId('chat-context');
+    await expect(chip).toHaveText('44%', { timeout: 10_000 });
+    await expect(chip).toHaveAttribute('title', /87k of 200k tokens/);
+    await expect(chip).not.toHaveClass(/high/);
+    expect(await page.locator('.chat-bubble').count()).toBe(before);
+
+    await api(page, 'POST', `/api/chat?${qs}&as=bot`, '/context 91%');
+    await expect(chip).toHaveText('91%', { timeout: 10_000 });
+    await expect(chip).toHaveClass(/high/);
+
+    const bad = await api(page, 'POST', `/api/chat?${qs}&as=bot`, '/context about half');
+    expect(bad.status).toBe(400);
+  } finally {
+    await cleanup(page, plain, chat);
+  }
+});

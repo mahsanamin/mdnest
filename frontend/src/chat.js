@@ -268,17 +268,35 @@ export function agentInstructions(alias, ns, path, name = 'AGENT_NAME', intent =
     '   Leave only when your lead or a human says you are done: post a one-line goodbye, then stop.',
     '',
     'How to behave',
-    '- People see you as waiting while you wait. Say you are working only when you are: before a',
-    `  task of more than a minute, mdnest chat post ${target} "/status what you are doing" --as ${as}`,
-    '  It is not added to the chat. Repeat it every 2 minutes while you work. Your next post, or',
-    '  going back to wait, clears it, so never leave a status up while you are only waiting.',
-    '- Need a human to answer or decide? Ask them with @their-name and add ![waiting](gif:question),',
-    '  so they can see where they are needed.',
+    '- You show as waiting while you wait. Before a task of more than a minute, say what you do:',
+    `  mdnest chat post ${target} "/status what you are doing" --as ${as} (not a chat message; repeat every 2 min).`,
+    '  Your next post, or going back to wait, clears it. Never leave a status up while only waiting.',
+    '- Need a human to answer or decide? Ask @their-name and add ![waiting](gif:question).',
     `- Other agents may be here. Answer only what is addressed to you (@${name}, @all) or is your part.`,
     '  Do not repeat what someone already said: agree with ![nod](gif:nod) instead. Keep replies',
     '  short and to the point. In a busy chat, add --mentions to wait.',
     `- Emoji are fine. Images react too, e.g. ![done](gif:done). List them: mdnest chat gifs ${nsTarget}`,
+    '- Report how full your context window is when you join, then about every 10 messages:',
+    `  mdnest chat post ${target} "/context 42%" --as ${as} (or 87k/200k). It shows by your name, not in the chat.`,
   ].join('\n');
+}
+
+// An agent's last /context report (chat_context.go) as the short chip shown
+// by its name: "44%", or "87k" when it gave only a token count. CONTEXT_HIGH
+// is where the chip turns to a warning: past it an agent is close to full and
+// a person may want to start it fresh.
+export const CONTEXT_HIGH = 80;
+const tokens = (n) => (n >= 1e6 ? `${+(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n));
+export function contextLabel(c) {
+  if (!c) return '';
+  if (c.pct >= 0) return `${c.pct}%`;
+  return c.used ? tokens(c.used) : '';
+}
+export function contextTitle(c, now = Date.now()) {
+  if (!c) return '';
+  const amount = c.used && c.total ? `${tokens(c.used)} of ${tokens(c.total)} tokens` : c.used ? `${tokens(c.used)} tokens` : `${c.pct}%`;
+  const mins = Math.max(0, Math.floor((now - Date.parse(c.at)) / 60000));
+  return `Context used: ${amount}, reported ${mins < 1 ? 'just now' : `${mins} min ago`}`;
 }
 
 // workingLine turns the chat's presence into the one quiet line under the
@@ -291,7 +309,8 @@ export function agentInstructions(alias, ns, path, name = 'AGENT_NAME', intent =
 // an entry with status text reads as working: anything else, including a
 // kind this page does not know yet, reads as waiting, so an older page and a
 // newer server never show "is working: undefined". Your own presence (the
-// same author/via rule as isOwnMessage) is left out. `title` lists everyone
+// same author/via rule as isOwnMessage) is left out. A name with a /context
+// report carries it: "codxu (44%) is waiting". `title` lists everyone
 // for the tooltip. Returns null when nobody else is here.
 export function workingLine(working, account, postingAs, now = Date.now()) {
   const others = (working || []).filter((w) => !isOwnMessage(w, account, postingAs));
@@ -300,10 +319,11 @@ export function workingLine(working, account, postingAs, now = Date.now()) {
   const after = (w) => (mins(w) >= 1 ? ` · ${mins(w)} min` : '');
   const busy = [];
   const waiting = [];
+  const who = (w) => (contextLabel(w.context) ? `${w.author} (${contextLabel(w.context)})` : w.author);
   for (const w of others) {
-    if (w.kind === 'thinking') busy.push(`${w.author} is thinking${after(w)}`);
-    else if (w.kind !== 'listening' && w.text) busy.push(`${w.author} is working: ${w.text}${after(w)}`);
-    else waiting.push(w.author);
+    if (w.kind === 'thinking') busy.push(`${who(w)} is thinking${after(w)}`);
+    else if (w.kind !== 'listening' && w.text) busy.push(`${who(w)} is working: ${w.text}${after(w)}`);
+    else waiting.push(who(w));
   }
   const names = (list) => (list.length <= 2 ? list.join(' and ') : `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`);
   const parts = [...busy];

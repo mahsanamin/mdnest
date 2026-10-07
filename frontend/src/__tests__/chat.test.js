@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   slugify, chatPathFor, colorForAuthor, AUTHOR_COLORS, isOwnMessage,
-  groupMessages, mergeMessages, agentInstructions, workingLine, plainPreview, shellQuote, isChatDoc,
+  groupMessages, mergeMessages, agentInstructions, workingLine, contextLabel, contextTitle, plainPreview, shellQuote, isChatDoc,
   mentionsName, highlightMentions, participants, mentionQuery, completeMention,
   avatarFor, reactions, gifMarkdown, expandGifRefs, initialOf,
 } from '../chat.js';
@@ -266,7 +266,7 @@ describe('working line', () => {
   });
   it('the prompt tells agents to say working only while working', () => {
     const s = agentInstructions('mini', 'notes', 'Chats/team.md', 'codxu');
-    expect(s).toMatch(/seen? you as waiting while you wait/);
+    expect(s).toMatch(/show as waiting while you wait/);
     expect(s).toMatch(/going back to wait, clears it/);
     expect(s).not.toMatch(/listening/);
   });
@@ -278,5 +278,31 @@ describe('working line', () => {
   it('an agent on my token under its own name is someone else, not me', () => {
     const line = workingLine([w('claude-a', 'thinking', '2026-10-06T10:05:00Z', { via: 'ahsan' })], 'ahsan', 'ahsan', now);
     expect(line.text).toContain('claude-a is thinking');
+  });
+});
+
+describe('context size', () => {
+  const now = Date.parse('2026-10-06T10:05:30Z');
+  it('the chip is the percentage, or the token count when that is all we have', () => {
+    expect(contextLabel({ used: 87000, total: 200000, pct: 44 })).toBe('44%');
+    expect(contextLabel({ pct: 42 })).toBe('42%');
+    expect(contextLabel({ used: 1200000, pct: -1 })).toBe('1.2M');
+    expect(contextLabel(undefined)).toBe('');
+  });
+  it('the tooltip says how much and how long ago', () => {
+    expect(contextTitle({ used: 87000, total: 200000, pct: 44, at: '2026-10-06T10:02:00Z' }, now))
+      .toBe('Context used: 87k of 200k tokens, reported 3 min ago');
+    expect(contextTitle({ pct: 42, at: '2026-10-06T10:05:20Z' }, now)).toBe('Context used: 42%, reported just now');
+  });
+  it('the presence line carries it by the name', () => {
+    const line = workingLine([
+      { author: 'codxu', kind: 'listening', since: '2026-10-06T10:05:20Z', context: { pct: 44 } },
+      { author: 'qa-1', kind: 'thinking', since: '2026-10-06T10:05:20Z', context: { pct: 91 } },
+    ], 'ahsan', 'ahsan', now);
+    expect(line.text).toBe('qa-1 (91%) is thinking  ·  codxu (44%) is waiting');
+  });
+  it('the prompt tells agents to report it', () => {
+    const s = agentInstructions('mini', 'notes', 'Chats/team.md', 'codxu');
+    expect(s).toContain('mdnest chat post @mini/notes/Chats/team.md "/context 42%" --as codxu');
   });
 });

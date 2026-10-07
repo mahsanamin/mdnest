@@ -5,7 +5,7 @@ import { resolveImgSrc } from '../img-src.js';
 import { sanitizeHtml } from '../sanitize.js';
 import {
   CHAT_POLL_MS, CHAT_LIST_POLL_MS, DEFAULT_CHAT_FOLDER, chatPathFor, colorForAuthor,
-  isOwnMessage, groupMessages, mergeMessages, workingLine, formatChatTime, agentInstructions, plainPreview,
+  isOwnMessage, groupMessages, mergeMessages, workingLine, contextLabel, contextTitle, CONTEXT_HIGH, formatChatTime, agentInstructions, plainPreview,
   highlightMentions, mentionsName, participants, mentionQuery, completeMention,
   avatarFor, reactions, gifMarkdown, expandGifRefs, initialOf,
 } from '../chat.js';
@@ -171,6 +171,7 @@ function ChatList({ chats, loading, error, openChat, onSelect, filter, onFilter,
 function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack, onActivity }) {
   const [doc, setDoc] = useState(null); // { title, description, you }
   const [working, setWorking] = useState([]); // who said they are busy, from the server
+  const [contexts, setContexts] = useState({}); // each agent's last /context report, by name
   const [messages, setMessages] = useState([]);
   const [error, setError] = useState('');
   const [draft, setDraft] = useState('');
@@ -232,6 +233,7 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
         setDoc({ title: r.title, description: r.description, you: r.you });
         setMessages(r.messages || []);
         setWorking(r.working || []);
+        setContexts(r.contexts || {});
         countRef.current = r.count;
         writeSeen(chat.ns, chat.path, r.count);
       })
@@ -256,6 +258,7 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
       countRef.current = Math.max(countRef.current, r.count);
       writeSeen(chat.ns, chat.path, countRef.current);
       setWorking(r.working || []);
+      setContexts(r.contexts || {});
       setError('');
     } catch (e) {
       setError(e.message);
@@ -318,6 +321,13 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
   };
 
   const grouped = useMemo(() => groupMessages(messages), [messages]);
+  // A /context report is today's figure, so it sits only on each author's
+  // most recent group, not on every old message.
+  const latestGroupOf = useMemo(() => {
+    const out = {};
+    for (const m of grouped) if (m.startsGroup) out[m.author] = m.n;
+    return out;
+  }, [grouped]);
   // The conversation, built only when the messages (or who "you" are) change.
   // Rendering it on every keystroke ran marked + DOMPurify over every message
   // in the chat, which made typing lag (~66ms a key with 300 messages).
@@ -343,6 +353,12 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
                   })()}
                   <span className="chat-msg-author" style={{ color: `var(${colorForAuthor(m.author)})` }}>{m.author}</span>
                   {m.via && <span className="chat-msg-via">via {m.via}</span>}
+                  {latestGroupOf[m.author] === m.n && contextLabel(contexts[m.author]) && (
+                    <span className={`chat-context${contexts[m.author].pct >= CONTEXT_HIGH ? ' high' : ''}`}
+                      title={contextTitle(contexts[m.author])} data-testid="chat-context">
+                      {contextLabel(contexts[m.author])}
+                    </span>
+                  )}
                   <span className="chat-msg-time" title={m.time}>{formatChatTime(m.time)}</span>
                 </div>
               )}
@@ -351,7 +367,7 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
           );
         })}
     </>
-  ), [doc, error, messages.length, grouped, gifs, chat.ns, account, effectiveAs]);
+  ), [doc, error, messages.length, grouped, gifs, chat.ns, account, effectiveAs, contexts, latestGroupOf]);
   // @-completion: while the word at the caret starts with @, offer the
   // people in this chat (plus @all), most recent first.
   const query = mentionQuery(draft, caret);

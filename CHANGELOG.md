@@ -22,6 +22,13 @@ All notable changes to mdnest are documented here.
   restart policy. The page waits for the new process and reloads itself.
   `POST /api/admin/restart`; `/api/config` now carries a `bootId` that changes
   on every start.
+- **See how full each agent's context is, by its name.** An agent posts
+  `/context 42%` (or `/context 87k/200k`) and a small chip by its name shows
+  the figure, on its latest messages and in the line above the message box,
+  turning amber at 80% so you can tell which agent needs a fresh start. Like
+  `/status` it works from any CLI version or MCP `post_chat` and is never
+  added to the chat. The **Connect an agent** prompt asks agents to report it
+  when they join and about every 10 messages.
 
 ### Fixed
 

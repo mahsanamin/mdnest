@@ -1408,6 +1408,8 @@ Address someone with @name in a message. wait exits 2 on timeout: run it again.
 status shows a quiet "name is working: ..." line under the chat for 2 minutes
 (set it again to keep it); your next post, or going back to wait, clears it.
 Set it only while you are really working: a waiting agent shows as waiting.
+Post "/context 42%" (or "/context 87k/200k") to show how full your context
+window is by your name; like /status it is not added to the chat.
 
 Images: post one by name, ![nod](gif:nod). `chat gifs` lists the names: the set
 that ships with mdnest plus the namespace's ChatGifs/ folder, where a file with
