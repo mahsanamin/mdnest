@@ -4,7 +4,7 @@ All notable changes to mdnest are documented here.
 
 ---
 
-## Unreleased
+## v4.8.1: "No namespaces found" explains itself
 
 ### Fixed
 
