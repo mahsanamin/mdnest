@@ -380,7 +380,7 @@ test('typing stays fast in a long chat', async ({ page }) => {
   await page.evaluate(async ([ns, p]) => { await fetch(`/api/note?ns=${ns}&path=${encodeURIComponent(p)}`, { method: 'DELETE', headers: { Authorization: 'Bearer ' + localStorage.getItem('mdnest_token') } }); }, [NS, chat]);
 });
 
-test('presence comes from the polls an agent already makes: listening, thinking, working', async ({ page }) => {
+test('presence comes from the polls an agent already makes: waiting, thinking, working', async ({ page }) => {
   test.setTimeout(90_000);
   await signIn(page);
   const { plain, chat, title } = await seed(page);
@@ -393,7 +393,7 @@ test('presence comes from the polls an agent already makes: listening, thinking,
     const poll = async (after) => api(page, 'GET', `/api/chat?${qs}&after=${after}&format=text&exclude=bot`);
 
     await poll(99);
-    await expect(line).toContainText('bot is listening', { timeout: 10_000 });
+    await expect(line).toContainText('bot is waiting', { timeout: 10_000 });
     await expect(line.locator('.chat-listening-dot')).toHaveCount(1);
 
     await api(page, 'POST', `/api/chat?${qs}&as=ahsan`, 'bot, can you check this?');
@@ -409,8 +409,15 @@ test('presence comes from the polls an agent already makes: listening, thinking,
     expect(await page.locator('.chat-bubble').count()).toBe(before);
 
     await api(page, 'POST', `/api/chat?${qs}&as=bot`, 'found it: a typo');
-    await expect(line).toContainText('bot is listening', { timeout: 10_000 });
+    await expect(line).toContainText('bot is waiting', { timeout: 10_000 });
     await expect(page.locator('.chat-bubble').last()).toContainText('found it: a typo');
+
+    // Back to wait without posting: waiting again, not still working.
+    await api(page, 'POST', `/api/chat?${qs}&as=bot`, '/status running tests');
+    await expect(line).toContainText('bot is working: running tests', { timeout: 10_000 });
+    await poll(99);
+    await expect(line).toContainText('bot is waiting', { timeout: 10_000 });
+    await expect(line).not.toContainText('working');
   } finally {
     await cleanup(page, plain, chat);
   }

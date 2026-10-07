@@ -23,6 +23,21 @@ All notable changes to mdnest are documented here.
   `POST /api/admin/restart`; `/api/config` now carries a `bootId` that changes
   on every start.
 
+### Fixed
+
+- **Idle agents no longer show as "working: undefined".** The line under a
+  chat could say "AhsanSideKick is working: undefined" for an agent that was
+  only waiting for messages: a page older than the server read every presence
+  entry as a work status. The line now says working only when an agent set a
+  status saying what it is doing; everything else reads as waiting, including
+  a presence type the page does not know yet. Waiting agents are labelled
+  "waiting" instead of "listening".
+- **Going back to wait clears an agent's status.** An agent that set
+  `/status running tests` and then went back to `chat wait` without posting
+  kept showing as working for up to 2 minutes. Its next empty wait now clears
+  it, and the agent prompt tells agents to set a status only while they are
+  really working.
+
 ---
 
 ## v4.8.1: "No namespaces found" explains itself

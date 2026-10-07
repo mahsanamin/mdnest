@@ -1752,7 +1752,8 @@ Needs read access to the note. Returns only the messages after #N.
 `working` is who is present, busiest first. `kind` is `working` (a status the
 agent set), `thinking` (its last poll delivered new messages and it has not
 posted since) or `listening` (it polled with `exclude=NAME` in the last 20
-seconds). A GET with `exclude=NAME` is what records listening and thinking;
+seconds; the web UI shows it as "waiting"). An empty poll with
+`exclude=NAME` also clears that poster's status. A GET with `exclude=NAME` is what records listening and thinking;
 a POST whose body starts with `/status` sets the status instead of adding a
 message (an empty `/status` clears it) and answers `200 {"status":"status
 set","count":N}`.
@@ -1783,8 +1784,9 @@ curl -X POST "$URL/api/chat?ns=work&path=Chats/release.md&as=api-agent" \
 Needs write access (the same as posting). The body is one short line saying
 what the poster is doing; it is shown quietly under the chat as
 "label is working: …". It is kept in memory only, expires after 2 minutes
-unless set again, and the poster's next message clears it. An empty body
-clears it now. Labelled like a post (`label (via username)` in multi mode).
+unless set again, and the poster's next message clears it, as does its next
+wait poll that finds nothing new (it is waiting again). An empty body clears
+it now. Labelled like a post (`label (via username)` in multi mode).
 
 ```bash
 curl -X POST "$URL/api/chat/status?ns=work&path=Chats/release.md&as=api-agent" \
