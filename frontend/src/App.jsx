@@ -44,7 +44,7 @@ import AttributionModal from './components/AttributionModal.jsx';
 import MoveToModal from './components/MoveToModal.jsx';
 import PasteModal from './components/PasteModal.jsx';
 import { copyPlainText } from './mermaid-text.js';
-import { emptyNamespacesMessage } from './emptyNamespaces.js';
+import EmptyNamespaces from './components/EmptyNamespaces';
 import { mdnestUri } from './mdnestUri.js';
 import {
   baseName, buildClipboardPayload, describeRefusal, filenameFromDisposition, formatBytes,
@@ -1324,6 +1324,19 @@ function App() {
     setTree([]);
   }, [getLastPath, flushPendingSave]);
 
+  // "Check again" / "Give me access" on the empty page: re-read the list and,
+  // once something appears, open it the way a fresh load would. In multi mode
+  // the caller's grants changed too, so refresh them for the editor's
+  // read-only checks.
+  const recheckNamespaces = useCallback(async () => {
+    const names = await loadNamespaces();
+    if (names.length > 0) {
+      if (isMulti) fetchMe().then(setUserInfo).catch(() => {});
+      handleSelectNs(names[0]);
+    }
+    return names;
+  }, [loadNamespaces, handleSelectNs, isMulti]);
+
   const openNote = useCallback(async (path) => {
     if (!selectedNs) return;
     // Board stays open across note navigation so the chosen view persists; the
@@ -2490,10 +2503,15 @@ function App() {
             )
           ) : (
             <div className="empty-state">
-              {namespaces.length === 0 ? (() => {
-                const m = emptyNamespacesMessage(namespacesEmptyReason, { isAdmin });
-                return <div className="empty-namespaces" data-testid="empty-namespaces"><p><strong>{m.title}</strong></p><p>{m.detail}</p></div>;
-              })() : <p>Select a note or create one to get started.</p>}
+              {namespaces.length === 0 ? (
+                <EmptyNamespaces
+                  reason={namespacesEmptyReason}
+                  isAdmin={isAdmin}
+                  isMulti={isMulti}
+                  userId={userInfo?.id}
+                  onRecheck={recheckNamespaces}
+                />
+              ) : <p>Select a note or create one to get started.</p>}
             </div>
           )}
         </div>
@@ -2507,6 +2525,7 @@ function App() {
           onChangeTheme={changeTheme}
           serverDefaultTheme={appConfig?.defaultTheme}
           serverVersion={appConfig?.version}
+          canRestart={isSuperAdmin}
         />
       )}
       {shareTarget && (

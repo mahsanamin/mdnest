@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -178,6 +179,9 @@ type testServer struct {
 	root   string
 	srv    *httptest.Server
 	tokens *handlers.TokenHandler
+	// restarts counts how often a restart was asked for (the real one
+	// re-execs the process; here it only counts).
+	restarts atomic.Int32
 }
 
 func gitRun(t *testing.T, dir string, args ...string) {
@@ -295,6 +299,7 @@ func newTestServer(t *testing.T, multi bool) *testServer {
 		tasks:      tasks,
 		chat:       chat,
 		sync:       handlers.NewSyncHandler(root, search.InvalidateCache, nsAdmins),
+		restart:    handlers.NewRestartHandler(func() { ts.restarts.Add(1) }),
 	}
 	if multi {
 		routes.attribution = handlers.NewAttributionHandler(stg, memActivity{})
@@ -1067,4 +1072,59 @@ func TestRoutes_EmptyNamespacesForANoAccessAccountSayNoAccess(t *testing.T) {
 	if got := resp.Header.Get("X-Namespaces-Empty-Reason"); got != "no-access" {
 		t.Fatalf("X-Namespaces-Empty-Reason = %q, want no-access", got)
 	}
+}
+
+// Restarting the server from Settings is superadmin-only in multi mode: a
+// collaborator or a namespace admin must not be able to take the server down
+// for everyone. In single mode the one user owns the server.
+func TestRoutes_RestartIsSuperadminOnly(t *testing.T) {
+	ts := newTestServer(t, true)
+	for name, tok := range map[string]string{
+		"collaborator":    jwtFor(t, uidPat, "collaborator", nil),
+		"namespace admin": jwtFor(t, uidAdele, "admin", nil),
+	} {
+		if code, body := ts.do(tok, http.MethodPost, "/api/admin/restart", nil, ""); code != http.StatusForbidden {
+			t.Errorf("%s: got %d %s, want 403", name, code, body)
+		}
+	}
+	if code, _ := ts.do("", http.MethodPost, "/api/admin/restart", nil, ""); code != http.StatusUnauthorized {
+		t.Errorf("no token: got %d, want 401", code)
+	}
+	if n := ts.restarts.Load(); n != 0 {
+		t.Fatalf("a refused request restarted the server %d times", n)
+	}
+
+	super := jwtFor(t, 9, "superadmin", nil)
+	if code, _ := ts.get(super, "/api/admin/restart"); code != http.StatusMethodNotAllowed {
+		t.Errorf("GET: got %d, want 405", code)
+	}
+	for i := 0; i < 2; i++ { // a double click asks once
+		if code, body := ts.do(super, http.MethodPost, "/api/admin/restart", nil, ""); code != http.StatusAccepted {
+			t.Fatalf("superadmin: got %d %s, want 202", code, body)
+		}
+	}
+	waitFor(t, func() bool { return ts.restarts.Load() == 1 })
+	time.Sleep(50 * time.Millisecond)
+	if n := ts.restarts.Load(); n != 1 {
+		t.Errorf("two clicks restarted %d times, want 1", n)
+	}
+}
+
+func TestRoutes_RestartInSingleMode(t *testing.T) {
+	ts := newTestServer(t, false)
+	if code, body := ts.do(jwtFor(t, 1, "admin", nil), http.MethodPost, "/api/admin/restart", nil, ""); code != http.StatusAccepted {
+		t.Fatalf("got %d %s, want 202", code, body)
+	}
+	waitFor(t, func() bool { return ts.restarts.Load() == 1 })
+}
+
+func waitFor(t *testing.T, ok func() bool) {
+	t.Helper()
+	for i := 0; i < 100; i++ {
+		if ok() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("condition not met within 1s")
 }

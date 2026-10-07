@@ -625,6 +625,17 @@ When the server is updated to a new version, active browser sessions will see a 
 
 Click "Refresh Now" to reload and pick up the latest frontend. The check runs every 60 seconds.
 
+## Restarting the server *(v4.8.2+)*
+
+A superadmin (or the owner of a single-user install) can restart the backend
+from **Settings > Server**, without SSH. Use it when the server seems stuck.
+Everyone is disconnected for a few seconds and reconnects on their own, and the
+page reloads by itself once the server is back. Saved notes are not affected.
+
+A restart keeps the same mounted folders and settings. Changes to
+`docker-compose.yml` or `.env` (a new namespace folder, for example) still need
+`docker compose up -d` on the server.
+
 ## Appearance *(v4.3.0+)*
 
 mdnest ships a light theme alongside the original dark one.

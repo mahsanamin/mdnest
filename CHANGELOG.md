@@ -4,6 +4,27 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## Unreleased
+
+### Added
+
+- **Fix "no namespaces" from the page, not over SSH** (follow-up to GitHub
+  issue #123). When notes are mounted but your account has no access, an admin
+  now gets a **Give me access to all namespaces** button on the empty page. For
+  a mount problem the page shows the exact `docker-compose.yml` lines (and the
+  `mdnest.conf` line for a setup.sh install) with a Copy button, plus **Check
+  again**, which re-reads the list and opens the workspace as soon as the fix
+  is in, without a reload. The messages now say `docker compose up -d` for a
+  mount change, since a plain restart keeps the old mounts.
+- **Restart the server from Settings.** A new **Server** tab (superadmin only
+  in multi-user mode) restarts the backend. It drains requests, commits
+  pending git edits, and restarts in place, so it works without a Docker
+  restart policy. The page waits for the new process and reloads itself.
+  `POST /api/admin/restart`; `/api/config` now carries a `bootId` that changes
+  on every start.
+
+---
+
 ## v4.8.1: "No namespaces found" explains itself
 
 ### Fixed
