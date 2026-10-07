@@ -176,7 +176,7 @@ mdnest/
         Preview.jsx            # Rendered markdown (marked + mermaid + KaTeX).
         Toolbar.jsx            # View + editor mode toggle, file actions, comment icon.
         ContextMenu.jsx        # Right-click / long-press menu.
-        AdminPanel.jsx         # Three tabs: Users, Access Grants, Namespace Admins.
+        AdminPanel.jsx         # Tabs: People, Groups, Namespaces (AdminPeople.jsx), Git Workspaces, Marp Themes.
                                # Scope-aware: superadmin sees all, namespace admin sees
                                # only their namespaces. Role dropdown for SuperAdmin.
         CommentSidebar.jsx     # Inline-comment threads with replies, resolve, delete.
@@ -372,7 +372,7 @@ The `RequireNamespace` function validates that the `ns` query parameter is a sim
 | `MermaidBlock.jsx` | Inline mermaid with Source/Preview toggle + click-to-edit labels |
 | `Preview.jsx` | Rendered markdown via marked + mermaid + KaTeX, collapsible headings |
 | `ContextMenu.jsx` | Right-click / long-press floating menu |
-| `AdminPanel.jsx` | Admin panel — Users tab (with role dropdown), Access Grants, Namespace Admins. Scope-aware: superadmin sees all, namespace admin only their namespaces |
+| `AdminPanel.jsx` | Admin panel: People (one card per person with role, groups, admin-of, direct access and what they can reach), Groups, Namespaces (who reaches each one and why). People and Namespaces live in `AdminPeople.jsx` and read one directory joined by `adminDirectory.js`. Scope-aware: superadmin sees all, namespace admin only their namespaces |
 | `CommentSidebar.jsx` | Inline comments — slide-out panel, threaded replies, Go-To, resolve, delete |
 | `Settings.jsx` | User settings — credentials (local mode), TOTP, API tokens |
 | `PathPicker.jsx` | Folder dropdown for grants. Filters by `appConfig.grantMaxDepth` |

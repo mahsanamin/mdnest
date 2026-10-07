@@ -4,6 +4,24 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## Unreleased
+
+### Changed
+
+- **A simpler admin panel for people and access.** The Users, Access Grants
+  and Namespace Admins tabs are replaced by **People** and **Namespaces**,
+  next to **Groups**. Click a person to see and change everything about
+  them in one place: super-admin, groups, the namespaces they administer,
+  their direct access, and a **Can reach** list that adds it all up with the
+  reason for each line ("via qa-team"). **Namespaces** shows who can reach
+  each namespace, directly or through a group, and who administers it, and
+  gives access to a person or a group. **+ Add person** no longer needs a
+  namespace: tick groups instead, or nothing, so a team run entirely
+  through groups works from the start. The namespace you do pick keeps the
+  folder and permission you chose.
+
+---
+
 ## v4.8.2: Pinned chats, heading links, and agents that show their context
 
 The chat list can collapse to a slim strip and has Pinned and All tabs. Each
