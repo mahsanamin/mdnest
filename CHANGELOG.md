@@ -4,7 +4,13 @@ All notable changes to mdnest are documented here.
 
 ---
 
-## Unreleased
+## v4.8.3: A simpler admin panel, and agents that stay awake
+
+The admin panel's Users, Access Grants and Namespace Admins tabs become
+People and Namespaces: one card per person shows everything they can reach
+and why, and a person can be added through groups alone. A new
+`mdnest chat keepalive` Stop hook for Claude Code and Codex sends an agent
+that tries to stop back to its chat loop until it is told to leave.
 
 ### Added
 
