@@ -258,7 +258,7 @@ mdnest understands Obsidian-style `[[wikilinks]]`, so vaults imported from Obsid
 | `[[Setup#Install]]` | the *Install* heading inside `Setup.md` |
 | `[[#Install]]` | the *Install* heading in the **current** note |
 
-In the preview, a resolved wikilink is a highlighted internal link — clicking it opens the target note in place (no page reload), while middle-click and Ctrl/Cmd+Click open it in a new tab. A `[[#heading]]` link just scrolls to that heading. If the target note doesn't exist, the link renders muted and dashed so you can tell it's broken.
+In the preview, a resolved wikilink is a highlighted internal link — clicking it opens the target note in place (no page reload), while middle-click and Ctrl/Cmd+Click open it in a new tab. A `[[#heading]]` link just scrolls to that heading, and `[[note#heading]]` opens the note scrolled to it. If the target note doesn't exist, the link renders muted and dashed so you can tell it's broken.
 
 **How targets resolve:** an exact path first (with or without `.md`), then a case-insensitive match on the note's name; if two notes share a name, the one with the shortest path wins — the same rules Obsidian uses.
 
@@ -308,9 +308,9 @@ A rendered diagram's labels are still text, and you can take them with you
 
 When live collab is on, mdnest opens a WebSocket from your browser to the backend on sign-in. While that connection is open, the app fans real-time events between everyone editing in the same namespace:
 
-- **Presence.** A small avatar stack at the top of the editor shows who else has the same note open right now. Tooltips reveal usernames.
+- **Presence.** Initials in the file toolbar, next to the comments button, show who else has the same note open right now. The tooltip names them.
 - **Cursors.** When a teammate is editing the same note in **Live** mode, you see their cursor as a thin coloured caret with their name on it. Cursor positions update in real time.
-- **Typing indicator.** When someone is actively typing, their avatar in the presence stack pulses faintly so you know to expect changes.
+- **Typing indicator.** When someone is actively typing, their initial pulses faintly and "is typing…" appears beside it, so you know to expect changes.
 - **Conflict banner.** If two people save the same note within the auto-save window, the second save shows a "your edit is based on a stale copy" banner with a one-click reload. This rarely fires — the cursor sharing usually keeps people out of each other's way.
 - **Tree refresh.** When someone else creates / renames / deletes a file in your namespace, your sidebar updates within a second without a manual refresh. This covers changes made *through mdnest*; a write that lands straight on the filesystem (a git-sync pull, an editor on the host) sends no event, and is picked up by the sidebar's own 30-second refresh instead — that refresh runs whether or not live collab is on.
 
@@ -614,6 +614,15 @@ http://localhost:3236/#work/projects/roadmap.md
 ```
 
 Opening a deep link takes you directly to that note (after login if your session has expired).
+
+### Linking to a heading *(v4.8.2+)*
+
+Hover any heading, in the preview or in the Live editor, and a small link button appears after its text. It offers:
+
+- **Copy link**: a URL that opens the note scrolled to that heading, for example `http://localhost:3236/#work/projects/roadmap.md#Next%20steps`.
+- **Copy as [[wikilink]]**: `[[projects/roadmap#Next steps]]`, to paste into another note in the same namespace.
+
+A heading is found by its text, so if it is renamed after you copy the link, the note opens at the top instead. The button sits beside the note, never in it, so using it changes nothing in the file.
 
 ---
 

@@ -29,6 +29,11 @@ All notable changes to mdnest are documented here.
   `/status` it works from any CLI version or MCP `post_chat` and is never
   added to the chat. The **Connect an agent** prompt asks agents to report it
   when they join and about every 10 messages.
+- **Link to a heading.** Hover a heading, in the preview or the Live editor,
+  and a link button offers **Copy link** (a URL that opens the note scrolled
+  to that heading) or **Copy as [[wikilink]]**. `[[note#Heading]]` links to
+  another note now scroll to the heading too; before, they only opened the
+  note.
 
 ### Fixed
 

@@ -35,6 +35,8 @@ import ContextMenu from './components/ContextMenu.jsx';
 import Settings from './components/Settings.jsx';
 import AdminPanel from './components/AdminPanel.jsx';
 import PresenceBar from './components/PresenceBar.jsx';
+import HeadingLinks from './components/HeadingLinks.jsx';
+import { findHeading } from './headingLink.js';
 import CommentSidebar from './components/CommentSidebar.jsx';
 import StickiesPanel from './components/StickiesPanel.jsx';
 import StickiesBoard from './components/StickiesBoard.jsx';
@@ -947,7 +949,8 @@ function App() {
       }
 
       const nsList = await loadNamespaces();
-      const { ns: hashNs, path: hashPath, stickies: hashStickies, board: hashBoard, chats: hashChats, chat: hashChat } = parseHash();
+      const { ns: hashNs, path: hashPath, stickies: hashStickies, board: hashBoard, chats: hashChats, chat: hashChat, heading: hashHeading } = parseHash();
+      if (hashHeading) pendingHeadingRef.current = hashHeading;
       // Opened (or refreshed) on the chats view, possibly with one chat open.
       if (hashChats) {
         setChatsOpen(true);
@@ -1131,6 +1134,11 @@ function App() {
   // half-finished state — e.g. the board switched on but the note not loaded
   // yet, which turned a pasted #!board/ns/note into #!board/ns.
   const hashNavPending = useRef(false);
+  // A heading to scroll to once the note on its way in has rendered: from a
+  // copied heading link (#ns/note.md#Heading) or a [[note#Heading]] link.
+  // While it is set it replaces the remembered scroll position.
+  const pendingHeadingRef = useRef(null);
+  const splitViewRef = useRef(null);
 
   // Update URL hash
   useEffect(() => {
@@ -1154,7 +1162,7 @@ function App() {
   // Handle browser back/forward
   useEffect(() => {
     const onHashChange = () => {
-      const { ns, path, stickies, board, chats, chat } = parseHash();
+      const { ns, path, stickies, board, chats, chat, heading } = parseHash();
       if (stickies) {
         setStickiesView('board');
         return; // the board route says nothing about which note is open
@@ -1172,6 +1180,11 @@ function App() {
       setShowTaskBoard(board);
       if (ns && ns !== selectedNs) {
         setSelectedNs(ns);
+      }
+      if (heading) pendingHeadingRef.current = heading;
+      if (path === currentPath && heading) {
+        scrollToPendingHeading();
+        setHash(ns, path); // consumed: drop the heading from the address bar
       }
       if (path !== currentPath) {
         if (path && ns) {
@@ -1242,7 +1255,31 @@ function App() {
   }, [selectedNs, currentPath, viewMode, editorMode, getScrollables, saveScrollPos]);
 
   // Restore scroll position when opening a document
+  // Scroll to pendingHeadingRef's heading once it has rendered (Preview and
+  // the Live editor both draw real h1-h6). Gives up after a few seconds: a
+  // heading that was renamed since the link was copied leaves the note at
+  // its top rather than retrying forever.
+  const scrollToPendingHeading = useCallback(() => {
+    let attempts = 0;
+    const tryScroll = () => {
+      const want = pendingHeadingRef.current;
+      if (!want) return;
+      const h = findHeading(splitViewRef.current, want);
+      if (h) {
+        h.scrollIntoView({ block: 'start' });
+        pendingHeadingRef.current = null;
+      } else if (attempts++ < 40) {
+        setTimeout(tryScroll, 100);
+      } else {
+        pendingHeadingRef.current = null;
+      }
+    };
+    tryScroll();
+  }, []);
+
   const restoreScrollPosition = useCallback((ns, path) => {
+    // A heading link beats the remembered position.
+    if (pendingHeadingRef.current) { scrollToPendingHeading(); return; }
     // Try in-memory first (fastest), then localStorage
     const key = `${ns}/${path}`;
     let pct = scrollPositions.current[key];
@@ -1269,7 +1306,7 @@ function App() {
       }
     };
     setTimeout(tryRestore, 200);
-  }, [getScrollables, getFilePrefs]);
+  }, [getScrollables, getFilePrefs, scrollToPendingHeading]);
 
   const openNoteDirect = useCallback(async (ns, path) => {
     // Board stays open across note navigation so the chosen view persists; the
@@ -1337,8 +1374,10 @@ function App() {
     return names;
   }, [loadNamespaces, handleSelectNs, isMulti]);
 
-  const openNote = useCallback(async (path) => {
+  const openNote = useCallback(async (path, heading) => {
     if (!selectedNs) return;
+    pendingHeadingRef.current = heading || null;
+    if (heading && path === currentPath) { scrollToPendingHeading(); return; }
     // Board stays open across note navigation so the chosen view persists; the
     // board's own "open source note" action closes it explicitly.
     // Write out the previous file's pending edits instead of dropping them.
@@ -1369,7 +1408,7 @@ function App() {
         console.error('Failed to open note:', e);
       }
     }
-  }, [selectedNs, restoreScrollPosition, commentsEnabled, setLastPath, flushPendingSave]);
+  }, [selectedNs, currentPath, scrollToPendingHeading, restoreScrollPosition, commentsEnabled, setLastPath, flushPendingSave]);
 
   // Stable identity on purpose: this is handed to every task card, which is
   // memoised. An inline arrow here would be a new function on every App
@@ -2315,7 +2354,10 @@ function App() {
             <button onClick={() => setLiveCrashedFor(null)}>Dismiss</button>
           </div>
         )}
-        <div className="split-view">
+        <div className="split-view" ref={splitViewRef}>
+          {currentPath && !chatsOpen && !showTaskBoard && (
+            <HeadingLinks rootRef={splitViewRef} ns={selectedNs} path={currentPath} />
+          )}
           {chatsOpen && chatEnabled ? (
             <ChunkErrorBoundary
               label="chats"
