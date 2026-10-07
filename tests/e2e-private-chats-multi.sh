@@ -113,12 +113,24 @@ for name in ("owen", "mia", "nate"):
         code, r = call("POST", "/api/admin/grants", admin, {"user_id": ids[name], "namespace": ns, "path": "/", "permission": "write"})
         assert code in (200, 201), f"grant: {code} {r}"
 owen, mia, nate = login("owen", "owenpass123"), login("mia", "miapass123"), login("nate", "natepass123")
+# Making an existing open chat private is for a namespace admin. The role is
+# read from the token, so owen signs in again after the promotion.
+code, r = call("POST", "/api/admin/namespace-admins", admin, {"user_id": ids["owen"], "namespace": "alpha"})
+assert code in (200, 201), f"promote owen: {code} {r}"
+owen = login("owen", "owenpass123X")
+
 
 def members(tok, ns, path):
     return call("GET", f"/api/chat/members?ns={ns}&path={path}", tok)
 
 def can_read(tok, ns, path):
     return call("GET", f"/api/note?ns={ns}&path={path}", tok)[0] == 200
+
+print("── making an existing chat private needs a namespace admin")
+code, r = call("POST", "/api/chat/members?ns=alpha&path=Chats_x.md", nate, {"userId": ids["mia"]})
+check("nate (collaborator) cannot make an open chat private", code == 403 and can_read(owen, "alpha", "Chats_x.md"), f"{code} {r}")
+code, r = call("POST", "/api/chat/members?ns=alpha&path=Chats/room.md", nate, {"userId": 999999})
+check("inviting an account outside the workspace is a uniform 404", code in (403, 404), f"{code} {r}")
 
 print("── making chats private, inviting, removing")
 code, r = call("POST", "/api/chat/members?ns=alpha&path=Chats/room.md", owen, {"userId": ids["mia"]})
@@ -171,6 +183,44 @@ code, r = call("POST", "/api/transfer", nate, {"mode": "copy", "from": {"ns": "a
 check("nate cannot copy a folder holding a chat he is not in", code == 403 and not os.path.exists(os.path.join(NOTES, "beta/Stolen")), f"{code} {r}")
 code, r = call("DELETE", "/api/note?ns=alpha&path=Rooms", nate)
 check("nate cannot delete that folder", code == 403 and os.path.exists(os.path.join(NOTES, "alpha/Rooms/room.md")), f"{code} {r}")
+check("the old path stays closed after the move (its git history is served there)", call("GET", "/api/note/history?ns=alpha&path=Chats/room.md", nate)[0] == 403)
+
+print("── a failed move restores exactly what it replaced")
+call("POST", "/api/note?ns=alpha&path=Notes/n.md", nate, text="nate's note")
+code, r = call("POST", "/api/move?ns=alpha&from=Notes/n.md&to=Rooms", nate)
+check("nate's move onto the existing folder fails", code >= 400, f"{code} {r}")
+check("and the private chat in that folder is still closed to him", not can_read(nate, "alpha", "Rooms/room.md"))
+check("and still open to its members", can_read(mia, "alpha", "Rooms/room.md"))
+code, r = call("POST", "/api/chat/convert?ns=alpha&path=Notes/n.md&private=1", owen)
+check("private=1 cannot take over an existing note", code == 409 and can_read(nate, "alpha", "Notes/n.md"), f"{code} {r}")
+
+print("── moving a chat onto an old path replaces the list left there")
+code, r = call("POST", "/api/chat/convert?ns=alpha&path=Rooms/fresh.md&private=1", owen)
+check("owen creates a private chat", code == 201, f"{code} {r}")
+code, r = call("POST", "/api/move?ns=alpha&from=Rooms/fresh.md&to=Chats/room.md", owen)
+check("owen moves it onto room.md's old path", code == 200, f"{code} {r}")
+code, r = members(owen, "alpha", "Chats/room.md")
+check("only the moved chat's members are there now", code == 200 and [m["username"] for m in r["members"]] == ["owen"], str(r))
+
+print("── letter case, and a removed member racing to add themselves back")
+check("another spelling of the path is refused too", call("GET", "/api/note?ns=alpha&path=ROOMS/ROOM.md", nate)[0] == 403)
+code, r = call("POST", "/api/chat/members?ns=alpha&path=Rooms/room.md", owen, {"userId": ids["nate"]})
+lost = 0
+for _ in range(15):
+    call("POST", "/api/chat/members?ns=alpha&path=Rooms/room.md", owen, {"userId": ids["nate"]})
+    stop = threading.Event()
+    def spam():
+        while not stop.is_set():
+            call("POST", "/api/chat/members?ns=alpha&path=Rooms/room.md", nate, {})
+    th = [threading.Thread(target=spam) for _ in range(3)]
+    for t in th: t.start()
+    call("DELETE", f"/api/chat/members?ns=alpha&path=Rooms/room.md&userId={ids['nate']}", owen)
+    stop.set()
+    for t in th: t.join()
+    _, r = members(owen, "alpha", "Rooms/room.md")
+    if any(m["username"] == "nate" for m in r["members"]):
+        lost += 1
+check("a removed member never stays on the list (15 rounds)", lost == 0, f"re-added in {lost} rounds")
 
 print("── a deleted account does not open the chat")
 code, r = call("POST", "/api/chat/convert?ns=alpha&path=Solo.md&private=1", mia)

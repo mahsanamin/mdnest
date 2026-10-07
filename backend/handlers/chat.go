@@ -552,6 +552,14 @@ func (h *ChatHandler) HandleConvert(w http.ResponseWriter, r *http.Request) {
 	// written BEFORE the note: a new chat must never exist, even briefly,
 	// as an open one that every reader of the namespace can see.
 	if r.URL.Query().Get("private") == "1" {
+		// Only for a new note. On an existing one it would let anyone with
+		// write access turn a shared note (or an open chat) into something
+		// only they can open. An existing chat is made private through
+		// /api/chat/members, which only accepts a chat.
+		if !created {
+			chatJSONError(w, http.StatusConflict, "private=1 only creates a new chat; use the chat's members to make an existing one private")
+			return
+		}
 		uc := middleware.UserFromContext(ctx)
 		if h.members == nil || uc == nil || uc.ID <= 0 {
 			chatJSONError(w, http.StatusBadRequest, "private chats are not available here")
@@ -561,6 +569,9 @@ func (h *ChatHandler) HandleConvert(w http.ResponseWriter, r *http.Request) {
 			chatJSONError(w, http.StatusInternalServerError, "failed to make the chat private")
 			return
 		}
+		// Anyone who joined the live room for this path before the note
+		// existed would otherwise stay connected to a private chat.
+		defer h.dropNonMembers(ns, relPath, "/"+relPath)
 	}
 	if out != existing {
 		if err := h.store.WriteFile(ctx, ns, relPath, []byte(out)); err != nil {
@@ -656,7 +667,7 @@ func (h *ChatHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, c := range h.scanNamespace(ctx, ns) {
 			if h.canRead(r, ns, "/"+c.Path) {
-				_, c.Private = private["/"+c.Path]
+				_, c.Private = private[strings.ToLower("/"+c.Path)] // keys are lowercased
 				chats = append(chats, c)
 			}
 		}

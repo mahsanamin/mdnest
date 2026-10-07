@@ -27,13 +27,16 @@ import (
 // permission checker on every route that serves the note, so a non-member
 // gets a 403 here before the handler runs, and the handler never needs to ask.
 
-// chatUserLookup is the part of the user store the member routes need.
+// chatUserLookup lists the people who can be invited to a chat in a
+// namespace: the same list the picker shows (/api/namespace/users).
 type chatUserLookup interface {
-	GetUserByID(id int) (*store.User, error)
+	UsersForNamespace(namespace string) ([]store.NamespaceUser, error)
 }
 
-// SetMembers turns on private chats. users resolves the id being added, so a
-// typo cannot put a nonexistent account on a chat.
+// SetMembers turns on private chats. users bounds who can be invited: only
+// someone with a grant in the chat's workspace. Accepting any account id
+// would let a member put arbitrary accounts on a chat, and learn the username
+// behind every id on the server from the list it sends back.
 func (h *ChatHandler) SetMembers(m store.ChatMemberStore, users chatUserLookup) {
 	h.members = m
 	h.users = users
@@ -80,26 +83,37 @@ func (h *ChatHandler) HandleMembers(w http.ResponseWriter, r *http.Request) {
 			chatJSONError(w, http.StatusBadRequest, "invalid userId")
 			return
 		}
-		if body.UserID > 0 {
-			if u, err := h.users.GetUserByID(body.UserID); err != nil || u == nil {
-				chatJSONError(w, http.StatusNotFound, "user not found")
+		if body.UserID > 0 && body.UserID != uc.ID {
+			inWorkspace := false
+			if users, err := h.users.UsersForNamespace(ns); err == nil {
+				for _, u := range users {
+					inWorkspace = inWorkspace || u.ID == body.UserID
+				}
+			}
+			if !inWorkspace {
+				chatJSONError(w, http.StatusNotFound, "no such user in this workspace")
 				return
 			}
 		}
-		// The caller first. On an open chat this is what makes it private,
-		// and it means the person who closed it can always still open it.
-		// On a private chat the caller is already a member (the checker let
-		// them in), so this is a no-op.
-		if err := h.members.Add(ns, key, uc.ID, uc.ID); err != nil {
+		// Turning an OPEN chat private shuts out everyone not added, so it is
+		// for a namespace admin. Otherwise anyone with write access could tag
+		// any shared note as a chat and then hide it from everyone else. A
+		// new chat can still be created private by anyone (convert
+		// ?private=1), and on a private chat any member can invite. The
+		// store decides under a lock, against the list as it is NOW: the
+		// route's check ran earlier, and a member removed in between must
+		// not be able to add themselves back.
+		pc := middleware.CheckerFrom(r.Context())
+		mayOpen := pc != nil && pc.HasAdminScope(uc, ns)
+		if err := h.members.Invite(ns, key, uc.ID, body.UserID, mayOpen); err != nil {
+			if errors.Is(err, store.ErrChatNotAllowed) {
+				chatJSONError(w, http.StatusForbidden, "only a workspace admin can make an existing chat private; a new chat can be created private")
+				return
+			}
 			chatJSONError(w, http.StatusInternalServerError, "failed to update members")
 			return
 		}
-		if body.UserID > 0 && body.UserID != uc.ID {
-			if err := h.members.Add(ns, key, body.UserID, uc.ID); err != nil {
-				chatJSONError(w, http.StatusInternalServerError, "failed to update members")
-				return
-			}
-		}
+		h.dropNonMembers(ns, relPath, key)
 		h.writeMembers(w, ns, key)
 
 	case http.MethodDelete:
@@ -116,11 +130,40 @@ func (h *ChatHandler) HandleMembers(w http.ResponseWriter, r *http.Request) {
 			chatJSONError(w, http.StatusInternalServerError, "failed to update members")
 			return
 		}
+		h.dropNonMembers(ns, relPath, key)
 		h.writeMembers(w, ns, key)
 
 	default:
 		chatJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
+}
+
+// dropNonMembers closes the live-editing connections of anyone not on the
+// list, after a removal or after an open chat was made private. Every other
+// way of reading the chat is checked per request; a live connection is
+// checked once, when it joins, so without this a removed member with the note
+// open in the editor would keep receiving every new message.
+func (h *ChatHandler) dropNonMembers(ns, relPath, key string) {
+	if h.hub == nil {
+		return
+	}
+	ids, err := h.members.Members(ns, key)
+	if err != nil {
+		// Cannot tell who is still in: drop everyone, they reconnect
+		// through the permission check.
+		h.hub.DropUsers(ns, relPath, func(int) bool { return false })
+		return
+	}
+	h.hub.DropUsers(ns, relPath, func(uid int) bool { return containsInt(ids, uid) })
+}
+
+func containsInt(ids []int, id int) bool {
+	for _, v := range ids {
+		if v == id {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *ChatHandler) writeMembers(w http.ResponseWriter, ns, key string) {

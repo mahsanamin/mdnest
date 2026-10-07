@@ -210,6 +210,27 @@ func (h *Hub) Leave(ns, path string, conn *Conn) {
 	}
 }
 
+// DropUsers closes every live connection on a note whose user keep rejects.
+// A connection is authorised once, when it joins, so this is how a change of
+// access (someone removed from a private chat) reaches a tab that is already
+// open: its connection closes, and reconnecting goes through the check again.
+// Only this instance's connections: with the Redis backplane a peer keeps its
+// own until they reconnect.
+func (h *Hub) DropUsers(ns, path string, keep func(userID int) bool) {
+	key := noteKey(ns, path)
+	h.mu.RLock()
+	var drop []*Conn
+	for c := range h.notes[key] {
+		if !keep(c.User.ID) {
+			drop = append(drop, c)
+		}
+	}
+	h.mu.RUnlock()
+	for _, c := range drop {
+		c.Close()
+	}
+}
+
 // userHasConnLocked reports whether `userID` still has at least one
 // connection on `key`. Caller must hold h.mu.
 func (h *Hub) userHasConnLocked(key string, userID int) bool {

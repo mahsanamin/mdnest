@@ -19,7 +19,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/mdnest/mdnest/backend/collab"
 	"github.com/mdnest/mdnest/backend/handlers"
 	"github.com/mdnest/mdnest/backend/middleware"
 	"github.com/mdnest/mdnest/backend/storage"
@@ -41,10 +43,11 @@ type memChatMembers struct {
 
 func newMemChatMembers() *memChatMembers { return &memChatMembers{rows: map[string][]int{}} }
 
-func ck(ns, p string) string { return ns + "\x00/" + strings.Trim(p, "/") }
+// Keys are lowercased, as the Postgres store keys them.
+func ck(ns, p string) string { return ns + "\x00" + strings.ToLower("/"+strings.Trim(p, "/")) }
 
 func under(root, p string) bool {
-	root = "/" + strings.Trim(root, "/")
+	root = strings.ToLower("/" + strings.Trim(root, "/"))
 	return root == "/" || p == root || strings.HasPrefix(p, root+"/")
 }
 
@@ -89,6 +92,24 @@ func (m *memChatMembers) Add(ns, p string, uid, _ int) error {
 	return nil
 }
 
+func (m *memChatMembers) Invite(ns, p string, caller, target int, mayOpen bool) error {
+	ids, _ := m.Members(ns, p)
+	isMember := false
+	for _, id := range ids {
+		isMember = isMember || id == caller
+	}
+	if (len(ids) == 0 && !mayOpen) || (len(ids) > 0 && !isMember) {
+		return store.ErrChatNotAllowed
+	}
+	if len(ids) == 0 {
+		m.Add(ns, p, caller, caller)
+	}
+	if target > 0 {
+		m.Add(ns, p, target, caller)
+	}
+	return nil
+}
+
 func (m *memChatMembers) Remove(ns, p string, uid int) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -106,55 +127,55 @@ func (m *memChatMembers) Remove(ns, p string, uid int) error {
 	return nil
 }
 
-func (m *memChatMembers) each(ns, root string, fn func(k, p string)) {
-	for k := range m.rows {
+func (m *memChatMembers) CopyPrefix(fromNS, from, toNS, to string) (*store.ChatCopy, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	f := strings.ToLower("/" + strings.Trim(from, "/"))
+	t := strings.ToLower("/" + strings.Trim(to, "/"))
+	c := &store.ChatCopy{NS: toNS}
+	add := map[string][]int{}
+	for k, ids := range m.rows {
 		parts := strings.SplitN(k, "\x00", 2)
-		if parts[0] == ns && under(root, parts[1]) {
-			fn(k, parts[1])
+		if parts[0] == fromNS && under(f, parts[1]) {
+			add[t+strings.TrimPrefix(parts[1], f)] = append([]int(nil), ids...)
 		}
 	}
-}
-
-func (m *memChatMembers) MovePrefix(fromNS, from, toNS, to string) error {
-	if err := m.CopyPrefix(fromNS, from, toNS, to); err != nil {
-		return err
+	for p, ids := range add {
+		c.Paths = append(c.Paths, p)
+		for _, id := range m.rows[toNS+"\x00"+p] {
+			c.Replaced = append(c.Replaced, store.ChatMemberRow{Path: p, UserID: id})
+		}
+		m.rows[toNS+"\x00"+p] = ids
 	}
-	return m.DeletePrefix(fromNS, from)
+	return c, nil
 }
 
-func (m *memChatMembers) CopyPrefix(fromNS, from, toNS, to string) error {
+func (m *memChatMembers) RestoreCopy(c *store.ChatCopy) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	f := "/" + strings.Trim(from, "/")
-	t := "/" + strings.Trim(to, "/")
-	add := map[string][]int{}
-	m.each(fromNS, f, func(k, p string) {
-		add[toNS+"\x00"+t+strings.TrimPrefix(p, f)] = append([]int(nil), m.rows[k]...)
-	})
-	for k, ids := range add {
-		m.rows[k] = ids
+	for _, p := range c.Paths {
+		delete(m.rows, c.NS+"\x00"+p)
+	}
+	for _, r := range c.Replaced {
+		k := c.NS + "\x00" + r.Path
+		m.rows[k] = append(m.rows[k], r.UserID)
 	}
 	return nil
 }
 
-func (m *memChatMembers) DeletePrefix(ns, p string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	var drop []string
-	m.each(ns, p, func(k, _ string) { drop = append(drop, k) })
-	for _, k := range drop {
-		delete(m.rows, k)
-	}
-	return nil
-}
+// memUsers is UsersForNamespace over the fixture's grants.
+type memUsers struct{ grants *memGrants }
 
-type memUsers struct{}
-
-func (memUsers) GetUserByID(id int) (*store.User, error) {
-	if id <= 0 || id > 9 {
-		return nil, nil
+func (m memUsers) UsersForNamespace(ns string) ([]store.NamespaceUser, error) {
+	seen := map[int]bool{}
+	var out []store.NamespaceUser
+	for _, g := range m.grants.grants {
+		if g.Namespace == ns && !seen[g.UserID] {
+			seen[g.UserID] = true
+			out = append(out, store.NamespaceUser{ID: g.UserID, Username: "user" + string(rune('0'+g.UserID))})
+		}
 	}
-	return &store.User{ID: id, Username: "user" + string(rune('0'+id))}, nil
+	return out, nil
 }
 
 // buildChatFixture:
@@ -218,14 +239,15 @@ func newChatServer(t *testing.T) *chatServer {
 
 	search := handlers.NewSearchHandler(stg)
 	note := handlers.NewNoteHandler(stg)
-	note.SetChatMembers(members)
 	move := handlers.NewMoveHandler(stg)
 	move.SetChatMembers(members)
 	tCanRead, tCanWrite := handlers.TransferPermissionFuncs(perms)
 	transfer := handlers.NewTransferHandler(stg, handlers.DefaultTreeLimits, tCanRead, tCanWrite, search.InvalidateCache)
-	transfer.SetChatMembers(members)
+	transfer.SetChatMembers(members, perms.CheckWriteDest)
 	chat := handlers.NewChatHandler(stg, perms.FilterNamespaces, perms.CheckRead, "admin", true)
-	chat.SetMembers(members, memUsers{})
+	chat.SetMembers(members, memUsers{grants: mg})
+	hub := collab.NewHub()
+	chat.SetCollabHub(hub)
 
 	invalidate := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -255,6 +277,7 @@ func newChatServer(t *testing.T) *chatServer {
 		chat:        chat,
 		sync:        handlers.NewSyncHandler(root, search.InvalidateCache, na),
 		restart:     handlers.NewRestartHandler(func() {}),
+		ws:          handlers.NewWSHandler(hub, testSecret, perms),
 	}
 	mux := http.NewServeMux()
 	registerContentRoutes(mux, routes)
@@ -433,9 +456,15 @@ func TestPrivateChat_MembersReadInviteAndRemove(t *testing.T) {
 		t.Errorf("removed member still reads the chat: %d", code)
 	}
 
-	// Inviting a user who does not exist is refused.
-	if code, _ := cs.do(owen, http.MethodPost, "/api/chat/members?"+secretQ, strings.NewReader(`{"userId":99}`), "application/json"); code != http.StatusNotFound {
-		t.Errorf("inviting a nonexistent user: %d", code)
+	// Inviting someone who does not exist, or who has no grant in this
+	// workspace (user 7 administers it but holds no grant here), is refused
+	// the same way, so the answer says nothing about accounts elsewhere on
+	// the server.
+	for _, id := range []string{"99", "7"} {
+		code, body := cs.do(owen, http.MethodPost, "/api/chat/members?"+secretQ, strings.NewReader(`{"userId":`+id+`}`), "application/json")
+		if code != http.StatusNotFound || !strings.Contains(body, "no such user in this workspace") {
+			t.Errorf("inviting user %s from outside the workspace: %d %s", id, code, body)
+		}
 	}
 
 	// Mia leaves; Owen, now alone, cannot remove himself.
@@ -455,16 +484,35 @@ func TestPrivateChat_MakingPrivate(t *testing.T) {
 	owen := jwtFor(t, uidOwen, "collaborator", nil)
 	nate := jwtFor(t, uidNate, "collaborator", nil)
 
-	// An open chat becomes private to whoever closes it.
+	// Making an existing open chat private is for a namespace admin: anyone
+	// else could tag a shared note as a chat and hide it from everyone.
 	q := "ns=alpha&path=Chats/open.md"
 	if code, body := cs.get(nate, "/api/chat/members?"+q); code != http.StatusOK || !strings.Contains(body, `"private":false`) {
 		t.Fatalf("open chat members: %d %s", code, body)
 	}
-	if code, _ := cs.do(owen, http.MethodPost, "/api/chat/members?"+q, nil, ""); code != http.StatusOK {
-		t.Fatalf("make private: %d", code)
+	for _, body := range []string{"", `{"userId":5}`} {
+		if code, _ := cs.do(owen, http.MethodPost, "/api/chat/members?"+q, strings.NewReader(body), "application/json"); code != http.StatusForbidden {
+			t.Errorf("a collaborator made an open chat private (%q): %d", body, code)
+		}
+	}
+	if code, _ := cs.get(nate, "/api/chat?"+q); code != http.StatusOK {
+		t.Fatalf("a refused make-private still closed the chat: %d", code)
+	}
+	// A plain note tagged as a chat cannot be taken that way either.
+	cs.do(owen, http.MethodPost, "/api/note?ns=alpha&path=Notes/shared.md", strings.NewReader("everyone's"), "text/plain")
+	cs.do(nate, http.MethodPost, "/api/chat/convert?ns=alpha&path=Notes/shared.md", nil, "")
+	if code, _ := cs.do(nate, http.MethodPost, "/api/chat/members?ns=alpha&path=Notes/shared.md", nil, ""); code != http.StatusForbidden {
+		t.Errorf("convert-then-make-private took a shared note: %d", code)
+	}
+	admin := jwtFor(t, uidAdmin, "admin", nil)
+	if code, body := cs.do(admin, http.MethodPost, "/api/chat/members?"+q, strings.NewReader(`{"userId":3}`), "application/json"); code != http.StatusOK {
+		t.Fatalf("namespace admin makes it private: %d %s", code, body)
 	}
 	if code, _ := cs.get(nate, "/api/chat?"+q); code != http.StatusForbidden {
 		t.Errorf("open chat made private is still readable by others: %d", code)
+	}
+	if code, _ := cs.get(owen, "/api/chat?"+q); code != http.StatusOK {
+		t.Errorf("the invited member cannot read it: %d", code)
 	}
 
 	// A new chat created private never exists as an open one.
@@ -497,9 +545,10 @@ func TestPrivateChat_MembershipFollowsTheNote(t *testing.T) {
 	if code, _ := cs.get(nate, "/api/note?ns=alpha&path=Chats/renamed.md"); code != http.StatusForbidden {
 		t.Errorf("a renamed private chat became open: %d", code)
 	}
-	// The old path is free again: a new note there is an ordinary note.
-	if code, _ := cs.do(nate, http.MethodPost, "/api/note?"+secretQ, strings.NewReader("mine"), "text/plain"); code >= 400 {
-		t.Errorf("old path still restricted after the move: %d", code)
+	// The old path stays restricted: the chat's git history is still served
+	// there. A non-member cannot create a note at it either.
+	if code, _ := cs.do(nate, http.MethodPost, "/api/note?"+secretQ, strings.NewReader("mine"), "text/plain"); code != http.StatusForbidden {
+		t.Errorf("old path opened after the move: %d", code)
 	}
 
 	// Moving the folder that holds it.
@@ -530,16 +579,23 @@ func TestPrivateChat_MembershipFollowsTheNote(t *testing.T) {
 	if code, _ := cs.get(nate, "/api/note?ns=alpha&path=Back/copy.md"); code != http.StatusForbidden {
 		t.Errorf("a private chat moved across namespaces is open: %d", code)
 	}
-	if m, _ := cs.members.Members("beta", "/copy.md"); len(m) != 0 {
-		t.Errorf("member list left behind at the source: %v", m)
+	if m, _ := cs.members.Members("beta", "/copy.md"); len(m) == 0 {
+		t.Errorf("the source path lost its restriction: its history would open")
 	}
 
-	// Deleting it forgets the list.
-	if code, _ := cs.do(owen, http.MethodDelete, "/api/note?ns=alpha&path=Back/copy.md", nil, ""); code != http.StatusOK {
-		t.Fatalf("delete: %d", code)
+	// Moving a chat back onto an old path REPLACES the list left there, so
+	// someone removed since cannot come back with it.
+	// A list left at an old path: Owen and Nate were both in that chat
+	// when it was moved away, and Nate has been removed from it since.
+	cs.members.Add("alpha", "/Rooms/old.md", uidOwen, uidOwen)
+	cs.members.Add("alpha", "/Rooms/old.md", uidNate, uidOwen)
+	os.WriteFile(filepath.Join(cs.root, "alpha", "Rooms", "new.md"), []byte("---\nmdnest-chat: true\n---\n"), 0o644)
+	cs.members.Add("alpha", "/Rooms/new.md", uidOwen, uidOwen)
+	if code, _ := cs.do(owen, http.MethodPost, "/api/move?ns=alpha&from=Rooms/new.md&to=Rooms/old.md", nil, ""); code != http.StatusOK {
+		t.Fatalf("move onto an old path: %d", code)
 	}
-	if m, _ := cs.members.Members("alpha", "/Back/copy.md"); len(m) != 0 {
-		t.Errorf("member list outlived the chat: %v", m)
+	if code, _ := cs.get(nate, "/api/note?ns=alpha&path=Rooms/old.md"); code != http.StatusForbidden {
+		t.Errorf("an old list at the destination let a non-member back in: %d", code)
 	}
 }
 
@@ -572,3 +628,229 @@ func TestPrivateChat_MembersRouteOnlyWithAStore(t *testing.T) {
 
 var _ = io.Discard
 var _ = url.QueryEscape
+
+// --- found by the security review after the first push ---------------------
+
+// A failed move used to roll back by dropping every member list under the
+// destination. Aimed at an existing folder (the rename fails), that wiped the
+// list of a private chat already living there and opened it.
+func TestPrivateChat_FailedMoveDoesNotOpenAChatAtTheDestination(t *testing.T) {
+	cs := newChatServer(t)
+	nate := jwtFor(t, uidNate, "collaborator", nil)
+	// Nate owns Notes/a.md and aims it at the existing folder Chats.
+	code, _ := cs.do(nate, http.MethodPost, "/api/move?ns=alpha&from=Notes/a.md&to=Chats", nil, "")
+	if code < 400 {
+		t.Fatalf("moving a file onto an existing folder should fail, got %d", code)
+	}
+	if code, body := cs.get(nate, "/api/note?"+secretQ); code != http.StatusForbidden {
+		t.Errorf("a failed move opened the private chat: %d %s", code, body)
+	}
+	// The same through /api/transfer within one namespace.
+	body := `{"mode":"move","from":{"ns":"alpha","path":"Notes/a.md"},"to":{"ns":"alpha","path":"Chats"}}`
+	cs.do(nate, http.MethodPost, "/api/transfer", strings.NewReader(body), "application/json")
+	if code, _ := cs.get(nate, "/api/note?"+secretQ); code != http.StatusForbidden {
+		t.Errorf("a failed transfer opened the private chat: %d", code)
+	}
+}
+
+// private=1 on convert must not turn someone else's existing note into a chat
+// only the caller can open.
+func TestPrivateChat_ConvertCannotTakeAnExistingNote(t *testing.T) {
+	cs := newChatServer(t)
+	owen := jwtFor(t, uidOwen, "collaborator", nil)
+	nate := jwtFor(t, uidNate, "collaborator", nil)
+	before := cs.readFile("alpha/Notes/a.md")
+	code, _ := cs.do(nate, http.MethodPost, "/api/chat/convert?ns=alpha&path=Notes/a.md&private=1", nil, "")
+	if code < 400 {
+		t.Errorf("private convert of an existing note: %d", code)
+	}
+	if code, _ := cs.get(owen, "/api/note?ns=alpha&path=Notes/a.md"); code != http.StatusOK {
+		t.Errorf("owen was locked out of an ordinary note: %d", code)
+	}
+	if got := cs.readFile("alpha/Notes/a.md"); got != before {
+		t.Errorf("a refused convert changed the note: %q", got)
+	}
+}
+
+// A private chat's old path keeps its restriction after a move or delete, so
+// its git history there (note/at, note/history) stays closed to non-members.
+func TestPrivateChat_OldPathStaysClosedAfterMoveAndDelete(t *testing.T) {
+	cs := newChatServer(t)
+	owen := jwtFor(t, uidOwen, "collaborator", nil)
+	nate := jwtFor(t, uidNate, "collaborator", nil)
+	if code, _ := cs.do(owen, http.MethodPost, "/api/move?ns=alpha&from=Chats/secret.md&to=Chats/renamed.md", nil, ""); code != http.StatusOK {
+		t.Fatalf("move: %d", code)
+	}
+	for _, p := range []string{"/api/note/history?" + secretQ, "/api/note/at?" + secretQ + "&ref=0123456789abcdef0123456789abcdef01234567"} {
+		if code, _ := cs.get(nate, p); code != http.StatusForbidden {
+			t.Errorf("after a move, %s: %d", p, code)
+		}
+	}
+	if code, _ := cs.do(owen, http.MethodDelete, "/api/note?ns=alpha&path=Chats/renamed.md", nil, ""); code != http.StatusOK {
+		t.Fatalf("delete: %d", code)
+	}
+	if code, _ := cs.get(nate, "/api/note/history?ns=alpha&path=Chats/renamed.md"); code != http.StatusForbidden {
+		t.Errorf("after a delete, the history is open: %d", code)
+	}
+	// The folder no longer holds a live private chat, so the leftover
+	// restriction does not stop a non-member managing it.
+	if code, body := cs.do(nate, http.MethodDelete, "/api/note?ns=alpha&path=Chats", nil, ""); code != http.StatusOK {
+		t.Errorf("a leftover restriction blocked deleting the folder: %d %s", code, body)
+	}
+}
+
+// A live-editing connection is authorised once, when it joins. Removing a
+// member must close theirs, or a removed member with the note open in the
+// editor keeps receiving every new message.
+func TestPrivateChat_RemovalClosesTheLiveConnection(t *testing.T) {
+	cs := newChatServer(t)
+	owen := jwtFor(t, uidOwen, "collaborator", nil)
+	mia := jwtFor(t, uidMia, "collaborator", nil)
+	nate := jwtFor(t, uidNate, "collaborator", nil)
+	if _, code := dialWS(t, cs.testServer, nate, "Chats/secret.md"); code == http.StatusSwitchingProtocols {
+		t.Fatalf("a non-member joined the live room")
+	}
+	cs.do(owen, http.MethodPost, "/api/chat/members?"+secretQ, strings.NewReader(`{"userId":6}`), "application/json")
+	nws, code := dialWS(t, cs.testServer, nate, "Chats/secret.md")
+	if code != http.StatusSwitchingProtocols {
+		t.Fatalf("an invited member could not join the live room: %d", code)
+	}
+	mws, _ := dialWS(t, cs.testServer, mia, "Chats/secret.md")
+	time.Sleep(100 * time.Millisecond) // let both joins register
+	cs.do(owen, http.MethodDelete, "/api/chat/members?"+secretQ+"&userId=6", nil, "")
+
+	deadline := time.After(3 * time.Second)
+	for closed := false; !closed; {
+		select {
+		case _, open := <-nws.msgs:
+			closed = !open
+		case <-deadline:
+			t.Fatal("the removed member's live connection stayed open")
+		}
+	}
+	// Mia is still a member: her connection stays up.
+	select {
+	case _, open := <-mws.msgs:
+		for open {
+			select {
+			case _, open = <-mws.msgs:
+			case <-time.After(300 * time.Millisecond):
+				return
+			}
+		}
+		t.Error("a member's live connection was closed too")
+	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+// The list left at a moved chat's old path guards its git history. A
+// non-member must not be able to replace it by moving or copying a private
+// chat of their own onto that path, directly or inside a folder.
+func TestPrivateChat_LeftoverListCannotBeReplacedByANonMember(t *testing.T) {
+	cs := newChatServer(t)
+	owen := jwtFor(t, uidOwen, "collaborator", nil)
+	nate := jwtFor(t, uidNate, "collaborator", nil)
+	if code, _ := cs.do(owen, http.MethodPost, "/api/move?ns=alpha&from=Chats/secret.md&to=Archive/secret.md", nil, ""); code != http.StatusOK {
+		t.Fatalf("owen moves the chat away: %d", code)
+	}
+	// Nate builds Mine/secret.md, a private chat of his own, then aims the
+	// folder at Chats, where the old list is.
+	if code, _ := cs.do(nate, http.MethodPost, "/api/chat/convert?ns=alpha&path=Mine/secret.md&private=1", nil, ""); code != http.StatusCreated {
+		t.Fatalf("nate's own chat: %d", code)
+	}
+	os.RemoveAll(filepath.Join(cs.root, "alpha", "Chats")) // the folder is gone, only the list is left
+	attempts := []struct{ method, path, body string }{
+		{http.MethodPost, "/api/move?ns=alpha&from=Mine&to=Chats", ""},
+		{http.MethodPost, "/api/move?ns=alpha&from=Mine/secret.md&to=Chats/secret.md", ""},
+		{http.MethodPost, "/api/transfer", `{"mode":"copy","from":{"ns":"alpha","path":"Mine"},"to":{"ns":"alpha","path":"Chats"}}`},
+		{http.MethodPost, "/api/transfer", `{"mode":"move","from":{"ns":"alpha","path":"Mine"},"to":{"ns":"alpha","path":"Chats"}}`},
+	}
+	for _, a := range attempts {
+		if code, _ := cs.do(nate, a.method, a.path, strings.NewReader(a.body), "application/json"); code != http.StatusForbidden {
+			t.Errorf("%s %s %s: %d", a.method, a.path, a.body, code)
+		}
+		if ids, _ := cs.members.Members("alpha", "/Chats/secret.md"); containsTestID(ids, uidNate) {
+			t.Fatalf("nate replaced the old list: %v", ids)
+		}
+	}
+	if code, _ := cs.get(nate, "/api/note/history?"+secretQ); code != http.StatusForbidden {
+		t.Errorf("the old history opened: %d", code)
+	}
+}
+
+func containsTestID(ids []int, id int) bool {
+	for _, v := range ids {
+		if v == id {
+			return true
+		}
+	}
+	return false
+}
+
+// Found by the independent review. On a case-insensitive mount CHATS/SECRET.md
+// opens Chats/secret.md, so the member check must not depend on the spelling.
+func TestPrivateChat_LetterCaseDoesNotSkipTheCheck(t *testing.T) {
+	cs := newChatServer(t)
+	nate := jwtFor(t, uidNate, "collaborator", nil)
+	for _, p := range []string{"CHATS/SECRET.md", "chats/Secret.md", "Chats/SECRET.MD"} {
+		for _, route := range []string{"/api/note", "/api/chat", "/api/note/history", "/api/download", "/api/comments"} {
+			if code, _ := cs.get(nate, route+"?ns=alpha&path="+url.QueryEscape(p)); code != http.StatusForbidden {
+				t.Errorf("%s %s: %d", route, p, code)
+			}
+		}
+		if code, _ := cs.do(nate, http.MethodDelete, "/api/note?ns=alpha&path="+url.QueryEscape(p), nil, ""); code != http.StatusForbidden {
+			t.Errorf("DELETE %s: %d", p, code)
+		}
+	}
+	if code, _ := cs.do(nate, http.MethodDelete, "/api/note?ns=alpha&path=CHATS", nil, ""); code != http.StatusForbidden {
+		t.Errorf("DELETE the folder by another spelling: %d", code)
+	}
+}
+
+// A move never lands on an existing note: it would replace the note's text,
+// and a private chat dropped over a shared note would take it from everyone.
+func TestPrivateChat_MoveCannotReplaceAnExistingNote(t *testing.T) {
+	cs := newChatServer(t)
+	nate := jwtFor(t, uidNate, "collaborator", nil)
+	owen := jwtFor(t, uidOwen, "collaborator", nil)
+	before := cs.readFile("alpha/Notes/a.md")
+	if code, _ := cs.do(nate, http.MethodPost, "/api/chat/convert?ns=alpha&path=Mine/x.md&private=1", nil, ""); code != http.StatusCreated {
+		t.Fatalf("nate's chat: %d", code)
+	}
+	if code, _ := cs.do(nate, http.MethodPost, "/api/move?ns=alpha&from=Mine/x.md&to=Notes/a.md", nil, ""); code != http.StatusConflict {
+		t.Errorf("move onto an existing note: %d", code)
+	}
+	if got := cs.readFile("alpha/Notes/a.md"); got != before {
+		t.Errorf("the note was replaced: %q", got)
+	}
+	if code, _ := cs.get(owen, "/api/note?ns=alpha&path=Notes/a.md"); code != http.StatusOK {
+		t.Errorf("owen lost the shared note: %d", code)
+	}
+	// A rename that only changes case still works.
+	if code, body := cs.do(owen, http.MethodPost, "/api/move?ns=alpha&from=Notes/a.md&to=Notes/A.md", nil, ""); code != http.StatusOK {
+		t.Errorf("case-only rename: %d %s", code, body)
+	}
+}
+
+// A link to a private chat must not carry its text into search or the task
+// board, for a namespace admin or a reader of the whole namespace.
+func TestPrivateChat_LinkToItStaysOutOfListings(t *testing.T) {
+	cs := newChatServer(t)
+	os.MkdirAll(filepath.Join(cs.root, "alpha", "Shared"), 0o755)
+	if err := os.Symlink(filepath.Join(cs.root, "alpha", "Chats", "secret.md"), filepath.Join(cs.root, "alpha", "Shared", "x.md")); err != nil {
+		t.Skip("no symlinks")
+	}
+	for name, tok := range map[string]string{
+		"ns admin":   jwtFor(t, uidAdmin, "admin", nil),
+		"root grant": jwtFor(t, uidNate, "collaborator", nil),
+	} {
+		for _, p := range []string{"/api/search?ns=alpha&q=SECRET-WORDS", "/api/tasks?ns=alpha", "/api/tasks/all"} {
+			if _, body := cs.get(tok, p); strings.Contains(body, "SECRET") {
+				t.Errorf("%s %s leaked the chat through a link: %s", name, p, body)
+			}
+		}
+		if code, _ := cs.get(tok, "/api/note?ns=alpha&path=Shared/x.md"); code != http.StatusForbidden {
+			t.Errorf("%s read the chat through the link: %d", name, code)
+		}
+	}
+}

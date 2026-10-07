@@ -279,8 +279,9 @@ function ChatMembers({ chat, account, onClose, onChanged }) {
       {!state && !error && <p>Loading…</p>}
       {state && !state.private && (
         <p>
-          Everyone with access to <b>{chat.ns}</b> can read and post here. Invite someone, or make it
-          private, and only the people listed will be able to open it.
+          Everyone with access to <b>{chat.ns}</b> can read and post here. A workspace admin can make
+          it private, and then only the people listed can open it. Anyone can create a new private
+          chat with <b>+ New</b>.
         </p>
       )}
       {state && state.private && (
