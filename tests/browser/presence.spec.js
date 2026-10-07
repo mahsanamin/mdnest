@@ -1,4 +1,4 @@
-// Presence must not move the page, and must not flicker.
+// Presence must not move the page, cover anything, or flicker.
 //
 // The presence bar used to be a full-width strip in the document flow between
 // the toolbar and the editor, so every join and leave reflowed everything
@@ -85,13 +85,14 @@ test('a collaborator joining does not move the content', async ({ browser }) => 
   const after = await target.boundingBox();
   expect(after.y, 'the content moved when a collaborator joined').toBeCloseTo(before.y, 0);
   expect(after.height, 'the content was resized when a collaborator joined').toBeCloseTo(before.height, 0);
-  expect(await pageA.locator('.presence-bar').evaluate((el) => getComputedStyle(el).position)).toBe('absolute');
-
-  // An overlay must not cover the controls it floats near. The first attempt
-  // was positioned against .main and sat on top of the toolbar's view-mode and
-  // settings buttons.
+  // It lives in the file toolbar, in the flow. Floated over the content it
+  // covered the editor's own formatting toolbar; floated over .main before
+  // that, the view-mode and settings buttons.
+  expect(await pageA.locator('.toolbar .presence-bar').count()).toBe(1);
   const bar = await pageA.locator('.presence-bar').boundingBox();
-  for (const sel of ['.toolbar-view-toggle', '.toolbar .settings-btn', '.editor-mode-toggle']) {
+  const content = await target.boundingBox();
+  expect(bar.y + bar.height, 'the presence bar reaches into the content').toBeLessThanOrEqual(content.y + 1);
+  for (const sel of ['.live-toolbar', '.editor-toolbar', '.toolbar-view-toggle', '.toolbar-comments', '.toolbar-more']) {
     const el = pageA.locator(sel).first();
     if (!(await el.count())) continue;
     const r = await el.boundingBox();

@@ -79,8 +79,18 @@ On it — frontend checks green.
   same steps and leave when their lead says they are done. Both fields stay
   editable, and clicking the active role again clears it.
 - The path under the title opens the note itself in the editor.
-- Right-click a chat in the list for **Open as note**, **Copy path for CLI**
-  (its `mdnest://` address) and **Delete chat**.
+- Right-click a chat in the list for **Pin** / **Unpin**, **Open as note**,
+  **Copy path for CLI** (its `mdnest://` address) and **Delete chat**.
+- **Pinned | All**: hover a chat and click its pin to keep it in the
+  **Pinned** tab, so you see only the chats you care about. Pins are saved
+  with your account (they follow you to other browsers) and are kept per
+  chat, so switching workspace does not lose them.
+- **«** in the list header collapses the list to a slim strip of initials,
+  one per chat (the pinned ones when you are on the Pinned tab), with a dot
+  for unread messages; **»** brings it back. The browser remembers which
+  you chose.
+- New messages from others never scroll the conversation: a **N new
+  messages ↓** pill appears instead.
 
 New messages are polled every few seconds, so this works on every install,
 with or without live collaboration.
@@ -116,13 +126,23 @@ everything.
 
 **Who is doing what.** One quiet line above the message box shows it, and
 none of it needs a CLI update. An agent running `chat wait --as NAME` shows
-as **listening**; when a wait hands it new messages it shows as
+as **waiting**; when a wait hands it new messages it shows as
 **thinking** until it posts. To say what it is working on, it posts
 `mdnest chat post @alias/ws/Chats/release.md "/status reviewing the PR" --as codxu`
 (any CLI version, or MCP `post_chat`); the server takes it as a status and
 does not add it to the chat. It lasts 2 minutes unless repeated, an empty
-`/status` clears it, and the next real post clears it too. `chat read`
-prints busy agents as `working now: …`. New agent behaviours follow the same
+`/status` clears it, and the next real post or the next empty wait clears
+it too, so an agent shows as working only while it really is. `chat read`
+prints busy agents as `working now: …`.
+
+**How full each agent is.** An agent posts `/context 42%` (or
+`/context 87k/200k`, `87,000 of 200,000 tokens`) to say how much of its
+context window it has used. Like `/status` it is not added to the chat: a
+small chip by the agent's name shows the figure on its latest messages and in
+the line above the message box, and turns amber at 80% so you can see who
+needs a fresh start. The prompt from **Connect an agent** asks agents to
+report it when they join and about every 10 messages. Reports are kept in
+memory for an hour; an empty `/context` clears one. New agent behaviours follow the same
 rule: inferred from calls agents already make, or a slash command in an
 ordinary post.
 

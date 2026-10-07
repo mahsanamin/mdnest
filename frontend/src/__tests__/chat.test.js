@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   slugify, chatPathFor, colorForAuthor, AUTHOR_COLORS, isOwnMessage,
-  groupMessages, mergeMessages, agentInstructions, workingLine, plainPreview, shellQuote, isChatDoc,
+  groupMessages, mergeMessages, agentInstructions, workingLine, contextLabel, contextTitle, plainPreview, shellQuote, isChatDoc,
   mentionsName, highlightMentions, participants, mentionQuery, completeMention,
   avatarFor, reactions, gifMarkdown, expandGifRefs, initialOf,
 } from '../chat.js';
@@ -237,18 +237,38 @@ describe('working line', () => {
   it('an agent that just got new messages is thinking', () => {
     expect(workingLine([w('codxu', 'thinking', '2026-10-06T10:05:00Z')], 'ahsan', 'ahsan', now).text).toBe('codxu is thinking');
   });
-  it('waiting agents are named together as listening, after the busy ones', () => {
+  it('waiting agents are named together, after the busy ones', () => {
     const line = workingLine([
       w('qa-1', 'listening', '2026-10-06T10:05:20Z'),
       w('codxu', 'thinking', '2026-10-06T10:05:00Z'),
       w('lead-qa', 'listening', '2026-10-06T10:05:20Z'),
     ], 'ahsan', 'ahsan', now);
-    expect(line.text).toBe('codxu is thinking  ·  qa-1 and lead-qa are listening');
-    expect(line.title.split('\n')).toEqual(['codxu is thinking', 'qa-1 is listening', 'lead-qa is listening']);
+    expect(line.text).toBe('codxu is thinking  ·  qa-1 and lead-qa are waiting');
+    expect(line.title.split('\n')).toEqual(['codxu is thinking', 'qa-1 is waiting', 'lead-qa is waiting']);
   });
-  it('one listener alone; three listeners get a comma list', () => {
-    expect(workingLine([w('codxu', 'listening', '2026-10-06T10:05:20Z')], 'ahsan', 'ahsan', now).text).toBe('codxu is listening');
-    expect(workingLine(['a', 'b', 'c'].map((n) => w(n, 'listening', '2026-10-06T10:05:20Z')), 'me', 'me', now).text).toBe('a, b and c are listening');
+  it('one waiting agent alone; three get a comma list', () => {
+    expect(workingLine([w('codxu', 'listening', '2026-10-06T10:05:20Z')], 'ahsan', 'ahsan', now).text).toBe('codxu is waiting');
+    expect(workingLine(['a', 'b', 'c'].map((n) => w(n, 'listening', '2026-10-06T10:05:20Z')), 'me', 'me', now).text).toBe('a, b and c are waiting');
+  });
+  // The reported bug: three idle bots read "is working: undefined". Only an
+  // entry with status text is working; anything else, including a kind this
+  // page does not know, is waiting.
+  it('never says working without saying on what', () => {
+    const line = workingLine([
+      w('AhsanSideKick', 'listening', '2026-10-06T10:05:20Z'),
+      w('MaintContextAgent', 'idle', '2026-10-06T10:05:20Z'),
+      w('codxuVerifier', undefined, '2026-10-06T10:05:20Z'),
+      w('qa-1', 'working', '2026-10-06T10:05:20Z'),
+    ], 'ahsan', 'ahsan', now);
+    expect(line.text).toBe('AhsanSideKick, MaintContextAgent, codxuVerifier and qa-1 are waiting');
+    expect(line.text).not.toMatch(/working|undefined/);
+    expect(line.busy).toBe(false);
+  });
+  it('the prompt tells agents to say working only while working', () => {
+    const s = agentInstructions('mini', 'notes', 'Chats/team.md', 'codxu');
+    expect(s).toMatch(/show as waiting while you wait/);
+    expect(s).toMatch(/going back to wait, clears it/);
+    expect(s).not.toMatch(/listening/);
   });
   it('leaves out your own presence and is null when nobody else is here', () => {
     expect(workingLine([w('ahsan', 'listening', '2026-10-06T10:05:00Z')], 'ahsan', 'ahsan', now)).toBeNull();
@@ -258,5 +278,31 @@ describe('working line', () => {
   it('an agent on my token under its own name is someone else, not me', () => {
     const line = workingLine([w('claude-a', 'thinking', '2026-10-06T10:05:00Z', { via: 'ahsan' })], 'ahsan', 'ahsan', now);
     expect(line.text).toContain('claude-a is thinking');
+  });
+});
+
+describe('context size', () => {
+  const now = Date.parse('2026-10-06T10:05:30Z');
+  it('the chip is the percentage, or the token count when that is all we have', () => {
+    expect(contextLabel({ used: 87000, total: 200000, pct: 44 })).toBe('44%');
+    expect(contextLabel({ pct: 42 })).toBe('42%');
+    expect(contextLabel({ used: 1200000, pct: -1 })).toBe('1.2M');
+    expect(contextLabel(undefined)).toBe('');
+  });
+  it('the tooltip says how much and how long ago', () => {
+    expect(contextTitle({ used: 87000, total: 200000, pct: 44, at: '2026-10-06T10:02:00Z' }, now))
+      .toBe('Context used: 87k of 200k tokens, reported 3 min ago');
+    expect(contextTitle({ pct: 42, at: '2026-10-06T10:05:20Z' }, now)).toBe('Context used: 42%, reported just now');
+  });
+  it('the presence line carries it by the name', () => {
+    const line = workingLine([
+      { author: 'codxu', kind: 'listening', since: '2026-10-06T10:05:20Z', context: { pct: 44 } },
+      { author: 'qa-1', kind: 'thinking', since: '2026-10-06T10:05:20Z', context: { pct: 91 } },
+    ], 'ahsan', 'ahsan', now);
+    expect(line.text).toBe('qa-1 (91%) is thinking  ·  codxu (44%) is waiting');
+  });
+  it('the prompt tells agents to report it', () => {
+    const s = agentInstructions('mini', 'notes', 'Chats/team.md', 'codxu');
+    expect(s).toContain('mdnest chat post @mini/notes/Chats/team.md "/context 42%" --as codxu');
   });
 });

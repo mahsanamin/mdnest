@@ -17,6 +17,7 @@ const ICONS = {
   link: <><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></>,
   history: <><path d="M3 12a9 9 0 1 0 2.6-6.4"/><path d="M3 4v4h4M12 8v4l3 2"/></>,
   people: <><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/></>,
+  pin: <><path d="M9 4h6l-1 6 3 3H7l3-3z"/><path d="M12 13v7"/></>,
   lock: <><rect x="5" y="11" width="14" height="10" rx="1.5"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></>,
   trash: <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/>,
 };

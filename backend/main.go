@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/http/httputil"
@@ -838,10 +839,17 @@ func main() {
 		mux.Handle("/api/admin/reset-password", authMiddleware.Wrap(middleware.RequireSuperAdmin(http.HandlerFunc(adminHandler.HandleResetPassword))))
 	}
 
+	// Restart from Settings (registered with the content routes, which hold
+	// its guard). What a restart does is at the end of main, after the server
+	// stops.
+	restartReq := make(chan struct{})
+	restartHandler := handlers.NewRestartHandler(func() { close(restartReq) })
+
 	// Git sync endpoints (admin-only in multi mode, always allowed in single)
 	syncHandler := handlers.NewSyncHandler(absNotesDir, searchHandler.InvalidateCache, nsAdminStore)
 
 	routes := contentRoutes{
+		restart:     restartHandler,
 		auth:        authMiddleware.Wrap,
 		perms:       perms,
 		invalidate:  invalidateSearch,
@@ -886,13 +894,48 @@ func main() {
 	log.Printf("mdnest backend listening on :%s (NOTES_DIR=%s)", port, absNotesDir)
 	logNamespacesAtStartup(appCtx, stg, absNotesDir)
 
-	<-appCtx.Done()
-	log.Println("shutdown signal received, draining…")
+	restart := false
+	select {
+	case <-appCtx.Done():
+		log.Println("shutdown signal received, draining…")
+	case <-restartReq:
+		restart = true
+		log.Println("restart requested from Settings, draining…")
+	}
 	shutCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutCtx); err != nil {
 		log.Printf("graceful shutdown error: %v", err)
 	}
+	if restart {
+		stopSignals() // cancels appCtx: background work stops as on SIGTERM
+		reexec(stg, db)
+	}
+}
+
+// reexec restarts the backend in place: same process id, same arguments and
+// environment, so it needs no restart policy from Docker or Kubernetes (a
+// plain `docker run` without one would otherwise stay down). Deferred calls
+// do not run across exec, so storage is closed here: the git backend commits
+// pending edits on Close. If exec fails, exiting non-zero hands over to the
+// container's restart policy, which every mdnest compose file sets.
+func reexec(stg storage.Storage, db *store.DB) {
+	time.Sleep(300 * time.Millisecond) // let ctx-driven goroutines (writer lock) wind down
+	if c, ok := stg.(io.Closer); ok {
+		if err := c.Close(); err != nil {
+			log.Printf("restart: closing storage: %v", err)
+		}
+	}
+	if db != nil {
+		db.Close()
+	}
+	exe, err := os.Executable()
+	if err == nil {
+		log.Println("restarting…")
+		err = syscall.Exec(exe, os.Args, os.Environ())
+	}
+	log.Printf("restart: could not re-exec (%v), exiting so the restart policy starts a new one", err)
+	os.Exit(1)
 }
 
 // parseAllowedDomains turns a comma-separated env string into a list of

@@ -809,7 +809,7 @@ if (features.chat) server.tool(
 
 if (features.chat) server.tool(
   "post_chat",
-  "Post a message to a chat. `as` is the name shown on the message — give each agent in a conversation its own. Returns the message number to pass to wait_chat.",
+  "Post a message to a chat. `as` is the name shown on the message — give each agent in a conversation its own. Returns the message number to pass to wait_chat. A text of \"/context 42%\" (or \"/context 87k/200k\") is not a message: it shows how full your context window is by your name; report it when you join and about every 10 messages.",
   {
     namespace: z.string().describe("Namespace name"),
     path: z.string().describe("Path of the chat note"),
@@ -830,7 +830,7 @@ if (features.chat) server.tool(
 
 if (features.chat) server.tool(
   "set_chat_status",
-  "Show a short 'working on it' line under the chat (e.g. 'reviewing the API PR'), so people can see you are busy without a message in the conversation. It lasts 2 minutes: set it again to keep it during long work. Your next post_chat clears it; an empty text clears it now.",
+  "Show a short 'working on it' line under the chat (e.g. 'reviewing the API PR'), so people can see you are busy without a message in the conversation. It lasts 2 minutes: set it again to keep it during long work. Your next post_chat, or going back to wait_chat, clears it; an empty text clears it now. Set it only while you are really working: a waiting agent already shows as waiting.",
   {
     namespace: z.string().describe("Namespace name"),
     path: z.string().describe("Path of the chat note"),

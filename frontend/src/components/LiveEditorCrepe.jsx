@@ -798,13 +798,14 @@ export default function LiveEditorCrepe({
       const target = e.target.closest && e.target.closest('.wikilink-live');
       if (!target) return;
       const inner = target.getAttribute('data-wikilink') || '';
-      const { page } = parseWikiLink(inner);
-      const path = resolveWikiLink(page, wikiIndexRef.current, currentPath);
-      if (!path || path === currentPath) return;
+      const { page, heading } = parseWikiLink(inner);
+      const path = page ? resolveWikiLink(page, wikiIndexRef.current, currentPath) : currentPath;
+      // A link to this same note only does something when it names a heading.
+      if (!path || (path === currentPath && !heading)) return;
       e.preventDefault();
       e.stopPropagation();
       const cb = onWikiLinkRef.current;
-      if (cb) cb(path);
+      if (cb) cb(path, heading);
     };
     el.addEventListener('click', onClick);
     return () => el.removeEventListener('click', onClick);

@@ -289,7 +289,7 @@ function Preview({ content, currentPath, ns, onCheckboxToggle, pathIndex, onWiki
         const path = a.dataset.path;
         const heading = a.dataset.heading || '';
         if (path && path !== currentPath) {
-          if (onWikiLink) onWikiLink(path);
+          if (onWikiLink) onWikiLink(path, heading);
         } else if (heading) {
           scrollToHeading(el, heading);
         }

@@ -7,7 +7,7 @@ function PresenceBar({ users, currentUserId, typingUsers }) {
   const typingNames = Object.values(typingUsers || {}).filter(Boolean);
 
   return (
-    <div className="presence-bar">
+    <div className="presence-bar" title={`${others.map((u) => u.username).join(', ')} ${others.length === 1 ? 'is' : 'are'} also here`}>
       {others.map((u) => {
         const isTyping = typingUsers && typingUsers[u.id];
         return (
@@ -21,13 +21,13 @@ function PresenceBar({ users, currentUserId, typingUsers }) {
           </div>
         );
       })}
-      <span className="presence-label">
-        {typingNames.length > 0 ? (
-          <>{typingNames.join(', ')} {typingNames.length === 1 ? 'is' : 'are'} typing<span className="typing-dots">...</span></>
-        ) : (
-          <>{others.map((u) => u.username).join(', ')} {others.length === 1 ? 'is' : 'are'} also here</>
-        )}
-      </span>
+      {/* Initials only, names in the tooltip, so the toolbar keeps its
+          width; words appear only while someone is typing. */}
+      {typingNames.length > 0 && (
+        <span className="presence-label">
+          {typingNames.join(', ')} {typingNames.length === 1 ? 'is' : 'are'} typing<span className="typing-dots">...</span>
+        </span>
+      )}
     </div>
   );
 }

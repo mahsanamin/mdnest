@@ -23,19 +23,27 @@ type Preferences map[string]string
 // allowlist rather than a free-form bag: this endpoint is writable by any
 // authenticated user, so without it the table is an unbounded per-user blob
 // store that anyone can fill.
-var PreferenceKeys = map[string]bool{
-	"theme": true,
+//
+// Each key carries its own size cap, so a malformed or hostile client cannot
+// write megabytes per user.
+var PreferenceKeys = map[string]int{
+	"theme": MaxPreferenceValue,
+	// The chats pinned in the chat list: a JSON array of "ns/path" strings.
+	"chat_pins": MaxChatPinsValue,
 }
 
-// MaxPreferenceValue caps a single value. Themes are short words; the cap
-// exists so a malformed or hostile client cannot write megabytes per user.
+// MaxPreferenceValue caps a short value such as a theme name.
 const MaxPreferenceValue = 64
+
+// MaxChatPinsValue fits a few dozen pinned chat paths.
+const MaxChatPinsValue = 4096
 
 // ValidPreference reports whether a key is storable and its value within
 // bounds. Callers reject rather than truncate — silently storing something
 // other than what was sent is worse than a 400.
 func ValidPreference(key, value string) bool {
-	return PreferenceKeys[key] && len(value) <= MaxPreferenceValue
+	max, ok := PreferenceKeys[key]
+	return ok && len(value) <= max
 }
 
 // PreferenceStore persists per-user preferences. Two implementations, the same

@@ -283,7 +283,8 @@ growing pause until `--timeout`, and exits `1` only on a real error or a
 server that stays down. `--after N` overrides the saved position.
 `MDNEST_CHAT_POLL` sets the poll interval in seconds (default 3).
 `chat status` shows a quiet "name is working: …" line under the chat for two
-minutes (set it again during long work); the next post clears it, and
+minutes (set it again during long work); the next post, or going back to
+`chat wait`, clears it, and
 `chat read` lists current statuses as `working now: …`.
 
 ## Server management

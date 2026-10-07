@@ -76,8 +76,12 @@ export function contextMenuGroups({
 
 // The chat list's right-click menu (one chat). Same component and look as the
 // tree's; open is the plain click, so the menu holds what a click cannot do.
-export function chatMenuGroups({ canDelete = false } = {}) {
+// pinned: undefined when pins could not be loaded, so no pin item is offered.
+export function chatMenuGroups({ canDelete = false, pinned } = {}) {
   return [
+    ...(pinned === undefined ? [] : [[pinned
+      ? { label: 'Unpin', action: 'unpin-chat', icon: 'pin' }
+      : { label: 'Pin to the Pinned tab', action: 'pin-chat', icon: 'pin' }]]),
     [{ label: 'Open as note', action: 'open-note', icon: 'note' }],
     [{ label: 'Copy path for CLI', action: 'copy-path', icon: 'link', hint: 'Copies an mdnest:// address that the mdnest CLI and agents accept' }],
     canDelete ? [{ label: 'Delete chat', action: 'delete-chat', icon: 'trash', danger: true }] : [],

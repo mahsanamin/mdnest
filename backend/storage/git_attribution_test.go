@@ -203,3 +203,31 @@ func TestCommitMessage_AnnotationCannotForgeLines(t *testing.T) {
 		t.Fatalf("annotation not kept on one line: %q", msg)
 	}
 }
+
+// A restart from Settings re-execs the backend, and deferred calls do not run
+// across exec, so main closes storage by hand. That only keeps an edit made
+// inside the debounce window if Close commits it: pin that here.
+func TestGitStorage_CloseCommitsPendingEdits(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	ctx := context.Background()
+	root := t.TempDir()
+	c := NewIntervalCommitter(root, time.Hour, time.Hour, "ci", "ci@example.com", remoteConfig{})
+	g, err := NewGitStorage(root, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "team"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.WriteFile(ctx, "team", "pending.md", []byte("not committed yet")); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if out := gitOut(t, filepath.Join(root, "team"), "log", "--format=%s", "--", "pending.md"); strings.TrimSpace(out) == "" {
+		t.Fatal("Close left the pending edit uncommitted")
+	}
+}

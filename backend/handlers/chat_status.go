@@ -21,7 +21,7 @@ import (
 // (any CLI since chat shipped) and the MCP wait_chat tool poll GET /api/chat
 // with exclude=NAME, so the server infers:
 //
-//   listening  NAME polled in the last chatListenWindow
+//   listening  NAME polled in the last chatListenWindow (shown as "waiting")
 //   thinking   NAME's last poll handed it new messages and it has neither
 //              posted nor polled empty since: it is reading or replying
 //
@@ -57,6 +57,8 @@ type ChatStatus struct {
 	Kind   string    `json:"kind"`
 	Text   string    `json:"text,omitempty"` // only for "working"
 	Since  time.Time `json:"since"`
+	// Context is the poster's last /context report, if any (chat_context.go).
+	Context *ChatContext `json:"context,omitempty"`
 }
 
 type chatPresence struct {
@@ -69,12 +71,13 @@ type chatPresence struct {
 }
 
 type chatStatusStore struct {
-	mu sync.Mutex
-	m  map[string]map[string]*chatPresence // "ns\x00path" -> author -> presence
+	mu  sync.Mutex
+	m   map[string]map[string]*chatPresence // "ns\x00path" -> author -> presence
+	ctx map[string]map[string]ChatContext   // "ns\x00path" -> author -> last /context
 }
 
 func newChatStatusStore() *chatStatusStore {
-	return &chatStatusStore{m: map[string]map[string]*chatPresence{}}
+	return &chatStatusStore{m: map[string]map[string]*chatPresence{}, ctx: map[string]map[string]ChatContext{}}
 }
 
 func chatStatusKey(ns, relPath string) string { return ns + "\x00" + relPath }
@@ -117,7 +120,10 @@ func (s *chatStatusStore) clearText(ns, relPath, author string) {
 }
 
 // polled records a wait/read poll by author; gotNew says whether it was
-// handed messages, which means it is now reading or working on a reply.
+// handed messages, which means it is now reading or working on a reply. An
+// empty poll means it is back to waiting, so it also drops an explicit
+// status: an agent that set "/status running tests" and went back to wait
+// without posting would otherwise read as working for up to 2 minutes.
 func (s *chatStatusStore) polled(ns, relPath, author, via string, gotNew bool, now time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -129,6 +135,7 @@ func (s *chatStatusStore) polled(ns, relPath, author, via string, gotNew bool, n
 		}
 	} else {
 		p.thinkingFrom = time.Time{}
+		p.text, p.textUntil = "", time.Time{}
 	}
 }
 
@@ -165,6 +172,12 @@ func (s *chatStatusStore) list(ns, relPath string, now time.Time) []ChatStatus {
 	}
 	if len(s.m[k]) == 0 {
 		delete(s.m, k)
+	}
+	ctx := s.contextsLocked(ns, relPath, now)
+	for i := range out {
+		if c, ok := ctx[out[i].Author]; ok {
+			out[i].Context = &c
+		}
 	}
 	rank := map[string]int{statusWorking: 0, statusThinking: 1, statusListening: 2}
 	sort.Slice(out, func(i, j int) bool {
@@ -217,17 +230,8 @@ func slashStatus(text string) (string, bool) {
 // applyStatus sets or clears the caller's explicit status after the usual
 // chat checks. It answers the request itself.
 func (h *ChatHandler) applyStatus(w http.ResponseWriter, r *http.Request, ns, relPath, text string, okStatus int) {
-	data, err := h.store.ReadFile(r.Context(), ns, relPath)
-	if errors.Is(err, storage.ErrNotExist) {
-		chatJSONError(w, http.StatusNotFound, "no chat at this path")
-		return
-	} else if err != nil {
-		chatJSONError(w, http.StatusInternalServerError, "failed to read chat")
-		return
-	}
-	doc := ParseChat(string(data))
-	if !doc.IsChat {
-		chatJSONError(w, http.StatusBadRequest, "this note is not a chat — convert it first")
+	doc, ok := h.readChatDoc(w, r, ns, relPath)
+	if !ok {
 		return
 	}
 	label, via, ok := h.author(r)
@@ -247,6 +251,25 @@ func (h *ChatHandler) applyStatus(w http.ResponseWriter, r *http.Request, ns, re
 	// count keeps an older CLI's "posted #N" line meaningful when the status
 	// arrived as a /status post.
 	io.WriteString(w, `{"status":"`+state+`","count":`+strconv.Itoa(len(doc.Messages))+`}`)
+}
+
+// readChatDoc reads the note a status or context report is for, answering
+// the request itself when it is missing or not a chat.
+func (h *ChatHandler) readChatDoc(w http.ResponseWriter, r *http.Request, ns, relPath string) (ChatDoc, bool) {
+	data, err := h.store.ReadFile(r.Context(), ns, relPath)
+	if errors.Is(err, storage.ErrNotExist) {
+		chatJSONError(w, http.StatusNotFound, "no chat at this path")
+		return ChatDoc{}, false
+	} else if err != nil {
+		chatJSONError(w, http.StatusInternalServerError, "failed to read chat")
+		return ChatDoc{}, false
+	}
+	doc := ParseChat(string(data))
+	if !doc.IsChat {
+		chatJSONError(w, http.StatusBadRequest, "this note is not a chat — convert it first")
+		return ChatDoc{}, false
+	}
+	return doc, true
 }
 
 // HandleStatus: POST /api/chat/status?ns=&path=&as= with the status as the

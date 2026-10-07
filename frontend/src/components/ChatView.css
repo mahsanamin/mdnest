@@ -27,7 +27,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: 10px 14px;
+  padding: 10px 16px;
   border-bottom: 1px solid var(--border);
   flex: 0 0 auto;
 }
@@ -45,7 +45,12 @@
 .chat-list-count { color: var(--text-muted); font-size: 0.85rem; }
 .chat-list-ns { color: var(--text-muted); font-weight: 400; font-size: 0.85rem; }
 .chat-list-in { color: var(--text-muted); font-weight: 400; font-size: 0.85rem; }
-.chat-list-header h2 { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.chat-list-header { flex-wrap: wrap; row-gap: 8px; }
+.chat-list-header h2 { min-width: 0; line-height: 28px; }
+.chat-list-header .chat-btn { height: 28px; display: inline-flex; align-items: center; justify-content: center; }
+.chat-list-header .chat-btn-icon { width: 28px; padding: 0; }
+.chat-list-scope { flex: 1 0 100%; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.chat-list-scope .chat-ns-select { flex: 1; height: 28px; }
 .chat-ns-select {
   max-width: 100%;
   min-width: 0;
@@ -118,7 +123,7 @@
 .chat-list-items {
   list-style: none;
   margin: 0;
-  padding: 6px;
+  padding: 6px 5px; /* 5 + 1px border + 10px item padding = the header's 16px */
   overflow-y: auto;
   flex: 1 1 auto;
   min-height: 0;
@@ -158,6 +163,90 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  padding-right: 22px; /* room for the pin */
+}
+
+/* Pin: hidden until the row is hovered, always shown when on. */
+.chat-list-row { position: relative; }
+.chat-pin {
+  position: absolute;
+  right: 12px;
+  bottom: 7px;
+  z-index: 1;
+  display: flex;
+  padding: 2px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+}
+.chat-list-row:hover .chat-pin,
+.chat-pin:focus-visible,
+.chat-pin.on { opacity: 1; }
+.chat-pin:hover { background: var(--surface-2); color: var(--text); }
+.chat-pin.on { color: var(--accent); }
+.chat-pin.on svg { fill: currentColor; }
+
+/* Pinned | All */
+.chat-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 10px 16px 2px;
+  flex: 0 0 auto;
+}
+.chat-tab {
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: none;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.chat-tab.active { background: var(--accent-wash); border-color: var(--accent-wash-3); color: var(--text); }
+
+/* Collapsed list: a slim strip of initials. */
+.chat-list.collapsed {
+  width: 52px;
+  flex: 0 0 52px;
+  align-items: center;
+  padding-top: 10px;
+  gap: 8px;
+}
+.chat-rail {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  overflow-y: auto;
+  min-height: 0;
+}
+.chat-rail-item {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  color: var(--text-inverse);
+  font-weight: 700;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.chat-rail-item.active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--surface); }
+.chat-rail-unread {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--surface);
 }
 .chat-unread {
   flex: 0 0 auto;
@@ -257,6 +346,29 @@
   font-family: inherit;
 }
 
+.chat-messages-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* New messages from others never scroll the view; this says they are there. */
+.chat-new-pill {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--accent);
+  color: var(--text-inverse);
+  border: none;
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 8px var(--shadow-color);
+}
 .chat-messages {
   flex: 1 1 auto;
   min-height: 0;
@@ -298,6 +410,17 @@
 .chat-msg-author { font-weight: 700; font-size: 0.82rem; }
 .chat-msg-via,
 .chat-msg-time { color: var(--text-muted); }
+
+/* An agent's last /context report, by its name. */
+.chat-context {
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+.chat-context.high { color: var(--warning); border-color: var(--warning); background: var(--warning-wash); }
 
 .chat-bubble {
   background: var(--surface-2);

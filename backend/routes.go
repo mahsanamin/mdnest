@@ -32,6 +32,7 @@ type contentRoutes struct {
 	chat        *handlers.ChatHandler // nil unless chat is on
 	sync        *handlers.SyncHandler
 	ws          *handlers.WSHandler // nil unless live collab is on
+	restart     *handlers.RestartHandler
 }
 
 func registerContentRoutes(mux *http.ServeMux, c contentRoutes) {
@@ -46,6 +47,16 @@ func registerContentRoutes(mux *http.ServeMux, c contentRoutes) {
 	}
 
 	// Apply permission checks in multi mode, passthrough in single mode
+	// Restarting the server is a system-wide action: superadmin-only in
+	// multi mode. In single mode the one user already owns the server.
+	if c.restart != nil {
+		if perms != nil {
+			mux.Handle("/api/admin/restart", auth(middleware.RequireSuperAdmin(http.HandlerFunc(c.restart.Handle))))
+		} else {
+			mux.Handle("/api/admin/restart", auth(http.HandlerFunc(c.restart.Handle)))
+		}
+	}
+
 	if perms != nil {
 		mux.Handle("/api/namespaces", auth(http.HandlerFunc(c.ns.ListNamespaces)))
 		mux.Handle("/api/tree", auth(perms.RequireNsAccess(http.HandlerFunc(c.tree.GetTree))))

@@ -268,16 +268,35 @@ export function agentInstructions(alias, ns, path, name = 'AGENT_NAME', intent =
     '   Leave only when your lead or a human says you are done: post a one-line goodbye, then stop.',
     '',
     'How to behave',
-    '- People can see when you are listening or thinking. Before anything that takes more than',
-    `  a minute, also say what: mdnest chat post ${target} "/status what you are doing" --as ${as}`,
-    '  It is not added to the chat. Repeat it every 2 minutes; your next real post clears it.',
-    '- Need a human to answer or decide? Ask them with @their-name and add ![waiting](gif:question),',
-    '  so they can see where they are needed.',
+    '- You show as waiting while you wait. Before a task of more than a minute, say what you do:',
+    `  mdnest chat post ${target} "/status what you are doing" --as ${as} (not a chat message; repeat every 2 min).`,
+    '  Your next post, or going back to wait, clears it. Never leave a status up while only waiting.',
+    '- Need a human to answer or decide? Ask @their-name and add ![waiting](gif:question).',
     `- Other agents may be here. Answer only what is addressed to you (@${name}, @all) or is your part.`,
     '  Do not repeat what someone already said: agree with ![nod](gif:nod) instead. Keep replies',
     '  short and to the point. In a busy chat, add --mentions to wait.',
     `- Emoji are fine. Images react too, e.g. ![done](gif:done). List them: mdnest chat gifs ${nsTarget}`,
+    '- Report how full your context window is when you join, then about every 10 messages:',
+    `  mdnest chat post ${target} "/context 42%" --as ${as} (or 87k/200k). It shows by your name, not in the chat.`,
   ].join('\n');
+}
+
+// An agent's last /context report (chat_context.go) as the short chip shown
+// by its name: "44%", or "87k" when it gave only a token count. CONTEXT_HIGH
+// is where the chip turns to a warning: past it an agent is close to full and
+// a person may want to start it fresh.
+export const CONTEXT_HIGH = 80;
+const tokens = (n) => (n >= 1e6 ? `${+(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n));
+export function contextLabel(c) {
+  if (!c) return '';
+  if (c.pct >= 0) return `${c.pct}%`;
+  return c.used ? tokens(c.used) : '';
+}
+export function contextTitle(c, now = Date.now()) {
+  if (!c) return '';
+  const amount = c.used && c.total ? `${tokens(c.used)} of ${tokens(c.total)} tokens` : c.used ? `${tokens(c.used)} tokens` : `${c.pct}%`;
+  const mins = Math.max(0, Math.floor((now - Date.parse(c.at)) / 60000));
+  return `Context used: ${amount}, reported ${mins < 1 ? 'just now' : `${mins} min ago`}`;
 }
 
 // workingLine turns the chat's presence into the one quiet line under the
@@ -285,29 +304,58 @@ export function agentInstructions(alias, ns, path, name = 'AGENT_NAME', intent =
 // make (chat_status.go), so it needs no CLI update:
 //   working    codxu is working: reviewing the PR · 3 min   (a /status)
 //   thinking   codxu is thinking                            (got new messages)
-//   listening  lead-qa and qa-1 are listening               (waiting)
-// Busy posters come first; listeners are named together at the end. Your own
-// presence (the same author/via rule as isOwnMessage) is left out. `title`
-// lists everyone for the tooltip. Returns null when nobody else is here.
+//   waiting    lead-qa and qa-1 are waiting                 (kind "listening")
+// Busy posters come first; waiting ones are named together at the end. Only
+// an entry with status text reads as working: anything else, including a
+// kind this page does not know yet, reads as waiting, so an older page and a
+// newer server never show "is working: undefined". Your own presence (the
+// same author/via rule as isOwnMessage) is left out. A name with a /context
+// report carries it: "codxu (44%) is waiting". `title` lists everyone
+// for the tooltip. Returns null when nobody else is here.
 export function workingLine(working, account, postingAs, now = Date.now()) {
   const others = (working || []).filter((w) => !isOwnMessage(w, account, postingAs));
   if (others.length === 0) return null;
   const mins = (w) => Math.floor((now - Date.parse(w.since)) / 60000);
   const after = (w) => (mins(w) >= 1 ? ` · ${mins(w)} min` : '');
   const busy = [];
-  const listening = [];
+  const waiting = [];
+  const who = (w) => (contextLabel(w.context) ? `${w.author} (${contextLabel(w.context)})` : w.author);
   for (const w of others) {
-    if (w.kind === 'listening') listening.push(w.author);
-    else if (w.kind === 'thinking') busy.push(`${w.author} is thinking${after(w)}`);
-    else busy.push(`${w.author} is working: ${w.text}${after(w)}`);
+    if (w.kind === 'thinking') busy.push(`${who(w)} is thinking${after(w)}`);
+    else if (w.kind !== 'listening' && w.text) busy.push(`${who(w)} is working: ${w.text}${after(w)}`);
+    else waiting.push(who(w));
   }
   const names = (list) => (list.length <= 2 ? list.join(' and ') : `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`);
   const parts = [...busy];
-  if (listening.length) parts.push(`${names(listening)} ${listening.length === 1 ? 'is' : 'are'} listening`);
+  if (waiting.length) parts.push(`${names(waiting)} ${waiting.length === 1 ? 'is' : 'are'} waiting`);
   return {
     text: parts.join('  ·  '),
-    title: [...busy, ...listening.map((n) => `${n} is listening`)].join('\n'),
+    title: [...busy, ...waiting.map((n) => `${n} is waiting`)].join('\n'),
     count: others.length,
     busy: busy.length > 0,
   };
+}
+
+// Pinned chats, saved as the chat_pins preference: a JSON array of "ns/path"
+// strings, newest pin first. Pins from other workspaces stay in the list, so
+// switching workspace does not lose them.
+export const MAX_CHAT_PINS_LENGTH = 4096; // store.MaxChatPinsValue
+export const pinKey = (ns, path) => `${ns}/${path}`;
+export function parsePins(raw) {
+  try {
+    const v = JSON.parse(raw || '[]');
+    return Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x) : [];
+  } catch {
+    return [];
+  }
+}
+export function togglePin(pins, key) {
+  return pins.includes(key) ? pins.filter((k) => k !== key) : [key, ...pins];
+}
+// The chats a tab shows. "pinned" keeps the pin order; "all" keeps the
+// list's own order (latest activity first).
+export function chatsForTab(chats, pins, tab) {
+  if (tab !== 'pinned') return chats;
+  const byKey = new Map(chats.map((c) => [pinKey(c.ns, c.path), c]));
+  return pins.map((k) => byKey.get(k)).filter(Boolean);
 }
