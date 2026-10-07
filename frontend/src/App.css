@@ -84,6 +84,11 @@
   background: var(--accent);
 }
 
+/* The "no namespaces" explanation (GitHub issue #123): a title and a
+   sentence or two of fix, kept to a readable width. */
+.empty-namespaces { max-width: 560px; margin: 0 auto; line-height: 1.55; }
+.empty-namespaces p + p { margin-top: 6px; }
+
 .empty-state {
   flex: 1;
   display: flex;

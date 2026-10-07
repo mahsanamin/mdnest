@@ -4,6 +4,25 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## Unreleased
+
+### Fixed
+
+- **"No namespaces found" now says why, and how to fix it** (fixing GitHub
+  issue #123, from a manual Docker Compose deployment). The page always said
+  "Check your mdnest.conf mounts", for every cause, even on a Compose install
+  that has no mdnest.conf. The server now reports why the list is empty and
+  the page names the fix: nothing mounted on the backend (volumes on the
+  frontend service, or a folder Docker cannot see, which it mounts as empty),
+  the notes folder mounted at `/data/notes` itself instead of one level down,
+  a notes folder the backend may not read (permissions, SELinux without
+  `:z`), or, in multi-user mode, an account with no access yet (admins get
+  none automatically). The backend also logs the namespaces it found at
+  startup, with the same advice when there are none, and the setup guide has
+  a troubleshooting table.
+
+---
+
 ## v4.8.0: Steadier shared editing, agents that show what they are doing
 
 Shared editing is calmer: your cursor stays put while someone else types, no
