@@ -3,6 +3,8 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/mdnest/mdnest/backend/updates"
 )
@@ -19,6 +21,12 @@ var Commit = "dev"
 // /api/config report *when* the running build was produced, not just which
 // commit — so "which version is live" is unambiguous. Empty/"dev" locally.
 var BuildTime = "dev"
+
+// bootID changes every time the backend process starts, including a restart
+// from Settings (which re-execs in place, keeping the version and pid). The
+// page polls /api/config until it changes, so it knows the new process is
+// the one answering rather than the old one still draining.
+var bootID = strconv.FormatInt(time.Now().UnixNano(), 36)
 
 // ConfigHandler returns public configuration (no auth required).
 type ConfigHandler struct {
@@ -167,6 +175,7 @@ func (h *ConfigHandler) HandleConfig(w http.ResponseWriter, r *http.Request) {
 		"commit":       Commit,
 		"buildTime":    BuildTime,
 		"defaultTheme": h.defaultThemeOrAuto(),
+		"bootId":       bootID,
 	}
 	if h.serverAlias != "" {
 		resp["serverAlias"] = h.serverAlias

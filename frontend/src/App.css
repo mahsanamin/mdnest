@@ -88,6 +88,16 @@
    sentence or two of fix, kept to a readable width. */
 .empty-namespaces { max-width: 560px; margin: 0 auto; line-height: 1.55; }
 .empty-namespaces p + p { margin-top: 6px; }
+.empty-namespaces-snippet { margin-top: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); font-size: 0.85rem; }
+.empty-namespaces-snippet-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: 4px 8px; border-bottom: 1px solid var(--border-subtle); color: var(--text-muted); }
+.empty-namespaces-snippet pre { margin: 0; padding: 8px 10px; color: var(--text); white-space: pre-wrap; word-break: break-all; font-size: 0.85rem; }
+.empty-namespaces-snippet button,
+.empty-namespaces-actions button { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 4px 10px; cursor: pointer; font-size: 0.85rem; }
+.empty-namespaces-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-4); }
+.empty-namespaces-actions button { padding: 6px 14px; font-size: 0.9rem; }
+.empty-namespaces-actions button.empty-namespaces-primary { background: var(--accent); color: var(--text-inverse); border-color: var(--accent); }
+.empty-namespaces-actions button:disabled { opacity: 0.6; cursor: default; }
+.empty-namespaces .empty-namespaces-note { margin-top: var(--space-3); font-size: 0.9rem; }
 
 .empty-state {
   flex: 1;
@@ -2315,6 +2325,10 @@ pre:hover .code-copy-btn {
 .modal-btn:hover {
   background: var(--surface-3);
 }
+
+.settings-server-text { margin: 0 0 var(--space-3); line-height: 1.5; }
+.settings-server-muted { color: var(--text-muted); font-size: 0.9rem; }
+.settings-server-confirm { justify-content: flex-start; align-items: center; flex-wrap: wrap; }
 
 .modal-btn-primary {
   padding: 0.4rem 0.9rem;

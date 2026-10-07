@@ -250,6 +250,33 @@ curl -X DELETE "http://localhost:8286/api/auth/tokens?id=a1b2c3d4" \
 
 ---
 
+## Server restart *(v4.8.2+)*
+
+### POST /api/admin/restart
+
+Restarts the backend, the same as **Settings > Server > Restart server**.
+Superadmin only in multi-user mode (others get 403); in single-user mode the
+signed-in user owns the server and may restart it.
+
+The response comes first (`202 {"status":"restarting"}`). The backend then
+stops taking requests, finishes the ones in flight (up to 15 seconds), commits
+pending edits when `STORAGE_BACKEND=git`, and starts itself again in place. It
+needs no restart policy from Docker or Kubernetes. Repeated calls while it is
+restarting start one restart.
+
+A restart keeps the container's mounts and environment, which Docker fixes when
+the container is created. To apply a change to `docker-compose.yml` or `.env`,
+run `docker compose up -d` on the server instead.
+
+To know when the new process is up, read `bootId` from `GET /api/config`
+before restarting and poll until it changes:
+
+```bash
+curl -X POST http://localhost:8286/api/admin/restart -H "Authorization: Bearer $TOKEN"
+```
+
+---
+
 ## Admin (multi-user mode only)
 
 These endpoints are only available when `AUTH_MODE=multi`. All require an admin role (`superadmin` or `admin`) — collaborators receive a 403.

@@ -114,7 +114,13 @@ startup:
 | "No namespaces found", but the folder exists | Docker cannot see the host folder, so it mounts an empty one | on Docker Desktop add the folder under Settings > Resources > File sharing; on an SELinux host (Fedora, RHEL) add `:z` |
 | "Your notes are mounted one level too high" | the folder is mounted at `/data/notes` itself, so its files are in no namespace | mount it one level down: `- ./notes:/data/notes/notes` |
 | "The notes folder cannot be read" | permissions, or SELinux without `:z` | fix the host permissions, or add `:z` to the volume |
-| "No namespaces you can open yet" | multi-user mode: your account has no grant (admins get none automatically) | grant access in **Manage users & access** |
+| "No namespaces you can open yet" | multi-user mode: your account has no grant (admins get none automatically) | an admin can click **Give me access to all namespaces** on that page, or choose namespaces in **Manage users & access** |
+
+For a mount problem the page also shows the lines to paste, and a **Check
+again** button that re-reads the list once you have fixed it, so there is no
+need to reload. Apply a mount change with `docker compose up -d`:
+`docker compose restart`, and **Settings > Server > Restart server**, keep the
+container's old mounts.
 
 ## Guided setup
 

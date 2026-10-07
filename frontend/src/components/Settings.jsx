@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { changePassword, listTokens, createToken, revokeToken, getMyWorkspace, saveMyWorkspace, deleteMyWorkspace } from '../api.js';
+import { changePassword, listTokens, createToken, revokeToken, getMyWorkspace, saveMyWorkspace, deleteMyWorkspace, restartServer, readBootId, waitForRestart } from '../api.js';
 
 // Derive server URL from current browser location
 function getServerUrl() {
@@ -51,7 +51,7 @@ function CodeBlock({ code, label }) {
   );
 }
 
-function Settings({ onClose, userProvider, themePreference, resolvedTheme, onChangeTheme, serverDefaultTheme, serverVersion }) {
+function Settings({ onClose, userProvider, themePreference, resolvedTheme, onChangeTheme, serverDefaultTheme, serverVersion, canRestart }) {
   const [tab, setTab] = useState('tokens');
   // Hide Credentials + 2FA in any federated mode — identity lives with the
   // external provider (Firebase Auth / corporate SSO IdP), not in mdnest's
@@ -76,6 +76,9 @@ function Settings({ onClose, userProvider, themePreference, resolvedTheme, onCha
           {passwordEnabled && (
             <button className={tab === 'password' ? 'active' : ''} onClick={() => setTab('password')}>Credentials</button>
           )}
+          {canRestart && (
+            <button className={tab === 'server' ? 'active' : ''} onClick={() => setTab('server')}>Server</button>
+          )}
         </div>
         {tab === 'appearance' && (
           <AppearanceTab
@@ -91,6 +94,7 @@ function Settings({ onClose, userProvider, themePreference, resolvedTheme, onCha
         {tab === 'api' && <ApiTab />}
         {tab === 'gitremote' && <GitRemoteTab />}
         {tab === 'password' && passwordEnabled && <PasswordTab />}
+        {tab === 'server' && canRestart && <ServerTab />}
       </div>
     </div>
   );
@@ -646,3 +650,59 @@ function PasswordTab() {
 }
 
 export default Settings;
+
+// ServerTab restarts the backend (superadmin only; the server enforces it).
+// It is for a server that is stuck, without needing SSH. It cannot apply a
+// change to docker-compose.yml or .env: Docker fixes mounts and environment
+// when the container is created, so those still need `docker compose up -d`
+// on the server, and the tab says so.
+function ServerTab() {
+  const [state, setState] = useState('idle'); // idle | confirm | restarting | failed
+  const [error, setError] = useState('');
+
+  const restart = async () => {
+    setState('restarting');
+    setError('');
+    try {
+      const before = await readBootId();
+      await restartServer();
+      await waitForRestart(before);
+      window.location.reload();
+    } catch (e) {
+      setError(e.message || 'Restart failed');
+      setState('failed');
+    }
+  };
+
+  return (
+    <div className="settings-content" data-testid="settings-server">
+      <p className="settings-server-text">
+        Restart the mdnest backend. Everyone using this server is disconnected for a few seconds and
+        then reconnects on their own. Saved notes are not affected.
+      </p>
+      <p className="settings-server-text settings-server-muted">
+        A restart keeps the same mounted folders and settings. To apply a change to docker-compose.yml
+        or .env, run docker compose up -d on the server instead.
+      </p>
+      {state === 'idle' && (
+        <button type="button" className="modal-btn-primary" onClick={() => setState('confirm')}>Restart server</button>
+      )}
+      {state === 'confirm' && (
+        <div className="modal-actions settings-server-confirm">
+          <span>Restart now? Everyone is disconnected briefly.</span>
+          <button type="button" className="modal-btn-primary" onClick={restart}>Restart now</button>
+          <button type="button" className="modal-btn" onClick={() => setState('idle')}>Cancel</button>
+        </div>
+      )}
+      {state === 'restarting' && (
+        <p className="settings-server-text" role="status">Restarting… this page reloads when the server is back.</p>
+      )}
+      {state === 'failed' && (
+        <>
+          <div className="modal-error">{error}</div>
+          <button type="button" className="modal-btn-primary" onClick={() => setState('idle')}>Back</button>
+        </>
+      )}
+    </div>
+  );
+}

@@ -265,6 +265,29 @@ export async function getManageableNamespaces() {
   return res.json();
 }
 
+// grantSelfAllNamespaces gives the signed-in admin write access at the root of
+// every namespace they can administer. It is the one-click fix on the empty
+// page when notes are mounted but the account has no grant (a superadmin has
+// no implicit data access). It uses the same grant API as Manage users &
+// access, so the same checks apply. Returns how many grants were made; a
+// namespace that already has one counts as done.
+export async function grantSelfAllNamespaces(userId) {
+  const names = await getManageableNamespaces();
+  let granted = 0;
+  let lastError = null;
+  for (const ns of names) {
+    try {
+      await adminCreateGrant(userId, ns, '/', 'write');
+      granted++;
+    } catch (e) {
+      if (/exist|duplicate/i.test(e.message)) granted++;
+      else lastError = e;
+    }
+  }
+  if (granted === 0 && lastError) throw lastError;
+  return { granted, total: names.length };
+}
+
 export async function getTree(ns) {
   const res = await request(`/tree?ns=${encodeURIComponent(ns)}`);
   if (!res.ok) throw new Error('Failed to load tree');
@@ -1072,4 +1095,41 @@ export async function convertToChat(ns, path, title) {
   const res = await request(`/chat/convert?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}&title=${encodeURIComponent(title || '')}`, { method: 'POST' });
   if (!res.ok) throw await chatError(res, 'Failed to create chat');
   return res.json();
+}
+
+// --- Server restart (Settings > Server) ---
+
+// restartServer asks the backend to restart itself. Superadmin-only in multi
+// mode. Pair it with waitForRestart: the request returns before the restart.
+export async function restartServer() {
+  const res = await request('/admin/restart', { method: 'POST' });
+  if (res.status !== 202) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Could not restart the server');
+  }
+}
+
+// readBootId returns the running backend's bootId, or null while it is down.
+export async function readBootId() {
+  try {
+    const res = await fetch(`${BASE}/config`, { cache: 'no-store' });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.bootId || null;
+  } catch {
+    return null;
+  }
+}
+
+// waitForRestart resolves once a backend with a different bootId answers,
+// i.e. the new process (not the old one still draining requests). Rejects
+// after timeoutMs.
+export async function waitForRestart(oldBootId, { timeoutMs = 90000, intervalMs = 1000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, intervalMs));
+    const id = await readBootId();
+    if (id && id !== oldBootId) return id;
+  }
+  throw new Error('The server did not come back in time');
 }
