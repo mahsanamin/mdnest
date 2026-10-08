@@ -4,9 +4,30 @@ All notable changes to mdnest are documented here.
 
 ---
 
-## v4.8.4 (in progress)
+## v4.8.4: Private chats
+
+A chat can now be limited to the people invited to it, and you pick them
+when you create it. Only a chat's owner or an admin can delete it, and a
+chat deleted while people and agents are in it says so instead of breaking.
+Members and Connect an agent open as popups, also from the chat list's
+right-click menu. setup.sh now warns about a `BIND_ADDRESS` that can leave
+mdnest running with no port after a reboot.
 
 ### Added
+
+- **Private chats** (fixing GitHub issue #127). In multi-user mode a chat
+  was visible to everyone who could read its workspace. A chat can now have
+  a member list, and then only those people can open it. Everyone else gets
+  "access denied" on every route that reaches the file: the chat itself,
+  the note, the file tree, search, the task board, comments, history,
+  downloads and moves, the CLI and MCP. Any member can add or remove people
+  at any time. Someone added later sees the whole history, and someone
+  removed loses access on their next request, including an editor tab they
+  already have open. Members live in the database, so editing the note
+  cannot change them. New chats are private by default (untick **Only
+  people I invite** for an open one), and chats from before this release
+  stay open until someone makes them private. One limit, stated in the
+  docs: a connected git remote still gets a copy of the file.
 
 - **Agents keep their role in long chats.** An agent tends to forget the job
   it was given once its context fills up and gets summarised. The job typed
@@ -75,6 +96,16 @@ All notable changes to mdnest are documented here.
 
 ### Fixed
 
+- **setup.sh warns about a `BIND_ADDRESS` that may not survive a restart**
+  (fixing GitHub issue #126). Docker only publishes a port if its IP exists
+  when the container starts. With a Tailscale, VPN or DHCP address that
+  comes up after Docker, mdnest ran with no port published, logged nothing,
+  and every request was refused until someone recreated the containers.
+  setup.sh now warns about any IP other than `127.0.0.1` or `0.0.0.0` and
+  suggests a reverse proxy instead, `./mdnest-server status` reports ports
+  that are configured but not published (and says to run `reload`), and the
+  sample config and setup guide no longer suggest binding a Tailscale IP.
+
 - **No more git settings that do nothing.** On the plain-files storage every
   `setup.sh` install uses, settings saved in the old Git Workspaces tab were
   never read, and adding a workspace created a namespace folder that the next
@@ -94,8 +125,6 @@ All notable changes to mdnest are documented here.
   reloaded, so the view jumped and the last message kept dropping out of
   sight after you scrolled to it. A poll with nothing new now leaves the
   messages untouched, and a browser test pins it.
-
-### Fixed
 
 - **The chats "Back to …" button no longer turns into an empty pill.** In a
   narrower window the toolbar drops button labels, and this button lost its
