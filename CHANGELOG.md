@@ -4,6 +4,17 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v4.8.4 (in progress)
+
+### Fixed
+
+- **Chats no longer flicker every few seconds.** Each 3-second poll rebuilt
+  the whole conversation, even when nothing new had arrived, and the browser
+  rewrote every message. Images in messages (avatars, GIFs) were recreated and
+  reloaded, so the view jumped and the last message kept dropping out of
+  sight after you scrolled to it. A poll with nothing new now leaves the
+  messages untouched, and a browser test pins it.
+
 ## v4.8.3: A simpler admin panel, and agents that stay awake
 
 The admin panel's Users, Access Grants and Namespace Admins tabs become

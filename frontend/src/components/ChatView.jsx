@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Marked } from 'marked';
 import { listChats, getChat, postChatMessage, convertToChat, listChatGifs, getToken, fetchPreferencesStrict, savePreferences, getChatMembers, addChatMember, removeChatMember, getNamespaceUsers } from '../api.js';
 import { resolveImgSrc } from '../img-src.js';
@@ -49,6 +49,19 @@ function renderMessage(text, ns, gifs) {
   });
   return tpl.innerHTML;
 }
+
+// Rendered message HTML. React 19 compares dangerouslySetInnerHTML by object
+// identity, so a plain div rewrote every message's innerHTML whenever the list
+// re-rendered, even with the same text. That recreated each image, which
+// reloaded, collapsed and pushed the last message out of view on every poll.
+// memo on the string keeps the DOM untouched unless the HTML really changed.
+const Html = memo(function Html({ className, html }) {
+  return <div className={className} dangerouslySetInnerHTML={{ __html: html }} />;
+});
+
+// Keep the current value when a poll returns the same thing, so state that
+// feeds the message list does not change identity (and rebuild it) every 3s.
+const sameOr = (next) => (cur) => (JSON.stringify(cur) === JSON.stringify(next) ? cur : next);
 
 const AS_KEY = 'mdnest_chat_as';
 const seenKey = (ns, path) => `mdnest_chat_seen:${ns}/${path}`;
@@ -432,8 +445,8 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
       }
       countRef.current = Math.max(countRef.current, r.count);
       writeSeen(chat.ns, chat.path, countRef.current);
-      setWorking(r.working || []);
-      setContexts(r.contexts || {});
+      setWorking(sameOr(r.working || []));
+      setContexts(sameOr(r.contexts || {}));
       setError('');
     } catch (e) {
       setError(e.message);
@@ -521,7 +534,7 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
   // in the chat, which made typing lag (~66ms a key with 300 messages).
   const messageList = useMemo(() => (
     <>
-        {doc?.description && <div className="chat-description" dangerouslySetInnerHTML={{ __html: renderMessage(doc.description, chat.ns, gifs) }} />}
+        {doc?.description && <Html className="chat-description" html={renderMessage(doc.description, chat.ns, gifs)} />}
         {!doc && !error && <div className="chat-empty">Loading…</div>}
         {doc && messages.length === 0 && <div className="chat-empty">No messages yet — say hello.</div>}
         {grouped.map((m) => {
@@ -550,7 +563,7 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
                   <span className="chat-msg-time" title={m.time}>{formatChatTime(m.time)}</span>
                 </div>
               )}
-              <div className="chat-bubble" dangerouslySetInnerHTML={{ __html: renderMessage(m.text, chat.ns, gifs) }} />
+              <Html className="chat-bubble" html={renderMessage(m.text, chat.ns, gifs)} />
             </div>
           );
         })}
