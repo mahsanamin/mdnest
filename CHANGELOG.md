@@ -6,7 +6,25 @@ All notable changes to mdnest are documented here.
 
 ## v4.8.4 (in progress)
 
+### Changed
+
+- **Git backup moves into the Namespaces tab.** The separate Git Workspaces
+  tab is gone. Its "groups" looked like the access Groups tab but meant
+  something else, and a "workspace" was just a namespace plus the repository
+  it backs up to. Each namespace card now has a **Git backup** section (the
+  repository, whether the last sync worked, Set up, Pause, Remove namespace),
+  **+ Add namespace** creates a namespace and its backup in one step, and a
+  git host plus token saved once is now a **Git connection**.
+
 ### Fixed
+
+- **No more git settings that do nothing.** On the plain-files storage every
+  `setup.sh` install uses, settings saved in the old Git Workspaces tab were
+  never read, and adding a workspace created a namespace folder that the next
+  `./mdnest-server rebuild` deleted. The server now refuses to create a
+  namespace there (namespaces come from `MOUNT_` lines in mdnest.conf, and
+  git-sync does the backup), the Namespaces tab says so, and Settings hides
+  the personal **Git remote** tab on those servers and in single mode.
 
 - **Chats no longer flicker every few seconds.** Each 3-second poll rebuilt
   the whole conversation, even when nothing new had arrived, and the browser

@@ -76,6 +76,11 @@ The panel has three tabs for access, and each answers one question:
 - **Groups**: who is in a group, and what the group can reach. Give access to a group once and every member gets it.
 - **Namespaces**: who can reach this namespace? Each namespace lists everyone with access, directly or through a group, and who administers it. **Give access** takes a person or a group.
 
+**Git backup and adding namespaces.** Where a namespace comes from depends on how notes are stored:
+
+- **Plain files (every `setup.sh` install).** A namespace is a folder listed in `mdnest.conf` (`MOUNT_name=/path`, then `./mdnest-server reload`), and git backup is done by git-sync. The Namespaces tab says so and offers nothing else, because settings saved there would never be used.
+- **Git storage (`STORAGE_BACKEND=git`, the Helm chart).** Super-admins get **+ Add namespace**, which creates a namespace together with the git repository it backs up to. Each namespace card has a **Git backup** section showing the repository and whether the last sync worked, with **Set up backup**, **Pause** / **Resume** and **Remove namespace**. Below the list, **Git connections** holds a git host and token saved once; each namespace backed up through a connection gets its own repository, `<address>/<namespace>.git`. A namespace can also back up to a repository of its own.
+
 Access from an IdP (OIDC) group is read from the sign-in token, so it is not part of **Can reach**.
 
 ### Adding a person

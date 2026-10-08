@@ -439,7 +439,7 @@ mdnest's backend reaches out to `api.github.com` once per hour to check whether 
 
 ### Per-workspace git credentials — sealing, fail-closed & rotation *(multi mode)*
 
-When a namespace mirrors to its own repository (Admin → Git Workspaces / Settings → Git remote), the supplied credential — an HTTPS PAT or an SSH private key, the most sensitive data mdnest holds — is sealed at rest with **AES-256-GCM** in the `workspaces` (and `workspace_groups`) table. The key is derived (SHA-256) from `MDNEST_ENCRYPTION_KEY`, which falls back to `MDNEST_JWT_SECRET`.
+When a namespace mirrors to its own repository (Admin → Namespaces → Git backup / Settings → Git remote, on git storage only), the supplied credential — an HTTPS PAT or an SSH private key, the most sensitive data mdnest holds — is sealed at rest with **AES-256-GCM** in the `workspaces` (and `workspace_groups`) table. The key is derived (SHA-256) from `MDNEST_ENCRYPTION_KEY`, which falls back to `MDNEST_JWT_SECRET`.
 
 - **Never read back.** The API only ever reports `has_credential`; the ciphertext is decrypted solely at push time, in the writer, to build the git operation. It is never returned to a client and never logged.
 - **Never in argv or a URL.** HTTPS uses a `GIT_ASKPASS` helper reading a private temp file; SSH stages the key to a private temp file wired through `GIT_SSH_COMMAND -i`. Only the *username* is embedded in the remote URL. Staged secret files are removed after each push, and `GIT_TERMINAL_PROMPT=0` prevents interactive prompts.

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { changePassword, listTokens, createToken, revokeToken, getMyWorkspace, saveMyWorkspace, deleteMyWorkspace, restartServer, readBootId, waitForRestart } from '../api.js';
+import { changePassword, listTokens, createToken, revokeToken, getWorkspaceStatus, getMyWorkspace, saveMyWorkspace, deleteMyWorkspace, restartServer, readBootId, waitForRestart } from '../api.js';
 
 // Derive server URL from current browser location
 function getServerUrl() {
@@ -58,6 +58,15 @@ function Settings({ onClose, userProvider, themePreference, resolvedTheme, onCha
   // users table. Keeping the tab visible would be misleading and the
   // change-password endpoint refuses these accounts anyway.
   const passwordEnabled = userProvider !== 'firebase' && userProvider !== 'sso';
+  // Mirroring your own namespace to git works only where the server keeps
+  // namespaces in git; on the plain-files backend (and in single mode) the
+  // tab would save settings nothing reads, so it is not shown.
+  const [gitRemote, setGitRemote] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    getWorkspaceStatus().then((s) => { if (alive) setGitRemote(!!s.mirroring); });
+    return () => { alive = false; };
+  }, []);
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -72,7 +81,7 @@ function Settings({ onClose, userProvider, themePreference, resolvedTheme, onCha
           <button className={tab === 'cli' ? 'active' : ''} onClick={() => setTab('cli')}>CLI</button>
           <button className={tab === 'mcp' ? 'active' : ''} onClick={() => setTab('mcp')}>MCP</button>
           <button className={tab === 'api' ? 'active' : ''} onClick={() => setTab('api')}>API</button>
-          <button className={tab === 'gitremote' ? 'active' : ''} onClick={() => setTab('gitremote')}>Git remote</button>
+          {gitRemote && <button className={tab === 'gitremote' ? 'active' : ''} onClick={() => setTab('gitremote')}>Git remote</button>}
           {passwordEnabled && (
             <button className={tab === 'password' ? 'active' : ''} onClick={() => setTab('password')}>Credentials</button>
           )}
@@ -92,7 +101,7 @@ function Settings({ onClose, userProvider, themePreference, resolvedTheme, onCha
         {tab === 'cli' && <CliTab serverVersion={serverVersion} />}
         {tab === 'mcp' && <McpTab />}
         {tab === 'api' && <ApiTab />}
-        {tab === 'gitremote' && <GitRemoteTab />}
+        {tab === 'gitremote' && gitRemote && <GitRemoteTab />}
         {tab === 'password' && passwordEnabled && <PasswordTab />}
         {tab === 'server' && canRestart && <ServerTab />}
       </div>

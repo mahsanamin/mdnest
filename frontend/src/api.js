@@ -841,6 +841,20 @@ export async function adminCreateWorkspaceInGroup(namespace, groupId) {
   return res.json();
 }
 
+// Whether namespaces and git backups can be set up from the app on this server.
+// False on the plain-files backend (every setup.sh install), where namespaces
+// come from mdnest.conf and git-sync does the backup; also false in single
+// mode, where the route does not exist.
+export async function getWorkspaceStatus() {
+  try {
+    const res = await request('/workspaces/status');
+    if (!res.ok) return { mirroring: false, encryption: false };
+    return res.json();
+  } catch {
+    return { mirroring: false, encryption: false };
+  }
+}
+
 export async function getMyWorkspace() {
   const res = await request('/me/workspace');
   if (!res.ok) throw new Error('Failed to load personal workspace');

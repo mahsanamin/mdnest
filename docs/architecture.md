@@ -176,7 +176,7 @@ mdnest/
         Preview.jsx            # Rendered markdown (marked + mermaid + KaTeX).
         Toolbar.jsx            # View + editor mode toggle, file actions, comment icon.
         ContextMenu.jsx        # Right-click / long-press menu.
-        AdminPanel.jsx         # Tabs: People, Groups, Namespaces (AdminPeople.jsx), Git Workspaces, Marp Themes.
+        AdminPanel.jsx         # Tabs: People, Groups, Namespaces (AdminPeople.jsx; git backup + Add namespace from AdminGit.jsx), Marp Themes.
                                # Scope-aware: superadmin sees all, namespace admin sees
                                # only their namespaces. Role dropdown for SuperAdmin.
         CommentSidebar.jsx     # Inline-comment threads with replies, resolve, delete.
