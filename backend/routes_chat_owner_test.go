@@ -72,10 +72,11 @@ func TestChatDelete_OnlyOwnerOrAdmin(t *testing.T) {
 		t.Fatalf("list should show the chat without canDelete for a non-owner: %s", list)
 	}
 
-	// The owner and a namespace admin may. (A superadmin passes the same
-	// admin check, on a namespace it has been granted: in multi mode it has
-	// no implicit access to notes at all, issue #123.)
-	for name, tok := range map[string]string{"owner": owner, "ns admin": admin} {
+	// The owner, a namespace admin, and a superadmin on a namespace it has
+	// been granted (in multi mode it has no implicit access to notes at all,
+	// so it needs the grant first) may.
+	super := jwtFor(t, uidNate, "superadmin", nil)
+	for name, tok := range map[string]string{"owner": owner, "ns admin": admin, "superadmin": super} {
 		writeFixture(t, cs, "alpha/Team/room.md", ownedChat)
 		if code, body := cs.do(tok, http.MethodDelete, q, nil, ""); code != http.StatusOK {
 			t.Errorf("%s could not delete the chat: %d %s", name, code, body)

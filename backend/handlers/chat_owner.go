@@ -87,7 +87,10 @@ func mayRemoveOwnedBy(r *http.Request, ns, owner string) bool {
 		// multi-mode token that maps to nobody: it owns nothing.
 		return pc == nil
 	}
-	if pc != nil && pc.HasAdminScope(uc, ns) {
+	// A superadmin has no implicit access to notes (it needs a grant like
+	// anyone else, and the route already checked that), but on a chat it can
+	// reach it may delete, the same as a namespace admin.
+	if uc.Role == "superadmin" || (pc != nil && pc.HasAdminScope(uc, ns)) {
 		return true
 	}
 	return owner == "" || strings.EqualFold(owner, sanitizeChatLabel(uc.Username))
