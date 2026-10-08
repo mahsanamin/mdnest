@@ -592,3 +592,34 @@ test('single mode shows no members control and no private option', async ({ page
     await cleanup(page, plain, chat);
   }
 });
+
+// A poll that brings nothing new must leave the messages' DOM alone. Every
+// poll used to rebuild the list (its agent-context object was new each time)
+// and React 19 rewrote each message's innerHTML, so images in messages were
+// recreated, reloaded and collapsed: the view flickered every 3 seconds and
+// the last message kept dropping out of sight at the bottom.
+test('a poll with nothing new does not rewrite the messages on screen', async ({ page }) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  const { plain, chat, title } = await seed(page);
+  try {
+    await page.goto(`/#!chats/${NS}/${chat}`);
+    await expect(page.locator('.chat-room-title h2')).toHaveText(title, { timeout: 20_000 });
+    await expect(page.locator('.chat-bubble').first()).toContainText('first message');
+    await page.evaluate(() => {
+      window.__chatMutations = 0;
+      window.__chatNode = document.querySelector('.chat-bubble').firstChild;
+      new MutationObserver((l) => { window.__chatMutations += l.length; })
+        .observe(document.querySelector('.chat-messages'), { subtree: true, childList: true, characterData: true });
+    });
+    // Two poll intervals (CHAT_POLL_MS is 3s).
+    await page.waitForTimeout(7_000);
+    const r = await page.evaluate(() => ({
+      mutations: window.__chatMutations,
+      same: document.querySelector('.chat-bubble').firstChild === window.__chatNode,
+    }));
+    expect(r).toEqual({ mutations: 0, same: true });
+  } finally {
+    await cleanup(page, plain, chat);
+  }
+});
