@@ -5840,6 +5840,37 @@ pre:hover .code-copy-btn {
 .adm-ns-access { display: flex; align-items: center; gap: 10px; font-size: 0.85rem; }
 .adm-ns-access code { min-width: 90px; }
 .adm-perm-static { font-size: 0.8rem; color: var(--text-secondary); padding: 0 10px; }
+/* Git backup inside the Namespaces tab (AdminGit.jsx). */
+.adm-git-line { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; font-size: 0.85rem; }
+.adm-git-repo { max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.adm-git-actions { margin-left: auto; display: flex; gap: 6px; }
+.adm-git-state { font-size: 0.78rem; color: var(--text-muted); }
+.adm-git-state.good { color: var(--success); }
+.adm-git-state.bad { color: var(--danger); }
+.adm-git-form { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+.adm-git-fields { display: flex; flex-direction: column; gap: 8px; }
+.adm-git-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.adm-git-row.end { justify-content: flex-end; margin-top: 8px; }
+.adm-git-fields input,
+.adm-git-fields select,
+.adm-git-fields textarea,
+.adm-git-form > select,
+.adm-git-add select {
+  padding: 6px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+  min-width: 0;
+}
+.adm-git-row input { flex: 1 1 200px; }
+.adm-git-row select { flex: 0 0 auto; }
+.adm-git-connections { margin-top: 28px; }
+.adm-git-conn { flex-wrap: wrap; gap: 8px; }
+.adm-git-conn code { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.adm-git-local { margin-top: 20px; font-style: normal; }
 .adm-invite {
   background: var(--surface);
   border: 1px solid var(--border);

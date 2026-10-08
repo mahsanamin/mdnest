@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildDirectory, viaLabel, accessSummary, matchesPerson, strongerPermission } from '../adminDirectory.js';
+import { buildDirectory, viaLabel, accessSummary, matchesPerson, strongerPermission, gitBackupFor } from '../adminDirectory.js';
 
 const users = [
   { id: 1, username: 'ahsan', email: 'a@x', role: 'superadmin' },
@@ -76,5 +76,35 @@ describe('admin directory', () => {
   it('write beats read whichever comes first', () => {
     expect(strongerPermission('read', 'write')).toBe('write');
     expect(strongerPermission('write', 'read')).toBe('write');
+  });
+});
+
+describe('git backup per namespace', () => {
+  const connections = [
+    { id: 7, name: 'GitLab acme', base_url: 'https://gitlab.com/acme/' },
+    { id: 8, name: 'Deployment default', base_url: 'https://git.example/notes', implicit_namespaces: ['legacy'] },
+  ];
+  const workspaces = [
+    { id: 1, namespace: 'team-a', group_id: 7, git_enabled: true },
+    { id: 2, namespace: 'solo', remote_url: 'https://github.com/me/solo.git', git_enabled: true },
+    { id: 3, namespace: 'me@x', is_personal: true, remote_url: 'https://x/me.git' },
+  ];
+
+  it('a namespace in a connection mirrors to <base>/<namespace>.git', () => {
+    const b = gitBackupFor('team-a', workspaces, connections);
+    expect([b.kind, b.connection.name, b.repo]).toEqual(['connection', 'GitLab acme', 'https://gitlab.com/acme/team-a.git']);
+  });
+
+  it('a namespace with its own repository shows that repository', () => {
+    expect(gitBackupFor('solo', workspaces, connections)).toMatchObject({ kind: 'own', repo: 'https://github.com/me/solo.git' });
+  });
+
+  it('the deployment default covers namespaces with no row of their own', () => {
+    expect(gitBackupFor('legacy', workspaces, connections)).toMatchObject({ kind: 'default', repo: 'https://git.example/notes/legacy.git' });
+  });
+
+  it('a personal workspace is not offered as a namespace backup, and nothing else means none', () => {
+    expect(gitBackupFor('me@x', workspaces, connections).kind).toBe('none');
+    expect(gitBackupFor('other', workspaces, connections).kind).toBe('none');
   });
 });

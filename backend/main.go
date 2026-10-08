@@ -830,6 +830,7 @@ func main() {
 		mux.Handle("/api/admin/workspaces", authMiddleware.Wrap(middleware.RequireSuperAdmin(http.HandlerFunc(workspaceHandler.HandleAdmin))))
 		mux.Handle("/api/admin/workspace-groups", authMiddleware.Wrap(middleware.RequireSuperAdmin(http.HandlerFunc(workspaceHandler.HandleGroups))))
 		mux.Handle("/api/me/workspace", authMiddleware.Wrap(http.HandlerFunc(workspaceHandler.HandleMine)))
+		mux.Handle("/api/workspaces/status", authMiddleware.Wrap(http.HandlerFunc(workspaceHandler.HandleStatus)))
 
 		// Role-based access "Groups": superadmin-only management of named sets
 		// (users + OIDC group IDs) and their namespace grants.
