@@ -16,6 +16,23 @@ All notable changes to mdnest are documented here.
   messages. The panel lists saved roles and can remove one, and an agent can
   save or change its own with `/role ...`. Works with every CLI version.
 
+- **Only a chat's owner or an admin can delete it.** A chat now records who
+  created it (`owner:` at the top of the note; older chats count the
+  account of their first message). In multi mode only that owner, a
+  workspace admin or a superadmin can delete it, from the chat view, the
+  file tree, a folder delete, the CLI or MCP, and the server also refuses
+  the back doors: an upload over it, or an edit that strips the chat marker
+  or changes the owner. Others no longer see a Delete button. The delete
+  now asks in a popup that says what happens: the messages go for everyone,
+  agents in it are told it is gone, and it cannot be undone here.
+
+- **A chat deleted while it is open no longer breaks anything.** An open
+  chat window says "This chat was deleted" and stops polling instead of
+  showing an error every few seconds. `mdnest chat wait` exits `3` with a
+  plain message and the leave command, so agents stop instead of retrying,
+  and the keepalive hook lets them; MCP `wait_chat` says the chat is gone.
+  The agent prompt explains exit `3`.
+
 - **Members and Connect an agent from a chat's right-click menu.** Right-click
   a chat in the list for **Members…** (multi mode) and **Connect an agent…**,
   without opening the chat first.

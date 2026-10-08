@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { parseRoute, formatRoute } from './hashRoute';
-import { chatPathFor, isChatDoc } from './chat.js';
+import { chatPathFor, isChatDoc, chatDeleteWarning } from './chat.js';
 import Login from './components/Login.jsx';
 import LoginFirebase from './components/LoginFirebase.jsx';
 import LoginSSO from './components/LoginSSO.jsx';
@@ -69,6 +69,7 @@ import {
   createNote,
   createFolder,
   deleteNote,
+  getChat,
   moveItem,
   downloadItem,
   fetchConfig,
@@ -1419,8 +1420,8 @@ function App() {
   // naming the note, because it removes every message too. Clears whatever
   // still points at the note (the open file, the namespace's last-opened
   // memory, the tree) exactly like deleting the file from the tree does.
-  const deleteChat = useCallback(async (ns, path, title) => {
-    if (!window.confirm(`Delete the chat "${title || path}"?\n\nThis deletes the note ${ns}/${path} and every message in it.`)) return false;
+  // The chats view asks first, in its own warning popup (ChatView).
+  const deleteChat = useCallback(async (ns, path) => {
     await deleteNote(ns, path);
     if (ns === selectedNs && currentPath === path) { setCurrentPath(null); setContent(null); setSavedContent(''); }
     if (getLastPath(ns) === path) setLastPath(ns, null);
@@ -1834,7 +1835,15 @@ function App() {
       case 'new-folder': await doCreateFolder(target); break;
       case 'delete-file': {
         if (!target || !selectedNs) return;
-        if (!confirm(`Delete "${target.name || target.path}"?`)) return;
+        // A chat gets the same warning as in the chats view: deleting it
+        // ends the conversation for everyone in it, agents included.
+        const chatInfo = /\.md$/i.test(target.path || '')
+          ? await getChat(selectedNs, target.path, Number.MAX_SAFE_INTEGER).catch(() => null) : null;
+        if (chatInfo && !chatInfo.canDelete) {
+          alert(`"${chatInfo.title || target.name}" is a chat. Only its owner${chatInfo.owner ? ` (${chatInfo.owner})` : ''} or a workspace admin can delete it.`);
+          return;
+        }
+        if (!confirm(chatInfo ? chatDeleteWarning(chatInfo.title || target.name, chatInfo.count) : `Delete "${target.name || target.path}"?`)) return;
         try {
           await deleteNote(selectedNs, target.path);
           if (currentPath === target.path) { setCurrentPath(null); setContent(null); setSavedContent(''); }

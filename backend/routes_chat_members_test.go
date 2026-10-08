@@ -182,6 +182,7 @@ func (m memUsers) UsersForNamespace(ns string) ([]store.NamespaceUser, error) {
 // buildChatFixture:
 //
 //	alpha/Chats/secret.md   private chat (Owen + Mia): SECRET-WORDS, SECRET-TASK
+//	                        (both chats' first message is Owen's, user3, so he owns them)
 //	alpha/Chats/open.md     open chat, as every chat was before
 //	alpha/Notes/a.md        an ordinary note
 //	beta/                   empty, writable by Owen and Nate
@@ -195,9 +196,9 @@ func buildChatFixture(t *testing.T) string {
 		os.WriteFile(filepath.Join(root, filepath.FromSlash(rel)), []byte(body), 0o644)
 	}
 	write("alpha/Chats/secret.md", "---\nmdnest-chat: true\ntitle: SECRET-ROOM\n---\n\n"+
-		"#### owen · 2026-10-07T10:00:00Z\nSECRET-WORDS\n- [ ] SECRET-TASK\n")
+		"#### user3 · 2026-10-07T10:00:00Z\nSECRET-WORDS\n- [ ] SECRET-TASK\n")
 	write("alpha/Chats/open.md", "---\nmdnest-chat: true\ntitle: OPEN-ROOM\n---\n\n"+
-		"#### owen · 2026-10-07T10:00:00Z\nopen words\n")
+		"#### user3 · 2026-10-07T10:00:00Z\nopen words\n")
 	write("alpha/Notes/a.md", "plain note\n")
 	return root
 }
@@ -697,7 +698,11 @@ func TestPrivateChat_OldPathStaysClosedAfterMoveAndDelete(t *testing.T) {
 		t.Errorf("after a delete, the history is open: %d", code)
 	}
 	// The folder no longer holds a live private chat, so the leftover
-	// restriction does not stop a non-member managing it.
+	// restriction does not stop a non-member managing it. (Its other chat
+	// goes first: only its owner may delete that one, chat_owner.go.)
+	if code, _ := cs.do(owen, http.MethodDelete, "/api/note?ns=alpha&path=Chats/open.md", nil, ""); code != http.StatusOK {
+		t.Fatalf("owner deleting the open chat: %d", code)
+	}
 	if code, body := cs.do(nate, http.MethodDelete, "/api/note?ns=alpha&path=Chats", nil, ""); code != http.StatusOK {
 		t.Errorf("a leftover restriction blocked deleting the folder: %d %s", code, body)
 	}

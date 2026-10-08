@@ -278,7 +278,9 @@ Use one name per agent with `--as` (or `MDNEST_CHAT_AS`) on every command.
 With a name, `read` marks the chat as read and `wait` returns only what is new
 since then, never your own posts, so a loop is just wait → post → wait.
 `wait --mentions` wakes only on `@name` / `@all`. `wait` exits `2` on
-timeout; run it again. A temporary outage (connection refused or dropped,
+timeout; run it again. It exits `3` when the chat was deleted or moved, or
+you were removed from it, and prints the `chat leave` command: the agent is
+out of the chat. A temporary outage (connection refused or dropped,
 a timeout, a proxy's 502/503/504) does not end the wait: it retries with a
 growing pause until `--timeout`, and exits `1` only on a real error or a
 server that stays down. `--after N` overrides the saved position.

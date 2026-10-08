@@ -134,7 +134,7 @@ test('leaving chat mode reloads the note underneath, so it is never stale', asyn
   }
 });
 
-test('Delete removes the chat note after confirming, and Cancel keeps it', async ({ page }) => {
+test('Delete warns what it does in a popup, Cancel keeps the chat, Delete removes it', async ({ page }) => {
   test.setTimeout(90_000);
   await signIn(page);
   const { plain, chat, title } = await seed(page);
@@ -142,15 +142,72 @@ test('Delete removes the chat note after confirming, and Cancel keeps it', async
     await page.goto(`/#!chats/${NS}/${chat}`);
     await expect(page.locator('.chat-room-title h2')).toHaveText(title, { timeout: 20_000 });
 
-    page.once('dialog', (d) => d.dismiss());
     await page.locator('.chat-delete').click();
+    const warn = page.getByTestId('chat-delete-confirm');
+    await expect(warn).toBeVisible();
+    await expect(warn).toContainText('Delete this chat for everyone?');
+    await expect(warn).toContainText(title);
+    await expect(warn).toContainText('Its 1 message is deleted');
+    await expect(warn).toContainText('agents waiting in it are told it is gone');
+    await expect(warn).toContainText('cannot be undone');
+    await warn.getByRole('button', { name: 'Cancel' }).click();
+    await expect(warn).toHaveCount(0);
     await expect(page.locator('.chat-room-title h2')).toHaveText(title);
     expect((await api(page, 'GET', `/api/note?ns=${NS}&path=${encodeURIComponent(chat)}`)).status).toBe(200);
 
-    page.once('dialog', (d) => d.accept());
     await page.locator('.chat-delete').click();
+    await page.getByTestId('chat-delete-confirm-button').click();
     await expect(page.locator('.chat-room-title')).toHaveCount(0);
     expect((await api(page, 'GET', `/api/note?ns=${NS}&path=${encodeURIComponent(chat)}`)).status).toBe(404);
+  } finally {
+    await cleanup(page, plain, chat);
+  }
+});
+
+// Someone else deletes the chat while it is open here: the view says so,
+// stops polling, and offers the way back, instead of an error every 3s.
+test('a chat deleted while it is open says so, and nothing can be posted', async ({ page }) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  const { plain, chat, title } = await seed(page);
+  try {
+    await page.goto(`/#!chats/${NS}/${chat}`);
+    await expect(page.locator('.chat-room-title h2')).toHaveText(title, { timeout: 20_000 });
+    expect((await api(page, 'DELETE', `/api/note?ns=${NS}&path=${encodeURIComponent(chat)}`)).status).toBe(200);
+
+    const gone = page.getByTestId('chat-gone');
+    await expect(gone).toContainText('This chat was deleted.', { timeout: 15_000 });
+    await expect(page.locator('.chat-draft')).toHaveCount(0);
+    await expect(page.locator('.chat-room-error')).toHaveCount(0);
+    await expect(page.locator('.chat-delete')).toHaveCount(0);
+    // Polling stopped: no more requests for it.
+    let polls = 0;
+    page.on('request', (r) => { if (r.url().includes('/api/chat?') && r.url().includes(encodeURIComponent(chat))) polls++; });
+    await page.waitForTimeout(7_000);
+    expect(polls).toBe(0);
+
+    await gone.getByRole('button', { name: 'Back to chats' }).click();
+    await expect(page.locator('.chat-room-title')).toHaveCount(0);
+    await expect(page.locator('.chat-list-item', { hasText: title })).toHaveCount(0);
+  } finally {
+    await cleanup(page, plain, chat);
+  }
+});
+
+test('deleting a chat from the file tree gives the chat warning', async ({ page }) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  const { plain, chat } = await seed(page);
+  try {
+    await page.goto('/');
+    const row = page.locator('.sidebar .tree-row', { hasText: chat }).first();
+    await row.click({ button: 'right' });
+    let message = '';
+    page.once('dialog', (d) => { message = d.message(); d.dismiss(); });
+    await page.locator('.context-menu-item', { hasText: /^Delete$/ }).click();
+    await expect.poll(() => message).toContain('for everyone');
+    expect(message).toContain('agents waiting in it are told it is gone');
+    expect((await api(page, 'GET', `/api/note?ns=${NS}&path=${encodeURIComponent(chat)}`)).status).toBe(200);
   } finally {
     await cleanup(page, plain, chat);
   }
@@ -305,8 +362,9 @@ test('right-click on a chat in the list: copy its path, and delete another chat 
     expect(copied).toMatch(new RegExp(`^mdnest://(@[^/]+/)?${NS}/${b.chat.replace(/[.]/g, '\\.')}$`));
 
     await rowB.click({ button: 'right' });
-    page.once('dialog', (d) => d.accept());
     await page.locator('.context-menu-item', { hasText: 'Delete chat' }).click();
+    await expect(page.getByTestId('chat-delete-confirm')).toContainText(b.title);
+    await page.getByTestId('chat-delete-confirm-button').click();
     await expect(page.locator('.chat-list-item', { hasText: b.title })).toHaveCount(0, { timeout: 10_000 });
     expect((await api(page, 'GET', `/api/note?ns=${NS}&path=${encodeURIComponent(b.chat)}`)).status).toBe(404);
     // The chat that was open is still open.
