@@ -1107,8 +1107,11 @@ export async function listChatGifs(ns) {
 
 // Creates the note when it does not exist; otherwise tags it as a chat in place.
 // isPrivate: only the creator can open it until they invite someone (multi mode).
-export async function convertToChat(ns, path, title, isPrivate = false) {
-  const res = await request(`/chat/convert?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}&title=${encodeURIComponent(title || '')}${isPrivate ? '&private=1' : ''}`, { method: 'POST' });
+// memberIds: people to add to a new private chat in the same request, so it
+// is never created with only some of them on it.
+export async function convertToChat(ns, path, title, isPrivate = false, memberIds = []) {
+  const members = isPrivate && memberIds.length ? `&members=${memberIds.join(',')}` : '';
+  const res = await request(`/chat/convert?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}&title=${encodeURIComponent(title || '')}${isPrivate ? '&private=1' : ''}${members}`, { method: 'POST' });
   if (!res.ok) throw await chatError(res, 'Failed to create chat');
   return res.json();
 }

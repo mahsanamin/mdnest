@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/mdnest/mdnest/backend/middleware"
 	"github.com/mdnest/mdnest/backend/store"
@@ -40,6 +41,55 @@ type chatUserLookup interface {
 func (h *ChatHandler) SetMembers(m store.ChatMemberStore, users chatUserLookup) {
 	h.members = m
 	h.users = users
+}
+
+// maxInvite caps how many people a new chat can be created with in one go.
+const maxInvite = 200
+
+// parseInviteIDs reads convert's members=3,5,8 (user ids). Empty is none;
+// duplicates are dropped.
+func parseInviteIDs(raw string) ([]int, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	seen := map[int]bool{}
+	var ids []int
+	for _, part := range strings.Split(raw, ",") {
+		id, err := strconv.Atoi(strings.TrimSpace(part))
+		if err != nil || id <= 0 {
+			return nil, errors.New("members must be a comma-separated list of user ids")
+		}
+		if !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) > maxInvite {
+		return nil, errors.New("too many members for one request")
+	}
+	return ids, nil
+}
+
+// allInWorkspace reports whether every id is someone who can be invited to a
+// chat in ns.
+func (h *ChatHandler) allInWorkspace(ns string, ids []int) bool {
+	if h.users == nil {
+		return false
+	}
+	users, err := h.users.UsersForNamespace(ns)
+	if err != nil {
+		return false
+	}
+	in := map[int]bool{}
+	for _, u := range users {
+		in[u.ID] = true
+	}
+	for _, id := range ids {
+		if !in[id] {
+			return false
+		}
+	}
+	return true
 }
 
 // MembersEnabled reports whether private chats are on.

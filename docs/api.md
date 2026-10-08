@@ -1829,7 +1829,7 @@ curl -X POST "$URL/api/chat/status?ns=work&path=Chats/release.md&as=api-agent" \
   -H "Authorization: Bearer $TOKEN" --data-raw "running the migration"
 ```
 
-### POST /api/chat/convert?ns=&path=[&title=][&private=1]
+### POST /api/chat/convert?ns=&path=[&title=][&private=1][&members=]
 
 Needs write access. Creates the chat note when it does not exist (`201`).
 Otherwise it adds the tag in place and keeps the existing content as the
@@ -1841,6 +1841,11 @@ as its only member. The member list is written before the note, so a new
 private chat never exists as an open one. It only creates: on a note that
 already exists it is a `409` (use `/api/chat/members` to make an existing chat
 private). In single mode it is a `400`.
+
+`members=3,5` (with `private=1`) adds those users in the same request. Each
+must be someone the people picker lists (a user with access to the
+workspace); one that is not is a `404` and nothing is created. Without
+`private=1` it is a `400`.
 
 ### GET/POST/DELETE /api/chat/members?ns=&path= *(v4.8.4+, multi mode)*
 

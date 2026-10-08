@@ -84,7 +84,7 @@ function useVisible() {
   return visible;
 }
 
-function NewChatForm({ ns, canPrivate, onCreated, onCancel }) {
+function NewChatForm({ ns, account, canPrivate, onCreated, onCancel }) {
   const [title, setTitle] = useState('');
   // Private by default where it exists (multi mode): a new chat is for the
   // people you invite, not everyone who can read the workspace.
@@ -92,7 +92,30 @@ function NewChatForm({ ns, canPrivate, onCreated, onCancel }) {
   const [folder, setFolder] = useState(DEFAULT_CHAT_FOLDER);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  // The people to invite, picked here so a private chat starts with them
+  // instead of being created and then filled in through Members.
+  const [users, setUsers] = useState(null);
+  const [picked, setPicked] = useState(() => new Set());
+  const [who, setWho] = useState('');
   const path = chatPathFor(title, folder);
+
+  useEffect(() => {
+    if (!canPrivate || !ns) return undefined;
+    let alive = true;
+    setUsers(null);
+    setPicked(new Set());
+    getNamespaceUsers(ns)
+      .then((u) => { if (alive) setUsers((u || []).filter((x) => x.username !== account)); })
+      .catch(() => { if (alive) setUsers([]); });
+    return () => { alive = false; };
+  }, [ns, canPrivate, account]);
+
+  const toggle = (id) => setPicked((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const shown = (users || []).filter((u) => !who.trim() || u.username.toLowerCase().includes(who.trim().toLowerCase()));
 
   const submit = async (e) => {
     e.preventDefault();
@@ -100,7 +123,7 @@ function NewChatForm({ ns, canPrivate, onCreated, onCancel }) {
     setBusy(true);
     setError('');
     try {
-      await convertToChat(ns, path, title.trim(), canPrivate && isPrivate);
+      await convertToChat(ns, path, title.trim(), canPrivate && isPrivate, [...picked]);
       onCreated({ ns, path });
     } catch (err) {
       setError(err.message);
@@ -133,6 +156,37 @@ function NewChatForm({ ns, canPrivate, onCreated, onCancel }) {
           <input type="checkbox" checked={isPrivate} onChange={(e) => setIsPrivate(e.target.checked)} data-testid="chat-new-private" />
           Only people I invite
         </label>
+      )}
+      {canPrivate && isPrivate && (
+        <div className="chat-new-invite" data-testid="chat-new-invite">
+          {users === null && <div className="chat-new-invite-note">Loading people…</div>}
+          {users && users.length === 0 && (
+            <div className="chat-new-invite-note">Nobody else has access to {ns} yet. You can add people later from Members.</div>
+          )}
+          {users && users.length > 0 && (
+            <>
+              <div className="chat-new-invite-note">
+                {picked.size ? `${picked.size} invited, plus you` : 'Invite people (you can add more later)'}
+              </div>
+              {users.length > 6 && (
+                <input className="chat-input" placeholder="Find someone" value={who}
+                  onChange={(e) => setWho(e.target.value)} aria-label="Find someone to invite" />
+              )}
+              <ul className="chat-new-invite-list">
+                {shown.map((u) => (
+                  <li key={u.id}>
+                    <label>
+                      <input type="checkbox" checked={picked.has(u.id)} onChange={() => toggle(u.id)}
+                        data-testid="chat-new-invite-user" />
+                      {u.username}
+                    </label>
+                  </li>
+                ))}
+                {shown.length === 0 && <li className="chat-new-invite-note">No one matches.</li>}
+              </ul>
+            </>
+          )}
+        </div>
       )}
       {error && <div className="chat-error">{error}</div>}
       <div className="chat-new-row">
@@ -1093,6 +1147,7 @@ function ChatView({ ns, namespaces, onSelectNs, account, serverAlias, isMobile, 
           {creating && (
             <NewChatForm
               ns={ns}
+              account={account}
               canPrivate={!!account}
               onCancel={() => setCreating(false)}
               onCreated={(c) => { setCreating(false); refresh(); onSelectChat(c); }}

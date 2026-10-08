@@ -26,6 +26,13 @@ All notable changes to mdnest are documented here.
   now asks in a popup that says what happens: the messages go for everyone,
   agents in it are told it is gone, and it cannot be undone here.
 
+- **Pick who is in a new chat when you create it.** With **Only people I
+  invite** ticked, the **+ New** form lists the people with access to the
+  workspace, so the chat starts with them instead of being created and then
+  filled in through Members. They are added in the same request as the chat
+  (`/api/chat/convert?private=1&members=…`), so it never exists with only
+  some of them on it.
+
 - **A chat deleted while it is open no longer breaks anything.** An open
   chat window says "This chat was deleted" and stops polling instead of
   showing an error every few seconds. `mdnest chat wait` exits `3` with a
@@ -87,6 +94,13 @@ All notable changes to mdnest are documented here.
   reloaded, so the view jumped and the last message kept dropping out of
   sight after you scrolled to it. A poll with nothing new now leaves the
   messages untouched, and a browser test pins it.
+
+### Fixed
+
+- **The chats "Back to …" button no longer turns into an empty pill.** In a
+  narrower window the toolbar drops button labels, and this button lost its
+  arrow along with its label. It now keeps the arrow and says "Back", with
+  the note's name in the tooltip; a long name is cut short at full width.
 
 ## v4.8.3: A simpler admin panel, and agents that stay awake
 

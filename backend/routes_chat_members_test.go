@@ -10,6 +10,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -958,5 +959,49 @@ func TestPrivateChat_OtherSpellingCannotTakeANote(t *testing.T) {
 	}
 	if code, _ := cs.get(nate, "/api/chat?ns=alpha&path=Chats/OPEN.md"); code != http.StatusOK {
 		t.Errorf("the other spelling was locked: %d", code)
+	}
+}
+
+// A private chat can be created with the people to invite in the same
+// request. Every id is checked first, so a bad one creates nothing, and the
+// chat is never briefly open or missing someone who was picked.
+func TestChatConvert_PrivateWithMembers(t *testing.T) {
+	cs := newChatServer(t)
+	owen := jwtFor(t, uidOwen, "collaborator", nil)
+	mia := jwtFor(t, uidMia, "collaborator", nil)
+	nate := jwtFor(t, uidNate, "collaborator", nil)
+
+	base := "/api/chat/convert?ns=alpha&path=Chats/team.md&title=Team&private=1"
+	for name, q := range map[string]string{
+		"someone outside the workspace": base + "&members=99",
+		"one good, one outside":         base + "&members=5,99",
+		"not a number":                  base + "&members=mia",
+		"members without private":       "/api/chat/convert?ns=alpha&path=Chats/team.md&members=5",
+	} {
+		code, body := cs.do(owen, http.MethodPost, q, nil, "")
+		if code != http.StatusNotFound && code != http.StatusBadRequest {
+			t.Errorf("%s: %d %s", name, code, body)
+		}
+		if cs.exists("alpha/Chats/team.md") {
+			t.Fatalf("%s: a refused create left the chat behind", name)
+		}
+	}
+
+	if code, body := cs.do(owen, http.MethodPost, base+"&members=5,5", nil, ""); code != http.StatusCreated {
+		t.Fatalf("create with members: %d %s", code, body)
+	}
+	if code, _ := cs.get(mia, "/api/chat?ns=alpha&path=Chats/team.md"); code != http.StatusOK {
+		t.Errorf("an invited member cannot open the new chat: %d", code)
+	}
+	if code, _ := cs.get(nate, "/api/chat?ns=alpha&path=Chats/team.md"); code != http.StatusForbidden {
+		t.Errorf("someone not invited can open the new chat: %d", code)
+	}
+	_, body := cs.get(owen, "/api/chat/members?ns=alpha&path=Chats/team.md")
+	var m struct {
+		Members []struct{ ID int } `json:"members"`
+	}
+	json.Unmarshal([]byte(body), &m)
+	if len(m.Members) != 2 {
+		t.Errorf("want the creator and Mia once each, got %s", body)
 	}
 }
