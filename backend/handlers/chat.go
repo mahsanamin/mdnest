@@ -118,6 +118,8 @@ type chatResponse struct {
 	// Contexts is each poster's last /context report, by label
 	// (chat_context.go), so the page can show it by their name.
 	Contexts map[string]ChatContext `json:"contexts"`
+	// Agents is each agent's saved role, by name (chat_traits.go).
+	Agents map[string]string `json:"agents"`
 }
 
 func chatTitle(doc ChatDoc, relPath string) string {
@@ -186,6 +188,13 @@ func (h *ChatHandler) read(w http.ResponseWriter, r *http.Request) {
 		for _, m := range msgs {
 			b.WriteString(formatChatMessageText(m))
 		}
+		// A waiting agent that is handed new messages is reminded of its
+		// saved role, last, so it is the freshest thing it reads.
+		if exclude != "" && len(msgs) > 0 {
+			if trait := chatTraitFor(doc.Agents, exclude); trait != "" {
+				b.WriteString(chatTraitReminder(exclude, trait))
+			}
+		}
 		io.WriteString(w, b.String())
 		return
 	}
@@ -193,7 +202,8 @@ func (h *ChatHandler) read(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(chatResponse{Namespace: ns, Path: relPath, Title: chatTitle(doc, relPath),
 		Description: doc.Description, Count: len(doc.Messages), Messages: msgs, You: you,
-		Working: h.status.list(ns, relPath, h.now()), Contexts: h.status.contexts(ns, relPath, h.now())})
+		Working: h.status.list(ns, relPath, h.now()), Contexts: h.status.contexts(ns, relPath, h.now()),
+		Agents: agentsOrEmpty(doc.Agents)})
 }
 
 // formatChatMessageText is the terminal rendering the CLI prints verbatim, so
@@ -291,6 +301,11 @@ func (h *ChatHandler) post(w http.ResponseWriter, r *http.Request) {
 	label, via, ok := h.author(r)
 	if !ok {
 		chatJSONError(w, http.StatusForbidden, "cannot attribute this post to a user")
+		return
+	}
+	// "/role one or two lines" saves the poster's own role (chat_traits.go).
+	if trait, isRole := slashRole(text); isRole {
+		h.applyTrait(w, r, ns, relPath, label, trait)
 		return
 	}
 

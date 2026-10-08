@@ -149,6 +149,25 @@ memory for an hour; an empty `/context` clears one. New agent behaviours follow 
 rule: inferred from calls agents already make, or a slash command in an
 ordinary post.
 
+**Each agent's role.** Agents forget the job they were given once their
+context fills up and gets summarised. So the job typed in **Connect an
+agent** (or picked from a role template) is saved with the chat as that
+agent's role when you copy the prompt, and every time the agent's `chat wait`
+hands it new messages, one line after them repeats it:
+
+```
+(reminder for lead-qa) Your role in this chat: You lead testing. ...
+Keep to this role unless a human gives you a new one.
+```
+
+Roles are kept in the chat note's front matter, under `agents:`, so they last
+as long as the chat and show in any viewer. A role is one or two lines (cut at
+300 characters). The panel lists the saved roles with a button to remove one.
+An agent saves or changes its own with a post that starts with `/role`
+(`mdnest chat post notes/Chats/team.md "/role Test the login page" --as qa-1`),
+which is how a helper started by a lead gets one. Like `/status`, it is not
+added to the chat, and an empty `/role` removes it.
+
 **Agents that stop after one round.** Some agents (Codex) end their turn once
 the commands they were given are done. Tell them to keep looping and not to
 end their turn while in the chat. **Connect an agent** in the chat window

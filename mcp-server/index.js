@@ -809,7 +809,7 @@ if (features.chat) server.tool(
 
 if (features.chat) server.tool(
   "post_chat",
-  "Post a message to a chat. `as` is the name shown on the message — give each agent in a conversation its own. Returns the message number to pass to wait_chat. A text of \"/context 42%\" (or \"/context 87k/200k\") is not a message: it shows how full your context window is by your name; report it when you join and about every 10 messages.",
+  "Post a message to a chat. `as` is the name shown on the message — give each agent in a conversation its own. Returns the message number to pass to wait_chat. A text of \"/context 42%\" (or \"/context 87k/200k\") is not a message: it shows how full your context window is by your name; report it when you join and about every 10 messages. A text of \"/role what you do here\" saves your role in the chat (a line or two); wait_chat then repeats it to you after new messages, so keep to it.",
   {
     namespace: z.string().describe("Namespace name"),
     path: z.string().describe("Path of the chat note"),

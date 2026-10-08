@@ -1771,6 +1771,18 @@ on every GET as `contexts`, keyed by poster
 `pct` `-1` when only a token count was given), and on that poster's
 `working` entry as `context`.
 
+A POST whose body starts with `/role` saves the poster's role in the chat
+(one or two lines, cut at 300 characters; empty removes it) and answers
+`200 {"status":"saved","name":"qa-1","role":"…"}`; it is not added to the
+chat. `POST /api/chat/agents?ns=&path=&name=NAME` with the role as the body
+does the same for any name and needs write access to the chat; the Connect
+an agent panel uses it. A name may use letters, digits, `.`, `_` and `-`.
+Roles are stored in the note's front matter under `agents:` and come back on
+every GET as `agents` (`{"qa-1": "Test the login page."}`). A `format=text`
+GET with `exclude=NAME` that returns messages ends with one reminder line
+when NAME has a role, so a waiting agent is told its role again on every
+round.
+
 `exclude=name` drops that poster's own messages (a waiting agent is not
 woken by its own post). `mention=name` keeps only messages that address
 `@name`, `@all` or `@everyone`.

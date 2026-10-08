@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Marked } from 'marked';
-import { listChats, getChat, postChatMessage, convertToChat, listChatGifs, getToken, fetchPreferencesStrict, savePreferences, getChatMembers, addChatMember, removeChatMember, getNamespaceUsers } from '../api.js';
+import { listChats, getChat, postChatMessage, convertToChat, listChatGifs, getToken, fetchPreferencesStrict, savePreferences, getChatMembers, addChatMember, removeChatMember, getNamespaceUsers, saveChatAgentRole } from '../api.js';
 import { resolveImgSrc } from '../img-src.js';
 import { sanitizeHtml } from '../sanitize.js';
 import {
@@ -9,6 +9,7 @@ import {
   highlightMentions, mentionsName, participants, mentionQuery, completeMention,
   avatarFor, reactions, gifMarkdown, expandGifRefs, initialOf,
   pinKey, parsePins, togglePin, chatsForTab, MAX_CHAT_PINS_LENGTH,
+  roleFor,
 } from '../chat.js';
 import { copyPlainText } from '../mermaid-text.js';
 import { mdnestUri } from '../mdnestUri.js';
@@ -349,6 +350,7 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
   const [doc, setDoc] = useState(null); // { title, description, you }
   const [working, setWorking] = useState([]); // who said they are busy, from the server
   const [contexts, setContexts] = useState({}); // each agent's last /context report, by name
+  const [agents, setAgents] = useState({}); // each agent's saved role, by name (kept in the note)
   const [messages, setMessages] = useState([]);
   const [error, setError] = useState('');
   const [draft, setDraft] = useState('');
@@ -361,6 +363,12 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
   const [agentName, setAgentName] = useState('');
   const [agentIntent, setAgentIntent] = useState('');
   const [agentRole, setAgentRole] = useState(''); // a CHAT_ROLES id, or '' for none
+  const saveRole = useCallback((name, role) => {
+    saveChatAgentRole(chat.ns, chat.path, name, role)
+      .then(() => getChat(chat.ns, chat.path, Number.MAX_SAFE_INTEGER))
+      .then((r) => setAgents(sameOr(r.agents || {})))
+      .catch((e) => setError(e.message));
+  }, [chat.ns, chat.path]);
   // Esc closes the agent panel from anywhere in the chat, besides its × button.
   useEffect(() => {
     if (!showAgent) return undefined;
@@ -418,6 +426,7 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
         setMessages(r.messages || []);
         setWorking(r.working || []);
         setContexts(r.contexts || {});
+        setAgents(r.agents || {});
         countRef.current = r.count;
         writeSeen(chat.ns, chat.path, r.count);
       })
@@ -447,6 +456,7 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
       writeSeen(chat.ns, chat.path, countRef.current);
       setWorking(sameOr(r.working || []));
       setContexts(sameOr(r.contexts || {}));
+      setAgents(sameOr(r.agents || {}));
       setError('');
     } catch (e) {
       setError(e.message);
@@ -552,7 +562,8 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
                       ? <img className="chat-avatar" src={gifUrl(chat.ns, av)} alt="" loading="lazy" />
                       : <span className="chat-avatar chat-avatar-initial" style={{ background: `var(${colorForAuthor(m.author)})` }} aria-hidden="true">{initialOf(m.author)}</span>;
                   })()}
-                  <span className="chat-msg-author" style={{ color: `var(${colorForAuthor(m.author)})` }}>{m.author}</span>
+                  <span className="chat-msg-author" style={{ color: `var(${colorForAuthor(m.author)})` }}
+                    title={roleFor(agents, m.author) ? `Role: ${roleFor(agents, m.author)}` : undefined}>{m.author}</span>
                   {m.via && <span className="chat-msg-via">via {m.via}</span>}
                   {latestGroupOf[m.author] === m.n && contextLabel(contexts[m.author]) && (
                     <span className={`chat-context${contexts[m.author].pct >= CONTEXT_HIGH ? ' high' : ''}`}
@@ -568,7 +579,7 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
           );
         })}
     </>
-  ), [doc, error, messages.length, grouped, gifs, chat.ns, account, effectiveAs, contexts, latestGroupOf]);
+  ), [doc, error, messages.length, grouped, gifs, chat.ns, account, effectiveAs, contexts, latestGroupOf, agents]);
   // @-completion: while the word at the caret starts with @, offer the
   // people in this chat (plus @all), most recent first.
   const query = mentionQuery(draft, caret);
@@ -652,6 +663,26 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
           <p>
             Paste this into the agent. Give it one name and it will use that name everywhere, so <code>@name</code> reaches it.
           </p>
+          {Object.keys(agents).length > 0 && (
+            <div className="chat-agent-saved" data-testid="chat-agent-saved">
+              <div className="chat-agent-saved-head">Saved roles. Each agent is reminded of its role while it waits.</div>
+              {Object.entries(agents).map(([name, role]) => (
+                <div key={name} className="chat-agent-saved-row">
+                  <strong style={{ color: `var(${colorForAuthor(name)})` }}>{name}</strong>
+                  <span className="chat-agent-saved-role">{role}</span>
+                  <button
+                    type="button"
+                    className="chat-btn chat-btn-icon"
+                    onClick={() => saveRole(name, '')}
+                    title={`Remove ${name}'s role`}
+                    aria-label={`Remove ${name}'s role`}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           {/* Role templates: a suggested name and a one-line trait, both still
               editable below. Leads start helpers who join this same chat. */}
           <div className="chat-agent-roles" role="radiogroup" aria-label="Role">
@@ -689,6 +720,9 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
                   setCopied(true);
                   setTimeout(() => setCopied(false), 1500);
                 }
+                // The job typed here is also saved as the agent's role, so the
+                // server can keep reminding it after its context fills up.
+                if (agentName && agentIntent.trim()) saveRole(agentName, agentIntent);
               }}
             >{copied ? 'Copied!' : 'Copy prompt'}</button>
           </div>
@@ -705,6 +739,7 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
             rows={3}
             aria-label="What this agent should do"
           />
+          <p className="chat-agent-hint">Copying the prompt saves this as the agent's role in the chat. Keep it to a line or two: it is repeated to the agent every time new messages arrive.</p>
           <pre>{agentInstructions(serverAlias, chat.ns, chat.path, agentName || 'AGENT_NAME', agentIntent)}</pre>
           <p className="chat-agent-mcp">MCP clients: <code>read_chat</code>, <code>post_chat</code>, <code>wait_chat</code>.</p>
         </div>

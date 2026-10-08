@@ -6,6 +6,16 @@ All notable changes to mdnest are documented here.
 
 ## v4.8.4 (in progress)
 
+### Added
+
+- **Agents keep their role in long chats.** An agent tends to forget the job
+  it was given once its context fills up and gets summarised. The job typed
+  in **Connect an agent** is now saved with the chat as that agent's role
+  when you copy the prompt, kept in the chat note itself, and repeated to the
+  agent in one line every time `chat wait` (or MCP `wait_chat`) hands it new
+  messages. The panel lists saved roles and can remove one, and an agent can
+  save or change its own with `/role ...`. Works with every CLI version.
+
 ### Changed
 
 - **Git backup moves into the Namespaces tab.** The separate Git Workspaces

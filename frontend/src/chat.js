@@ -240,7 +240,10 @@ export function completeMention(text, caret, name) {
 // stand-ins, and the target is shell-quoted whenever it needs to be.
 // intent is what the person wants this agent to do here, typed in the panel.
 // Like the name, it becomes part of the prompt; it is prose for the agent and
-// never reaches a shell command, so it needs no quoting.
+// never reaches a shell command, so it needs no quoting. Copying the prompt
+// also saves it as the agent's role in the chat (chat_traits.go), which the
+// server repeats to the agent every time wait hands it new messages: agents
+// forget the job they were given once their context is summarised.
 export function agentInstructions(alias, ns, path, name = 'AGENT_NAME', intent = '') {
   const target = shellQuote(`${alias ? `@${alias}/` : ''}${ns}/${path}`);
   const nsTarget = shellQuote(`${alias ? `@${alias}/` : ''}${ns}`);
@@ -249,7 +252,9 @@ export function agentInstructions(alias, ns, path, name = 'AGENT_NAME', intent =
   return [
     `You are ${name} in an mdnest chat. Use --as ${as} on every command, and only that name.`,
     '',
-    ...(job ? ['Your job in this chat:', ...job.split(/\r?\n/).map((l) => `  ${l}`), ''] : []),
+    ...(job ? ['Your job in this chat:', ...job.split(/\r?\n/).map((l) => `  ${l}`),
+      'This is saved with the chat as your role, and wait repeats it after new messages.',
+      'Keep to it, even after a long conversation, unless a human gives you a new one.', ''] : []),
     'Join',
     `1. Read the chat once: mdnest chat read ${target} --as ${as}`,
     '   This also saves your place. From then on, wait gives you only what is new,',
@@ -271,6 +276,7 @@ export function agentInstructions(alias, ns, path, name = 'AGENT_NAME', intent =
     '- You show as waiting while you wait. Before a task of more than a minute, say what you do:',
     `  mdnest chat post ${target} "/status what you are doing" --as ${as} (not a chat message; repeat every 2 min).`,
     '  Your next post, or going back to wait, clears it. Never leave a status up while only waiting.',
+    `- New role from a human, or none saved yet? Save it: mdnest chat post ${target} "/role what you do here" --as ${as}`,
     '- Need a human to answer or decide? Ask @their-name and add ![waiting](gif:question).',
     `- Other agents may be here. Answer only what is addressed to you (@${name}, @all) or is your part.`,
     '  Do not repeat what someone already said: agree with ![nod](gif:nod) instead. Keep replies',
@@ -358,4 +364,11 @@ export function chatsForTab(chats, pins, tab) {
   if (tab !== 'pinned') return chats;
   const byKey = new Map(chats.map((c) => [pinKey(c.ns, c.path), c]));
   return pins.map((k) => byKey.get(k)).filter(Boolean);
+}
+
+// roleFor finds an agent's saved role, matching names the way mentions do.
+export function roleFor(agents, name) {
+  const want = String(name || '').toLowerCase();
+  for (const [k, v] of Object.entries(agents || {})) if (k.toLowerCase() === want) return v;
+  return '';
 }
