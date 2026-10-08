@@ -127,6 +127,31 @@
   color: var(--text-secondary);
 }
 
+/* The people to invite to a new private chat. */
+.chat-new-invite {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-left: 24px;
+}
+.chat-new-invite-note { font-size: 0.78rem; color: var(--text-muted); }
+.chat-new-invite-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.chat-new-invite-list label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 2px 0;
+  font-size: 0.85rem;
+  color: var(--text);
+  cursor: pointer;
+}
+
 .chat-list-items {
   list-style: none;
   margin: 0;

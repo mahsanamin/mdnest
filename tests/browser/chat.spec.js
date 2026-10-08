@@ -75,6 +75,16 @@ test('a chat clicked in the tree opens as a chat, and Back returns to the note b
 
     const back = page.locator('.toolbar-chats-back');
     await expect(back).toContainText(plain);
+    // In a narrow window the label is dropped. The button used to shrink to
+    // an empty pill (its arrow was hidden with the label); it must still
+    // show the arrow and say "Back".
+    const size = page.viewportSize();
+    await page.setViewportSize({ width: 900, height: size.height });
+    await expect(back.locator('.toolbar-chats-back-arrow')).toBeVisible();
+    await expect(back.locator('.toolbar-chats-back-short')).toBeVisible();
+    await expect(back.locator('.toolbar-chats-back-label')).toBeHidden();
+    await page.setViewportSize(size);
+    await expect(back.locator('.toolbar-chats-back-label')).toBeVisible();
     await back.click();
     await expect(page.locator('.chat-panel')).toHaveCount(0);
     await expect(page.locator('.toolbar-path')).toContainText(plain);

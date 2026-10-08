@@ -576,6 +576,15 @@ func (h *ChatHandler) HandleConvert(w http.ResponseWriter, r *http.Request) {
 	// ?private=1 makes the chat private to the caller. The member list is
 	// written BEFORE the note: a new chat must never exist, even briefly,
 	// as an open one that every reader of the namespace can see.
+	invite, err := parseInviteIDs(r.URL.Query().Get("members"))
+	if err != nil {
+		chatJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if len(invite) > 0 && r.URL.Query().Get("private") != "1" {
+		chatJSONError(w, http.StatusBadRequest, "members only applies to a new private chat (private=1)")
+		return
+	}
 	if r.URL.Query().Get("private") == "1" {
 		// Only for a new note. On an existing one it would let anyone with
 		// write access turn a shared note (or an open chat) into something
@@ -600,9 +609,20 @@ func (h *ChatHandler) HandleConvert(w http.ResponseWriter, r *http.Request) {
 			chatJSONError(w, http.StatusBadRequest, "private chats are not available here")
 			return
 		}
-		if err := h.members.Add(ns, "/"+relPath, uc.ID, uc.ID); err != nil {
-			chatJSONError(w, http.StatusInternalServerError, "failed to make the chat private")
-			return
+		// The people picked in the new-chat form. Every one is checked
+		// before anything is written, against the same list the picker
+		// shows: someone with a grant in this workspace.
+		if len(invite) > 0 {
+			if !h.allInWorkspace(ns, invite) {
+				chatJSONError(w, http.StatusNotFound, "no such user in this workspace")
+				return
+			}
+		}
+		for _, id := range append([]int{uc.ID}, invite...) {
+			if err := h.members.Add(ns, "/"+relPath, id, uc.ID); err != nil {
+				chatJSONError(w, http.StatusInternalServerError, "failed to make the chat private")
+				return
+			}
 		}
 		// Anyone who joined the live room for this path before the note
 		// existed would otherwise stay connected to a private chat.

@@ -311,8 +311,10 @@ In multi mode a chat is either **open** or **private**.
   Everyone else gets "access denied", and the chat is left out of their chat
   list, file tree, search results, task board and downloads.
 
-Creating a chat with **+ New** makes it private by default, with you as the
-only member (untick **Only people I invite** for an open one). To change an
+Creating a chat with **+ New** makes it private by default. Tick the people
+to invite in the same form (anyone with access to the workspace), or leave
+them all unticked to start with only you. Untick **Only people I invite**
+for an open one. To change an
 existing chat, open it and click **Members** (or right-click it in the list
 → **Members…**):
 

@@ -6860,6 +6860,24 @@ pre:hover .code-copy-btn {
    so nothing pushed the utilities right and they drifted left beside the
    Back button. Pin them to the right edge. */
 .toolbar--chats .toolbar-utility { margin-left: auto; }
+/* The chats Back button. The narrow-toolbar rules hide every label span in
+   .toolbar-view-btn (Board/Chats keep their SVG icon), but this button has no
+   SVG: its arrow is a span too, so it shrank to an empty pill. The arrow
+   always shows; a long note name is cut with an ellipsis, and once the
+   toolbar is narrow the label becomes plain "Back" (the full name stays in
+   the tooltip). */
+.toolbar-view-btn.toolbar-chats-back > .toolbar-chats-back-arrow { display: inline; }
+.toolbar-chats-back { min-width: 0; }
+.toolbar-chats-back-label {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.toolbar-view-btn.toolbar-chats-back > .toolbar-chats-back-short { display: none; }
+@container toolbar (max-width: 1120px) {
+  .toolbar-view-btn.toolbar-chats-back > .toolbar-chats-back-short { display: inline; }
+}
 /* On a phone the chats header has its own ←; the bar stays ☰ · title · ⋯. */
 @media (max-width: 768px) {
   .toolbar .toolbar-chats-back { display: none; }
