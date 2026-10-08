@@ -4,6 +4,8 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v4.8.5 (in progress)
+
 ## v4.8.4: Private chats
 
 A chat can now be limited to the people invited to it, and you pick them
