@@ -3,6 +3,7 @@ package store
 import (
 	"fmt"
 	"log"
+	"strings"
 )
 
 // migrations is an ordered list of SQL statements.
@@ -316,6 +317,48 @@ var migrations = []struct {
 			);
 		`,
 	},
+	{
+		// Private chats (issue #127). A chat with rows here is readable and
+		// writable only by the users listed; a chat with none is open, as
+		// before. Keyed by namespace + canonical note path, the form the
+		// permission checker matches, and moved along with the note by the
+		// routes that move, copy and delete. user_id deliberately has NO
+		// foreign key: with ON DELETE CASCADE, deleting the account of a
+		// chat's only member would leave it with no rows, and no rows means
+		// open, so the chat would silently become readable by everyone. A
+		// deleted user's row keeps the chat private, and ids are never
+		// reused (SERIAL), so it grants nothing. added_by is SET NULL so the
+		// record of an invite outlives the person who sent it.
+		name: "017_create_chat_members",
+		sql: `
+			CREATE TABLE IF NOT EXISTS chat_members (
+				namespace  TEXT NOT NULL,
+				path       TEXT NOT NULL,
+				user_id    INTEGER NOT NULL,
+				added_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+				added_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+				PRIMARY KEY (namespace, path, user_id)
+			);
+		`,
+	},
+	{
+		// Keys are compared lowercased (a case-insensitive mount serves
+		// CHATS/SECRET.md as Chats/secret.md). 017 shipped on develop
+		// storing them as spelled, so lower them here: a row left in its
+		// original case would no longer be found, and its chat would be
+		// silently OPEN. Copies first, then the old rows, so no moment has
+		// neither. ASCII keys only: Postgres lower() and Go's
+		// strings.ToLower (what the checker uses) agree on ASCII but not on
+		// every other letter. lowerChatMemberKeys lowers the rest in Go.
+		name: "018_chat_members_lowercase_paths",
+		sql: `
+			INSERT INTO chat_members (namespace, path, user_id, added_by, added_at)
+				SELECT namespace, lower(path), user_id, added_by, added_at
+				FROM chat_members WHERE path <> lower(path) AND path ~ '^[ -~]*$'
+				ON CONFLICT (namespace, path, user_id) DO NOTHING;
+			DELETE FROM chat_members WHERE path <> lower(path) AND path ~ '^[ -~]*$';
+		`,
+	},
 }
 
 // Migrate runs all pending migrations. Safe to call on every startup.
@@ -357,6 +400,63 @@ func (db *DB) Migrate() error {
 		log.Printf("migration applied: %s", m.name)
 	}
 
+	if err := db.lowerChatMemberKeys(); err != nil {
+		return fmt.Errorf("lowercase chat member keys: %w", err)
+	}
+
 	log.Println("database schema is up to date")
+	return nil
+}
+
+// lowerChatMemberKeys lowers any chat_members key that is not already in the
+// form the permission checker looks up (strings.ToLower). Migration 018 does
+// ASCII keys in SQL; this covers the rest with Go's own rules, because
+// Postgres lower() can disagree with them on non-ASCII letters, and a key the
+// checker never finds leaves its chat open. Runs on every start; with no such
+// rows it is one cheap query.
+func (db *DB) lowerChatMemberKeys() error {
+	rows, err := db.Query(`SELECT DISTINCT namespace, path FROM chat_members WHERE path ~ '[^ -~]' OR path <> lower(path)`)
+	if err != nil {
+		return err
+	}
+	type key struct{ ns, path string }
+	var todo []key
+	for rows.Next() {
+		var k key
+		if err := rows.Scan(&k.ns, &k.path); err != nil {
+			rows.Close()
+			return err
+		}
+		if strings.ToLower(k.path) != k.path {
+			todo = append(todo, k)
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, k := range todo {
+		tx, err := db.Begin()
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`INSERT INTO chat_members (namespace, path, user_id, added_by, added_at)
+			SELECT namespace, $3, user_id, added_by, added_at FROM chat_members
+			WHERE namespace = $1 AND path = $2
+			ON CONFLICT (namespace, path, user_id) DO NOTHING`, k.ns, k.path, strings.ToLower(k.path)); err != nil {
+			tx.Rollback()
+			return err
+		}
+		if _, err := tx.Exec(`DELETE FROM chat_members WHERE namespace = $1 AND path = $2`, k.ns, k.path); err != nil {
+			tx.Rollback()
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+	if len(todo) > 0 {
+		log.Printf("chat members: lowered %d key(s)", len(todo))
+	}
 	return nil
 }

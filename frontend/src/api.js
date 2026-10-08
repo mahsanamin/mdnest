@@ -408,7 +408,12 @@ export async function deleteNote(ns, path) {
   const res = await request(`/note?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}`, {
     method: 'DELETE',
   });
-  if (!res.ok) throw new Error('Failed to delete note');
+  if (!res.ok) {
+    // Say why: a chat can only be deleted by its owner or an admin, and a
+    // folder holding one says which.
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to delete note');
+  }
   return res.json();
 }
 
@@ -841,32 +846,18 @@ export async function adminCreateWorkspaceInGroup(namespace, groupId) {
   return res.json();
 }
 
-export async function getMyWorkspace() {
-  const res = await request('/me/workspace');
-  if (!res.ok) throw new Error('Failed to load personal workspace');
-  return res.json();
-}
-
-export async function saveMyWorkspace(payload) {
-  const res = await request('/me/workspace', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || 'Failed to save workspace');
+// Whether namespaces and git backups can be set up from the app on this server.
+// False on the plain-files backend (every setup.sh install), where namespaces
+// come from mdnest.conf and git-sync does the backup; also false in single
+// mode, where the route does not exist.
+export async function getWorkspaceStatus() {
+  try {
+    const res = await request('/workspaces/status');
+    if (!res.ok) return { mirroring: false, encryption: false };
+    return res.json();
+  } catch {
+    return { mirroring: false, encryption: false };
   }
-  return res.json();
-}
-
-export async function deleteMyWorkspace() {
-  const res = await request('/me/workspace', { method: 'DELETE' });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || 'Failed to remove workspace');
-  }
-  return res.json();
 }
 
 // --- Comments ---
@@ -1064,7 +1055,10 @@ export { getToken, setToken, clearToken, PermissionError };
 
 async function chatError(res, fallback) {
   const data = await res.json().catch(() => ({}));
-  return new Error(data.error || fallback);
+  const err = new Error(data.error || fallback);
+  // 404/403 on an open chat means it was deleted, moved, or you were removed.
+  err.status = res.status;
+  return err;
 }
 
 // ns: only that namespace's chats (what the chats view shows). Omit for every
@@ -1092,6 +1086,18 @@ export async function postChatMessage(ns, path, text, as) {
   return res.json();
 }
 
+// Saves an agent's role in the chat (an empty role removes it). The server
+// keeps it in the note and repeats it to the agent while it waits.
+export async function saveChatAgentRole(ns, path, name, role) {
+  const res = await request(`/chat/agents?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}&name=${encodeURIComponent(name)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body: role || '',
+  });
+  if (!res.ok) throw await chatError(res, 'Failed to save the role');
+  return res.json();
+}
+
 // The namespace's chat images (ChatGifs/): reactions and avatar-NAME files.
 export async function listChatGifs(ns) {
   const res = await request(`/chat/gifs?ns=${encodeURIComponent(ns)}`);
@@ -1100,9 +1106,42 @@ export async function listChatGifs(ns) {
 }
 
 // Creates the note when it does not exist; otherwise tags it as a chat in place.
-export async function convertToChat(ns, path, title) {
-  const res = await request(`/chat/convert?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}&title=${encodeURIComponent(title || '')}`, { method: 'POST' });
+// isPrivate: only the creator can open it until they invite someone (multi mode).
+// memberIds: people to add to a new private chat in the same request, so it
+// is never created with only some of them on it.
+export async function convertToChat(ns, path, title, isPrivate = false, memberIds = []) {
+  const members = isPrivate && memberIds.length ? `&members=${memberIds.join(',')}` : '';
+  const res = await request(`/chat/convert?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}&title=${encodeURIComponent(title || '')}${isPrivate ? '&private=1' : ''}${members}`, { method: 'POST' });
   if (!res.ok) throw await chatError(res, 'Failed to create chat');
+  return res.json();
+}
+
+// Private chat members (multi mode). Each returns { private, members: [{ id, username }] }.
+// getChatMembers returns null where private chats do not exist (single mode),
+// so the caller can leave the members control out.
+const membersUrl = (ns, path) => `/chat/members?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}`;
+export async function getChatMembers(ns, path) {
+  const res = await request(membersUrl(ns, path));
+  if (res.status === 404) return null;
+  if (!res.ok) throw await chatError(res, 'Failed to load members');
+  return res.json();
+}
+
+// Adds userId; on an open chat this also makes it private with you as the
+// first member. With no userId it only makes the chat private.
+export async function addChatMember(ns, path, userId) {
+  const res = await request(membersUrl(ns, path), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(userId ? { userId } : {}),
+  });
+  if (!res.ok) throw await chatError(res, 'Failed to add member');
+  return res.json();
+}
+
+export async function removeChatMember(ns, path, userId) {
+  const res = await request(`${membersUrl(ns, path)}&userId=${encodeURIComponent(userId)}`, { method: 'DELETE' });
+  if (!res.ok) throw await chatError(res, 'Failed to remove member');
   return res.json();
 }
 

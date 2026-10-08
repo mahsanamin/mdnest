@@ -100,6 +100,47 @@ namespace_drift_report() {
   return 1
 }
 
+# Reports containers that are running but did not publish the host ports they
+# were created with (issue #126). Docker publishes a port only if its host IP is
+# on an interface when the container starts. A Tailscale, VPN or DHCP address
+# can come up after Docker does, and the container then runs with no port and
+# nothing logs it: `docker ps` says Up, every request is refused.
+# Returns 1 when something is missing, so callers under `set -e` use `|| true`.
+port_drift() {
+  local svc cid want live rc=0
+  for svc in backend frontend; do
+    cid=$(compose ps -q "$svc" 2>/dev/null | head -1 || true)
+    [ -n "$cid" ] || continue
+    want=$(docker inspect -f '{{range $p, $b := .HostConfig.PortBindings}}{{range $b}}{{.HostIp}}:{{.HostPort}}{{"\n"}}{{end}}{{end}}' "$cid" 2>/dev/null || true)
+    live=$(docker inspect -f '{{range $p, $b := .NetworkSettings.Ports}}{{range $b}}{{.HostIp}}:{{.HostPort}}{{"\n"}}{{end}}{{end}}' "$cid" 2>/dev/null || true)
+    port_drift_report "$svc" "$want" "$live" || rc=1
+  done
+  return $rc
+}
+
+# The comparison, split out so it can be tested without Docker: takes the
+# service name and the configured and published bindings (one ip:port per
+# line). Prints a report and returns 1 if a configured binding is not live.
+port_drift_report() {
+  local svc="$1" want="$2" live="$3" missing="" b
+  while IFS= read -r b; do
+    [ -n "$b" ] || continue
+    printf '%s\n' "$live" | grep -qxF "$b" || missing="$missing $b"
+  done <<< "$want"
+  [ -n "$missing" ] || return 0
+  echo ""
+  echo "  ⚠  $svc is running but these ports are not published:${missing}"
+  echo "     The IP was probably not up when the container started (after a"
+  echo "     reboot or a Docker restart). Recreate the containers:"
+  echo ""
+  echo "    ./mdnest-server reload"
+  echo ""
+  echo "     To stop it happening again, bind 127.0.0.1 and put a reverse proxy"
+  echo "     in front. See BIND_ADDRESS in docs/setup.md."
+  echo ""
+  return 1
+}
+
 # Prints, one per line, every credential helper the Docker client config names
 # (`credsStore`, and each value under `credHelpers`) whose
 # docker-credential-<name> binary is not on PATH.
@@ -280,6 +321,7 @@ case "$CMD" in
     # The one place someone looks when a namespace "isn't there" — so it's the
     # place that has to say the conf hasn't been applied yet.
     namespace_drift || true
+    port_drift || true
     ;;
   update)
     git pull

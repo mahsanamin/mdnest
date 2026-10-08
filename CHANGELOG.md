@@ -4,6 +4,133 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v4.8.4: Private chats
+
+A chat can now be limited to the people invited to it, and you pick them
+when you create it. Only a chat's owner or an admin can delete it, and a
+chat deleted while people and agents are in it says so instead of breaking.
+Members and Connect an agent open as popups, also from the chat list's
+right-click menu. setup.sh now warns about a `BIND_ADDRESS` that can leave
+mdnest running with no port after a reboot.
+
+### Added
+
+- **Private chats** (fixing GitHub issue #127). In multi-user mode a chat
+  was visible to everyone who could read its workspace. A chat can now have
+  a member list, and then only those people can open it. Everyone else gets
+  "access denied" on every route that reaches the file: the chat itself,
+  the note, the file tree, search, the task board, comments, history,
+  downloads and moves, the CLI and MCP. Any member can add or remove people
+  at any time. Someone added later sees the whole history, and someone
+  removed loses access on their next request, including an editor tab they
+  already have open. Members live in the database, so editing the note
+  cannot change them. New chats are private by default (untick **Only
+  people I invite** for an open one), and chats from before this release
+  stay open until someone makes them private. One limit, stated in the
+  docs: a connected git remote still gets a copy of the file.
+
+- **Agents keep their role in long chats.** An agent tends to forget the job
+  it was given once its context fills up and gets summarised. The job typed
+  in **Connect an agent** is now saved with the chat as that agent's role
+  when you copy the prompt, kept in the chat note itself, and repeated to the
+  agent in one line every time `chat wait` (or MCP `wait_chat`) hands it new
+  messages. The panel lists saved roles and can remove one, and an agent can
+  save or change its own with `/role ...`. Works with every CLI version.
+
+- **Only a chat's owner or an admin can delete it.** A chat now records who
+  created it (`owner:` at the top of the note; older chats count the
+  account of their first message). In multi mode only that owner, a
+  workspace admin or a superadmin can delete it, from the chat view, the
+  file tree, a folder delete, the CLI or MCP, and the server also refuses
+  the back doors: an upload over it, or an edit that strips the chat marker
+  or changes the owner. Others no longer see a Delete button. The delete
+  now asks in a popup that says what happens: the messages go for everyone,
+  agents in it are told it is gone, and it cannot be undone here.
+
+- **Pick who is in a new chat when you create it.** With **Only people I
+  invite** ticked, the **+ New** form lists the people with access to the
+  workspace, so the chat starts with them instead of being created and then
+  filled in through Members. They are added in the same request as the chat
+  (`/api/chat/convert?private=1&members=…`), so it never exists with only
+  some of them on it.
+
+- **A chat deleted while it is open no longer breaks anything.** An open
+  chat window says "This chat was deleted" and stops polling instead of
+  showing an error every few seconds. `mdnest chat wait` exits `3` with a
+  plain message and the leave command, so agents stop instead of retrying,
+  and the keepalive hook lets them; MCP `wait_chat` says the chat is gone.
+  The agent prompt explains exit `3`.
+
+- **Members and Connect an agent from a chat's right-click menu.** Right-click
+  a chat in the list for **Members…** (multi mode) and **Connect an agent…**,
+  without opening the chat first.
+
+### Changed
+
+- **"Copy for another mdnest" is now "Copy file contents".** It copied the
+  note wrapped in a block of JSON, which was only useful for **Paste here**
+  and looked like junk anywhere else. It now copies the note's plain text,
+  so it pastes anywhere. **Paste here** accepts plain text from anywhere and
+  names the new note after its first heading (editable). A copy made by an
+  older version still pastes with its original file name.
+
+- **Members and Connect an agent open as popups.** They used to open as a
+  panel inside the chat that pushed the messages down. Esc or a click outside
+  closes them.
+
+- **Agents stop dropping out of chats to ask in their terminal.** An agent
+  that stopped to ask the person who started it something ended its turn,
+  and then nothing read the chat until someone typed to it again. The agent
+  prompt now tells it to ask in the chat with `@their-name` and keep waiting,
+  and, if it must answer in the terminal, to start the wait in the background
+  first so it wakes up. The prompt also no longer promises a keepalive hook,
+  which most machines do not have set up.
+
+- **Git backup moves into the Namespaces tab.** The separate Git Workspaces
+  tab is gone. Its "groups" looked like the access Groups tab but meant
+  something else, and a "workspace" was just a namespace plus the repository
+  it backs up to. Each namespace card now has a **Git backup** section (the
+  repository, whether the last sync worked, Set up, Pause, Remove namespace),
+  **+ Add namespace** creates a namespace and its backup in one step, and a
+  git host plus token saved once is now a **Git connection**.
+
+### Fixed
+
+- **setup.sh warns about a `BIND_ADDRESS` that may not survive a restart**
+  (fixing GitHub issue #126). Docker only publishes a port if its IP exists
+  when the container starts. With a Tailscale, VPN or DHCP address that
+  comes up after Docker, mdnest ran with no port published, logged nothing,
+  and every request was refused until someone recreated the containers.
+  setup.sh now warns about any IP other than `127.0.0.1` or `0.0.0.0` and
+  suggests a reverse proxy instead, `./mdnest-server status` reports ports
+  that are configured but not published (and says to run `reload`), and the
+  sample config and setup guide no longer suggest binding a Tailscale IP.
+
+- **No more git settings that do nothing.** On the plain-files storage every
+  `setup.sh` install uses, settings saved in the old Git Workspaces tab were
+  never read, and adding a workspace created a namespace folder that the next
+  `./mdnest-server rebuild` deleted. The server now refuses to create a
+  namespace there (namespaces come from `MOUNT_` lines in mdnest.conf, and
+  git-sync does the backup), and the Namespaces tab says so.
+
+- **Settings no longer has a Git remote tab.** It offered to mirror "your
+  personal workspace" to a git repository, which read as if it were about the
+  namespace you were looking at. It was about a separate namespace named
+  after your email, which the server created the first time you saved. Git
+  backup is now set up per namespace in Admin → Namespaces.
+
+- **Chats no longer flicker every few seconds.** Each 3-second poll rebuilt
+  the whole conversation, even when nothing new had arrived, and the browser
+  rewrote every message. Images in messages (avatars, GIFs) were recreated and
+  reloaded, so the view jumped and the last message kept dropping out of
+  sight after you scrolled to it. A poll with nothing new now leaves the
+  messages untouched, and a browser test pins it.
+
+- **The chats "Back to …" button no longer turns into an empty pill.** In a
+  narrower window the toolbar drops button labels, and this button lost its
+  arrow along with its label. It now keeps the arrow and says "Back", with
+  the note's name in the tooltip; a long name is cut short at full width.
+
 ## v4.8.3: A simpler admin panel, and agents that stay awake
 
 The admin panel's Users, Access Grants and Namespace Admins tabs become

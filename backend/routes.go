@@ -100,11 +100,12 @@ func registerContentRoutes(mux *http.ServeMux, c contentRoutes) {
 			// and then each task by its note (ReadFilterFor), so it must not be
 			// wrapped in the single-namespace RequireNsAccess.
 			mux.Handle("/api/tasks/all", auth(http.HandlerFunc(c.tasks.HandleGlobalTasks)))
-			// Namespace members for the task assignee picker. Read-access gated:
-			// anyone who can see the namespace may list who else is on it.
-			if c.team != nil {
-				mux.Handle("/api/namespace/users", auth(perms.RequireNsAccess(c.team)))
-			}
+		}
+		// Namespace members for the task assignee picker and the private chat
+		// member picker. Read-access gated: anyone who can see the namespace
+		// may list who else is on it.
+		if c.team != nil {
+			mux.Handle("/api/namespace/users", auth(perms.RequireNsAccess(c.team)))
 		}
 		if c.chat != nil {
 			// Read a chat = read the note; post or convert = write it.
@@ -113,12 +114,19 @@ func registerContentRoutes(mux *http.ServeMux, c contentRoutes) {
 			// A status is presence, not content: same right as posting, and
 			// nothing is written, so no search invalidation.
 			mux.Handle("/api/chat/status", auth(perms.RequireWrite(http.HandlerFunc(c.chat.HandleStatus))))
+			mux.Handle("/api/chat/agents", auth(perms.RequireWrite(http.HandlerFunc(c.chat.HandleAgents))))
 			// Cross-namespace: self-filters, like /api/tasks/all.
 			mux.Handle("/api/chats", auth(http.HandlerFunc(c.chat.HandleList)))
 			// The chat image library: any access to the namespace may list it,
 			// filtered to the images the user may read; /api/files checks again.
 			mux.Handle("/api/chat/gifs", auth(perms.RequireNsAccess(http.HandlerFunc(c.chat.HandleGifs))))
 			mux.HandleFunc(handlers.BuiltinGifRoute, handlers.HandleBuiltinGif)
+			// Private chat members (issue #127). Seeing the list is a reader's
+			// right, changing it a writer's; the checker already refuses a
+			// non-member of a private chat both.
+			if c.chat.MembersEnabled() {
+				mux.Handle("/api/chat/members", auth(perms.ReadWriteRouter(http.HandlerFunc(c.chat.HandleMembers))))
+			}
 		}
 		mux.Handle("/api/files/", auth(http.HandlerFunc(c.upload.HandleServeFile))) // files endpoint extracts ns from URL, handled differently
 	} else {
@@ -147,6 +155,7 @@ func registerContentRoutes(mux *http.ServeMux, c contentRoutes) {
 			mux.Handle("/api/chat", auth(invalidateSearch(http.HandlerFunc(c.chat.Handle))))
 			mux.Handle("/api/chat/convert", auth(invalidateSearch(http.HandlerFunc(c.chat.HandleConvert))))
 			mux.Handle("/api/chat/status", auth(http.HandlerFunc(c.chat.HandleStatus)))
+			mux.Handle("/api/chat/agents", auth(http.HandlerFunc(c.chat.HandleAgents)))
 			mux.Handle("/api/chats", auth(http.HandlerFunc(c.chat.HandleList)))
 			mux.Handle("/api/chat/gifs", auth(http.HandlerFunc(c.chat.HandleGifs)))
 			mux.HandleFunc(handlers.BuiltinGifRoute, handlers.HandleBuiltinGif)

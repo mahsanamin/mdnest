@@ -30,6 +30,6 @@ describe('pinned chats', () => {
     const first = (g) => g[0][0].label;
     expect(first(chatMenuGroups({ pinned: false }))).toBe('Pin to the Pinned tab');
     expect(first(chatMenuGroups({ pinned: true }))).toBe('Unpin');
-    expect(first(chatMenuGroups({}))).toBe('Open as note');
+    expect(first(chatMenuGroups({}))).toBe('Connect an agent…');
   });
 });

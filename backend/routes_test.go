@@ -593,6 +593,7 @@ func testReservedPathsRefused(t *testing.T, multi bool) {
 			{http.MethodGet, "/api/chat?ns=alpha&path=" + q},
 			{http.MethodPost, "/api/chat/convert?ns=alpha&path=" + q},
 			{http.MethodPost, "/api/chat/status?ns=alpha&path=" + q},
+			{http.MethodPost, "/api/chat/agents?ns=alpha&name=spy&path=" + q},
 			{http.MethodGet, "/api/download?ns=alpha&path=" + q},
 		}
 		if multi {

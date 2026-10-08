@@ -119,6 +119,38 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   overflow-wrap: anywhere;
 }
+.chat-new-private {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+/* The people to invite to a new private chat. */
+.chat-new-invite {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-left: 24px;
+}
+.chat-new-invite-note { font-size: 0.78rem; color: var(--text-muted); }
+.chat-new-invite-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.chat-new-invite-list label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 2px 0;
+  font-size: 0.85rem;
+  color: var(--text);
+  cursor: pointer;
+}
 
 .chat-list-items {
   list-style: none;
@@ -148,6 +180,7 @@
 .chat-list-top,
 .chat-list-bottom { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
 .chat-list-title { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-list-lock { display: inline-flex; vertical-align: -1px; margin-right: 4px; color: var(--text-muted); }
 .chat-list-time { font-size: 0.75rem; color: var(--text-muted); flex: 0 0 auto; }
 .chat-list-preview {
   flex: 1;
@@ -336,6 +369,24 @@
   border-color: var(--accent);
   color: var(--text-inverse);
 }
+.chat-agent-saved {
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  max-width: 640px;
+}
+.chat-agent-saved-head { margin: 0 0 4px; font-size: 0.78rem; }
+.chat-agent-saved-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 2px 0;
+}
+.chat-agent-saved-row strong { flex: 0 0 auto; }
+.chat-agent-saved-role { flex: 1 1 auto; min-width: 0; color: var(--text); overflow-wrap: anywhere; }
+.chat-agent-hint { font-size: 0.78rem; }
 .chat-agent-intent {
   display: block;
   width: 100%;
@@ -599,8 +650,6 @@
 }
 .chat-suggest-item.first { border-color: var(--accent); color: var(--accent); }
 .chat-suggest-hint { color: var(--text-faint); font-size: 0.72rem; margin-left: 4px; }
-.chat-agent-row { display: flex; gap: var(--space-2); margin: 0 0 6px; }
-.chat-agent-row .chat-input { flex: 1; max-width: 240px; }
 .chat-agent pre { white-space: pre-wrap; user-select: text; }
 
 /* Chat images: reactions in messages, avatars beside names, the picker. */
@@ -651,3 +700,100 @@
   line-height: 1;
 }
 
+
+/* Private chat members (issue #127). */
+.chat-members-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+.chat-members-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 3px 0;
+  color: var(--text);
+}
+.chat-members-note { font-size: 0.78rem; color: var(--text-muted); }
+
+/* Members and Connect an agent open as a popup over the chat view (from the
+   header or the list's right-click menu), so they never push the messages
+   down. The panel inside keeps its .chat-agent classes. */
+.chat-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 15000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: var(--scrim);
+}
+.chat-dialog {
+  width: 440px;
+  max-width: 100%;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 12px 40px var(--shadow-color-strong);
+}
+.chat-dialog.wide { width: 680px; }
+.chat-dialog .chat-agent {
+  padding: 16px 18px;
+  background: none;
+  border-bottom: none;
+}
+.chat-dialog .chat-agent-head { margin: 0 0 10px; font-size: 1rem; }
+.chat-dialog .chat-agent-saved { max-width: none; }
+.chat-dialog .chat-agent pre { max-height: 260px; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat-agent-sub { color: var(--text-secondary); }
+.chat-agent-step {
+  margin: 12px 0 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.chat-agent-name { display: block; width: 100%; max-width: 260px; box-sizing: border-box; margin: 0 0 6px; }
+.chat-agent-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+}
+@media (max-width: 768px) {
+  .chat-dialog-backdrop { padding: 0; align-items: stretch; }
+  .chat-dialog, .chat-dialog.wide { width: 100%; max-height: 100vh; border-radius: 0; }
+}
+
+/* Delete warning (owner or admin only). */
+.chat-btn-danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--text-inverse-deep);
+}
+.chat-btn-danger:hover:not(:disabled) { background: var(--danger); filter: brightness(1.08); }
+.chat-delete-name { color: var(--text); overflow-wrap: anywhere; }
+.chat-delete-name span { color: var(--text-muted); font-size: 0.78rem; margin-left: 4px; }
+.chat-delete-list { margin: 6px 0 4px; padding-left: 18px; color: var(--text); }
+.chat-delete-list li { margin: 0 0 4px; }
+.chat-delete-foot { justify-content: flex-end; }
+
+/* Shown instead of the composer once the open chat was deleted, or you were
+   removed from it: polling stops, nothing can be posted. */
+.chat-gone {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin: 8px 14px 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--danger-wash-4);
+  border-radius: var(--radius-sm);
+  background: var(--danger-wash);
+  color: var(--text);
+  font-size: 0.85rem;
+}
+.chat-gone span { flex: 1 1 260px; color: var(--text-secondary); }

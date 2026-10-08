@@ -211,7 +211,7 @@ test.describe('a new folder in the picker', () => {
   });
 });
 
-test.describe('copy for another mdnest, paste here', () => {
+test.describe('copy file contents, paste here', () => {
   // A real paste event carrying the given text, as Ctrl/Cmd+V produces.
   async function pasteInto(page, text) {
     const box = page.getByTestId('paste-capture');
@@ -229,14 +229,12 @@ test.describe('copy for another mdnest, paste here', () => {
     await seed(page, SRC, `${base}/${name}`, '# clipboard note\n\n![pic](pic.png)\n');
     await reloadTree(page);
     await openBase(page);
-    await menuOn(page, name, 'Copy for another mdnest');
+    await menuOn(page, name, 'Copy file contents');
     await expect(page.getByTestId('notice-bar')).toContainText('Copied', { timeout: 10_000 });
     await expect(page.getByTestId('notice-bar')).toContainText('1 linked file');
+    // The plain text of the note, so it pastes anywhere, without its ID marker.
     const clip = await page.evaluate(() => navigator.clipboard.readText());
-    const payload = JSON.parse(clip);
-    expect(payload).toMatchObject({ mdnest: 'file/v1', name });
-    expect(payload.content).toContain('# clipboard note');
-    expect(payload.content).not.toMatch(/<!-- mdnest:/);
+    expect(clip).toBe('# clipboard note\n\n![pic](pic.png)\n');
 
     // Paste into a folder of its own (inside the test's folder) — as the
     // other server would, here the same one.
@@ -247,7 +245,9 @@ test.describe('copy for another mdnest, paste here', () => {
     await openBase(page);
     await menuOn(page, sub, 'Paste here');
     await pasteInto(page, clip);
-    await expect(page.getByTestId('paste-name')).toHaveValue(name);
+    // Plain text is named after its first heading; the name stays editable.
+    await expect(page.getByTestId('paste-name')).toHaveValue('clipboard note.md');
+    await page.getByTestId('paste-name').fill(name);
     await expect(page.getByTestId('paste-message')).toContainText('not copied');
     await page.getByTestId('paste-confirm').click();
     await expect(page.getByTestId('paste-modal')).toBeHidden({ timeout: 10_000 });
@@ -258,6 +258,7 @@ test.describe('copy for another mdnest, paste here', () => {
     await openBase(page);
     await menuOn(page, sub, 'Paste here');
     await pasteInto(page, clip);
+    await page.getByTestId('paste-name').fill(name);
     await page.getByTestId('paste-confirm').click();
     await expect(page.getByTestId('paste-message')).toContainText('already exists');
     const copyName = name.replace(/\.md$/, ' (copy).md');
@@ -364,7 +365,7 @@ test.describe('on a phone', () => {
     await expect(page.locator('.tree-row', { hasText: base }).first()).toBeInViewport({ timeout: 10_000 });
     await openBase(page);
     await longPress(page, page.locator('.tree-row', { hasText: name }).first());
-    for (const item of ['Download', 'Copy to…', 'Copy for another mdnest']) {
+    for (const item of ['Download', 'Copy to…', 'Copy file contents']) {
       await expect(page.locator('.context-menu-item', { hasText: item }).first()).toBeVisible();
     }
     await page.locator('.context-menu-item', { hasText: 'Copy to…' }).click();

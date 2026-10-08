@@ -76,6 +76,11 @@ The panel has three tabs for access, and each answers one question:
 - **Groups**: who is in a group, and what the group can reach. Give access to a group once and every member gets it.
 - **Namespaces**: who can reach this namespace? Each namespace lists everyone with access, directly or through a group, and who administers it. **Give access** takes a person or a group.
 
+**Git backup and adding namespaces.** Where a namespace comes from depends on how notes are stored:
+
+- **Plain files (every `setup.sh` install).** A namespace is a folder listed in `mdnest.conf` (`MOUNT_name=/path`, then `./mdnest-server reload`), and git backup is done by git-sync. The Namespaces tab says so and offers nothing else, because settings saved there would never be used.
+- **Git storage (`STORAGE_BACKEND=git`, the Helm chart).** Super-admins get **+ Add namespace**, which creates a namespace together with the git repository it backs up to. Each namespace card has a **Git backup** section showing the repository and whether the last sync worked, with **Set up backup**, **Pause** / **Resume** and **Remove namespace**. Below the list, **Git connections** holds a git host and token saved once; each namespace backed up through a connection gets its own repository, `<address>/<namespace>.git`. A namespace can also back up to a repository of its own.
+
 Access from an IdP (OIDC) group is read from the sign-in token, so it is not part of **Can reach**.
 
 ### Adding a person
@@ -141,9 +146,9 @@ selected.
 
 Right-click (desktop) or long-press (mobile) on a file or folder in the tree. The menu shows the item's name at the top, then its actions in groups, always in the same order:
 
-- **New note / New folder / New drawing / New chat, Paste here** (folders and the namespace root) -- create inside that folder. **Paste here** creates a note copied with "Copy for another mdnest".
+- **New note / New folder / New drawing / New chat, Paste here** (folders and the namespace root) -- create inside that folder. **Paste here** makes a new note from the text on your clipboard, such as a note copied with "Copy file contents" on another mdnest.
 - **Rename, Move to…, Copy to…** -- renaming a file without an extension keeps the original one (`notes.md` renamed to `summary` becomes `summary.md`). **Move to…** and **Copy to…** open one picker for a namespace, a folder and a name; it is touch-friendly, which matters on mobile, where drag-and-drop is off.
-- **Download** (a file) or **Download as zip** (a folder, keeping its folders), **Copy for another mdnest** (notes), **Copy path for CLI** (an `mdnest://` address the CLI and agents accept)
+- **Download** (a file) or **Download as zip** (a folder, keeping its folders), **Copy file contents** (notes, as plain text), **Copy path for CLI** (an `mdnest://` address the CLI and agents accept)
 - **History** and, in multi-user mode, **Authors** (files)
 - **Manage access** (admins, on folders and the root)
 - **Delete** -- always last, on its own, in red
@@ -547,7 +552,7 @@ The move happens within the same namespace. Cross-namespace moves are not suppor
 
 **Download** saves a file. **Download as zip** saves a folder with everything in it, keeping its folders; the `.git` and `.mdnest` folders are left out. Folders larger than the server's limits (500 files / 100 MB by default) are refused with the actual counts, so you can pick a subfolder. A large download can be cancelled from the status bar.
 
-**Between two mdnest servers:** right-click a note → **Copy for another mdnest**. In the other mdnest's browser, right-click a folder → **Paste here**, then press Ctrl+V (⌘V), or long-press the box and choose Paste.
+**Between two mdnest servers:** right-click a note → **Copy file contents**. In the other mdnest's browser, right-click a folder → **Paste here**, then press Ctrl+V (⌘V), or long-press the box and choose Paste. The new note is named after the first heading, and you can change the name before creating it. The copied text pastes anywhere else too.
 
 - The note is created there with that server's permissions. It is never written over an existing one; you are offered a "(copy)" name instead.
 - Images and attachments the note links to are not carried along; you are told which.
@@ -581,7 +586,7 @@ The context menu provides quick actions for files and folders in the sidebar.
 - Rename -- rename the file
 - Move to… / Copy to… -- to another folder or namespace
 - Download -- save the file
-- Copy for another mdnest -- for Paste here on another server
+- Copy file contents -- the note as plain text, for pasting anywhere or into Paste here on another server
 - Delete -- remove the file
 - Attribution *(v4.2.0+, multi mode)* -- who created the note, who last edited it, and everyone who has contributed. Built from an activity trail of every save, cross-checked against the note's git history so edits made outside the app are still credited. Single-mode installs have no user identities to attribute, so the entry is hidden.
 

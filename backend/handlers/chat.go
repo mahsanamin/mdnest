@@ -19,6 +19,7 @@ import (
 	"github.com/mdnest/mdnest/backend/collab"
 	"github.com/mdnest/mdnest/backend/middleware"
 	"github.com/mdnest/mdnest/backend/storage"
+	"github.com/mdnest/mdnest/backend/store"
 )
 
 // File-based chat (ENABLE_CHAT). Request handling only — the markdown format
@@ -28,6 +29,7 @@ import (
 //	POST /api/chat?ns=&path=[&as=label]                 post (body = message text)
 //	POST /api/chat/convert?ns=&path=[&title=]           make a note a chat (creates it if missing)
 //	GET  /api/chats[?format=text]                       every chat the caller can read
+//	GET/POST/DELETE /api/chat/members?ns=&path=          private chat members (chat_members.go)
 //
 // The note is the only state. Posting appends a block under the per-note lock
 // (notelock.go), so concurrent posters never drop each other's messages.
@@ -43,7 +45,9 @@ type ChatHandler struct {
 	hub        *collab.Hub
 	now        func() time.Time
 	index      *chatIndex
-	status     *chatStatusStore // who is working on what (chat_status.go)
+	status     *chatStatusStore      // who is working on what (chat_status.go)
+	members    store.ChatMemberStore // private chats (chat_members.go); nil = off
+	users      chatUserLookup
 }
 
 // NewChatHandler: nsFilter and canRead are REQUIRED. /api/chats spans
@@ -114,6 +118,13 @@ type chatResponse struct {
 	// Contexts is each poster's last /context report, by label
 	// (chat_context.go), so the page can show it by their name.
 	Contexts map[string]ChatContext `json:"contexts"`
+	// Agents is each agent's saved role, by name (chat_traits.go).
+	Agents map[string]string `json:"agents"`
+	// Owner is the account that owns the chat, and CanDelete whether this
+	// caller may delete it (chat_owner.go), so the page offers Delete only
+	// to those who may.
+	Owner     string `json:"owner,omitempty"`
+	CanDelete bool   `json:"canDelete"`
 }
 
 func chatTitle(doc ChatDoc, relPath string) string {
@@ -182,6 +193,13 @@ func (h *ChatHandler) read(w http.ResponseWriter, r *http.Request) {
 		for _, m := range msgs {
 			b.WriteString(formatChatMessageText(m))
 		}
+		// A waiting agent that is handed new messages is reminded of its
+		// saved role, last, so it is the freshest thing it reads.
+		if exclude != "" && len(msgs) > 0 {
+			if trait := chatTraitFor(doc.Agents, exclude); trait != "" {
+				b.WriteString(chatTraitReminder(exclude, trait))
+			}
+		}
 		io.WriteString(w, b.String())
 		return
 	}
@@ -189,7 +207,8 @@ func (h *ChatHandler) read(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(chatResponse{Namespace: ns, Path: relPath, Title: chatTitle(doc, relPath),
 		Description: doc.Description, Count: len(doc.Messages), Messages: msgs, You: you,
-		Working: h.status.list(ns, relPath, h.now()), Contexts: h.status.contexts(ns, relPath, h.now())})
+		Working: h.status.list(ns, relPath, h.now()), Contexts: h.status.contexts(ns, relPath, h.now()),
+		Agents: agentsOrEmpty(doc.Agents), Owner: ChatOwner(string(data)), CanDelete: mayRemoveChat(r, ns, string(data))})
 }
 
 // formatChatMessageText is the terminal rendering the CLI prints verbatim, so
@@ -287,6 +306,11 @@ func (h *ChatHandler) post(w http.ResponseWriter, r *http.Request) {
 	label, via, ok := h.author(r)
 	if !ok {
 		chatJSONError(w, http.StatusForbidden, "cannot attribute this post to a user")
+		return
+	}
+	// "/role one or two lines" saves the poster's own role (chat_traits.go).
+	if trait, isRole := slashRole(text); isRole {
+		h.applyTrait(w, r, ns, relPath, label, trait)
 		return
 	}
 
@@ -544,6 +568,66 @@ func (h *ChatHandler) HandleConvert(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	out := ConvertToChat(existing, title)
+	// The account that makes a note a chat owns it: only the owner or an
+	// admin may delete it later (chat_owner.go).
+	if out != existing {
+		out = stampChatOwner(out, requestOwnerName(r))
+	}
+	// ?private=1 makes the chat private to the caller. The member list is
+	// written BEFORE the note: a new chat must never exist, even briefly,
+	// as an open one that every reader of the namespace can see.
+	invite, err := parseInviteIDs(r.URL.Query().Get("members"))
+	if err != nil {
+		chatJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if len(invite) > 0 && r.URL.Query().Get("private") != "1" {
+		chatJSONError(w, http.StatusBadRequest, "members only applies to a new private chat (private=1)")
+		return
+	}
+	if r.URL.Query().Get("private") == "1" {
+		// Only for a new note. On an existing one it would let anyone with
+		// write access turn a shared note (or an open chat) into something
+		// only they can open. An existing chat is made private through
+		// /api/chat/members, which only accepts a chat.
+		if !created {
+			chatJSONError(w, http.StatusConflict, "private=1 only creates a new chat; use the chat's members to make an existing one private")
+			return
+		}
+		if !PrivateChatPathOK(relPath) {
+			chatJSONError(w, http.StatusBadRequest, "a private chat needs a plain ASCII path")
+			return
+		}
+		// The list is keyed by the lowercased path: on a case-sensitive disk
+		// it would also cover an existing note spelled with other capitals.
+		if foldedMatches(ctx, h.store, ns, relPath) > 0 {
+			chatJSONError(w, http.StatusConflict, "another note has this name in different letter case; pick another name")
+			return
+		}
+		uc := middleware.UserFromContext(ctx)
+		if h.members == nil || uc == nil || uc.ID <= 0 {
+			chatJSONError(w, http.StatusBadRequest, "private chats are not available here")
+			return
+		}
+		// The people picked in the new-chat form. Every one is checked
+		// before anything is written, against the same list the picker
+		// shows: someone with a grant in this workspace.
+		if len(invite) > 0 {
+			if !h.allInWorkspace(ns, invite) {
+				chatJSONError(w, http.StatusNotFound, "no such user in this workspace")
+				return
+			}
+		}
+		for _, id := range append([]int{uc.ID}, invite...) {
+			if err := h.members.Add(ns, "/"+relPath, id, uc.ID); err != nil {
+				chatJSONError(w, http.StatusInternalServerError, "failed to make the chat private")
+				return
+			}
+		}
+		// Anyone who joined the live room for this path before the note
+		// existed would otherwise stay connected to a private chat.
+		defer h.dropNonMembers(ns, relPath, "/"+relPath)
+	}
 	if out != existing {
 		if err := h.store.WriteFile(ctx, ns, relPath, []byte(out)); err != nil {
 			chatJSONError(w, http.StatusInternalServerError, "failed to write note")
@@ -573,6 +657,12 @@ type ChatSummary struct {
 	LastAuthor string `json:"lastAuthor,omitempty"`
 	LastTime   string `json:"lastTime,omitempty"`
 	LastText   string `json:"lastText,omitempty"`
+	// Private is true for a chat with a member list (chat_members.go). Only
+	// members ever see a private chat in the list.
+	Private bool `json:"private,omitempty"`
+	// Owner and CanDelete as in chatResponse.
+	Owner     string `json:"owner,omitempty"`
+	CanDelete bool   `json:"canDelete"`
 }
 
 // chatIndex remembers, per file, whether it is a chat and its summary, keyed
@@ -629,8 +719,14 @@ func (h *ChatHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 
 	chats := []ChatSummary{}
 	for _, ns := range names {
+		var private map[string][]int
+		if h.members != nil {
+			private, _ = h.members.Restricted(ns)
+		}
 		for _, c := range h.scanNamespace(ctx, ns) {
 			if h.canRead(r, ns, "/"+c.Path) {
+				_, c.Private = private[strings.ToLower("/"+c.Path)] // keys are lowercased
+				c.CanDelete = mayRemoveOwnedBy(r, ns, c.Owner)
 				chats = append(chats, c)
 			}
 		}
@@ -717,7 +813,7 @@ func (h *ChatHandler) summarize(ctx context.Context, ns, relPath string) (ChatSu
 		return ChatSummary{}, false
 	}
 	doc := ParseChat(string(data))
-	sum := ChatSummary{Namespace: ns, Path: relPath, Title: chatTitle(doc, relPath), Count: len(doc.Messages)}
+	sum := ChatSummary{Namespace: ns, Path: relPath, Title: chatTitle(doc, relPath), Count: len(doc.Messages), Owner: ChatOwner(string(data))}
 	if n := len(doc.Messages); n > 0 {
 		last := doc.Messages[n-1]
 		sum.LastAuthor, sum.LastTime, sum.LastText = last.Author, last.Time, chatPreview(last.Text)

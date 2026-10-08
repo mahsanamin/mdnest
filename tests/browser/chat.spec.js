@@ -75,6 +75,16 @@ test('a chat clicked in the tree opens as a chat, and Back returns to the note b
 
     const back = page.locator('.toolbar-chats-back');
     await expect(back).toContainText(plain);
+    // In a narrow window the label is dropped. The button used to shrink to
+    // an empty pill (its arrow was hidden with the label); it must still
+    // show the arrow and say "Back".
+    const size = page.viewportSize();
+    await page.setViewportSize({ width: 900, height: size.height });
+    await expect(back.locator('.toolbar-chats-back-arrow')).toBeVisible();
+    await expect(back.locator('.toolbar-chats-back-short')).toBeVisible();
+    await expect(back.locator('.toolbar-chats-back-label')).toBeHidden();
+    await page.setViewportSize(size);
+    await expect(back.locator('.toolbar-chats-back-label')).toBeVisible();
     await back.click();
     await expect(page.locator('.chat-panel')).toHaveCount(0);
     await expect(page.locator('.toolbar-path')).toContainText(plain);
@@ -134,7 +144,7 @@ test('leaving chat mode reloads the note underneath, so it is never stale', asyn
   }
 });
 
-test('Delete removes the chat note after confirming, and Cancel keeps it', async ({ page }) => {
+test('Delete warns what it does in a popup, Cancel keeps the chat, Delete removes it', async ({ page }) => {
   test.setTimeout(90_000);
   await signIn(page);
   const { plain, chat, title } = await seed(page);
@@ -142,15 +152,72 @@ test('Delete removes the chat note after confirming, and Cancel keeps it', async
     await page.goto(`/#!chats/${NS}/${chat}`);
     await expect(page.locator('.chat-room-title h2')).toHaveText(title, { timeout: 20_000 });
 
-    page.once('dialog', (d) => d.dismiss());
     await page.locator('.chat-delete').click();
+    const warn = page.getByTestId('chat-delete-confirm');
+    await expect(warn).toBeVisible();
+    await expect(warn).toContainText('Delete this chat for everyone?');
+    await expect(warn).toContainText(title);
+    await expect(warn).toContainText('Its 1 message is deleted');
+    await expect(warn).toContainText('agents waiting in it are told it is gone');
+    await expect(warn).toContainText('cannot be undone');
+    await warn.getByRole('button', { name: 'Cancel' }).click();
+    await expect(warn).toHaveCount(0);
     await expect(page.locator('.chat-room-title h2')).toHaveText(title);
     expect((await api(page, 'GET', `/api/note?ns=${NS}&path=${encodeURIComponent(chat)}`)).status).toBe(200);
 
-    page.once('dialog', (d) => d.accept());
     await page.locator('.chat-delete').click();
+    await page.getByTestId('chat-delete-confirm-button').click();
     await expect(page.locator('.chat-room-title')).toHaveCount(0);
     expect((await api(page, 'GET', `/api/note?ns=${NS}&path=${encodeURIComponent(chat)}`)).status).toBe(404);
+  } finally {
+    await cleanup(page, plain, chat);
+  }
+});
+
+// Someone else deletes the chat while it is open here: the view says so,
+// stops polling, and offers the way back, instead of an error every 3s.
+test('a chat deleted while it is open says so, and nothing can be posted', async ({ page }) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  const { plain, chat, title } = await seed(page);
+  try {
+    await page.goto(`/#!chats/${NS}/${chat}`);
+    await expect(page.locator('.chat-room-title h2')).toHaveText(title, { timeout: 20_000 });
+    expect((await api(page, 'DELETE', `/api/note?ns=${NS}&path=${encodeURIComponent(chat)}`)).status).toBe(200);
+
+    const gone = page.getByTestId('chat-gone');
+    await expect(gone).toContainText('This chat was deleted.', { timeout: 15_000 });
+    await expect(page.locator('.chat-draft')).toHaveCount(0);
+    await expect(page.locator('.chat-room-error')).toHaveCount(0);
+    await expect(page.locator('.chat-delete')).toHaveCount(0);
+    // Polling stopped: no more requests for it.
+    let polls = 0;
+    page.on('request', (r) => { if (r.url().includes('/api/chat?') && r.url().includes(encodeURIComponent(chat))) polls++; });
+    await page.waitForTimeout(7_000);
+    expect(polls).toBe(0);
+
+    await gone.getByRole('button', { name: 'Back to chats' }).click();
+    await expect(page.locator('.chat-room-title')).toHaveCount(0);
+    await expect(page.locator('.chat-list-item', { hasText: title })).toHaveCount(0);
+  } finally {
+    await cleanup(page, plain, chat);
+  }
+});
+
+test('deleting a chat from the file tree gives the chat warning', async ({ page }) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  const { plain, chat } = await seed(page);
+  try {
+    await page.goto('/');
+    const row = page.locator('.sidebar .tree-row', { hasText: chat }).first();
+    await row.click({ button: 'right' });
+    let message = '';
+    page.once('dialog', (d) => { message = d.message(); d.dismiss(); });
+    await page.locator('.context-menu-item', { hasText: /^Delete$/ }).click();
+    await expect.poll(() => message).toContain('for everyone');
+    expect(message).toContain('agents waiting in it are told it is gone');
+    expect((await api(page, 'GET', `/api/note?ns=${NS}&path=${encodeURIComponent(chat)}`)).status).toBe(200);
   } finally {
     await cleanup(page, plain, chat);
   }
@@ -179,14 +246,51 @@ test('the agent panel puts the typed intent into the prompt, and × or Esc close
     await panel.locator('.chat-agent-close').click();
     await expect(panel).toHaveCount(0);
 
-    // And Esc, with focus anywhere in the chat.
+    // And Esc.
     await openBtn.click();
     await expect(panel).toBeVisible();
-    await page.locator('.chat-room-title h2').click();
     await page.keyboard.press('Escape');
+    await expect(panel).toHaveCount(0);
+
+    // And a click outside the popup.
+    await openBtn.click();
+    await expect(panel).toBeVisible();
+    await page.mouse.click(5, 5);
     await expect(panel).toHaveCount(0);
   } finally {
     await cleanup(page, plain, chat);
+  }
+});
+
+// Connect an agent is a popup, reachable from a right-click on a chat in the
+// list without opening that chat first, and it never pushes the messages down.
+test('right-click a chat to connect an agent, in a popup', async ({ page }) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  const a = await seed(page);
+  const b = await seed(page);
+  try {
+    await page.goto(`/#!chats/${NS}/${a.chat}`);
+    await expect(page.locator('.chat-room-title h2')).toHaveText(a.title, { timeout: 20_000 });
+    const messagesTop = (await page.locator('.chat-messages').boundingBox()).y;
+
+    await page.locator('.chat-list-item', { hasText: b.title }).click({ button: 'right' });
+    await page.locator('.context-menu-item', { hasText: 'Connect an agent…' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Connect an agent' });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator('.chat-agent-sub')).toContainText(b.title);
+    await dialog.locator('input[aria-label="Agent name"]').fill('helper');
+    // The prompt is for the right-clicked chat, not the open one.
+    await expect(dialog.locator('pre')).toContainText(`${NS}/${b.chat} --as helper`);
+    // The open chat stays where it was, underneath.
+    await expect(page.locator('.chat-room-title h2')).toHaveText(a.title);
+    expect((await page.locator('.chat-messages').boundingBox()).y).toBe(messagesTop);
+    await expect(page.locator('.chat-room .chat-agent')).toHaveCount(0);
+
+    await dialog.locator('.chat-agent-close').click();
+    await expect(dialog).toHaveCount(0);
+  } finally {
+    await cleanup(page, a.plain, a.chat, b.plain, b.chat);
   }
 });
 
@@ -260,7 +364,7 @@ test('right-click on a chat in the list: copy its path, and delete another chat 
     const menu = page.locator('.context-menu');
     await expect(menu).toBeVisible();
     await expect(menu.locator('.context-menu-title')).toHaveText(b.title);
-    await expect(menu.locator('.context-menu-item')).toHaveText(['Pin to the Pinned tab', 'Open as note', 'Copy path for CLI', 'Delete chat']);
+    await expect(menu.locator('.context-menu-item')).toHaveText(['Pin to the Pinned tab', 'Connect an agent…', 'Open as note', 'Copy path for CLI', 'Delete chat']);
 
     await menu.locator('.context-menu-item', { hasText: 'Copy path for CLI' }).click();
     await expect(menu).toBeHidden();
@@ -268,8 +372,9 @@ test('right-click on a chat in the list: copy its path, and delete another chat 
     expect(copied).toMatch(new RegExp(`^mdnest://(@[^/]+/)?${NS}/${b.chat.replace(/[.]/g, '\\.')}$`));
 
     await rowB.click({ button: 'right' });
-    page.once('dialog', (d) => d.accept());
     await page.locator('.context-menu-item', { hasText: 'Delete chat' }).click();
+    await expect(page.getByTestId('chat-delete-confirm')).toContainText(b.title);
+    await page.getByTestId('chat-delete-confirm-button').click();
     await expect(page.locator('.chat-list-item', { hasText: b.title })).toHaveCount(0, { timeout: 10_000 });
     expect((await api(page, 'GET', `/api/note?ns=${NS}&path=${encodeURIComponent(b.chat)}`)).status).toBe(404);
     // The chat that was open is still open.
@@ -335,6 +440,41 @@ test('a role template fills the agent name and its trait into the prompt', async
     await expect(name).toHaveValue('');
     await expect(intent).toHaveValue('');
     await expect(panel.locator('.chat-role.active')).toHaveCount(0);
+  } finally {
+    await cleanup(page, plain, chat);
+  }
+});
+
+test('copying the prompt saves the agent\'s role, and wait repeats it to that agent', async ({ page }) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  const { plain, chat, title } = await seed(page);
+  const qs = `ns=${NS}&path=${encodeURIComponent(chat)}`;
+  try {
+    await page.goto(`/#!chats/${NS}/${chat}`);
+    await expect(page.locator('.chat-room-title h2')).toHaveText(title, { timeout: 20_000 });
+    await page.locator('.chat-btn', { hasText: /Connect an agent|Agents/ }).first().click();
+    const panel = page.locator('.chat-agent');
+    await panel.locator('.chat-role', { hasText: 'Lead QA' }).click();
+    await panel.getByRole('button', { name: 'Copy prompt' }).click();
+
+    const saved = panel.getByTestId('chat-agent-saved');
+    await expect(saved).toContainText('lead-qa');
+    await expect(saved).toContainText('You lead testing');
+    // It is kept in the note itself, so it outlives a restart.
+    const note = await api(page, 'GET', `/api/note?${qs}`);
+    expect(note.text).toMatch(/\nagents:\n  lead-qa: "You lead testing/);
+
+    // The agent's next wait carries its role after the new messages.
+    expect((await api(page, 'POST', `/api/chat?${qs}&as=ahsan`, '@lead-qa please plan the tests')).status).toBe(201);
+    const waited = await api(page, 'GET', `/api/chat?${qs}&after=1&format=text&exclude=lead-qa`);
+    expect(waited.text).toContain('please plan the tests');
+    expect(waited.text).toContain('(reminder for lead-qa) Your role in this chat: You lead testing');
+
+    // Removing it from the panel takes it out of the note.
+    await saved.getByRole('button', { name: "Remove lead-qa's role" }).click();
+    await expect(panel.getByTestId('chat-agent-saved')).toHaveCount(0);
+    expect((await api(page, 'GET', `/api/note?${qs}`)).text).not.toContain('agents:');
   } finally {
     await cleanup(page, plain, chat);
   }
@@ -568,5 +708,62 @@ test('pin chats to the Pinned tab, and collapse the list to a strip', async ({ p
       localStorage.removeItem('mdnest_chat_tab');
       localStorage.removeItem('mdnest_chat_list_collapsed');
     }, [NS, names]);
+  }
+});
+
+// Private chats (issue #127) exist only in multi mode, where there are other
+// people to keep out. This harness is single mode: there is one user, so the
+// members control and the "Only people I invite" option must not appear, and
+// a chat must work exactly as before.
+test('single mode shows no members control and no private option', async ({ page }) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  const { plain, chat, title } = await seed(page);
+  try {
+    await page.goto(`/#!chats/${NS}/${chat}`);
+    await expect(page.locator('.chat-room-title h2')).toHaveText(title, { timeout: 20_000 });
+    await expect(page.locator('[data-testid=chat-members-toggle]')).toHaveCount(0);
+    await page.locator('.chat-list-item', { hasText: title }).click({ button: 'right' });
+    await expect(page.locator('.context-menu-item', { hasText: 'Connect an agent…' })).toBeVisible();
+    await expect(page.locator('.context-menu-item', { hasText: 'Members…' })).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.chat-list-lock')).toHaveCount(0);
+    await page.locator('button:has-text("+ New")').first().click();
+    await expect(page.locator('.chat-new')).toBeVisible();
+    await expect(page.locator('[data-testid=chat-new-private]')).toHaveCount(0);
+    expect((await api(page, 'GET', `/api/chat/members?ns=${NS}&path=${encodeURIComponent(chat)}`)).status).toBe(404);
+  } finally {
+    await cleanup(page, plain, chat);
+  }
+});
+
+// A poll that brings nothing new must leave the messages' DOM alone. Every
+// poll used to rebuild the list (its agent-context object was new each time)
+// and React 19 rewrote each message's innerHTML, so images in messages were
+// recreated, reloaded and collapsed: the view flickered every 3 seconds and
+// the last message kept dropping out of sight at the bottom.
+test('a poll with nothing new does not rewrite the messages on screen', async ({ page }) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  const { plain, chat, title } = await seed(page);
+  try {
+    await page.goto(`/#!chats/${NS}/${chat}`);
+    await expect(page.locator('.chat-room-title h2')).toHaveText(title, { timeout: 20_000 });
+    await expect(page.locator('.chat-bubble').first()).toContainText('first message');
+    await page.evaluate(() => {
+      window.__chatMutations = 0;
+      window.__chatNode = document.querySelector('.chat-bubble').firstChild;
+      new MutationObserver((l) => { window.__chatMutations += l.length; })
+        .observe(document.querySelector('.chat-messages'), { subtree: true, childList: true, characterData: true });
+    });
+    // Two poll intervals (CHAT_POLL_MS is 3s).
+    await page.waitForTimeout(7_000);
+    const r = await page.evaluate(() => ({
+      mutations: window.__chatMutations,
+      same: document.querySelector('.chat-bubble').firstChild === window.__chatNode,
+    }));
+    expect(r).toEqual({ mutations: 0, same: true });
+  } finally {
+    await cleanup(page, plain, chat);
   }
 });

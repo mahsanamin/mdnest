@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -15,8 +16,205 @@ import (
 type PermissionChecker struct {
 	grantStore   store.GrantStore
 	nsAdminStore store.NamespaceAdminStore
-	groupStore   store.GroupStore     // role-based "Groups" access; nil disables it
-	links        storage.LinkResolver // nil: the storage has no symlinks (app tier)
+	groupStore   store.GroupStore      // role-based "Groups" access; nil disables it
+	links        storage.LinkResolver  // nil: the storage has no symlinks (app tier)
+	stg          storage.Storage       // for "is there still a file here" (private chats)
+	chatMembers  store.ChatMemberStore // private chats (issue #127); nil disables them
+}
+
+// SetChatMembers turns on private chats: a note with a member list is readable
+// and writable only by its members, on top of the usual grant check. It
+// applies to namespace admins too. The point of a private chat is that the
+// people in a workspace cannot read it unless invited, and an admin is one of
+// those people.
+func (pc *PermissionChecker) SetChatMembers(s store.ChatMemberStore) {
+	pc.chatMembers = s
+}
+
+// chatMemberOK reports whether uc may touch the note at path as far as chat
+// membership is concerned: true for anything that is not a private chat, and
+// for a member of one. A lookup error refuses, so a database hiccup never
+// opens a private chat.
+func (pc *PermissionChecker) chatMemberOK(uc *UserContext, namespace, path string) bool {
+	if pc.chatMembers == nil {
+		return true
+	}
+	ids, err := pc.chatMembers.Members(namespace, "/"+strings.Trim(path, "/"))
+	if err != nil {
+		return false
+	}
+	return len(ids) == 0 || containsID(ids, uc.ID)
+}
+
+func containsID(ids []int, id int) bool {
+	for _, v := range ids {
+		if v == id {
+			return true
+		}
+	}
+	return false
+}
+
+// chatFilter loads the namespace's private chats once and returns a predicate
+// that is false for a private chat uc is not on. For listings, which check
+// every path in a namespace. ok is false when the list cannot be loaded; the
+// caller must then refuse everything.
+func (pc *PermissionChecker) chatFilter(uc *UserContext, namespace string) (func(canonical string) bool, bool) {
+	if pc.chatMembers == nil || uc == nil {
+		return func(string) bool { return true }, true
+	}
+	restricted, err := pc.chatMembers.Restricted(namespace)
+	if err != nil {
+		return nil, false
+	}
+	if len(restricted) == 0 {
+		return func(string) bool { return true }, true
+	}
+	return func(p string) bool {
+		ids, private := restricted[foldPath(p)]
+		return !private || containsID(ids, uc.ID)
+	}, true
+}
+
+// exactSpelling guards the member check against the file system's own idea
+// of which names are the same. Lists are keyed by the lowercased path, which
+// is exactly how a case-insensitive disk compares ASCII names. For other
+// letters it is not: such a disk may also fold the long s, the Kelvin sign
+// or a decomposed accent, so a non-ASCII spelling could open a private chat
+// without matching its key. So, in a namespace with private chats, a
+// non-ASCII path must name what is on disk byte for byte, or name nothing
+// at all (a new file). Private chat paths themselves are kept ASCII (see
+// handlers.PrivateChatPathOK), so an exact spelling can never alias one.
+func (pc *PermissionChecker) exactSpelling(r *http.Request, namespace, path string) bool {
+	if isASCII(path) || pc.stg == nil || !pc.hasPrivateChats(namespace) {
+		return true
+	}
+	ctx := r.Context()
+	rel := strings.Trim(path, "/")
+	dir := ""
+	for _, seg := range strings.Split(rel, "/") {
+		entries, err := pc.stg.ReadDir(ctx, namespace, dir)
+		if err != nil {
+			// The folder is not there: nothing below it exists to alias.
+			return errors.Is(err, storage.ErrNotExist)
+		}
+		exact := false
+		for _, e := range entries {
+			if e.Name == seg {
+				exact = true
+				break
+			}
+		}
+		if !exact {
+			// No entry by this exact name. If the disk still finds
+			// something, it matched another spelling: refuse.
+			_, err := pc.stg.Stat(ctx, namespace, rel)
+			return errors.Is(err, storage.ErrNotExist)
+		}
+		dir = strings.TrimPrefix(dir+"/"+seg, "/")
+	}
+	return true
+}
+
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return false
+		}
+	}
+	return true
+}
+
+// hasPrivateChats reports whether namespace has any member list. A lookup
+// error answers true, so the caller takes the careful path.
+func (pc *PermissionChecker) hasPrivateChats(namespace string) bool {
+	if pc.chatMembers == nil {
+		return false
+	}
+	restricted, err := pc.chatMembers.Restricted(namespace)
+	return err != nil || len(restricted) > 0
+}
+
+// foldPath is the form member lists are keyed by: lowercased, because a
+// case-insensitive mount serves CHATS/SECRET.md as Chats/secret.md (see
+// store.canonChatPath, which must agree).
+func foldPath(p string) string { return strings.ToLower("/" + strings.Trim(p, "/")) }
+
+// PrivateChatFilter returns a predicate that is false for a private chat the
+// user is not a member of, for handlers that filter a listing on their own
+// (the tree). Fails closed: if the member lists cannot be loaded, nothing is
+// visible.
+func (pc *PermissionChecker) PrivateChatFilter(r *http.Request, namespace string) func(relPath string) bool {
+	f, ok := pc.chatFilter(UserFromContext(r.Context()), namespace)
+	if !ok {
+		return func(string) bool { return false }
+	}
+	return func(relPath string) bool {
+		p, ok := canonicalPath(relPath)
+		return ok && f(p)
+	}
+}
+
+// noForeignChatsUnder reports whether the folder at path holds no private chat
+// that uc is not a member of. Used for operations that act on a whole folder
+// (delete, move, copy to another namespace), where checking the folder alone
+// would let a non-member delete, carry off or copy someone else's chat.
+//
+// A row whose file is gone does not count: the list stays at a chat's old
+// path after it is moved or deleted (its git history is still served there),
+// and it must not stop everyone else managing the folder forever. Exact-path
+// checks still apply it.
+func (pc *PermissionChecker) noForeignChatsUnder(r *http.Request, uc *UserContext, namespace, path string) bool {
+	if pc.chatMembers == nil || uc == nil {
+		return true
+	}
+	restricted, err := pc.chatMembers.Restricted(namespace)
+	if err != nil {
+		return false
+	}
+	root := foldPath(path)
+	for p, ids := range restricted {
+		under := root == "/" || p == root || strings.HasPrefix(p, root+"/")
+		if under && !containsID(ids, uc.ID) && pc.fileExists(r, namespace, p) {
+			return false
+		}
+	}
+	return true
+}
+
+// fileExists reports whether a file is at the namespace path p, in any
+// letter case: p is a lowercased list key, and on a case-sensitive disk the
+// file may be Chats/Secret.md. Without a storage, or on any error other than
+// "not there", it answers true, so a doubt refuses.
+func (pc *PermissionChecker) fileExists(r *http.Request, namespace, p string) bool {
+	if pc.stg == nil {
+		return true
+	}
+	ctx := r.Context()
+	rel := strings.TrimPrefix(p, "/")
+	if _, err := pc.stg.Stat(ctx, namespace, rel); err == nil || !errors.Is(err, storage.ErrNotExist) {
+		return true
+	}
+	// Walk the segments, matching each one case-insensitively.
+	dir := ""
+	for _, seg := range strings.Split(rel, "/") {
+		entries, err := pc.stg.ReadDir(ctx, namespace, dir)
+		if err != nil {
+			return !errors.Is(err, storage.ErrNotExist)
+		}
+		found := ""
+		for _, e := range entries {
+			if strings.EqualFold(e.Name, seg) {
+				found = e.Name
+				break
+			}
+		}
+		if found == "" {
+			return false
+		}
+		dir = strings.TrimPrefix(dir+"/"+found, "/")
+	}
+	return true
 }
 
 // SetStorage tells the checker which storage the paths it authorises live on,
@@ -24,6 +222,7 @@ type PermissionChecker struct {
 // for that file too (see storage.LinkResolver). A storage without links (the
 // app tier's working set) leaves every path as named.
 func (pc *PermissionChecker) SetStorage(stg storage.Storage) {
+	pc.stg = stg
 	if lr, ok := stg.(storage.LinkResolver); ok {
 		pc.links = lr
 	}
@@ -89,12 +288,66 @@ func (pc *PermissionChecker) CheckWrite(r *http.Request, namespace, path string)
 	return pc.check(r, namespace, path, "write")
 }
 
+// CheckReadTree is CheckRead for an operation that carries a whole folder off
+// (a copy to another namespace): it also refuses when the folder holds a
+// private chat the user is not a member of.
+func (pc *PermissionChecker) CheckReadTree(r *http.Request, namespace, path string) bool {
+	return pc.CheckRead(r, namespace, path) && pc.noForeignChatsUnder(r, UserFromContext(r.Context()), namespace, path)
+}
+
+// CheckWriteTree is CheckWrite for an operation on a whole folder (delete,
+// move): it also refuses when the folder holds a private chat the user is not
+// a member of. For a single note it is the same as CheckWrite.
+func (pc *PermissionChecker) CheckWriteTree(r *http.Request, namespace, path string) bool {
+	return pc.CheckWrite(r, namespace, path) && pc.noForeignChatsUnder(r, UserFromContext(r.Context()), namespace, path)
+}
+
+// CheckWriteDest is CheckWrite for the destination of a move or copy. A move
+// carries member lists to the destination and REPLACES the lists it finds
+// there, including one left at a private chat's old path, which guards that
+// chat's git history. So, unlike the source side, a leftover list counts
+// here: a user not on every list at or under the destination is refused.
+func (pc *PermissionChecker) CheckWriteDest(r *http.Request, namespace, path string) bool {
+	return pc.CheckWrite(r, namespace, path) && pc.noForeignListsUnder(UserFromContext(r.Context()), namespace, path)
+}
+
+// noForeignListsUnder is noForeignChatsUnder without the "file is gone"
+// exemption: any member list at or under path that does not include uc.
+func (pc *PermissionChecker) noForeignListsUnder(uc *UserContext, namespace, path string) bool {
+	if pc.chatMembers == nil || uc == nil {
+		return true
+	}
+	restricted, err := pc.chatMembers.Restricted(namespace)
+	if err != nil {
+		return false
+	}
+	root := foldPath(path)
+	for p, ids := range restricted {
+		if (root == "/" || p == root || strings.HasPrefix(p, root+"/")) && !containsID(ids, uc.ID) {
+			return false
+		}
+	}
+	return true
+}
+
 func (pc *PermissionChecker) check(r *http.Request, namespace, path, permission string) bool {
 	uc := UserFromContext(r.Context())
 	if uc == nil {
 		return true // single-user mode
 	}
+	// Before the admin shortcut: a private chat binds namespace admins too.
+	if !pc.chatMemberOK(uc, namespace, path) || !pc.exactSpelling(r, namespace, path) {
+		return false
+	}
 	if pc.hasAdminScope(uc, namespace) {
+		// The admin shortcut skips the link resolution below, but a link
+		// to a private chat must not open it: check where it leads.
+		if pc.chatMembers != nil {
+			real, ok := pc.resolve(r.Context(), namespace, path)
+			if !ok || !pc.chatMemberOK(uc, namespace, real) {
+				return false
+			}
+		}
 		return true
 	}
 	if !pc.granted(uc, namespace, path, permission) {
@@ -109,7 +362,7 @@ func (pc *PermissionChecker) check(r *http.Request, namespace, path, permission 
 		return false
 	}
 	if real != "/"+strings.TrimPrefix(path, "/") {
-		return pc.granted(uc, namespace, real, permission)
+		return pc.chatMemberOK(uc, namespace, real) && pc.granted(uc, namespace, real, permission)
 	}
 	return true
 }
@@ -138,8 +391,30 @@ func (pc *PermissionChecker) ReadFilter(r *http.Request, namespace string) func(
 	if uc == nil {
 		return func(string) bool { return true } // single-user mode, as check()
 	}
+	nameOK, ok := pc.chatFilter(uc, namespace)
+	if !ok {
+		return func(string) bool { return false }
+	}
+	ctx := r.Context()
+	// chatOK checks a path and, when it is a link, the file it reaches: a
+	// link Shared/x.md -> Chats/secret.md must not hand search or the task
+	// board a private chat. Links are resolved only when the namespace has
+	// private chats, so a namespace without any pays nothing.
+	chatOK := nameOK
+	if pc.hasPrivateChats(namespace) {
+		chatOK = func(p string) bool {
+			if !nameOK(p) {
+				return false
+			}
+			real, ok := pc.resolve(ctx, namespace, p)
+			return ok && (real == p || nameOK(real))
+		}
+	}
 	if pc.hasAdminScope(uc, namespace) {
-		return func(string) bool { return true }
+		return func(relPath string) bool {
+			p, ok := canonicalPath(relPath)
+			return ok && chatOK(p)
+		}
 	}
 	var grants []store.Grant
 	if all, err := pc.grantStore.GetGrantsForUser(uc.ID); err == nil {
@@ -155,20 +430,20 @@ func (pc *PermissionChecker) ReadFilter(r *http.Request, namespace string) func(
 		return store.GrantsAllow(grants, namespace, p, "read") || store.GroupGrantsAllow(groupGrants, p, "read")
 	}
 	// A reader of the whole namespace may read every file in it. Storage
-	// refuses a link that leaves the namespace or reaches .git, so nothing
-	// needs resolving here; a link into .mdnest can only show this reader
-	// comment data of notes they can already read.
+	// refuses a link that leaves the namespace or reaches .git, so grants
+	// need no resolving here (a link into .mdnest can only show this reader
+	// comment data of notes they can already read); a private chat does,
+	// and chatOK resolves for it.
 	if allowed("/") {
-		return func(relPath string) bool { _, ok := canonicalPath(relPath); return ok }
+		return func(relPath string) bool { p, ok := canonicalPath(relPath); return ok && chatOK(p) }
 	}
-	ctx := r.Context()
 	return func(relPath string) bool {
 		p, ok := canonicalPath(relPath)
-		if !ok || !allowed(p) {
+		if !ok || !allowed(p) || !chatOK(p) {
 			return false
 		}
 		real, ok := pc.resolve(ctx, namespace, p)
-		return ok && (real == p || allowed(real))
+		return ok && (real == p || (allowed(real) && chatOK(real)))
 	}
 }
 
@@ -400,7 +675,7 @@ func (pc *PermissionChecker) CheckMoveAccess(r *http.Request) bool {
 	if !okFrom || !okTo {
 		return false
 	}
-	return pc.CheckWrite(r, ns, from) && pc.CheckWrite(r, ns, to)
+	return pc.CheckWriteTree(r, ns, from) && pc.CheckWriteDest(r, ns, to)
 }
 
 // RequireMove wraps a handler and checks write access on both from and to paths.
@@ -415,7 +690,8 @@ func (pc *PermissionChecker) RequireMove(next http.Handler) http.Handler {
 }
 
 // ReadWriteRouter wraps a handler and applies read check for GET/HEAD,
-// write check for POST/PUT/PATCH/DELETE. Used for the /api/note endpoint.
+// write check for POST/PUT/PATCH, and the folder-aware write check for
+// DELETE. Used for the /api/note endpoint.
 func (pc *PermissionChecker) ReadWriteRouter(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ns := r.URL.Query().Get("ns")
@@ -431,6 +707,13 @@ func (pc *PermissionChecker) ReadWriteRouter(next http.Handler) http.Handler {
 		switch r.Method {
 		case "GET", "HEAD":
 			if !pc.CheckRead(r, ns, path) {
+				DenyJSON(w)
+				return
+			}
+		case "DELETE":
+			// A folder delete removes every note under it, so it also needs
+			// membership of any private chat in there.
+			if !pc.CheckWriteTree(r, ns, path) {
 				DenyJSON(w)
 				return
 			}
