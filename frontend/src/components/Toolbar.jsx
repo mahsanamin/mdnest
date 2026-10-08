@@ -74,8 +74,9 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
           onClick={() => onSetChatsActive(false)}
           title={`Back to ${chatsBackLabel || 'the editor'}`}
         >
-          <span aria-hidden="true">&#8592;</span>
-          <span>Back to {chatsBackLabel || 'the editor'}</span>
+          <span className="toolbar-chats-back-arrow" aria-hidden="true">&#8592;</span>
+          <span className="toolbar-chats-back-label">Back to {chatsBackLabel || 'the editor'}</span>
+          <span className="toolbar-chats-back-short">Back</span>
         </button>
       )}
       {boardActive ? (
