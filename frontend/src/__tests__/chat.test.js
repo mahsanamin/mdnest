@@ -205,8 +205,17 @@ describe('chat images', () => {
     expect(s).toMatch(/Do not repeat what someone already said/);
     expect(s).toMatch(/Emoji are fine/);
     // concise: the whole prompt stays short enough to read at a glance
-    // (31 since the /role line, which keeps an agent on its job)
-    expect(s.split('\n').length).toBeLessThanOrEqual(31);
+    // (34 since the lines on not dropping out of the chat to ask in the terminal)
+    expect(s.split('\n').length).toBeLessThanOrEqual(34);
+  });
+  it('the prompt keeps the agent in the chat when it needs its own human', () => {
+    const s = agentInstructions('mini', 'notes', 'Chats/team.md', 'codxu');
+    // Agents ended their turn to ask in the terminal and went deaf to the chat.
+    expect(s).toMatch(/even the one who started you\? Ask @their-name here/);
+    expect(s).toMatch(/Never stop to ask in your terminal/);
+    expect(s).toMatch(/Start the wait in the background\s+first \(run_in_background\)/);
+    // No promise of a keepalive hook the machine may not have.
+    expect(s).not.toMatch(/keepalive/);
   });
 });
 

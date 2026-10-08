@@ -346,7 +346,138 @@ function ChatMembers({ chat, account, onClose, onChanged }) {
   );
 }
 
-function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack, onActivity }) {
+// A popup over the chat view. Members and Connect an agent open in one, from
+// the chat's header or from a right-click on the chat in the list, so neither
+// pushes the conversation down. Esc or a click outside closes it.
+function ChatDialog({ label, wide, onClose, children }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape' && !e.defaultPrevented) onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return (
+    <div className="chat-dialog-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className={`chat-dialog${wide ? ' wide' : ''}`} role="dialog" aria-modal="true" aria-label={label}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// How an agent joins a chat: a name, what it should do here, and the prompt to
+// paste into it. It reads the saved roles itself, so it also works for a chat
+// opened from the list's right-click menu without opening it first.
+function ChatAgentPanel({ chat, serverAlias, onClose }) {
+  const [agents, setAgents] = useState({}); // each agent's saved role, by name (kept in the note)
+  const [agentName, setAgentName] = useState('');
+  const [agentIntent, setAgentIntent] = useState('');
+  const [agentRole, setAgentRole] = useState(''); // a CHAT_ROLES id, or '' for none
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState('');
+  const loadAgents = useCallback(() => getChat(chat.ns, chat.path, Number.MAX_SAFE_INTEGER)
+    .then((r) => setAgents(r.agents || {}))
+    .catch((e) => setError(e.message)), [chat.ns, chat.path]);
+  useEffect(() => { loadAgents(); }, [loadAgents]);
+  const saveRole = (name, role) => {
+    saveChatAgentRole(chat.ns, chat.path, name, role).then(loadAgents).catch((e) => setError(e.message));
+  };
+  const prompt = agentInstructions(serverAlias, chat.ns, chat.path, agentName || 'AGENT_NAME', agentIntent);
+
+  return (
+    <div className="chat-agent" data-testid="chat-agent">
+      <div className="chat-agent-head">
+        <strong>Connect an agent</strong>
+        <button className="chat-btn chat-btn-icon chat-agent-close" onClick={onClose} title="Close (Esc)" aria-label="Close">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <p className="chat-agent-sub">
+        To <b>{chat.title || chat.path}</b>. Paste the prompt into the agent. Give it one name and it uses that name
+        everywhere, so <code>@name</code> reaches it.
+      </p>
+      {Object.keys(agents).length > 0 && (
+        <div className="chat-agent-saved" data-testid="chat-agent-saved">
+          <div className="chat-agent-saved-head">Saved roles. Each agent is reminded of its role while it waits.</div>
+          {Object.entries(agents).map(([name, role]) => (
+            <div key={name} className="chat-agent-saved-row">
+              <strong style={{ color: `var(${colorForAuthor(name)})` }}>{name}</strong>
+              <span className="chat-agent-saved-role">{role}</span>
+              <button type="button" className="chat-btn chat-btn-icon" onClick={() => saveRole(name, '')}
+                title={`Remove ${name}'s role`} aria-label={`Remove ${name}'s role`}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="chat-agent-step">1. Pick a role, or skip it</div>
+      {/* Role templates: a suggested name and a one-line trait, both still
+          editable below. Leads start helpers who join this same chat. */}
+      <div className="chat-agent-roles" role="radiogroup" aria-label="Role">
+        {CHAT_ROLES.map((r) => (
+          <button
+            key={r.id}
+            type="button"
+            role="radio"
+            aria-checked={agentRole === r.id}
+            className={`chat-role${agentRole === r.id ? ' active' : ''}`}
+            title={r.trait}
+            onClick={() => {
+              const nextId = agentRole === r.id ? '' : r.id;
+              const next = applyRole({ name: agentName, intent: agentIntent, prevRoleId: agentRole }, nextId);
+              setAgentName(next.name);
+              setAgentIntent(next.intent);
+              setAgentRole(nextId);
+            }}
+          >{r.label}</button>
+        ))}
+      </div>
+      <div className="chat-agent-step">2. Name it and say what it should do</div>
+      <input
+        className="chat-input chat-agent-name"
+        placeholder="Agent name, e.g. codxu"
+        value={agentName}
+        onChange={(e) => setAgentName(e.target.value.replace(/[^\w.-]/g, ''))}
+        maxLength={40}
+        aria-label="Agent name"
+      />
+      {/* What the agent is for, in the person's own words. It goes into the
+          prompt after the name, so the agent starts with its job instead of
+          asking for one. */}
+      <textarea
+        {...NO_GRAMMAR_ASSIST}
+        className="chat-input chat-agent-intent"
+        placeholder="What should this agent do here? e.g. Review the API pull requests and flag anything touching auth. (optional)"
+        value={agentIntent}
+        onChange={(e) => setAgentIntent(e.target.value)}
+        maxLength={2000}
+        rows={3}
+        aria-label="What this agent should do"
+      />
+      <p className="chat-agent-hint">This is saved as the agent's role in the chat when you copy the prompt. Keep it to a line or two: it is repeated to the agent every time new messages arrive.</p>
+      <div className="chat-agent-step">3. Copy the prompt into the agent</div>
+      <pre>{prompt}</pre>
+      {error && <div className="chat-error">{error}</div>}
+      <div className="chat-agent-foot">
+        <span className="chat-agent-mcp">MCP clients: <code>read_chat</code>, <code>post_chat</code>, <code>wait_chat</code>.</span>
+        <button
+          className="chat-btn chat-btn-primary"
+          onClick={() => {
+            if (copyPlainText(prompt)) {
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1500);
+            }
+            // The job typed here is also saved as the agent's role, so the
+            // server can keep reminding it after its context fills up.
+            if (agentName && agentIntent.trim()) saveRole(agentName, agentIntent);
+          }}
+        >{copied ? 'Copied!' : 'Copy prompt'}</button>
+      </div>
+    </div>
+  );
+}
+
+function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack, onActivity, onDialog }) {
   const [doc, setDoc] = useState(null); // { title, description, you }
   const [working, setWorking] = useState([]); // who said they are busy, from the server
   const [contexts, setContexts] = useState({}); // each agent's last /context report, by name
@@ -358,25 +489,6 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
   const [postingAs, setPostingAs] = useState(() => {
     try { return localStorage.getItem(AS_KEY) || ''; } catch { return ''; }
   });
-  const [showAgent, setShowAgent] = useState(false);
-  const [showMembers, setShowMembers] = useState(false);
-  const [agentName, setAgentName] = useState('');
-  const [agentIntent, setAgentIntent] = useState('');
-  const [agentRole, setAgentRole] = useState(''); // a CHAT_ROLES id, or '' for none
-  const saveRole = useCallback((name, role) => {
-    saveChatAgentRole(chat.ns, chat.path, name, role)
-      .then(() => getChat(chat.ns, chat.path, Number.MAX_SAFE_INTEGER))
-      .then((r) => setAgents(sameOr(r.agents || {})))
-      .catch((e) => setError(e.message));
-  }, [chat.ns, chat.path]);
-  // Esc closes the agent panel from anywhere in the chat, besides its × button.
-  useEffect(() => {
-    if (!showAgent) return undefined;
-    const onKey = (e) => { if (e.key === 'Escape' && !e.defaultPrevented) setShowAgent(false); };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [showAgent]);
-  const [copied, setCopied] = useState(false);
   const [caret, setCaret] = useState(0);
   const draftRef = useRef(null);
   // The draft grows with its content, wrapped lines included, up to a cap
@@ -610,16 +722,18 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
             {chat.ns}/{chat.path}
           </button>
         </div>
-        {account && (
-          <button className={`chat-btn${showMembers ? ' active' : ''}`} onClick={() => { setShowMembers((v) => !v); setShowAgent(false); }}
+        {account && onDialog && (
+          <button className="chat-btn" onClick={() => onDialog('members')}
             title="Who can open this chat" data-testid="chat-members-toggle">
             Members
           </button>
         )}
-        <button className={`chat-btn${showAgent ? ' active' : ''}`} onClick={() => { setShowAgent((v) => !v); setShowMembers(false); }} title="How an agent joins this chat">
-          <span className="chat-label-long">Connect an agent</span>
-          <span className="chat-label-short">Agents</span>
-        </button>
+        {onDialog && (
+          <button className="chat-btn" onClick={() => onDialog('agent')} title="How an agent joins this chat">
+            <span className="chat-label-long">Connect an agent</span>
+            <span className="chat-label-short">Agents</span>
+          </button>
+        )}
         <button
           className={`chat-btn chat-btn-icon chat-refresh${reloading ? ' spinning' : ''}`}
           onClick={() => { setReloading(true); setReloadNonce((n) => n + 1); onActivity?.(); }}
@@ -642,108 +756,6 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
           </button>
         )}
       </header>
-
-      {showMembers && account && (
-        <ChatMembers chat={chat} account={account} onClose={() => setShowMembers(false)} onChanged={() => onActivity?.()} />
-      )}
-
-      {showAgent && (
-        <div className="chat-agent">
-          <div className="chat-agent-head">
-            <strong>Connect an agent</strong>
-            <button
-              className="chat-btn chat-btn-icon chat-agent-close"
-              onClick={() => setShowAgent(false)}
-              title="Close (Esc)"
-              aria-label="Close"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
-            </button>
-          </div>
-          <p>
-            Paste this into the agent. Give it one name and it will use that name everywhere, so <code>@name</code> reaches it.
-          </p>
-          {Object.keys(agents).length > 0 && (
-            <div className="chat-agent-saved" data-testid="chat-agent-saved">
-              <div className="chat-agent-saved-head">Saved roles. Each agent is reminded of its role while it waits.</div>
-              {Object.entries(agents).map(([name, role]) => (
-                <div key={name} className="chat-agent-saved-row">
-                  <strong style={{ color: `var(${colorForAuthor(name)})` }}>{name}</strong>
-                  <span className="chat-agent-saved-role">{role}</span>
-                  <button
-                    type="button"
-                    className="chat-btn chat-btn-icon"
-                    onClick={() => saveRole(name, '')}
-                    title={`Remove ${name}'s role`}
-                    aria-label={`Remove ${name}'s role`}
-                  >
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-          {/* Role templates: a suggested name and a one-line trait, both still
-              editable below. Leads start helpers who join this same chat. */}
-          <div className="chat-agent-roles" role="radiogroup" aria-label="Role">
-            {CHAT_ROLES.map((r) => (
-              <button
-                key={r.id}
-                type="button"
-                role="radio"
-                aria-checked={agentRole === r.id}
-                className={`chat-role${agentRole === r.id ? ' active' : ''}`}
-                title={r.trait}
-                onClick={() => {
-                  const nextId = agentRole === r.id ? '' : r.id;
-                  const next = applyRole({ name: agentName, intent: agentIntent, prevRoleId: agentRole }, nextId);
-                  setAgentName(next.name);
-                  setAgentIntent(next.intent);
-                  setAgentRole(nextId);
-                }}
-              >{r.label}</button>
-            ))}
-          </div>
-          <div className="chat-agent-row">
-            <input
-              className="chat-input"
-              placeholder="Agent name, e.g. codxu"
-              value={agentName}
-              onChange={(e) => setAgentName(e.target.value.replace(/[^\w.-]/g, ''))}
-              maxLength={40}
-              aria-label="Agent name"
-            />
-            <button
-              className="chat-btn"
-              onClick={() => {
-                if (copyPlainText(agentInstructions(serverAlias, chat.ns, chat.path, agentName || 'AGENT_NAME', agentIntent))) {
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 1500);
-                }
-                // The job typed here is also saved as the agent's role, so the
-                // server can keep reminding it after its context fills up.
-                if (agentName && agentIntent.trim()) saveRole(agentName, agentIntent);
-              }}
-            >{copied ? 'Copied!' : 'Copy prompt'}</button>
-          </div>
-          {/* What the agent is for, in the person's own words. It goes into the
-              prompt after the name, so the agent starts with its job instead
-              of asking for one. */}
-          <textarea
-            {...NO_GRAMMAR_ASSIST}
-            className="chat-input chat-agent-intent"
-            placeholder="What should this agent do here? e.g. Review the API pull requests and flag anything touching auth. (optional)"
-            value={agentIntent}
-            onChange={(e) => setAgentIntent(e.target.value)}
-            maxLength={2000}
-            rows={3}
-            aria-label="What this agent should do"
-          />
-          <p className="chat-agent-hint">Copying the prompt saves this as the agent's role in the chat. Keep it to a line or two: it is repeated to the agent every time new messages arrive.</p>
-          <pre>{agentInstructions(serverAlias, chat.ns, chat.path, agentName || 'AGENT_NAME', agentIntent)}</pre>
-          <p className="chat-agent-mcp">MCP clients: <code>read_chat</code>, <code>post_chat</code>, <code>wait_chat</code>.</p>
-        </div>
-      )}
 
       <div className="chat-messages-wrap">
         <div className="chat-messages" ref={scrollRef} onScroll={onScroll}>
@@ -883,6 +895,8 @@ function ChatView({ ns, namespaces, onSelectNs, account, serverAlias, isMobile, 
   const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
   const [menu, setMenu] = useState(null); // {x, y, chat} while the right-click menu is open
+  const [dialog, setDialog] = useState(null); // {kind: 'members' | 'agent', chat} while a popup is open
+  const closeDialog = useCallback(() => setDialog(null), []);
   const [filter, setFilter] = useState('');
   const visible = useVisible();
   // Per-browser view choices; failing storage just means the defaults.
@@ -1034,12 +1048,14 @@ function ChatView({ ns, namespaces, onSelectNs, account, serverAlias, isMobile, 
             y={menu?.y || 0}
             target={menu?.chat || null}
             title={menu?.chat?.title}
-            groups={chatMenuGroups({ canDelete: !!onDeleteChat, pinned: pins && menu?.chat ? pins.includes(pinKey(menu.chat.ns, menu.chat.path)) : undefined })}
+            groups={chatMenuGroups({ canDelete: !!onDeleteChat, canMembers: !!account, pinned: pins && menu?.chat ? pins.includes(pinKey(menu.chat.ns, menu.chat.path)) : undefined })}
             onClose={() => setMenu(null)}
             onAction={async (action, c) => {
               if (!c) return;
               if (action === 'pin-chat' || action === 'unpin-chat') togglePinFor(c);
               if (action === 'open-note') onOpenNote(c.ns, c.path);
+              if (action === 'chat-members') setDialog({ kind: 'members', chat: c });
+              if (action === 'connect-agent') setDialog({ kind: 'agent', chat: c });
               if (action === 'copy-path') copyPlainText(mdnestUri(serverAlias, c.ns, c.path));
               if (action === 'delete-chat' && onDeleteChat) {
                 try { if (await onDeleteChat(c.ns, c.path, c.title)) refresh(); } catch (e) { alert('Failed to delete the chat: ' + e.message); }
@@ -1060,6 +1076,7 @@ function ChatView({ ns, namespaces, onSelectNs, account, serverAlias, isMobile, 
           } : null}
           onBack={isMobile ? () => onSelectChat(null) : null}
           onActivity={refresh}
+          onDialog={(kind) => setDialog({ kind, chat: { ...openChat, title: chats.find((c) => c.ns === openChat.ns && c.path === openChat.path)?.title } })}
         />
       ) : !isMobile && (
         <section className="chat-room chat-room-placeholder">
@@ -1068,6 +1085,16 @@ function ChatView({ ns, namespaces, onSelectNs, account, serverAlias, isMobile, 
             <code> mdnest chat</code> talk in the same file.
           </div>
         </section>
+      )}
+      {dialog?.kind === 'members' && account && (
+        <ChatDialog label="Members" onClose={closeDialog}>
+          <ChatMembers chat={dialog.chat} account={account} onClose={closeDialog} onChanged={() => refresh()} />
+        </ChatDialog>
+      )}
+      {dialog?.kind === 'agent' && (
+        <ChatDialog label="Connect an agent" wide onClose={closeDialog}>
+          <ChatAgentPanel chat={dialog.chat} serverAlias={serverAlias} onClose={closeDialog} />
+        </ChatDialog>
       )}
     </div>
   );

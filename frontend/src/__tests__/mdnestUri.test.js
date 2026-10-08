@@ -17,9 +17,12 @@ describe('mdnestUri', () => {
 describe('chat list menu', () => {
   const labels = (g) => g.map((x) => x.map((i) => i.label));
   it('open as note, copy path, and Delete last when allowed', () => {
-    expect(labels(chatMenuGroups({ canDelete: true }))).toEqual([['Open as note'], ['Copy path for CLI'], ['Delete chat']]);
+    expect(labels(chatMenuGroups({ canDelete: true }))).toEqual([['Connect an agent…'], ['Open as note'], ['Copy path for CLI'], ['Delete chat']]);
   });
   it('no Delete without the right', () => {
-    expect(labels(chatMenuGroups({ canDelete: false }))).toEqual([['Open as note'], ['Copy path for CLI']]);
+    expect(labels(chatMenuGroups({ canDelete: false }))).toEqual([['Connect an agent…'], ['Open as note'], ['Copy path for CLI']]);
+  });
+  it('Members only where a chat can have members (multi mode)', () => {
+    expect(labels(chatMenuGroups({ canMembers: true }))[0]).toEqual(['Members…', 'Connect an agent…']);
   });
 });
