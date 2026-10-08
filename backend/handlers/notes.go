@@ -273,6 +273,13 @@ func (h *NoteHandler) updateNote(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Turning a chat back into a plain note, or giving it another owner, is
+	// as good as deleting it, so it takes the same right (chat_owner.go).
+	if !chatEditAllowed(r, ns, string(currentData), writeContent) {
+		chatJSONError(w, http.StatusForbidden, "only the chat's owner or a workspace admin can remove its chat marker or change its owner")
+		return
+	}
+
 	if err := h.store.WriteFile(ctx, ns, relPath, []byte(writeContent)); err != nil {
 		http.Error(w, `{"error":"failed to write file"}`, http.StatusInternalServerError)
 		return
@@ -399,6 +406,12 @@ func (h *NoteHandler) deleteNote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"failed to delete"}`, http.StatusInternalServerError)
 		return
 	}
+	// A chat is deleted only by its owner or an admin (chat_owner.go), also
+	// when it sits inside a folder being deleted.
+	if blocked := blockedChat(r, h.store, ns, relPath, info.IsDir); blocked != "" {
+		denyChatRemoval(w, blocked, info.IsDir)
+		return
+	}
 	if info.IsDir {
 		err = h.store.RemoveAll(ctx, ns, relPath)
 	} else {
@@ -476,6 +489,12 @@ func (h *NoteHandler) patchNote(w http.ResponseWriter, r *http.Request) {
 		} else {
 			result = text
 		}
+	}
+
+	// Text added above a chat's front matter would turn it into a plain note.
+	if !chatEditAllowed(r, ns, existing, result) {
+		chatJSONError(w, http.StatusForbidden, "only the chat's owner or a workspace admin can add text above a chat's front matter")
+		return
 	}
 
 	if err := h.store.WriteFile(ctx, ns, relPath, []byte(result)); err != nil {

@@ -120,6 +120,11 @@ type chatResponse struct {
 	Contexts map[string]ChatContext `json:"contexts"`
 	// Agents is each agent's saved role, by name (chat_traits.go).
 	Agents map[string]string `json:"agents"`
+	// Owner is the account that owns the chat, and CanDelete whether this
+	// caller may delete it (chat_owner.go), so the page offers Delete only
+	// to those who may.
+	Owner     string `json:"owner,omitempty"`
+	CanDelete bool   `json:"canDelete"`
 }
 
 func chatTitle(doc ChatDoc, relPath string) string {
@@ -203,7 +208,7 @@ func (h *ChatHandler) read(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(chatResponse{Namespace: ns, Path: relPath, Title: chatTitle(doc, relPath),
 		Description: doc.Description, Count: len(doc.Messages), Messages: msgs, You: you,
 		Working: h.status.list(ns, relPath, h.now()), Contexts: h.status.contexts(ns, relPath, h.now()),
-		Agents: agentsOrEmpty(doc.Agents)})
+		Agents: agentsOrEmpty(doc.Agents), Owner: ChatOwner(string(data)), CanDelete: mayRemoveChat(r, ns, string(data))})
 }
 
 // formatChatMessageText is the terminal rendering the CLI prints verbatim, so
@@ -563,6 +568,11 @@ func (h *ChatHandler) HandleConvert(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	out := ConvertToChat(existing, title)
+	// The account that makes a note a chat owns it: only the owner or an
+	// admin may delete it later (chat_owner.go).
+	if out != existing {
+		out = stampChatOwner(out, requestOwnerName(r))
+	}
 	// ?private=1 makes the chat private to the caller. The member list is
 	// written BEFORE the note: a new chat must never exist, even briefly,
 	// as an open one that every reader of the namespace can see.
@@ -630,6 +640,9 @@ type ChatSummary struct {
 	// Private is true for a chat with a member list (chat_members.go). Only
 	// members ever see a private chat in the list.
 	Private bool `json:"private,omitempty"`
+	// Owner and CanDelete as in chatResponse.
+	Owner     string `json:"owner,omitempty"`
+	CanDelete bool   `json:"canDelete"`
 }
 
 // chatIndex remembers, per file, whether it is a chat and its summary, keyed
@@ -693,6 +706,7 @@ func (h *ChatHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 		for _, c := range h.scanNamespace(ctx, ns) {
 			if h.canRead(r, ns, "/"+c.Path) {
 				_, c.Private = private[strings.ToLower("/"+c.Path)] // keys are lowercased
+				c.CanDelete = mayRemoveOwnedBy(r, ns, c.Owner)
 				chats = append(chats, c)
 			}
 		}
@@ -779,7 +793,7 @@ func (h *ChatHandler) summarize(ctx context.Context, ns, relPath string) (ChatSu
 		return ChatSummary{}, false
 	}
 	doc := ParseChat(string(data))
-	sum := ChatSummary{Namespace: ns, Path: relPath, Title: chatTitle(doc, relPath), Count: len(doc.Messages)}
+	sum := ChatSummary{Namespace: ns, Path: relPath, Title: chatTitle(doc, relPath), Count: len(doc.Messages), Owner: ChatOwner(string(data))}
 	if n := len(doc.Messages); n > 0 {
 		last := doc.Messages[n-1]
 		sum.LastAuthor, sum.LastTime, sum.LastText = last.Author, last.Time, chatPreview(last.Text)

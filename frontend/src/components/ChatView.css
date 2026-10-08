@@ -742,3 +742,33 @@
   .chat-dialog-backdrop { padding: 0; align-items: stretch; }
   .chat-dialog, .chat-dialog.wide { width: 100%; max-height: 100vh; border-radius: 0; }
 }
+
+/* Delete warning (owner or admin only). */
+.chat-btn-danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--text-inverse-deep);
+}
+.chat-btn-danger:hover:not(:disabled) { background: var(--danger); filter: brightness(1.08); }
+.chat-delete-name { color: var(--text); overflow-wrap: anywhere; }
+.chat-delete-name span { color: var(--text-muted); font-size: 0.78rem; margin-left: 4px; }
+.chat-delete-list { margin: 6px 0 4px; padding-left: 18px; color: var(--text); }
+.chat-delete-list li { margin: 0 0 4px; }
+.chat-delete-foot { justify-content: flex-end; }
+
+/* Shown instead of the composer once the open chat was deleted, or you were
+   removed from it: polling stops, nothing can be posted. */
+.chat-gone {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin: 8px 14px 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--danger-wash-4);
+  border-radius: var(--radius-sm);
+  background: var(--danger-wash);
+  color: var(--text);
+  font-size: 0.85rem;
+}
+.chat-gone span { flex: 1 1 260px; color: var(--text-secondary); }

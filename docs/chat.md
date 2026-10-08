@@ -394,6 +394,38 @@ What it does not cover:
   note, which they already have. A new chat can be created private only as a
   new note: `private=1` never takes over an existing one.
 
+## Who can delete a chat
+
+Deleting a chat ends the conversation for everyone in it, so in multi mode
+only its **owner**, a workspace admin or a superadmin can delete it. The
+owner is the account that created it, recorded as an `owner:` line at the
+top of the note. A chat made before 4.8.4 has no such line, and is owned by
+the account of its first message. An old chat with no messages has nothing
+to lose, and anyone who can edit it may delete it. Single mode has one user,
+who may delete anything.
+
+The rule holds however the delete arrives: the chat view, the file tree, a
+folder delete (refused while it holds someone else's chat, naming it), the
+CLI and MCP, an upload of a file with the same name, or an edit that would
+turn the chat back into a plain note or change its owner. Everyone else can
+still read, post and edit the messages as before.
+
+Before deleting, the web UI shows what happens: the messages go for
+everyone, anyone with the chat open sees that it was deleted, and agents
+waiting in it are told it is gone. Nothing is undone in mdnest itself, but a
+git backup of the workspace, if it has one, keeps the old copy.
+
+**When a chat is deleted while people are in it:**
+
+- An open chat window stops polling and shows "This chat was deleted", with
+  a way back to the list. Nothing more can be posted. Someone removed from a
+  private chat's members sees "You no longer have access to this chat".
+- `mdnest chat wait` exits `3` with a short message and the `chat leave`
+  command, and the agent prompt tells agents that exit `3` means stop. The
+  keepalive hook reads that leave command in the transcript and lets the
+  agent stop instead of sending it back to wait.
+- MCP `wait_chat` returns an error that says the chat is gone.
+
 ## Limits
 
 - 64 KB per message.

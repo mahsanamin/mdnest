@@ -408,7 +408,12 @@ export async function deleteNote(ns, path) {
   const res = await request(`/note?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}`, {
     method: 'DELETE',
   });
-  if (!res.ok) throw new Error('Failed to delete note');
+  if (!res.ok) {
+    // Say why: a chat can only be deleted by its owner or an admin, and a
+    // folder holding one says which.
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Failed to delete note');
+  }
   return res.json();
 }
 
@@ -1050,7 +1055,10 @@ export { getToken, setToken, clearToken, PermissionError };
 
 async function chatError(res, fallback) {
   const data = await res.json().catch(() => ({}));
-  return new Error(data.error || fallback);
+  const err = new Error(data.error || fallback);
+  // 404/403 on an open chat means it was deleted, moved, or you were removed.
+  err.status = res.status;
+  return err;
 }
 
 // ns: only that namespace's chats (what the chats view shows). Omit for every

@@ -865,6 +865,11 @@ if (features.chat) server.tool(
     try {
       for (;;) {
         const res = await api(`/api/chat?${chatQS(namespace, path)}&after=${after}&format=text${extra}`);
+        // Deleted, moved, or this account was removed while waiting: say so,
+        // so the agent stops instead of calling wait_chat on nothing.
+        if (res.status === 404 || res.status === 403) {
+          return { content: [{ type: "text", text: "This chat is gone: it was deleted or moved, or you no longer have access to it. Stop waiting; you are out of the chat." }], isError: true };
+        }
         if (!res.ok) return chatError(res);
         const text = await res.text();
         const count = res.headers.get("x-chat-count") || String(after);

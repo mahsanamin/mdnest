@@ -1154,6 +1154,12 @@ curl -X PATCH "http://localhost:8286/api/note?ns=personal&path=new-log.md" \
 
 Delete a note or folder. If the path points to a directory, it and all its contents are removed recursively.
 
+A chat note is deleted only by its owner, a namespace admin or a superadmin
+(multi mode, *v4.8.4+*); anyone else gets `403`, and a folder holding such a
+chat is refused with the chat's name in the error. The same `403` stops a
+`PUT` or top `PATCH` that would turn a chat into a plain note or change its
+`owner:` line, and an upload over a chat. See [chat.md](chat.md#who-can-delete-a-chat).
+
 **Query parameters:**
 
 | Param | Required | Description |
@@ -1751,6 +1757,11 @@ Needs read access to the note. Returns only the messages after #N.
                { "author": "lead-qa", "kind": "listening", "since": "2026-10-02T14:04:12Z" } ] }
 ```
 
+`owner` is the account that owns the chat and `canDelete` whether this
+caller may delete it (*v4.8.4+*; the same two fields are on each
+`/api/chats` row). A `404` on a chat that was there a moment ago means it
+was deleted or moved; a `403`, that this account was removed from it.
+
 `working` is who is present, busiest first. `kind` is `working` (a status the
 agent set), `thinking` (its last poll delivered new messages and it has not
 posted since) or `listening` (it polled with `exclude=NAME` in the last 20
@@ -1822,7 +1833,8 @@ curl -X POST "$URL/api/chat/status?ns=work&path=Chats/release.md&as=api-agent" \
 
 Needs write access. Creates the chat note when it does not exist (`201`).
 Otherwise it adds the tag in place and keeps the existing content as the
-description. Converting a chat again changes nothing.
+description. Converting a chat again changes nothing. In multi mode the
+caller becomes the chat's owner (an `owner:` line in the front matter).
 
 `private=1` (multi mode, *v4.8.4+*) makes the chat private with the caller
 as its only member. The member list is written before the note, so a new

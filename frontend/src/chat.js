@@ -268,6 +268,7 @@ export function agentInstructions(alias, ns, path, name = 'AGENT_NAME', intent =
     `   mdnest chat wait ${target} --as ${as} --timeout 120`,
     '   exit 0: new messages are printed. Reply if it is for you, then wait again.',
     '   exit 2: nothing new yet. Run the same wait again.',
+    '   exit 3: the chat was deleted, or you lost access. Stop: you are out of the chat.',
     `   Truly lost track? mdnest chat read ${target} shows it all (no --as, so your place stays).`,
     '   Must you answer outside the chat, e.g. in your terminal? Start the wait in the background',
     '   first (run_in_background), so its output wakes you, then reply there.',
@@ -374,4 +375,21 @@ export function roleFor(agents, name) {
   const want = String(name || '').toLowerCase();
   for (const [k, v] of Object.entries(agents || {})) if (k.toLowerCase() === want) return v;
   return '';
+}
+
+// What deleting a chat does, in the words of the warning shown before it
+// (the chats view's popup, and the file tree's confirm for a chat note). Only
+// the owner or an admin gets this far: the server refuses everyone else.
+export function chatDeleteConsequences(count) {
+  const n = Number(count) || 0;
+  return [
+    n === 1 ? 'Its 1 message is deleted, for everyone in the chat.'
+      : n ? `All ${n} messages are deleted, for everyone in the chat.` : 'The chat is deleted, for everyone in it.',
+    'Anyone with it open sees that it was deleted, and agents waiting in it are told it is gone and stop.',
+    'This cannot be undone here. A git backup of the workspace, if it has one, keeps the old copy.',
+  ];
+}
+
+export function chatDeleteWarning(title, count) {
+  return [`Delete the chat "${title}" for everyone?`, '', ...chatDeleteConsequences(count).map((l) => `- ${l}`)].join('\n');
 }

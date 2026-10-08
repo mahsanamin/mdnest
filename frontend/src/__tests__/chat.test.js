@@ -5,6 +5,7 @@ import {
   mentionsName, highlightMentions, participants, mentionQuery, completeMention,
   avatarFor, reactions, gifMarkdown, expandGifRefs, initialOf, roleFor,
 } from '../chat.js';
+import { chatDeleteConsequences, chatDeleteWarning } from '../chat.js';
 
 describe('chat naming', () => {
   it('slugifies a channel name into a shell-safe filename', () => {
@@ -205,8 +206,9 @@ describe('chat images', () => {
     expect(s).toMatch(/Do not repeat what someone already said/);
     expect(s).toMatch(/Emoji are fine/);
     // concise: the whole prompt stays short enough to read at a glance
-    // (34 since the lines on not dropping out of the chat to ask in the terminal)
-    expect(s.split('\n').length).toBeLessThanOrEqual(34);
+    // (35 since the line on a deleted chat, exit 3)
+    expect(s.split('\n').length).toBeLessThanOrEqual(35);
+    expect(s).toMatch(/exit 3: the chat was deleted/);
   });
   it('the prompt keeps the agent in the chat when it needs its own human', () => {
     const s = agentInstructions('mini', 'notes', 'Chats/team.md', 'codxu');
@@ -327,5 +329,17 @@ describe('context size', () => {
   it('the prompt tells agents to report it', () => {
     const s = agentInstructions('mini', 'notes', 'Chats/team.md', 'codxu');
     expect(s).toContain('mdnest chat post @mini/notes/Chats/team.md "/context 42%" --as codxu');
+  });
+});
+
+describe('the warning before a chat is deleted', () => {
+  it('says it is for everyone, what happens to agents, and that it cannot be undone', () => {
+    const w = chatDeleteWarning('Release room', 12);
+    expect(w).toMatch(/^Delete the chat "Release room" for everyone\?/);
+    expect(w).toContain('All 12 messages are deleted');
+    expect(w).toContain('agents waiting in it are told it is gone');
+    expect(w).toContain('cannot be undone');
+    expect(chatDeleteConsequences(1)[0]).toBe('Its 1 message is deleted, for everyone in the chat.');
+    expect(chatDeleteConsequences(0)[0]).toBe('The chat is deleted, for everyone in it.');
   });
 });

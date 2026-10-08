@@ -9,7 +9,7 @@ import {
   highlightMentions, mentionsName, participants, mentionQuery, completeMention,
   avatarFor, reactions, gifMarkdown, expandGifRefs, initialOf,
   pinKey, parsePins, togglePin, chatsForTab, MAX_CHAT_PINS_LENGTH,
-  roleFor,
+  roleFor, chatDeleteConsequences,
 } from '../chat.js';
 import { copyPlainText } from '../mermaid-text.js';
 import { mdnestUri } from '../mdnestUri.js';
@@ -364,6 +364,43 @@ function ChatDialog({ label, wide, onClose, children }) {
   );
 }
 
+// The warning before a chat is deleted. Deleting one ends the conversation
+// for everyone in it, people and agents, so it says exactly that and asks
+// once more. The server refuses anyone but the owner or an admin, and its
+// reason is shown here if it does.
+function ChatDeleteConfirm({ chat, onCancel, onConfirm }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  return (
+    <div className="chat-agent chat-delete-confirm" data-testid="chat-delete-confirm">
+      <div className="chat-agent-head">
+        <strong>Delete this chat for everyone?</strong>
+        <button className="chat-btn chat-btn-icon chat-agent-close" onClick={onCancel} title="Close (Esc)" aria-label="Close">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <p className="chat-delete-name"><b>{chat.title || chat.path}</b> <span>{chat.ns}/{chat.path}</span></p>
+      <ul className="chat-delete-list">
+        {chatDeleteConsequences(chat.count).map((line) => <li key={line}>{line}</li>)}
+      </ul>
+      {error && <div className="chat-error">{error}</div>}
+      <div className="chat-agent-foot chat-delete-foot">
+        <button className="chat-btn" onClick={onCancel} autoFocus>Cancel</button>
+        <button
+          className="chat-btn chat-btn-danger"
+          disabled={busy}
+          data-testid="chat-delete-confirm-button"
+          onClick={async () => {
+            setBusy(true);
+            setError('');
+            try { await onConfirm(); } catch (e) { setError(e.message); setBusy(false); }
+          }}
+        >{busy ? 'Deleting…' : 'Delete chat'}</button>
+      </div>
+    </div>
+  );
+}
+
 // How an agent joins a chat: a name, what it should do here, and the prompt to
 // paste into it. It reads the saved roles itself, so it also works for a chat
 // opened from the list's right-click menu without opening it first.
@@ -477,8 +514,13 @@ function ChatAgentPanel({ chat, serverAlias, onClose }) {
   );
 }
 
-function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack, onActivity, onDialog }) {
-  const [doc, setDoc] = useState(null); // { title, description, you }
+function ChatRoom({ chat, account, serverAlias, onOpenNote, onBack, onActivity, onDialog, onGone }) {
+  const [doc, setDoc] = useState(null); // { title, description, you, owner, canDelete }
+  // Set when the chat disappears under you: 'deleted' (404: deleted or
+  // moved) or 'removed' (403: taken off a private chat's member list). The
+  // view stops polling and says so, instead of repeating an error.
+  const [gone, setGone] = useState(null);
+  const goneFrom = (e) => (e?.status === 404 ? 'deleted' : e?.status === 403 ? 'removed' : null);
   const [working, setWorking] = useState([]); // who said they are busy, from the server
   const [contexts, setContexts] = useState({}); // each agent's last /context report, by name
   const [agents, setAgents] = useState({}); // each agent's saved role, by name (kept in the note)
@@ -534,7 +576,7 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
     getChat(chat.ns, chat.path, 0)
       .then((r) => {
         if (cancelled) return;
-        setDoc({ title: r.title, description: r.description, you: r.you });
+        setDoc({ title: r.title, description: r.description, you: r.you, owner: r.owner, canDelete: !!r.canDelete });
         setMessages(r.messages || []);
         setWorking(r.working || []);
         setContexts(r.contexts || {});
@@ -542,7 +584,13 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
         countRef.current = r.count;
         writeSeen(chat.ns, chat.path, r.count);
       })
-      .catch((e) => { if (!cancelled) setError(e.message); })
+      .catch((e) => {
+        if (cancelled) return;
+        // Opening a deleted chat says so. A 403 on the FIRST load is a chat
+        // you were never let into, which the error line below explains.
+        if (e.status === 404) setGone('deleted');
+        else setError(e.message);
+      })
       .finally(() => { if (!cancelled) setReloading(false); });
     return () => { cancelled = true; };
   }, [chat.ns, chat.path, reloadNonce]);
@@ -569,17 +617,20 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
       setWorking(sameOr(r.working || []));
       setContexts(sameOr(r.contexts || {}));
       setAgents(sameOr(r.agents || {}));
+      if (typeof r.canDelete === 'boolean') setDoc((d) => (d && d.canDelete !== r.canDelete ? { ...d, canDelete: r.canDelete } : d));
       setError('');
     } catch (e) {
-      setError(e.message);
+      const g = goneFrom(e);
+      if (g) setGone(g);
+      else setError(e.message);
     }
   }, [chat.ns, chat.path, onActivity]);
 
   useEffect(() => {
-    if (!doc || !visible) return undefined;
+    if (!doc || !visible || gone) return undefined;
     const id = setInterval(poll, CHAT_POLL_MS);
     return () => clearInterval(id);
-  }, [doc, visible, poll]);
+  }, [doc, visible, gone, poll]);
 
   const atBottom = (el) => el.scrollHeight - el.scrollTop - el.clientHeight < 60;
   useEffect(() => {
@@ -620,7 +671,9 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
       onActivity?.();
       setError('');
     } catch (e) {
-      setError(e.message);
+      const g = goneFrom(e);
+      if (g) setGone(g);
+      else setError(e.message);
     } finally {
       setSending(false);
     }
@@ -722,13 +775,13 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
             {chat.ns}/{chat.path}
           </button>
         </div>
-        {account && onDialog && (
+        {account && onDialog && !gone && (
           <button className="chat-btn" onClick={() => onDialog('members')}
             title="Who can open this chat" data-testid="chat-members-toggle">
             Members
           </button>
         )}
-        {onDialog && (
+        {onDialog && !gone && (
           <button className="chat-btn" onClick={() => onDialog('agent')} title="How an agent joins this chat">
             <span className="chat-label-long">Connect an agent</span>
             <span className="chat-label-short">Agents</span>
@@ -743,12 +796,12 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
         </button>
-        {onDeleteChat && (
+        {/* Only the chat's owner or an admin may delete it (the server
+            decides, and says so as canDelete). */}
+        {onDialog && doc?.canDelete && !gone && (
           <button
             className="chat-btn chat-btn-icon chat-delete"
-            onClick={async () => {
-              try { await onDeleteChat(chat.ns, chat.path, doc?.title); } catch (e) { setError(e.message); }
-            }}
+            onClick={() => onDialog('delete', { title: doc.title, count: countRef.current })}
             title="Delete this chat"
             aria-label="Delete this chat"
           >
@@ -768,7 +821,7 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
         )}
       </div>
 
-      {error && (
+      {error && !gone && (
         <div className="chat-error chat-room-error">
           {/* The server says only "access denied", for a private chat and a
               missing grant alike, so it does not reveal which one it is. */}
@@ -778,6 +831,17 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
         </div>
       )}
 
+      {gone ? (
+        <div className="chat-gone" role="status" data-testid="chat-gone">
+          <strong>{gone === 'deleted' ? 'This chat was deleted.' : 'You no longer have access to this chat.'}</strong>
+          <span>
+            {gone === 'deleted'
+              ? 'It was deleted or moved, so nothing more can be posted here. Agents waiting in it are told it is gone.'
+              : 'You were removed from its members, so nothing more can be posted here.'}
+          </span>
+          {onGone && <button className="chat-btn" onClick={onGone}>Back to chats</button>}
+        </div>
+      ) : (<>
       {showGifs && (
         <div className="chat-gifs" role="listbox" aria-label="React with an image">
           {reactions(gifs).length === 0 ? (
@@ -874,6 +938,7 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onDeleteChat, onBack
           </div>
         </div>
       </div>
+      </>)}
     </section>
   );
 }
@@ -895,7 +960,7 @@ function ChatView({ ns, namespaces, onSelectNs, account, serverAlias, isMobile, 
   const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
   const [menu, setMenu] = useState(null); // {x, y, chat} while the right-click menu is open
-  const [dialog, setDialog] = useState(null); // {kind: 'members' | 'agent', chat} while a popup is open
+  const [dialog, setDialog] = useState(null); // {kind: 'members' | 'agent' | 'delete', chat} while a popup is open
   const closeDialog = useCallback(() => setDialog(null), []);
   const [filter, setFilter] = useState('');
   const visible = useVisible();
@@ -1048,7 +1113,7 @@ function ChatView({ ns, namespaces, onSelectNs, account, serverAlias, isMobile, 
             y={menu?.y || 0}
             target={menu?.chat || null}
             title={menu?.chat?.title}
-            groups={chatMenuGroups({ canDelete: !!onDeleteChat, canMembers: !!account, pinned: pins && menu?.chat ? pins.includes(pinKey(menu.chat.ns, menu.chat.path)) : undefined })}
+            groups={chatMenuGroups({ canDelete: !!onDeleteChat && !!menu?.chat?.canDelete, canMembers: !!account, pinned: pins && menu?.chat ? pins.includes(pinKey(menu.chat.ns, menu.chat.path)) : undefined })}
             onClose={() => setMenu(null)}
             onAction={async (action, c) => {
               if (!c) return;
@@ -1057,9 +1122,7 @@ function ChatView({ ns, namespaces, onSelectNs, account, serverAlias, isMobile, 
               if (action === 'chat-members') setDialog({ kind: 'members', chat: c });
               if (action === 'connect-agent') setDialog({ kind: 'agent', chat: c });
               if (action === 'copy-path') copyPlainText(mdnestUri(serverAlias, c.ns, c.path));
-              if (action === 'delete-chat' && onDeleteChat) {
-                try { if (await onDeleteChat(c.ns, c.path, c.title)) refresh(); } catch (e) { alert('Failed to delete the chat: ' + e.message); }
-              }
+              if (action === 'delete-chat' && onDeleteChat) setDialog({ kind: 'delete', chat: c });
             }}
           />
         </aside>
@@ -1071,12 +1134,13 @@ function ChatView({ ns, namespaces, onSelectNs, account, serverAlias, isMobile, 
           account={account}
           serverAlias={serverAlias}
           onOpenNote={onOpenNote}
-          onDeleteChat={onDeleteChat ? async (ns, path, title) => {
-            if (await onDeleteChat(ns, path, title)) refresh();
-          } : null}
           onBack={isMobile ? () => onSelectChat(null) : null}
           onActivity={refresh}
-          onDialog={(kind) => setDialog({ kind, chat: { ...openChat, title: chats.find((c) => c.ns === openChat.ns && c.path === openChat.path)?.title } })}
+          onDialog={(kind, extra) => {
+            if (kind === 'delete' && !onDeleteChat) return;
+            setDialog({ kind, chat: { ...openChat, title: chats.find((c) => c.ns === openChat.ns && c.path === openChat.path)?.title, ...extra } });
+          }}
+          onGone={() => { onSelectChat(null); refresh(); }}
         />
       ) : !isMobile && (
         <section className="chat-room chat-room-placeholder">
@@ -1089,6 +1153,19 @@ function ChatView({ ns, namespaces, onSelectNs, account, serverAlias, isMobile, 
       {dialog?.kind === 'members' && account && (
         <ChatDialog label="Members" onClose={closeDialog}>
           <ChatMembers chat={dialog.chat} account={account} onClose={closeDialog} onChanged={() => refresh()} />
+        </ChatDialog>
+      )}
+      {dialog?.kind === 'delete' && onDeleteChat && (
+        <ChatDialog label="Delete this chat" onClose={closeDialog}>
+          <ChatDeleteConfirm
+            chat={dialog.chat}
+            onCancel={closeDialog}
+            onConfirm={async () => {
+              await onDeleteChat(dialog.chat.ns, dialog.chat.path);
+              setDialog(null);
+              refresh();
+            }}
+          />
         </ChatDialog>
       )}
       {dialog?.kind === 'agent' && (
