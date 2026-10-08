@@ -855,34 +855,6 @@ export async function getWorkspaceStatus() {
   }
 }
 
-export async function getMyWorkspace() {
-  const res = await request('/me/workspace');
-  if (!res.ok) throw new Error('Failed to load personal workspace');
-  return res.json();
-}
-
-export async function saveMyWorkspace(payload) {
-  const res = await request('/me/workspace', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || 'Failed to save workspace');
-  }
-  return res.json();
-}
-
-export async function deleteMyWorkspace() {
-  const res = await request('/me/workspace', { method: 'DELETE' });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || 'Failed to remove workspace');
-  }
-  return res.json();
-}
-
 // --- Comments ---
 
 export async function listComments(ns, path) {

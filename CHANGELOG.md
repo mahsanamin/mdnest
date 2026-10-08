@@ -33,8 +33,13 @@ All notable changes to mdnest are documented here.
   never read, and adding a workspace created a namespace folder that the next
   `./mdnest-server rebuild` deleted. The server now refuses to create a
   namespace there (namespaces come from `MOUNT_` lines in mdnest.conf, and
-  git-sync does the backup), the Namespaces tab says so, and Settings hides
-  the personal **Git remote** tab on those servers and in single mode.
+  git-sync does the backup), and the Namespaces tab says so.
+
+- **Settings no longer has a Git remote tab.** It offered to mirror "your
+  personal workspace" to a git repository, which read as if it were about the
+  namespace you were looking at. It was about a separate namespace named
+  after your email, which the server created the first time you saved. Git
+  backup is now set up per namespace in Admin → Namespaces.
 
 - **Chats no longer flicker every few seconds.** Each 3-second poll rebuilt
   the whole conversation, even when nothing new had arrived, and the browser
