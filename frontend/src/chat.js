@@ -240,7 +240,10 @@ export function completeMention(text, caret, name) {
 // stand-ins, and the target is shell-quoted whenever it needs to be.
 // intent is what the person wants this agent to do here, typed in the panel.
 // Like the name, it becomes part of the prompt; it is prose for the agent and
-// never reaches a shell command, so it needs no quoting.
+// never reaches a shell command, so it needs no quoting. Copying the prompt
+// also saves it as the agent's role in the chat (chat_traits.go), which the
+// server repeats to the agent every time wait hands it new messages: agents
+// forget the job they were given once their context is summarised.
 export function agentInstructions(alias, ns, path, name = 'AGENT_NAME', intent = '') {
   const target = shellQuote(`${alias ? `@${alias}/` : ''}${ns}/${path}`);
   const nsTarget = shellQuote(`${alias ? `@${alias}/` : ''}${ns}`);
@@ -249,7 +252,9 @@ export function agentInstructions(alias, ns, path, name = 'AGENT_NAME', intent =
   return [
     `You are ${name} in an mdnest chat. Use --as ${as} on every command, and only that name.`,
     '',
-    ...(job ? ['Your job in this chat:', ...job.split(/\r?\n/).map((l) => `  ${l}`), ''] : []),
+    ...(job ? ['Your job in this chat:', ...job.split(/\r?\n/).map((l) => `  ${l}`),
+      'This is saved with the chat as your role, and wait repeats it after new messages.',
+      'Keep to it, even after a long conversation, unless a human gives you a new one.', ''] : []),
     'Join',
     `1. Read the chat once: mdnest chat read ${target} --as ${as}`,
     '   This also saves your place. From then on, wait gives you only what is new,',
@@ -259,19 +264,24 @@ export function agentInstructions(alias, ns, path, name = 'AGENT_NAME', intent =
     '   answers to anything already waiting for you.',
     `   mdnest chat post ${target} "..." --as ${as}`,
     '',
-    'Loop (do not end your turn while you are in the chat)',
+    'Loop (never end your turn while in the chat: once it ends, nobody hears the chat until someone types to you)',
     `   mdnest chat wait ${target} --as ${as} --timeout 120`,
     '   exit 0: new messages are printed. Reply if it is for you, then wait again.',
     '   exit 2: nothing new yet. Run the same wait again.',
+    '   exit 3: the chat was deleted, or you lost access. Stop: you are out of the chat.',
     `   Truly lost track? mdnest chat read ${target} shows it all (no --as, so your place stays).`,
+    '   Must you answer outside the chat, e.g. in your terminal? Start the wait in the background',
+    '   first (run_in_background), so its output wakes you, then reply there.',
     `   Leave only when your lead or a human says you are done: post a one-line goodbye, then`,
-    `   mdnest chat leave ${target} --as ${as} (until then a keepalive hook may send you back to wait).`,
+    `   mdnest chat leave ${target} --as ${as}`,
     '',
     'How to behave',
     '- You show as waiting while you wait. Before a task of more than a minute, say what you do:',
     `  mdnest chat post ${target} "/status what you are doing" --as ${as} (not a chat message; repeat every 2 min).`,
     '  Your next post, or going back to wait, clears it. Never leave a status up while only waiting.',
-    '- Need a human to answer or decide? Ask @their-name and add ![waiting](gif:question).',
+    `- New role from a human, or none saved yet? Save it: mdnest chat post ${target} "/role what you do here" --as ${as}`,
+    '- Need a human to answer or decide, even the one who started you? Ask @their-name here, add',
+    '  ![waiting](gif:question), and keep waiting. Never stop to ask in your terminal instead.',
     `- Other agents may be here. Answer only what is addressed to you (@${name}, @all) or is your part.`,
     '  Do not repeat what someone already said: agree with ![nod](gif:nod) instead. Keep replies',
     '  short and to the point. In a busy chat, add --mentions to wait.',
@@ -358,4 +368,28 @@ export function chatsForTab(chats, pins, tab) {
   if (tab !== 'pinned') return chats;
   const byKey = new Map(chats.map((c) => [pinKey(c.ns, c.path), c]));
   return pins.map((k) => byKey.get(k)).filter(Boolean);
+}
+
+// roleFor finds an agent's saved role, matching names the way mentions do.
+export function roleFor(agents, name) {
+  const want = String(name || '').toLowerCase();
+  for (const [k, v] of Object.entries(agents || {})) if (k.toLowerCase() === want) return v;
+  return '';
+}
+
+// What deleting a chat does, in the words of the warning shown before it
+// (the chats view's popup, and the file tree's confirm for a chat note). Only
+// the owner or an admin gets this far: the server refuses everyone else.
+export function chatDeleteConsequences(count) {
+  const n = Number(count) || 0;
+  return [
+    n === 1 ? 'Its 1 message is deleted, for everyone in the chat.'
+      : n ? `All ${n} messages are deleted, for everyone in the chat.` : 'The chat is deleted, for everyone in it.',
+    'Anyone with it open sees that it was deleted, and agents waiting in it are told it is gone and stop.',
+    'This cannot be undone here. A git backup of the workspace, if it has one, keeps the old copy.',
+  ];
+}
+
+export function chatDeleteWarning(title, count) {
+  return [`Delete the chat "${title}" for everyone?`, '', ...chatDeleteConsequences(count).map((l) => `- ${l}`)].join('\n');
 }

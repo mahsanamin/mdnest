@@ -515,6 +515,7 @@ else
   BACKEND_PORT_LINE="    ports:"
   FRONTEND_PORT_LINE="    ports:"
   IFS=',' read -ra BIND_IPS <<< "$BIND_ADDRESS"
+  BIND_FRAGILE=""
   for ip in "${BIND_IPS[@]}"; do
     ip="${ip// /}"
     [ -z "$ip" ] && continue
@@ -522,7 +523,24 @@ else
       - \"${ip}:${BACKEND_PORT}:8080\""
     FRONTEND_PORT_LINE="${FRONTEND_PORT_LINE}
       - \"${ip}:${FRONTEND_PORT}:80\""
+    # Docker only publishes a port if the IP is on an interface at the moment
+    # the container starts. A Tailscale, VPN or DHCP address can come up after
+    # Docker does (a reboot, a Docker restart), and then the container runs
+    # with no port published and nothing logs it (issue #126).
+    case "$ip" in
+      127.0.0.1|0.0.0.0|::1|::) ;;
+      *) BIND_FRAGILE="${BIND_FRAGILE:+$BIND_FRAGILE, }$ip" ;;
+    esac
   done
+  if [ -n "${BIND_FRAGILE:-}" ]; then
+    echo "  Warning: BIND_ADDRESS includes $BIND_FRAGILE."
+    echo "           Docker publishes a port only if that IP exists when the"
+    echo "           container starts. After a reboot or a Docker restart the"
+    echo "           address may not be up yet, and mdnest then runs with no port"
+    echo "           published (connection refused, 502 from a proxy)."
+    echo "           Safer: BIND_ADDRESS=127.0.0.1 with a reverse proxy in front"
+    echo "           (Caddy, nginx, or 'tailscale serve'). See docs/setup.md."
+  fi
 fi
 
 # MCP server (AI agents) — optional, opt-in via ENABLE_MCP=true. Gated behind

@@ -809,7 +809,7 @@ if (features.chat) server.tool(
 
 if (features.chat) server.tool(
   "post_chat",
-  "Post a message to a chat. `as` is the name shown on the message — give each agent in a conversation its own. Returns the message number to pass to wait_chat. A text of \"/context 42%\" (or \"/context 87k/200k\") is not a message: it shows how full your context window is by your name; report it when you join and about every 10 messages.",
+  "Post a message to a chat. `as` is the name shown on the message — give each agent in a conversation its own. Returns the message number to pass to wait_chat. A text of \"/context 42%\" (or \"/context 87k/200k\") is not a message: it shows how full your context window is by your name; report it when you join and about every 10 messages. A text of \"/role what you do here\" saves your role in the chat (a line or two); wait_chat then repeats it to you after new messages, so keep to it.",
   {
     namespace: z.string().describe("Namespace name"),
     path: z.string().describe("Path of the chat note"),
@@ -865,6 +865,11 @@ if (features.chat) server.tool(
     try {
       for (;;) {
         const res = await api(`/api/chat?${chatQS(namespace, path)}&after=${after}&format=text${extra}`);
+        // Deleted, moved, or this account was removed while waiting: say so,
+        // so the agent stops instead of calling wait_chat on nothing.
+        if (res.status === 404 || res.status === 403) {
+          return { content: [{ type: "text", text: "This chat is gone: it was deleted or moved, or you no longer have access to it. Stop waiting; you are out of the chat." }], isError: true };
+        }
         if (!res.ok) return chatError(res);
         const text = await res.text();
         const count = res.headers.get("x-chat-count") || String(after);

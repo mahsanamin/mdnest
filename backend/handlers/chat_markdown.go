@@ -60,6 +60,8 @@ type ChatDoc struct {
 	Title       string
 	Description string
 	Messages    []ChatMessage
+	// Agents is each agent's saved role, by name (chat_traits.go).
+	Agents map[string]string
 }
 
 // splitFrontMatter returns the front-matter body (without the --- fences) and
@@ -136,6 +138,7 @@ func ParseChat(content string) ChatDoc {
 		v, _ := frontMatterValue(fm, chatMarkerKey)
 		doc.IsChat = strings.EqualFold(v, "true")
 		doc.Title, _ = frontMatterValue(fm, "title")
+		doc.Agents = ChatTraits(fm)
 	} else {
 		rest = content
 	}

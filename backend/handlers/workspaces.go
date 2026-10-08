@@ -140,6 +140,36 @@ func (h *WorkspaceHandler) ensurePersonalGrant(userID int, ns string) {
 	}
 }
 
+// errLocalDisk is returned when a request would create a namespace on a server
+// that stores notes as plain files (STORAGE_BACKEND=local, every setup.sh
+// install). There a runtime-created namespace lands in the container's writable
+// layer, which `mdnest-server rebuild` discards, and the per-namespace remote
+// is never read: that backend does not mirror, git-sync does. Namespaces come
+// from MOUNT_ lines in mdnest.conf instead.
+var errLocalDisk = "this server stores notes as files on disk, so namespaces come from MOUNT_ lines in mdnest.conf and git backup is done by git-sync (see docs/setup.md)"
+
+// MirroringSupported reports whether this server keeps namespaces in git and
+// pushes each to its own remote, so a namespace can be created here and given
+// a git backup. False on the local (plain files) backend.
+func (h *WorkspaceHandler) MirroringSupported() bool {
+	_, local := h.stg.(*storage.LocalStorage)
+	return !local
+}
+
+// HandleStatus (GET /api/workspaces/status, any signed-in user) tells the UI
+// whether namespaces and git backups can be set up from the app at all, so it
+// does not offer settings this server would ignore.
+func (h *WorkspaceHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		wsError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	wsJSON(w, http.StatusOK, map[string]bool{
+		"mirroring":  h.MirroringSupported(),
+		"encryption": h.encryptionConfigured,
+	})
+}
+
 // ensureNamespace materialises a namespace so it is listed (and writable) even
 // before it holds a note — MkdirAll registers it in the working set. Best
 // effort: a failure is logged, not fatal (the git config is already saved).
@@ -205,6 +235,10 @@ func (h *WorkspaceHandler) adminCreate(w http.ResponseWriter, r *http.Request) {
 	var req workspaceRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		wsError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if !h.MirroringSupported() {
+		wsError(w, http.StatusConflict, errLocalDisk)
 		return
 	}
 	ns := strings.TrimSpace(req.Namespace)
@@ -673,6 +707,10 @@ func (h *WorkspaceHandler) minePut(w http.ResponseWriter, r *http.Request, userI
 	var req workspaceRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		wsError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if req.GitEnabled && !h.MirroringSupported() {
+		wsError(w, http.StatusConflict, errLocalDisk)
 		return
 	}
 	in, err := h.inputFrom(req, req.GitEnabled)

@@ -3,8 +3,9 @@ import {
   slugify, chatPathFor, colorForAuthor, AUTHOR_COLORS, isOwnMessage,
   groupMessages, mergeMessages, agentInstructions, workingLine, contextLabel, contextTitle, plainPreview, shellQuote, isChatDoc,
   mentionsName, highlightMentions, participants, mentionQuery, completeMention,
-  avatarFor, reactions, gifMarkdown, expandGifRefs, initialOf,
+  avatarFor, reactions, gifMarkdown, expandGifRefs, initialOf, roleFor,
 } from '../chat.js';
+import { chatDeleteConsequences, chatDeleteWarning } from '../chat.js';
 
 describe('chat naming', () => {
   it('slugifies a channel name into a shell-safe filename', () => {
@@ -84,6 +85,17 @@ describe('agent intent', () => {
     const lines = s.split('\n');
     expect(lines[0]).toMatch(/^You are codxu in an mdnest chat/);
     expect(lines.slice(2, 5)).toEqual(['Your job in this chat:', '  Review the API PRs.', '  Flag anything touching auth.']);
+  });
+  it('tells the agent the job is saved as its role and repeated while it waits', () => {
+    const s = agentInstructions('mini', 'notes', 'Chats/team.md', 'codxu', 'Review the API PRs.');
+    expect(s).toContain('saved with the chat as your role, and wait repeats it after new messages');
+    // /role goes through an ordinary post, so every CLI version can save one.
+    expect(s).toContain('mdnest chat post @mini/notes/Chats/team.md "/role what you do here" --as codxu');
+  });
+  it('finds a saved role the way mentions match names', () => {
+    expect(roleFor({ Codxu: 'Review PRs' }, 'codxu')).toBe('Review PRs');
+    expect(roleFor({ codxu: 'Review PRs' }, 'qa-1')).toBe('');
+    expect(roleFor(undefined, 'codxu')).toBe('');
   });
   it('adds nothing when the intent is empty or blank', () => {
     const plain = agentInstructions('mini', 'notes', 'Chats/team.md', 'codxu');
@@ -194,7 +206,18 @@ describe('chat images', () => {
     expect(s).toMatch(/Do not repeat what someone already said/);
     expect(s).toMatch(/Emoji are fine/);
     // concise: the whole prompt stays short enough to read at a glance
-    expect(s.split('\n').length).toBeLessThanOrEqual(30);
+    // (35 since the line on a deleted chat, exit 3)
+    expect(s.split('\n').length).toBeLessThanOrEqual(35);
+    expect(s).toMatch(/exit 3: the chat was deleted/);
+  });
+  it('the prompt keeps the agent in the chat when it needs its own human', () => {
+    const s = agentInstructions('mini', 'notes', 'Chats/team.md', 'codxu');
+    // Agents ended their turn to ask in the terminal and went deaf to the chat.
+    expect(s).toMatch(/even the one who started you\? Ask @their-name here/);
+    expect(s).toMatch(/Never stop to ask in your terminal/);
+    expect(s).toMatch(/Start the wait in the background\s+first \(run_in_background\)/);
+    // No promise of a keepalive hook the machine may not have.
+    expect(s).not.toMatch(/keepalive/);
   });
 });
 
@@ -306,5 +329,17 @@ describe('context size', () => {
   it('the prompt tells agents to report it', () => {
     const s = agentInstructions('mini', 'notes', 'Chats/team.md', 'codxu');
     expect(s).toContain('mdnest chat post @mini/notes/Chats/team.md "/context 42%" --as codxu');
+  });
+});
+
+describe('the warning before a chat is deleted', () => {
+  it('says it is for everyone, what happens to agents, and that it cannot be undone', () => {
+    const w = chatDeleteWarning('Release room', 12);
+    expect(w).toMatch(/^Delete the chat "Release room" for everyone\?/);
+    expect(w).toContain('All 12 messages are deleted');
+    expect(w).toContain('agents waiting in it are told it is gone');
+    expect(w).toContain('cannot be undone');
+    expect(chatDeleteConsequences(1)[0]).toBe('Its 1 message is deleted, for everyone in the chat.');
+    expect(chatDeleteConsequences(0)[0]).toBe('The chat is deleted, for everyone in it.');
   });
 });

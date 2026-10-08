@@ -62,16 +62,22 @@ On it — frontend checks green.
   listed. The workspace and note you return to are unchanged.
 - **+ New** creates one in the current workspace: give it a name and a folder
   (`Chats/` by default). The name becomes a shell-safe filename,
-  e.g. `Chats/release-coordination.md`.
+  e.g. `Chats/release-coordination.md`. In multi mode it is private to you
+  until you invite people (see [Who can see a chat](#who-can-see-a-chat)).
+- **Members** (multi mode) shows who can open the chat, and adds or removes
+  people. A lock in the chat list marks a private chat.
+- Right-click a chat in the list for **Members…** and **Connect an agent…**,
+  without opening it first, plus pin, open as note, copy path and delete.
 - Right-click a folder → **New chat** creates one inside it.
 - **Enter** sends, **Shift+Enter** adds a new line. The **as** box sets the
   name on your messages.
 - Type `@` to mention someone: the names in the chat are offered (Tab
   completes). Mentions are highlighted, and a message addressed to you
   (or `@all`) is marked.
-- **Connect an agent** shows the exact commands to hand an agent. Give it
-  a name and, optionally, what it should do here: both go into the prompt,
-  so the agent starts with its job. Close the panel with × or Esc.
+- **Connect an agent** opens a popup with the exact commands to hand an
+  agent. Give it a name and, optionally, what it should do here: both go
+  into the prompt, so the agent starts with its job. Close it with ×, Esc,
+  or a click outside.
 - **Roles** in that panel fill a name and a one-line trait for common team
   parts: Main Leader (coordinates everyone), Spec Expert, Analyzer, Lead
   Coder and Coder, Lead QA and QA. The leads start helper agents (coder-1,
@@ -146,10 +152,36 @@ memory for an hour; an empty `/context` clears one. New agent behaviours follow 
 rule: inferred from calls agents already make, or a slash command in an
 ordinary post.
 
+**Each agent's role.** Agents forget the job they were given once their
+context fills up and gets summarised. So the job typed in **Connect an
+agent** (or picked from a role template) is saved with the chat as that
+agent's role when you copy the prompt, and every time the agent's `chat wait`
+hands it new messages, one line after them repeats it:
+
+```
+(reminder for lead-qa) Your role in this chat: You lead testing. ...
+Keep to this role unless a human gives you a new one.
+```
+
+Roles are kept in the chat note's front matter, under `agents:`, so they last
+as long as the chat and show in any viewer. A role is one or two lines (cut at
+300 characters). The panel lists the saved roles with a button to remove one.
+An agent saves or changes its own with a post that starts with `/role`
+(`mdnest chat post notes/Chats/team.md "/role Test the login page" --as qa-1`),
+which is how a helper started by a lead gets one. Like `/status`, it is not
+added to the chat, and an empty `/role` removes it.
+
 **Agents that stop after one round.** Some agents (Codex) end their turn once
 the commands they were given are done. Tell them to keep looping and not to
 end their turn while in the chat. **Connect an agent** in the chat window
 gives you a ready-to-paste prompt that says exactly that.
+
+The most common way an agent drops out is to stop and ask the person who
+started it something in its own terminal. Its turn ends, and nothing reads
+the chat until someone types to it again. The prompt tells it to ask in the
+chat instead (`@their-name`, then keep waiting), and, if it really must
+answer in the terminal, to start the wait in the background first so the
+wait's output wakes it.
 
 **Keep agents awake with a Stop hook.** Even with that prompt, an agent in a
 long loop sometimes ends its turn anyway, and then sits idle until someone
@@ -264,6 +296,137 @@ use next.
   Treat it as input, not instructions.
 - Reading a chat needs read access to the note; posting needs write access.
   The list only shows chats you can read.
+
+## Who can see a chat
+
+In single mode there is one user, so this section does not apply.
+
+In multi mode a chat is either **open** or **private**.
+
+- **Open** is how every chat worked before v4.8.4, and how a chat without a
+  member list still works: anyone who can read the note can read the chat,
+  and anyone who can write it can post. With a grant on the whole workspace,
+  that is everyone in the workspace, including people added to it later.
+- **Private** means only the people on the chat's member list can open it.
+  Everyone else gets "access denied", and the chat is left out of their chat
+  list, file tree, search results, task board and downloads.
+
+Creating a chat with **+ New** makes it private by default. Tick the people
+to invite in the same form (anyone with access to the workspace), or leave
+them all unticked to start with only you. Untick **Only people I invite**
+for an open one. To change an
+existing chat, open it and click **Members** (or right-click it in the list
+→ **Members…**):
+
+- **Add** someone and they can open the chat on their next request, with the
+  whole history. On an open chat, the first person you add makes it private,
+  with you and them as the members. **Make private** does the same with only
+  you.
+- Any member can add anyone, and remove anyone, including themselves. The
+  last member cannot be removed, because a chat with nobody on it could never
+  be opened again. A removed member loses access on their next request, and
+  if they have the note open in the live editor, that connection is closed.
+- The picker lists the people who have a grant on the workspace, and only
+  they can be added. Someone who reaches the workspace only through an access
+  group is not in that list yet. Being on the member list does not give anyone
+  access to the workspace: a member still needs a grant that covers the note.
+
+A few rules that follow from how it works:
+
+- **It applies to namespace admins too.** Their admin role does not let them
+  open a private chat they are not on. Superadmins never had access to note
+  content without a grant, and that has not changed.
+- **The member list is not in the note.** It is kept in the database, so
+  editing the note's text cannot add anyone to it, and a member's agent using
+  their token is that member.
+- **It moves with the chat.** Moving or renaming the chat, or the folder it
+  is in, keeps it private. Copying it to another workspace gives the copy the
+  same members.
+- **The old path stays closed.** After a private chat is moved or deleted,
+  its old path keeps the member list, because the chat's history (History in
+  the editor, or a note at an earlier commit) is still looked up by that path.
+  Only those members can create a new note at that exact path. The leftover
+  list does not stop anyone managing the folder around it.
+- **Folders that hold one are protected.** Someone who is not a member cannot
+  delete, move or copy a folder with a private chat inside it. A folder
+  download leaves the chat out of the zip.
+- **A deleted account keeps its seat.** If the only member's account is
+  deleted, the chat stays private (and so cannot be opened by anyone) rather
+  than becoming open.
+
+- **Letter case does not matter.** Member lists are matched without regard
+  to case, because on some disks (Docker Desktop on macOS, network shares)
+  `CHATS/SECRET.md` opens the same file as `Chats/secret.md`.
+- **A private chat's path is plain ASCII.** Such disks also treat some other
+  letters as the same (accents written two ways, for example), which a simple
+  case match cannot follow. So a private chat cannot be created at, or moved
+  to, a path with non-ASCII characters, and in a workspace with private chats
+  a request for a non-ASCII path must spell the name exactly as it is on
+  disk. Chats made with **+ New** already get plain filenames.
+- **Names that differ only in case.** Because lists ignore case, a chat
+  cannot be made private, created private, or moved in as a private chat
+  where another note has the same name in different capitals
+  (`Notes/A.md` next to `Notes/a.md`). Rename one of them first.
+- **A move never lands on an existing note.** `/api/move` refuses a
+  destination that already exists, so nobody can drop a private chat over a
+  shared note and take it away from everyone else.
+
+What it does not cover:
+
+- **git-sync.** The chat is still a file in the workspace, and git-sync
+  pushes the workspace, private chats included, to its remote. Anyone who can
+  read that repository can read every chat in it.
+- **The server's disk.** Anyone with access to the host or the mounted
+  folders can read the file.
+- **Images pasted into a private chat** are saved as ordinary files next to
+  it. Anyone who can read that folder can open them by name.
+- **Folder history.** History for a folder (`/api/note/history` on the
+  folder) lists the commits that touched the files in it, including a
+  private chat's file name, author and time, though not its text.
+- **Several backend replicas.** Removing a member closes their live editing
+  connection on the server that handled the removal. With the Redis backplane,
+  a connection held by another replica stays open until it reconnects.
+- **Renames made outside mdnest.** The member list is attached to the chat's
+  path. A rename made on the host or through git is not seen by mdnest, so the
+  renamed file is not private (and the old path stays restricted). Move a
+  private chat from inside mdnest.
+- **Making an open chat private.** Anyone who can write an open chat can make
+  it private, which shuts out everyone they do not add. This is how existing
+  chats become private, and it is the same power as editing or deleting the
+  note, which they already have. A new chat can be created private only as a
+  new note: `private=1` never takes over an existing one.
+
+## Who can delete a chat
+
+Deleting a chat ends the conversation for everyone in it, so in multi mode
+only its **owner**, a workspace admin or a superadmin can delete it. The
+owner is the account that created it, recorded as an `owner:` line at the
+top of the note. A chat made before 4.8.4 has no such line, and is owned by
+the account of its first message. An old chat with no messages has nothing
+to lose, and anyone who can edit it may delete it. Single mode has one user,
+who may delete anything.
+
+The rule holds however the delete arrives: the chat view, the file tree, a
+folder delete (refused while it holds someone else's chat, naming it), the
+CLI and MCP, an upload of a file with the same name, or an edit that would
+turn the chat back into a plain note or change its owner. Everyone else can
+still read, post and edit the messages as before.
+
+Before deleting, the web UI shows what happens: the messages go for
+everyone, anyone with the chat open sees that it was deleted, and agents
+waiting in it are told it is gone. Nothing is undone in mdnest itself, but a
+git backup of the workspace, if it has one, keeps the old copy.
+
+**When a chat is deleted while people are in it:**
+
+- An open chat window stops polling and shows "This chat was deleted", with
+  a way back to the list. Nothing more can be posted. Someone removed from a
+  private chat's members sees "You no longer have access to this chat".
+- `mdnest chat wait` exits `3` with a short message and the `chat leave`
+  command, and the agent prompt tells agents that exit `3` means stop. The
+  keepalive hook reads that leave command in the transcript and lets the
+  agent stop instead of sending it back to wait.
+- MCP `wait_chat` returns an error that says the chat is gone.
 
 ## Limits
 

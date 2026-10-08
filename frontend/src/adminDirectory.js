@@ -119,3 +119,25 @@ export function matchesPerson(person, query) {
   const hay = [person.user.username, person.user.email, ...person.groups.map((g) => g.name)].join(' ').toLowerCase();
   return hay.includes(q);
 }
+
+// Where a namespace's git backup comes from, for its card in the Namespaces
+// tab. workspaces: the admin workspace list (one row per namespace that has a
+// git config); connections: the saved git connections (the API calls them
+// workspace groups), each with base_url and, for the deployment's default
+// connection, implicit_namespaces.
+//   {kind:'connection', ws, connection, repo}  mirrors to <base>/<ns>.git
+//   {kind:'own', ws, repo}                      mirrors to its own repository
+//   {kind:'default', connection, repo}          the deployment's default remote
+//   {kind:'none'}
+export function gitBackupFor(ns, workspaces = [], connections = []) {
+  const base = (c) => (c?.base_url || '').replace(/\/+$/, '');
+  const ws = workspaces.find((w) => w.namespace === ns && !w.is_personal);
+  if (ws && ws.group_id != null) {
+    const connection = connections.find((c) => c.id === ws.group_id) || { id: ws.group_id, name: ws.group_name || 'connection' };
+    return { kind: 'connection', ws, connection, repo: `${base(connection)}/${ns}.git` };
+  }
+  if (ws) return { kind: 'own', ws, repo: ws.remote_url };
+  const def = connections.find((c) => (c.implicit_namespaces || []).includes(ns));
+  if (def) return { kind: 'default', connection: def, repo: `${base(def)}/${ns}.git` };
+  return { kind: 'none' };
+}

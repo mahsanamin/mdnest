@@ -22,6 +22,7 @@ import {
   adminDeleteGroupGrant,
 } from '../api.js';
 import PathPicker from './PathPicker.jsx';
+import { GitBackup, AddNamespace, GitConnections } from './AdminGit.jsx';
 import { buildDirectory, name, pathLabel, viaLabel, accessSummary, matchesPerson } from '../adminDirectory.js';
 
 // People and Namespaces: the two ways an admin looks at access. Both read the
@@ -515,33 +516,58 @@ function ResetPasswordModal({ user, onClose, onDone }) {
 
 // ---------------------------------------------------------------- Namespaces
 
-export function NamespacesTab({ isSuperAdmin, namespaces, grantMaxDepth, directory }) {
+export function NamespacesTab({ isSuperAdmin, namespaces, grantMaxDepth, directory, git, onNamespacesChanged }) {
   const { dir, error: loadError, reload } = directory;
   const { error, run } = useAction(reload);
   const [open, setOpen] = useState(namespaces.length === 1 ? namespaces[0] : null);
+  const [adding, setAdding] = useState(false);
+  // Namespaces can be added, and backed up to git, only where the server
+  // keeps them in git. Elsewhere they come from mdnest.conf.
+  const showGit = isSuperAdmin && git?.mirroring;
 
-  if (!namespaces.length) return <div className="admin-section">No namespaces to manage.</div>;
-  if (!dir) return <div className="admin-section">{loadError || 'Loading…'}</div>;
+  const changed = async (openNs) => {
+    await onNamespacesChanged?.();
+    await reload();
+    if (openNs) setOpen(openNs);
+  };
 
   return (
     <div className="admin-section">
-      <div className="admin-section-header"><h3>Namespaces ({namespaces.length})</h3></div>
-      <p className="admin-hint adm-intro">
-        Who can reach each namespace, directly or through a group, and who administers it.
-      </p>
-      {(error || loadError) && <div className="admin-error">{error || loadError}</div>}
-      <div className="grants-user-list">
-        {namespaces.map((ns) => (
-          <NamespaceCard key={ns} ns={ns} view={dir.byNamespace(ns)} groups={dir.groups} people={dir.people}
-            open={open === ns} onToggle={() => setOpen(open === ns ? null : ns)}
-            isSuperAdmin={isSuperAdmin} grantMaxDepth={grantMaxDepth} run={run} />
-        ))}
+      <div className="admin-section-header">
+        <h3>Namespaces ({namespaces.length})</h3>
+        {showGit && !adding && <button className="admin-action-btn" onClick={() => setAdding(true)} data-testid="adm-add-ns-toggle">+ Add namespace</button>}
       </div>
+      <p className="admin-hint adm-intro">
+        Who can reach each namespace, directly or through a group, and who administers it{showGit ? ', and where it is backed up' : ''}.
+      </p>
+      {(error || loadError || (showGit && git.error)) && <div className="admin-error">{error || loadError || git.error}</div>}
+      {adding && showGit && (
+        <AddNamespace git={git} onCancel={() => setAdding(false)} onAdded={(ns) => { setAdding(false); changed(ns); }} />
+      )}
+      {!namespaces.length && <div className="admin-hint">No namespaces to manage.</div>}
+      {namespaces.length > 0 && !dir && <div className="admin-hint">{loadError || 'Loading…'}</div>}
+      {dir && (
+        <div className="grants-user-list">
+          {namespaces.map((ns) => (
+            <NamespaceCard key={ns} ns={ns} view={dir.byNamespace(ns)} groups={dir.groups} people={dir.people}
+              open={open === ns} onToggle={() => setOpen(open === ns ? null : ns)}
+              isSuperAdmin={isSuperAdmin} grantMaxDepth={grantMaxDepth} run={run}
+              gitSection={showGit ? <GitBackup ns={ns} git={git} onRemoved={() => changed()} /> : null} />
+          ))}
+        </div>
+      )}
+      {showGit && <GitConnections git={git} />}
+      {isSuperAdmin && git?.status && !git.mirroring && (
+        <p className="admin-hint adm-git-local" data-testid="adm-git-local">
+          On this server a namespace is a folder listed in <code>mdnest.conf</code> (a <code>MOUNT_name=/path</code> line,
+          then <code>./mdnest-server reload</code>), and git backup is done by git-sync. See docs/setup.md.
+        </p>
+      )}
     </div>
   );
 }
 
-function NamespaceCard({ ns, view, groups, people, open, onToggle, isSuperAdmin, grantMaxDepth, run }) {
+function NamespaceCard({ ns, view, groups, people, open, onToggle, isSuperAdmin, grantMaxDepth, run, gitSection }) {
   const [subject, setSubject] = useState('');
   const admins = view.members.filter((m) => m.isAdmin);
   const groupCount = new Set(view.groups.map((g) => g.group.id)).size;
@@ -638,6 +664,8 @@ function NamespaceCard({ ns, view, groups, people, open, onToggle, isSuperAdmin,
               </div>
             </section>
           )}
+
+          {gitSection}
 
           <section className="adm-sec">
             <h4>Give access</h4>

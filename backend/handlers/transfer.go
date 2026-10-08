@@ -50,6 +50,20 @@ type TransferHandler struct {
 	// and DOWNLOAD_MAX_CONCURRENT in all. A dry run takes none, so the
 	// picker's checks can never starve a transfer.
 	slots *downloadSlots
+	// chatMembers carries private chats' member lists along (issue #127).
+	// Nil unless private chats are on.
+	chatMembers chatMembersFollow
+	// canWriteDest, when set, replaces canWrite for the destination: the
+	// stricter check that also counts member lists left at old chat paths
+	// (see PermissionChecker.CheckWriteDest).
+	canWriteDest func(r *http.Request, ns, path string) bool
+}
+
+// SetChatMembers makes a transfer carry private chats' member lists along,
+// checking the destination with canWriteDest.
+func (h *TransferHandler) SetChatMembers(m chatMembersFollow, canWriteDest func(r *http.Request, ns, path string) bool) {
+	h.chatMembers = m
+	h.canWriteDest = canWriteDest
 }
 
 // NewTransferHandler builds the handler. canRead and canWrite take a
@@ -145,15 +159,28 @@ func (h *TransferHandler) HandleTransfer(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// A copy of a private chat is private to the same people, and a moved
+	// one stays private: the member lists go first (see chat_members_follow.go).
+	copied, carried := chatMembersBeforeMove(ctx, h.store, h.chatMembers, t.fromNS, t.from, t.toNS, t.to)
+	if !carried {
+		writeStatusJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to carry chat members"})
+		return
+	}
 	if t.fromNS == t.toNS && t.mode == "move" {
 		// Same namespace: a plain rename, exactly what /api/move does.
-		if err := h.store.Rename(ctx, t.fromNS, t.from, t.to); err != nil {
+		err := h.store.Rename(ctx, t.fromNS, t.from, t.to)
+		chatMembersAfter(h.chatMembers, copied, err == nil)
+		if err != nil {
 			writeStatusJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to move item"})
 			return
 		}
-	} else if terr := h.execute(ctx, t); terr != nil {
-		writeStatusJSON(w, terr.status, terr.body)
-		return
+	} else {
+		terr := h.execute(ctx, t)
+		chatMembersAfter(h.chatMembers, copied, terr == nil)
+		if terr != nil {
+			writeStatusJSON(w, terr.status, terr.body)
+			return
+		}
 	}
 
 	if h.onChange != nil {
@@ -226,7 +253,11 @@ func (h *TransferHandler) prepare(ctx context.Context, r *http.Request, req tran
 		// The right /api/move requires on its source today: write.
 		srcOK = h.canWrite != nil && h.canWrite(r, t.fromNS, "/"+t.from)
 	}
-	if !srcOK || h.canWrite == nil || !h.canWrite(r, t.toNS, "/"+t.to) {
+	canWriteDest := h.canWrite
+	if h.canWriteDest != nil {
+		canWriteDest = h.canWriteDest
+	}
+	if !srcOK || canWriteDest == nil || !canWriteDest(r, t.toNS, "/"+t.to) {
 		return nil, refuse(http.StatusForbidden, "access denied")
 	}
 
@@ -576,5 +607,7 @@ func TransferPermissionFuncs(pc *middleware.PermissionChecker) (canRead, canWrit
 		allow := func(*http.Request, string, string) bool { return true }
 		return allow, allow
 	}
-	return pc.CheckRead, pc.CheckWrite
+	// The tree-aware checks: a folder holding a private chat the caller is
+	// not on can be neither copied out nor moved (issue #127).
+	return pc.CheckReadTree, pc.CheckWriteTree
 }

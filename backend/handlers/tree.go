@@ -76,6 +76,11 @@ func (h *TreeHandler) GetTree(w http.ResponseWriter, r *http.Request) {
 			}
 			root = filterTreeByGrants(root, nsGrants)
 		}
+		// Private chats the caller is not on are hidden from everyone,
+		// namespace admins included (issue #127).
+		if uc != nil && pc != nil && root != nil {
+			pruneTree(root, pc.PrivateChatFilter(r, ns))
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -237,4 +242,19 @@ func buildTree(ctx context.Context, stg storage.Storage, ns, relPath string) (*T
 	}
 
 	return node, nil
+}
+
+// pruneTree drops every file node for which visible is false, in place.
+// Folders stay, even when emptied: the folder itself is not private.
+func pruneTree(node *TreeNode, visible func(relPath string) bool) {
+	kept := node.Children[:0]
+	for _, c := range node.Children {
+		if c.Type == "folder" {
+			pruneTree(c, visible)
+		} else if !visible(c.Path) {
+			continue
+		}
+		kept = append(kept, c)
+	}
+	node.Children = kept
 }

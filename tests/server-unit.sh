@@ -147,6 +147,30 @@ out=$(DOCKER_CONFIG="$T/cfg" TMPDIR="$T/does-not-exist" bash -c '
 eq "guard: mktemp failure does not abort"   "SURVIVED" "$out"
 PATH=$OLDPATH
 
+# ── port drift (issue #126) ────────────────────────────────────────────────
+# A container whose host IP was not up when it started runs with no published
+# port, and `docker ps` still says Up. status has to name it.
+echo
+echo "── port drift ──"
+
+out="$(port_drift_report frontend "127.0.0.1:3236" "127.0.0.1:3236")"; rc=$?
+eq    "ports live: no drift"            "0"  "$rc"
+eq    "ports live: says nothing"        ""   "$out"
+
+out="$(port_drift_report frontend "127.0.0.1:3236
+100.64.0.5:3236" "127.0.0.1:3236")"; rc=$?
+eq    "one IP missing: reports drift"    "1"  "$rc"
+has   "one IP missing: names it"         "$out" "frontend is running but these ports are not published: 100.64.0.5:3236"
+hasnt "one IP missing: live one not listed" "$out" "published: 127.0.0.1:3236"
+has   "one IP missing: gives the command" "$out" "./mdnest-server reload"
+
+out="$(port_drift_report backend "100.64.0.5:8286" "")"; rc=$?
+eq    "nothing published: reports drift" "1"  "$rc"
+has   "nothing published: names it"      "$out" "backend is running but these ports are not published: 100.64.0.5:8286"
+
+out="$(port_drift_report backend "" "")"; rc=$?
+eq    "no bindings configured (Caddy): no drift" "0" "$rc"
+
 echo
 echo "=== $((PASS+FAIL)) checks: $(green "$PASS passed"), $([ "$FAIL" -gt 0 ] && red "$FAIL failed" || echo "0 failed") ==="
 [ "$FAIL" -eq 0 ]

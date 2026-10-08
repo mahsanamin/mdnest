@@ -115,6 +115,13 @@ func (h *UploadHandler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// An upload replaces a file of the same name, so over a chat it is a
+	// delete and takes the same right (chat_owner.go).
+	if content, isChat := readChatFile(ctx, h.store, ns, destRel); isChat && !mayRemoveChat(r, ns, content) {
+		chatJSONError(w, http.StatusForbidden, errChatOwnerOnly)
+		return
+	}
+
 	if err := h.store.WriteFrom(ctx, ns, destRel, file, header.Size); err != nil {
 		http.Error(w, `{"error":"failed to save file"}`, http.StatusInternalServerError)
 		return

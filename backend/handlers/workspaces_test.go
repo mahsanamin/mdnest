@@ -493,3 +493,48 @@ func TestDecommissionPurgesOnlyWithADurableCopy(t *testing.T) {
 		})
 	}
 }
+
+// On the local (plain files) backend a namespace created at runtime lands in
+// the container's writable layer, which a rebuild discards, and no per-namespace
+// remote is ever read. Every path that would create one must refuse, and the
+// status endpoint must say mirroring is off so the UI does not offer it.
+func TestLocalDiskRefusesRuntimeNamespaces(t *testing.T) {
+	local, err := storage.NewLocalStorage(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	newH := func(fs *fakeWSStore) *WorkspaceHandler {
+		return NewWorkspaceHandler(fs, fakeUsers{email: "me@example.com"}, &fakeGrants{}, local, nil, true)
+	}
+	groups := map[int]*store.WorkspaceGroup{7: {ID: 7, Name: "dev", BaseURL: "https://gitlab.com/acme"}}
+
+	for name, body := range map[string]string{
+		"standalone": `{"namespace":"team-a","git_enabled":true,"transport":"https","remote_url":"https://gitlab.com/acme/team-a.git","credential":"x"}`,
+		"in a group": `{"namespace":"team-a","group_id":7}`,
+	} {
+		fs := &fakeWSStore{byNS: map[string]*store.Workspace{}, groups: groups}
+		w := httptest.NewRecorder()
+		newH(fs).HandleAdmin(w, httptest.NewRequest(http.MethodPost, "/api/admin/workspaces", strings.NewReader(body)))
+		if w.Code != http.StatusConflict || fs.created || fs.inGroupCall {
+			t.Errorf("%s: status=%d created=%v inGroup=%v, want 409 and no write", name, w.Code, fs.created, fs.inGroupCall)
+		}
+	}
+
+	fs := &fakeWSStore{personal: map[int]*store.Workspace{}}
+	w := httptest.NewRecorder()
+	newH(fs).HandleMine(w, mineReq(7, `{"git_enabled":true,"transport":"https","remote_url":"https://gitlab.com/me/notes.git","credential":"x"}`))
+	if w.Code != http.StatusConflict || fs.created {
+		t.Errorf("personal mirror: status=%d created=%v, want 409 and no write", w.Code, fs.created)
+	}
+
+	w = httptest.NewRecorder()
+	newH(&fakeWSStore{}).HandleStatus(w, httptest.NewRequest(http.MethodGet, "/api/workspaces/status", nil))
+	if !strings.Contains(w.Body.String(), `"mirroring":false`) {
+		t.Errorf("status on local disk = %s, want mirroring false", w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	NewWorkspaceHandler(&fakeWSStore{}, nil, nil, nil, nil, true).HandleStatus(w, httptest.NewRequest(http.MethodGet, "/api/workspaces/status", nil))
+	if !strings.Contains(w.Body.String(), `"mirroring":true`) {
+		t.Errorf("status on a git backend = %s, want mirroring true", w.Body.String())
+	}
+}

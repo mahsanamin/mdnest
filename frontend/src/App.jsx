@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { parseRoute, formatRoute } from './hashRoute';
-import { chatPathFor, isChatDoc } from './chat.js';
+import { chatPathFor, isChatDoc, chatDeleteWarning } from './chat.js';
 import Login from './components/Login.jsx';
 import LoginFirebase from './components/LoginFirebase.jsx';
 import LoginSSO from './components/LoginSSO.jsx';
@@ -49,7 +49,7 @@ import { copyPlainText } from './mermaid-text.js';
 import EmptyNamespaces from './components/EmptyNamespaces';
 import { mdnestUri } from './mdnestUri.js';
 import {
-  baseName, buildClipboardPayload, describeRefusal, filenameFromDisposition, formatBytes,
+  baseName, stripNoteMarker, utf8Bytes, describeRefusal, filenameFromDisposition, formatBytes,
   localLinks, CLIPBOARD_MAX_BYTES,
 } from './transfer.js';
 import ReleaseNotesModal from './components/ReleaseNotesModal.jsx';
@@ -69,6 +69,7 @@ import {
   createNote,
   createFolder,
   deleteNote,
+  getChat,
   moveItem,
   downloadItem,
   fetchConfig,
@@ -1419,8 +1420,8 @@ function App() {
   // naming the note, because it removes every message too. Clears whatever
   // still points at the note (the open file, the namespace's last-opened
   // memory, the tree) exactly like deleting the file from the tree does.
-  const deleteChat = useCallback(async (ns, path, title) => {
-    if (!window.confirm(`Delete the chat "${title || path}"?\n\nThis deletes the note ${ns}/${path} and every message in it.`)) return false;
+  // The chats view asks first, in its own warning popup (ChatView).
+  const deleteChat = useCallback(async (ns, path) => {
     await deleteNote(ns, path);
     if (ns === selectedNs && currentPath === path) { setCurrentPath(null); setContent(null); setSavedContent(''); }
     if (getLastPath(ns) === path) setLastPath(ns, null);
@@ -1780,12 +1781,13 @@ function App() {
     }
   }, []);
 
-  // "Copy for another mdnest": one note on the clipboard as a small JSON
-  // payload another mdnest's "Paste here" understands. Plain-HTTP installs
+  // "Copy file contents": the note's text on the clipboard, without its
+  // note-ID marker, so it pastes anywhere and "Paste here" in any mdnest makes
+  // a new note from it. Plain-HTTP installs
   // have no async Clipboard API, so the hidden-textarea route is the fallback;
   // if the browser refuses both (the fetch above used up the click's
   // activation), the notice offers a button that copies synchronously.
-  const copyForAnotherMdnest = useCallback(async (ns, target) => {
+  const copyFileContents = useCallback(async (ns, target) => {
     let text;
     try {
       ({ text } = await getNote(ns, target.path));
@@ -1794,23 +1796,24 @@ function App() {
       return;
     }
     const name = target.name || baseName(target.path);
-    const p = buildClipboardPayload(name, text);
-    if (!p.ok) {
+    const content = stripNoteMarker(text);
+    const bytes = utf8Bytes(content);
+    if (bytes > CLIPBOARD_MAX_BYTES) {
       setNotice({
         kind: 'error',
-        text: `This note is ${formatBytes(p.bytes)}, over the ${formatBytes(CLIPBOARD_MAX_BYTES)} clipboard limit. Download it instead.`,
+        text: `This note is ${formatBytes(bytes)}, over the ${formatBytes(CLIPBOARD_MAX_BYTES)} clipboard limit. Download it instead.`,
         action: { label: 'Download', run: () => runDownload(ns, target) },
       });
       return;
     }
     const links = localLinks(text);
-    const done = `Copied "${name}". In the other mdnest, right-click a folder and choose Paste here.`
+    const done = `Copied the contents of "${name}". To make a note of it in another mdnest, right-click a folder there and choose Paste here.`
       + (links.length ? ` ${links.length} linked file${links.length === 1 ? '' : 's'} on this server will not be copied.` : '');
     let ok = false;
     if (navigator.clipboard && window.isSecureContext) {
-      try { await navigator.clipboard.writeText(p.text); ok = true; } catch { /* fall back */ }
+      try { await navigator.clipboard.writeText(content); ok = true; } catch { /* fall back */ }
     }
-    if (!ok) ok = copyPlainText(p.text);
+    if (!ok) ok = copyPlainText(content);
     if (ok) {
       setNotice({ kind: 'ok', text: done });
     } else {
@@ -1819,7 +1822,7 @@ function App() {
         text: `"${name}" is ready to copy.`,
         action: {
           label: 'Copy',
-          run: () => setNotice(copyPlainText(p.text) ? { kind: 'ok', text: done } : { kind: 'error', text: 'The browser blocked the clipboard.' }),
+          run: () => setNotice(copyPlainText(content) ? { kind: 'ok', text: done } : { kind: 'error', text: 'The browser blocked the clipboard.' }),
         },
       });
     }
@@ -1832,7 +1835,15 @@ function App() {
       case 'new-folder': await doCreateFolder(target); break;
       case 'delete-file': {
         if (!target || !selectedNs) return;
-        if (!confirm(`Delete "${target.name || target.path}"?`)) return;
+        // A chat gets the same warning as in the chats view: deleting it
+        // ends the conversation for everyone in it, agents included.
+        const chatInfo = /\.md$/i.test(target.path || '')
+          ? await getChat(selectedNs, target.path, Number.MAX_SAFE_INTEGER).catch(() => null) : null;
+        if (chatInfo && !chatInfo.canDelete) {
+          alert(`"${chatInfo.title || target.name}" is a chat. Only its owner${chatInfo.owner ? ` (${chatInfo.owner})` : ''} or a workspace admin can delete it.`);
+          return;
+        }
+        if (!confirm(chatInfo ? chatDeleteWarning(chatInfo.title || target.name, chatInfo.count) : `Delete "${target.name || target.path}"?`)) return;
         try {
           await deleteNote(selectedNs, target.path);
           if (currentPath === target.path) { setCurrentPath(null); setContent(null); setSavedContent(''); }
@@ -1881,7 +1892,7 @@ function App() {
       case 'copy-clipboard': {
         if (!target || !selectedNs) return;
         await flushPendingSave();
-        copyForAnotherMdnest(selectedNs, target);
+        copyFileContents(selectedNs, target);
         break;
       }
       case 'paste-here': {
@@ -1967,7 +1978,7 @@ function App() {
         break;
       }
     }
-  }, [selectedNs, currentPath, refreshTree, doCreateNote, doCreateDrawing, doCreateFolder, getLastPath, setLastPath, enterChats, flushPendingSave, runDownload, copyForAnotherMdnest]);
+  }, [selectedNs, currentPath, refreshTree, doCreateNote, doCreateDrawing, doCreateFolder, getLastPath, setLastPath, enterChats, flushPendingSave, runDownload, copyFileContents]);
 
   const handleTreeDrop = useCallback(async (fromPath, toFolderPath) => {
     if (!selectedNs) return;

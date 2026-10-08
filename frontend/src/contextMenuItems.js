@@ -8,7 +8,7 @@
 //
 //   create    New note / folder / drawing / chat, Paste here   (folder, root)
 //   organize  Rename, Move to…, Copy to…
-//   share     Download, Copy for another mdnest, Copy path for CLI
+//   share     Download, Copy file contents, Copy path for CLI
 //   info      History, Authors                                  (files)
 //   admin     Manage access
 //   danger    Delete
@@ -31,7 +31,7 @@ export function contextMenuGroups({
     create.push({ label: 'New folder', action: 'new-folder', icon: 'folder' });
     if (excalidraw) create.push({ label: 'New drawing', action: 'new-drawing', icon: 'drawing' });
     if (chat) create.push({ label: 'New chat', action: 'new-chat', icon: 'chat' });
-    // A note copied with "Copy for another mdnest", possibly on another server.
+    // A new note from the clipboard, e.g. one copied with "Copy file contents" on another server.
     create.push({ label: 'Paste here', action: 'paste-here', icon: 'paste' });
   }
 
@@ -48,7 +48,7 @@ export function contextMenuGroups({
   if (isFile || isFolder) {
     share.push({ label: isFolder ? 'Download as zip' : 'Download', action: 'download', icon: 'download' });
     if (isFile && (path.endsWith('.md') || path.endsWith('.txt'))) {
-      share.push({ label: 'Copy for another mdnest', action: 'copy-clipboard', icon: 'clipboard' });
+      share.push({ label: 'Copy file contents', action: 'copy-clipboard', icon: 'clipboard', hint: 'Copies the note as plain text. Paste it anywhere, or use Paste here in any mdnest to make a new note' });
     }
     // It copies an mdnest:// address for the CLI and agents, not a file-system
     // path; the plain "Copy path" read as the latter.
@@ -77,11 +77,16 @@ export function contextMenuGroups({
 // The chat list's right-click menu (one chat). Same component and look as the
 // tree's; open is the plain click, so the menu holds what a click cannot do.
 // pinned: undefined when pins could not be loaded, so no pin item is offered.
-export function chatMenuGroups({ canDelete = false, pinned } = {}) {
+// canMembers: multi mode, where a chat can have a member list.
+export function chatMenuGroups({ canDelete = false, canMembers = false, pinned } = {}) {
   return [
     ...(pinned === undefined ? [] : [[pinned
       ? { label: 'Unpin', action: 'unpin-chat', icon: 'pin' }
       : { label: 'Pin to the Pinned tab', action: 'pin-chat', icon: 'pin' }]]),
+    [
+      ...(canMembers ? [{ label: 'Members…', action: 'chat-members', icon: 'people', hint: 'See who can open this chat, and add people' }] : []),
+      { label: 'Connect an agent…', action: 'connect-agent', icon: 'link', hint: 'Get the prompt that brings an agent into this chat' },
+    ],
     [{ label: 'Open as note', action: 'open-note', icon: 'note' }],
     [{ label: 'Copy path for CLI', action: 'copy-path', icon: 'link', hint: 'Copies an mdnest:// address that the mdnest CLI and agents accept' }],
     canDelete ? [{ label: 'Delete chat', action: 'delete-chat', icon: 'trash', danger: true }] : [],

@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { createNoteWithContent } from '../api.js';
-import { parseClipboardPayload, suggestCopyName, joinPath, localLinks, formatBytes, CLIPBOARD_MAX_BYTES } from '../transfer.js';
+import { parsePastedNote, suggestCopyName, joinPath, localLinks, formatBytes, CLIPBOARD_MAX_BYTES } from '../transfer.js';
 
-// PasteModal — "Paste here" for a note copied with "Copy for another mdnest",
-// possibly on a different server.
+// PasteModal — "Paste here": a new note from what is on the clipboard,
+// usually a note copied with "Copy file contents", possibly on a different
+// server. Plain text is accepted from anywhere.
 //
 // It is driven only by a real paste event (Ctrl/Cmd+V, or the phone's own
 // Paste in the box). It never calls navigator.clipboard.readText(): that is
@@ -26,12 +27,12 @@ export default function PasteModal({ namespace, folder, onClose, onPasted }) {
   useEffect(() => { boxRef.current?.focus(); }, []);
 
   const accept = (text) => {
-    const r = parseClipboardPayload(text);
+    const r = parsePastedNote(text);
     if (!r.ok) {
       setNote(null);
       setMessage(r.reason === 'too_large'
         ? `That note is ${formatBytes(r.bytes)}, over the ${formatBytes(CLIPBOARD_MAX_BYTES)} clipboard limit. Download it on the other mdnest instead and add the file here.`
-        : 'That is not a note copied with "Copy for another mdnest".');
+        : 'The clipboard is empty. Copy a note first (right-click it, Copy file contents).');
       return;
     }
     setNote(r);

@@ -1154,6 +1154,12 @@ curl -X PATCH "http://localhost:8286/api/note?ns=personal&path=new-log.md" \
 
 Delete a note or folder. If the path points to a directory, it and all its contents are removed recursively.
 
+A chat note is deleted only by its owner, a namespace admin or a superadmin
+(multi mode, *v4.8.4+*); anyone else gets `403`, and a folder holding such a
+chat is refused with the chat's name in the error. The same `403` stops a
+`PUT` or top `PATCH` that would turn a chat into a plain note or change its
+`owner:` line, and an upload over a chat. See [chat.md](chat.md#who-can-delete-a-chat).
+
 **Query parameters:**
 
 | Param | Required | Description |
@@ -1285,7 +1291,7 @@ Move a file or folder from one location to another within the same namespace.
 {"status": "moved"}
 ```
 
-The destination's parent directories are created automatically if they do not exist.
+The destination's parent directories are created automatically if they do not exist. The destination itself must not exist (*v4.8.4+*): a move never replaces a note or folder. A rename that only changes letter case (`a.md` to `A.md`) is allowed.
 
 **Example:**
 
@@ -1306,6 +1312,7 @@ curl -X POST "http://localhost:8286/api/move?ns=personal&from=drafts&to=archive/
 | 400 | `{"error":"invalid source path"}` | Source path is empty or attempts directory traversal |
 | 400 | `{"error":"invalid destination path"}` | Destination path is empty or attempts directory traversal |
 | 404 | `{"error":"source not found"}` | Source file or folder does not exist |
+| 409 | `{"error":"destination already exists"}` | Something is already at `to` (*v4.8.4+*; before, a file there was silently replaced) |
 
 ---
 
@@ -1750,6 +1757,11 @@ Needs read access to the note. Returns only the messages after #N.
                { "author": "lead-qa", "kind": "listening", "since": "2026-10-02T14:04:12Z" } ] }
 ```
 
+`owner` is the account that owns the chat and `canDelete` whether this
+caller may delete it (*v4.8.4+*; the same two fields are on each
+`/api/chats` row). A `404` on a chat that was there a moment ago means it
+was deleted or moved; a `403`, that this account was removed from it.
+
 `working` is who is present, busiest first. `kind` is `working` (a status the
 agent set), `thinking` (its last poll delivered new messages and it has not
 posted since) or `listening` (it polled with `exclude=NAME` in the last 20
@@ -1769,6 +1781,18 @@ on every GET as `contexts`, keyed by poster
 (`{"codxu": {"used": 87000, "total": 200000, "pct": 44, "at": "…"}}`, with
 `pct` `-1` when only a token count was given), and on that poster's
 `working` entry as `context`.
+
+A POST whose body starts with `/role` saves the poster's role in the chat
+(one or two lines, cut at 300 characters; empty removes it) and answers
+`200 {"status":"saved","name":"qa-1","role":"…"}`; it is not added to the
+chat. `POST /api/chat/agents?ns=&path=&name=NAME` with the role as the body
+does the same for any name and needs write access to the chat; the Connect
+an agent panel uses it. A name may use letters, digits, `.`, `_` and `-`.
+Roles are stored in the note's front matter under `agents:` and come back on
+every GET as `agents` (`{"qa-1": "Test the login page."}`). A `format=text`
+GET with `exclude=NAME` that returns messages ends with one reminder line
+when NAME has a role, so a waiting agent is told its role again on every
+round.
 
 `exclude=name` drops that poster's own messages (a waiting agent is not
 woken by its own post). `mention=name` keeps only messages that address
@@ -1805,11 +1829,56 @@ curl -X POST "$URL/api/chat/status?ns=work&path=Chats/release.md&as=api-agent" \
   -H "Authorization: Bearer $TOKEN" --data-raw "running the migration"
 ```
 
-### POST /api/chat/convert?ns=&path=[&title=]
+### POST /api/chat/convert?ns=&path=[&title=][&private=1][&members=]
 
 Needs write access. Creates the chat note when it does not exist (`201`).
 Otherwise it adds the tag in place and keeps the existing content as the
-description. Converting a chat again changes nothing.
+description. Converting a chat again changes nothing. In multi mode the
+caller becomes the chat's owner (an `owner:` line in the front matter).
+
+`private=1` (multi mode, *v4.8.4+*) makes the chat private with the caller
+as its only member. The member list is written before the note, so a new
+private chat never exists as an open one. It only creates: on a note that
+already exists it is a `409` (use `/api/chat/members` to make an existing chat
+private). In single mode it is a `400`.
+
+`members=3,5` (with `private=1`) adds those users in the same request. Each
+must be someone the people picker lists (a user with access to the
+workspace); one that is not is a `404` and nothing is created. Without
+`private=1` it is a `400`.
+
+### GET/POST/DELETE /api/chat/members?ns=&path= *(v4.8.4+, multi mode)*
+
+The member list of a private chat. A chat with no list is open: anyone with
+read access to the note can read it. A chat with a list can be read and
+written only by the users on it, on every route that serves the note (note,
+chat, comments, history, attribution, files, download, search, tree, tasks,
+transfer, move, delete, websocket), namespace admins included. Not
+registered in single mode (`404`).
+
+- `GET` (read access): `{"private":true,"members":[{"id":3,"username":"mia","addedBy":2,"addedAt":"2026-10-08T00:12:00Z"}]}`.
+  An open chat answers `{"private":false,"members":[]}`.
+- `POST` (write access), body `{"userId":N}` or empty: adds the caller and,
+  if given, user `N`. On an open chat this is what makes it private. `N` must
+  hold a grant in the namespace (the `/api/namespace/users` list); anyone else
+  is a `404` "no such user in this workspace", whether or not the account
+  exists.
+- `DELETE ?...&userId=N` (write access): removes user `N`. `409` for the last
+  member. Their live-collaboration connection to the note, if any, is closed.
+
+Each returns the list as `GET` does. `400` when the note is not a chat, or
+(for `POST`) when its path is not plain ASCII: private chat paths are kept
+ASCII so a case-insensitive disk cannot reach one by another spelling. A
+non-member gets `403` from all three, so they can neither see who is in a
+chat nor invite themselves.
+
+Folder operations check every chat inside: a non-member cannot delete
+(`DELETE /api/note`), move (`/api/move`) or copy or move to another namespace
+(`/api/transfer`) a folder that holds a private chat (`403`), and a folder
+`/api/download` leaves it out of the zip. A move or transfer by a member
+carries the list to the new path, replacing any list left there. The old path
+keeps its list after a move or delete, because note history is served by
+path; a leftover list whose file is gone does not block folder operations.
 
 ### GET /api/chat/gifs?ns=[&format=text]
 
@@ -1837,7 +1906,9 @@ is cacheable.
 ### GET /api/chats[?ns=][&format=text]
 
 Every chat the caller can read, across namespaces, most recently active
-first: `{"chats":[{"ns","path","title","count","lastAuthor","lastTime","lastText"}]}`.
+first: `{"chats":[{"ns","path","title","count","lastAuthor","lastTime","lastText","private"}]}`.
+`private` is present and `true` for a private chat (only its members ever
+see it listed).
 It applies the same namespace filter as `/api/tasks/all`, plus a per-note
 read check.
 
