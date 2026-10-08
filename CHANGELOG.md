@@ -22,6 +22,13 @@ All notable changes to mdnest are documented here.
 
 ### Changed
 
+- **"Copy for another mdnest" is now "Copy file contents".** It copied the
+  note wrapped in a block of JSON, which was only useful for **Paste here**
+  and looked like junk anywhere else. It now copies the note's plain text,
+  so it pastes anywhere. **Paste here** accepts plain text from anywhere and
+  names the new note after its first heading (editable). A copy made by an
+  older version still pastes with its original file name.
+
 - **Members and Connect an agent open as popups.** They used to open as a
   panel inside the chat that pushed the messages down. Esc or a click outside
   closes them.

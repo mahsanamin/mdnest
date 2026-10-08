@@ -57,6 +57,29 @@ export function parseClipboardPayload(text) {
   return { ok: true, name: safeFileName(data.name), content: data.content };
 }
 
+// parsePastedNote reads what was pasted into "Paste here": the plain text of
+// a note (what "Copy file contents" puts on the clipboard, or anything copied
+// from elsewhere), or the JSON payload older versions copied, which still
+// carries the note's file name. Plain text is named after its first heading.
+//   {ok:true, name, content} | {ok:false, reason:'too_large', bytes} | {ok:false, reason:'empty'}
+export function parsePastedNote(text) {
+  const legacy = parseClipboardPayload(text);
+  if (legacy.ok || legacy.reason === 'too_large') return legacy;
+  const content = String(text || '');
+  if (!content.trim()) return { ok: false, reason: 'empty' };
+  const bytes = utf8Bytes(content);
+  if (bytes > CLIPBOARD_MAX_BYTES) return { ok: false, reason: 'too_large', bytes };
+  return { ok: true, name: nameFromContent(content), content };
+}
+
+// nameFromContent: "# Release plan" -> "Release plan.md"; no heading ->
+// "pasted.md". Only a suggestion, shown in an editable box.
+export function nameFromContent(content) {
+  const m = String(content || '').match(/^#{1,6}[ \t]+(.+?)[ \t#]*$/m);
+  const title = m ? m[1].replace(/[\\/:*?"<>|]/g, ' ').replace(/\s+/g, ' ').replace(/^[.\s]+/, '').slice(0, 80).trim() : '';
+  return safeFileName(title ? `${title}.md` : '');
+}
+
 // safeFileName keeps the last path segment and drops characters no file name
 // should carry, falling back to "pasted.md".
 export function safeFileName(name) {

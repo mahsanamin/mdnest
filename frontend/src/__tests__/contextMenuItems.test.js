@@ -9,7 +9,7 @@ describe('right-click menu groups', () => {
   it('a writable note: organize, share, info, then Delete alone and last', () => {
     expect(labels(contextMenuGroups({ target: file, hasWrite: true, multi: true, chat: true }))).toEqual([
       ['Rename', 'Move to…', 'Copy to…'],
-      ['Download', 'Copy for another mdnest', 'Copy path for CLI'],
+      ['Download', 'Copy file contents', 'Copy path for CLI'],
       ['History', 'Authors'],
       ['Delete'],
     ]);
@@ -36,7 +36,7 @@ describe('right-click menu groups', () => {
   it('read-only: only what reading allows, and no Delete', () => {
     expect(labels(contextMenuGroups({ target: file, hasWrite: false }))).toEqual([
       ['Copy to…'],
-      ['Download', 'Copy for another mdnest', 'Copy path for CLI'],
+      ['Download', 'Copy file contents', 'Copy path for CLI'],
       ['History'],
     ]);
     expect(labels(contextMenuGroups({ target: folder, hasWrite: false }))).toEqual([
@@ -57,7 +57,7 @@ describe('right-click menu groups', () => {
 
   it('Copy for another mdnest only for text notes, and drawings get New drawing only when enabled', () => {
     const png = contextMenuGroups({ target: { type: 'file', path: 'a/pic.png' }, hasWrite: true }).flat().map((i) => i.label);
-    expect(png).not.toContain('Copy for another mdnest');
+    expect(png).not.toContain('Copy file contents');
     const noDraw = contextMenuGroups({ target: folder, hasWrite: true, excalidraw: false }).flat().map((i) => i.label);
     expect(noDraw).not.toContain('New drawing');
   });
