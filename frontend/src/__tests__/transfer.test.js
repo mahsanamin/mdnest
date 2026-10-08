@@ -1,9 +1,25 @@
 import { describe, it, expect } from 'vitest';
 import {
-  CLIPBOARD_MAX_BYTES, utf8Bytes, stripNoteMarker, buildClipboardPayload, parseClipboardPayload,
+  CLIPBOARD_MAX_BYTES, utf8Bytes, stripNoteMarker, buildClipboardPayload, parseClipboardPayload, parsePastedNote, nameFromContent,
   safeFileName, suggestCopyName, localLinks, joinPath, isInvalidDestination, describeRefusal,
   filenameFromDisposition, newFolderError, transferSummary, isLargeTransfer, filterFolders,
 } from '../transfer.js';
+
+describe('paste here', () => {
+  it('plain text becomes a note named after its first heading', () => {
+    expect(parsePastedNote('intro\n\n## Release plan: Q4 ##\n\nbody\n')).toEqual({ ok: true, name: 'Release plan Q4.md', content: 'intro\n\n## Release plan: Q4 ##\n\nbody\n' });
+    expect(nameFromContent('no heading here')).toBe('pasted.md');
+    expect(nameFromContent('# ../../etc/passwd')).toBe('etc passwd.md');
+  });
+  it('the JSON older versions copied still pastes with its file name', () => {
+    const old = buildClipboardPayload('plan.md', '# Something else\n');
+    expect(parsePastedNote(old.text)).toMatchObject({ ok: true, name: 'plan.md', content: '# Something else\n' });
+  });
+  it('an empty paste or one over the limit is refused', () => {
+    expect(parsePastedNote('  \n')).toEqual({ ok: false, reason: 'empty' });
+    expect(parsePastedNote('x'.repeat(CLIPBOARD_MAX_BYTES + 1))).toMatchObject({ ok: false, reason: 'too_large' });
+  });
+});
 
 describe('clipboard payload', () => {
   it('round-trips a note without its marker', () => {

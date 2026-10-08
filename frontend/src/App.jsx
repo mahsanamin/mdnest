@@ -49,7 +49,7 @@ import { copyPlainText } from './mermaid-text.js';
 import EmptyNamespaces from './components/EmptyNamespaces';
 import { mdnestUri } from './mdnestUri.js';
 import {
-  baseName, buildClipboardPayload, describeRefusal, filenameFromDisposition, formatBytes,
+  baseName, stripNoteMarker, utf8Bytes, describeRefusal, filenameFromDisposition, formatBytes,
   localLinks, CLIPBOARD_MAX_BYTES,
 } from './transfer.js';
 import ReleaseNotesModal from './components/ReleaseNotesModal.jsx';
@@ -1780,12 +1780,13 @@ function App() {
     }
   }, []);
 
-  // "Copy for another mdnest": one note on the clipboard as a small JSON
-  // payload another mdnest's "Paste here" understands. Plain-HTTP installs
+  // "Copy file contents": the note's text on the clipboard, without its
+  // note-ID marker, so it pastes anywhere and "Paste here" in any mdnest makes
+  // a new note from it. Plain-HTTP installs
   // have no async Clipboard API, so the hidden-textarea route is the fallback;
   // if the browser refuses both (the fetch above used up the click's
   // activation), the notice offers a button that copies synchronously.
-  const copyForAnotherMdnest = useCallback(async (ns, target) => {
+  const copyFileContents = useCallback(async (ns, target) => {
     let text;
     try {
       ({ text } = await getNote(ns, target.path));
@@ -1794,23 +1795,24 @@ function App() {
       return;
     }
     const name = target.name || baseName(target.path);
-    const p = buildClipboardPayload(name, text);
-    if (!p.ok) {
+    const content = stripNoteMarker(text);
+    const bytes = utf8Bytes(content);
+    if (bytes > CLIPBOARD_MAX_BYTES) {
       setNotice({
         kind: 'error',
-        text: `This note is ${formatBytes(p.bytes)}, over the ${formatBytes(CLIPBOARD_MAX_BYTES)} clipboard limit. Download it instead.`,
+        text: `This note is ${formatBytes(bytes)}, over the ${formatBytes(CLIPBOARD_MAX_BYTES)} clipboard limit. Download it instead.`,
         action: { label: 'Download', run: () => runDownload(ns, target) },
       });
       return;
     }
     const links = localLinks(text);
-    const done = `Copied "${name}". In the other mdnest, right-click a folder and choose Paste here.`
+    const done = `Copied the contents of "${name}". To make a note of it in another mdnest, right-click a folder there and choose Paste here.`
       + (links.length ? ` ${links.length} linked file${links.length === 1 ? '' : 's'} on this server will not be copied.` : '');
     let ok = false;
     if (navigator.clipboard && window.isSecureContext) {
-      try { await navigator.clipboard.writeText(p.text); ok = true; } catch { /* fall back */ }
+      try { await navigator.clipboard.writeText(content); ok = true; } catch { /* fall back */ }
     }
-    if (!ok) ok = copyPlainText(p.text);
+    if (!ok) ok = copyPlainText(content);
     if (ok) {
       setNotice({ kind: 'ok', text: done });
     } else {
@@ -1819,7 +1821,7 @@ function App() {
         text: `"${name}" is ready to copy.`,
         action: {
           label: 'Copy',
-          run: () => setNotice(copyPlainText(p.text) ? { kind: 'ok', text: done } : { kind: 'error', text: 'The browser blocked the clipboard.' }),
+          run: () => setNotice(copyPlainText(content) ? { kind: 'ok', text: done } : { kind: 'error', text: 'The browser blocked the clipboard.' }),
         },
       });
     }
@@ -1881,7 +1883,7 @@ function App() {
       case 'copy-clipboard': {
         if (!target || !selectedNs) return;
         await flushPendingSave();
-        copyForAnotherMdnest(selectedNs, target);
+        copyFileContents(selectedNs, target);
         break;
       }
       case 'paste-here': {
@@ -1967,7 +1969,7 @@ function App() {
         break;
       }
     }
-  }, [selectedNs, currentPath, refreshTree, doCreateNote, doCreateDrawing, doCreateFolder, getLastPath, setLastPath, enterChats, flushPendingSave, runDownload, copyForAnotherMdnest]);
+  }, [selectedNs, currentPath, refreshTree, doCreateNote, doCreateDrawing, doCreateFolder, getLastPath, setLastPath, enterChats, flushPendingSave, runDownload, copyFileContents]);
 
   const handleTreeDrop = useCallback(async (fromPath, toFolderPath) => {
     if (!selectedNs) return;
