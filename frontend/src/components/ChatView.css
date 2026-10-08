@@ -625,8 +625,6 @@
 }
 .chat-suggest-item.first { border-color: var(--accent); color: var(--accent); }
 .chat-suggest-hint { color: var(--text-faint); font-size: 0.72rem; margin-left: 4px; }
-.chat-agent-row { display: flex; gap: var(--space-2); margin: 0 0 6px; }
-.chat-agent-row .chat-input { flex: 1; max-width: 240px; }
 .chat-agent pre { white-space: pre-wrap; user-select: text; }
 
 /* Chat images: reactions in messages, avatars beside names, the picker. */
@@ -692,3 +690,55 @@
   color: var(--text);
 }
 .chat-members-note { font-size: 0.78rem; color: var(--text-muted); }
+
+/* Members and Connect an agent open as a popup over the chat view (from the
+   header or the list's right-click menu), so they never push the messages
+   down. The panel inside keeps its .chat-agent classes. */
+.chat-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 15000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: var(--scrim);
+}
+.chat-dialog {
+  width: 440px;
+  max-width: 100%;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 12px 40px var(--shadow-color-strong);
+}
+.chat-dialog.wide { width: 680px; }
+.chat-dialog .chat-agent {
+  padding: 16px 18px;
+  background: none;
+  border-bottom: none;
+}
+.chat-dialog .chat-agent-head { margin: 0 0 10px; font-size: 1rem; }
+.chat-dialog .chat-agent-saved { max-width: none; }
+.chat-dialog .chat-agent pre { max-height: 260px; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat-agent-sub { color: var(--text-secondary); }
+.chat-agent-step {
+  margin: 12px 0 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.chat-agent-name { display: block; width: 100%; max-width: 260px; box-sizing: border-box; margin: 0 0 6px; }
+.chat-agent-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+}
+@media (max-width: 768px) {
+  .chat-dialog-backdrop { padding: 0; align-items: stretch; }
+  .chat-dialog, .chat-dialog.wide { width: 100%; max-height: 100vh; border-radius: 0; }
+}

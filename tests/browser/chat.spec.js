@@ -179,14 +179,51 @@ test('the agent panel puts the typed intent into the prompt, and × or Esc close
     await panel.locator('.chat-agent-close').click();
     await expect(panel).toHaveCount(0);
 
-    // And Esc, with focus anywhere in the chat.
+    // And Esc.
     await openBtn.click();
     await expect(panel).toBeVisible();
-    await page.locator('.chat-room-title h2').click();
     await page.keyboard.press('Escape');
+    await expect(panel).toHaveCount(0);
+
+    // And a click outside the popup.
+    await openBtn.click();
+    await expect(panel).toBeVisible();
+    await page.mouse.click(5, 5);
     await expect(panel).toHaveCount(0);
   } finally {
     await cleanup(page, plain, chat);
+  }
+});
+
+// Connect an agent is a popup, reachable from a right-click on a chat in the
+// list without opening that chat first, and it never pushes the messages down.
+test('right-click a chat to connect an agent, in a popup', async ({ page }) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  const a = await seed(page);
+  const b = await seed(page);
+  try {
+    await page.goto(`/#!chats/${NS}/${a.chat}`);
+    await expect(page.locator('.chat-room-title h2')).toHaveText(a.title, { timeout: 20_000 });
+    const messagesTop = (await page.locator('.chat-messages').boundingBox()).y;
+
+    await page.locator('.chat-list-item', { hasText: b.title }).click({ button: 'right' });
+    await page.locator('.context-menu-item', { hasText: 'Connect an agent…' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Connect an agent' });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator('.chat-agent-sub')).toContainText(b.title);
+    await dialog.locator('input[aria-label="Agent name"]').fill('helper');
+    // The prompt is for the right-clicked chat, not the open one.
+    await expect(dialog.locator('pre')).toContainText(`${NS}/${b.chat} --as helper`);
+    // The open chat stays where it was, underneath.
+    await expect(page.locator('.chat-room-title h2')).toHaveText(a.title);
+    expect((await page.locator('.chat-messages').boundingBox()).y).toBe(messagesTop);
+    await expect(page.locator('.chat-room .chat-agent')).toHaveCount(0);
+
+    await dialog.locator('.chat-agent-close').click();
+    await expect(dialog).toHaveCount(0);
+  } finally {
+    await cleanup(page, a.plain, a.chat, b.plain, b.chat);
   }
 });
 
@@ -260,7 +297,7 @@ test('right-click on a chat in the list: copy its path, and delete another chat 
     const menu = page.locator('.context-menu');
     await expect(menu).toBeVisible();
     await expect(menu.locator('.context-menu-title')).toHaveText(b.title);
-    await expect(menu.locator('.context-menu-item')).toHaveText(['Pin to the Pinned tab', 'Open as note', 'Copy path for CLI', 'Delete chat']);
+    await expect(menu.locator('.context-menu-item')).toHaveText(['Pin to the Pinned tab', 'Connect an agent…', 'Open as note', 'Copy path for CLI', 'Delete chat']);
 
     await menu.locator('.context-menu-item', { hasText: 'Copy path for CLI' }).click();
     await expect(menu).toBeHidden();
@@ -618,6 +655,10 @@ test('single mode shows no members control and no private option', async ({ page
     await page.goto(`/#!chats/${NS}/${chat}`);
     await expect(page.locator('.chat-room-title h2')).toHaveText(title, { timeout: 20_000 });
     await expect(page.locator('[data-testid=chat-members-toggle]')).toHaveCount(0);
+    await page.locator('.chat-list-item', { hasText: title }).click({ button: 'right' });
+    await expect(page.locator('.context-menu-item', { hasText: 'Connect an agent…' })).toBeVisible();
+    await expect(page.locator('.context-menu-item', { hasText: 'Members…' })).toHaveCount(0);
+    await page.keyboard.press('Escape');
     await expect(page.locator('.chat-list-lock')).toHaveCount(0);
     await page.locator('button:has-text("+ New")').first().click();
     await expect(page.locator('.chat-new')).toBeVisible();

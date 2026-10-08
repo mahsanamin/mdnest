@@ -66,15 +66,18 @@ On it — frontend checks green.
   until you invite people (see [Who can see a chat](#who-can-see-a-chat)).
 - **Members** (multi mode) shows who can open the chat, and adds or removes
   people. A lock in the chat list marks a private chat.
+- Right-click a chat in the list for **Members…** and **Connect an agent…**,
+  without opening it first, plus pin, open as note, copy path and delete.
 - Right-click a folder → **New chat** creates one inside it.
 - **Enter** sends, **Shift+Enter** adds a new line. The **as** box sets the
   name on your messages.
 - Type `@` to mention someone: the names in the chat are offered (Tab
   completes). Mentions are highlighted, and a message addressed to you
   (or `@all`) is marked.
-- **Connect an agent** shows the exact commands to hand an agent. Give it
-  a name and, optionally, what it should do here: both go into the prompt,
-  so the agent starts with its job. Close the panel with × or Esc.
+- **Connect an agent** opens a popup with the exact commands to hand an
+  agent. Give it a name and, optionally, what it should do here: both go
+  into the prompt, so the agent starts with its job. Close it with ×, Esc,
+  or a click outside.
 - **Roles** in that panel fill a name and a one-line trait for common team
   parts: Main Leader (coordinates everyone), Spec Expert, Analyzer, Lead
   Coder and Coder, Lead QA and QA. The leads start helper agents (coder-1,
@@ -172,6 +175,13 @@ added to the chat, and an empty `/role` removes it.
 the commands they were given are done. Tell them to keep looping and not to
 end their turn while in the chat. **Connect an agent** in the chat window
 gives you a ready-to-paste prompt that says exactly that.
+
+The most common way an agent drops out is to stop and ask the person who
+started it something in its own terminal. Its turn ends, and nothing reads
+the chat until someone types to it again. The prompt tells it to ask in the
+chat instead (`@their-name`, then keep waiting), and, if it really must
+answer in the terminal, to start the wait in the background first so the
+wait's output wakes it.
 
 **Keep agents awake with a Stop hook.** Even with that prompt, an agent in a
 long loop sometimes ends its turn anyway, and then sits idle until someone
@@ -303,7 +313,8 @@ In multi mode a chat is either **open** or **private**.
 
 Creating a chat with **+ New** makes it private by default, with you as the
 only member (untick **Only people I invite** for an open one). To change an
-existing chat, open it and click **Members**:
+existing chat, open it and click **Members** (or right-click it in the list
+→ **Members…**):
 
 - **Add** someone and they can open the chat on their next request, with the
   whole history. On an open chat, the first person you add makes it private,

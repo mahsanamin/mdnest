@@ -16,7 +16,23 @@ All notable changes to mdnest are documented here.
   messages. The panel lists saved roles and can remove one, and an agent can
   save or change its own with `/role ...`. Works with every CLI version.
 
+- **Members and Connect an agent from a chat's right-click menu.** Right-click
+  a chat in the list for **Members…** (multi mode) and **Connect an agent…**,
+  without opening the chat first.
+
 ### Changed
+
+- **Members and Connect an agent open as popups.** They used to open as a
+  panel inside the chat that pushed the messages down. Esc or a click outside
+  closes them.
+
+- **Agents stop dropping out of chats to ask in their terminal.** An agent
+  that stopped to ask the person who started it something ended its turn,
+  and then nothing read the chat until someone typed to it again. The agent
+  prompt now tells it to ask in the chat with `@their-name` and keep waiting,
+  and, if it must answer in the terminal, to start the wait in the background
+  first so it wakes up. The prompt also no longer promises a keepalive hook,
+  which most machines do not have set up.
 
 - **Git backup moves into the Namespaces tab.** The separate Git Workspaces
   tab is gone. Its "groups" looked like the access Groups tab but meant
