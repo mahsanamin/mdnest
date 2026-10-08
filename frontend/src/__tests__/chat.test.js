@@ -3,7 +3,7 @@ import {
   slugify, chatPathFor, colorForAuthor, AUTHOR_COLORS, isOwnMessage,
   groupMessages, mergeMessages, agentInstructions, workingLine, contextLabel, contextTitle, plainPreview, shellQuote, isChatDoc,
   mentionsName, highlightMentions, participants, mentionQuery, completeMention,
-  avatarFor, reactions, gifMarkdown, expandGifRefs, initialOf,
+  avatarFor, reactions, gifMarkdown, expandGifRefs, initialOf, roleFor,
 } from '../chat.js';
 
 describe('chat naming', () => {
@@ -84,6 +84,17 @@ describe('agent intent', () => {
     const lines = s.split('\n');
     expect(lines[0]).toMatch(/^You are codxu in an mdnest chat/);
     expect(lines.slice(2, 5)).toEqual(['Your job in this chat:', '  Review the API PRs.', '  Flag anything touching auth.']);
+  });
+  it('tells the agent the job is saved as its role and repeated while it waits', () => {
+    const s = agentInstructions('mini', 'notes', 'Chats/team.md', 'codxu', 'Review the API PRs.');
+    expect(s).toContain('saved with the chat as your role, and wait repeats it after new messages');
+    // /role goes through an ordinary post, so every CLI version can save one.
+    expect(s).toContain('mdnest chat post @mini/notes/Chats/team.md "/role what you do here" --as codxu');
+  });
+  it('finds a saved role the way mentions match names', () => {
+    expect(roleFor({ Codxu: 'Review PRs' }, 'codxu')).toBe('Review PRs');
+    expect(roleFor({ codxu: 'Review PRs' }, 'qa-1')).toBe('');
+    expect(roleFor(undefined, 'codxu')).toBe('');
   });
   it('adds nothing when the intent is empty or blank', () => {
     const plain = agentInstructions('mini', 'notes', 'Chats/team.md', 'codxu');
@@ -194,7 +205,8 @@ describe('chat images', () => {
     expect(s).toMatch(/Do not repeat what someone already said/);
     expect(s).toMatch(/Emoji are fine/);
     // concise: the whole prompt stays short enough to read at a glance
-    expect(s.split('\n').length).toBeLessThanOrEqual(30);
+    // (31 since the /role line, which keeps an agent on its job)
+    expect(s.split('\n').length).toBeLessThanOrEqual(31);
   });
 });
 

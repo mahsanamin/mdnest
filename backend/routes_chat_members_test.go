@@ -393,6 +393,8 @@ func TestPrivateChat_NonMemberCannotChangeIt(t *testing.T) {
 		{http.MethodPost, "/api/chat?" + secretQ, "hello"},
 		{http.MethodPost, "/api/chat/convert?" + secretQ, ""},
 		{http.MethodPost, "/api/chat/status?" + secretQ, `{"text":"x"}`},
+		{http.MethodPost, "/api/chat/agents?name=spy&" + secretQ, "spy on them"},
+		{http.MethodPost, "/api/chat?as=spy&" + secretQ, "/role spy on them"},
 		{http.MethodPost, "/api/chat/members?" + secretQ, ""},
 		{http.MethodPost, "/api/chat/members?" + secretQ, `{"userId":6}`},
 		{http.MethodPost, "/api/move?ns=alpha&from=Chats/secret.md&to=Notes/stolen.md", ""},

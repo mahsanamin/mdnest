@@ -114,6 +114,7 @@ func registerContentRoutes(mux *http.ServeMux, c contentRoutes) {
 			// A status is presence, not content: same right as posting, and
 			// nothing is written, so no search invalidation.
 			mux.Handle("/api/chat/status", auth(perms.RequireWrite(http.HandlerFunc(c.chat.HandleStatus))))
+			mux.Handle("/api/chat/agents", auth(perms.RequireWrite(http.HandlerFunc(c.chat.HandleAgents))))
 			// Cross-namespace: self-filters, like /api/tasks/all.
 			mux.Handle("/api/chats", auth(http.HandlerFunc(c.chat.HandleList)))
 			// The chat image library: any access to the namespace may list it,
@@ -154,6 +155,7 @@ func registerContentRoutes(mux *http.ServeMux, c contentRoutes) {
 			mux.Handle("/api/chat", auth(invalidateSearch(http.HandlerFunc(c.chat.Handle))))
 			mux.Handle("/api/chat/convert", auth(invalidateSearch(http.HandlerFunc(c.chat.HandleConvert))))
 			mux.Handle("/api/chat/status", auth(http.HandlerFunc(c.chat.HandleStatus)))
+			mux.Handle("/api/chat/agents", auth(http.HandlerFunc(c.chat.HandleAgents)))
 			mux.Handle("/api/chats", auth(http.HandlerFunc(c.chat.HandleList)))
 			mux.Handle("/api/chat/gifs", auth(http.HandlerFunc(c.chat.HandleGifs)))
 			mux.HandleFunc(handlers.BuiltinGifRoute, handlers.HandleBuiltinGif)

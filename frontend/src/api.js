@@ -1106,6 +1106,18 @@ export async function postChatMessage(ns, path, text, as) {
   return res.json();
 }
 
+// Saves an agent's role in the chat (an empty role removes it). The server
+// keeps it in the note and repeats it to the agent while it waits.
+export async function saveChatAgentRole(ns, path, name, role) {
+  const res = await request(`/chat/agents?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}&name=${encodeURIComponent(name)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body: role || '',
+  });
+  if (!res.ok) throw await chatError(res, 'Failed to save the role');
+  return res.json();
+}
+
 // The namespace's chat images (ChatGifs/): reactions and avatar-NAME files.
 export async function listChatGifs(ns) {
   const res = await request(`/chat/gifs?ns=${encodeURIComponent(ns)}`);

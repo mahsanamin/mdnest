@@ -344,6 +344,24 @@
   border-color: var(--accent);
   color: var(--text-inverse);
 }
+.chat-agent-saved {
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  max-width: 640px;
+}
+.chat-agent-saved-head { margin: 0 0 4px; font-size: 0.78rem; }
+.chat-agent-saved-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 2px 0;
+}
+.chat-agent-saved-row strong { flex: 0 0 auto; }
+.chat-agent-saved-role { flex: 1 1 auto; min-width: 0; color: var(--text); overflow-wrap: anywhere; }
+.chat-agent-hint { font-size: 0.78rem; }
 .chat-agent-intent {
   display: block;
   width: 100%;

@@ -340,6 +340,41 @@ test('a role template fills the agent name and its trait into the prompt', async
   }
 });
 
+test('copying the prompt saves the agent\'s role, and wait repeats it to that agent', async ({ page }) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  const { plain, chat, title } = await seed(page);
+  const qs = `ns=${NS}&path=${encodeURIComponent(chat)}`;
+  try {
+    await page.goto(`/#!chats/${NS}/${chat}`);
+    await expect(page.locator('.chat-room-title h2')).toHaveText(title, { timeout: 20_000 });
+    await page.locator('.chat-btn', { hasText: /Connect an agent|Agents/ }).first().click();
+    const panel = page.locator('.chat-agent');
+    await panel.locator('.chat-role', { hasText: 'Lead QA' }).click();
+    await panel.getByRole('button', { name: 'Copy prompt' }).click();
+
+    const saved = panel.getByTestId('chat-agent-saved');
+    await expect(saved).toContainText('lead-qa');
+    await expect(saved).toContainText('You lead testing');
+    // It is kept in the note itself, so it outlives a restart.
+    const note = await api(page, 'GET', `/api/note?${qs}`);
+    expect(note.text).toMatch(/\nagents:\n  lead-qa: "You lead testing/);
+
+    // The agent's next wait carries its role after the new messages.
+    expect((await api(page, 'POST', `/api/chat?${qs}&as=ahsan`, '@lead-qa please plan the tests')).status).toBe(201);
+    const waited = await api(page, 'GET', `/api/chat?${qs}&after=1&format=text&exclude=lead-qa`);
+    expect(waited.text).toContain('please plan the tests');
+    expect(waited.text).toContain('(reminder for lead-qa) Your role in this chat: You lead testing');
+
+    // Removing it from the panel takes it out of the note.
+    await saved.getByRole('button', { name: "Remove lead-qa's role" }).click();
+    await expect(panel.getByTestId('chat-agent-saved')).toHaveCount(0);
+    expect((await api(page, 'GET', `/api/note?${qs}`)).text).not.toContain('agents:');
+  } finally {
+    await cleanup(page, plain, chat);
+  }
+});
+
 test('typing stays fast in a long chat', async ({ page }) => {
   test.setTimeout(240_000);
   await signIn(page);
