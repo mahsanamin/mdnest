@@ -2469,13 +2469,23 @@ cmd_approval_hook_config() {
   local agent="${1:-}"
   case "$agent" in
     claude-code)
-      # The allow list lets a chat agent run its chat commands without a
-      # prompt. Only the command exactly as given matches: a combined command
-      # (`mdnest chat wait ... ; echo $?`) asks for each part.
+      # The allow list lets a chat agent run the five chat commands it uses
+      # without a prompt, and nothing else of `mdnest chat` (not `new`, which
+      # creates notes). A combined command (`mdnest chat wait ...; echo $?`)
+      # asks for each part, so agents must run them exactly as given. Tested
+      # on Claude Code 2.1.295: a rule like this also passes `< file` for a
+      # file inside the project, but asks for `$(...)`, backticks, `> file`
+      # and `< file` outside the project. docs/chat.md says what that means.
       cat <<'CONFIG'
 {
   "permissions": {
-    "allow": ["Bash(mdnest chat:*)"]
+    "allow": [
+      "Bash(mdnest chat wait:*)",
+      "Bash(mdnest chat read:*)",
+      "Bash(mdnest chat post:*)",
+      "Bash(mdnest chat status:*)",
+      "Bash(mdnest chat leave:*)"
+    ]
   },
   "hooks": {
     "PermissionRequest": [

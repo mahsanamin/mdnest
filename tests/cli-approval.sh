@@ -318,7 +318,8 @@ for a in claude-code codex; do
   contains "hook-config $a keeps chat agents in the chat" "$CFG" 'mdnest chat keepalive'
 done
 CFG="$("$CLI" approval hook-config claude-code 2>/dev/null)"
-contains "hook-config claude-code allows chat commands" "$CFG" '"Bash(mdnest chat:*)"'
+contains "hook-config claude-code allows chat wait" "$CFG" '"Bash(mdnest chat wait:*)"'
+case "$CFG" in *'mdnest chat:*'*|*'chat new'*) bad "hook-config does not allow every chat command" "found a broad rule" ;; *) ok "hook-config does not allow every chat command" ;; esac
 contains "hook-config claude-code sets the Notification hook" "$CFG" 'mdnest approval notify --agent claude-code'
 "$CLI" approval hook-config other >/dev/null 2>&1; RC=$?
 if [ "$RC" != "0" ]; then ok "hook-config refuses an unknown agent"; else bad "hook-config refuses an unknown agent" "exit 0"; fi
