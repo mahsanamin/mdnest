@@ -448,6 +448,10 @@ func main() {
 	// to true; see handlers.ChatEnabled. When off, the /api/chat* routes are
 	// never registered and the frontend never loads the chat chunk.
 	enableChat := handlers.ChatEnabled(env("ENABLE_CHAT", ""), env("MDNEST_ROLE", "single"))
+	// Agent approvals (experimental): an agent's permission prompt answered
+	// from mdnest. Off unless ENABLE_AGENT_APPROVALS=true, and never on the
+	// multi-replica app role (requests live in this process's memory).
+	enableApprovals := handlers.ApprovalsEnabled(env("ENABLE_AGENT_APPROVALS", ""), env("MDNEST_ROLE", "single"))
 
 	// Live collaboration hub (optional, multi mode only)
 	enableCollab := multiMode && env("ENABLE_LIVE_COLLAB", "false") == "true"
@@ -688,6 +692,7 @@ func main() {
 	configHandler.SetMarpThemes(enableMarpThemes)
 	configHandler.SetExcalidraw(enableExcalidraw)
 	configHandler.SetChat(enableChat)
+	configHandler.SetAgentApprovals(enableApprovals)
 	configHandler.SetDefaultTheme(env("DEFAULT_THEME", "auto"))
 	if enableExcalidraw {
 		// Operator-provided default Excalidraw libraries: comma-separated URLs to
@@ -900,6 +905,13 @@ func main() {
 	}
 	if enableCollab {
 		routes.ws = handlers.NewWSHandler(collabHub, jwtSecret, perms)
+	}
+	if enableApprovals {
+		routes.approvals = handlers.NewApprovalHandler(multiMode, taskCanWrite)
+		if enableChat {
+			routes.approvals.SetChat(chatHandler)
+		}
+		log.Printf("agent approvals: on (experimental)")
 	}
 	registerContentRoutes(mux, routes)
 

@@ -100,6 +100,8 @@ function Sidebar({
   serverBuildTime,
   updateAvailableVersion,
   onShowReleaseNotes,
+  approvalCount = 0,
+  onShowApprovals,
   revealNonce,
 }) {
   const [syncing, setSyncing] = useState(false);
@@ -604,6 +606,17 @@ function Sidebar({
         )}
         <div className="sidebar-server-info" ref={versionInfoRef}>
           <span className="sidebar-host" title={window.location.host}>{window.location.host}</span>
+          {approvalCount > 0 && onShowApprovals && (
+            <button
+              type="button"
+              className="approvals-badge"
+              data-testid="approvals-badge"
+              onClick={onShowApprovals}
+              title={`${approvalCount} agent approval request${approvalCount === 1 ? '' : 's'} waiting`}
+            >
+              {approvalCount} waiting
+            </button>
+          )}
           {serverVersion && (
             <span className="sidebar-version">
               v{serverVersion}

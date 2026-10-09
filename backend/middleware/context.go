@@ -9,6 +9,13 @@ type contextKey string
 
 const userContextKey contextKey = "mdnest_user"
 
+// viaAPITokenKey marks a request that was authenticated with an mdnest_ API
+// token rather than a browser session. It is a separate context value, not
+// only the field on UserContext, because a single-mode request carries no
+// UserContext at all and still has to be told apart (agent approvals refuse
+// a decision made with a token in BOTH modes).
+const viaAPITokenKey contextKey = "mdnest_via_api_token"
+
 // UserContext holds the authenticated user's identity extracted from the JWT.
 //
 // Role values (v3.5.0+):
@@ -32,6 +39,29 @@ type UserContext struct {
 	// login. Used to resolve access-group membership. Empty for local users or
 	// when the IdP emits no groups claim.
 	Groups []string
+	// ViaAPIToken is true when the request was authenticated with an mdnest_
+	// API token instead of a browser login. Set by AuthMiddleware. In single
+	// mode there is no UserContext, so read RequestViaAPIToken instead.
+	ViaAPIToken bool
+}
+
+// withAPIToken marks the request as authenticated by an API token.
+func withAPIToken(r *http.Request) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), viaAPITokenKey, true))
+}
+
+// RequestViaAPIToken reports whether the request was authenticated with an
+// mdnest_ API token. Works in both auth modes. A request that never went
+// through AuthMiddleware reports false, so a check built on it must also
+// require that the route is behind auth (every /api/approvals route is).
+func RequestViaAPIToken(r *http.Request) bool {
+	if v, _ := r.Context().Value(viaAPITokenKey).(bool); v {
+		return true
+	}
+	if u := UserFromContext(r.Context()); u != nil && u.ViaAPIToken {
+		return true
+	}
+	return false
 }
 
 // WithUser attaches a UserContext to the request context.

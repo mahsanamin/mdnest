@@ -16,6 +16,8 @@ import { mdnestUri } from '../mdnestUri.js';
 import { CHAT_ROLES, applyRole } from '../chatRoles.js';
 import { chatMenuGroups } from '../contextMenuItems.js';
 import ContextMenu from './ContextMenu.jsx';
+import ApprovalCard from './ApprovalCard.jsx';
+import { approvalIdIn, withoutApprovalMarker } from '../approvals.js';
 import './ChatView.css';
 import { NO_GRAMMAR_ASSIST } from '../noGrammarAssist.js';
 
@@ -804,7 +806,16 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onBack, onActivity, 
                   <span className="chat-msg-time" title={m.time}>{formatChatTime(m.time)}</span>
                 </div>
               )}
-              <Html className="chat-bubble" html={renderMessage(m.text, chat.ns, gifs)} />
+              {approvalIdIn(m.text) ? (
+                // An agent approval: the message holds only a marker and a
+                // neutral line; the card loads the rest for the owner.
+                <div className="chat-bubble chat-approval">
+                  <Html className="chat-approval-text" html={renderMessage(withoutApprovalMarker(m.text), chat.ns, gifs)} />
+                  <ApprovalCard id={approvalIdIn(m.text)} />
+                </div>
+              ) : (
+                <Html className="chat-bubble" html={renderMessage(m.text, chat.ns, gifs)} />
+              )}
             </div>
           );
         })}

@@ -77,6 +77,18 @@ else
   FAILED=1
 fi
 
+# 2b-ii-a. `mdnest approval request` prints the server's answer verbatim or
+# nothing at all, and sends nothing without the machine's policy file. Fake
+# backend, loopback only, a few seconds; SKIPs without python3.
+echo -n "CLI agent approval hook... "
+if bash tests/cli-approval.sh > /dev/null 2>&1; then
+  echo "OK"
+else
+  echo "FAILED"
+  echo "  Run: bash tests/cli-approval.sh"
+  FAILED=1
+fi
+
 # 2b-iii. `mdnest chat wait` keeps listening through a temporary outage
 # (dropped reply, 503) and still exits 1 on a real error. Fake backend,
 # loopback only, a few seconds; SKIPs without python3.
@@ -126,11 +138,11 @@ fi
 # read, so a knob whose plumbing breaks does not fail — it silently reverts to
 # a default and nothing reports it. Fast and Docker-free.
 echo -n "setup.sh generation + plain-compose tests... "
-if bash tests/setup-default-theme.sh > /dev/null 2>&1 && bash tests/setup-marp-themes.sh > /dev/null 2>&1 && bash tests/setup-sso-options.sh > /dev/null 2>&1 && bash tests/setup-chat.sh > /dev/null 2>&1 && bash tests/setup-download-limits.sh > /dev/null 2>&1 && bash tests/setup-bind-address.sh > /dev/null 2>&1 && bash tests/compose-example.sh > /dev/null 2>&1; then
+if bash tests/setup-default-theme.sh > /dev/null 2>&1 && bash tests/setup-marp-themes.sh > /dev/null 2>&1 && bash tests/setup-sso-options.sh > /dev/null 2>&1 && bash tests/setup-chat.sh > /dev/null 2>&1 && bash tests/setup-agent-approvals.sh > /dev/null 2>&1 && bash tests/setup-download-limits.sh > /dev/null 2>&1 && bash tests/setup-bind-address.sh > /dev/null 2>&1 && bash tests/compose-example.sh > /dev/null 2>&1; then
   echo "OK"
 else
   echo "FAILED"
-  echo "  Run: bash tests/setup-default-theme.sh; bash tests/setup-marp-themes.sh; bash tests/setup-sso-options.sh; bash tests/setup-chat.sh; bash tests/setup-download-limits.sh; bash tests/setup-bind-address.sh; bash tests/compose-example.sh"
+  echo "  Run: bash tests/setup-default-theme.sh; bash tests/setup-marp-themes.sh; bash tests/setup-sso-options.sh; bash tests/setup-chat.sh; bash tests/setup-agent-approvals.sh; bash tests/setup-download-limits.sh; bash tests/setup-bind-address.sh; bash tests/compose-example.sh"
   FAILED=1
 fi
 

@@ -53,6 +53,7 @@ services:
       # Optional features, all off by default:
       # ENABLE_TASK_BOARD: "true"     # Kanban board over the checkboxes in your notes
       # ENABLE_CHAT: "false"          # Chat is on by default; this turns it off
+      # ENABLE_AGENT_APPROVALS: "true" # Experimental: answer agent permission prompts from mdnest
       # ENABLE_EXCALIDRAW: "true"     # .excalidraw.md drawings
       # ENABLE_MARP: "true"           # Marp slide decks
       # DEFAULT_THEME: auto           # auto | dark | light

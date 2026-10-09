@@ -6,6 +6,21 @@ All notable changes to mdnest are documented here.
 
 ## v4.8.5 (in progress)
 
+### Added (experimental)
+
+- **Answer an agent's permission prompt from mdnest.** When Claude Code or
+  Codex stops to ask before running a command, the question can now show up
+  in mdnest as a card, in the agent's chat or in a new approvals list, and
+  you press Allow, Deny, or Deny with a reason from the browser or your
+  phone. The agent's own terminal prompt still shows at the same time, and
+  whichever answers first wins; if anything fails, the terminal answers as
+  before. Off by default and opted into three times: the server
+  (`ENABLE_AGENT_APPROVALS=true`), each machine (`~/.mdnest/approvals.conf`
+  and `mdnest approval hook-config`), and each agent session. Decisions count
+  only from a browser login, never from an API token, and only the account the
+  agent runs as can see the command. Experimental: to be reviewed on
+  2026-11-15. Setup in `docs/chat.md`, the added risk in `docs/security.md`.
+
 ### Fixed
 
 - **A half-typed chat message is no longer lost when you open another

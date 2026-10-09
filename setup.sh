@@ -45,6 +45,9 @@ COMPOSE_PROJECT_NAME=""
 SSO_DISABLE_PASSWORD_LOGIN=""
 SSO_AUTOPROVISION_USERS=""
 OIDC_GROUPS_CLAIM=""
+# Agent approvals let a browser answer an agent's permission prompt, so an
+# exported shell variable must not turn them on either.
+ENABLE_AGENT_APPROVALS=""
 # Folder download / transfer limits: only mdnest.conf sets them.
 DOWNLOAD_MAX_FILES=""
 DOWNLOAD_MAX_MB=""
@@ -84,6 +87,7 @@ while IFS= read -r line; do
     ENABLE_MARP_THEMES) ENABLE_MARP_THEMES="$value" ;;
     ENABLE_EXCALIDRAW) ENABLE_EXCALIDRAW="$value" ;;
     ENABLE_CHAT) ENABLE_CHAT="$value" ;;
+    ENABLE_AGENT_APPROVALS) ENABLE_AGENT_APPROVALS="$value" ;;
     DEFAULT_THEME) DEFAULT_THEME="$value" ;;
     EXCALIDRAW_LIBRARIES) EXCALIDRAW_LIBRARIES="$value" ;;
     REQUIRE_2FA) REQUIRE_2FA="$value" ;;
@@ -223,6 +227,15 @@ if [ "$USER_PROVIDER" = "sso" ]; then
   esac
 fi
 
+case "${ENABLE_AGENT_APPROVALS:-false}" in
+  true)  echo "Agent approvals: on (experimental). Agents on opted-in machines can ask for approval here." ;;
+  false) ;;
+  *)
+    echo "Error: ENABLE_AGENT_APPROVALS must be true or false (got '${ENABLE_AGENT_APPROVALS}')."
+    exit 1
+    ;;
+esac
+
 if [ ${#MOUNT_NAMES[@]} -eq 0 ]; then
   echo "Error: No MOUNT_ entries found in $CONF."
   echo "Add at least one line like: MOUNT_myrepo=/path/to/directory"
@@ -290,6 +303,7 @@ ENABLE_MARP=${ENABLE_MARP:-false}
 ENABLE_MARP_THEMES=${ENABLE_MARP_THEMES:-false}
 ENABLE_EXCALIDRAW=${ENABLE_EXCALIDRAW:-false}
 ENABLE_CHAT=${ENABLE_CHAT:-true}
+ENABLE_AGENT_APPROVALS=${ENABLE_AGENT_APPROVALS:-false}
 EXCALIDRAW_LIBRARIES=${EXCALIDRAW_LIBRARIES:-}
 DEFAULT_THEME=${DEFAULT_THEME:-auto}
 REQUIRE_2FA=${REQUIRE_2FA:-false}

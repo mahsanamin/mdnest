@@ -578,6 +578,49 @@ run_keepalive_suite() {
   rm -rf "$d"
 }
 
+run_approval_suite() {
+  echo "── agent approvals (pure helpers) ──"
+  local d; d=$(mktemp -d)
+  # Policy file: read as data, quotes stripped, comments and CRLF ignored,
+  # and never sourced (a line that looks like a command is just an unknown key).
+  printf '%s\r\n' '# policy' 'SERVER=@box' 'MACHINE_LABEL="build box"' "TOOLS='Bash, Write'" \
+    'NEVER_REMOTE= sudo , rm -rf ' 'MAX_WAIT=300' "touch $d/ran" > "$d/approvals.conf"
+  APPROVALS_CONF="$d/approvals.conf" approval_policy_load; local rc=$?
+  eq "policy: loads" "0" "$rc"
+  eq "policy: SERVER without @" "box" "$APPROVAL_SERVER"
+  eq "policy: quoted label" "build box" "$APPROVAL_MACHINE"
+  eq "policy: TOOLS" "Bash, Write" "$APPROVAL_TOOLS"
+  eq "policy: MAX_WAIT" "300" "$APPROVAL_MAX_WAIT"
+  if [ -e "$d/ran" ]; then bad "policy: the file is never run" "a line in it was executed"; else ok "policy: the file is never run"; fi
+  APPROVALS_CONF="$d/missing.conf" approval_policy_load; rc=$?
+  eq "policy: no file means forward nothing" "1" "$rc"
+  printf 'MACHINE_LABEL=x\n' > "$d/noserver.conf"
+  APPROVALS_CONF="$d/noserver.conf" approval_policy_load; rc=$?
+  eq "policy: no SERVER means forward nothing" "1" "$rc"
+  # Tools: exact names, * for any, empty tool never.
+  approval_tool_allowed Bash "Bash, Write"; eq "tools: Bash allowed" "0" "$?"
+  approval_tool_allowed Write "Bash, Write"; eq "tools: Write allowed (spaces trimmed)" "0" "$?"
+  approval_tool_allowed bash "Bash"; eq "tools: names are case-sensitive" "1" "$?"
+  approval_tool_allowed WebFetch "Bash"; eq "tools: others stay local" "1" "$?"
+  approval_tool_allowed WebFetch "*"; eq "tools: * allows any" "0" "$?"
+  approval_tool_allowed "" "*"; eq "tools: no tool name stays local" "1" "$?"
+  # NEVER_REMOTE: substring, case-insensitive, over the whole raw input.
+  approval_never_remote '{"command":"SUDO reboot"}' "sudo"; eq "never: case-insensitive" "0" "$?"
+  approval_never_remote '{"command":"cat ~\/.ssh\/key"}' "~/.ssh"; eq "never: matches behind JSON-escaped slashes" "0" "$?"
+  approval_never_remote '{"command":"ls","description":"uses sudo later"}' "sudo"; eq "never: a match in the description also stays local" "0" "$?"
+  approval_never_remote '{"command":"ls -la"}' "sudo, rm -rf"; eq "never: no match goes remote" "1" "$?"
+  approval_never_remote '{"command":"ls"}' " , "; eq "never: empty patterns match nothing" "1" "$?"
+  # Chat refs: only a chat on the approval SERVER is sent.
+  APPROVAL_SERVER=box
+  eq "chat: @alias/ns/path" "ns/Chats/a.md" "$(approval_chat_ref '@box/ns/Chats/a.md')"
+  eq "chat: quoted, as in a transcript" "ns/Chats/my room.md" "$(approval_chat_ref "'@box/ns/Chats/my room.md'")"
+  eq "chat: mdnest:// form" "ns/a.md" "$(approval_chat_ref 'mdnest://@box/ns/a.md')"
+  eq "chat: another server is dropped" "" "$(approval_chat_ref '@other/ns/a.md')"
+  eq "chat: not a note is dropped" "" "$(approval_chat_ref '@box/ns')"
+  eq "approval_field: reads a plain field" "s-1" "$(approval_field session_id '{"a":1, "session_id" : "s-1","x":"y"}')"
+  rm -rf "$d"
+}
+
 run_version_suite() {
   echo "── version comparison ──"
   gt() { version_gt "$1" "$2" && echo yes || echo no; }
@@ -716,6 +759,7 @@ run_unreachable_suite
 run_install_source_suite
 run_version_suite
 run_keepalive_suite
+run_approval_suite
 run_errexit_lint
 
 echo

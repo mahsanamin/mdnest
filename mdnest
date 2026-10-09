@@ -2130,6 +2130,300 @@ cmd_search() {
 
 # ─── Legacy compat: mdnest note <subcmd> <ns> <path> ───────────────────────
 
+# ─── Agent approvals (experimental; server: ENABLE_AGENT_APPROVALS) ─────────
+# `mdnest approval request` is an agent's PermissionRequest hook. It relays the
+# hook input to the server, waits for a person to press Allow or Deny in the
+# browser, and prints the server's answer verbatim. The agent shows its own
+# terminal prompt at the same time, so on ANY failure (no policy file, a tool
+# or command that must stay local, timeout, an expired or closed request, a
+# CLI the server finds too old, an unreachable server) it prints nothing and
+# exits 0: the terminal prompt answers, exactly as without the hook. It never
+# allows or denies on its own. No python3 or jq needed.
+
+APPROVALS_CONF="${HOME}/.mdnest/approvals.conf"
+
+approval_usage() {
+  cat >&2 <<'USAGE'
+Usage:
+  mdnest approval request [--agent claude-code|codex] [--chat @alias/ns/path] [--timeout N]
+      The agent's PermissionRequest hook: reads the hook input on stdin.
+  mdnest approval done
+      The agent's PostToolUse and Stop hook: closes requests answered in the terminal.
+  mdnest approval hook-config claude-code|codex
+      Prints the hook settings to use.
+
+Needs ~/.mdnest/approvals.conf on this machine (without it nothing is sent):
+  SERVER=@myserver
+  MACHINE_LABEL=build-box
+  TOOLS=Bash
+  NEVER_REMOTE=sudo,rm -rf,.ssh,credentials
+  MAX_WAIT=540
+USAGE
+}
+
+# approval_policy_load: reads ~/.mdnest/approvals.conf into APPROVAL_* vars.
+# Plain KEY=value lines, read as data and never sourced, so the file cannot
+# run code. Returns 1 when there is no file (forward nothing) or no SERVER.
+approval_policy_load() {
+  APPROVAL_SERVER="" APPROVAL_MACHINE="" APPROVAL_TOOLS="Bash" APPROVAL_NEVER="" APPROVAL_MAX_WAIT=""
+  [ -r "$APPROVALS_CONF" ] || return 1
+  local line key value
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    case "$line" in ''|'#'*) continue ;; esac
+    [[ "$line" == *=* ]] || continue
+    key="${line%%=*}"; value="${line#*=}"
+    key="${key//[[:space:]]/}"
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+    if [ "${#value}" -ge 2 ]; then
+      case "$value" in \"*\"|\'*\') value="${value:1:${#value}-2}" ;; esac
+    fi
+    case "$key" in
+      SERVER)        APPROVAL_SERVER="${value#@}" ;;
+      MACHINE_LABEL) APPROVAL_MACHINE="$value" ;;
+      TOOLS)         APPROVAL_TOOLS="$value" ;;
+      NEVER_REMOTE)  APPROVAL_NEVER="$value" ;;
+      MAX_WAIT)      APPROVAL_MAX_WAIT="$value" ;;
+    esac
+  done < "$APPROVALS_CONF"
+  [ -n "$APPROVAL_SERVER" ] || return 1
+  return 0
+}
+
+# approval_tool_allowed <tool> <comma list>: exact, case-sensitive tool
+# names, or `*` for any tool.
+approval_tool_allowed() {
+  local tool="$1" item items=()
+  [ -n "$tool" ] || return 1
+  # read -a, not an unquoted `for item in $list`: that would glob, and turn
+  # TOOLS=* into the names of the files in the current directory.
+  IFS=',' read -r -a items <<< "$2" || true
+  for item in "${items[@]}"; do
+    item="${item#"${item%%[![:space:]]*}"}"
+    item="${item%"${item##*[![:space:]]}"}"
+    if [ "$item" = "*" ] || [ "$item" = "$tool" ]; then return 0; fi
+  done
+  return 1
+}
+
+# approval_never_remote <hook input> <comma list>: true when any pattern
+# appears in the input, case-insensitively. Matched against the WHOLE raw
+# input (the CLI does not parse JSON), so a pattern that only shows up in the
+# agent's description also keeps the question in the terminal. That errs on
+# the side the terminal is already on.
+approval_never_remote() {
+  local hay list item items=() esc='\/' slash='/'
+  # JSON may write / as \/. Quoted variables keep both sides literal on
+  # every bash (a backslash in a replacement string differs between versions).
+  hay="${1//"$esc"/$slash}"
+  hay=$(printf '%s' "$hay" | tr '[:upper:]' '[:lower:]') || hay=""
+  list=$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]') || list=""
+  IFS=',' read -r -a items <<< "$list" || true
+  for item in "${items[@]}"; do
+    item="${item#"${item%%[![:space:]]*}"}"
+    item="${item%"${item##*[![:space:]]}"}"
+    [ -n "$item" ] || continue
+    case "$hay" in *"$item"*) return 0 ;; esac
+  done
+  return 1
+}
+
+# approval_chat_ref <target>: turns a chat target ("@alias/ns/path",
+# "'@alias/ns/path'", "mdnest://...", or "ns/path" on the default server) into
+# "ns/path" when it is on the approval SERVER, else prints nothing.
+approval_chat_ref() {
+  local t="$1" alias="" def=""
+  t="${t#\'}"; t="${t%\'}"
+  t="${t#mdnest://}"
+  if [[ "$t" == @* ]]; then
+    alias="${t#@}"; alias="${alias%%/*}"
+    [[ "$t" == */* ]] || return 0
+    t="${t#*/}"
+  else
+    [ -f "$DEFAULT_FILE" ] && { def=$(cat "$DEFAULT_FILE" 2>/dev/null) || def=""; }
+    alias="$def"
+  fi
+  [ "$alias" = "$APPROVAL_SERVER" ] || return 0
+  [[ "$t" == */*.md ]] || return 0
+  printf '%s' "$t"
+  return 0
+}
+
+# approval_field <name> <json>: one top-level string field, pure bash first
+# (the hook input is a flat object and the fields read here are plain ids),
+# json_top_string as the fallback.
+approval_field() {
+  local out
+  out=$(printf '%s' "$2" | grep -oE "\"$1\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" | head -n 1 | sed -E 's/^.*:[[:space:]]*"(.*)"$/\1/') || out=""
+  if [ -z "$out" ]; then
+    out=$(printf '%s' "$2" | json_top_string "$1") || out=""
+  fi
+  printf '%s' "$out"
+  return 0
+}
+
+APPROVAL_TMP=""
+approval_cleanup() {
+  [ -n "$APPROVAL_TMP" ] && rm -rf "$APPROVAL_TMP"
+  [ -n "${APPROVAL_MARKER:-}" ] && rm -f "$APPROVAL_MARKER"
+  return 0
+}
+
+cmd_approval_request() {
+  local agent="claude-code" chat_arg="" timeout=540
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --agent)   agent="${2:-}"; shift 2 2>/dev/null || shift ;;
+      --agent=*) agent="${1#*=}"; shift ;;
+      --chat)    chat_arg="${2:-}"; shift 2 2>/dev/null || shift ;;
+      --chat=*)  chat_arg="${1#*=}"; shift ;;
+      --timeout) timeout="${2:-}"; shift 2 2>/dev/null || shift ;;
+      --timeout=*) timeout="${1#*=}"; shift ;;
+      *) shift ;;
+    esac
+  done
+  case "$timeout" in ''|*[!0-9]*) timeout=540 ;; esac
+
+  # The hook input, kept byte for byte (the sentinel keeps a final newline).
+  local input
+  input=$(cat 2>/dev/null; printf 'X') || input="X"
+  input="${input%X}"
+
+  approval_policy_load || return 0
+  case "$APPROVAL_MAX_WAIT" in ''|*[!0-9]*) ;; *) [ "$APPROVAL_MAX_WAIT" -lt "$timeout" ] && timeout="$APPROVAL_MAX_WAIT" ;; esac
+  [ "$timeout" -gt 0 ] || return 0
+
+  local tool
+  tool=$(approval_field tool_name "$input") || tool=""
+  approval_tool_allowed "$tool" "$APPROVAL_TOOLS" || return 0
+  if [ -n "$APPROVAL_NEVER" ] && approval_never_remote "$input" "$APPROVAL_NEVER"; then return 0; fi
+
+  load_server "$APPROVAL_SERVER" || return 0
+  [ -n "$MDNEST_URL" ] && [ -n "$MDNEST_TOKEN" ] || return 0
+
+  # The chat this agent is in: --chat, else the last `mdnest chat wait` in
+  # the session's transcript (the same rule as chat keepalive).
+  local chat="" transcript found
+  if [ -n "$chat_arg" ]; then
+    chat=$(approval_chat_ref "$chat_arg") || chat=""
+  else
+    transcript=$(approval_field transcript_path "$input") || transcript=""
+    [ -n "$transcript" ] || { transcript=$(approval_field rollout_path "$input") || transcript=""; }
+    local esc='\/' slash='/'
+    transcript="${transcript//"$esc"/$slash}"
+    if [ -n "$transcript" ] && [ -r "$transcript" ]; then
+      found=$(chat_keepalive_target "$transcript") || found=""
+      [ -n "$found" ] && { chat=$(approval_chat_ref "${found%%$'\t'*}") || chat=""; }
+    fi
+  fi
+
+  local machine="${APPROVAL_MACHINE}"
+  [ -n "$machine" ] || { machine=$(hostname -s 2>/dev/null) || machine=""; }
+
+  APPROVAL_TMP=$(mktemp -d "${TMPDIR:-/tmp}/mdnest-approval.XXXXXX" 2>/dev/null) || return 0
+  trap approval_cleanup EXIT
+  trap 'approval_cleanup; exit 0' INT TERM HUP
+
+  local qs code id
+  qs="agent=$(urlencode "$agent")&cli=$(urlencode "$MDNEST_CLI_VERSION")&ttl=$((timeout + 60))&machine=$(urlencode "$machine")"
+  [ -n "$chat" ] && qs="$qs&chat=$(urlencode "$chat")"
+  code=$(printf '%s' "$input" | curl -s -o "$APPROVAL_TMP/created" -w '%{http_code}' \
+      --connect-timeout "${MDNEST_TIMEOUT:-10}" --max-time 30 \
+      -H "Authorization: Bearer $MDNEST_TOKEN" -H "Content-Type: application/json" \
+      --data-binary @- -X POST "${MDNEST_URL}/api/approvals?${qs}" 2>/dev/null) || return 0
+  [ "$code" = "201" ] || return 0
+  id=$(approval_field id "$(cat "$APPROVAL_TMP/created" 2>/dev/null)") || id=""
+  [[ "$id" =~ ^[0-9a-f]{32}$ ]] || return 0
+
+  # A marker per open request, so `approval done` only calls the server
+  # while this session has something waiting.
+  local sid state_dir
+  sid=$(approval_field session_id "$input") || sid=""
+  if [ -n "$sid" ]; then
+    state_dir="${TMPDIR:-/tmp}/mdnest-approvals"
+    mkdir -p "$state_dir" 2>/dev/null || true
+    APPROVAL_MARKER="$state_dir/${sid//[^A-Za-z0-9_-]/_}.$id"
+    : > "$APPROVAL_MARKER" 2>/dev/null || APPROVAL_MARKER=""
+  fi
+
+  local deadline=$((SECONDS + timeout)) left
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    left=$((deadline - SECONDS))
+    code=$(curl -s -o "$APPROVAL_TMP/answer" -w '%{http_code}' \
+        --connect-timeout "${MDNEST_TIMEOUT:-10}" --max-time $((left < 60 ? left + 1 : 60)) \
+        -H "Authorization: Bearer $MDNEST_TOKEN" \
+        "${MDNEST_URL}/api/approvals/${id}/wait" 2>/dev/null) || return 0
+    case "$code" in
+      200) cat "$APPROVAL_TMP/answer" 2>/dev/null || true; return 0 ;;
+      204) continue ;;
+      *)   return 0 ;;
+    esac
+  done
+  return 0
+}
+
+# approval done: PostToolUse and Stop hook. Closes this session's requests
+# that were answered in the terminal, so their cards stop asking. Quiet and
+# fast: it calls the server only while a request of this session is open.
+cmd_approval_done() {
+  local input sid state_dir
+  input=$(cat 2>/dev/null; printf 'X') || input="X"
+  input="${input%X}"
+  approval_policy_load || return 0
+  sid=$(approval_field session_id "$input") || sid=""
+  [ -n "$sid" ] || return 0
+  state_dir="${TMPDIR:-/tmp}/mdnest-approvals"
+  compgen -G "$state_dir/${sid//[^A-Za-z0-9_-]/_}.*" >/dev/null 2>&1 || return 0
+  load_server "$APPROVAL_SERVER" || return 0
+  [ -n "$MDNEST_URL" ] && [ -n "$MDNEST_TOKEN" ] || return 0
+  printf '%s' "$input" | curl -s -o /dev/null --connect-timeout "${MDNEST_TIMEOUT:-10}" --max-time 10 \
+      -H "Authorization: Bearer $MDNEST_TOKEN" -H "Content-Type: application/json" \
+      --data-binary @- -X POST "${MDNEST_URL}/api/approvals/close?session=$(urlencode "$sid")" >/dev/null 2>&1 || true
+  return 0
+}
+
+cmd_approval_hook_config() {
+  local agent="${1:-}"
+  case "$agent" in
+    claude-code|codex) ;;
+    *) approval_usage; return 1 ;;
+  esac
+  cat <<CONFIG
+{
+  "hooks": {
+    "PermissionRequest": [
+      { "hooks": [{ "type": "command", "command": "mdnest approval request --agent $agent", "timeout": 600 }] }
+    ],
+    "PostToolUse": [
+      { "hooks": [{ "type": "command", "command": "mdnest approval done", "timeout": 15 }] }
+    ],
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "mdnest approval done", "timeout": 15 }] }
+    ]
+  }
+}
+CONFIG
+  if [ "$agent" = "claude-code" ]; then
+    echo "Save this as approvals.json and start one session with it: claude --settings approvals.json" >&2
+  else
+    echo "Merge this into ~/.codex/hooks.json, start codex, and trust the hook once when Codex asks." >&2
+  fi
+  [ -r "$APPROVALS_CONF" ] || echo "Then create ~/.mdnest/approvals.conf (see: mdnest approval). Without it nothing is sent." >&2
+  return 0
+}
+
+cmd_approval() {
+  local sub="${1:-}"
+  shift 2>/dev/null || true
+  case "$sub" in
+    request)     cmd_approval_request "$@" || true; return 0 ;;
+    done)        cmd_approval_done "$@" || true; return 0 ;;
+    hook-config) cmd_approval_hook_config "$@" ;;
+    *) approval_usage; return 1 ;;
+  esac
+}
+
 cmd_note_legacy() {
   local subcmd="${1:-help}"
   shift 2>/dev/null || true
@@ -2220,6 +2514,8 @@ NOTE OPERATIONS
            post <path> <text|-> --as NAME   read <path> --as NAME
            wait <path> --as NAME [--mentions] [--timeout S]   new <path> ["Title"]
            status <path> "doing X" --as NAME   (a quiet working line; --clear)
+  approval request|done|hook-config  Answer an agent's permission prompt from mdnest (experimental,
+           server: ENABLE_AGENT_APPROVALS; needs ~/.mdnest/approvals.conf on this machine)
 
 OTHER
   version                         Show CLI version
@@ -2277,7 +2573,11 @@ EXAMPLES
   mdnest chat status @work/engineering/Chats/release.md "running the migration" --as api-agent
   mdnest chat leave @work/engineering/Chats/release.md --as api-agent
 
-  # List — a tree for humans, --json for scripts
+  # Agent approvals: print the hook settings, then use them for one session
+  mdnest approval hook-config claude-code > approvals.json
+  claude --settings approvals.json
+  mdnest approval hook-config codex
+
   mdnest list @work/engineering
   mdnest list @work/engineering/Architecture      # scoped to one folder
   mdnest list --json @work/engineering            # raw API JSON
@@ -2302,7 +2602,8 @@ shift 2>/dev/null || true
 # $(...) subshells so a guard flag set there can't reach the parent. Skip for
 # commands that neither parse nor encode (help/version/docs/logout).
 case "$CMD" in
-  help|--help|-h|version|--version|docs|logout) ;;
+  # approval runs as an agent hook: its output is read by the agent, so it stays silent.
+  help|--help|-h|version|--version|docs|logout|approval) ;;
   *) warn_no_parser ;;
 esac
 
@@ -2327,6 +2628,7 @@ case "$CMD" in
   search)   load_default; warn_if_default_alias; cmd_search "$@" ;;
   chat)
     if [ "${1:-}" = "keepalive" ]; then cmd_chat_keepalive; else load_default; warn_if_default_alias; cmd_chat "$@"; fi ;;
+  approval) cmd_approval "$@" ;;
   note)     cmd_note_legacy "$@" ;;
   version|--version|-v) echo "mdnest CLI v${MDNEST_CLI_VERSION}" ;;
   docs)

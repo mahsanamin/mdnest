@@ -6883,3 +6883,91 @@ pre:hover .code-copy-btn {
   .toolbar .toolbar-chats-back { display: none; }
 }
 
+
+/* ── Agent approvals (experimental) ─────────────────────────────────────
+   The card is used in a chat message and in the approvals list, so it lives
+   here rather than in the lazily loaded ChatView.css. Tokens only. */
+.approvals-badge {
+  flex: 0 0 auto;
+  border: 1px solid var(--warning);
+  background: var(--warning-wash);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  padding: 1px 6px;
+  margin-right: 6px;
+  cursor: pointer;
+}
+.approvals-badge:hover { background: var(--warning-wash-3); }
+.modal.approvals-panel { width: 560px; max-height: 85vh; overflow-y: auto; }
+.approvals-list { display: flex; flex-direction: column; gap: var(--space-3); }
+.approvals-empty { color: var(--text-muted); }
+.approvals-notify {
+  margin-top: var(--space-3);
+  background: none;
+  border: 1px dashed var(--border-strong);
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  cursor: pointer;
+}
+.approval-card {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--warning);
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-3);
+  color: var(--text);
+  font-size: 0.9rem;
+}
+.approval-card.allowed { border-left-color: var(--success); }
+.approval-card.denied { border-left-color: var(--danger); }
+.approval-card.expired,
+.approval-card.closed,
+.approval-card.gone,
+.approval-card.loading { border-left-color: var(--border-strong); color: var(--text-muted); }
+.approval-card-head { display: flex; flex-wrap: wrap; gap: 0.35em; margin-bottom: var(--space-1); }
+.approval-card-machine { color: var(--text); }
+.approval-card-ask { color: var(--text-muted); }
+.approval-card-command {
+  margin: 0 0 var(--space-2);
+  padding: var(--space-2);
+  background: var(--bg-deep);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 16em;
+  overflow-y: auto;
+}
+.approval-card-command code { font-size: 0.85rem; color: var(--text); background: none; }
+.approval-card-desc { color: var(--text-secondary); margin-bottom: var(--space-1); }
+.approval-card-desc-label { color: var(--text-muted); font-style: italic; }
+.approval-card-cwd { color: var(--text-muted); font-size: 0.8rem; margin-bottom: var(--space-2); }
+.approval-card-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.approval-card-actions button,
+.approval-card-reason button {
+  border-radius: var(--radius-sm);
+  padding: 4px 12px;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+}
+.approval-card-actions .approval-allow { background: var(--success); border-color: var(--success); color: var(--text-inverse-deep); }
+.approval-card-actions .approval-deny,
+.approval-card-reason .approval-deny { background: var(--danger); border-color: var(--danger); color: var(--text-inverse-deep); }
+.approval-card-actions button:disabled { opacity: 0.6; cursor: default; }
+.approval-card-reason { display: flex; flex: 1 1 100%; gap: var(--space-2); }
+.approval-card-reason input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+}
+.approval-card-error { color: var(--danger); flex: 1 1 100%; }
+.approval-card-state { color: var(--text-secondary); }
+.chat-approval { display: flex; flex-direction: column; gap: var(--space-2); }

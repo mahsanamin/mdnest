@@ -237,6 +237,121 @@ session that was closed.
 Plain `mdnest append` also works if an agent writes the header line itself,
 but `chat post` stamps the author and time for you.
 
+## Agent approvals *(experimental, off by default)*
+
+An agent running unattended stops when it needs permission for a command,
+and the question waits in a terminal nobody is looking at. With agent
+approvals on, the question also shows up in mdnest. You press Allow or Deny
+in the browser (or on your phone), and the agent continues.
+
+Three things all have to be on, and each is off by default:
+
+1. **The server.** `ENABLE_AGENT_APPROVALS=true` in `mdnest.conf`. Without it
+   the endpoints do not exist.
+2. **The machine.** The agent's permission hook runs
+   `mdnest approval request`, and the machine has a policy file at
+   `~/.mdnest/approvals.conf`. Without the file the hook sends nothing.
+3. **The session.** You can turn the hook on for one run only, so a machine
+   can use it for one unattended agent and keep it off for your own work.
+
+Your agent's own rules still come first: anything its settings deny stays
+denied, and the hook only sees questions the agent was going to ask you
+anyway.
+
+### What happens
+
+The agent shows its normal terminal prompt and runs the hook at the same
+time. The hook sends the question to mdnest and waits. Whichever answers
+first wins: Allow or Deny in mdnest, or you in the terminal. If mdnest is
+unreachable, the request expires, or anything else goes wrong, the hook
+prints nothing and the terminal prompt answers, exactly as without the hook.
+The hook never allows or denies anything by itself.
+
+If the agent is in a chat (its last `mdnest chat wait`), the question shows
+as a card in that chat. Otherwise it shows in the approvals list: a
+"N waiting" badge in the sidebar footer opens it. While an mdnest tab is
+open, the tab title shows the count, for example `(1) mdnest`, and if you
+allowed browser notifications (the approvals list offers it) each new
+request raises one.
+
+The card shows which machine and which agent ask, the exact command, and,
+labelled as such, the agent's own description of it. Approve the command,
+not the description: the model writes the description and it can say
+anything. Characters that could make the command look different from what
+runs (invisible, right-to-left, or unusual spaces) are shown as escapes such
+as `\u{202E}`. Deny with a reason sends your text to the agent, which reads
+it word for word.
+
+The message in the chat holds only a marker and a line such as "Claude Code
+on build-box is waiting for approval". The command is never written into the
+chat note, because a chat is a file every member reads and git keeps. Only
+the account the agent runs as sees the command and the buttons.
+
+### Set up the machine
+
+Update the CLI first (`mdnest update`); the `approval` command needs 4.8.5
+or newer, and an older CLI is refused by the server.
+
+Write `~/.mdnest/approvals.conf`:
+
+```
+SERVER=@myserver
+MACHINE_LABEL=build-box
+TOOLS=Bash
+NEVER_REMOTE=sudo,rm -rf,.ssh,credentials
+MAX_WAIT=540
+```
+
+| Key | Meaning |
+|---|---|
+| `SERVER` | which mdnest server (CLI alias) may answer for this machine. Required. |
+| `MACHINE_LABEL` | the name shown on the card. Defaults to the host name. |
+| `TOOLS` | comma-separated tool names that may be sent, e.g. `Bash,Write`. `*` sends any. Default `Bash`. |
+| `NEVER_REMOTE` | comma-separated text that keeps a question in the terminal when it appears anywhere in the hook input (case-insensitive). |
+| `MAX_WAIT` | the longest the hook waits, in seconds. Default 540. |
+
+The file is read as plain `KEY=value` data and never run.
+
+### Claude Code
+
+Print the settings and start one session with them:
+
+```bash
+mdnest approval hook-config claude-code > approvals.json
+claude --settings approvals.json
+```
+
+They set `mdnest approval request --agent claude-code` as the
+`PermissionRequest` hook (600 second timeout), and `mdnest approval done` as
+the `PostToolUse` and `Stop` hooks. `approval done` is what turns a card into
+"answered in the terminal" when you answered there first, so the card does
+not keep asking. To use it in every session, merge the same `hooks` block
+into your Claude Code settings instead.
+
+### Codex
+
+```bash
+mdnest approval hook-config codex
+```
+
+Merge the printed `hooks` block into `~/.codex/hooks.json`, or pass it with
+`-c` flags for one session. Codex asks you once to trust a new or changed
+hook before it runs it; answer that in the terminal. `codex exec` never asks
+for permission, so the hook never runs there.
+
+### What it does not cover
+
+- Claude Code auto-mode refusals. Use the `autoMode` rules in Claude Code's
+  settings for agents that should run hands-off.
+- The "trust this folder" screen and Codex's "trust this hook" screen.
+- Only the account the agent runs as can approve. Approving someone else's
+  agent in a shared chat is not supported yet.
+- No "always allow": one press approves one command.
+
+Requests live in the server's memory for at most 60 minutes (10 by default).
+A restart drops pending ones, and the agent falls back to its terminal
+prompt. The risk this adds is described in [security.md](security.md).
+
 ## Images, avatars and reactions
 
 - **React by name**: `![nod](gif:nod)`. A set of animated reactions ships

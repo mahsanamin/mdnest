@@ -81,8 +81,12 @@ func (a *AuthMiddleware) Wrap(next http.Handler) http.Handler {
 						http.Error(w, `{"error":"this API token has no owner; create a new one in Settings → API Tokens"}`, http.StatusUnauthorized)
 						return
 					}
-					r = WithUser(r, uc)
+					// Copy before marking: the resolver may hand out a shared value.
+					tokenUser := *uc
+					tokenUser.ViaAPIToken = true
+					r = WithUser(r, &tokenUser)
 				}
+				r = withAPIToken(r)
 				next.ServeHTTP(w, r)
 				return
 			}

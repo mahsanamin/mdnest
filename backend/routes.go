@@ -33,6 +33,7 @@ type contentRoutes struct {
 	sync        *handlers.SyncHandler
 	ws          *handlers.WSHandler // nil unless live collab is on
 	restart     *handlers.RestartHandler
+	approvals   *handlers.ApprovalHandler // nil unless ENABLE_AGENT_APPROVALS
 }
 
 func registerContentRoutes(mux *http.ServeMux, c contentRoutes) {
@@ -161,6 +162,14 @@ func registerContentRoutes(mux *http.ServeMux, c contentRoutes) {
 			mux.HandleFunc(handlers.BuiltinGifRoute, handlers.HandleBuiltinGif)
 		}
 		mux.Handle("/api/files/", auth(http.HandlerFunc(c.upload.HandleServeFile)))
+	}
+
+	// Agent approvals: not scoped to a namespace, so no namespace guard. The
+	// handler serves each account only its own requests, and refuses a
+	// decision made with an API token (handlers/approvals.go).
+	if c.approvals != nil {
+		mux.Handle("/api/approvals", auth(http.HandlerFunc(c.approvals.Handle)))
+		mux.Handle("/api/approvals/", auth(http.HandlerFunc(c.approvals.Handle)))
 	}
 
 	// Git sync endpoints (admin-only in multi mode, always allowed in single)
