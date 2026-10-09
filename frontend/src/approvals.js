@@ -43,20 +43,41 @@ export function notificationText(a) {
   return `${who} ${a.questions ? 'has a question' : 'is waiting for approval'}`;
 }
 
-// shortPath shows a file the agent touches the way a person reads it: relative
-// to the agent's folder when it is inside it, else with the home folder as ~.
+// shortPath shows a file the agent touches the way a person reads it:
+// relative to the agent's folder when it is inside it, else with the agent's
+// own home folder as ~. It never hides anything that changes where the file
+// is: a path with a "." or ".." segment, an empty segment, or a backslash is
+// shown in full, and only the home folder the agent's own cwd is in becomes ~
+// (another user's home stays spelled out).
+export function hasTrickySegments(path) {
+  const p = String(path || '');
+  return /\\/.test(p) || p.split('/').slice(1).some((seg) => seg === '' || seg === '.' || seg === '..');
+}
+
+export function homeOf(cwd) {
+  const m = /^\/(?:Users|home)\/[^/]+/.exec(String(cwd || ''));
+  return m && !hasTrickySegments(m[0]) ? m[0] : '';
+}
+
 export function shortPath(path, cwd) {
   const p = String(path || '');
+  if (!p.startsWith('/') || hasTrickySegments(p)) return p;
   const c = String(cwd || '').replace(/\/+$/, '');
-  if (c && p.startsWith(c + '/')) return p.slice(c.length + 1);
-  return tildePath(p);
+  if (c && !hasTrickySegments(c) && p.startsWith(c + '/')) return p.slice(c.length + 1);
+  return tildePath(p, cwd);
 }
 
-export function tildePath(path) {
-  return String(path || '').replace(/^\/(Users|home)\/[^/]+(?=\/|$)/, '~');
+export function tildePath(path, cwd) {
+  const p = String(path || '');
+  const home = homeOf(cwd);
+  if (!home || hasTrickySegments(p)) return p;
+  if (p === home) return '~';
+  return p.startsWith(home + '/') ? '~' + p.slice(home.length) : p;
 }
 
-// middleEllipsis keeps both ends of a long path readable on a narrow screen.
+// middleEllipsis keeps both ends of a long text readable on a narrow screen.
+// Only for context (the folder the agent runs in), never for what is being
+// approved: the approved path is shown whole and wraps.
 export function middleEllipsis(s, max = 48) {
   const t = String(s || '');
   if (t.length <= max) return t;

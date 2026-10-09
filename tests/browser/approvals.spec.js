@@ -232,7 +232,7 @@ test.describe('agent approvals', () => {
     await expect(body).toContainText('line 40');
     await expect(body).not.toContainText('line 41');
     await expect(body).not.toContainText('file_path');
-    await card.getByRole('button', { name: '5 more lines' }).click();
+    await card.getByRole('button', { name: '5 more lines not shown' }).click();
     await expect(body).toContainText('line 45');
     await card.getByRole('button', { name: 'src/deep/notes.txt' }).click();
     await expect(card).toContainText('/Users/pat/repo/src/deep/notes.txt');

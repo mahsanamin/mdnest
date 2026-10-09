@@ -27,19 +27,23 @@ function Expandable({ text, className, testId }) {
       <pre className={className} data-testid={testId}><code>{open ? text : shown}</code></pre>
       {more > 0 && (
         <button type="button" className="approval-card-more" onClick={() => setOpen(!open)}>
-          {open ? 'Show less' : `${more} more line${more === 1 ? '' : 's'}`}
+          {open ? 'Show less' : `${more} more line${more === 1 ? '' : 's'} not shown`}
         </button>
       )}
     </>
   );
 }
 
-// A path or folder: shortened, the full value one tap away.
-function PathLine({ full, short, className }) {
+// A path or folder, shortened (see shortPath: never in a way that changes
+// where it points), the full value one tap away. `ellipsis` cuts the middle on
+// a narrow screen and is only used for context (the agent's folder), never
+// for the file being approved, which wraps instead.
+function PathLine({ full, short, ellipsis }) {
   const [open, setOpen] = useState(false);
+  const shown = open ? full : (ellipsis ? middleEllipsis(short) : short);
   return (
-    <button type="button" className={`approval-card-path ${className || ''}`} title={full} onClick={() => setOpen(!open)}>
-      <code>{open ? full : middleEllipsis(short)}</code>
+    <button type="button" className="approval-card-path" title={full} onClick={() => setOpen(!open)}>
+      <code>{shown}</code>
     </button>
   );
 }
@@ -191,7 +195,7 @@ function ApprovalCard({ id, initial, onDecided }) {
           <span className="approval-card-desc-label">The agent describes it as:</span> {a.description}
         </div>
       )}
-      {a.cwd && <div className="approval-card-cwd">in <PathLine full={a.cwd} short={tildePath(a.cwd)} /></div>}
+      {a.cwd && <div className="approval-card-cwd">in <PathLine full={a.cwd} short={tildePath(a.cwd, a.cwd)} ellipsis /></div>}
       {a.state === 'pending' ? (
         <div className="approval-card-actions">
           {isQuestion && !asking && <QuestionForm a={a} busy={busy} onAnswer={(answers) => decide('answer', answers)} />}

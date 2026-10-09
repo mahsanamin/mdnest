@@ -52,12 +52,24 @@ describe('card state text', () => {
 import { shortPath, tildePath, middleEllipsis, firstLines, answersComplete, toggleChoice } from '../approvals.js';
 
 describe('paths on the card', () => {
-  it('is relative inside the agent folder, ~ outside it', () => {
-    expect(shortPath('/Users/pat/repo/src/a.go', '/Users/pat/repo')).toBe('src/a.go');
-    expect(shortPath('/Users/pat/other/a.go', '/Users/pat/repo')).toBe('~/other/a.go');
-    expect(shortPath('/home/pat/x', '')).toBe('~/x');
-    expect(shortPath('/etc/hosts', '/Users/pat/repo')).toBe('/etc/hosts');
-    expect(tildePath('/Users/pat')).toBe('~');
+  const cwd = '/Users/pat/repo';
+  it('is relative inside the agent folder, ~ for the agent\'s own home', () => {
+    expect(shortPath('/Users/pat/repo/src/a.go', cwd)).toBe('src/a.go');
+    expect(shortPath('/Users/pat/other/a.go', cwd)).toBe('~/other/a.go');
+    expect(shortPath('/etc/hosts', cwd)).toBe('/etc/hosts');
+    expect(tildePath('/Users/pat', cwd)).toBe('~');
+  });
+  it('never shortens in a way that changes where the path points', () => {
+    // Another user's home is not "~".
+    expect(shortPath('/Users/admin/.ssh/authorized_keys', cwd)).toBe('/Users/admin/.ssh/authorized_keys');
+    // A dot segment is shown whole, inside the folder or out.
+    expect(shortPath('/Users/pat/repo/../../admin/.ssh/x', cwd)).toBe('/Users/pat/repo/../../admin/.ssh/x');
+    expect(shortPath('/home/../etc/passwd', '/home/pat')).toBe('/home/../etc/passwd');
+    expect(shortPath('/Users/pat/repo//x', cwd)).toBe('/Users/pat/repo//x');
+    expect(shortPath('/Users/pat/repo/./x', cwd)).toBe('/Users/pat/repo/./x');
+    // Without a known home nothing becomes ~.
+    expect(shortPath('/home/pat/x', '')).toBe('/home/pat/x');
+    expect(shortPath('relative/x', cwd)).toBe('relative/x');
   });
   it('keeps both ends of a long path', () => {
     const s = middleEllipsis('a'.repeat(30) + 'b'.repeat(30), 21);
