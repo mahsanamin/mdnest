@@ -306,7 +306,7 @@ mdnest approval hook-config codex                            # the same for Code
 
 `approval request [--agent claude-code|codex] [--chat @alias/ns/path] [--timeout N]`
 is the `PermissionRequest` hook. It reads the hook input on stdin, sends it
-unchanged to the server named in `~/.mdnest/approvals.conf`, waits for a
+unchanged to the server named in `~/.config/mdnest/approvals.conf`, waits for a
 decision (540 seconds by default, never longer than `MAX_WAIT`), and prints
 the server's answer exactly as received. On any failure (no policy file, a
 tool not in `TOOLS`, a `NEVER_REMOTE` match, a timeout, an expired request,

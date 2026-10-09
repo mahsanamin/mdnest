@@ -250,7 +250,7 @@ Three things all have to be on, and each is off by default:
    the endpoints do not exist.
 2. **The machine.** The agent's permission hook runs
    `mdnest approval request`, and the machine has a policy file at
-   `~/.mdnest/approvals.conf`. Without the file the hook sends nothing.
+   `~/.config/mdnest/approvals.conf`. Without the file the hook sends nothing.
 3. **The session.** You can turn the hook on for one run only, so a machine
    can use it for one unattended agent and keep it off for your own work.
 
@@ -292,7 +292,7 @@ the account the agent runs as sees the command and the buttons.
 Update the CLI first (`mdnest update`); the `approval` command needs 4.8.5
 or newer, and an older CLI is refused by the server.
 
-Write `~/.mdnest/approvals.conf`:
+Write `~/.config/mdnest/approvals.conf`:
 
 ```
 SERVER=@myserver
