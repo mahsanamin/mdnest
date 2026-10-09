@@ -1500,7 +1500,13 @@ cmd_chat_keepalive() {
         if [ $(( now - t )) -lt "${MDNEST_KEEPALIVE_WINDOW:-120}" ]; then recent="$recent $t"; n=$((n + 1)); fi
       done
     fi
-    if [ "$n" -ge 3 ]; then rm -f "$state"; return 0; fi
+    if [ "$n" -ge 3 ]; then
+      rm -f "$state"
+      # Letting a chat agent stop: tell the owner, through the approvals
+      # list and the chat (only when this machine opted in to approvals).
+      ( printf '%s' "$input" | cmd_approval_notify --type stopped --chat "${found%%$'\t'*}" --as "${found#*$'\t'}" ) >/dev/null 2>&1 || true
+      return 0
+    fi
     printf '%s %s\n' "$recent" "$now" > "$state" 2>/dev/null || true
   fi
   target="${found%%$'\t'*}"
@@ -2149,6 +2155,8 @@ Usage:
       The agent's PermissionRequest hook: reads the hook input on stdin.
   mdnest approval done
       The agent's PostToolUse and Stop hook: closes requests answered in the terminal.
+  mdnest approval notify [--agent claude-code|codex] [--chat @alias/ns/path] [--as NAME]
+      The agent's Notification hook: tells mdnest the agent is waiting in its terminal.
   mdnest approval hook-config claude-code|codex
       Prints the hook settings to use.
 
@@ -2158,6 +2166,7 @@ Needs ~/.config/mdnest/approvals.conf on this machine (without it nothing is sen
   TOOLS=Bash
   NEVER_REMOTE=sudo,rm -rf,.ssh,credentials
   MAX_WAIT=540
+  QUESTIONS=yes
 USAGE
 }
 
@@ -2165,7 +2174,7 @@ USAGE
 # Plain KEY=value lines, read as data and never sourced, so the file cannot
 # run code. Returns 1 when there is no file (forward nothing) or no SERVER.
 approval_policy_load() {
-  APPROVAL_SERVER="" APPROVAL_MACHINE="" APPROVAL_TOOLS="Bash" APPROVAL_NEVER="" APPROVAL_MAX_WAIT=""
+  APPROVAL_SERVER="" APPROVAL_MACHINE="" APPROVAL_TOOLS="Bash" APPROVAL_NEVER="" APPROVAL_MAX_WAIT="" APPROVAL_QUESTIONS="yes"
   [ -r "$APPROVALS_CONF" ] || return 1
   local line key value
   while IFS= read -r line || [ -n "$line" ]; do
@@ -2185,6 +2194,7 @@ approval_policy_load() {
       TOOLS)         APPROVAL_TOOLS="$value" ;;
       NEVER_REMOTE)  APPROVAL_NEVER="$value" ;;
       MAX_WAIT)      APPROVAL_MAX_WAIT="$value" ;;
+      QUESTIONS)     APPROVAL_QUESTIONS="$value" ;;
     esac
   done < "$APPROVALS_CONF"
   [ -n "$APPROVAL_SERVER" ] || return 1
@@ -2263,6 +2273,34 @@ approval_field() {
   return 0
 }
 
+# approval_context <hook input> <--chat value> <--as value>: sets
+# APPROVAL_CHAT (ns/path on the approval server, or empty), APPROVAL_AS (the
+# agent's chat name, or empty) and APPROVAL_MACHINE_NAME. The chat and the
+# name come from the flags, else from the last `mdnest chat wait` in the
+# session's transcript, the same rule chat keepalive uses.
+approval_context() {
+  local input="$1" chat_arg="$2" as_arg="$3" transcript found=""
+  APPROVAL_CHAT="" APPROVAL_AS="$as_arg"
+  transcript=$(approval_field transcript_path "$input") || transcript=""
+  [ -n "$transcript" ] || { transcript=$(approval_field rollout_path "$input") || transcript=""; }
+  local esc='\/' slash='/'
+  transcript="${transcript//"$esc"/$slash}"
+  if [ -n "$transcript" ] && [ -r "$transcript" ]; then
+    found=$(chat_keepalive_target "$transcript") || found=""
+  fi
+  if [ -n "$chat_arg" ]; then
+    APPROVAL_CHAT=$(approval_chat_ref "$chat_arg") || APPROVAL_CHAT=""
+  elif [ -n "$found" ]; then
+    APPROVAL_CHAT=$(approval_chat_ref "${found%%$'\t'*}") || APPROVAL_CHAT=""
+  fi
+  if [ -z "$APPROVAL_AS" ] && [ -n "$found" ]; then
+    APPROVAL_AS="${found#*$'\t'}"
+  fi
+  APPROVAL_MACHINE_NAME="${APPROVAL_MACHINE}"
+  [ -n "$APPROVAL_MACHINE_NAME" ] || { APPROVAL_MACHINE_NAME=$(hostname -s 2>/dev/null) || APPROVAL_MACHINE_NAME=""; }
+  return 0
+}
+
 APPROVAL_TMP=""
 approval_cleanup() {
   [ -n "$APPROVAL_TMP" ] && rm -rf "$APPROVAL_TMP"
@@ -2271,7 +2309,7 @@ approval_cleanup() {
 }
 
 cmd_approval_request() {
-  local agent="claude-code" chat_arg="" timeout=540
+  local agent="claude-code" chat_arg="" timeout=540 as_arg=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --agent)   agent="${2:-}"; shift 2 2>/dev/null || shift ;;
@@ -2280,6 +2318,8 @@ cmd_approval_request() {
       --chat=*)  chat_arg="${1#*=}"; shift ;;
       --timeout) timeout="${2:-}"; shift 2 2>/dev/null || shift ;;
       --timeout=*) timeout="${1#*=}"; shift ;;
+      --as)      as_arg="${2:-}"; shift 2 2>/dev/null || shift ;;
+      --as=*)    as_arg="${1#*=}"; shift ;;
       *) shift ;;
     esac
   done
@@ -2296,38 +2336,28 @@ cmd_approval_request() {
 
   local tool
   tool=$(approval_field tool_name "$input") || tool=""
-  approval_tool_allowed "$tool" "$APPROVAL_TOOLS" || return 0
-  if [ -n "$APPROVAL_NEVER" ] && approval_never_remote "$input" "$APPROVAL_NEVER"; then return 0; fi
+  if [ "$tool" = "AskUserQuestion" ]; then
+    # A question runs nothing, so it goes through whatever TOOLS says, and
+    # NEVER_REMOTE (about commands) does not apply. QUESTIONS=no keeps them local.
+    case "$APPROVAL_QUESTIONS" in no|NO|false|0|off) return 0 ;; esac
+  else
+    approval_tool_allowed "$tool" "$APPROVAL_TOOLS" || return 0
+    if [ -n "$APPROVAL_NEVER" ] && approval_never_remote "$input" "$APPROVAL_NEVER"; then return 0; fi
+  fi
 
   load_server "$APPROVAL_SERVER" || return 0
   [ -n "$MDNEST_URL" ] && [ -n "$MDNEST_TOKEN" ] || return 0
 
-  # The chat this agent is in: --chat, else the last `mdnest chat wait` in
-  # the session's transcript (the same rule as chat keepalive).
-  local chat="" transcript found
-  if [ -n "$chat_arg" ]; then
-    chat=$(approval_chat_ref "$chat_arg") || chat=""
-  else
-    transcript=$(approval_field transcript_path "$input") || transcript=""
-    [ -n "$transcript" ] || { transcript=$(approval_field rollout_path "$input") || transcript=""; }
-    local esc='\/' slash='/'
-    transcript="${transcript//"$esc"/$slash}"
-    if [ -n "$transcript" ] && [ -r "$transcript" ]; then
-      found=$(chat_keepalive_target "$transcript") || found=""
-      [ -n "$found" ] && { chat=$(approval_chat_ref "${found%%$'\t'*}") || chat=""; }
-    fi
-  fi
-
-  local machine="${APPROVAL_MACHINE}"
-  [ -n "$machine" ] || { machine=$(hostname -s 2>/dev/null) || machine=""; }
+  approval_context "$input" "$chat_arg" "$as_arg"
 
   APPROVAL_TMP=$(mktemp -d "${TMPDIR:-/tmp}/mdnest-approval.XXXXXX" 2>/dev/null) || return 0
   trap approval_cleanup EXIT
   trap 'approval_cleanup; exit 0' INT TERM HUP
 
   local qs code id
-  qs="agent=$(urlencode "$agent")&cli=$(urlencode "$MDNEST_CLI_VERSION")&ttl=$((timeout + 60))&machine=$(urlencode "$machine")"
-  [ -n "$chat" ] && qs="$qs&chat=$(urlencode "$chat")"
+  qs="agent=$(urlencode "$agent")&cli=$(urlencode "$MDNEST_CLI_VERSION")&ttl=$((timeout + 60))&machine=$(urlencode "$APPROVAL_MACHINE_NAME")"
+  [ -n "$APPROVAL_CHAT" ] && qs="$qs&chat=$(urlencode "$APPROVAL_CHAT")"
+  [ -n "$APPROVAL_AS" ] && qs="$qs&as=$(urlencode "$APPROVAL_AS")"
   code=$(printf '%s' "$input" | curl -s -o "$APPROVAL_TMP/created" -w '%{http_code}' \
       --connect-timeout "${MDNEST_TIMEOUT:-10}" --max-time 30 \
       -H "Authorization: Bearer $MDNEST_TOKEN" -H "Content-Type: application/json" \
@@ -2377,38 +2407,131 @@ cmd_approval_done() {
   compgen -G "$state_dir/${sid//[^A-Za-z0-9_-]/_}.*" >/dev/null 2>&1 || return 0
   load_server "$APPROVAL_SERVER" || return 0
   [ -n "$MDNEST_URL" ] && [ -n "$MDNEST_TOKEN" ] || return 0
-  printf '%s' "$input" | curl -s -o /dev/null --connect-timeout "${MDNEST_TIMEOUT:-10}" --max-time 10 \
+  printf '%s' "$input" | curl -s -o /dev/null --connect-timeout 5 --max-time 5 \
       -H "Authorization: Bearer $MDNEST_TOKEN" -H "Content-Type: application/json" \
       --data-binary @- -X POST "${MDNEST_URL}/api/approvals/close?session=$(urlencode "$sid")" >/dev/null 2>&1 || true
+  # The server cleared this session's notices too.
+  rm -f "$state_dir/${sid//[^A-Za-z0-9_-]/_}.notice" 2>/dev/null || true
+  return 0
+}
+
+# approval notify: the agent's Notification hook (and what chat keepalive
+# calls when it lets a chat agent stop). Posts a notice to the approvals list,
+# and a neutral line in the agent's chat: the agent is waiting in its
+# terminal, idle, or stopped. The server skips a permission_prompt while the
+# session already has an open card, so a notice only appears when no card was
+# made (the policy kept the question local). Prints nothing, exits 0.
+cmd_approval_notify() {
+  local agent="" chat_arg="" as_arg="" type=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --agent)   agent="${2:-}"; shift 2 2>/dev/null || shift ;;
+      --agent=*) agent="${1#*=}"; shift ;;
+      --chat)    chat_arg="${2:-}"; shift 2 2>/dev/null || shift ;;
+      --chat=*)  chat_arg="${1#*=}"; shift ;;
+      --as)      as_arg="${2:-}"; shift 2 2>/dev/null || shift ;;
+      --as=*)    as_arg="${1#*=}"; shift ;;
+      --type)    type="${2:-}"; shift 2 2>/dev/null || shift ;;
+      --type=*)  type="${1#*=}"; shift ;;
+      *) shift ;;
+    esac
+  done
+  local input sid
+  input=$(cat 2>/dev/null; printf 'X') || input="X"
+  input="${input%X}"
+  approval_policy_load || return 0
+  load_server "$APPROVAL_SERVER" || return 0
+  [ -n "$MDNEST_URL" ] && [ -n "$MDNEST_TOKEN" ] || return 0
+  if [ -z "$agent" ]; then
+    # Codex hook input carries a turn_id; Claude Code's does not.
+    agent="claude-code"
+    case "$input" in *'"turn_id"'*) agent="codex" ;; esac
+  fi
+  approval_context "$input" "$chat_arg" "$as_arg"
+  local qs
+  qs="agent=$(urlencode "$agent")&cli=$(urlencode "$MDNEST_CLI_VERSION")&machine=$(urlencode "$APPROVAL_MACHINE_NAME")"
+  [ -n "$APPROVAL_CHAT" ] && qs="$qs&chat=$(urlencode "$APPROVAL_CHAT")"
+  [ -n "$APPROVAL_AS" ] && qs="$qs&as=$(urlencode "$APPROVAL_AS")"
+  [ -n "$type" ] && qs="$qs&type=$(urlencode "$type")"
+  printf '%s' "$input" | curl -s -o /dev/null --connect-timeout 5 --max-time 5 \
+      -H "Authorization: Bearer $MDNEST_TOKEN" -H "Content-Type: application/json" \
+      --data-binary @- -X POST "${MDNEST_URL}/api/approvals/notices?${qs}" >/dev/null 2>&1 || return 0
+  # So `approval done` knows to tell the server once the agent carries on.
+  sid=$(approval_field session_id "$input") || sid=""
+  if [ -n "$sid" ]; then
+    mkdir -p "${TMPDIR:-/tmp}/mdnest-approvals" 2>/dev/null || true
+    : > "${TMPDIR:-/tmp}/mdnest-approvals/${sid//[^A-Za-z0-9_-]/_}.notice" 2>/dev/null || true
+  fi
   return 0
 }
 
 cmd_approval_hook_config() {
   local agent="${1:-}"
   case "$agent" in
-    claude-code|codex) ;;
-    *) approval_usage; return 1 ;;
-  esac
-  cat <<CONFIG
+    claude-code)
+      # The allow list lets a chat agent run the five chat commands it uses
+      # without a prompt, and nothing else of `mdnest chat` (not `new`, which
+      # creates notes). A combined command (`mdnest chat wait ...; echo $?`)
+      # asks for each part, so agents must run them exactly as given. Tested
+      # on Claude Code 2.1.295: a rule like this also passes `< file` for a
+      # file inside the project, but asks for `$(...)`, backticks, `> file`
+      # and `< file` outside the project. docs/chat.md says what that means.
+      cat <<'CONFIG'
+{
+  "permissions": {
+    "allow": [
+      "Bash(mdnest chat wait:*)",
+      "Bash(mdnest chat read:*)",
+      "Bash(mdnest chat post:*)",
+      "Bash(mdnest chat status:*)",
+      "Bash(mdnest chat leave:*)"
+    ]
+  },
+  "hooks": {
+    "PermissionRequest": [
+      { "hooks": [{ "type": "command", "command": "mdnest approval request --agent claude-code", "timeout": 600 }] }
+    ],
+    "PostToolUse": [
+      { "hooks": [{ "type": "command", "command": "mdnest approval done", "timeout": 15 }] }
+    ],
+    "Notification": [
+      { "hooks": [{ "type": "command", "command": "mdnest approval notify --agent claude-code", "timeout": 15 }] }
+    ],
+    "Stop": [
+      { "hooks": [
+        { "type": "command", "command": "mdnest approval done", "timeout": 15 },
+        { "type": "command", "command": "mdnest chat keepalive", "timeout": 30 }
+      ] }
+    ]
+  }
+}
+CONFIG
+      echo "Save this as approvals.json and start one session with it: claude --settings approvals.json" >&2
+      ;;
+    codex)
+      # Codex's Notification hook was not tested, so it is left out.
+      cat <<'CONFIG'
 {
   "hooks": {
     "PermissionRequest": [
-      { "hooks": [{ "type": "command", "command": "mdnest approval request --agent $agent", "timeout": 600 }] }
+      { "hooks": [{ "type": "command", "command": "mdnest approval request --agent codex", "timeout": 600 }] }
     ],
     "PostToolUse": [
       { "hooks": [{ "type": "command", "command": "mdnest approval done", "timeout": 15 }] }
     ],
     "Stop": [
-      { "hooks": [{ "type": "command", "command": "mdnest approval done", "timeout": 15 }] }
+      { "hooks": [
+        { "type": "command", "command": "mdnest approval done", "timeout": 15 },
+        { "type": "command", "command": "mdnest chat keepalive", "timeout": 30 }
+      ] }
     ]
   }
 }
 CONFIG
-  if [ "$agent" = "claude-code" ]; then
-    echo "Save this as approvals.json and start one session with it: claude --settings approvals.json" >&2
-  else
-    echo "Merge this into ~/.codex/hooks.json, start codex, and trust the hook once when Codex asks." >&2
-  fi
+      echo "Merge this into ~/.codex/hooks.json, start codex, and trust the hook once when Codex asks." >&2
+      ;;
+    *) approval_usage; return 1 ;;
+  esac
   [ -r "$APPROVALS_CONF" ] || echo "Then create ~/.config/mdnest/approvals.conf (see: mdnest approval). Without it nothing is sent." >&2
   return 0
 }
@@ -2419,6 +2542,7 @@ cmd_approval() {
   case "$sub" in
     request)     cmd_approval_request "$@" || true; return 0 ;;
     done)        cmd_approval_done "$@" || true; return 0 ;;
+    notify)      cmd_approval_notify "$@" || true; return 0 ;;
     hook-config) cmd_approval_hook_config "$@" ;;
     *) approval_usage; return 1 ;;
   esac
@@ -2514,7 +2638,7 @@ NOTE OPERATIONS
            post <path> <text|-> --as NAME   read <path> --as NAME
            wait <path> --as NAME [--mentions] [--timeout S]   new <path> ["Title"]
            status <path> "doing X" --as NAME   (a quiet working line; --clear)
-  approval request|done|hook-config  Answer an agent's permission prompt from mdnest (experimental,
+  approval request|done|notify|hook-config  Answer an agent's permission prompt from mdnest (experimental,
            server: ENABLE_AGENT_APPROVALS; needs ~/.config/mdnest/approvals.conf on this machine)
 
 OTHER
@@ -2577,6 +2701,7 @@ EXAMPLES
   mdnest approval hook-config claude-code > approvals.json
   claude --settings approvals.json
   mdnest approval hook-config codex
+  echo '{"session_id":"s1","notification_type":"idle_prompt"}' | mdnest approval notify --as builder
 
   mdnest list @work/engineering
   mdnest list @work/engineering/Architecture      # scoped to one folder

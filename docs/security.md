@@ -209,8 +209,32 @@ The rules:
   command comes from the owner-only API.
 - **No silent outcome.** A timeout or any failure leaves the agent's normal
   terminal prompt to answer. Nothing allows or denies on its own.
-- **No "always allow".** One press approves one command.
-- **Caps.** 64 KB per request, 20 pending per account, 60 minutes at most.
+- **No "always allow".** One press approves one command. "Allow for this
+  session" returns only the rule the agent itself suggested (for a command,
+  that exact command), forced to the current session, so nothing is written
+  to the agent's settings files; it is offered only when there is such a
+  suggestion, and the card says what it allows.
+- **A question is answered, not allowed.** An AskUserQuestion card cannot be
+  plainly allowed, only answered or denied, and its questions are parsed with
+  the same strict rules as a command.
+- **The card cannot show a different path.** A file path is shortened only
+  when that cannot change where it points: `~` stands only for the agent's own
+  home (from its working folder), and a path with `.`, `..`, an empty segment
+  or a backslash is shown whole. The file being written is never cut in the
+  middle; long content shows its first 40 lines and says how many are not
+  shown.
+- **Notices carry no agent text into the chat.** The chat gets a fixed line
+  ("Builder on mini is waiting."); the agent's own message is shown only in
+  the owner's approvals list.
+- **Caps.** 64 KB per request, 100 pending per account and 20 per machine
+  label, 60 minutes at most; 50 notices per account, kept 12 hours.
+- **The allow list from `hook-config`** lets a Claude Code agent run five
+  chat commands (`wait`, `read`, `post`, `status`, `leave`) without asking.
+  Tested on Claude Code 2.1.295: such a rule also passes `< file` for a file
+  inside the agent's folder (it asks for one outside, and for `$(...)`,
+  backticks and `> file`). So the agent can post anything it can read in its
+  folder into the chat without asking. Keep agent chats private, and leave the
+  allow list out for an agent that works on secrets.
   Requests live in memory only, so nothing about them is written to disk.
 - **The machine decides what may go remote.** `~/.config/mdnest/approvals.conf`
   names the one server that may answer, which tools may be sent, and text

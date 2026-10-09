@@ -1192,11 +1192,18 @@ async function approvalError(res, fallback) {
 }
 
 // The pending requests this account owns.
+// The pending requests and the notices (stuck or stopped agents) this
+// account owns.
 export async function listApprovals() {
   const res = await request('/approvals');
   if (!res.ok) throw await approvalError(res, 'Failed to load approvals');
   const data = await res.json();
-  return data.approvals || [];
+  return { approvals: data.approvals || [], notices: data.notices || [] };
+}
+
+export async function dismissNotice(id) {
+  const res = await request(`/approvals/notices/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  if (!res.ok && res.status !== 404) throw await approvalError(res, 'Failed to dismiss the notice');
 }
 
 // One request, owner only. A 404 means it is gone (expired long ago, or the
@@ -1208,9 +1215,12 @@ export async function getApproval(id) {
 }
 
 // decision is 'allow' or 'deny'; reason goes with deny only.
-export async function decideApproval(id, decision, reason) {
+// decision is 'allow', 'allow_session', 'answer' (with answers: one
+// { selected: [option indexes], other: 'typed text' } per question) or 'deny'.
+export async function decideApproval(id, decision, reason, answers) {
   const body = { decision };
   if (decision === 'deny' && reason) body.reason = reason;
+  if (decision === 'answer') body.answers = answers;
   const res = await request(`/approvals/${encodeURIComponent(id)}/decide`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

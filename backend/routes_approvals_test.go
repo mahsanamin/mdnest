@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -159,11 +160,25 @@ func TestApprovals_Caps(t *testing.T) {
 	if code, _ := ts.do(tok, "POST", "/api/approvals?cli=4.8.5", strings.NewReader(big), ""); code != 413 {
 		t.Fatalf("65KB body: %d, want 413", code)
 	}
+	// 20 per machine label: a 21st from the same machine is refused, while
+	// another machine on the same account still gets through.
 	for i := 0; i < 20; i++ {
-		ts.createApproval(t, tok, "", approvalHookInput)
+		ts.createApproval(t, tok, "&machine=noisy", approvalHookInput)
 	}
-	if code, _ := ts.do(tok, "POST", "/api/approvals?cli=4.8.5", strings.NewReader(approvalHookInput), ""); code != 429 {
-		t.Fatalf("21st pending: %d, want 429", code)
+	if code, out := ts.do(tok, "POST", "/api/approvals?cli=4.8.5&machine=noisy", strings.NewReader(approvalHookInput), ""); code != 429 || !strings.Contains(out, "this machine") {
+		t.Fatalf("21st pending from one machine: %d %s, want 429", code, out)
+	}
+	ts.createApproval(t, tok, "&machine=quiet", approvalHookInput)
+	// 100 per account, across machines.
+	for i := 21; i < 100; i++ {
+		ts.createApproval(t, tok, "&machine=m"+strconv.Itoa(i/10), approvalHookInput)
+	}
+	if code, out := ts.do(tok, "POST", "/api/approvals?cli=4.8.5&machine=fresh", strings.NewReader(approvalHookInput), ""); code != 429 || !strings.Contains(out, "this account") {
+		t.Fatalf("101st pending: %d %s, want 429", code, out)
+	}
+	// Notices count toward neither cap.
+	if code, _ := ts.do(tok, "POST", "/api/approvals/notices?cli=4.8.5&machine=noisy", strings.NewReader(`{"session_id":"n","notification_type":"idle_prompt"}`), ""); code != 201 {
+		t.Fatalf("a notice was refused by the approval cap: %d", code)
 	}
 	if code, _ := ts.do(tok, "POST", "/api/approvals?cli=4.8.5&agent=other", strings.NewReader(approvalHookInput), ""); code != 400 {
 		t.Fatalf("unknown agent: %d, want 400", code)

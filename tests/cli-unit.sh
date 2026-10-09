@@ -591,6 +591,16 @@ run_approval_suite() {
   eq "policy: quoted label" "build box" "$APPROVAL_MACHINE"
   eq "policy: TOOLS" "Bash, Write" "$APPROVAL_TOOLS"
   eq "policy: MAX_WAIT" "300" "$APPROVAL_MAX_WAIT"
+  eq "policy: QUESTIONS defaults to yes" "yes" "$APPROVAL_QUESTIONS"
+  # approval_context: the chat and the agent's name from the transcript, the
+  # same rule chat keepalive uses; flags win.
+  printf '%s\n' '{"x":"mdnest chat wait @box/ns/Chats/room.md --as builder --timeout 120"}' > "$d/t.jsonl"
+  APPROVAL_SERVER=box APPROVAL_MACHINE=mini approval_context "{\"transcript_path\":\"$d/t.jsonl\"}" "" ""
+  eq "context: chat from the transcript" "ns/Chats/room.md" "$APPROVAL_CHAT"
+  eq "context: name from the transcript" "builder" "$APPROVAL_AS"
+  eq "context: machine label" "mini" "$APPROVAL_MACHINE_NAME"
+  APPROVAL_SERVER=box approval_context "{\"transcript_path\":\"$d/t.jsonl\"}" "@box/ns/other.md" "Reviewer"
+  eq "context: flags win" "ns/other.md Reviewer" "$APPROVAL_CHAT $APPROVAL_AS"
   if [ -e "$d/ran" ]; then bad "policy: the file is never run" "a line in it was executed"; else ok "policy: the file is never run"; fi
   APPROVALS_CONF="$d/missing.conf" approval_policy_load; rc=$?
   eq "policy: no file means forward nothing" "1" "$rc"
@@ -618,6 +628,26 @@ run_approval_suite() {
   eq "chat: another server is dropped" "" "$(approval_chat_ref '@other/ns/a.md')"
   eq "chat: not a note is dropped" "" "$(approval_chat_ref '@box/ns')"
   eq "approval_field: reads a plain field" "s-1" "$(approval_field session_id '{"a":1, "session_id" : "s-1","x":"y"}')"
+  rm -rf "$d"
+}
+
+run_keepalive_no_policy_suite() {
+  echo "── chat keepalive without an approvals policy (unchanged output) ──"
+  # Agent approvals hooked a "stopped" notice into keepalive's give-up path.
+  # Without ~/.config/mdnest/approvals.conf that must change nothing: the
+  # expected text below is what the CLI printed before approvals existed
+  # (captured from develop at 4.8.5-dev), for three blocked stops and the
+  # fourth one it lets through. Nothing may be written under HOME either.
+  local d out i; d=$(mktemp -d)
+  mkdir -p "$d/home" "$d/tmp"
+  printf '%s\n' '{"x":"mdnest chat wait @srv/notes/team.md --as codxu --timeout 120"}' > "$d/t.jsonl"
+  local block='{"decision":"block","reason":"You are still in the mdnest chat @srv/notes/team.md. Do not stop: run `mdnest chat wait @srv/notes/team.md --as codxu --timeout 120` now and keep the loop going (wait, reply if it is for you, wait again). Only when a person in the chat tells you to leave, run the chat leave command with the same chat and --as, then stop."}'
+  out=""
+  for i in 1 2 3 4; do
+    out="$out$(printf '{"session_id":"pin","transcript_path":"%s"}' "$d/t.jsonl" | HOME="$d/home" TMPDIR="$d/tmp" "$REPO_ROOT/mdnest" chat keepalive 2>&1; printf '|%s;' "$?")"
+  done
+  eq "keepalive, no policy: byte-for-byte the output it had before approvals" "$block"$'\n'"|0;$block"$'\n'"|0;$block"$'\n'"|0;|0;" "$out"
+  eq "keepalive, no policy: writes nothing under HOME" "" "$(ls -A "$d/home")"
   rm -rf "$d"
 }
 
@@ -759,6 +789,7 @@ run_unreachable_suite
 run_install_source_suite
 run_version_suite
 run_keepalive_suite
+run_keepalive_no_policy_suite
 run_approval_suite
 run_errexit_lint
 

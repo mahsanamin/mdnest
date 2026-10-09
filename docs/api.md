@@ -1921,7 +1921,7 @@ Requests are kept in memory (default 10 minutes, at most 60). Every request
 belongs to the account that created it; another account gets `404` (or `410`
 on `wait`), as if it did not exist. Setup: [chat.md](chat.md).
 
-### POST /api/approvals?agent=&cli=[&chat=ns/path][&machine=][&ttl=]
+### POST /api/approvals?agent=&cli=[&chat=ns/path][&machine=][&as=][&ttl=]
 
 Any signed-in caller, API token included. The body is the agent's
 `PermissionRequest` hook input, as the agent sent it (max 64 KB). The command
@@ -1931,14 +1931,26 @@ case-variant keys are refused. `agent` is `claude-code` (default) or `codex`.
 `cli` is the CLI version; below 4.8.5 (a `-dev` suffix is ignored) the answer
 is `426`. `ttl` is in seconds, kept between 60 and 3600. With `chat`, a card
 marker and a neutral line are posted in that chat, if the account may write
-it; the command is never written there. At most 20 pending requests per
-account (`429`). Returns `201 {"id":"<32 hex>"}`.
+it; the command is never written there. `as` is the agent's chat name: the
+card is headed "as (Claude Code on machine)" and the chat line is posted under
+that name. At most 100 pending requests per account and 20 per machine label
+(`429`, and the question stays in the agent's terminal). Returns
+`201 {"id":"<32 hex>"}`.
+
+For `AskUserQuestion` the questions are read from `tool_input.questions`
+(strictly: duplicate keys refused) and served as `questions`. For `Write` and
+`Edit` a readable `details` object is served (`kind`, `path`, `content` or
+`oldString` / `newString`). When the agent sent `permission_suggestions`
+(Claude Code), `sessionScope` lists in words what "allow for this session"
+would allow; only `addRules` and `addDirectories` suggestions are used.
 
 ### GET /api/approvals
 
-The caller's pending requests: `{"approvals":[{id, agent, agentName,
-machine, toolName, command, description, cwd, chat, state, createdAt,
-expiresAt}]}`.
+The caller's pending requests and notices: `{"approvals":[{id, agent,
+agentName, name, label, machine, toolName, command, description, cwd, chat,
+state, createdAt, expiresAt, questions?, details?, sessionScope?}],
+"notices":[{id, agent, agentName, name, machine, type, text, message, chat,
+createdAt}]}`.
 
 ### GET /api/approvals/{id}
 
@@ -1959,15 +1971,45 @@ the agent's hook must print once decided; `410` once expired or closed.
 
 **Browser login only**: refused with `403` when the request was made with an
 API token, because the agent itself runs on its owner's token. Owner only.
-Body `{"decision":"allow"}` or `{"decision":"deny","reason":"optional, up to
-500 characters"}`. `409` if the request is no longer pending.
+Body one of:
+
+- `{"decision":"allow"}`
+- `{"decision":"deny","reason":"optional, up to 500 characters"}`
+- `{"decision":"allow_session"}`: allow, and return the agent's suggestions as
+  `updatedPermissions` with `destination` forced to `session`. `400` when the
+  agent offered none.
+- `{"decision":"answer","answers":[{"selected":[0,2],"other":"typed text"}]}`:
+  one entry per question, option indexes plus optional typed text. A
+  single-select question takes exactly one of the two. The agent receives
+  `updatedInput` with `answers` set to the picked labels in option order,
+  joined with ", ", then the typed text, the same as Claude Code produces when
+  a person answers in the terminal. A question cannot be plainly allowed.
+
+`409` if the request is no longer pending.
 
 ### POST /api/approvals/close?session=
 
 Owner only. Closes that session's pending requests as answered in the
 terminal. The body may be the agent's `PostToolUse` or `Stop` hook input: a
 `PostToolUse` closes only requests for the command that just ran, so a
-parallel call still waiting keeps its card. Returns `{"closed":N}`.
+parallel call still waiting keeps its card. It also clears the session's
+notices. Returns `{"closed":N}`.
+
+### POST /api/approvals/notices?agent=&cli=[&as=][&machine=][&chat=][&type=]
+
+Any signed-in caller, API token included. The body is the agent's
+`Notification` (or `Stop`) hook input. The kind is its `notification_type`,
+or `stopped` for a `Stop` input or `type=stopped`. A `permission_prompt` is
+skipped (`200 {"skipped":...}`) while the same session has an open request.
+One notice per session and kind (a repeat replaces it); at most 50 per
+account, the oldest dropped; kept 12 hours. With `chat`, one neutral line
+("Builder on mini is waiting." / "... stopped.") is posted at most every five
+minutes per session and kind; the agent's message text never goes into the
+chat. Returns `201 {"id":"..."}`.
+
+### DELETE /api/approvals/notices/{id}
+
+Owner only. Dismisses a notice.
 
 ## File Serving
 

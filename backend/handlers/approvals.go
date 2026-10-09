@@ -40,7 +40,8 @@ import (
 
 const (
 	approvalMaxBody       = 64 << 10 // the hook input, as the agent sent it
-	approvalMaxPending    = 20       // per account
+	approvalMaxPending    = 100      // per account
+	approvalMaxPerMachine = 20       // per machine label, so one noisy machine cannot use up the account
 	approvalDefaultTTL    = 10 * time.Minute
 	approvalMinTTL        = time.Minute
 	approvalMaxTTL        = 60 * time.Minute
@@ -78,6 +79,7 @@ type approval struct {
 	owner       string // ownerKey(); never served
 	OwnerName   string
 	Agent       string
+	Name        string // the agent's chat name (--as), when it has one
 	Machine     string
 	SessionID   string
 	ToolName    string
@@ -93,6 +95,16 @@ type approval struct {
 	DecidedAt   time.Time
 	Reason      string
 	changed     chan struct{} // closed when the state leaves pending
+
+	toolInput    json.RawMessage    // kept for a question's updatedInput
+	questions    []ApprovalQuestion // AskUserQuestion, as shown
+	rawQuestions []rawQuestion
+	details      *ApprovalDetails
+	sessionPerms []map[string]json.RawMessage // "allow for this session"
+	sessionScope []string
+	updatedInput json.RawMessage // set when a question is answered
+	allSession   bool            // allowed for this session
+	answerText   string          // the answers, for the decided card
 }
 
 // ApprovalView is what the UI reads.
@@ -100,6 +112,8 @@ type ApprovalView struct {
 	ID          string    `json:"id"`
 	Agent       string    `json:"agent"`
 	AgentName   string    `json:"agentName"`
+	Name        string    `json:"name,omitempty"`
+	Label       string    `json:"label"` // "Builder (Claude Code on mac-mini)"
 	Machine     string    `json:"machine"`
 	ToolName    string    `json:"toolName"`
 	Command     string    `json:"command"`
@@ -112,6 +126,12 @@ type ApprovalView struct {
 	DecidedBy   string    `json:"decidedBy,omitempty"`
 	DecidedAt   string    `json:"decidedAt,omitempty"`
 	Reason      string    `json:"reason,omitempty"`
+
+	Questions    []ApprovalQuestion `json:"questions,omitempty"`
+	Details      *ApprovalDetails   `json:"details,omitempty"`
+	SessionScope []string           `json:"sessionScope,omitempty"` // what "Allow for this session" allows
+	ForSession   bool               `json:"forSession,omitempty"`
+	Answer       string             `json:"answer,omitempty"`
 }
 
 // approvalChatPoster puts the card's message in a chat (ChatHandler.PostNotice).
@@ -122,6 +142,7 @@ type approvalChatPoster interface {
 type ApprovalHandler struct {
 	mu        sync.Mutex
 	items     map[string]*approval
+	notices   map[string]*notice
 	multiMode bool
 	now       func() time.Time
 	maxWait   time.Duration
@@ -134,7 +155,7 @@ type ApprovalHandler struct {
 // NewApprovalHandler: canWrite is the write check used before posting a card
 // in a chat. Pass nil to never post (the request still shows in the list).
 func NewApprovalHandler(multiMode bool, canWrite func(*http.Request, string, string) bool) *ApprovalHandler {
-	return &ApprovalHandler{items: map[string]*approval{}, multiMode: multiMode, now: time.Now,
+	return &ApprovalHandler{items: map[string]*approval{}, notices: map[string]*notice{}, multiMode: multiMode, now: time.Now,
 		maxWait: approvalMaxWait, canWrite: canWrite}
 }
 
@@ -211,6 +232,12 @@ func (h *ApprovalHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		default:
 			approvalError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
+	case parts[0] == "notices" && len(parts) <= 2:
+		id := ""
+		if len(parts) == 2 {
+			id = parts[1]
+		}
+		h.handleNotices(w, r, owner, id)
 	case rest == "close":
 		if r.Method != http.MethodPost {
 			approvalError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -291,6 +318,7 @@ type hookInput struct {
 	HookEventName string
 	ToolName      string
 	ToolInput     json.RawMessage
+	Suggestions   json.RawMessage // permission_suggestions
 }
 
 // strictObject decodes one JSON object into its members, with EXACT key
@@ -350,6 +378,7 @@ func parseHookInput(body []byte) (hookInput, error) {
 	in.HookEventName = jsonString(m["hook_event_name"])
 	in.ToolName = jsonString(m["tool_name"])
 	in.ToolInput = m["tool_input"]
+	in.Suggestions = m["permission_suggestions"]
 	if t := bytes.TrimSpace(in.ToolInput); len(t) > 0 && t[0] == '{' {
 		if _, err := strictObject(t); err != nil {
 			return in, errors.New("tool_input: " + err.Error())
@@ -476,7 +505,9 @@ func (h *ApprovalHandler) sweepLocked() {
 }
 
 func (h *ApprovalHandler) viewLocked(a *approval) ApprovalView {
-	v := ApprovalView{ID: a.ID, Agent: a.Agent, AgentName: approvalAgents[a.Agent], Machine: a.Machine,
+	v := ApprovalView{ID: a.ID, Agent: a.Agent, AgentName: approvalAgents[a.Agent], Name: a.Name,
+		Label: agentLabel(a.Name, a.Agent, a.Machine), Machine: a.Machine,
+		Questions: a.questions, Details: a.details, SessionScope: a.sessionScope, ForSession: a.allSession, Answer: a.answerText,
 		ToolName: a.ToolName, Command: a.Command, Description: a.Description, Cwd: a.Cwd,
 		State: h.stateLocked(a), CreatedAt: a.Created.UTC(), ExpiresAt: a.Expires.UTC(),
 		DecidedBy: a.DecidedBy, Reason: a.Reason}
@@ -555,8 +586,15 @@ func (h *ApprovalHandler) create(w http.ResponseWriter, r *http.Request, owner, 
 		approvalError(w, http.StatusBadRequest, msg)
 		return
 	}
-	command, description := commandOf(in.ToolInput)
-	command, description = visibleText(command), visibleText(description)
+	var questions []ApprovalQuestion
+	var rawQs []rawQuestion
+	if in.ToolName == questionTool {
+		if questions, rawQs, err = parseQuestions(in.ToolInput); err != nil {
+			approvalError(w, http.StatusBadRequest, "AskUserQuestion input: "+err.Error())
+			return
+		}
+	}
+	command, description := displayCommand(in.ToolName, in.ToolInput)
 	if strings.TrimSpace(command) == "" {
 		approvalError(w, http.StatusBadRequest, "the hook input names no command")
 		return
@@ -571,19 +609,33 @@ func (h *ApprovalHandler) create(w http.ResponseWriter, r *http.Request, owner, 
 		Machine: cleanMachineLabel(q.Get("machine")), SessionID: in.SessionID,
 		ToolName: in.ToolName, Command: command, Description: description, Cwd: in.Cwd,
 		ChatNS: chatNS, ChatPath: chatPath, Created: now, Expires: now.Add(ttl),
-		state: ApprovalPending, changed: make(chan struct{})}
+		state: ApprovalPending, changed: make(chan struct{}),
+		Name: sanitizeChatLabel(q.Get("as")), toolInput: in.ToolInput, questions: questions, rawQuestions: rawQs,
+		details: toolDetails(in.ToolName, in.ToolInput)}
+	if a.Agent == "claude-code" && questions == nil {
+		// Tested with Claude Code only; Codex keeps one press per command.
+		a.sessionPerms, a.sessionScope = sessionPermissions(in.Suggestions)
+	}
 
 	h.mu.Lock()
 	h.sweepLocked()
-	pending := 0
+	pending, onMachine := 0, 0
 	for _, x := range h.items {
 		if x.owner == owner && x.state == ApprovalPending {
 			pending++
+			if x.Machine == a.Machine {
+				onMachine++
+			}
 		}
 	}
 	if pending >= approvalMaxPending {
 		h.mu.Unlock()
-		approvalError(w, http.StatusTooManyRequests, "too many pending approvals for this account (max 20)")
+		approvalError(w, http.StatusTooManyRequests, "too many pending approvals for this account (max 100); the question stays in the agent's terminal")
+		return
+	}
+	if onMachine >= approvalMaxPerMachine {
+		h.mu.Unlock()
+		approvalError(w, http.StatusTooManyRequests, "too many pending approvals from this machine (max 20); the question stays in the agent's terminal")
 		return
 	}
 	h.items[id] = a
@@ -603,12 +655,16 @@ func (h *ApprovalHandler) postCard(r *http.Request, a *approval) {
 	if a.ChatNS == "" || h.chat == nil || h.canWrite == nil || !h.canWrite(r, a.ChatNS, a.ChatPath) {
 		return
 	}
-	who := approvalAgents[a.Agent]
-	if a.Machine != "" {
-		who += " on " + a.Machine
+	what := " is waiting for approval."
+	if a.questions != nil {
+		what = " has a question."
 	}
-	text := "![approval](approval:" + a.ID + ")\n\n" + who + " is waiting for approval."
-	h.chat.PostNotice(r, a.ChatNS, a.ChatPath, a.Agent, text)
+	text := "![approval](approval:" + a.ID + ")\n\n" + agentLabel(a.Name, a.Agent, a.Machine) + what
+	as := a.Name
+	if as == "" {
+		as = a.Agent
+	}
+	h.chat.PostNotice(r, a.ChatNS, a.ChatPath, as, text)
 }
 
 func (h *ApprovalHandler) list(w http.ResponseWriter, owner string) {
@@ -620,9 +676,11 @@ func (h *ApprovalHandler) list(w http.ResponseWriter, owner string) {
 			out = append(out, h.viewLocked(a))
 		}
 	}
+	h.sweepNoticesLocked()
+	notices := h.noticesFor(owner)
 	h.mu.Unlock()
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
-	approvalJSON(w, http.StatusOK, map[string]any{"approvals": out})
+	approvalJSON(w, http.StatusOK, map[string]any{"approvals": out, "notices": notices})
 }
 
 func (h *ApprovalHandler) get(w http.ResponseWriter, id, owner string) {
@@ -639,8 +697,15 @@ func (h *ApprovalHandler) get(w http.ResponseWriter, id, owner string) {
 }
 
 // hookOutput is the exact text the agent's hook prints for a decision.
-func hookOutput(agent, state, reason string) []byte {
+func hookOutput(a *approval) []byte {
+	agent, state, reason := a.Agent, a.state, a.Reason
 	decision := map[string]any{"behavior": "allow"}
+	if len(a.updatedInput) > 0 {
+		decision["updatedInput"] = a.updatedInput
+	}
+	if a.allSession && len(a.sessionPerms) > 0 {
+		decision["updatedPermissions"] = a.sessionPerms
+	}
 	if state == ApprovalDenied {
 		if reason == "" {
 			reason = approvalDefaultDenial
@@ -697,7 +762,7 @@ func (h *ApprovalHandler) wait(w http.ResponseWriter, r *http.Request, id, owner
 		w.WriteHeader(http.StatusNoContent)
 	case ApprovalAllowed, ApprovalDenied:
 		h.mu.Lock()
-		out := hookOutput(a.Agent, state, a.Reason)
+		out := hookOutput(a)
 		h.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
@@ -717,17 +782,18 @@ func (h *ApprovalHandler) decide(w http.ResponseWriter, r *http.Request, id, own
 		return
 	}
 	var body struct {
-		Decision string `json:"decision"`
-		Reason   string `json:"reason"`
+		Decision string           `json:"decision"`
+		Reason   string           `json:"reason"`
+		Answers  []QuestionAnswer `json:"answers"`
 	}
-	if err := json.NewDecoder(io.LimitReader(r.Body, 8<<10)).Decode(&body); err != nil {
-		approvalError(w, http.StatusBadRequest, `body must be {"decision": "allow" or "deny"}`)
+	if err := json.NewDecoder(io.LimitReader(r.Body, 32<<10)).Decode(&body); err != nil {
+		approvalError(w, http.StatusBadRequest, `body must be {"decision": "allow", "allow_session", "answer" or "deny"}`)
 		return
 	}
 	reason := strings.TrimSpace(body.Reason)
 	var state string
 	switch body.Decision {
-	case "allow":
+	case "allow", "allow_session", "answer":
 		state = ApprovalAllowed
 		if reason != "" {
 			approvalError(w, http.StatusBadRequest, "a reason goes with deny only")
@@ -740,7 +806,7 @@ func (h *ApprovalHandler) decide(w http.ResponseWriter, r *http.Request, id, own
 			return
 		}
 	default:
-		approvalError(w, http.StatusBadRequest, `decision must be "allow" or "deny"`)
+		approvalError(w, http.StatusBadRequest, `decision must be "allow", "allow_session", "answer" or "deny"`)
 		return
 	}
 
@@ -754,6 +820,39 @@ func (h *ApprovalHandler) decide(w http.ResponseWriter, r *http.Request, id, own
 	if cur := h.stateLocked(a); cur != ApprovalPending {
 		approvalJSON(w, http.StatusConflict, map[string]any{"error": "this request is already " + cur, "approval": h.viewLocked(a)})
 		return
+	}
+	switch {
+	case a.questions != nil && (body.Decision == "allow" || body.Decision == "allow_session"):
+		// Allowing a question without answers would leave the agent with
+		// nothing to act on.
+		approvalError(w, http.StatusBadRequest, "answer the question, or deny it")
+		return
+	case body.Decision == "answer":
+		if a.questions == nil {
+			approvalError(w, http.StatusBadRequest, "this request is not a question")
+			return
+		}
+		updated, err := withAnswers(a.toolInput, a.rawQuestions, body.Answers)
+		if err != nil {
+			approvalError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		a.updatedInput = updated
+		var answers struct {
+			Answers map[string]string `json:"answers"`
+		}
+		json.Unmarshal(updated, &answers)
+		var lines []string
+		for _, rq := range a.rawQuestions {
+			lines = append(lines, visibleText(rq.question)+" "+visibleText(answers.Answers[rq.question]))
+		}
+		a.answerText = strings.Join(lines, "\n")
+	case body.Decision == "allow_session":
+		if len(a.sessionPerms) == 0 {
+			approvalError(w, http.StatusBadRequest, "the agent offered nothing to allow for the session; allow this once")
+			return
+		}
+		a.allSession = true
 	}
 	a.state = state
 	a.Reason = reason
@@ -788,10 +887,11 @@ func (h *ApprovalHandler) close(w http.ResponseWriter, r *http.Request, owner st
 	}
 	onlyCommand := ""
 	if in.HookEventName != "Stop" && len(in.ToolInput) > 0 {
-		onlyCommand, _ = commandOf(in.ToolInput)
-		onlyCommand = visibleText(onlyCommand)
+		onlyCommand, _ = displayCommand(in.ToolName, in.ToolInput)
 	}
 	h.mu.Lock()
+	// The agent is carrying on, so what said it was stuck is out of date.
+	h.clearSessionNoticesLocked(owner, session)
 	n := 0
 	for _, a := range h.items {
 		if a.owner != owner || a.SessionID != session || h.stateLocked(a) != ApprovalPending {

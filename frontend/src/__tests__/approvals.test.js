@@ -48,3 +48,67 @@ describe('card state text', () => {
     expect(stateText({ state: 'closed' })).toMatch(/Answered in the terminal/);
   });
 });
+
+import { shortPath, tildePath, middleEllipsis, firstLines, answersComplete, toggleChoice } from '../approvals.js';
+
+describe('paths on the card', () => {
+  const cwd = '/Users/pat/repo';
+  it('is relative inside the agent folder, ~ for the agent\'s own home', () => {
+    expect(shortPath('/Users/pat/repo/src/a.go', cwd)).toBe('src/a.go');
+    expect(shortPath('/Users/pat/other/a.go', cwd)).toBe('~/other/a.go');
+    expect(shortPath('/etc/hosts', cwd)).toBe('/etc/hosts');
+    expect(tildePath('/Users/pat', cwd)).toBe('~');
+  });
+  it('never shortens in a way that changes where the path points', () => {
+    // Another user's home is not "~".
+    expect(shortPath('/Users/admin/.ssh/authorized_keys', cwd)).toBe('/Users/admin/.ssh/authorized_keys');
+    // A dot segment is shown whole, inside the folder or out.
+    expect(shortPath('/Users/pat/repo/../../admin/.ssh/x', cwd)).toBe('/Users/pat/repo/../../admin/.ssh/x');
+    expect(shortPath('/home/../etc/passwd', '/home/pat')).toBe('/home/../etc/passwd');
+    expect(shortPath('/Users/pat/repo//x', cwd)).toBe('/Users/pat/repo//x');
+    expect(shortPath('/Users/pat/repo/./x', cwd)).toBe('/Users/pat/repo/./x');
+    // Without a known home nothing becomes ~.
+    expect(shortPath('/home/pat/x', '')).toBe('/home/pat/x');
+    expect(shortPath('relative/x', cwd)).toBe('relative/x');
+  });
+  it('keeps both ends of a long path', () => {
+    const s = middleEllipsis('a'.repeat(30) + 'b'.repeat(30), 21);
+    expect(s).toHaveLength(21);
+    expect(s.startsWith('aaaaaaaaaa')).toBe(true);
+    expect(s.endsWith('bbbbbbbbbb')).toBe(true);
+    expect(middleEllipsis('short', 21)).toBe('short');
+  });
+  it('previews the first 40 lines and counts the rest', () => {
+    const text = Array.from({ length: 45 }, (_, i) => `l${i}`).join('\n');
+    const p = firstLines(text);
+    expect(p.shown.split('\n')).toHaveLength(40);
+    expect(p.more).toBe(5);
+    expect(firstLines('a\nb').more).toBe(0);
+  });
+});
+
+describe('question answers', () => {
+  const single = { multiSelect: false, options: [{}, {}] };
+  const multi = { multiSelect: true, options: [{}, {}, {}] };
+  it('single select replaces the pick', () => {
+    expect(toggleChoice(single, { selected: [0], other: 'x' }, 1)).toEqual({ selected: [1], other: '' });
+  });
+  it('multi select toggles, in option order', () => {
+    let a = toggleChoice(multi, undefined, 2);
+    a = toggleChoice(multi, a, 0);
+    expect(a.selected).toEqual([0, 2]);
+    expect(toggleChoice(multi, a, 2).selected).toEqual([0]);
+  });
+  it('is complete only when every question has a valid answer', () => {
+    expect(answersComplete([single, multi], [{ selected: [0], other: '' }, { selected: [], other: 'x' }])).toBe(true);
+    expect(answersComplete([single], [{ selected: [0], other: 'x' }])).toBe(false);
+    expect(answersComplete([multi], [{ selected: [], other: ' ' }])).toBe(false);
+  });
+});
+
+describe('notifications for notices and questions', () => {
+  it('uses the notice text, or says a question waits', () => {
+    expect(notificationText({ text: 'Builder stopped' })).toBe('Builder stopped');
+    expect(notificationText({ label: 'Builder (Claude Code on mini)', questions: [{}] })).toBe('Builder (Claude Code on mini) has a question');
+  });
+});
