@@ -45,6 +45,8 @@ func TestCommandOf(t *testing.T) {
 	cases := []struct{ in, cmd, desc string }{
 		{`{"command":"ls -la","description":"List"}`, "ls -la", "List"},
 		{`{"command":["git","status"]}`, "git status", ""},
+		{`{"command":["bash","-lc","make; rm -rf x"]}`, "bash -lc 'make; rm -rf x'", ""},
+		{`{"command":["echo","it's"]}`, `echo 'it'\''s'`, ""},
 		{`{"file_path":"/a.md"}`, "{\n  \"file_path\": \"/a.md\"\n}", ""},
 	}
 	for _, c := range cases {
@@ -77,6 +79,21 @@ func TestSplitChatRef(t *testing.T) {
 	for _, bad := range []string{"", "x.md", "n/a/../b.md", "n/a.txt", ".marp-themes/a.md", "n//a.md"} {
 		if _, _, good := splitChatRef(bad); good {
 			t.Errorf("splitChatRef(%q) accepted", bad)
+		}
+	}
+}
+
+func TestVisibleText(t *testing.T) {
+	cases := map[string]string{
+		"ls -la\n\tpwd":          "ls -la\n\tpwd",
+		"rm -rf \u202Etxt.exe":   `rm -rf \u{202E}txt.exe`,
+		"echo safe\rrm -rf /":    `echo safe\u{000D}rm -rf /`,
+		"git\u200Bpush":          `git\u{200B}push`,
+		"caf\u00e9 \u65e5\u672c": "caf\u00e9 \u65e5\u672c",
+	}
+	for in, want := range cases {
+		if got := visibleText(in); got != want {
+			t.Errorf("visibleText(%q) = %q, want %q", in, got, want)
 		}
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"sort"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/mdnest/mdnest/backend/middleware"
 )
@@ -305,10 +307,15 @@ func commandOf(toolInput json.RawMessage) (command, description string) {
 		if json.Unmarshal(raw, &s) == nil {
 			return s, description
 		}
-		// Codex can send the command as an argv array.
+		// Codex can send the command as an argv array. Each element is shell
+		// quoted, so ["bash","-lc","a; b"] does not read as two commands.
 		var argv []string
 		if json.Unmarshal(raw, &argv) == nil {
-			return strings.Join(argv, " "), description
+			quoted := make([]string, len(argv))
+			for i, a := range argv {
+				quoted[i] = shellQuote(a)
+			}
+			return strings.Join(quoted, " "), description
 		}
 	}
 	var buf bytes.Buffer
@@ -316,6 +323,38 @@ func commandOf(toolInput json.RawMessage) (command, description string) {
 		return buf.String(), description
 	}
 	return string(toolInput), description
+}
+
+// shellQuote leaves a plain word alone and single-quotes anything else.
+func shellQuote(s string) string {
+	if s != "" && strings.IndexFunc(s, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("-_./=:,@%+", r))
+	}) < 0 {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// visibleText makes every character that could change how the command
+// LOOKS without changing what runs show up as an escape: control characters
+// (other than newline and tab), bidi overrides and isolates, and zero-width
+// characters. What the person reads is then what the agent will run.
+func visibleText(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r == '\n' || r == '\t':
+			b.WriteRune(r)
+		case unicode.IsControl(r),
+			r >= 0x202A && r <= 0x202E, r >= 0x2066 && r <= 0x2069,
+			r == 0x200E, r == 0x200F, r == 0x061C,
+			r >= 0x200B && r <= 0x200D, r == 0x2060, r == 0xFEFF:
+			fmt.Fprintf(&b, "\\u{%04X}", r)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 func cleanMachineLabel(s string) string {
@@ -443,6 +482,7 @@ func (h *ApprovalHandler) create(w http.ResponseWriter, r *http.Request, owner, 
 		return
 	}
 	command, description := commandOf(in.ToolInput)
+	command, description = visibleText(command), visibleText(description)
 	if strings.TrimSpace(command) == "" {
 		approvalError(w, http.StatusBadRequest, "the hook input names no command")
 		return
@@ -675,6 +715,7 @@ func (h *ApprovalHandler) close(w http.ResponseWriter, r *http.Request, owner st
 	onlyCommand := ""
 	if in.HookEventName != "Stop" && len(in.ToolInput) > 0 {
 		onlyCommand, _ = commandOf(in.ToolInput)
+		onlyCommand = visibleText(onlyCommand)
 	}
 	h.mu.Lock()
 	n := 0
