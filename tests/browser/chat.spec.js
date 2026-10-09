@@ -791,6 +791,9 @@ test('a half-typed message is still there after opening another chat and coming 
     // It survives a reload too, and goes once it is sent.
     await page.reload();
     await expect(box).toHaveValue('half a thought for A', { timeout: 20_000 });
+    // The restored draft shows before the chat has loaded, while the box is
+    // still disabled, and press() does not wait for it to be enabled.
+    await expect(box).toBeEnabled({ timeout: 20_000 });
     await box.press('Enter');
     await expect(page.locator('.chat-msg', { hasText: 'half a thought for A' })).toBeVisible();
     await expect(box).toHaveValue('');
