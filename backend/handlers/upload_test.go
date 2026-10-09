@@ -37,10 +37,10 @@ func (f *fakeGrantStore) CheckAccess(userID int, namespace, path, requiredPermis
 func (f *fakeGrantStore) CreateGrant(int, string, string, string, *int) (*store.Grant, error) {
 	return nil, nil
 }
-func (f *fakeGrantStore) UpdateGrantPermission(int, string) error        { return nil }
-func (f *fakeGrantStore) DeleteGrant(int) error                          { return nil }
+func (f *fakeGrantStore) UpdateGrantPermission(int, string) error { return nil }
+func (f *fakeGrantStore) DeleteGrant(int) error                   { return nil }
 func (f *fakeGrantStore) DeleteGrantsForNamespace(string) (int64, error) { return 0, nil }
-func (f *fakeGrantStore) GetGrant(int) (*store.Grant, error)             { return nil, nil }
+func (f *fakeGrantStore) GetGrant(int) (*store.Grant, error)      { return nil, nil }
 func (f *fakeGrantStore) GetGrantsForUser(int) ([]store.Grant, error) {
 	return nil, nil
 }
@@ -59,12 +59,12 @@ func (f *fakeGrantStore) GetAccessibleNamespaces(int) ([]string, error) {
 // access here — every principal falls through to the grant check.
 type fakeNsAdminStore struct{}
 
-func (fakeNsAdminStore) Add(int, string, *int) error                 { return nil }
-func (fakeNsAdminStore) Remove(int, string) error                    { return nil }
-func (fakeNsAdminStore) IsAdminOf(int, string) (bool, error)         { return false, nil }
+func (fakeNsAdminStore) Add(int, string, *int) error         { return nil }
+func (fakeNsAdminStore) Remove(int, string) error            { return nil }
+func (fakeNsAdminStore) IsAdminOf(int, string) (bool, error) { return false, nil }
 func (fakeNsAdminStore) DeleteAllForNamespace(string) (int64, error) { return 0, nil }
-func (fakeNsAdminStore) ListByUser(int) ([]string, error)            { return nil, nil }
-func (fakeNsAdminStore) CountByUser(int) (int, error)                { return 0, nil }
+func (fakeNsAdminStore) ListByUser(int) ([]string, error)    { return nil, nil }
+func (fakeNsAdminStore) CountByUser(int) (int, error)        { return 0, nil }
 func (fakeNsAdminStore) ListByNamespace(string) ([]store.NamespaceAdminWithUser, error) {
 	return nil, nil
 }

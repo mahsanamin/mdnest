@@ -631,6 +631,26 @@ run_approval_suite() {
   rm -rf "$d"
 }
 
+run_keepalive_no_policy_suite() {
+  echo "── chat keepalive without an approvals policy (unchanged output) ──"
+  # Agent approvals hooked a "stopped" notice into keepalive's give-up path.
+  # Without ~/.config/mdnest/approvals.conf that must change nothing: the
+  # expected text below is what the CLI printed before approvals existed
+  # (captured from develop at 4.8.5-dev), for three blocked stops and the
+  # fourth one it lets through. Nothing may be written under HOME either.
+  local d out i; d=$(mktemp -d)
+  mkdir -p "$d/home" "$d/tmp"
+  printf '%s\n' '{"x":"mdnest chat wait @srv/notes/team.md --as codxu --timeout 120"}' > "$d/t.jsonl"
+  local block='{"decision":"block","reason":"You are still in the mdnest chat @srv/notes/team.md. Do not stop: run `mdnest chat wait @srv/notes/team.md --as codxu --timeout 120` now and keep the loop going (wait, reply if it is for you, wait again). Only when a person in the chat tells you to leave, run the chat leave command with the same chat and --as, then stop."}'
+  out=""
+  for i in 1 2 3 4; do
+    out="$out$(printf '{"session_id":"pin","transcript_path":"%s"}' "$d/t.jsonl" | HOME="$d/home" TMPDIR="$d/tmp" "$REPO_ROOT/mdnest" chat keepalive 2>&1; printf '|%s;' "$?")"
+  done
+  eq "keepalive, no policy: byte-for-byte the output it had before approvals" "$block"$'\n'"|0;$block"$'\n'"|0;$block"$'\n'"|0;|0;" "$out"
+  eq "keepalive, no policy: writes nothing under HOME" "" "$(ls -A "$d/home")"
+  rm -rf "$d"
+}
+
 run_version_suite() {
   echo "── version comparison ──"
   gt() { version_gt "$1" "$2" && echo yes || echo no; }
@@ -769,6 +789,7 @@ run_unreachable_suite
 run_install_source_suite
 run_version_suite
 run_keepalive_suite
+run_keepalive_no_policy_suite
 run_approval_suite
 run_errexit_lint
 

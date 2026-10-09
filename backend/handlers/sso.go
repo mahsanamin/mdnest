@@ -17,21 +17,21 @@ import (
 // SSOHandler owns /api/auth/sso/start and /api/auth/sso/callback.
 //
 // Flow:
-//  1. Browser hits /api/auth/sso/start → we generate CSRF state + PKCE
-//     verifier + OIDC nonce, pack them into a signed cookie, and redirect
-//     to the IdP's authorization endpoint.
-//  2. IdP bounces the browser back to /api/auth/sso/callback with
-//     ?code=...&state=... — we verify the state cookie, exchange the code,
-//     verify the ID token, and extract the email.
-//  3. We look the email up in the local users table. By default there is NO
-//     auto-provisioning — if the email isn't already invited, we redirect
-//     back to the frontend with an error in the hash. When the operator opts
-//     in (autoProvisionUsers), an unknown but IdP-authenticated email is
-//     instead created as a least-privilege collaborator on first login.
-//  4. On success we mint the normal mdnest JWT (same shape as password /
-//     Firebase flow) and redirect to the frontend with the token in the
-//     URL fragment (#token=...). The frontend bootstrap reads the fragment,
-//     stores the token in localStorage, strips the hash, and proceeds.
+//   1. Browser hits /api/auth/sso/start → we generate CSRF state + PKCE
+//      verifier + OIDC nonce, pack them into a signed cookie, and redirect
+//      to the IdP's authorization endpoint.
+//   2. IdP bounces the browser back to /api/auth/sso/callback with
+//      ?code=...&state=... — we verify the state cookie, exchange the code,
+//      verify the ID token, and extract the email.
+//   3. We look the email up in the local users table. By default there is NO
+//      auto-provisioning — if the email isn't already invited, we redirect
+//      back to the frontend with an error in the hash. When the operator opts
+//      in (autoProvisionUsers), an unknown but IdP-authenticated email is
+//      instead created as a least-privilege collaborator on first login.
+//   4. On success we mint the normal mdnest JWT (same shape as password /
+//      Firebase flow) and redirect to the frontend with the token in the
+//      URL fragment (#token=...). The frontend bootstrap reads the fragment,
+//      stores the token in localStorage, strips the hash, and proceeds.
 type SSOHandler struct {
 	client       *sso.Client
 	userStore    store.UserStore

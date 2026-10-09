@@ -18,8 +18,13 @@ All notable changes to mdnest are documented here.
   (`ENABLE_AGENT_APPROVALS=true`), each machine (`~/.config/mdnest/approvals.conf`
   and `mdnest approval hook-config`), and each agent session. Decisions count
   only from a browser login, never from an API token, and only the account the
-  agent runs as can see the command. Experimental: to be reviewed on
-  2026-11-15. Setup in `docs/chat.md`, the added risk in `docs/security.md`.
+  agent runs as can see the command. The card also answers an agent's
+  questions (options, several at once, or your own answer), shows file writes
+  and edits readably, and offers "Allow for this session" when Claude Code
+  suggests it. Notices in the same list say when an agent is waiting in its
+  terminal or has stopped. Cards and notices carry the agent's chat name.
+  Experimental: to be reviewed on 2026-11-15. Setup, and what to expect in
+  auto mode, in `docs/chat.md`; the added risk in `docs/security.md`.
 
 ### Fixed
 
