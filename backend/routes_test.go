@@ -175,10 +175,11 @@ func (memActivity) Summary(ns, p string) (*store.NoteAttribution, error) {
 // --- fixture ---------------------------------------------------------------
 
 type testServer struct {
-	t      *testing.T
-	root   string
-	srv    *httptest.Server
-	tokens *handlers.TokenHandler
+	t         *testing.T
+	root      string
+	srv       *httptest.Server
+	tokens    *handlers.TokenHandler
+	approvals *handlers.ApprovalHandler
 	// restarts counts how often a restart was asked for (the real one
 	// re-execs the process; here it only counts).
 	restarts atomic.Int32
@@ -301,6 +302,9 @@ func newTestServer(t *testing.T, multi bool) *testServer {
 		sync:       handlers.NewSyncHandler(root, search.InvalidateCache, nsAdmins),
 		restart:    handlers.NewRestartHandler(func() { ts.restarts.Add(1) }),
 	}
+	ts.approvals = handlers.NewApprovalHandler(multi, canWrite)
+	ts.approvals.SetChat(chat)
+	routes.approvals = ts.approvals
 	if multi {
 		routes.attribution = handlers.NewAttributionHandler(stg, memActivity{})
 		routes.comments = handlers.NewCommentsHandler(stg)

@@ -314,47 +314,67 @@ func (h *ChatHandler) post(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	doc, status, errMsg := h.appendMessage(r, ns, relPath, label, via, text)
+	if status != 0 {
+		chatJSONError(w, status, errMsg)
+		return
+	}
+	msg := doc.Messages[len(doc.Messages)-1]
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]any{"status": "posted", "count": len(doc.Messages), "message": msg})
+}
+
+// appendMessage adds one message to a chat under the note lock. On failure it
+// returns the HTTP status and the message to answer with; status 0 is success.
+func (h *ChatHandler) appendMessage(r *http.Request, ns, relPath, label, via, text string) (ChatDoc, int, string) {
 	ctx := r.Context()
 	unlock := lockNote(ns, relPath)
 	data, err := h.store.ReadFile(ctx, ns, relPath)
 	if errors.Is(err, storage.ErrNotExist) {
 		unlock()
-		chatJSONError(w, http.StatusNotFound, "chat not found — create it first")
-		return
+		return ChatDoc{}, http.StatusNotFound, "chat not found — create it first"
 	} else if err != nil {
 		unlock()
-		chatJSONError(w, http.StatusInternalServerError, "failed to read chat")
-		return
+		return ChatDoc{}, http.StatusInternalServerError, "failed to read chat"
 	}
 	content := string(data)
 	if !IsChatNote(content) {
 		unlock()
-		chatJSONError(w, http.StatusBadRequest, "this note is not a chat — convert it first")
-		return
+		return ChatDoc{}, http.StatusBadRequest, "this note is not a chat — convert it first"
 	}
 	at := h.now()
 	updated := AppendChatMessage(content, RenderChatMessage(label, via, at, text))
 	if len(updated) > maxNoteSize {
 		unlock()
-		chatJSONError(w, http.StatusRequestEntityTooLarge, "chat is full (10MB) — start a new one")
-		return
+		return ChatDoc{}, http.StatusRequestEntityTooLarge, "chat is full (10MB) — start a new one"
 	}
 	if err := h.store.WriteFile(ctx, ns, relPath, []byte(updated)); err != nil {
 		unlock()
-		chatJSONError(w, http.StatusInternalServerError, "failed to write chat")
-		return
+		return ChatDoc{}, http.StatusInternalServerError, "failed to write chat"
 	}
 	unlock()
 
-	doc := ParseChat(updated)
-	msg := doc.Messages[len(doc.Messages)-1]
 	// The post is the result of whatever the poster said it was working on.
 	h.status.posted(ns, relPath, label)
 	h.notify(r, ns, relPath, updated)
+	return ParseChat(updated), 0, ""
+}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]any{"status": "posted", "count": len(doc.Messages), "message": msg})
+// PostNotice appends a message from the server on the caller's behalf, as
+// `as` (rendered "as (via account)" in multi mode, like any labelled post).
+// Used by agent approvals to put a card in the chat an agent is working in.
+// The caller has already checked that the account may write the note.
+func (h *ChatHandler) PostNotice(r *http.Request, ns, relPath, as, text string) error {
+	label, via, ok := h.authorFor(r, as)
+	if !ok {
+		return errors.New("cannot attribute this post to a user")
+	}
+	if _, status, msg := h.appendMessage(r, ns, relPath, label, via, text); status != 0 {
+		return errors.New(msg)
+	}
+	return nil
 }
 
 // notify tells an editor with this note open that it changed underneath it
