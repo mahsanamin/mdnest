@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -285,19 +286,85 @@ func newApprovalID() (string, error) {
 // hookInput is the part of a PermissionRequest (or PostToolUse) input the
 // server reads. The rest is ignored.
 type hookInput struct {
-	SessionID     string          `json:"session_id"`
-	Cwd           string          `json:"cwd"`
-	HookEventName string          `json:"hook_event_name"`
-	ToolName      string          `json:"tool_name"`
-	ToolInput     json.RawMessage `json:"tool_input"`
+	SessionID     string
+	Cwd           string
+	HookEventName string
+	ToolName      string
+	ToolInput     json.RawMessage
+}
+
+// strictObject decodes one JSON object into its members, with EXACT key
+// names. A duplicate key, or two keys that differ only in case, is an error.
+// encoding/json would otherwise take the last duplicate and match struct
+// fields case-insensitively, so the server could read a different command
+// from the one the agent runs, and the card would show the wrong thing.
+func strictObject(raw []byte) (map[string]json.RawMessage, error) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		return nil, errors.New("not a JSON object")
+	}
+	out := map[string]json.RawMessage{}
+	seen := map[string]bool{}
+	for dec.More() {
+		tok, err := dec.Token()
+		if err != nil {
+			return nil, err
+		}
+		key, _ := tok.(string)
+		folded := strings.ToLower(key)
+		if seen[folded] {
+			return nil, errors.New("duplicate key " + strconv.Quote(key))
+		}
+		seen[folded] = true
+		var v json.RawMessage
+		if err := dec.Decode(&v); err != nil {
+			return nil, err
+		}
+		out[key] = v
+	}
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('}') {
+		return nil, errors.New("not a JSON object")
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return nil, errors.New("trailing data after the JSON object")
+	}
+	return out, nil
+}
+
+func jsonString(raw json.RawMessage) string {
+	var s string
+	json.Unmarshal(raw, &s)
+	return s
+}
+
+// parseHookInput reads the fields the server needs, strictly (see
+// strictObject). tool_input, when it is an object, is checked the same way.
+func parseHookInput(body []byte) (hookInput, error) {
+	var in hookInput
+	m, err := strictObject(body)
+	if err != nil {
+		return in, err
+	}
+	in.SessionID = jsonString(m["session_id"])
+	in.Cwd = jsonString(m["cwd"])
+	in.HookEventName = jsonString(m["hook_event_name"])
+	in.ToolName = jsonString(m["tool_name"])
+	in.ToolInput = m["tool_input"]
+	if t := bytes.TrimSpace(in.ToolInput); len(t) > 0 && t[0] == '{' {
+		if _, err := strictObject(t); err != nil {
+			return in, errors.New("tool_input: " + err.Error())
+		}
+	}
+	return in, nil
 }
 
 // commandOf is what the person approves: the Bash command as the agent will
 // run it, or, for any other tool, its input as JSON. Never the description,
-// which the model writes and which can say anything.
+// which the model writes and which can say anything. tool_input has already
+// been through strictObject.
 func commandOf(toolInput json.RawMessage) (command, description string) {
-	var fields map[string]json.RawMessage
-	if json.Unmarshal(toolInput, &fields) != nil {
+	fields, err := strictObject(toolInput)
+	if err != nil {
 		return strings.TrimSpace(string(toolInput)), ""
 	}
 	if raw, ok := fields["description"]; ok {
@@ -479,9 +546,13 @@ func (h *ApprovalHandler) create(w http.ResponseWriter, r *http.Request, owner, 
 		approvalError(w, http.StatusRequestEntityTooLarge, "hook input too large (max 64KB)")
 		return
 	}
-	var in hookInput
-	if err := json.Unmarshal(body, &in); err != nil || len(in.ToolInput) == 0 {
-		approvalError(w, http.StatusBadRequest, "body must be the agent's hook input JSON, with tool_input")
+	in, err := parseHookInput(body)
+	if err != nil || len(in.ToolInput) == 0 {
+		msg := "body must be the agent's hook input JSON, with tool_input"
+		if err != nil {
+			msg += " (" + err.Error() + ")"
+		}
+		approvalError(w, http.StatusBadRequest, msg)
 		return
 	}
 	command, description := commandOf(in.ToolInput)
@@ -706,7 +777,7 @@ func (h *ApprovalHandler) close(w http.ResponseWriter, r *http.Request, owner st
 	body, _ := io.ReadAll(io.LimitReader(r.Body, approvalMaxBody+1))
 	var in hookInput
 	if len(body) > 0 && len(body) <= approvalMaxBody {
-		json.Unmarshal(body, &in)
+		in, _ = parseHookInput(body)
 	}
 	if session == "" {
 		session = in.SessionID

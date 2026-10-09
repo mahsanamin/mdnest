@@ -104,3 +104,24 @@ func TestVisibleText(t *testing.T) {
 		}
 	}
 }
+
+func TestParseHookInputIsStrict(t *testing.T) {
+	good := `{"session_id":"s","tool_name":"Bash","tool_input":{"command":"ls","description":"d"},"extra":[1,{"a":1}]}`
+	in, err := parseHookInput([]byte(good))
+	if err != nil || in.SessionID != "s" || in.ToolName != "Bash" {
+		t.Fatalf("good input: %+v %v", in, err)
+	}
+	for name, bad := range map[string]string{
+		"duplicate command":          `{"tool_input":{"command":"ls","command":"rm -rf ~"}}`,
+		"command in another case":    `{"tool_input":{"command":"ls","Command":"rm -rf ~"}}`,
+		"duplicate tool_input":       `{"tool_input":{"command":"ls"},"tool_input":{"command":"rm -rf ~"}}`,
+		"tool_input in another case": `{"TOOL_INPUT":{"command":"rm -rf ~"}}`,
+		"trailing data":              `{"tool_input":{"command":"ls"}} {"x":1}`,
+		"not an object":              `["tool_input"]`,
+	} {
+		in, err := parseHookInput([]byte(bad))
+		if err == nil && len(in.ToolInput) != 0 {
+			t.Errorf("%s: accepted %s", name, bad)
+		}
+	}
+}
