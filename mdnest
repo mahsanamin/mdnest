@@ -2161,7 +2161,7 @@ Needs ~/.mdnest/approvals.conf on this machine (without it nothing is sent):
 USAGE
 }
 
-# approval_policy_load — reads ~/.mdnest/approvals.conf into APPROVAL_* vars.
+# approval_policy_load: reads ~/.mdnest/approvals.conf into APPROVAL_* vars.
 # Plain KEY=value lines, read as data and never sourced, so the file cannot
 # run code. Returns 1 when there is no file (forward nothing) or no SERVER.
 approval_policy_load() {
@@ -2191,7 +2191,7 @@ approval_policy_load() {
   return 0
 }
 
-# approval_tool_allowed <tool> <comma list> — exact, case-sensitive tool
+# approval_tool_allowed <tool> <comma list>: exact, case-sensitive tool
 # names, or `*` for any tool.
 approval_tool_allowed() {
   local tool="$1" item items=()
@@ -2207,7 +2207,7 @@ approval_tool_allowed() {
   return 1
 }
 
-# approval_never_remote <hook input> <comma list> — true when any pattern
+# approval_never_remote <hook input> <comma list>: true when any pattern
 # appears in the input, case-insensitively. Matched against the WHOLE raw
 # input (the CLI does not parse JSON), so a pattern that only shows up in the
 # agent's description also keeps the question in the terminal. That errs on
@@ -2229,7 +2229,7 @@ approval_never_remote() {
   return 1
 }
 
-# approval_chat_ref <target> — turns a chat target ("@alias/ns/path",
+# approval_chat_ref <target>: turns a chat target ("@alias/ns/path",
 # "'@alias/ns/path'", "mdnest://...", or "ns/path" on the default server) into
 # "ns/path" when it is on the approval SERVER, else prints nothing.
 approval_chat_ref() {
@@ -2250,7 +2250,7 @@ approval_chat_ref() {
   return 0
 }
 
-# approval_field <name> <json> — one top-level string field, pure bash first
+# approval_field <name> <json>: one top-level string field, pure bash first
 # (the hook input is a flat object and the fields read here are plain ids),
 # json_top_string as the fallback.
 approval_field() {
@@ -2363,7 +2363,7 @@ cmd_approval_request() {
   return 0
 }
 
-# approval done — PostToolUse and Stop hook. Closes this session's requests
+# approval done: PostToolUse and Stop hook. Closes this session's requests
 # that were answered in the terminal, so their cards stop asking. Quiet and
 # fast: it calls the server only while a request of this session is open.
 cmd_approval_done() {
@@ -2573,7 +2573,7 @@ EXAMPLES
   mdnest chat status @work/engineering/Chats/release.md "running the migration" --as api-agent
   mdnest chat leave @work/engineering/Chats/release.md --as api-agent
 
-  # Agent approvals — print the hook settings, then use them for one session
+  # Agent approvals: print the hook settings, then use them for one session
   mdnest approval hook-config claude-code > approvals.json
   claude --settings approvals.json
   mdnest approval hook-config codex

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# mdnest CLI — `approval request` / `approval done` against a fake backend
+# mdnest CLI: `approval request` / `approval done` against a fake backend
 #
 # `mdnest approval request` runs as an agent's PermissionRequest hook. The
 # agent shows its own terminal prompt at the same time, so the hook has
@@ -36,7 +36,7 @@ contains() { case "$2" in *"$3"*) ok "$1" ;; *) bad "$1" "[$2] does not contain 
 echo "=== mdnest CLI approval hook ==="
 
 if ! command -v python3 >/dev/null 2>&1; then
-  echo "  SKIP — python3 not present (needed only for the fake backend)"
+  echo "  SKIP: python3 not present (needed only for the fake backend)"
   exit 0
 fi
 REAL_PY="$(command -v python3)"
@@ -128,7 +128,7 @@ start_server() {
 }
 stop_server() { kill "$SRV_PID" 2>/dev/null; wait "$SRV_PID" 2>/dev/null; SRV_PID=""; rm -f "$WORK/port"; }
 srv_log() { curl -s "http://127.0.0.1:$PORT/__log"; }
-# logq <log json> <expr> — evaluates a Python expression over the log, as `d`.
+# logq <log json> <expr>: evaluates a Python expression over the log, as `d`.
 # The expressions are literals written in this file, never data from the CLI.
 logq() { printf '%s' "$1" | "$REAL_PY" -c "import json,sys; d=json.load(sys.stdin); print(eval(sys.argv[1]))" "$2"; }
 
@@ -153,7 +153,7 @@ TRANSCRIPT="$WORK/transcript.jsonl"
 printf '%s\n' '{"type":"tool_use","input":{"command":"mdnest chat wait @t/ns/Chats/room.md --as builder --timeout 120"}}' > "$TRANSCRIPT"
 INPUT="{\"session_id\":\"s-1\",\"transcript_path\":\"$TRANSCRIPT\",\"cwd\":\"/w\",\"hook_event_name\":\"PermissionRequest\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git push origin x\",\"description\":\"Push it\"}}"
 
-# run_request <name> [args...] — the hook, with INPUT on stdin; stdout to a
+# run_request <name> [args...]: the hook, with INPUT on stdin; stdout to a
 # file (never through $( ), which would eat the trailing newlines we check).
 run_request() {
   local name="$1"; shift

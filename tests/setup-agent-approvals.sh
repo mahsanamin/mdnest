@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# setup.sh agent-approvals switch test — no network, no Docker
+# setup.sh agent-approvals switch test: no network, no Docker
 # ────────────────────────────────────────────────────────────
 # ENABLE_AGENT_APPROVALS lets a browser answer an agent's permission prompt on
 # every machine that opted in. It travels mdnest.conf -> setup.sh -> .env ->

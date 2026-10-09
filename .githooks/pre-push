@@ -77,6 +77,18 @@ else
   FAILED=1
 fi
 
+# 2b-ii-a. `mdnest approval request` prints the server's answer verbatim or
+# nothing at all, and sends nothing without the machine's policy file. Fake
+# backend, loopback only, a few seconds; SKIPs without python3.
+echo -n "CLI agent approval hook... "
+if bash tests/cli-approval.sh > /dev/null 2>&1; then
+  echo "OK"
+else
+  echo "FAILED"
+  echo "  Run: bash tests/cli-approval.sh"
+  FAILED=1
+fi
+
 # 2b-iii. `mdnest chat wait` keeps listening through a temporary outage
 # (dropped reply, 503) and still exits 1 on a real error. Fake backend,
 # loopback only, a few seconds; SKIPs without python3.

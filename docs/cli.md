@@ -293,6 +293,34 @@ minutes (set it again during long work); the next post, or going back to
 to end its turn while its last chat command was a wait is sent back to
 waiting, until it runs `chat leave`. Setup is in [chat.md](chat.md).
 
+### Agent approvals *(experimental; server `ENABLE_AGENT_APPROVALS=true`)*
+
+Lets you answer an agent's permission prompt from mdnest. These commands are
+meant to be run by the agent as hooks, not by hand.
+
+```bash
+mdnest approval hook-config claude-code > approvals.json   # print the hook settings
+claude --settings approvals.json                             # use them for one session
+mdnest approval hook-config codex                            # the same for Codex
+```
+
+`approval request [--agent claude-code|codex] [--chat @alias/ns/path] [--timeout N]`
+is the `PermissionRequest` hook. It reads the hook input on stdin, sends it
+unchanged to the server named in `~/.mdnest/approvals.conf`, waits for a
+decision (540 seconds by default, never longer than `MAX_WAIT`), and prints
+the server's answer exactly as received. On any failure (no policy file, a
+tool not in `TOOLS`, a `NEVER_REMOTE` match, a timeout, an expired request,
+an unreachable server, a CLI the server finds too old) it prints nothing and
+exits 0, so the agent's terminal prompt answers. It finds the chat the agent
+is in the same way `chat keepalive` does, or takes `--chat`.
+
+`approval done` is the `PostToolUse` and `Stop` hook. It closes the session's
+open requests that were answered in the terminal, and only calls the server
+while one of them is open.
+
+Needs only bash and curl. The policy file and the agent setup are in
+[chat.md](chat.md#agent-approvals-experimental-off-by-default).
+
 ## Server management
 
 ```bash

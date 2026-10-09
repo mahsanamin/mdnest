@@ -1914,6 +1914,61 @@ read check.
 
 ---
 
+## Agent approvals *(experimental, `ENABLE_AGENT_APPROVALS=true`)*
+
+Not registered unless the switch is on, and never on `MDNEST_ROLE=app`.
+Requests are kept in memory (default 10 minutes, at most 60). Every request
+belongs to the account that created it; another account gets `404` (or `410`
+on `wait`), as if it did not exist. Setup: [chat.md](chat.md).
+
+### POST /api/approvals?agent=&cli=[&chat=ns/path][&machine=][&ttl=]
+
+Any signed-in caller, API token included. The body is the agent's
+`PermissionRequest` hook input, as the agent sent it (max 64 KB). The command
+shown to the person is taken from `tool_input.command` (for any other tool,
+`tool_input` as JSON), never from the description. Duplicate or
+case-variant keys are refused. `agent` is `claude-code` (default) or `codex`.
+`cli` is the CLI version; below 4.8.5 (a `-dev` suffix is ignored) the answer
+is `426`. `ttl` is in seconds, kept between 60 and 3600. With `chat`, a card
+marker and a neutral line are posted in that chat, if the account may write
+it; the command is never written there. At most 20 pending requests per
+account (`429`). Returns `201 {"id":"<32 hex>"}`.
+
+### GET /api/approvals
+
+The caller's pending requests: `{"approvals":[{id, agent, agentName,
+machine, toolName, command, description, cwd, chat, state, createdAt,
+expiresAt}]}`.
+
+### GET /api/approvals/{id}
+
+One request, owner only, with `state` (`pending`, `allowed`, `denied`,
+`expired` or `closed`) and, once decided, `decidedBy`, `decidedAt` and
+`reason`.
+
+### GET /api/approvals/{id}/wait
+
+Long poll, up to 50 seconds. `204` while pending; `200` with the exact text
+the agent's hook must print once decided; `410` once expired or closed.
+
+```json
+{"hookSpecificOutput":{"decision":{"behavior":"deny","message":"Run the tests first"},"hookEventName":"PermissionRequest"}}
+```
+
+### POST /api/approvals/{id}/decide
+
+**Browser login only**: refused with `403` when the request was made with an
+API token, because the agent itself runs on its owner's token. Owner only.
+Body `{"decision":"allow"}` or `{"decision":"deny","reason":"optional, up to
+500 characters"}`. `409` if the request is no longer pending.
+
+### POST /api/approvals/close?session=
+
+Owner only. Closes that session's pending requests as answered in the
+terminal. The body may be the agent's `PostToolUse` or `Stop` hook input: a
+`PostToolUse` closes only requests for the command that just ran, so a
+parallel call still waiting keeps its card. Returns `{"closed":N}`.
+
 ## File Serving
 
 ### GET /api/files/{namespace}/{path}

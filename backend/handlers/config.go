@@ -41,7 +41,7 @@ type ConfigHandler struct {
 	grantMaxDepth   int                    // server-side ceiling on grant path depth (0 = no limit). PathPicker uses this to filter the dropdown.
 	taskBoard       bool                   // ENABLE_TASK_BOARD is on — the frontend may show the board button and load its chunk
 	chat            bool                   // ENABLE_CHAT is on — the frontend may show the Chats button and load its chunk
-	agentApprovals  bool                   // ENABLE_AGENT_APPROVALS is on — the frontend polls /api/approvals
+	agentApprovals  bool                   // ENABLE_AGENT_APPROVALS is on: the frontend polls /api/approvals
 	marp            bool                   // ENABLE_MARP is on — the frontend may render Marp-format notes as a slide deck (loads its chunk)
 	marpThemes      bool                   // ENABLE_MARP_THEMES is on — the centralized theme catalog + admin editor are available
 	excalidraw      bool                   // ENABLE_EXCALIDRAW is on — the frontend may open .excalidraw.md files in the drawing editor (loads its chunk)
