@@ -1181,3 +1181,47 @@ export async function waitForRestart(oldBootId, { timeoutMs = 90000, intervalMs 
   }
   throw new Error('The server did not come back in time');
 }
+
+// --- Agent approvals (experimental, ENABLE_AGENT_APPROVALS) ---
+
+async function approvalError(res, fallback) {
+  const data = await res.json().catch(() => ({}));
+  const err = new Error(data.error || fallback);
+  err.status = res.status;
+  return err;
+}
+
+// The pending requests this account owns.
+export async function listApprovals() {
+  const res = await request('/approvals');
+  if (!res.ok) throw await approvalError(res, 'Failed to load approvals');
+  const data = await res.json();
+  return data.approvals || [];
+}
+
+// One request, owner only. A 404 means it is gone (expired long ago, or the
+// server restarted) or it belongs to another account; both look the same.
+export async function getApproval(id) {
+  const res = await request(`/approvals/${encodeURIComponent(id)}`);
+  if (!res.ok) throw await approvalError(res, 'Failed to load the approval');
+  return res.json();
+}
+
+// decision is 'allow' or 'deny'; reason goes with deny only.
+export async function decideApproval(id, decision, reason) {
+  const body = { decision };
+  if (decision === 'deny' && reason) body.reason = reason;
+  const res = await request(`/approvals/${encodeURIComponent(id)}/decide`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 409 && data.approval) return data.approval;
+  if (!res.ok) {
+    const err = new Error(data.error || 'Failed to send the decision');
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
