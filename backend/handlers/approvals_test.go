@@ -59,10 +59,10 @@ func TestCommandOf(t *testing.T) {
 
 func TestHookOutput(t *testing.T) {
 	for _, agent := range []string{"claude-code", "codex"} {
-		if got := string(hookOutput(agent, ApprovalAllowed, "")); got != `{"hookSpecificOutput":{"decision":{"behavior":"allow"},"hookEventName":"PermissionRequest"}}`+"\n" {
+		if got := string(hookOutput(&approval{Agent: agent, state: ApprovalAllowed})); got != `{"hookSpecificOutput":{"decision":{"behavior":"allow"},"hookEventName":"PermissionRequest"}}`+"\n" {
 			t.Errorf("%s allow: %s", agent, got)
 		}
-		if got := string(hookOutput(agent, ApprovalDenied, "")); got != `{"hookSpecificOutput":{"decision":{"behavior":"deny","message":"Denied from mdnest."},"hookEventName":"PermissionRequest"}}`+"\n" {
+		if got := string(hookOutput(&approval{Agent: agent, state: ApprovalDenied})); got != `{"hookSpecificOutput":{"decision":{"behavior":"deny","message":"Denied from mdnest."},"hookEventName":"PermissionRequest"}}`+"\n" {
 			t.Errorf("%s deny: %s", agent, got)
 		}
 	}
