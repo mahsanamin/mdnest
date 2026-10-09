@@ -1458,6 +1458,10 @@ chat_keepalive_target() {
     rest="${rest#"$target"}"
   fi
   if [[ "$rest" =~ --as[=\ ]\'?([^\'\ ]+) ]]; then as="${BASH_REMATCH[1]}"; fi
+  # A shell separator ends the word: an agent that ran
+  # `mdnest chat wait X --as Viewer; echo $?` is in X as Viewer, not "Viewer;".
+  [ "${target:0:1}" = "'" ] || target="${target%%[;&|<>)]*}"
+  as="${as%%[;&|<>)]*}"
   printf '%s\t%s\n' "$target" "$as"
   return 0
 }
