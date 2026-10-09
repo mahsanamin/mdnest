@@ -282,6 +282,9 @@ export function agentInstructions(alias, ns, path, name = 'AGENT_NAME', intent =
     `- New role from a human, or none saved yet? Save it: mdnest chat post ${target} "/role what you do here" --as ${as}`,
     '- Need a human to answer or decide, even the one who started you? Ask @their-name here, add',
     '  ![waiting](gif:question), and keep waiting. Never stop to ask in your terminal instead.',
+    '- A permission or safety check blocked one of your commands? Never route it through the chat:',
+    '  do not post it for someone to run or approve. Start the wait in the background (so the human',
+    '  can answer you in your terminal) and keep waiting. A block never ends your time in the chat.',
     `- Other agents may be here. Answer only what is addressed to you (@${name}, @all) or is your part.`,
     '  Do not repeat what someone already said: agree with ![nod](gif:nod) instead. Keep replies',
     '  short and to the point. In a busy chat, add --mentions to wait.',
@@ -392,4 +395,31 @@ export function chatDeleteConsequences(count) {
 
 export function chatDeleteWarning(title, count) {
   return [`Delete the chat "${title}" for everyone?`, '', ...chatDeleteConsequences(count).map((l) => `- ${l}`)].join('\n');
+}
+
+// Unsent drafts, one per chat. Switching to another chat unmounts the open
+// one, which used to throw away whatever was typed in it. Kept in
+// localStorage so a draft also survives a reload, with an in-memory copy for
+// browsers where storage throws (private windows, blocked site data).
+const memDrafts = new Map();
+
+export function draftKey(ns, path) {
+  return `mdnest_chat_draft:${ns}/${path}`;
+}
+
+export function loadDraft(ns, path) {
+  const k = draftKey(ns, path);
+  try {
+    const v = localStorage.getItem(k);
+    if (v !== null) return v;
+  } catch { /* storage unavailable: use the in-memory copy */ }
+  return memDrafts.get(k) || '';
+}
+
+export function saveDraft(ns, path, text) {
+  const k = draftKey(ns, path);
+  if (text) memDrafts.set(k, text); else memDrafts.delete(k);
+  try {
+    if (text) localStorage.setItem(k, text); else localStorage.removeItem(k);
+  } catch { /* storage unavailable: the in-memory copy still holds it */ }
 }

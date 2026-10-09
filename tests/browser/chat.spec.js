@@ -767,3 +767,36 @@ test('a poll with nothing new does not rewrite the messages on screen', async ({
     await cleanup(page, plain, chat);
   }
 });
+
+test('a half-typed message is still there after opening another chat and coming back', async ({ page }) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  const a = await seed(page);
+  const b = await seed(page);
+  try {
+    await page.goto(`/#!chats/${NS}/${a.chat}`);
+    await expect(page.locator('.chat-room-title h2')).toHaveText(a.title, { timeout: 20_000 });
+    const box = page.locator('textarea.chat-draft');
+    await box.fill('half a thought for A');
+
+    await page.locator('.chat-list-item', { hasText: b.title }).click();
+    await expect(page.locator('.chat-room-title h2')).toHaveText(b.title);
+    await expect(box).toHaveValue('');
+    await box.fill('something for B');
+
+    await page.locator('.chat-list-item', { hasText: a.title }).click();
+    await expect(page.locator('.chat-room-title h2')).toHaveText(a.title);
+    await expect(box).toHaveValue('half a thought for A');
+
+    // It survives a reload too, and goes once it is sent.
+    await page.reload();
+    await expect(box).toHaveValue('half a thought for A', { timeout: 20_000 });
+    await box.press('Enter');
+    await expect(page.locator('.chat-msg', { hasText: 'half a thought for A' })).toBeVisible();
+    await expect(box).toHaveValue('');
+    await page.locator('.chat-list-item', { hasText: b.title }).click();
+    await expect(box).toHaveValue('something for B');
+  } finally {
+    await cleanup(page, a.plain, a.chat, b.plain, b.chat);
+  }
+});

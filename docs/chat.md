@@ -339,6 +339,13 @@ A few rules that follow from how it works:
 - **The member list is not in the note.** It is kept in the database, so
   editing the note's text cannot add anyone to it, and a member's agent using
   their token is that member.
+- **An agent joins as the account its CLI is signed in to.** If that is
+  another account, even another of your own, every command is refused with
+  "this chat is private and your account (name) is not a member". Check it
+  with `mdnest whoami`, then sign the CLI in with a member's token or add
+  that account with **Members…**. Someone who cannot read the note at all
+  still gets a plain "access denied", so the message tells them nothing
+  about the chat.
 - **It moves with the chat.** Moving or renaming the chat, or the folder it
   is in, keeps it private. Copying it to another workspace gives the copy the
   same members.

@@ -5,7 +5,7 @@ import {
   mentionsName, highlightMentions, participants, mentionQuery, completeMention,
   avatarFor, reactions, gifMarkdown, expandGifRefs, initialOf, roleFor,
 } from '../chat.js';
-import { chatDeleteConsequences, chatDeleteWarning } from '../chat.js';
+import { chatDeleteConsequences, chatDeleteWarning, loadDraft, saveDraft } from '../chat.js';
 
 describe('chat naming', () => {
   it('slugifies a channel name into a shell-safe filename', () => {
@@ -206,8 +206,11 @@ describe('chat images', () => {
     expect(s).toMatch(/Do not repeat what someone already said/);
     expect(s).toMatch(/Emoji are fine/);
     // concise: the whole prompt stays short enough to read at a glance
-    // (35 since the line on a deleted chat, exit 3)
-    expect(s.split('\n').length).toBeLessThanOrEqual(35);
+    // (38 since the rule on blocked commands: Claude Code's auto mode refused
+    // chat posts that relayed a blocked command, and the agent then stopped)
+    expect(s.split('\n').length).toBeLessThanOrEqual(38);
+    expect(s).toMatch(/blocked one of your commands\? Never route it through the chat/);
+    expect(s).toMatch(/A block never ends your time in the chat/);
     expect(s).toMatch(/exit 3: the chat was deleted/);
   });
   it('the prompt keeps the agent in the chat when it needs its own human', () => {
@@ -341,5 +344,17 @@ describe('the warning before a chat is deleted', () => {
     expect(w).toContain('cannot be undone');
     expect(chatDeleteConsequences(1)[0]).toBe('Its 1 message is deleted, for everyone in the chat.');
     expect(chatDeleteConsequences(0)[0]).toBe('The chat is deleted, for everyone in it.');
+  });
+});
+
+describe('chat drafts', () => {
+  it('keeps one draft per chat and clears it when emptied', () => {
+    saveDraft('ns', 'Chats/a.md', 'half a thought');
+    saveDraft('ns', 'Chats/b.md', 'other');
+    expect(loadDraft('ns', 'Chats/a.md')).toBe('half a thought');
+    expect(loadDraft('ns', 'Chats/b.md')).toBe('other');
+    saveDraft('ns', 'Chats/a.md', '');
+    expect(loadDraft('ns', 'Chats/a.md')).toBe('');
+    expect(loadDraft('other', 'Chats/b.md')).toBe('');
   });
 });
