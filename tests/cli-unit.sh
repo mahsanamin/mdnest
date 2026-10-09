@@ -591,6 +591,16 @@ run_approval_suite() {
   eq "policy: quoted label" "build box" "$APPROVAL_MACHINE"
   eq "policy: TOOLS" "Bash, Write" "$APPROVAL_TOOLS"
   eq "policy: MAX_WAIT" "300" "$APPROVAL_MAX_WAIT"
+  eq "policy: QUESTIONS defaults to yes" "yes" "$APPROVAL_QUESTIONS"
+  # approval_context: the chat and the agent's name from the transcript, the
+  # same rule chat keepalive uses; flags win.
+  printf '%s\n' '{"x":"mdnest chat wait @box/ns/Chats/room.md --as builder --timeout 120"}' > "$d/t.jsonl"
+  APPROVAL_SERVER=box APPROVAL_MACHINE=mini approval_context "{\"transcript_path\":\"$d/t.jsonl\"}" "" ""
+  eq "context: chat from the transcript" "ns/Chats/room.md" "$APPROVAL_CHAT"
+  eq "context: name from the transcript" "builder" "$APPROVAL_AS"
+  eq "context: machine label" "mini" "$APPROVAL_MACHINE_NAME"
+  APPROVAL_SERVER=box approval_context "{\"transcript_path\":\"$d/t.jsonl\"}" "@box/ns/other.md" "Reviewer"
+  eq "context: flags win" "ns/other.md Reviewer" "$APPROVAL_CHAT $APPROVAL_AS"
   if [ -e "$d/ran" ]; then bad "policy: the file is never run" "a line in it was executed"; else ok "policy: the file is never run"; fi
   APPROVALS_CONF="$d/missing.conf" approval_policy_load; rc=$?
   eq "policy: no file means forward nothing" "1" "$rc"

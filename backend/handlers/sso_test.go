@@ -95,10 +95,10 @@ func TestHandoffBase_EmptyAllowlist_AlwaysFrontend(t *testing.T) {
 	h := NewSSOHandler(nil, nil, "secret", testFrontend, false, nil, false)
 
 	for _, origin := range []string{
-		"",                          // normal browser login
-		"https://mcp.example.com",   // would-be bridge target, not allowlisted
-		"https://evil.example.com",  // outright injection attempt
-		testFrontend + "/",          // frontend itself
+		"",                         // normal browser login
+		"https://mcp.example.com",  // would-be bridge target, not allowlisted
+		"https://evil.example.com", // outright injection attempt
+		testFrontend + "/",         // frontend itself
 	} {
 		if got := h.handoffBase(origin); got != testFrontend {
 			t.Fatalf("handoffBase(%q) = %q, want frontend %q", origin, got, testFrontend)
@@ -129,6 +129,7 @@ func TestHandoffBase_WithAllowlist(t *testing.T) {
 		})
 	}
 }
+
 // fakeUserStore implements just enough of store.UserStore to drive
 // provisionSSOUser. Unused methods are inherited from the embedded interface
 // (nil) and panic if called, which keeps the tested surface honest.

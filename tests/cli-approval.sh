@@ -64,7 +64,7 @@ from urllib.parse import urlsplit, parse_qs
 MODE = os.environ.get("MODE", "allow")
 ANSWER = b'{"hookSpecificOutput":{"decision":{"behavior":"allow"},"hookEventName":"PermissionRequest"}}\n\n'
 ID = "0123456789abcdef0123456789abcdef"
-LOG = {"posts": [], "waits": 0, "closes": []}
+LOG = {"posts": [], "waits": 0, "closes": [], "notices": []}
 
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
@@ -106,6 +106,9 @@ class H(BaseHTTPRequestHandler):
             if MODE == "error":
                 return self.reply(500, b'{"error":"boom"}')
             return self.reply(201, json.dumps({"id": ID}).encode())
+        if u.path == "/api/approvals/notices":
+            LOG["notices"].append({"query": parse_qs(u.query), "body": data.decode()})
+            return self.reply(201, b'{"id":"n"}')
         if u.path == "/api/approvals/close":
             LOG["closes"].append({"query": parse_qs(u.query), "body": data.decode()})
             return self.reply(200, b'{"closed":1}')
@@ -252,6 +255,58 @@ eq "it closes that session" "s-1" "$(logq "$LOGJ" 'd["closes"][0]["query"]["sess
 eq "it sends the hook input, so only the matching command closes" "$POST" "$(logq "$LOGJ" 'd["closes"][0]["body"]')"
 stop_server
 
+# ── 4b. the agent's chat name, questions, and notices ───────────────────────
+echo "── chat name and questions ──"
+start_server allow; new_home name
+run_request name
+eq "the --as name from the transcript is sent" "builder" "$(logq "$(srv_log)" 'd["posts"][0]["query"]["as"][0]')"
+run_request name2 --as Reviewer
+eq "--as wins over the transcript" "Reviewer" "$(logq "$(srv_log)" 'd["posts"][1]["query"]["as"][0]')"
+QUESTION='{"session_id":"s-q","tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Use sudo or not?","options":[{"label":"yes"},{"label":"no"}]}]}}'
+HOOK_INPUT="$QUESTION" run_request q
+eq "a question goes through though TOOLS does not list it, and NEVER_REMOTE does not apply" "3" "$(logq "$(srv_log)" 'len(d["posts"])')"
+if cmp -s "$WORK/expected_allow" "$WORK/out.q"; then ok "the question's answer is printed verbatim"; else bad "the question's answer is printed verbatim" "$(cat "$WORK/out.q")"; fi
+printf 'QUESTIONS=no\n' >> "$HOME/.config/mdnest/approvals.conf"
+HOOK_INPUT="$QUESTION" run_request qno
+eq "QUESTIONS=no keeps questions in the terminal" "3:" "$(logq "$(srv_log)" 'len(d["posts"])'):$(cat "$WORK/out.qno")"
+stop_server
+
+echo "── approval notify ──"
+start_server allow; new_home notify
+NOTE="{\"session_id\":\"s-n\",\"transcript_path\":\"$TRANSCRIPT\",\"hook_event_name\":\"Notification\",\"notification_type\":\"permission_prompt\",\"message\":\"Claude needs your permission\"}"
+OUT="$(printf '%s' "$NOTE" | "$CLI" approval notify --agent claude-code 2>&1)"; RC=$?
+eq "notify: exit 0, prints nothing" "0:" "$RC:$OUT"
+LOGJ="$(srv_log)"
+eq "notify: one request" "1" "$(logq "$LOGJ" 'len(d["notices"])')"
+eq "notify: the hook input is sent unchanged" "$NOTE" "$(logq "$LOGJ" 'd["notices"][0]["body"]')"
+eq "notify: chat and name from the transcript" "ns/Chats/room.md builder" "$(logq "$LOGJ" 'd["notices"][0]["query"]["chat"][0]+" "+d["notices"][0]["query"]["as"][0]')"
+eq "notify: leaves a marker so done clears it" "s-n.notice" "$(ls "$TMPDIR/mdnest-approvals")"
+OUT="$(printf '%s' '{"session_id":"s-n","hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"ls"}}' | "$CLI" approval done 2>&1)"
+eq "done after a notice calls the server and removes the marker" "1:" "$(logq "$(srv_log)" 'len(d["closes"])'):$(ls "$TMPDIR/mdnest-approvals")"
+CX='{"session_id":"s-c","turn_id":"t1","hook_event_name":"Notification","notification_type":"idle_prompt"}'
+printf '%s' "$CX" | "$CLI" approval notify >/dev/null 2>&1
+eq "notify: a Codex hook input is labelled codex" "codex" "$(logq "$(srv_log)" 'd["notices"][1]["query"]["agent"][0]')"
+rm -f "$HOME/.config/mdnest/approvals.conf"
+printf '%s' "$NOTE" | "$CLI" approval notify >/dev/null 2>&1
+eq "notify without a policy file sends nothing" "2" "$(logq "$(srv_log)" 'len(d["notices"])')"
+stop_server
+new_home notifydead "$DEAD"
+START=$SECONDS; OUT="$(printf '%s' "$NOTE" | "$CLI" approval notify 2>&1)"; RC=$?
+eq "notify to a dead server: exit 0, prints nothing" "0:" "$RC:$OUT"
+if [ $((SECONDS - START)) -le 6 ]; then ok "notify gives up within its 5 s limit"; else bad "notify gives up within its 5 s limit" "took $((SECONDS - START)) s"; fi
+
+echo "── keepalive lets a chat agent stop ──"
+start_server allow; new_home keep
+STOPIN="{\"session_id\":\"s-k\",\"transcript_path\":\"$TRANSCRIPT\",\"hook_event_name\":\"Stop\"}"
+for i in 1 2 3; do printf '%s' "$STOPIN" | "$CLI" chat keepalive >/dev/null 2>&1; done
+eq "keepalive: no notice while it sends the agent back" "0" "$(logq "$(srv_log)" 'len(d["notices"])')"
+OUT="$(printf '%s' "$STOPIN" | "$CLI" chat keepalive 2>&1)"
+eq "keepalive: lets it stop, says nothing to the agent" "" "$OUT"
+LOGJ="$(srv_log)"
+eq "keepalive: posts a stopped notice with the chat name" "stopped builder ns/Chats/room.md" \
+   "$(logq "$LOGJ" 'd["notices"][0]["query"]["type"][0]+" "+d["notices"][0]["query"]["as"][0]+" "+d["notices"][0]["query"]["chat"][0]')"
+stop_server
+
 # ── 5. hook-config ──────────────────────────────────────────────────────────
 echo "── hook-config ──"
 for a in claude-code codex; do
@@ -260,7 +315,11 @@ for a in claude-code codex; do
     bad "hook-config $a prints valid JSON on stdout" "$CFG"; fi
   contains "hook-config $a names the agent" "$CFG" "mdnest approval request --agent $a"
   contains "hook-config $a sets the 600 s hook timeout" "$CFG" '"timeout": 600'
+  contains "hook-config $a keeps chat agents in the chat" "$CFG" 'mdnest chat keepalive'
 done
+CFG="$("$CLI" approval hook-config claude-code 2>/dev/null)"
+contains "hook-config claude-code allows chat commands" "$CFG" '"Bash(mdnest chat:*)"'
+contains "hook-config claude-code sets the Notification hook" "$CFG" 'mdnest approval notify --agent claude-code'
 "$CLI" approval hook-config other >/dev/null 2>&1; RC=$?
 if [ "$RC" != "0" ]; then ok "hook-config refuses an unknown agent"; else bad "hook-config refuses an unknown agent" "exit 0"; fi
 

@@ -23,12 +23,12 @@ func NewMeHandler(userStore store.UserStore, grantStore store.GrantStore, nsAdmi
 }
 
 type meResponse struct {
-	ID        int    `json:"id"`
-	Email     string `json:"email"`
-	Username  string `json:"username"`
-	AvatarURL string `json:"avatar_url,omitempty"`
-	Role      string `json:"role"`
-	CreatedAt string `json:"created_at"`
+	ID        int       `json:"id"`
+	Email     string    `json:"email"`
+	Username  string    `json:"username"`
+	AvatarURL string    `json:"avatar_url,omitempty"`
+	Role      string    `json:"role"`
+	CreatedAt string    `json:"created_at"`
 	Grants    []meGrant `json:"grants"`
 	// IsSuperAdmin is true only for the global "superadmin" role. The
 	// frontend uses this to show / hide the system-wide admin actions

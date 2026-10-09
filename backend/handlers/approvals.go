@@ -40,7 +40,8 @@ import (
 
 const (
 	approvalMaxBody       = 64 << 10 // the hook input, as the agent sent it
-	approvalMaxPending    = 20       // per account
+	approvalMaxPending    = 100      // per account
+	approvalMaxPerMachine = 20       // per machine label, so one noisy machine cannot use up the account
 	approvalDefaultTTL    = 10 * time.Minute
 	approvalMinTTL        = time.Minute
 	approvalMaxTTL        = 60 * time.Minute
@@ -618,15 +619,23 @@ func (h *ApprovalHandler) create(w http.ResponseWriter, r *http.Request, owner, 
 
 	h.mu.Lock()
 	h.sweepLocked()
-	pending := 0
+	pending, onMachine := 0, 0
 	for _, x := range h.items {
 		if x.owner == owner && x.state == ApprovalPending {
 			pending++
+			if x.Machine == a.Machine {
+				onMachine++
+			}
 		}
 	}
 	if pending >= approvalMaxPending {
 		h.mu.Unlock()
-		approvalError(w, http.StatusTooManyRequests, "too many pending approvals for this account (max 20)")
+		approvalError(w, http.StatusTooManyRequests, "too many pending approvals for this account (max 100); the question stays in the agent's terminal")
+		return
+	}
+	if onMachine >= approvalMaxPerMachine {
+		h.mu.Unlock()
+		approvalError(w, http.StatusTooManyRequests, "too many pending approvals from this machine (max 20); the question stays in the agent's terminal")
 		return
 	}
 	h.items[id] = a
