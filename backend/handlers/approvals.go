@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/mdnest/mdnest/backend/middleware"
 )
@@ -336,22 +337,24 @@ func shellQuote(s string) string {
 }
 
 // visibleText makes every character that could change how the command
-// LOOKS without changing what runs show up as an escape: control characters
-// (other than newline and tab), bidi overrides and isolates, and zero-width
-// characters. What the person reads is then what the agent will run.
+// LOOKS without changing what runs show up as an escape, so what the person
+// reads is what the agent runs. It is an allowlist: printable ASCII, newline
+// and tab, and non-ASCII letters, numbers, punctuation and symbols are kept.
+// Everything else is escaped: control and format characters (bidi overrides,
+// zero-width characters, tag characters, soft hyphen), every space that is
+// not ASCII space (a no-break space looks like a word break and is not one),
+// line and paragraph separators, combining marks, private-use and unassigned
+// code points. A command written in another script still reads normally.
 func visibleText(s string) string {
 	var b strings.Builder
 	for _, r := range s {
 		switch {
-		case r == '\n' || r == '\t':
+		case r == '\n' || r == '\t' || (r >= 0x20 && r < 0x7F):
 			b.WriteRune(r)
-		case unicode.IsControl(r),
-			r >= 0x202A && r <= 0x202E, r >= 0x2066 && r <= 0x2069,
-			r == 0x200E, r == 0x200F, r == 0x061C,
-			r >= 0x200B && r <= 0x200D, r == 0x2060, r == 0xFEFF:
-			fmt.Fprintf(&b, "\\u{%04X}", r)
+		case r >= 0x80 && r != utf8.RuneError && unicode.In(r, unicode.L, unicode.N, unicode.P, unicode.S):
+			b.WriteRune(r)
 		default:
-			b.WriteRune(r)
+			fmt.Fprintf(&b, "\\u{%04X}", r)
 		}
 	}
 	return b.String()

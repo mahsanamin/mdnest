@@ -85,11 +85,18 @@ func TestSplitChatRef(t *testing.T) {
 
 func TestVisibleText(t *testing.T) {
 	cases := map[string]string{
-		"ls -la\n\tpwd":          "ls -la\n\tpwd",
-		"rm -rf \u202Etxt.exe":   `rm -rf \u{202E}txt.exe`,
-		"echo safe\rrm -rf /":    `echo safe\u{000D}rm -rf /`,
-		"git\u200Bpush":          `git\u{200B}push`,
-		"caf\u00e9 \u65e5\u672c": "caf\u00e9 \u65e5\u672c",
+		"ls -la\n\tpwd":        "ls -la\n\tpwd",
+		"rm -rf \u202Etxt.exe": `rm -rf \u{202E}txt.exe`,
+		"echo safe\rrm -rf /":  `echo safe\u{000D}rm -rf /`,
+		"git\u200Bpush":        `git\u{200B}push`,
+		"caf\u00e9 \u65e5\u672c \u00e9t\u00e9 \u2192 \u20ac5": "caf\u00e9 \u65e5\u672c \u00e9t\u00e9 \u2192 \u20ac5",
+		"rm\u00a0-rf":   `rm\u{00A0}-rf`, // no-break space: looks like a word break, is not
+		"a\u2028b":      `a\u{2028}b`,
+		"x\u00adz":      `x\u{00AD}z`,
+		"tag\U000E0041": `tag\u{E0041}`,
+		"e\u0301":       `e\u{0301}`,
+		"\ufeffls":      `\u{FEFF}ls`,
+		"bad\xffbyte":   `bad\u{FFFD}byte`,
 	}
 	for in, want := range cases {
 		if got := visibleText(in); got != want {
