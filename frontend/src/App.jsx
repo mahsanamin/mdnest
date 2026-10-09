@@ -721,11 +721,11 @@ function App() {
   // Agent approvals (experimental): polled on every view while the server
   // has them on, so the waiting count can sit in the tab title.
   const approvalsEnabled = !!appConfig?.agentApprovals && authenticated;
-  const { approvals, refresh: refreshApprovals, notifyState, enableNotifications } = useApprovals(approvalsEnabled);
+  const { approvals, notices, refresh: refreshApprovals, dismiss: dismissNotice, notifyState, enableNotifications } = useApprovals(approvalsEnabled);
   useEffect(() => {
     const alias = appConfig?.serverAlias;
-    document.title = titleWithCount(alias ? `mdnest (${alias})` : 'mdnest', approvals.length);
-  }, [appConfig?.serverAlias, approvals.length]);
+    document.title = titleWithCount(alias ? `mdnest (${alias})` : 'mdnest', approvals.length + notices.length);
+  }, [appConfig?.serverAlias, approvals.length, notices.length]);
 
   // Version check: poll /api/config every 60s, compare server version vs build version.
   // Same poll keeps `appConfig.latestRelease` fresh — without this update,
@@ -2228,7 +2228,7 @@ function App() {
             : null
         }
         onShowReleaseNotes={() => setShowReleaseNotes(true)}
-        approvalCount={approvalsEnabled ? approvals.length : 0}
+        approvalCount={approvalsEnabled ? approvals.length + notices.length : 0}
         onShowApprovals={() => setShowApprovals(true)}
         revealNonce={revealNonce}
         width={sidebarWidth}
@@ -2699,6 +2699,8 @@ function App() {
       {showApprovals && approvalsEnabled && (
         <ApprovalsPanel
           approvals={approvals}
+          notices={notices}
+          onDismiss={dismissNotice}
           onClose={() => setShowApprovals(false)}
           onRefresh={refreshApprovals}
           notifyState={notifyState}

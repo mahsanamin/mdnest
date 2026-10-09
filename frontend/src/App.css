@@ -6971,3 +6971,89 @@ pre:hover .code-copy-btn {
 .approval-card-error { color: var(--danger); flex: 1 1 100%; }
 .approval-card-state { color: var(--text-secondary); }
 .chat-approval { display: flex; flex-direction: column; gap: var(--space-2); }
+.approval-card-file { margin-bottom: var(--space-1); color: var(--text-secondary); }
+.approval-card-label { color: var(--text-muted); font-size: 0.8rem; margin: var(--space-1) 0 2px; }
+.approval-card-old { border-left: 3px solid var(--danger); }
+.approval-card-new { border-left: 3px solid var(--success); }
+.approval-card-path {
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.approval-card-path code { background: none; font-size: 0.85rem; }
+.approval-card-more {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: -4px 0 var(--space-2);
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+.approval-card-actions .approval-allow-session { border-color: var(--success); color: var(--text); }
+.approval-card-scope { flex: 1 1 100%; color: var(--text-muted); font-size: 0.8rem; overflow-wrap: anywhere; }
+.approval-card-answer { margin: var(--space-1) 0 0; white-space: pre-wrap; font-family: inherit; color: var(--text); }
+.approval-questions { display: flex; flex-direction: column; gap: var(--space-2); flex: 1 1 100%; }
+.approval-question { border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: var(--space-2); margin: 0; }
+.approval-question legend { padding: 0 4px; color: var(--text); }
+.approval-question-header {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+.approval-question-options { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-2); }
+.approval-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+}
+.approval-option.picked { border-color: var(--accent); background: var(--accent-wash-2); }
+.approval-other {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+}
+.approvals-notices { display: flex; flex-direction: column; gap: var(--space-2); margin-top: var(--space-3); }
+.approval-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--warning);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+}
+.approval-notice.stopped { border-left-color: var(--danger); }
+.approval-notice-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.approval-notice-chat,
+.approval-notice-time { color: var(--text-muted); font-size: 0.8rem; }
+.approval-notice-dismiss {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  padding: 2px 8px;
+  cursor: pointer;
+}

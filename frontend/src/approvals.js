@@ -38,9 +38,60 @@ export function newApprovals(seen, list) {
 
 // One line for the browser notification.
 export function notificationText(a) {
-  const who = a.agentName || a.agent || 'An agent';
-  const where = a.machine ? ` on ${a.machine}` : '';
-  return `${who}${where} is waiting for approval`;
+  if (a.text) return a.text; // a notice says it already
+  const who = a.label || `${a.agentName || a.agent || 'An agent'}${a.machine ? ` on ${a.machine}` : ''}`;
+  return `${who} ${a.questions ? 'has a question' : 'is waiting for approval'}`;
+}
+
+// shortPath shows a file the agent touches the way a person reads it: relative
+// to the agent's folder when it is inside it, else with the home folder as ~.
+export function shortPath(path, cwd) {
+  const p = String(path || '');
+  const c = String(cwd || '').replace(/\/+$/, '');
+  if (c && p.startsWith(c + '/')) return p.slice(c.length + 1);
+  return tildePath(p);
+}
+
+export function tildePath(path) {
+  return String(path || '').replace(/^\/(Users|home)\/[^/]+(?=\/|$)/, '~');
+}
+
+// middleEllipsis keeps both ends of a long path readable on a narrow screen.
+export function middleEllipsis(s, max = 48) {
+  const t = String(s || '');
+  if (t.length <= max) return t;
+  const keep = max - 1;
+  const head = Math.ceil(keep / 2);
+  return t.slice(0, head) + '…' + t.slice(t.length - (keep - head));
+}
+
+export const PREVIEW_LINES = 40;
+
+// firstLines splits long content for a preview: the first `n` lines, and how
+// many more there are.
+export function firstLines(text, n = PREVIEW_LINES) {
+  const lines = String(text || '').split('\n');
+  if (lines.length <= n) return { shown: String(text || ''), more: 0 };
+  return { shown: lines.slice(0, n).join('\n'), more: lines.length - n };
+}
+
+// An answer is ready to send when every question has one: single-select
+// questions take exactly one of a pick or typed text.
+export function answersComplete(questions, answers) {
+  return (questions || []).every((q, i) => {
+    const a = answers[i] || { selected: [], other: '' };
+    const n = a.selected.length + (a.other.trim() ? 1 : 0);
+    return q.multiSelect ? n >= 1 : n === 1;
+  });
+}
+
+// toggleChoice updates one question's answer after a click on option `idx`.
+// A single-select pick replaces the previous one and clears typed text.
+export function toggleChoice(q, a, idx) {
+  const cur = a || { selected: [], other: '' };
+  if (!q.multiSelect) return { selected: [idx], other: '' };
+  const has = cur.selected.includes(idx);
+  return { ...cur, selected: has ? cur.selected.filter((i) => i !== idx) : [...cur.selected, idx].sort((x, y) => x - y) };
 }
 
 // What a decided, expired or closed card says instead of its buttons.
@@ -48,7 +99,9 @@ export function stateText(a) {
   if (!a) return '';
   const when = a.decidedAt ? ` at ${new Date(a.decidedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}` : '';
   switch (a.state) {
-    case 'allowed': return `Allowed by ${a.decidedBy || 'you'}${when}`;
+    case 'allowed':
+      if (a.answer) return `Answered by ${a.decidedBy || 'you'}${when}`;
+      return `Allowed${a.forSession ? ' for this session' : ''} by ${a.decidedBy || 'you'}${when}`;
     case 'denied': return `Denied by ${a.decidedBy || 'you'}${when}${a.reason ? `: ${a.reason}` : ''}`;
     case 'closed': return `Answered in the terminal${when}`;
     case 'expired': return 'Expired. Nobody answered here, so the agent asks in its terminal.';
