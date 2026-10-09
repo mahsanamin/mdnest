@@ -2140,7 +2140,7 @@ cmd_search() {
 # exits 0: the terminal prompt answers, exactly as without the hook. It never
 # allows or denies on its own. No python3 or jq needed.
 
-APPROVALS_CONF="${HOME}/.mdnest/approvals.conf"
+APPROVALS_CONF="${CONFIG_DIR}/approvals.conf"
 
 approval_usage() {
   cat >&2 <<'USAGE'
@@ -2152,7 +2152,7 @@ Usage:
   mdnest approval hook-config claude-code|codex
       Prints the hook settings to use.
 
-Needs ~/.mdnest/approvals.conf on this machine (without it nothing is sent):
+Needs ~/.config/mdnest/approvals.conf on this machine (without it nothing is sent):
   SERVER=@myserver
   MACHINE_LABEL=build-box
   TOOLS=Bash
@@ -2161,7 +2161,7 @@ Needs ~/.mdnest/approvals.conf on this machine (without it nothing is sent):
 USAGE
 }
 
-# approval_policy_load: reads ~/.mdnest/approvals.conf into APPROVAL_* vars.
+# approval_policy_load: reads ~/.config/mdnest/approvals.conf into APPROVAL_* vars.
 # Plain KEY=value lines, read as data and never sourced, so the file cannot
 # run code. Returns 1 when there is no file (forward nothing) or no SERVER.
 approval_policy_load() {
@@ -2409,7 +2409,7 @@ CONFIG
   else
     echo "Merge this into ~/.codex/hooks.json, start codex, and trust the hook once when Codex asks." >&2
   fi
-  [ -r "$APPROVALS_CONF" ] || echo "Then create ~/.mdnest/approvals.conf (see: mdnest approval). Without it nothing is sent." >&2
+  [ -r "$APPROVALS_CONF" ] || echo "Then create ~/.config/mdnest/approvals.conf (see: mdnest approval). Without it nothing is sent." >&2
   return 0
 }
 
@@ -2515,7 +2515,7 @@ NOTE OPERATIONS
            wait <path> --as NAME [--mentions] [--timeout S]   new <path> ["Title"]
            status <path> "doing X" --as NAME   (a quiet working line; --clear)
   approval request|done|hook-config  Answer an agent's permission prompt from mdnest (experimental,
-           server: ENABLE_AGENT_APPROVALS; needs ~/.mdnest/approvals.conf on this machine)
+           server: ENABLE_AGENT_APPROVALS; needs ~/.config/mdnest/approvals.conf on this machine)
 
 OTHER
   version                         Show CLI version

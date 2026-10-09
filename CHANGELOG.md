@@ -15,7 +15,7 @@ All notable changes to mdnest are documented here.
   phone. The agent's own terminal prompt still shows at the same time, and
   whichever answers first wins; if anything fails, the terminal answers as
   before. Off by default and opted into three times: the server
-  (`ENABLE_AGENT_APPROVALS=true`), each machine (`~/.mdnest/approvals.conf`
+  (`ENABLE_AGENT_APPROVALS=true`), each machine (`~/.config/mdnest/approvals.conf`
   and `mdnest approval hook-config`), and each agent session. Decisions count
   only from a browser login, never from an API token, and only the account the
   agent runs as can see the command. Experimental: to be reviewed on

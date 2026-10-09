@@ -135,10 +135,10 @@ logq() { printf '%s' "$1" | "$REAL_PY" -c "import json,sys; d=json.load(sys.stdi
 # A throwaway HOME with server @t pointing at the fake backend, and a policy.
 new_home() {
   export HOME="$WORK/home-$1"
-  rm -rf "$HOME"; mkdir -p "$HOME/.config/mdnest/servers" "$HOME/.mdnest"
+  rm -rf "$HOME"; mkdir -p "$HOME/.config/mdnest/servers"
   printf 'url=http://127.0.0.1:%s\ntoken=mdnest_faketoken\n' "${2:-$PORT}" > "$HOME/.config/mdnest/servers/t"
   printf 't' > "$HOME/.config/mdnest/default"
-  cat > "$HOME/.mdnest/approvals.conf" <<CONF
+  cat > "$HOME/.config/mdnest/approvals.conf" <<CONF
 # test policy
 SERVER=@t
 MACHINE_LABEL="build box"
@@ -221,7 +221,7 @@ policy_case() {
 }
 echo "── machine policy ──"
 start_server allow
-new_home nofile; rm -f "$HOME/.mdnest/approvals.conf"
+new_home nofile; rm -f "$HOME/.config/mdnest/approvals.conf"
 policy_case nofile "no policy file"
 stop_server; start_server allow
 new_home tool
@@ -233,7 +233,7 @@ stop_server; start_server allow
 new_home ssh
 HOOK_INPUT='{"session_id":"s-1","tool_name":"Bash","tool_input":{"command":"cat ~\/.ssh\/id_ed25519"}}' policy_case ssh "a NEVER_REMOTE match behind escaped slashes"
 stop_server; start_server allow
-new_home noserver; sed -i.bak '/^SERVER=/d' "$HOME/.mdnest/approvals.conf"
+new_home noserver; sed -i.bak '/^SERVER=/d' "$HOME/.config/mdnest/approvals.conf"
 policy_case noserver "a policy without SERVER"
 stop_server
 

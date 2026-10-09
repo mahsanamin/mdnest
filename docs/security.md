@@ -212,7 +212,7 @@ The rules:
 - **No "always allow".** One press approves one command.
 - **Caps.** 64 KB per request, 20 pending per account, 60 minutes at most.
   Requests live in memory only, so nothing about them is written to disk.
-- **The machine decides what may go remote.** `~/.mdnest/approvals.conf`
+- **The machine decides what may go remote.** `~/.config/mdnest/approvals.conf`
   names the one server that may answer, which tools may be sent, and text
   (`sudo`, `.ssh`, ...) that always stays in the terminal. It is read as data
   and never run.

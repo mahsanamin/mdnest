@@ -100,7 +100,7 @@ GIT_AUTHOR_EMAIL=you@example.com
 # mdnest: the agent's question shows as a card, you press Allow or Deny in the
 # browser, and the agent continues. A machine only takes part if its owner
 # sets `mdnest approval request` as the agent's permission hook and writes
-# ~/.mdnest/approvals.conf; see docs/chat.md. Decisions are accepted only from
+# ~/.config/mdnest/approvals.conf; see docs/chat.md. Decisions are accepted only from
 # a browser login, never from an API token. Requests are kept in memory, so a
 # restart drops pending ones and the agent falls back to its terminal prompt.
 # Turning this on means anyone who gets into an account can approve commands
