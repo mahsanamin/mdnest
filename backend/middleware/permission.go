@@ -2,7 +2,9 @@ package middleware
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -554,6 +556,24 @@ func DenyJSON(w http.ResponseWriter) {
 	http.Error(w, `{"error":"access denied"}`, http.StatusForbidden)
 }
 
+// deny writes the 403 for a refused note request. When the only thing in the
+// way is a private chat's member list, it says so and names the account: an
+// agent on a token of another account (an admin login, a colleague's) used to
+// get a bare "access denied" with no way to tell why. Someone who could not
+// read the path anyway still gets the bare answer, so nothing about the chat
+// is revealed to them.
+func (pc *PermissionChecker) deny(w http.ResponseWriter, r *http.Request, ns, path string) {
+	uc := UserFromContext(r.Context())
+	if uc != nil && pc.chatMembers != nil && !pc.chatMemberOK(uc, ns, path) &&
+		(pc.hasAdminScope(uc, ns) || pc.granted(uc, ns, path, "read")) {
+		msg, _ := json.Marshal(map[string]string{"error": fmt.Sprintf(
+			"this chat is private and your account (%s) is not a member. Ask its owner to add %s, or sign in as a member", uc.Username, uc.Username)})
+		http.Error(w, string(msg), http.StatusForbidden)
+		return
+	}
+	DenyJSON(w)
+}
+
 // canonicalPath turns a namespace-relative query path into the absolute form
 // grants are matched against, cleaned with the same rule the handlers apply
 // (relpath.Clean). Checking the raw string instead let "Shared/../Private/x"
@@ -588,7 +608,7 @@ func (pc *PermissionChecker) RequireRead(next http.Handler) http.Handler {
 				return
 			}
 			if !pc.CheckRead(r, ns, path) {
-				DenyJSON(w)
+				pc.deny(w, r, ns, path)
 				return
 			}
 		}
@@ -608,7 +628,7 @@ func (pc *PermissionChecker) RequireWrite(next http.Handler) http.Handler {
 				return
 			}
 			if !pc.CheckWrite(r, ns, path) {
-				DenyJSON(w)
+				pc.deny(w, r, ns, path)
 				return
 			}
 		}
@@ -707,19 +727,19 @@ func (pc *PermissionChecker) ReadWriteRouter(next http.Handler) http.Handler {
 		switch r.Method {
 		case "GET", "HEAD":
 			if !pc.CheckRead(r, ns, path) {
-				DenyJSON(w)
+				pc.deny(w, r, ns, path)
 				return
 			}
 		case "DELETE":
 			// A folder delete removes every note under it, so it also needs
 			// membership of any private chat in there.
 			if !pc.CheckWriteTree(r, ns, path) {
-				DenyJSON(w)
+				pc.deny(w, r, ns, path)
 				return
 			}
 		default:
 			if !pc.CheckWrite(r, ns, path) {
-				DenyJSON(w)
+				pc.deny(w, r, ns, path)
 				return
 			}
 		}

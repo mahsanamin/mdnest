@@ -9,7 +9,7 @@ import {
   highlightMentions, mentionsName, participants, mentionQuery, completeMention,
   avatarFor, reactions, gifMarkdown, expandGifRefs, initialOf,
   pinKey, parsePins, togglePin, chatsForTab, MAX_CHAT_PINS_LENGTH,
-  roleFor, chatDeleteConsequences,
+  roleFor, chatDeleteConsequences, loadDraft, saveDraft,
 } from '../chat.js';
 import { copyPlainText } from '../mermaid-text.js';
 import { mdnestUri } from '../mdnestUri.js';
@@ -486,6 +486,12 @@ function ChatAgentPanel({ chat, serverAlias, onClose }) {
         To <b>{chat.title || chat.path}</b>. Paste the prompt into the agent. Give it one name and it uses that name
         everywhere, so <code>@name</code> reaches it.
       </p>
+      {chat.private && (
+        <p className="chat-agent-private" data-testid="chat-agent-private">
+          This chat is private. The agent's mdnest CLI must be signed in as a member, so check
+          with <code>mdnest whoami</code>. A token of any other account is refused.
+        </p>
+      )}
       {Object.keys(agents).length > 0 && (
         <div className="chat-agent-saved" data-testid="chat-agent-saved">
           <div className="chat-agent-saved-head">Saved roles. Each agent is reminded of its role while it waits.</div>
@@ -580,7 +586,9 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onBack, onActivity, 
   const [agents, setAgents] = useState({}); // each agent's saved role, by name (kept in the note)
   const [messages, setMessages] = useState([]);
   const [error, setError] = useState('');
-  const [draft, setDraft] = useState('');
+  // Kept per chat, so opening another chat and coming back keeps what was typed.
+  const [draft, setDraft] = useState(() => loadDraft(chat.ns, chat.path));
+  useEffect(() => { saveDraft(chat.ns, chat.path, draft); }, [chat.ns, chat.path, draft]);
   const [sending, setSending] = useState(false);
   const [postingAs, setPostingAs] = useState(() => {
     try { return localStorage.getItem(AS_KEY) || ''; } catch { return ''; }
@@ -717,7 +725,10 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onBack, onActivity, 
     setSending(true);
     try {
       const r = await postChatMessage(chat.ns, chat.path, text, postingAs.trim());
-      if (typeof override !== 'string') setDraft('');
+      if (typeof override !== 'string') {
+        setDraft('');
+        saveDraft(chat.ns, chat.path, ''); // also when this chat was closed while sending
+      }
       followNext.current = true;
       setMessages((cur) => mergeMessages(cur, [r.message]));
       // Anything posted by others in between is fetched by the next poll,
@@ -1193,7 +1204,8 @@ function ChatView({ ns, namespaces, onSelectNs, account, serverAlias, isMobile, 
           onActivity={refresh}
           onDialog={(kind, extra) => {
             if (kind === 'delete' && !onDeleteChat) return;
-            setDialog({ kind, chat: { ...openChat, title: chats.find((c) => c.ns === openChat.ns && c.path === openChat.path)?.title, ...extra } });
+            const entry = chats.find((c) => c.ns === openChat.ns && c.path === openChat.path);
+            setDialog({ kind, chat: { ...openChat, title: entry?.title, private: entry?.private, ...extra } });
           }}
           onGone={() => { onSelectChat(null); refresh(); }}
         />

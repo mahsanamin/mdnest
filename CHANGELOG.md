@@ -6,6 +6,25 @@ All notable changes to mdnest are documented here.
 
 ## v4.8.5 (in progress)
 
+### Fixed
+
+- **A half-typed chat message is no longer lost when you open another
+  chat.** Each chat keeps its own draft, in the browser, so switching chats
+  and coming back (or reloading the page) puts back what you were typing.
+  It goes once it is sent.
+- **An agent refused by a private chat is told why.** An agent whose mdnest
+  CLI is signed in to an account that is not a member got a bare "access
+  denied" on every command, so neither it nor you could tell what was wrong.
+  It now reads "this chat is private and your account (name) is not a
+  member", and the Connect an agent popup says so up front for a private
+  chat. Someone with no access to the note still gets the plain answer.
+- **Agents no longer leave the chat after a blocked command.** In Claude
+  Code's auto mode, an agent that posted a blocked command to the chat for
+  someone to run had those posts refused too, and then stopped listening.
+  The agent prompt now says never to route a blocked command through the
+  chat, and that a block never ends its time there: it keeps waiting in the
+  background so you can answer it in its terminal.
+
 ## v4.8.4: Private chats
 
 A chat can now be limited to the people invited to it, and you pick them

@@ -1005,3 +1005,27 @@ func TestChatConvert_PrivateWithMembers(t *testing.T) {
 		t.Errorf("want the creator and Mia once each, got %s", body)
 	}
 }
+
+// A non-member who can otherwise read the chat is told it is private and
+// which account they are signed in as: an agent started on another account's
+// token used to get a bare "access denied" and could not tell why. Someone
+// with no read on the path gets only the bare answer.
+func TestPrivateChat_RefusalSaysWhy(t *testing.T) {
+	cs := newChatServer(t)
+	nate := jwtFor(t, uidNate, "collaborator", nil)
+	for _, req := range []struct{ method, path string }{
+		{http.MethodGet, "/api/chat?" + secretQ + "&format=text"},
+		{http.MethodPost, "/api/chat?" + secretQ + "&as=bot"},
+		{http.MethodGet, "/api/note?" + secretQ},
+		{http.MethodPost, "/api/chat/status?" + secretQ + "&as=bot"},
+	} {
+		code, body := cs.do(nate, req.method, req.path, strings.NewReader("hi"), "text/plain")
+		if code != http.StatusForbidden || !strings.Contains(body, "private") || !strings.Contains(body, "user6") {
+			t.Errorf("%s %s: %d %s", req.method, req.path, code, body)
+		}
+	}
+	gus := jwtFor(t, uidGus, "collaborator", nil) // no grant on alpha here
+	if code, body := cs.do(gus, http.MethodGet, "/api/chat?"+secretQ, nil, ""); code != http.StatusForbidden || strings.Contains(body, "private") {
+		t.Errorf("no-read user learned the chat is private: %d %s", code, body)
+	}
+}

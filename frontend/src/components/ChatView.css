@@ -749,6 +749,14 @@
 .chat-dialog .chat-agent-saved { max-width: none; }
 .chat-dialog .chat-agent pre { max-height: 260px; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 .chat-agent-sub { color: var(--text-secondary); }
+.chat-agent-private {
+  margin: 8px 0 0;
+  padding: 6px 10px;
+  border-left: 3px solid var(--warning);
+  background: var(--warning-wash);
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
 .chat-agent-step {
   margin: 12px 0 6px;
   font-size: 0.78rem;
