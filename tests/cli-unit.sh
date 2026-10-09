@@ -557,6 +557,12 @@ run_keepalive_suite() {
   # After chat leave, the agent may stop.
   printf '%s\n' '{"x":"mdnest chat wait notes/c.md --as a"}' '{"x":"mdnest chat leave notes/c.md --as a"}' > "$d/left.jsonl"
   eq "keepalive: chat leave lets the agent stop" "" "$(ka s3 "$d/left.jsonl")"
+  # An agent that tacks `; echo $?` onto its wait: the separator is not part
+  # of the chat path or the name.
+  printf '%s\n' '{"tool_use":{"input":{"command":"mdnest chat wait @srv/notes/team.md --as Viewer; echo \"EXIT=$?\""}}}' > "$d/sep.jsonl"
+  eq "keepalive target: a ; after the name is not part of it" "$(printf '@srv/notes/team.md\tViewer')" "$(MDNEST_LIB=1 bash -c 'source "$1"; chat_keepalive_target "$2"' _ "$REPO_ROOT/mdnest" "$d/sep.jsonl" 2>/dev/null)"
+  printf '%s\n' '{"tool_use":{"input":{"command":"mdnest chat wait @srv/notes/team.md; echo done"}}}' > "$d/sep2.jsonl"
+  eq "keepalive target: a ; after the path is not part of it" "$(printf '@srv/notes/team.md\t')" "$(MDNEST_LIB=1 bash -c 'source "$1"; chat_keepalive_target "$2"' _ "$REPO_ROOT/mdnest" "$d/sep2.jsonl" 2>/dev/null)"
   # Never in a chat, no transcript, garbage, or switched off: say nothing.
   printf '%s\n' '{"x":"ls -la"}' > "$d/none.jsonl"
   eq "keepalive: no chat, no block" "" "$(ka s4 "$d/none.jsonl")"

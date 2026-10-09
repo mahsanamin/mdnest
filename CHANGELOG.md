@@ -28,6 +28,10 @@ All notable changes to mdnest are documented here.
 
 ### Fixed
 
+- **Chat keepalive reads an agent's name correctly when it adds `; echo $?`
+  to its wait.** The name and chat path stopped at a space or a quote but not
+  at `;`, so an agent named Viewer showed as "Viewer;". They now end at any
+  shell separator.
 - **A half-typed chat message is no longer lost when you open another
   chat.** Each chat keeps its own draft, in the browser, so switching chats
   and coming back (or reloading the page) puts back what you were typing.
