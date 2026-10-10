@@ -18,6 +18,25 @@ fi
 
 echo "Reading $CONF..."
 
+# The compose file below gives the frontend build a second, named context
+# (`additional_contexts`, so the image can serve the repo-root CLI). Compose
+# learned that key in 2.17; an older one fails every command with a schema
+# error that names neither the key's purpose nor the version. Say it plainly
+# instead. Skipped when docker is absent or the version can't be read: this
+# script also runs on machines that only generate the files.
+compose_ver=$(docker compose version --short 2>/dev/null) || compose_ver=""
+compose_ver="${compose_ver#v}"
+if [ -n "$compose_ver" ]; then
+  cv_major="${compose_ver%%.*}"; cv_rest="${compose_ver#*.}"; cv_minor="${cv_rest%%.*}"
+  cv_major="${cv_major//[!0-9]/}"; cv_minor="${cv_minor//[!0-9]/}"
+  if [ -n "$cv_major" ] && [ -n "$cv_minor" ] &&
+     { [ "$cv_major" -lt 2 ] || { [ "$cv_major" -eq 2 ] && [ "$cv_minor" -lt 17 ]; }; }; then
+    echo "Error: mdnest needs Docker Compose 2.17 or newer; this machine has ${compose_ver}." >&2
+    echo "Update Docker (or the docker-compose-plugin package), then run this again." >&2
+    exit 1
+  fi
+fi
+
 # Short git commit of the current checkout. Baked into the backend binary at
 # build time (via docker-compose build arg → Dockerfile ldflags) so /api/config
 # can report exactly which build is running. Falls back to "unknown" outside a
@@ -619,7 +638,11 @@ ${BACKEND_VOLUMES}      - mdnest-secrets:/data/secrets
 ${BACKEND_EXTRA_ENV}    restart: unless-stopped
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      # The repo-root mdnest CLI, served at /cli/mdnest (needs Compose 2.17+).
+      additional_contexts:
+        cli: .
 ${FRONTEND_PORT_LINE}
     depends_on:
       - backend

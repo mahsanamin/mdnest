@@ -4,6 +4,28 @@ The `mdnest` CLI lets you read, write, search, and organize notes from any termi
 
 ## Install
 
+### From your own server (4.8.5+)
+
+Every mdnest server serves the exact CLI it was built with, at `/cli/mdnest`,
+with no login needed. Its installer gets the CLI from that server and then
+logs you in to it:
+
+```bash
+curl -fsSL https://notes.example.com/cli/install.sh | bash -s -- https://notes.example.com
+```
+
+Settings, then the CLI tab, shows this command with your server's address
+filled in. Use it when the server runs a develop build, an older release or a
+fork: the CLI you get matches the server, which the GitHub copy may not. If the
+server cannot serve the CLI (an older server, or a proxy in the way), the
+installer falls back to the latest release from GitHub and says so.
+
+After installing, it runs `mdnest login https://notes.example.com`, which asks
+for a token at the terminal (see [Login](#login)). With no terminal (a script)
+it prints that command for you to run instead.
+
+### From GitHub
+
 One command, works on macOS and Linux:
 
 ```bash
@@ -45,6 +67,28 @@ MDNEST_BRANCH=develop mdnest update --force
 ## Login
 
 Every server you log into gets a short **alias** (`@work`, `@home`, etc). The alias appears in your paths (`@work/engineering/README.md`) and in copy-path URIs from the web UI.
+
+### Paste the token at a prompt
+
+Leave the token off and, in a terminal, the CLI asks for it:
+
+```bash
+mdnest login https://work-server:3236
+# Create a token in the web UI at https://work-server:3236
+# (Settings, then the API Tokens tab), copy it, and paste it here.
+# Token (not shown):
+```
+
+What you paste is not shown and does not go into your shell history. The CLI
+checks the token with the server before saving it, and saves nothing if the
+server refuses it or you press Enter without one. If the server has no
+`SERVER_ALIAS`, it also asks what to call the server. `@alias` works here too:
+`mdnest login @work https://work-server:3236`.
+
+The prompt reads from the terminal itself, not from standard input, so it works
+under `curl ... | bash`. With no terminal at all (a script or CI job), login
+without a token prints the usage and exits 1, as before; pass the token on the
+command line there.
 
 ### Pick the alias yourself
 
@@ -383,8 +427,11 @@ line telling you so, wherever you are already looking at versions
 
 ```
   Your mdnest CLI is v4.3.1; @work is running v4.3.2.
-  Update it with:  mdnest update
+  Update it with:  mdnest update --server @work
 ```
+
+It suggests `--server`, which installs the CLI that server was built with
+(see [Updating](#updating)).
 
 This exists because nothing pushes CLI updates to you. `mdnest update` is
 pull-only, and before v4.3.2 the *only* check was the major-version one — so a
@@ -412,7 +459,15 @@ version your server is running, so you have something concrete to compare
 mdnest update                 # self-update from main
 mdnest update --force         # re-download even if the version matches
 MDNEST_BRANCH=develop mdnest update --force   # track an unreleased build
+mdnest update --server @work  # the CLI the @work server was built with (4.8.5+)
+mdnest update --server https://notes.example.com   # same, by address
 ```
+
+`--server` downloads only from that server's `/cli/mdnest`; it never falls
+back to GitHub, because the point is to match the server. Like every update it
+downloads to a temp file and checks that it really is the CLI before replacing
+anything, so an error page or a proxy login page leaves your installed CLI as
+it was.
 
 Or reinstall from scratch:
 

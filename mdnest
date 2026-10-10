@@ -75,6 +75,43 @@ valid_url() {
   esac
 }
 
+# The terminal that login prompts on. /dev/tty, never stdin: under
+# `curl ... | bash` stdin is the pipe the installer arrived on. MDNEST_TTY is a
+# test hook (tests/cli-unit.sh points it at a missing file for "no terminal").
+login_tty() {
+  printf '%s' "${MDNEST_TTY:-/dev/tty}"
+}
+
+# True when there is a terminal to ask on. Opening /dev/tty fails when the
+# process has no controlling terminal (a cron job, CI, a pipe from a script).
+have_tty() {
+  local t
+  t="$(login_tty)"
+  { : <"$t"; } 2>/dev/null
+}
+
+# Prompt on the terminal and print the answer on stdout. The prompt goes to the
+# terminal, not stdout, because callers capture stdout with $( ).
+read_tty_line() {
+  local t v=""
+  t="$(login_tty)"
+  printf '%s' "$1" >"$t"
+  IFS= read -r v <"$t" || v=""
+  printf '%s' "$v"
+  return 0
+}
+
+# Same, without echoing what is typed (-s), for the token.
+read_tty_secret() {
+  local t v=""
+  t="$(login_tty)"
+  printf '%s' "$1" >"$t"
+  IFS= read -rs v <"$t" || v=""
+  printf '\n' >"$t"
+  printf '%s' "$v"
+  return 0
+}
+
 # GETs the target server's /api/config. Stdout is the raw body; the exit
 # status is curl's, so the caller can tell "we never reached it" apart from
 # "we reached it and it told us nothing" — two different problems that need
@@ -140,7 +177,12 @@ cli_update_notice() {
   version_gt "$server_ver" "$MDNEST_CLI_VERSION" || return 0
   echo ""
   echo "  Your mdnest CLI is v${MDNEST_CLI_VERSION}; ${who} is running v${server_ver}."
-  echo "  Update it with:  mdnest update"
+  # The server's own copy is the one that matches it; GitHub's is the latest
+  # release, which may not be the version this server runs.
+  case "$who" in
+    @*) echo "  Update it with:  mdnest update --server ${who}" ;;
+    *)  echo "  Update it with:  mdnest update" ;;
+  esac
   return 0
 }
 
@@ -645,12 +687,21 @@ cmd_login() {
     alias_source="autodetect"
   fi
 
-  if [ -z "$url" ] || [ -z "$tok" ]; then
+  # No token on the command line: ask for it at the terminal, if there is one.
+  # A script or CI job has no terminal and still gets the usage and exit 1.
+  local interactive=0
+  if [ -n "$url" ] && [ -z "$tok" ] && have_tty; then
+    interactive=1
+  fi
+
+  if [ -z "$url" ] || { [ -z "$tok" ] && [ "$interactive" = "0" ]; }; then
     cat <<'USAGE'
 Usage:
   mdnest login @alias <url> <token>   Pick the alias yourself.
   mdnest login <url> <token>          Use the server's own SERVER_ALIAS
                                       (server must set it in mdnest.conf).
+  mdnest login [@alias] <url>         In a terminal: asks for the token,
+                                      so it stays out of shell history.
 
 The @alias is any short name (e.g. @work, @home, @staging). It shows up
 in your paths (mdnest://@alias/ns/file.md) and in copy-path URIs from
@@ -726,11 +777,21 @@ Error: couldn't reach ${url} to ask what it calls itself — ${reason}.
 Nothing about that server's own config can be read until it answers, so
 either get it reachable from here, or name it yourself:
 
-  mdnest login @myserver ${url} ${tok}
+  mdnest login @myserver ${url}${tok:+ ${tok}}
 ERR
       exit 1
     fi
     alias=$(parse_server_alias "$cfg") || alias=""
+    if [ -z "$alias" ] && [ "$interactive" = "1" ]; then
+      echo "${url} has no SERVER_ALIAS set, so give it a short name here"
+      echo "(for example work or home). It goes in your paths: @work/notes/todo.md"
+      alias=$(read_tty_line "Name for this server: ") || alias=""
+      alias="${alias#@}"
+      if [ -z "$alias" ]; then
+        echo "No name entered. Nothing was saved." >&2
+        exit 1
+      fi
+    fi
     if [ -z "$alias" ]; then
       cat >&2 <<ERR
 Error: ${url} answered, but has no SERVER_ALIAS set, so the CLI can't pick
@@ -750,6 +811,16 @@ ERR
     fi
   fi
 
+  # Every alias, typed, given on the command line or reported by the server,
+  # becomes a file name under $SERVERS_DIR and is printed in commands for the
+  # user to paste. So it may hold only plain characters: a server reporting
+  # "../x" or "a;b" as its SERVER_ALIAS must not get either.
+  case "$alias" in
+    ""|.*|*[!A-Za-z0-9._-]*)
+      echo "Error: '${alias}' is not a usable alias. Use letters, digits, '.', '_' and '-', for example @work. Nothing was saved." >&2
+      exit 1 ;;
+  esac
+
   # Refuse the literal "default" alias — it carries the same confusion
   # we're trying to kill.
   if [ "$alias" = "default" ]; then
@@ -759,6 +830,30 @@ Error: '@default' is not a valid alias — pick a meaningful name like
 web UI, so it should identify the server.
 ERR
     exit 1
+  fi
+
+  if [ "$interactive" = "1" ]; then
+    echo "Create a token in the web UI at ${url}"
+    echo "(Settings, then the API Tokens tab), copy it, and paste it here."
+    tok=$(read_tty_secret "Token (not shown): ") || tok=""
+    # A paste can carry a trailing CR or spaces; a token never has whitespace.
+    tok="${tok//[[:space:]]/}"
+    if [ -z "$tok" ]; then
+      echo "No token entered. Nothing was saved." >&2
+      exit 1
+    fi
+    # The token was typed, not copied from a command, so a typo is likely.
+    # Check it before saving rather than storing a token the server refuses.
+    # Only a definite 401 blocks: an unreachable server keeps today's
+    # "saved, will retry" behaviour below.
+    local tok_code=""
+    tok_code=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 10 \
+      -H "Authorization: Bearer $tok" "${url}/api/namespaces" 2>/dev/null) || tok_code="000"
+    if [ "$tok_code" = "401" ]; then
+      echo "Error: ${url} did not accept that token. Nothing was saved." >&2
+      echo "Check it was copied in full, or create a new one, then run: mdnest login @${alias} ${url}" >&2
+      exit 1
+    fi
   fi
 
   mkdir -p "$SERVERS_DIR"
@@ -1024,8 +1119,17 @@ looks_like_cli() {
 # it prints what each source actually said — a 503 from GitHub's CDN and a
 # blocked proxy need different actions from the reader, and collapsing both
 # into "check your network" sends people to look at the wrong thing.
+#
+# With a third argument (a server URL) the only source is that server's own
+# copy at /cli/mdnest: `mdnest update --server` asks for the CLI that matches
+# the server, and quietly installing GitHub's instead would defeat that.
 cli_fetch() {
-  local branch="$1" out="$2" url code attempt got="" why=""
+  local branch="$1" out="$2" server="${3:-}" url code attempt got="" why="" sources
+  if [ -n "$server" ]; then
+    sources="${server}/cli/mdnest"
+  else
+    sources="$(cli_sources "$branch" "mdnest")"
+  fi
   while IFS= read -r url; do
     [ -n "$url" ] || continue
     for attempt in 1 2; do
@@ -1049,15 +1153,20 @@ cli_fetch() {
     done
     if [ -n "$got" ]; then break; fi
   done <<SOURCES
-$(cli_sources "$branch" "mdnest")
+$sources
 SOURCES
 
   if [ -z "$got" ]; then
     echo "Error: couldn't download the mdnest CLI from any source." >&2
     echo "Tried:$why" >&2
     echo "" >&2
-    echo "A 503 from raw.githubusercontent.com is GitHub's CDN — not your" >&2
-    echo "network and not the repo — and usually clears within minutes." >&2
+    if [ -n "$server" ]; then
+      echo "Your installed CLI was left as it was. A server older than 4.8.5 does" >&2
+      echo "not serve the CLI; 'mdnest update' gets the latest release from GitHub." >&2
+    else
+      echo "A 503 from raw.githubusercontent.com is GitHub's CDN, not your" >&2
+      echo "network and not the repo, and usually clears within minutes." >&2
+    fi
     return 1
   fi
   CLI_FETCHED_FROM="$got"
@@ -1071,12 +1180,49 @@ cmd_update() {
   REAL_PATH="$(resolve_self "$0")"
   TARGET="$REAL_PATH"
 
+  # --server @alias (or a URL) takes the CLI that server was built with, so a
+  # server on develop, an older release or a fork hands out a matching CLI.
+  local force=0 server="" server_arg=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --force) force=1 ;;
+      --server)
+        server_arg="${2:-}"
+        if [ -z "$server_arg" ]; then
+          echo "Error: --server needs a server, for example: mdnest update --server @work" >&2
+          exit 1
+        fi
+        shift ;;
+      --server=*) server_arg="${1#--server=}" ;;
+      *)
+        echo "Unknown option: $1. Usage: mdnest update [--server @alias] [--force]" >&2
+        exit 1 ;;
+    esac
+    shift
+  done
+  if [ -n "$server_arg" ]; then
+    if valid_url "$server_arg"; then
+      server="${server_arg%/}"
+    elif load_server "${server_arg#@}"; then
+      server="${MDNEST_URL%/}"
+    else
+      echo "Error: no server called @${server_arg#@}. Run 'mdnest servers' to see the ones you have." >&2
+      exit 1
+    fi
+  fi
+
   # Download FIRST, then compare versions, rather than fetching once to read
   # the version and again to install it. Two fetches meant twice the exposure
   # to the outage this is guarding against, and they could disagree.
   local tmp
   tmp="$(mktemp "${TMPDIR:-/tmp}/mdnest.XXXXXX")" || { echo "Error: couldn't create a temp file." >&2; exit 1; }
-  if ! cli_fetch "$BRANCH" "$tmp"; then
+  # Plain http is a supported setup (a LAN install), but code fetched over it
+  # can be changed on the way. Say so rather than refuse.
+  case "$server" in
+    ""|http://localhost*|http://127.*|http://\[::1\]*|https://*) ;;
+    *) echo "Warning: ${server} is plain http, so the CLI it sends could be altered on the way. Prefer https." >&2 ;;
+  esac
+  if ! cli_fetch "$BRANCH" "$tmp" "$server"; then
     rm -f "$tmp"
     exit 1
   fi
@@ -1089,7 +1235,7 @@ cmd_update() {
     exit 1
   fi
 
-  if [ "$CURRENT" = "$LATEST" ] && [ "$1" != "--force" ]; then
+  if [ "$CURRENT" = "$LATEST" ] && [ "$force" = "0" ]; then
     rm -f "$tmp"
     echo "mdnest CLI is up to date (v${CURRENT})."
     echo "Pass --force to re-download anyway."
@@ -2617,11 +2763,13 @@ PATH FORMAT
 SERVER MANAGEMENT
   login    @alias <url> <token>   Add or overwrite a server alias (you choose the name)
   login    <url> <token>          Use the server's own SERVER_ALIAS (it must be set)
+  login    [@alias] <url>         In a terminal: asks for the token (and a name if needed)
   logout   [@alias]               Remove a server (omit alias to remove all)
   rename   @old @new               Rename a server alias (also updates default)
   servers  [-v]                   List servers (add -v to include namespaces)
   whoami   [-v]                   Show CLI version + servers
   update   [--force]              Self-update to the latest release of this CLI
+  update   --server @alias        Install the CLI that server was built with
 
 NOTE OPERATIONS
   create   <path> <content|->     Create a NEW file (fails if already exists; use - for stdin)
@@ -2656,6 +2804,12 @@ EXAMPLES
 
   # Setup — let the CLI use the server's own SERVER_ALIAS (must be set on server)
   mdnest login https://work.company.com:3236 mdnest_abc123
+
+  # Or leave the token off and paste it at the prompt (not shown, not in history)
+  mdnest login @work https://work.company.com:3236
+
+  # Get the CLI that matches a server
+  mdnest update --server @work
 
   # Rename a legacy @default alias installed by older CLI
   mdnest rename @default @work

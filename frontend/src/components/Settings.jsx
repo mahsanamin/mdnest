@@ -257,6 +257,73 @@ function TokensTab() {
   );
 }
 
+// Copies text without the async Clipboard API when that is unavailable (a LAN
+// install over plain http). Returns whether the copy went through.
+function copyText(text) {
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+// Creates an API token for the CLI and copies it, so setting up the CLI never
+// means switching to the API Tokens tab and back. The token is shown once, as
+// in that tab, in case the copy was blocked.
+function CliTokenButton() {
+  const [token, setToken] = useState(null);
+  const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const create = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      const day = new Date().toISOString().slice(0, 10);
+      const data = await createToken(`CLI ${day}`);
+      setToken(data.token);
+      setCopied(copyText(data.token));
+    } catch (e) {
+      setError(e.message || 'Could not create a token');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (token) {
+    return (
+      <div className="token-created cli-token-created">
+        <div className="token-created-label">
+          {copied
+            ? 'Token created and copied. Paste it when the terminal asks for it. It will not be shown again:'
+            : 'Token created. Copy it now, it will not be shown again:'}
+        </div>
+        <div className="token-created-value">
+          <code>{token}</code>
+          <button onClick={() => setCopied(copyText(token))}>{copied ? 'Copied!' : 'Copy'}</button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="cli-token-row">
+      <button className="modal-btn-primary" onClick={create} disabled={busy}>
+        {busy ? 'Creating...' : 'Create a token and copy it'}
+      </button>
+      {error && <span className="cli-token-error">{error}</span>}
+    </div>
+  );
+}
+
 function CliTab({ serverVersion }) {
   const serverUrl = getServerUrl();
   return (
@@ -274,18 +341,21 @@ function CliTab({ serverVersion }) {
       <div className="settings-steps">
         <div className="settings-step">
           <span className="step-num">1</span>
-          <span>Install the CLI (one command):</span>
+          <span>Install the CLI from this server and log in (one command):</span>
         </div>
       </div>
-      <CodeBlock code="curl -fsSL https://mdnest.dev/install.sh | bash" />
+      <CodeBlock code={`curl -fsSL ${serverUrl}/cli/install.sh | bash -s -- ${serverUrl}`} />
 
       <div className="settings-steps">
         <div className="settings-step">
           <span className="step-num">2</span>
-          <span>Create an API token in the <strong>API Tokens</strong> tab, then login:</span>
+          <span>
+            The terminal asks for a token. Create one here, or in the <strong>API Tokens</strong> tab,
+            and paste it in. It is not shown as you paste and does not go into your shell history.
+          </span>
         </div>
       </div>
-      <CodeBlock code={`mdnest login ${serverUrl} mdnest_yourtoken`} />
+      <CliTokenButton />
 
       <div className="settings-steps">
         <div className="settings-step">
@@ -305,8 +375,12 @@ echo "text" | mdnest append notes/log.md -        # pipe`} />
         The CLI does <strong>not</strong> update itself, and nothing pushes new versions to you —
         it is a script on your machine. If it starts behaving oddly, update it first:
       </p>
-      <CodeBlock code={`mdnest update      # self-update from GitHub
+      <CodeBlock code={`mdnest update --server ${serverUrl}   # the CLI this server was built with
 mdnest version     # check what you are running`} />
+      <p className="settings-description">
+        Plain <code>mdnest update</code> installs the latest release from GitHub instead, which may not
+        be the version this server runs.
+      </p>
       <p className="settings-description">
         {serverVersion
           ? <>This server runs <code>v{serverVersion}</code>. If <code>mdnest version</code> reports
@@ -320,8 +394,8 @@ mdnest version     # check what you are running`} />
       <p className="settings-description">
         Manage multiple mdnest servers with @alias paths:
       </p>
-      <CodeBlock code={`mdnest login @work ${serverUrl} mdnest_yourtoken
-mdnest login @personal https://home:3236 mdnest_yourtoken
+      <CodeBlock code={`mdnest login @work ${serverUrl}
+mdnest login @personal https://home:3236
 mdnest read @work/notes/path.md
 mdnest servers                           # list all servers`} />
     </div>

@@ -54,7 +54,9 @@ log "Building backend + frontend images from the working tree"
 if ! docker build -t "$BE_IMAGE" backend/  >/tmp/mdnest-be-build.log 2>&1; then
   fail "backend build failed"; tail -30 /tmp/mdnest-be-build.log; exit 1
 fi
-if ! docker build -t "$FE_IMAGE" frontend/ >/tmp/mdnest-fe-build.log 2>&1; then
+# The frontend image serves the repo-root CLI at /cli/mdnest; it comes in as
+# the named "cli" build context (see frontend/Dockerfile).
+if ! docker build --build-context cli=. -t "$FE_IMAGE" frontend/ >/tmp/mdnest-fe-build.log 2>&1; then
   fail "frontend build failed"; tail -30 /tmp/mdnest-fe-build.log; exit 1
 fi
 pass "images built"
@@ -113,6 +115,60 @@ This note exists so the browser tests have content to open, render and search.
 Unique token: $SEED_TOKEN
 " >/dev/null || { fail "could not seed note"; exit 1; }
 pass "seeded $SEED_FILE (token $SEED_TOKEN)"
+
+# ── The CLI this server serves, and what the /cli/ location must not change ──
+log "Checking /cli/ and the routes around it"
+CLI_TMP="$(mktemp -d)"
+code_of() { curl -s -o "$CLI_TMP/body" -w '%{http_code}' "$1"; }
+if [ "$(code_of "$BASE_URL/cli/mdnest")" = "200" ] && cmp -s "$CLI_TMP/body" mdnest; then
+  pass "/cli/mdnest is byte-identical to the repo-root mdnest"
+else
+  fail "/cli/mdnest is not the repo-root mdnest"; exit 1
+fi
+if [ "$(code_of "$BASE_URL/cli/install.sh")" = "200" ] && cmp -s "$CLI_TMP/body" frontend/public/cli/install.sh; then
+  pass "/cli/install.sh is served"
+else
+  fail "/cli/install.sh is not served"; exit 1
+fi
+[ "$(code_of "$BASE_URL/cli/nope")" = "404" ] || { fail "/cli/ miss is not a 404"; exit 1; }
+pass "/cli/ miss is a 404, not the app"
+[ "$(code_of "$BASE_URL/assets/no-such-chunk.js")" = "404" ] || { fail "/assets/ miss is no longer a 404"; exit 1; }
+pass "/assets/ miss is still a 404"
+if [ "$(code_of "$BASE_URL/some/app/route")" = "200" ] && grep -q 'id="root"' "$CLI_TMP/body"; then
+  pass "an app route still falls back to index.html"
+else
+  fail "the SPA fallback changed"; exit 1
+fi
+[ "$(code_of "$BASE_URL/api/config")" = "200" ] || { fail "/api/ is no longer proxied"; exit 1; }
+pass "/api/ is still proxied"
+
+# The install command the Settings CLI tab shows, run for real in a throwaway
+# HOME: install from this server, then paste a token at the login prompt.
+# Driven on a pty because the login reads the token from the terminal.
+if command -v python3 >/dev/null 2>&1; then
+  API_TOKEN="$(curl -fsS -X POST "$BASE_URL/api/auth/tokens" -H "Authorization: Bearer $TOKEN" \
+    -H 'Content-Type: application/json' -d '{"name":"e2e-cli"}' | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')"
+  [ -n "$API_TOKEN" ] || { fail "could not create an API token"; exit 1; }
+  mkdir -p "$CLI_TMP/home" "$CLI_TMP/bin"
+  if HOME="$CLI_TMP/home" MDNEST_BIN_DIR="$CLI_TMP/bin" \
+     PTY_PROMPTS="$(printf 'Name for this server: \nToken (not shown): ')" \
+     PTY_ANSWERS="$(printf 'e2e\n%s' "$API_TOKEN")" \
+     python3 tests/pty-drive.py -- bash -c "curl -fsSL $BASE_URL/cli/install.sh | bash -s -- $BASE_URL" \
+       >"$CLI_TMP/install.out" 2>&1; then
+    pass "install command from the CLI tab installs and logs in"
+  else
+    fail "install command from the CLI tab failed"; sed 's/mdnest_[A-Za-z0-9_]*/mdnest_REDACTED/g' "$CLI_TMP/install.out"; exit 1
+  fi
+  if HOME="$CLI_TMP/home" "$CLI_TMP/bin/mdnest" servers 2>&1 | grep -q '@e2e' &&
+     HOME="$CLI_TMP/home" "$CLI_TMP/bin/mdnest" list @e2e 2>&1 | grep -q testing_workspace; then
+    pass "the installed CLI runs 'servers' and 'list' against this server"
+  else
+    fail "the installed CLI could not use the login"; exit 1
+  fi
+else
+  log "python3 not present: skipping the install-and-login run"
+fi
+rm -rf "$CLI_TMP"
 
 # A mermaid flowchart, so the suite can prove diagram labels actually render.
 # Mermaid draws flowchart labels inside <foreignObject>; a sanitizer that drops

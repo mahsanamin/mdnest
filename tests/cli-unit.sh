@@ -191,6 +191,65 @@ run_login_suite() {
   esac
 }
 
+# ── login with no token: the terminal prompt ────────────────────────────────
+# `mdnest login @alias url` with no token asks for it on /dev/tty without
+# echoing, so it never lands in shell history. Driven on a real pty by
+# tests/pty-drive.py, against a closed loopback port: the CLI cannot check the
+# token there, so it saves it with the old "will retry" warning, which is what
+# lets the saved file be inspected with no server at all. The alias prompt and
+# a rejected token need a server and live in tests/cli-login-update.sh.
+run_login_prompt_suite() {
+  echo "── login: token prompt ──"
+  local home out rc tokfile
+
+  # No terminal at all (a script, CI): exactly today's usage + exit 1.
+  home="$(mktemp -d "$SHIM_DIR/home.XXXXXX")"
+  rc=0
+  out="$(HOME="$home" MDNEST_TTY="$SHIM_DIR/no-such-tty" "$REPO_ROOT/mdnest" login @t http://127.0.0.1:1 2>&1 </dev/null)" || rc=$?
+  eq "login prompt: no terminal exits 1" "1" "$rc"
+  case "$out" in *Usage:*) ok "login prompt: no terminal prints usage" ;;
+    *) bad "login prompt: no terminal prints usage" "got [$out]" ;; esac
+  eq "login prompt: no terminal saves nothing" "0" "$(find "$home" -type f | wc -l | tr -d ' ')"
+
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "  (python3 not present: skipping the pty checks)"
+    return 0
+  fi
+
+  # A terminal and a token: prompt shown, token not echoed, token saved.
+  home="$(mktemp -d "$SHIM_DIR/home.XXXXXX")"
+  rc=0
+  out="$(HOME="$home" PTY_PROMPTS="Token (not shown): " PTY_ANSWERS="mdnest_secret123" \
+    python3 "$REPO_ROOT/tests/pty-drive.py" -- "$REPO_ROOT/mdnest" login @t http://127.0.0.1:1 2>&1)" || rc=$?
+  eq "login prompt: exits 0 with a token" "0" "$rc"
+  case "$out" in *"Token (not shown): "*) ok "login prompt: asks for the token" ;;
+    *) bad "login prompt: asks for the token" "got [$out]" ;; esac
+  case "$out" in *"API Tokens"*) ok "login prompt: says where to create one" ;;
+    *) bad "login prompt: says where to create one" "got [$out]" ;; esac
+  case "$out" in *mdnest_secret123*|*PTY-ECHO-STILL-ON*) bad "login prompt: token is not echoed" "got [$out]" ;;
+    *) ok "login prompt: token is not echoed" ;; esac
+  tokfile="$home/.config/mdnest/servers/t"
+  eq "login prompt: token saved" "token=mdnest_secret123" "$(grep '^token=' "$tokfile" 2>/dev/null)"
+  eq "login prompt: url saved" "url=http://127.0.0.1:1" "$(grep '^url=' "$tokfile" 2>/dev/null)"
+
+  # An empty answer saves nothing.
+  home="$(mktemp -d "$SHIM_DIR/home.XXXXXX")"
+  rc=0
+  out="$(HOME="$home" PTY_PROMPTS="Token (not shown): " PTY_ANSWERS="" \
+    python3 "$REPO_ROOT/tests/pty-drive.py" -- "$REPO_ROOT/mdnest" login @t http://127.0.0.1:1 2>&1)" || rc=$?
+  eq "login prompt: empty token exits 1" "1" "$rc"
+  eq "login prompt: empty token saves nothing" "0" "$(find "$home" -type f | wc -l | tr -d ' ')"
+
+  # A token on the command line never prompts, even with a terminal.
+  home="$(mktemp -d "$SHIM_DIR/home.XXXXXX")"
+  rc=0
+  out="$(HOME="$home" PTY_PROMPTS="" python3 "$REPO_ROOT/tests/pty-drive.py" -- \
+    "$REPO_ROOT/mdnest" login @t http://127.0.0.1:1 mdnest_cli 2>&1)" || rc=$?
+  case "$out" in *"Token (not shown)"*) bad "login prompt: a given token is not asked for" "got [$out]" ;;
+    *) ok "login prompt: a given token is not asked for" ;; esac
+  eq "login prompt: given token saved" "token=mdnest_cli" "$(grep '^token=' "$home/.config/mdnest/servers/t" 2>/dev/null)"
+}
+
 # ── unreachable servers must degrade, not kill the script ───────────────────
 # `mdnest servers` printed the table header, then exited with curl's own 28 and
 # nothing else, whenever ANY registered server was unreachable. The cause is a
@@ -791,6 +850,7 @@ run_transfer_suite "no python3/jq"
 # Argument handling is pure bash and parser-independent, so it runs once. It
 # needs SHIM_DIR for its throwaway HOMEs, hence its place at the end.
 run_login_suite
+run_login_prompt_suite
 run_unreachable_suite
 run_install_source_suite
 run_version_suite
