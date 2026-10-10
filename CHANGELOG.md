@@ -26,6 +26,32 @@ All notable changes to mdnest are documented here.
   Experimental: to be reviewed on 2026-11-15. Setup, and what to expect in
   auto mode, in `docs/chat.md`; the added risk in `docs/security.md`.
 
+### Added
+
+- **Get the CLI from your own server.** Every server now serves the exact
+  `mdnest` CLI it was built with at `/cli/mdnest`, plus an installer at
+  `/cli/install.sh`, with no login needed. The installer gets the CLI from
+  that server (falling back to GitHub's latest release only if the server
+  cannot serve it) and then logs in to it. Settings, CLI tab, shows the command
+  with your server's address filled in. `mdnest update --server @work` (or a
+  URL) installs the CLI that server was built with, and the "your CLI is
+  behind" notice now suggests it. A plain `mdnest update` still comes from
+  GitHub `main`. Like every update, it checks the download really is the CLI
+  before replacing anything. **The guided setup now needs Docker Compose 2.17
+  or newer**, because the frontend image takes the CLI from a second build
+  context; `setup.sh` stops with a message naming the version if Compose is
+  older (`docker compose version` shows yours). The plain Compose install only
+  pulls images and is unaffected.
+- **Log in without pasting the token into the command.** `mdnest login
+  https://server` (or `mdnest login @alias https://server`) with no token now
+  asks for it at the terminal, says where to create one, and does not show
+  what you paste, so it stays out of shell history. The token is checked with
+  the server before it is saved. If the server has no `SERVER_ALIAS`, it asks
+  what to call the server instead of failing. With no terminal (a script or
+  CI) login behaves as before, and a token on the command line still works.
+  The Settings CLI tab has a "Create a token and copy it" button for this
+  prompt, so there is no need to switch tabs.
+
 ### Fixed
 
 - **Chat keepalive reads an agent's name correctly when it adds `; echo $?`

@@ -9,7 +9,13 @@ This guide covers installing, configuring, and running mdnest.
 ## Prerequisites
 
 - [Docker](https://docs.docker.com/get-docker/) (version 20.10 or later)
-- [Docker Compose](https://docs.docker.com/compose/install/) (v2, included with Docker Desktop)
+- [Docker Compose](https://docs.docker.com/compose/install/) (v2, included with Docker Desktop).
+  The guided setup needs **Compose 2.17 or newer** from 4.8.5 on: it builds the
+  frontend image with a second build context (`additional_contexts`) so the
+  image can serve the `mdnest` CLI at `/cli/mdnest`. `setup.sh` checks the
+  version and stops with a message naming it if Compose is older. Check yours
+  with `docker compose version`. The plain Compose install only pulls images
+  and has no such requirement.
 - Git — only for the [guided setup](#guided-setup); the plain Compose install needs none
 
 There are two ways to install. They run the same images and give you the same
