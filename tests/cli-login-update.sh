@@ -11,7 +11,7 @@
 #   - `mdnest update --server` refuses an error page, a non-script body and a
 #     404, and leaves the installed CLI byte-for-byte as it was
 #   - `update --server` installs the server's CLI when it is a real one
-#   - the served installer installs from the server, then logs in
+#   - the served installer installs from the server and only prints the login
 #
 # Needs python3 (the fake backend and the pty driver) and SKIPs without it.
 set -u
@@ -203,14 +203,13 @@ echo "── served installer ──"
 echo "real" > "$WORK/cli_mode"
 echo "srvalias" > "$WORK/alias"
 H="$(new_home)"; rc=0
-out="$(HOME="$H" MDNEST_BIN_DIR="$WORK/ibin" PTY_PROMPTS="Token (not shown): " PTY_ANSWERS="mdnest_good" \
-  python3 "$PTY" -- bash "$REPO_ROOT/frontend/public/cli/install.sh" "$URL" 2>&1)" || rc=$?
+out="$(HOME="$H" MDNEST_BIN_DIR="$WORK/ibin" bash "$REPO_ROOT/frontend/public/cli/install.sh" "$URL" 2>&1 </dev/null)" || rc=$?
 eq "installer: exits 0" "0" "$rc"
 if cmp -s "$WORK/ibin/mdnest" "$CLI"; then ok "installer: installed the server's CLI"
 else bad "installer: installed the server's CLI" "installed file differs"; fi
-contains "installer: went on to the login" "$out" "Token (not shown): "
-eq "installer: login saved" "token=mdnest_good" \
-   "$(grep '^token=' "$H/.config/mdnest/servers/srvalias" 2>/dev/null)"
+# It only installs. Connecting is a separate step, printed for this server.
+contains "installer: prints the connect command for this server" "$out" "mdnest login $URL"
+eq "installer: does not log in by itself" "0" "$(files_in "$H")"
 
 rc=0
 out="$(bash "$REPO_ROOT/frontend/public/cli/install.sh" 2>&1 </dev/null)" || rc=$?

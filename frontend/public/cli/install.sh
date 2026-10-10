@@ -6,9 +6,9 @@
 # It installs the CLI this server was built with (served next to it at
 # /cli/mdnest), so the CLI matches the server even when the server runs a
 # develop build, an older release or a fork. Only if that download fails does
-# it fall back to the latest release from GitHub. Then it logs in to the
-# server: the CLI asks for the token at the terminal, so it never lands in
-# shell history.
+# it fall back to the latest release from GitHub. It only installs: it prints
+# the login command for this server but does not run it, because most people
+# running it already have the CLI connected, or are updating.
 #
 # The repo-root install-cli.sh is the GitHub/mdnest.dev installer and is a
 # separate file on purpose: this one is fetched on its own and cannot source
@@ -119,16 +119,6 @@ case ":$PATH:" in
 esac
 
 echo ""
-# Log in now if there is a terminal to ask for the token on. Under
-# `curl | bash` stdin is the pipe, so the CLI reads the token from /dev/tty.
-if { : </dev/tty; } 2>/dev/null; then
-  if ! "$DEST" login "$SERVER"; then
-    echo ""
-    echo "The CLI is installed, but the login did not finish. Try again with:"
-    echo "  mdnest login ${SERVER}"
-    exit 1
-  fi
-else
-  echo "Next, log in (it asks for a token from Settings, API Tokens):"
-  echo "  mdnest login ${SERVER}"
-fi
+echo "To connect it to ${SERVER}, run this and paste a token when it asks"
+echo "(create one in Settings, CLI or API Tokens):"
+echo "  mdnest login ${SERVER}"

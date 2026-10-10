@@ -32,8 +32,9 @@ All notable changes to mdnest are documented here.
   `mdnest` CLI it was built with at `/cli/mdnest`, plus an installer at
   `/cli/install.sh`, with no login needed. The installer gets the CLI from
   that server (falling back to GitHub's latest release only if the server
-  cannot serve it) and then logs in to it. Settings, CLI tab, shows the command
-  with your server's address filled in. `mdnest update --server @work` (or a
+  cannot serve it) and prints the command to connect it. Settings, CLI tab,
+  now has three separate commands for this server, Install, Update and
+  Connect, since most people need only one of them. `mdnest update --server @work` (or a
   URL) installs the CLI that server was built with, and the "your CLI is
   behind" notice now suggests it. A plain `mdnest update` still comes from
   GitHub `main`. Like every update, it checks the download really is the CLI

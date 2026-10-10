@@ -142,22 +142,31 @@ fi
 [ "$(code_of "$BASE_URL/api/config")" = "200" ] || { fail "/api/ is no longer proxied"; exit 1; }
 pass "/api/ is still proxied"
 
-# The install command the Settings CLI tab shows, run for real in a throwaway
-# HOME: install from this server, then paste a token at the login prompt.
-# Driven on a pty because the login reads the token from the terminal.
+# The Install and Connect commands the Settings CLI tab shows, run for real in
+# a throwaway HOME: install from this server, then log in pasting a token at
+# the prompt. The login runs on a pty because it reads the token from the
+# terminal.
 if command -v python3 >/dev/null 2>&1; then
   API_TOKEN="$(curl -fsS -X POST "$BASE_URL/api/auth/tokens" -H "Authorization: Bearer $TOKEN" \
     -H 'Content-Type: application/json' -d '{"name":"e2e-cli"}' | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')"
   [ -n "$API_TOKEN" ] || { fail "could not create an API token"; exit 1; }
   mkdir -p "$CLI_TMP/home" "$CLI_TMP/bin"
+  # Step "Install", exactly as the tab shows it.
   if HOME="$CLI_TMP/home" MDNEST_BIN_DIR="$CLI_TMP/bin" \
+     bash -c "curl -fsSL $BASE_URL/cli/install.sh | bash -s -- $BASE_URL" >"$CLI_TMP/install.out" 2>&1 </dev/null &&
+     cmp -s "$CLI_TMP/bin/mdnest" mdnest; then
+    pass "install command from the CLI tab installs this server's CLI"
+  else
+    fail "install command from the CLI tab failed"; cat "$CLI_TMP/install.out"; exit 1
+  fi
+  # Step "Connect": the login command, pasting a token at the prompt.
+  if HOME="$CLI_TMP/home" \
      PTY_PROMPTS="$(printf 'Name for this server: \nToken (not shown): ')" \
      PTY_ANSWERS="$(printf 'e2e\n%s' "$API_TOKEN")" \
-     python3 tests/pty-drive.py -- bash -c "curl -fsSL $BASE_URL/cli/install.sh | bash -s -- $BASE_URL" \
-       >"$CLI_TMP/install.out" 2>&1; then
-    pass "install command from the CLI tab installs and logs in"
+     python3 tests/pty-drive.py -- "$CLI_TMP/bin/mdnest" login "$BASE_URL" >"$CLI_TMP/login.out" 2>&1; then
+    pass "connect command from the CLI tab logs in with a pasted token"
   else
-    fail "install command from the CLI tab failed"; sed 's/mdnest_[A-Za-z0-9_]*/mdnest_REDACTED/g' "$CLI_TMP/install.out"; exit 1
+    fail "connect command from the CLI tab failed"; sed 's/mdnest_[A-Za-z0-9_]*/mdnest_REDACTED/g' "$CLI_TMP/login.out"; exit 1
   fi
   if HOME="$CLI_TMP/home" "$CLI_TMP/bin/mdnest" servers 2>&1 | grep -q '@e2e' &&
      HOME="$CLI_TMP/home" "$CLI_TMP/bin/mdnest" list @e2e 2>&1 | grep -q testing_workspace; then
