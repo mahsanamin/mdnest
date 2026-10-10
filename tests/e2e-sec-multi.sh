@@ -294,6 +294,29 @@ check("pat cannot join through a link (403)", ws_status(pat, "Shared/link.md") =
 check("pat joins a /Shared room (101)", ws_status(pat, "Shared/a.md") == 101)
 check("gus (group reader) joins a /Shared room (101)", ws_status(gus, "Shared/a.md") == 101)
 
+print("── namespace admin grants a first access")
+for name in ("nina", "newbie"):
+    code, r = call("POST", "/api/admin/invite", admin, {"email": f"{name}@e2e.local", "username": name, "password": name + "pass123", "role": "collaborator"})
+    assert code in (200, 201), f"invite {name}: {code} {r}"
+code, all_users = call("GET", "/api/admin/users", admin)
+ids = {u["username"]: u["id"] for u in all_users}
+code, r = call("POST", "/api/admin/namespace-admins", admin, {"user_id": ids["nina"], "namespace": "beta"})
+assert code in (200, 201), f"namespace admin: {code} {r}"
+nina, newbie = login("nina", "ninapass123"), login("newbie", "newbiepass123")
+code, seen = call("GET", "/api/admin/users", nina)
+seen = {u["username"] for u in seen} if isinstance(seen, list) else set()
+check("nina (admin of beta) sees newbie, who has no access anywhere yet", "newbie" in seen, seen)
+code, r = call("POST", "/api/admin/grants", nina, {"user_id": ids["newbie"], "namespace": "beta", "path": "/", "permission": "read"})
+check("nina grants newbie read on beta", code in (200, 201), (code, r))
+code, r = call("GET", "/api/note?ns=beta&path=secret.md", newbie)
+check("newbie reads beta through that grant", code == 200 and "BETA-SECRET" in str(r), (code, r))
+code, r = call("POST", "/api/admin/grants", nina, {"user_id": ids["newbie"], "namespace": "alpha", "path": "/", "permission": "read"})
+check("nina cannot grant on alpha, which she does not admin (403)", code == 403, (code, r))
+code, r = call("GET", "/api/note?ns=alpha&path=Shared/a.md", newbie)
+check("newbie still has no access to alpha (403)", code == 403, (code, r))
+code, r = call("DELETE", f"/api/admin/users?id={ids['newbie']}", nina)
+check("nina cannot delete a user (403)", code == 403, (code, r))
+
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(0 if failed == 0 else 1)
 PY

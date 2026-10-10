@@ -280,27 +280,20 @@ func (h *AdminHandler) HandleUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AdminHandler) listUsers(w http.ResponseWriter, r *http.Request) {
+	// Any admin — superadmin or namespace-scoped — may list all users. A
+	// namespace admin needs the full directory to be able to grant access
+	// to (or promote as co-admin) someone who has no access to their
+	// namespace yet; the previous "only users already present on my
+	// namespaces" scoping made that impossible — a chicken-and-egg where a
+	// namespace admin could only manage people who already had access.
+	// Mutating actions stay gated: PUT/DELETE here are superadmin-only, and
+	// grant / namespace-admin writes are still scoped to the caller's
+	// namespaces server-side (see callerCanAdminNamespace).
 	users, err := h.userStore.ListUsers()
 	if err != nil {
 		log.Printf("failed to list users: %v", err)
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 		return
-	}
-
-	// Scope: superadmins see all users; namespace admins see only users
-	// who have grants OR namespace_admins entries in any namespace they
-	// administer (themselves always included). Filter is best-effort —
-	// errors building the visibility set fall back to "self only".
-	adminNs, isAll := h.callerAdminNamespaces(r)
-	if !isAll {
-		visible := h.usersVisibleToAdmin(r, adminNs)
-		filtered := users[:0]
-		for _, u := range users {
-			if visible[u.ID] {
-				filtered = append(filtered, u)
-			}
-		}
-		users = filtered
 	}
 
 	resp := make([]userResponse, 0, len(users))
@@ -310,31 +303,6 @@ func (h *AdminHandler) listUsers(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
-}
-
-// usersVisibleToAdmin returns the set of user IDs a namespace-scoped admin
-// is allowed to see — those with grants or namespace_admins entries on
-// any of the admin's namespaces, plus the admin themselves.
-func (h *AdminHandler) usersVisibleToAdmin(r *http.Request, adminNs []string) map[int]bool {
-	visible := map[int]bool{}
-	if uc := middleware.UserFromContext(r.Context()); uc != nil {
-		visible[uc.ID] = true
-	}
-	for _, ns := range adminNs {
-		grants, err := h.grantStore.GetGrantsForNamespace(ns)
-		if err == nil {
-			for _, g := range grants {
-				visible[g.UserID] = true
-			}
-		}
-		nsAdmins, err := h.nsAdminStore.ListByNamespace(ns)
-		if err == nil {
-			for _, a := range nsAdmins {
-				visible[a.UserID] = true
-			}
-		}
-	}
-	return visible
 }
 
 func (h *AdminHandler) deleteUser(w http.ResponseWriter, r *http.Request) {
