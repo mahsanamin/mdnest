@@ -144,6 +144,14 @@ case "$out" in *"Name for this server"*) bad "SERVER_ALIAS: no name prompt" "got
 eq "SERVER_ALIAS: saved under the server's alias" "token=mdnest_good" \
    "$(grep '^token=' "$H/.config/mdnest/servers/srvalias" 2>/dev/null)"
 
+# ── login: a hostile SERVER_ALIAS ───────────────────────────────────────────
+echo "../evil" > "$WORK/alias"
+H="$(new_home)"; rc=0
+out="$(HOME="$H" "$CLI" login "$URL" mdnest_good 2>&1)" || rc=$?
+eq "a SERVER_ALIAS with a path in it is refused" "1" "$rc"
+eq "a SERVER_ALIAS with a path in it saves nothing" "0" "$(files_in "$H")"
+echo "srvalias" > "$WORK/alias"
+
 # ── login: the server refuses the token ─────────────────────────────────────
 H="$(new_home)"; rc=0
 out="$(HOME="$H" PTY_PROMPTS="Token (not shown): " PTY_ANSWERS="mdnest_wrong" \

@@ -43,6 +43,12 @@ looks_like_cli() {
 }
 
 echo "Installing the mdnest CLI from ${SERVER}..."
+# Plain http is a supported setup (a LAN install), but code fetched over it
+# can be changed on the way. Say so rather than refuse.
+case "$SERVER" in
+  http://localhost*|http://127.*|http://\[::1\]*|https://*) ;;
+  *) echo "Warning: ${SERVER} is plain http, so the CLI it sends could be altered on the way. Prefer https." ;;
+esac
 
 TMP="$(mktemp "${TMPDIR:-/tmp}/mdnest.XXXXXX")" || { echo "Error: couldn't create a temp file." >&2; exit 1; }
 trap 'rm -f "$TMP"' EXIT

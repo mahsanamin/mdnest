@@ -791,11 +791,6 @@ ERR
         echo "No name entered. Nothing was saved." >&2
         exit 1
       fi
-      case "$alias" in
-        *[!A-Za-z0-9._-]*)
-          echo "Error: '${alias}' can only use letters, digits, '.', '_' and '-'. Nothing was saved." >&2
-          exit 1 ;;
-      esac
     fi
     if [ -z "$alias" ]; then
       cat >&2 <<ERR
@@ -815,6 +810,16 @@ ERR
       exit 1
     fi
   fi
+
+  # Every alias, typed, given on the command line or reported by the server,
+  # becomes a file name under $SERVERS_DIR and is printed in commands for the
+  # user to paste. So it may hold only plain characters: a server reporting
+  # "../x" or "a;b" as its SERVER_ALIAS must not get either.
+  case "$alias" in
+    ""|.*|*[!A-Za-z0-9._-]*)
+      echo "Error: '${alias}' is not a usable alias. Use letters, digits, '.', '_' and '-', for example @work. Nothing was saved." >&2
+      exit 1 ;;
+  esac
 
   # Refuse the literal "default" alias — it carries the same confusion
   # we're trying to kill.
@@ -1211,6 +1216,12 @@ cmd_update() {
   # to the outage this is guarding against, and they could disagree.
   local tmp
   tmp="$(mktemp "${TMPDIR:-/tmp}/mdnest.XXXXXX")" || { echo "Error: couldn't create a temp file." >&2; exit 1; }
+  # Plain http is a supported setup (a LAN install), but code fetched over it
+  # can be changed on the way. Say so rather than refuse.
+  case "$server" in
+    ""|http://localhost*|http://127.*|http://\[::1\]*|https://*) ;;
+    *) echo "Warning: ${server} is plain http, so the CLI it sends could be altered on the way. Prefer https." >&2 ;;
+  esac
   if ! cli_fetch "$BRANCH" "$tmp" "$server"; then
     rm -f "$tmp"
     exit 1
