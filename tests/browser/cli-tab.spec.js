@@ -1,6 +1,6 @@
-// The Settings CLI tab: one command that installs the CLI from THIS server and
-// logs in, and a button that creates a token for the login prompt so nobody
-// has to switch to the API Tokens tab and back.
+// The Settings CLI tab: Install, Update and Connect as three separate commands
+// for THIS server (most people need only one of them), and a button that
+// creates a token for the login prompt so nobody has to switch tabs.
 //
 // The install command itself is run for real by tests/e2e-browser.sh (it needs
 // a terminal); this spec pins what the tab shows and that the button produces
@@ -25,17 +25,30 @@ async function openCliTab(page) {
 }
 
 test.describe('Settings CLI tab', () => {
-  test('shows install-and-login and update commands for this server', async ({ page, baseURL }) => {
+  test('shows Install, Update and Connect as separate commands for this server', async ({ page, baseURL }) => {
     await signIn(page);
     await openCliTab(page);
     const origin = new URL(baseURL).origin;
     const blocks = page.locator('.settings-code pre');
     await expect(blocks.filter({ hasText: '/cli/install.sh' }))
       .toHaveText(`curl -fsSL ${origin}/cli/install.sh | bash -s -- ${origin}`);
-    await expect(blocks.filter({ hasText: 'mdnest update --server' }))
-      .toContainText(`mdnest update --server ${origin}`);
-    // The old placeholder flow is gone from the setup steps.
+    await expect(blocks.filter({ hasText: 'mdnest update' }))
+      .toHaveText(`mdnest update --server ${origin}`);
+    await expect(blocks.filter({ hasText: 'mdnest login' }))
+      .toHaveText(`mdnest login ${origin}`);
+    for (const title of ['Install', 'Update', 'Connect to this server']) {
+      await expect(page.locator('.settings-section-title', { hasText: title })).toBeVisible();
+    }
     await expect(page.locator('.settings-content')).not.toContainText('mdnest_yourtoken');
+  });
+
+  test('every Settings tab fits on one row on a desktop screen', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await signIn(page);
+    await openCliTab(page);
+    const tops = await page.locator('.settings-tabs button').evaluateAll(
+      (els) => [...new Set(els.map((e) => Math.round(e.getBoundingClientRect().top)))]);
+    expect(tops.length).toBe(1);
   });
 
   test('"Create a token and copy it" makes a token the server accepts', async ({ page }) => {

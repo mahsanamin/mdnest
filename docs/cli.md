@@ -7,22 +7,23 @@ The `mdnest` CLI lets you read, write, search, and organize notes from any termi
 ### From your own server (4.8.5+)
 
 Every mdnest server serves the exact CLI it was built with, at `/cli/mdnest`,
-with no login needed. Its installer gets the CLI from that server and then
-logs you in to it:
+with no login needed. Its installer gets the CLI from that server:
 
 ```bash
 curl -fsSL https://notes.example.com/cli/install.sh | bash -s -- https://notes.example.com
 ```
 
 Settings, then the CLI tab, shows this command with your server's address
-filled in. Use it when the server runs a develop build, an older release or a
+filled in, next to separate commands to update an installed CLI and to connect
+it to the server. Use it when the server runs a develop build, an older release or a
 fork: the CLI you get matches the server, which the GitHub copy may not. If the
 server cannot serve the CLI (an older server, or a proxy in the way), the
 installer falls back to the latest release from GitHub and says so.
 
-After installing, it runs `mdnest login https://notes.example.com`, which asks
-for a token at the terminal (see [Login](#login)). With no terminal (a script)
-it prints that command for you to run instead.
+It only installs. It then prints `mdnest login https://notes.example.com`,
+which you run to connect the CLI to the server; it asks for a token at the
+terminal (see [Login](#login)). Installing and connecting are separate steps
+because most people already have the CLI connected, or are only updating it.
 
 ### From GitHub
 

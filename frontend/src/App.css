@@ -2352,7 +2352,9 @@ pre:hover .code-copy-btn {
 }
 
 .modal-wide {
-  width: 500px;
+  /* Wide enough for every Settings tab on one row and a full CLI command
+     per line; max-width still fits it to a phone. */
+  width: 640px;
   max-width: 95vw;
   max-height: 85vh;
   overflow-y: auto;
@@ -2656,7 +2658,9 @@ pre:hover .code-copy-btn {
   font-size: 0.72rem;
   color: var(--text);
   white-space: pre-wrap;
-  word-break: break-all;
+  /* Break a long command at a space first, so an address stays whole;
+     only a run with no space at all (a token, a long URL) breaks inside. */
+  overflow-wrap: anywhere;
   font-family: 'JetBrains Mono', 'Fira Code', monospace;
   line-height: 1.5;
 }
