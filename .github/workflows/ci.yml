@@ -144,6 +144,10 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ./${{ matrix.context }}
+          # The frontend image serves the repo-root CLI at /cli/mdnest and
+          # takes it from this named context; the backend never uses it.
+          build-contexts: |
+            cli=.
           push: false
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}

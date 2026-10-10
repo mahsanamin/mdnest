@@ -88,6 +88,10 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ./${{ matrix.context }}
+          # The frontend image serves the repo-root CLI at /cli/mdnest and
+          # takes it from this named context; the other images never use it.
+          build-contexts: |
+            cli=.
           # arm64 too, so the plain-compose install works on Apple silicon,
           # Raspberry Pi and ARM cloud hosts (issue #112).
           platforms: linux/amd64,linux/arm64

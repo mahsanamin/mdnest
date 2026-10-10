@@ -77,6 +77,19 @@ else
   FAILED=1
 fi
 
+# 2b-ii-b. The login prompt (token read from the terminal, not echoed, not
+# saved when the server refuses it), `update --server` refusing an error page,
+# and the installer a server serves. Fake backend on loopback; SKIPs without
+# python3.
+echo -n "CLI login prompt + update --server... "
+if bash tests/cli-login-update.sh > /dev/null 2>&1; then
+  echo "OK"
+else
+  echo "FAILED"
+  echo "  Run: bash tests/cli-login-update.sh"
+  FAILED=1
+fi
+
 # 2b-ii-a. `mdnest approval request` prints the server's answer verbatim or
 # nothing at all, and sends nothing without the machine's policy file. Fake
 # backend, loopback only, a few seconds; SKIPs without python3.
@@ -138,11 +151,11 @@ fi
 # read, so a knob whose plumbing breaks does not fail — it silently reverts to
 # a default and nothing reports it. Fast and Docker-free.
 echo -n "setup.sh generation + plain-compose tests... "
-if bash tests/setup-default-theme.sh > /dev/null 2>&1 && bash tests/setup-marp-themes.sh > /dev/null 2>&1 && bash tests/setup-sso-options.sh > /dev/null 2>&1 && bash tests/setup-chat.sh > /dev/null 2>&1 && bash tests/setup-agent-approvals.sh > /dev/null 2>&1 && bash tests/setup-download-limits.sh > /dev/null 2>&1 && bash tests/setup-bind-address.sh > /dev/null 2>&1 && bash tests/compose-example.sh > /dev/null 2>&1; then
+if bash tests/setup-default-theme.sh > /dev/null 2>&1 && bash tests/setup-marp-themes.sh > /dev/null 2>&1 && bash tests/setup-sso-options.sh > /dev/null 2>&1 && bash tests/setup-chat.sh > /dev/null 2>&1 && bash tests/setup-agent-approvals.sh > /dev/null 2>&1 && bash tests/setup-download-limits.sh > /dev/null 2>&1 && bash tests/setup-bind-address.sh > /dev/null 2>&1 && bash tests/setup-cli-context.sh > /dev/null 2>&1 && bash tests/compose-example.sh > /dev/null 2>&1; then
   echo "OK"
 else
   echo "FAILED"
-  echo "  Run: bash tests/setup-default-theme.sh; bash tests/setup-marp-themes.sh; bash tests/setup-sso-options.sh; bash tests/setup-chat.sh; bash tests/setup-agent-approvals.sh; bash tests/setup-download-limits.sh; bash tests/setup-bind-address.sh; bash tests/compose-example.sh"
+  echo "  Run: bash tests/setup-default-theme.sh; bash tests/setup-marp-themes.sh; bash tests/setup-sso-options.sh; bash tests/setup-chat.sh; bash tests/setup-agent-approvals.sh; bash tests/setup-download-limits.sh; bash tests/setup-bind-address.sh; bash tests/setup-cli-context.sh; bash tests/compose-example.sh"
   FAILED=1
 fi
 
