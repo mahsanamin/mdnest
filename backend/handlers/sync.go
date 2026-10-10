@@ -1,15 +1,17 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/mdnest/mdnest/backend/gitproc"
 	"github.com/mdnest/mdnest/backend/middleware"
 	"github.com/mdnest/mdnest/backend/store"
 )
@@ -315,8 +317,16 @@ func gitSSHEnv(ns string) []string {
 	return []string{"HOME=/root"}
 }
 
+// gitOpTimeout bounds every git subprocess run through gitRunIn/gitCmd. Pull
+// and push here have no other deadline, so a stalled remote would otherwise
+// hang the request goroutine, and its OS thread, forever. A var so tests can
+// shorten it.
+var gitOpTimeout = 2 * time.Minute
+
 func gitRunIn(dir string, extraEnv []string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), gitOpTimeout)
+	defer cancel()
+	cmd := gitproc.Command(ctx, args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "HOME=/root")
 	for _, e := range extraEnv {
@@ -327,7 +337,9 @@ func gitRunIn(dir string, extraEnv []string, args ...string) (string, error) {
 }
 
 func gitCmd(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), gitOpTimeout)
+	defer cancel()
+	cmd := gitproc.Command(ctx, args...)
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
