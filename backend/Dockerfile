@@ -52,7 +52,9 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 # Stage 2: Run
 FROM alpine:latest
 
-RUN apk add --no-cache ca-certificates git openssh-client
+# tini is PID 1 so orphaned git helpers (git-remote-https, ssh) are reaped when
+# they exit; mdnest as PID 1 would leave each one as a zombie for good.
+RUN apk add --no-cache ca-certificates git openssh-client tini
 
 WORKDIR /app
 
@@ -60,4 +62,5 @@ COPY --from=builder /app/mdnest .
 
 EXPOSE 8080
 
+ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["./mdnest"]
