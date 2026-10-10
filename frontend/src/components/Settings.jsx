@@ -346,7 +346,9 @@ function CliTab({ serverVersion }) {
       <h4 className="settings-section-title">Update</h4>
       <p className="settings-description">
         Already installed? The CLI never updates itself. This gets the version this server
-        runs, where a plain update gets the latest release from GitHub.
+        runs, where a plain update gets the latest release from GitHub. A CLI older than 4.8.5
+        does not know <code>--server</code> and quietly updates from GitHub instead: run the
+        Install command above once.
       </p>
       <CodeBlock code={`mdnest update --server ${serverUrl}`} />
 
