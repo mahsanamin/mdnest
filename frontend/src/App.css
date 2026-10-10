@@ -2481,6 +2481,19 @@ pre:hover .code-copy-btn {
   white-space: nowrap;
 }
 
+.cli-token-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin: 0.25rem 0 1rem;
+}
+
+.cli-token-error {
+  font-size: 0.8rem;
+  color: var(--danger);
+}
+
 .token-list {
   border: 1px solid var(--border);
   border-radius: 6px;
