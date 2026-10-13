@@ -33,6 +33,8 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Crepe } from '@milkdown/crepe';
+import { imageSchema } from '@milkdown/preset-commonmark';
+import { imageBlockSchema } from '@milkdown/components/image-block';
 import { editorViewCtx, nodeViewCtx, parserCtx, SchemaReady } from '@milkdown/core';
 import { TextSelection } from '@milkdown/prose/state';
 import { insert, markdownToSlice, replaceAll } from '@milkdown/utils';
@@ -40,6 +42,7 @@ import { blockConfig } from '@milkdown/plugin-block';
 import { uploadConfig } from '@milkdown/plugin-upload';
 import { findParent } from '@milkdown/prose';
 import { uploadImage } from '../api.js';
+import { withDefaultImageTitle } from '../image-title-default.js';
 import { htmlToMarkdown, hasRichContent } from '../html-to-md.js';
 import { looksLikeMarkdown } from '../markdown-utils.js';
 import { parseWikiLink, resolveWikiLink, restoreWikilinks } from '../wikilink.js';
@@ -355,6 +358,11 @@ export default function LiveEditorCrepe({
           proxyDomURL,
         },
       },
+    });
+
+    crepe.editor.config((ctx) => {
+      ctx.update(imageSchema.key, withDefaultImageTitle);
+      ctx.update(imageBlockSchema.key, withDefaultImageTitle);
     });
 
     // Allow Crepe's upload plugin to handle pasted images even when the
