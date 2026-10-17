@@ -28,7 +28,9 @@ Bump all three in lockstep:
 The pre-push hook (`.githooks/pre-push`) verifies these match — if any disagrees the push is blocked.
 
 ### 3. README.md
-Only touch the "Why mdnest?" section if this is a major user-visible feature. Bug fixes and internal changes don't belong on the README.
+Touch the intro (the pitch, "How it works", "Built for teams", "What you get", "Is it for you?") only for a major user-visible feature, and never change the pitch lines without the owner asking. Bug fixes and internal changes don't belong on the README.
+
+Any README wording follows the website repo's writing standard, `../mdnest-website/WRITING.md` ([on GitHub](https://github.com/mahsanamin/mdnest-website/blob/main/WRITING.md)): plain English, no claim the released code does not support, and an "Optional" or "Needs team setup" label on any feature the basic install does not turn on.
 
 ### 4. AGENTS.md
 - New files in the project tree → add them to the structure block in the appropriate section.
@@ -67,11 +69,10 @@ cp "$REPO"/docs/*.md "$WEBSITE/docs/"
 cp "$REPO"/CHANGELOG.md "$WEBSITE/docs/changelog.md"
 ```
 
-### 7. Website index.html (only for major features)
-If this is a headline feature, update `../mdnest-website/index.html`:
-- Hero badge version (`v3.X.Y`)
-- Feature grid cards (add or refresh wording)
-- CLI terminal demo if the CLI changed
+### 7. Website: writing standard and landing page
+First, read `../mdnest-website/WRITING.md`. It lists which features are off by default or need team setup, and the product facts the site relies on. If this release changes one of them (a new `ENABLE_*` flag, a changed default, a new outbound request, a feature that now needs or no longer needs multi-user mode), update `WRITING.md` in the same release. A stale fact there leads straight to a wrong claim on the site.
+
+Then, only if this is a headline feature, update `../mdnest-website/index.html`: a card in "What you work with every day" or a line in "Everything else, in one line each", or the "Built for teams" section for a team feature. Follow `WRITING.md`: plain English, the user's gain first, an "Optional" or "Needs team setup" label where it applies, and no time or privacy claims it rules out. Do not change the hero pitch unless the owner asks.
 
 Bug fixes don't need landing-page changes.
 
@@ -80,7 +81,7 @@ Only if step 6 or 7 actually changed something in the website repo:
 
 ```bash
 cd "$WEBSITE"
-git add docs/ index.html
+git add docs/ index.html WRITING.md
 git commit  # author the message describing what synced
 cd "$REPO"
 ```

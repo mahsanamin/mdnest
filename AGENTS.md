@@ -1,6 +1,6 @@
 # mdnest - AI Context
 
-Privately-hosted Markdown notes app. Plain files on disk, Docker-based. Supports single-user (no database) and multi-user (PostgreSQL) modes.
+Self-hosted Markdown knowledge base for teams and their AI agents. Plain files on disk, Docker-based. Supports single-user (no database) and multi-user (PostgreSQL) modes.
 
 ## Quick Orientation
 
@@ -140,6 +140,19 @@ mdnest-server                # Server management CLI (start, stop, rebuild, rese
 setup.sh                     # Reads mdnest.conf, generates docker-compose.yml + .env
 mdnest.conf.sample           # Template config with MOUNT_ entries
 ```
+
+## Public wording (README, docs, website, release notes)
+
+mdnest is pitched as **"Your team and your AI agents, working from the same notes."**: a self-hosted Markdown knowledge base for developer teams who work with coding agents. A single developer can try it alone first, but teams are the main readers. The owner sets the audience and the pitch, so do not change either on your own.
+
+Every public sentence (this repo's `README.md`, the user-facing `docs/`, CHANGELOG entries, GitHub release notes, and the website) follows the writing standard in the website repo: `../mdnest-website/WRITING.md` ([on GitHub](https://github.com/mahsanamin/mdnest-website/blob/main/WRITING.md)). In short:
+
+- Plain English: short common words, one idea per sentence, no metaphors, no em or en dashes, no marketing words.
+- Say what the user gets, then the fact that proves it.
+- Promise only what the **released** code does. No time claims ("3 minutes"), no "one command", no "nothing leaves your server", no "built-in AI". `WRITING.md` has the full list and the wording to use instead.
+- Label features the basic install does not turn on: "Optional" (for example the task board, drawings, MCP) or "Needs team setup" (comments, presence, per-person access, groups, private chats).
+
+When a change here alters one of those defaults or what the server sends out, update the facts in `WRITING.md` in the same release. `md-ship` step 7 covers this.
 
 ## Key Conventions
 
