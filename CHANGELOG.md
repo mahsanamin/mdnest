@@ -4,6 +4,41 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v4.8.11: HA installs no longer fill Redis, and CLI changes show live again
+
+A fix release. On the Kubernetes HA topology (app replicas and one writer),
+Redis could fill up and stop every save, and the writer did not recover
+until it was restarted. Upgrading is strongly recommended for HA installs.
+It also fixes text added from the CLI not showing in an open note until a
+reload, a regression in 4.8.10.
+
+### Fixed
+
+- **HA installs: Redis no longer fills up, and the writer recovers on its
+  own** (GitHub issue #147). In the Kubernetes topology with app replicas and
+  one writer, every save is handed to the writer through a Redis stream. Two
+  bugs together caused a full write outage. First, applied entries were never
+  removed from the stream, and each one carries the whole note, so a busy
+  chat filled Redis until it refused every save ("failed to write chat").
+  Now the writer deletes each entry as soon as it is applied, and on its
+  first start after the upgrade it clears the entries an older version left
+  behind. Second, a writer that lost its leader lock stopped applying saves
+  but kept running and stayed Ready, until someone restarted the pod. Now it
+  campaigns for the lock again with a backoff, logs why it lost it, and no
+  longer applies anything once the lock is gone. Single-box installs are not
+  affected.
+
+- **A note changed with the CLI updates live again in the browser.** Since
+  shared editing, text added with `mdnest append` or `mdnest prepend` (or an
+  agent's append) only showed after a reload. The server never announced
+  those changes; before 4.8.10 the browser's 60-second check hid that, and a
+  shared note no longer runs that check. The server now announces an append
+  or prepend like any other save, so it shows within a second, in Live and in
+  Basic. Changes that never go through the server at all, such as a git-sync
+  pull, are now picked up by the browser that saves the note within about 20
+  seconds and merged in. If someone is typing in the note at the same time,
+  the CLI's change is merged with their text, never written over it.
+
 ## v4.8.10: Shared editing, and no more lost typing when two people edit a note
 
 Fixes an old and serious bug: when two people edited the same note, typing

@@ -92,7 +92,8 @@ func newAppStorage(ctx context.Context, _ string) (Storage, error) {
 
 // newWriterStorage builds the single writer: it owns the git tree, starts the
 // drain loop in a background goroutine, and serves reads through the working
-// set. The goroutine ends when ctx is cancelled or leadership is lost.
+// set. The goroutine ends only when ctx is cancelled: a lost leadership makes
+// the writer campaign again (Writer.Run).
 func newWriterStorage(ctx context.Context, localRoot string, resolver RemoteResolver) (Storage, error) {
 	url := strings.TrimSpace(os.Getenv("REDIS_URL"))
 	if url == "" {

@@ -9,7 +9,7 @@
 # write access to testing_workspace, and runs the two-browser specs against
 # them. The notes folder is on the host, so a spec can check the bytes on disk.
 #
-# Usage:  tests/e2e-collab-multi.sh            (runs collab-*.spec.js + presence)
+# Usage:  tests/e2e-collab-multi.sh            (runs the collab-*.spec.js + presence)
 #         MDNEST_E2E_SPECS=collab-shared-editing.spec.js tests/e2e-collab-multi.sh
 # Needs:  docker, node, curl, python3. Exit 0 if every spec passes, 2 if a
 #         prerequisite is missing.
@@ -36,7 +36,7 @@ cleanup() {
   if [ -n "${KEEP_LOGS:-}" ]; then docker logs "$BE" >"$KEEP_LOGS" 2>&1 || true; fi
   docker rm -f "$FE" "$BE" "$PG" >/dev/null 2>&1 || true
   docker network rm "$NET" >/dev/null 2>&1 || true
-  rm -rf "$NOTES_DIR"
+  rm -rf "$NOTES_DIR" "$NOTES_DIR.cli"
 }
 trap cleanup EXIT
 
@@ -44,10 +44,17 @@ command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 || { fail "dock
 command -v node >/dev/null 2>&1 || { fail "node is required for Playwright"; exit 2; }
 command -v python3 >/dev/null 2>&1 || { fail "python3 is required"; exit 2; }
 
-log "Building backend + frontend images from the working tree"
-docker build -t "$BE_IMAGE" backend/ >/tmp/mdnest-e2e-collab-be.log 2>&1 \
+# MDNEST_BUILD_ROOT builds the app from another checkout (an older release
+# in a throwaway worktree, say) while the specs, the CLI and this script stay
+# the current ones. MDNEST_E2E_BACKEND_ENV adds backend settings, for example
+# "SHARED_EDITING=false".
+BUILD_ROOT="${MDNEST_BUILD_ROOT:-$REPO_ROOT}"
+EXTRA_ENV=()
+for kv in ${MDNEST_E2E_BACKEND_ENV:-}; do EXTRA_ENV+=(-e "$kv"); done
+log "Building backend + frontend images from $BUILD_ROOT"
+docker build -t "$BE_IMAGE" "$BUILD_ROOT/backend/" >/tmp/mdnest-e2e-collab-be.log 2>&1 \
   || { fail "backend build failed"; tail -30 /tmp/mdnest-e2e-collab-be.log; exit 1; }
-docker build --build-context cli=. -t "$FE_IMAGE" frontend/ >/tmp/mdnest-e2e-collab-fe.log 2>&1 \
+docker build --build-context cli="$BUILD_ROOT" -t "$FE_IMAGE" "$BUILD_ROOT/frontend/" >/tmp/mdnest-e2e-collab-fe.log 2>&1 \
   || { fail "frontend build failed"; tail -30 /tmp/mdnest-e2e-collab-fe.log; exit 1; }
 pass "images built"
 
@@ -62,20 +69,24 @@ docker run -d --name "$BE" --network "$NET" --network-alias backend \
   -e AUTH_MODE=multi -e POSTGRES_HOST="$PG" -e POSTGRES_PASSWORD=pw \
   -e MDNEST_USER=admin -e MDNEST_PASSWORD=adminpass123 -e MDNEST_JWT_SECRET=e2e-collab-secret \
   -e NOTES_DIR=/notes -e FRONTEND_ORIGIN=http://localhost \
-  -e ENABLE_LIVE_COLLAB=true \
+  -e ENABLE_LIVE_COLLAB=true -e ENABLE_AGENT_APPROVALS=true ${EXTRA_ENV[@]+"${EXTRA_ENV[@]}"} \
   -v "$NOTES_DIR:/notes" "$BE_IMAGE" >/dev/null
 docker run -d --name "$FE" --network "$NET" -p 127.0.0.1:0:80 "$FE_IMAGE" >/dev/null
 PORT="$(docker port "$FE" 80/tcp | head -1 | sed 's/.*://')"
 BASE="http://127.0.0.1:$PORT"
 for _ in $(seq 1 60); do curl -fsS "$BASE/api/config" >/dev/null 2>&1 && break; sleep 1; done
-curl -fsS "$BASE/api/config" | grep -q '"liveCollab":true' \
+curl -fsS "$BASE/api/config" | tr -d ' ' | grep -q '"liveCollab":true' \
   || { fail "stack not healthy or live collab off"; docker logs "$BE" | tail -30; exit 1; }
 pass "multi-mode stack with live collab at $BASE"
 
 # Two collaborators with write access to testing_workspace. An invited account
 # must change its password at first sign-in; do that here so the browser signs
 # in straight to the app with the final password.
-BASE="$BASE" python3 - <<'PY' || { fail "could not seed users"; exit 1; }
+# Each account also gets an API token and a CLI login in its own HOME, so a
+# spec can drive the real ./mdnest at a note open in a browser.
+CLI_DIR="$NOTES_DIR.cli"
+mkdir -p "$CLI_DIR"
+BASE="$BASE" CLI_DIR="$CLI_DIR" python3 - <<'PY' || { fail "could not seed users"; exit 1; }
 import json, os, urllib.request, urllib.error
 BASE = os.environ["BASE"]
 def call(method, path, token=None, body=None):
@@ -101,10 +112,20 @@ ids = {u["username"]: u["id"] for u in (users if isinstance(users, list) else us
 for name in ("alice", "bob"):
     code, r = call("POST", "/api/admin/grants", admin, {"user_id": ids[name], "namespace": "testing_workspace", "path": "/", "permission": "write"})
     assert code in (200, 201), f"grant {name}: {code} {r}"
-    login(name, name + "temp123", name + "pass123")
+    tok = login(name, name + "temp123", name + "pass123")
+    code, r = call("POST", "/api/auth/tokens", tok, {"name": "e2e-cli"})
+    assert code in (200, 201) and isinstance(r, dict) and r.get("token"), f"token {name}: {code} {r}"
+    with open(os.path.join(os.environ["CLI_DIR"], name + ".token"), "w") as f:
+        f.write(r["token"])
 print("seeded alice + bob")
 PY
 pass "two collaborators seeded"
+for name in alice bob; do
+  mkdir -p "$CLI_DIR/$name-home"
+  HOME="$CLI_DIR/$name-home" ./mdnest login "@$name" "$BASE" "$(cat "$CLI_DIR/$name.token")" >/dev/null 2>&1 \
+    || { fail "CLI login for $name failed"; exit 1; }
+done
+pass "CLI logged in as alice (@alice) and bob (@bob)"
 
 log "Preparing Playwright"
 ( cd tests/browser
@@ -119,7 +140,8 @@ if ( cd tests/browser && \
      MDNEST_USER=alice MDNEST_PASSWORD=alicepass123 \
      MDNEST_USER2=bob MDNEST_PASSWORD2=bobpass123 \
      MDNEST_NOTES_DIR="$NOTES_DIR" \
-     npx playwright test ${MDNEST_E2E_SPECS:-collab-shared-editing.spec.js presence.spec.js} ); then
+     MDNEST_CLI="$REPO_ROOT/mdnest" MDNEST_CLI_HOMES="$CLI_DIR" \
+     npx playwright test ${MDNEST_E2E_SPECS:-collab-shared-editing.spec.js collab-cli.spec.js presence.spec.js} ); then
   pass "COLLAB E2E: all specs passed"
   exit 0
 else

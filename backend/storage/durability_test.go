@@ -26,3 +26,21 @@ func TestEncodeDecodeOpRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func TestNextStreamID(t *testing.T) {
+	cases := map[string]string{
+		"5-3":                    "5-4",
+		"1700000000000-0":        "1700000000000-1",
+		"7-18446744073709551615": "8-0",
+		"":                       "",
+		"0-0":                    "",
+		"garbage":                "",
+		"1-x":                    "",
+	}
+	for in, want := range cases {
+		got, ok := nextStreamID(in)
+		if ok != (want != "") || got != want {
+			t.Errorf("nextStreamID(%q) = %q, %v; want %q", in, got, ok, want)
+		}
+	}
+}

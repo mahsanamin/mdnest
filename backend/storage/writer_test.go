@@ -3,10 +3,13 @@ package storage
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 // fakeLeader grants leadership immediately and never revokes it.
@@ -234,5 +237,135 @@ func TestWriterNeverServesOrWritesThroughALink(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(base, "Shared", "mine.md")); err != nil {
 		t.Fatal("a queued rename into a linked folder moved the file")
+	}
+}
+
+// losingLeader grants leadership and takes it away again shortly after, like
+// a failed renew. It counts the campaigns.
+type losingLeader struct {
+	mu        sync.Mutex
+	campaigns int
+}
+
+func (l *losingLeader) Campaign(ctx context.Context) (context.Context, error) {
+	l.mu.Lock()
+	l.campaigns++
+	l.mu.Unlock()
+	lctx, cancel := context.WithTimeout(ctx, 20*time.Millisecond)
+	_ = cancel // released when the timeout fires
+	return lctx, nil
+}
+func (l *losingLeader) Close() error { return nil }
+func (l *losingLeader) count() int   { l.mu.Lock(); defer l.mu.Unlock(); return l.campaigns }
+
+// blockingQueue consumes until its context ends, like the Redis queue.
+type blockingQueue struct{ fakeQueue }
+
+func (q *blockingQueue) Consume(ctx context.Context, _ func(context.Context, DurabilityOp) error) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+// TestWriterCampaignsAgainAfterLosingLeadership pins issue #147: a lost
+// leadership must lead to a new campaign, not to Run returning while the
+// process stays up with nothing draining the queue.
+func TestWriterCampaignsAgainAfterLosingLeadership(t *testing.T) {
+	oldMin, oldMax := writerRetryMin, writerRetryMax
+	writerRetryMin, writerRetryMax = 5*time.Millisecond, 20*time.Millisecond
+	defer func() { writerRetryMin, writerRetryMax = oldMin, oldMax }()
+
+	gs, err := NewGitStorage(t.TempDir(), NoopCommitter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	l := &losingLeader{}
+	w := NewWriter(gs, newFakeWorkingSet(), &blockingQueue{}, l, defaultWorkingSetMaxBytes)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- w.Run(ctx) }()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for l.count() < 3 && time.Now().Before(deadline) {
+		select {
+		case err := <-done:
+			t.Fatalf("Run returned after losing leadership (campaigns=%d): %v", l.count(), err)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	if l.count() < 3 {
+		t.Fatalf("campaigned %d times, want at least 3", l.count())
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Run after cancel = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return after ctx was cancelled")
+	}
+}
+
+// termLeader hands out leader contexts and records whether each one was
+// ended before the next campaign.
+type termLeader struct {
+	mu        sync.Mutex
+	terms     []context.Context
+	stillLive int // campaigns that started while the previous term was live
+}
+
+func (l *termLeader) Campaign(ctx context.Context) (context.Context, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if n := len(l.terms); n > 0 && l.terms[n-1].Err() == nil {
+		l.stillLive++
+	}
+	l.terms = append(l.terms, ctx)
+	return ctx, nil
+}
+func (l *termLeader) Close() error { return nil }
+
+// failingQueue fails every Consume at once, as a Redis error would.
+type failingQueue struct{ fakeQueue }
+
+func (q *failingQueue) Consume(context.Context, func(context.Context, DurabilityOp) error) error {
+	return errors.New("XREADGROUP failed")
+}
+
+// A queue error while the lock is held must still end the term, or the renew
+// loop keeps the lock and the next campaign waits on it forever.
+func TestWriterEndsTermWhenQueueFails(t *testing.T) {
+	oldMin, oldMax := writerRetryMin, writerRetryMax
+	writerRetryMin, writerRetryMax = time.Millisecond, 2*time.Millisecond
+	defer func() { writerRetryMin, writerRetryMax = oldMin, oldMax }()
+
+	gs, err := NewGitStorage(t.TempDir(), NoopCommitter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	l := &termLeader{}
+	w := NewWriter(gs, newFakeWorkingSet(), &failingQueue{}, l, defaultWorkingSetMaxBytes)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- w.Run(ctx) }()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		l.mu.Lock()
+		n := len(l.terms)
+		l.mu.Unlock()
+		if n >= 3 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	cancel()
+	<-done
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if len(l.terms) < 3 {
+		t.Fatalf("campaigned %d times, want at least 3", len(l.terms))
+	}
+	if l.stillLive > 0 {
+		t.Fatalf("%d campaigns started while the previous term was still live", l.stillLive)
 	}
 }

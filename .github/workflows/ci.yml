@@ -17,6 +17,16 @@ jobs:
   backend:
     name: Backend (build + test)
     runs-on: ubuntu-latest
+    services:
+      # A throwaway Redis for the durability-queue tests (storage/redis_queue_test.go,
+      # issue #147). They flush it and change its maxmemory; without it they skip.
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 2s --health-timeout 2s --health-retries 15
+    env:
+      MDNEST_TEST_REDIS_URL: redis://localhost:6379/15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

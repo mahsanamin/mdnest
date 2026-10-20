@@ -41,6 +41,12 @@ const SAVE_DELAY = 800;
 // How long the saver waits after a file-changed it did not cause before it
 // checks the file: long enough for a just-replaced saver's meta to arrive.
 const OUTSIDE_GRACE = 1200;
+// The saver also looks at the file on a timer. git-sync pulls and edits made
+// on the host write the file without telling the server's collab hub, so no
+// file-changed ever arrives for them. (The whole-file path has the app's own
+// 60 s poll; a shared note skips it, because reloading would replace the
+// room's text, so the saver does the check here instead, as a merge.)
+const OUTSIDE_POLL = 20000;
 const REMOTE = 'remote';
 // What the editor tells the person when shared editing stops for them.
 const ERROR_TEXT = {
@@ -230,7 +236,7 @@ export class SharedSession {
         const was = this.saver;
         this.saver = !!msg.saver && this.canWrite;
         if (this.saver && !was && this.bound) this._becameSaver();
-        if (!this.saver) this._cancelSave();
+        if (!this.saver) { this._cancelSave(); this._stopPoll(); }
         break;
       }
       case 'yjs-ready':
@@ -351,6 +357,16 @@ export class SharedSession {
     // file may have changed while nobody was saving. Check the file first,
     // then save whatever differs.
     this._checkOutside().finally(() => this._scheduleSave(0));
+    if (!this.pollTimer) {
+      this.pollTimer = setInterval(() => {
+        if (this.saver && !this.closed && !this.disabled) this._checkOutside();
+      }, OUTSIDE_POLL);
+    }
+  }
+
+  _stopPoll() {
+    if (this.pollTimer) clearInterval(this.pollTimer);
+    this.pollTimer = null;
   }
 
   _cancelSave() {
@@ -534,6 +550,7 @@ export class SharedSession {
     this.leave();
     this.closed = true;
     this._cancelSave();
+    this._stopPoll();
     window.removeEventListener('pagehide', this._onPageHide);
     this.awareness.destroy();
     this.doc.off('update', this._onDocUpdate);

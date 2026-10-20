@@ -78,10 +78,14 @@ minutes and logs a warning, so a quick reload can still save it.
 ### Changes from outside the room
 
 git-sync, the CLI, an agent through MCP, or a history restore can change the
-file while people are editing it. The saver notices (from the server's
-`file-changed` message, or from a refused save) and merges the change in: a
-line-based three-way merge of the text the room last saved, the room's text
-now, and the file. A part changed on one side takes that side, a part changed
+file while people are editing it. The saver notices and merges the change in.
+It notices a change made through the server (a save, `mdnest write`, `edit`,
+`append`, `prepend`, an agent, a restore) within about a second, from the
+server's `file-changed` message, and also on any refused save. A change that
+never goes through the server, such as a git-sync pull or an editor on the
+host, sends no message, so the saver also checks the file every 20 seconds.
+The merge is a line-based three-way merge of the text the room last saved,
+the room's text now, and the file. A part changed on one side takes that side, a part changed
 the same way on both sides is taken once, and a part changed differently on
 both keeps both versions, the room's first. The result is applied to the
 editor as an ordinary edit, so it reaches everyone.
@@ -179,6 +183,15 @@ always sent.
   against a real multi-user stack with two accounts: two people typing at
   once, opening and leaving without changing the file, the saver closing the
   tab mid-edit, an outside change merging in, front matter kept, a folder move
-  closing the room, and Basic switching to Live.
+  closing the room, and Basic switching to Live. It also runs
+  `tests/browser/collab-cli.spec.js`, which drives the real `./mdnest` (logged
+  in as the same account as the browser, and as another one): `write`,
+  `append`, `prepend` and `edit` show live in a shared note and in Basic mode,
+  a git-sync style write to disk shows within the saver's check, and CLI
+  changes made while someone types are merged, not written over.
+  `collab-idle.spec.js` leaves a note open for a minute and fails on any
+  remount, change inside the editor or reconnect. `cli-vs-typing.spec.js`
+  has one person typing past the 60-second poll while the CLI appends, and
+  fails if the CLI's line is not on disk.
 - `frontend/src/__tests__/sharedText.test.js`: front matter split and join, the
   three-way merge, the message format.

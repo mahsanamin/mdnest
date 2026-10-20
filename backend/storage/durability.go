@@ -2,6 +2,8 @@ package storage
 
 import (
 	"context"
+	"log"
+	"strconv"
 	"strings"
 	"time"
 
@@ -146,6 +148,7 @@ func (q *RedisStreamQueue) Consume(ctx context.Context, apply func(context.Conte
 	if err := q.reclaimPending(ctx, apply); err != nil && ctx.Err() == nil {
 		return err
 	}
+	q.trimApplied(ctx)
 	for {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -168,9 +171,16 @@ func (q *RedisStreamQueue) Consume(ctx context.Context, apply func(context.Conte
 		}
 		for _, s := range res {
 			for _, msg := range s.Messages {
+				// go-redis does not cancel a blocked read with ctx, so the
+				// read can return after leadership was lost. Leave the rest
+				// pending for the next leader rather than apply it here.
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
 				q.applyAndAck(ctx, apply, decodeOp(msg.ID, msg.Values))
 			}
 		}
+		q.trimApplied(ctx)
 	}
 }
 
@@ -201,13 +211,84 @@ func (q *RedisStreamQueue) reclaimPending(ctx context.Context, apply func(contex
 	}
 }
 
-// applyAndAck applies one op and acknowledges it only on success. A failed
-// apply is left pending for a later redelivery.
+// applyAndAck applies one op, then acknowledges and deletes it. A failed apply
+// is left pending for a later redelivery.
+//
+// The entry is deleted, not only acked: an acked entry stays in the stream
+// with its whole payload (a full note body), and before v4.8.11 nothing ever
+// removed one, so the stream grew until Redis hit maxmemory and refused every
+// write (issue #147). Deleting by id removes exactly the entry that was just
+// applied, so a failing op further back never holds later ones in memory.
 func (q *RedisStreamQueue) applyAndAck(ctx context.Context, apply func(context.Context, DurabilityOp) error, op DurabilityOp) {
 	if err := apply(ctx, op); err != nil {
 		return // leave unacked; XAUTOCLAIM/redelivery retries it
 	}
-	q.client.XAck(ctx, durabilityStream, durabilityGroup, op.Seq)
+	if err := q.client.XAck(ctx, durabilityStream, durabilityGroup, op.Seq).Err(); err != nil {
+		return // still pending: redelivered later, and apply is idempotent
+	}
+	q.client.XDel(ctx, durabilityStream, op.Seq)
+}
+
+// trimApplied removes every entry older than anything the writer still needs:
+// the oldest pending entry if there is one, otherwise everything up to the
+// last one delivered to the group. It clears entries acked by a version that
+// did not delete them, and any entry whose XDEL failed.
+//
+// The group's last-delivered id is read BEFORE the pending list. An entry
+// delivered in between is either still pending (and so above the trim point)
+// or already acked, so the order never trims an entry that has not been
+// applied. Entries added by app replicas meanwhile get newer ids and are never
+// below the trim point.
+func (q *RedisStreamQueue) trimApplied(ctx context.Context) {
+	groups, err := q.client.XInfoGroups(ctx, durabilityStream).Result()
+	if err != nil {
+		if ctx.Err() == nil {
+			log.Printf("storage: durability stream trim skipped: %v", err)
+		}
+		return
+	}
+	last := ""
+	for _, g := range groups {
+		if g.Name == durabilityGroup {
+			last = g.LastDeliveredID
+		}
+	}
+	minID, ok := nextStreamID(last)
+	if !ok {
+		return // nothing delivered yet
+	}
+	pending, err := q.client.XPending(ctx, durabilityStream, durabilityGroup).Result()
+	if err != nil {
+		if ctx.Err() == nil {
+			log.Printf("storage: durability stream trim skipped: %v", err)
+		}
+		return
+	}
+	if pending.Count > 0 && pending.Lower != "" {
+		minID = pending.Lower
+	}
+	if err := q.client.XTrimMinID(ctx, durabilityStream, minID).Err(); err != nil && ctx.Err() == nil {
+		log.Printf("storage: durability stream trim failed: %v", err)
+	}
+}
+
+// nextStreamID returns the smallest stream id after id ("5-3" -> "5-4"), so
+// XTRIM MINID with it keeps nothing at or below id. It reports false for an
+// empty or zero id (nothing delivered) and for anything it cannot parse.
+func nextStreamID(id string) (string, bool) {
+	ms, seq, found := strings.Cut(id, "-")
+	if !found {
+		return "", false
+	}
+	m, err1 := strconv.ParseUint(ms, 10, 64)
+	n, err2 := strconv.ParseUint(seq, 10, 64)
+	if err1 != nil || err2 != nil || (m == 0 && n == 0) {
+		return "", false
+	}
+	if n == ^uint64(0) {
+		return strconv.FormatUint(m+1, 10) + "-0", true
+	}
+	return ms + "-" + strconv.FormatUint(n+1, 10), true
 }
 
 func (q *RedisStreamQueue) Close() error { return q.client.Close() }

@@ -2,8 +2,10 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"log"
 	"path"
+	"time"
 )
 
 // Writer is the out-of-process single writer. It owns the durable git tree
@@ -33,10 +35,56 @@ func NewWriter(dst Storage, ws WorkingSet, queue DurabilityQueue, leader Leader,
 }
 
 // Run campaigns for leadership, hydrates the working set, then consumes the
-// durability queue until the leader context is cancelled (leadership lost or
-// ctx cancelled). It returns the terminating error, if any.
+// durability queue. When leadership is lost (a renew failed, for example while
+// Redis was out of memory) or the queue fails, it campaigns again after a
+// backoff, for as long as ctx is live. It returns when ctx is cancelled, or
+// with nil when the queue reports it is finished (only the test fakes do).
+//
+// Before v4.8.11 Run returned on the first lost leadership, so the writer
+// process stayed up and Ready while nothing applied the queue any more, until
+// the pod was restarted (issue #147).
 func (w *Writer) Run(ctx context.Context) error {
-	lctx, err := w.leader.Campaign(ctx)
+	backoff := writerRetryMin
+	for {
+		started := time.Now()
+		err := w.lead(ctx)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err == nil {
+			return nil
+		}
+		if time.Since(started) > writerRetryMax {
+			backoff = writerRetryMin // a long term: this is a fresh failure, not a loop
+		}
+		log.Printf("storage: durability writer stopped (%v), campaigning again in %s", err, backoff)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(backoff):
+		}
+		if backoff *= 2; backoff > writerRetryMax {
+			backoff = writerRetryMax
+		}
+	}
+}
+
+// Backoff bounds between leadership terms. Package vars so tests can shorten
+// them.
+var (
+	writerRetryMin = time.Second
+	writerRetryMax = 30 * time.Second
+)
+
+// lead runs one leadership term: campaign, hydrate, consume until the leader
+// context ends. A lost leadership comes back as an error, never nil.
+func (w *Writer) lead(ctx context.Context) error {
+	// End the term's leader context whatever ends the term. If the queue
+	// fails while the lock is still held, the renew loop would otherwise keep
+	// the lock alive and the next campaign would wait on it forever.
+	tctx, end := context.WithCancel(ctx)
+	defer end()
+	lctx, err := w.leader.Campaign(tctx)
 	if err != nil {
 		return err
 	}
@@ -44,8 +92,17 @@ func (w *Writer) Run(ctx context.Context) error {
 	if err := w.hydrate(lctx); err != nil {
 		log.Printf("storage: writer hydrate warning: %v", err)
 	}
-	return w.queue.Consume(lctx, w.apply)
+	err = w.queue.Consume(lctx, w.apply)
+	if err == nil {
+		return nil
+	}
+	if lctx.Err() != nil && ctx.Err() == nil {
+		return errLostLeadership
+	}
+	return err
 }
+
+var errLostLeadership = errors.New("lost leadership")
 
 // hydrate loads every cached-eligible note body from the durable tree into the
 // working set so replicas reading from Redis see the full corpus. Bodies over

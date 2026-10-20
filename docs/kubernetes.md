@@ -79,6 +79,8 @@ Understand the durability contract before choosing this topology, because it mov
 
 - **Redis is a durability component here, not a cache.** Between the ack and the writer applying the op, the Redis queue is the *only* copy of that change. So **run Redis with AOF persistence** (`appendonly yes`, `appendfsync everysec` at least) for this topology: the working-set cache would survive a Redis rebuild by rehydrating from the git tree, but the *unflushed queue* would not — a Redis restart in that window is real data loss. This is a deliberate trade for horizontal scale without ReadWriteMany storage; make it knowingly. (Note this is a stronger requirement than the presence/event backplane role Redis plays for live collaboration, where a lost event only costs a reconnect.)
 
+- **The stream holds only what the writer has not applied yet.** Each entry carries the whole note body, so a writer that is down or behind makes the stream grow, and with it Redis memory. Since v4.8.11 the writer deletes each entry once applied, clears entries an older version acked but left behind the first time it starts, and campaigns for the lock again if it loses it. Watch `XLEN mdnest:durability`: it should stay near zero. Before v4.8.11 nothing deleted applied entries, and a writer that lost the lock stopped draining until its pod was restarted (issue #147).
+
 The opt-in mirror (`storage.git.remote.url`) pushes each namespace repo to an external git host, so the durable tree also exists off-cluster — a copy independent of the writer's PVC.
 
 ## Upgrades

@@ -502,6 +502,24 @@ func (h *NoteHandler) patchNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.recordSave(ctx, ns, relPath, "", store.NoteActionEdited)
+
+	// Tell the people who have this note open, as PUT does. Append and
+	// prepend are what the CLI and agents use most; without this the change
+	// only showed after the browser's own poll, and in a shared note (which
+	// skips that poll) not until a reload. The etag is the one a GET of the
+	// new text returns. Sent while the note lock is held, so the broadcasts
+	// of two appends arrive in the order they were written.
+	_, clean := ExtractNoteID(result)
+	newETag := contentETag([]byte(canonicalForETag(clean)))
+	if h.hub != nil {
+		userID, username := 0, "unknown"
+		if uc := middleware.UserFromContext(r.Context()); uc != nil {
+			userID, username = uc.ID, uc.Username
+		}
+		h.hub.BroadcastFileChanged(ns, reqPath, userID, username, newETag, "", "")
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	w.Header().Set("ETag", newETag)
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok", "etag": newETag})
 }

@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"log"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -103,6 +104,13 @@ func (l *RedisLeader) keep(ctx context.Context, cancel context.CancelFunc) {
 		case <-t.C:
 			held, err := renewCAS.Run(ctx, l.client, []string{leaderKey}, l.id, l.ttl.Milliseconds()).Int()
 			if err != nil || held == 0 {
+				// Say why: a Redis that is out of memory refuses the renew
+				// script, and that is the first sign of a full stream.
+				if err != nil {
+					log.Printf("storage: writer lost leadership: renew failed: %v", err)
+				} else {
+					log.Printf("storage: writer lost leadership: the lock is held by another writer")
+				}
 				cancel() // lost leadership; stop writing
 				return
 			}
