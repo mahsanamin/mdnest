@@ -13,9 +13,10 @@ FAILED=0
 # only, so day-to-day pushes stay quick. git feeds pushed refs on stdin as
 # "<local_ref> <local_oid> <remote_ref> <remote_oid>".
 RUN_E2E=0
+RELEASE_OIDS=()
 while read -r _lref _loid remote_ref _roid; do
   case "$remote_ref" in
-    refs/heads/main|refs/heads/release/*) RUN_E2E=1 ;;
+    refs/heads/main|refs/heads/release/*) RUN_E2E=1; RELEASE_OIDS+=("$_loid") ;;
   esac
 done
 
@@ -38,17 +39,32 @@ else
   FAILED=1
 fi
 
-# 2. Backend: verify Go compiles. On a Docker-only machine (no host Go
-# toolchain) this is skipped — the release-tier Docker E2E below builds the
-# backend image for real, so a broken build still can't reach main.
-echo -n "Backend build... "
-if ! command -v go >/dev/null 2>&1; then
-  echo "SKIPPED (no host Go — the Docker E2E build covers this on release pushes)"
-elif (cd backend && go build -o /dev/null .) > /dev/null 2>&1; then
-  echo "OK"
+# 2. Backend: verify Go compiles and vets. Without a host Go toolchain this
+# runs in the go.mod-pinned golang image (module and build caches are kept in
+# named volumes, so it is quick after the first run). It used to be skipped,
+# which meant a push from a Docker-only machine never compiled the backend.
+echo -n "Backend build + vet... "
+if command -v go >/dev/null 2>&1; then
+  if (cd backend && go build -o /dev/null . && go vet ./...) > /dev/null 2>&1; then
+    echo "OK"
+  else
+    echo "FAILED"
+    echo "  Run: cd backend && go build . && go vet ./..."
+    FAILED=1
+  fi
+elif command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+  GO_IMG="golang:$(awk '/^go[[:space:]]/{print $2; exit}' backend/go.mod)"
+  GO_LOG="$(mktemp "${TMPDIR:-/tmp}/mdnest-go-vet.XXXXXX")"
+  if docker run --rm -v "$PWD/backend:/src" -v mdnest-gomod:/go/pkg/mod -v mdnest-gobuild:/root/.cache/go-build \
+       -w /src "$GO_IMG" sh -c 'go build -o /dev/null . && go vet ./...' > "$GO_LOG" 2>&1; then
+    echo "OK (Docker $GO_IMG)"
+  else
+    echo "FAILED"
+    echo "  See $GO_LOG"
+    FAILED=1
+  fi
 else
-  echo "FAILED"
-  FAILED=1
+  echo "SKIPPED (neither Go nor Docker available; CI's 'Backend (build + test)' is the gate)"
 fi
 
 # 2b. CLI unit tests: pure helpers, run WITH python3 and with it force-disabled.
@@ -319,26 +335,28 @@ else
   FAILED=1
 fi
 
-# 8. Shell scripts: shellcheck (if installed)
+# 8. Shell scripts: shellcheck, host binary or the koalaman/shellcheck image.
 # Mirrors the CI workflow gate: severity `error` only. Lower-severity
 # findings (warnings / info) are non-blocking for now.
+SC_FILES="setup.sh mdnest-server mdnest git-sync/sync.sh install-cli.sh .githooks/pre-push tests/release-gate.sh"
+SC_CMD=""
 if command -v shellcheck >/dev/null 2>&1; then
+  SC_CMD="shellcheck"
+elif command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+  SC_CMD="docker run --rm -v $PWD:/mnt -w /mnt koalaman/shellcheck:stable"
+fi
+if [ -n "$SC_CMD" ]; then
   echo -n "Shell scripts (shellcheck)... "
-  if shellcheck -S error \
-       setup.sh \
-       mdnest-server \
-       mdnest \
-       git-sync/sync.sh \
-       install-cli.sh \
-       .githooks/pre-push >/dev/null 2>&1; then
+  # shellcheck disable=SC2086 # word splitting of the command and file list is intended
+  if $SC_CMD -S error $SC_FILES >/dev/null 2>&1; then
     echo "OK"
   else
     echo "ISSUES FOUND"
-    echo "  Run: shellcheck -S error setup.sh mdnest-server mdnest git-sync/sync.sh install-cli.sh .githooks/pre-push"
+    echo "  Run: shellcheck -S error $SC_FILES"
     FAILED=1
   fi
 else
-  echo "Shell scripts: skipped (shellcheck not installed — brew install shellcheck)"
+  echo "Shell scripts: skipped (neither shellcheck nor Docker available)"
 fi
 
 # 9. End-to-end (Docker): build the backend from the working tree, boot a
@@ -347,7 +365,37 @@ fi
 # main), since it builds an image. Skippable in a true emergency with
 # MDNEST_SKIP_E2E=1. Requires a running Docker daemon; skipped (not failed) if
 # absent so a machine without Docker can still push non-release branches.
-if [ "$RUN_E2E" -eq 1 ] && [ "${MDNEST_SKIP_E2E:-0}" != "1" ]; then
+# A release push does not run this tier itself any more: it takes 20+ minutes,
+# and GitHub drops the SSH connection git opened before running this hook
+# (v4.8.11). tests/release-gate.sh runs it, plus Go with Redis and the suites
+# the changes call for, and records the tree it tested. Here we only check that
+# the tree being pushed is that tree. The gate itself runs this hook with
+# MDNEST_GATE_INNER=1 to get the tier run inline.
+RUN_HEAVY=0
+if [ "$RUN_E2E" -eq 1 ] && [ "${MDNEST_SKIP_E2E:-0}" = "1" ]; then
+  echo "Release gate: SKIPPED by MDNEST_SKIP_E2E=1. Say so in the release PR, with the run that covered this tree."
+elif [ "$RUN_E2E" -eq 1 ] && [ "${MDNEST_GATE_INNER:-0}" = "1" ]; then
+  RUN_HEAVY=1
+elif [ "$RUN_E2E" -eq 1 ]; then
+  echo -n "Release gate (tests/release-gate.sh)... "
+  GATE_FILE="$(git rev-parse --git-path mdnest-release-gate)"
+  GATE_TREE=""; GATE_AT=""
+  [ -f "$GATE_FILE" ] && read -r GATE_TREE GATE_AT _ < "$GATE_FILE"
+  GATE_OK=1
+  for oid in "${RELEASE_OIDS[@]}"; do
+    case "$oid" in 0000000000000000000000000000000000000000) continue ;; esac
+    if [ "$(git rev-parse "$oid^{tree}" 2>/dev/null)" != "$GATE_TREE" ]; then GATE_OK=0; fi
+  done
+  if [ -n "$GATE_TREE" ] && [ "$GATE_OK" -eq 1 ]; then
+    echo "OK (this exact tree passed at $GATE_AT)"
+  else
+    echo "NOT RUN for this tree"
+    echo "  Run: bash tests/release-gate.sh   (then push again)"
+    FAILED=1
+  fi
+fi
+
+if [ "$RUN_HEAVY" -eq 1 ]; then
   echo -n "End-to-end (Docker CLI ↔ backend)... "
   if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
     echo "SKIPPED (docker not available — run 'bash tests/e2e-docker.sh' before merging)"
@@ -366,8 +414,7 @@ if [ "$RUN_E2E" -eq 1 ] && [ "${MDNEST_SKIP_E2E:-0}" != "1" ]; then
   if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
     echo "SKIPPED (docker not available — run 'bash tests/e2e-sec-multi.sh' before merging)"
   else
-    bash tests/e2e-sec-multi.sh > /tmp/mdnest-e2e-sec.log 2>&1
-    rc=$?
+    bash tests/e2e-sec-multi.sh > /tmp/mdnest-e2e-sec.log 2>&1 && rc=0 || rc=$?  # under set -e a bare failure would end the hook silently
     if [ "$rc" -eq 0 ]; then
       echo "OK"
     elif [ "$rc" -eq 2 ]; then
@@ -385,8 +432,7 @@ if [ "$RUN_E2E" -eq 1 ] && [ "${MDNEST_SKIP_E2E:-0}" != "1" ]; then
   if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
     echo "SKIPPED (docker not available, run 'bash tests/backend-image-init.sh' before merging)"
   else
-    bash tests/backend-image-init.sh > /tmp/mdnest-image-init.log 2>&1
-    rc=$?
+    bash tests/backend-image-init.sh > /tmp/mdnest-image-init.log 2>&1 && rc=0 || rc=$?  # under set -e a bare failure would end the hook silently
     if [ "$rc" -eq 0 ]; then
       echo "OK"
     elif [ "$rc" -eq 2 ]; then
@@ -407,8 +453,7 @@ if [ "$RUN_E2E" -eq 1 ] && [ "${MDNEST_SKIP_E2E:-0}" != "1" ]; then
   if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1 || ! command -v node >/dev/null 2>&1; then
     echo "SKIPPED (docker+node needed — run 'bash tests/e2e-browser.sh' before merging)"
   else
-    bash tests/e2e-browser.sh > /tmp/mdnest-e2e-browser.log 2>&1
-    rc=$?
+    bash tests/e2e-browser.sh > /tmp/mdnest-e2e-browser.log 2>&1 && rc=0 || rc=$?  # under set -e a bare failure would end the hook silently
     if [ "$rc" -eq 0 ]; then
       echo "OK"
     elif [ "$rc" -eq 2 ]; then

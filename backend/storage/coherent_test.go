@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"strings"
 	"testing"
@@ -31,6 +32,18 @@ func (f *fakeWorkingSet) Set(_ context.Context, ns, p string, d []byte) error {
 	f.data[fwKey(ns, p)] = cp
 	f.nss[ns] = struct{}{}
 	return nil
+}
+func (f *fakeWorkingSet) SetIfAbsent(ctx context.Context, ns, p string, d []byte) error {
+	if _, ok := f.data[fwKey(ns, p)]; ok {
+		return nil
+	}
+	return f.Set(ctx, ns, p, d)
+}
+func (f *fakeWorkingSet) CompareAndSet(ctx context.Context, ns, p string, old, d []byte) (bool, error) {
+	if cur, ok := f.data[fwKey(ns, p)]; ok && !bytes.Equal(cur, old) {
+		return false, nil
+	}
+	return true, f.Set(ctx, ns, p, d)
 }
 func (f *fakeWorkingSet) Delete(_ context.Context, ns, p string) error {
 	delete(f.data, fwKey(ns, p))

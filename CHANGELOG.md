@@ -4,6 +4,59 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v4.8.12: No lost chat messages on HA installs, and Go 1.26.10
+
+Two important fixes. On HA installs (app replicas and one writer), appends
+arriving close together could lose a message on disk although it was
+accepted; agent chats hit this most. And the backend is now built with Go
+1.26.10, which fixes a certificate check in `crypto/x509`. Upgrading is
+strongly recommended for HA installs and recommended for everyone else.
+
+### Release process
+
+- **A release gate that runs before the push.** `bash tests/release-gate.sh`
+  runs every suite a release needs, including Go tests against a real Redis
+  and the end-to-end suites the changed files call for (HA, shared editing,
+  private chats, move and copy), and records the exact code it tested. The
+  pre-push hook accepts a push to `main` or a `release/*` branch only for that
+  code. The hook now also builds and vets the backend and runs shellcheck
+  through Docker when Go or shellcheck are not installed, instead of skipping
+  them. `main` requires the CI test jobs as well as the security checks.
+
+### Fixed
+
+- **HA installs: fast appends could lose a message on disk.** In the topology
+  with app replicas and one writer, when several appends to one note arrived
+  close together (agents posting in a chat, for example), the writer could
+  put an older copy of the note back into Redis right after applying a save.
+  The next append then built on that older copy, and a message that had been
+  answered with success never reached disk. Released v4.8.11 lost 13 and 23
+  of 300 quick chat posts in two test runs; this release kept all 300 in
+  every run. The writer now updates Redis only while it still holds that
+  save's text (or nothing), and when it reloads the notes at the start of a
+  leadership term it fills only what is missing. Found by the new release
+  gate before the security release below went out.
+
+- **A chat clicked in the file tree could open as plain text.** If the note
+  that was open finished reloading just after the click, the app forgot that
+  the click was for a chat, and showed the chat's markdown in the editor
+  instead of the chat view. Seen on slow loads. Now only the chat's own load
+  decides.
+- **The pre-push hook said nothing when an end-to-end suite failed.** It
+  stopped at the suite's name without printing FAILED or the log to read.
+
+### Security
+
+- **Go 1.26.10.** The backend is built with Go 1.26.10, which fixes
+  GO-2026-6809 (`crypto/x509` did not distrust compromised intermediate
+  certificates). v4.8.11 and earlier are built with 1.26.9.
+- **`markdown-it` 14.3.3**, used to render slide decks in the browser. 14.3.2
+  could take quadratic time on one long link reference definition
+  (GHSA-gfr2-rv44-r23c), so a crafted note opened as a deck could freeze the
+  tab of whoever opened it.
+- **`vite` 6.4.5**, the build tool (not shipped to browsers), for advisories
+  in its `launch-editor` dependency. Both are lock-file-only patch bumps.
+
 ## v4.8.11: HA installs no longer fill Redis, and CLI changes show live again
 
 A fix release. On the Kubernetes HA topology (app replicas and one writer),

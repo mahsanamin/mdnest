@@ -128,7 +128,10 @@ func (w *Writer) hydrate(ctx context.Context) error {
 			if rerr != nil {
 				return nil // skip unreadable entries, keep hydrating
 			}
-			_ = w.ws.Set(ctx, ns, relPath, data)
+			// Fill only what is missing: a body an app replica already changed
+			// is newer than this disk copy while its op is still queued, and
+			// hydrate runs at the start of every leadership term.
+			_ = w.ws.SetIfAbsent(ctx, ns, relPath, data)
 			return nil
 		})
 		if err != nil {
@@ -175,12 +178,19 @@ func (w *Writer) apply(ctx context.Context, op DurabilityOp) error {
 			return err
 		}
 		// The git backend may reconcile a note's mdnest marker on write, so
-		// cache what actually landed rather than the queued bytes; otherwise
-		// replicas would serve the pre-reconcile content from the working set.
-		if b, rerr := w.dst.ReadFile(ctx, op.NS, op.Path); rerr == nil {
-			cacheBody(ctx, w.ws, op.NS, op.Path, b, w.maxBytes)
-		} else {
-			cacheBody(ctx, w.ws, op.NS, op.Path, op.Data, w.maxBytes)
+		// publish what actually landed rather than the queued bytes, but only
+		// while the working set still holds this op's bytes. App replicas
+		// append onto the working set: if a newer append is already there, its
+		// op is queued behind this one, and putting this older body back would
+		// make the next append build on stale text and lose a message on disk
+		// although every append was answered 200 (148 of 150 chat messages in
+		// tests/e2e-ha-durability.sh). The newer op publishes its own result.
+		b, rerr := w.dst.ReadFile(ctx, op.NS, op.Path)
+		if rerr != nil {
+			b = op.Data
+		}
+		if int64(len(b)) <= w.maxBytes {
+			_, _ = w.ws.CompareAndSet(ctx, op.NS, op.Path, op.Data, b)
 		}
 	case OpMkdir:
 		if err := w.dst.MkdirAll(ctx, op.NS, op.Path); err != nil {

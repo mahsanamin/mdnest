@@ -302,3 +302,33 @@ func TestWriterCampaignsAgainAfterRedisOOM(t *testing.T) {
 		t.Fatal("Run did not return after ctx was cancelled")
 	}
 }
+
+// CompareAndSet is what keeps the writer from putting an older body over a
+// newer append: it may fill a missing body or replace its own, never another.
+func TestRedisWorkingSetCompareAndSet(t *testing.T) {
+	_, url := testRedis(t)
+	ctx := context.Background()
+	ws, err := NewRedisWorkingSet(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws.Close()
+	get := func() string { b, _, _ := ws.Get(ctx, "team", "chat.md"); return string(b) }
+
+	if ok, err := ws.CompareAndSet(ctx, "team", "chat.md", []byte("old"), []byte("landed")); err != nil || !ok || get() != "landed" {
+		t.Fatalf("missing body: ok=%v err=%v body=%q, want it filled", ok, err, get())
+	}
+	if paths, _ := ws.List(ctx, "team"); len(paths) != 1 || paths[0] != "chat.md" {
+		t.Fatalf("a filled body must be indexed, got %v", paths)
+	}
+	if ok, _ := ws.CompareAndSet(ctx, "team", "chat.md", []byte("landed"), []byte("landed2")); !ok || get() != "landed2" {
+		t.Fatalf("own body: ok=%v body=%q, want replaced", ok, get())
+	}
+	_ = ws.Set(ctx, "team", "chat.md", []byte("newer append"))
+	if ok, _ := ws.CompareAndSet(ctx, "team", "chat.md", []byte("landed2"), []byte("stale")); ok || get() != "newer append" {
+		t.Fatalf("newer body: ok=%v body=%q, want it kept", ok, get())
+	}
+	if err := ws.SetIfAbsent(ctx, "team", "chat.md", []byte("disk copy")); err != nil || get() != "newer append" {
+		t.Fatalf("SetIfAbsent replaced an existing body: %q", get())
+	}
+}

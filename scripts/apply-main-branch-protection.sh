@@ -2,7 +2,7 @@
 #
 # apply-main-branch-protection.sh
 #
-# Enforce the "Security Audit must pass before merge to main" gate.
+# Enforce the "CI and Security Audit must pass before merge to main" gate.
 #
 # WHY THIS EXISTS
 # ---------------
@@ -15,7 +15,7 @@
 # CI caught it only on the post-merge push.
 #
 # This script adds a `required_status_checks` rule to the `main-branch`
-# ruleset so all four Security Audit jobs must be green before anything
+# ruleset so every CI and Security Audit job must be green before anything
 # merges to main. The `main-branch` ruleset has no bypass actors
 # (current_user_can_bypass: never), so the gate binds even the repo owner —
 # `gh pr merge` will refuse until the checks pass. Direct pushes to main are
@@ -41,10 +41,25 @@ set -euo pipefail
 REPO="${REPO:-mahsanamin/mdnest}"
 RULESET_NAME="main-branch"
 
-# The check "context" strings must match the GitHub Actions job `name:` values
-# in .github/workflows/security-audit.yml exactly — a mismatch creates an
-# "Expected" check that never reports and blocks main forever.
+# The check "context" strings must match what GitHub Actions REPORTS, which for
+# a matrix job appends the matrix values (see apply-develop-branch-protection.sh).
+# A mismatch creates an "Expected" check that never reports and blocks main
+# forever, so check a real release PR first:
+#
+#   gh pr checks <release PR number>
+#
+# Until v4.8.11 only the four Security Audit jobs were required here, so a
+# release could merge with the backend or frontend tests red. The CI jobs are
+# required too now: a release must not merge on checks that were merely run.
 CONTEXTS=(
+  # .github/workflows/ci.yml: build + test
+  "Backend (build + test)"
+  "Frontend (build + test)"
+  "MCP server (auth smoke tests)"
+  "Helm chart (lint + render)"
+  "Docker images (build only) (backend, backend)"
+  "Docker images (build only) (frontend, frontend)"
+  # .github/workflows/security-audit.yml
   "Frontend (npm audit)"
   "MCP Server (npm audit)"
   "Backend (govulncheck)"

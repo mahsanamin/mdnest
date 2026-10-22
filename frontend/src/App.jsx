@@ -1292,7 +1292,7 @@ function App() {
           restoreScrollPosition(selectedNs, currentPath);
           noteLoadedRef.current?.(selectedNs, currentPath, text);
         }).catch(() => {
-          chatRedirectFor.current = null;
+          if (chatRedirectFor.current === `${selectedNs}/${currentPath}`) chatRedirectFor.current = null;
           // The saved/hash-pointed file is gone (deleted on disk, renamed
           // by another client). Clear so the user gets a clean slate, and
           // forget the stale last-path so the next ns switch doesn't try
@@ -1615,7 +1615,7 @@ function App() {
       }
       noteLoadedRef.current?.(ns, path, text);
     } catch (e) {
-      chatRedirectFor.current = null;
+      if (chatRedirectFor.current === `${ns}/${path}`) chatRedirectFor.current = null;
       console.error('Failed to open note:', e);
     }
   }, [restoreScrollPosition, commentsEnabled, flushPendingSave]);
@@ -1690,7 +1690,7 @@ function App() {
       }
       noteLoadedRef.current?.(selectedNs, path, text);
     } catch (e) {
-      chatRedirectFor.current = null;
+      if (chatRedirectFor.current === `${selectedNs}/${path}`) chatRedirectFor.current = null;
       if (e.name === 'PermissionError') {
         alert('Access denied: you do not have permission to read this file.');
       } else {
@@ -1817,11 +1817,15 @@ function App() {
   // next keystroke.
   noteLoadedRef.current = (ns, path, text) => {
     const want = chatRedirectFor.current;
-    if (!want) return;
+    // Only the load of the note the redirect was armed for may use it up. An
+    // earlier load of another note finishing after the click (the note that
+    // was open, reloading) used to clear it, so the chat then opened as plain
+    // text (seen under load in chat.spec.js).
+    if (!want || want !== `${ns}/${path}`) return;
     chatRedirectFor.current = null;
     const from = chatRedirectFrom.current;
     chatRedirectFrom.current = null;
-    if (want !== `${ns}/${path}` || !chatEnabled || !isChatDoc(text)) return;
+    if (!chatEnabled || !isChatDoc(text)) return;
     enterChats({ ns, path }, from && !(from.ns === ns && from.path === path) ? from : 'none');
   };
   const chatsBackLabel = chatsReturnTo === 'board'

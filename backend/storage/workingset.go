@@ -21,6 +21,15 @@ type WorkingSet interface {
 	Get(ctx context.Context, ns, relPath string) (data []byte, ok bool, err error)
 	// Set stores (or replaces) the cached body for (ns, relPath).
 	Set(ctx context.Context, ns, relPath string, data []byte) error
+	// SetIfAbsent stores data only when (ns, relPath) has no cached body. The
+	// writer hydrates with it: a body an app replica already changed is newer
+	// than the disk copy while its op is still queued.
+	SetIfAbsent(ctx context.Context, ns, relPath string, data []byte) error
+	// CompareAndSet stores data only while the cached body is still old or
+	// missing, atomically, and reports whether it did. The writer publishes
+	// what landed on disk with it, so an older op never overwrites a newer
+	// append that an app replica has already put there.
+	CompareAndSet(ctx context.Context, ns, relPath string, old, data []byte) (bool, error)
 	// Delete drops the cached body for (ns, relPath). It is a no-op on a miss.
 	Delete(ctx context.Context, ns, relPath string) error
 	// DeletePrefix drops every cached body at relPath and below (relPath == ""
@@ -92,6 +101,34 @@ func (r *RedisWorkingSet) Set(ctx context.Context, ns, relPath string, data []by
 	pipe.SAdd(ctx, nsRegistryKey, ns)
 	_, err := pipe.Exec(ctx)
 	return err
+}
+
+func (r *RedisWorkingSet) SetIfAbsent(ctx context.Context, ns, relPath string, data []byte) error {
+	pipe := r.client.TxPipeline()
+	pipe.SetNX(ctx, noteKey(ns, relPath), data, 0)
+	pipe.SAdd(ctx, nsIndexKey(ns), relPath)
+	pipe.SAdd(ctx, nsRegistryKey, ns)
+	_, err := pipe.Exec(ctx)
+	return err
+}
+
+// casBody sets KEYS[1] to ARGV[2] only while it is missing or still equals
+// ARGV[1], and indexes it (KEYS[2] the namespace's paths, KEYS[3] the
+// namespace registry; ARGV[3] the path, ARGV[4] the namespace).
+var casBody = redis.NewScript(`
+local cur = redis.call("get", KEYS[1])
+if cur == false or cur == ARGV[1] then
+	redis.call("set", KEYS[1], ARGV[2])
+	redis.call("sadd", KEYS[2], ARGV[3])
+	redis.call("sadd", KEYS[3], ARGV[4])
+	return 1
+end
+return 0`)
+
+func (r *RedisWorkingSet) CompareAndSet(ctx context.Context, ns, relPath string, old, data []byte) (bool, error) {
+	n, err := casBody.Run(ctx, r.client, []string{noteKey(ns, relPath), nsIndexKey(ns), nsRegistryKey},
+		old, data, relPath, ns).Int()
+	return n == 1, err
 }
 
 func (r *RedisWorkingSet) Delete(ctx context.Context, ns, relPath string) error {

@@ -32,7 +32,12 @@ unit, and when one ships, trim just that bullet rather than deleting the file.
   reach outside mdnest's box (see `CLAUDE.md` → "Scope discipline"). Confirm
   scope with the user when a feature is open-ended (offer options).
 - **Verify before merging to develop.** `npm run build` + `npm test` (frontend),
-  `bash -n mdnest` (CLI), and `tests/cli-smoke-test.sh` when CLI behavior changed.
+  `bash -n mdnest` (CLI), and `tests/cli-smoke-test.sh` when CLI behavior changed,
+  plus the end-to-end suite the changed files call for (the path map in
+  `tests/release-gate.sh` and `md-fix-bugs` step 3). A feature lands **off by
+  default** when it changes how an existing install behaves, and never removes
+  something users already rely on without the owner's sign-off (`md-ship`
+  Step 0, item 6).
   For visual/UI work, headless-screenshot a mock against the built CSS, or rebuild
   brain (`./mdnest-server rebuild`) so the user can eyeball it before release.
 
@@ -48,7 +53,9 @@ unit, and when one ships, trim just that bullet rather than deleting the file.
    attribution), then mark the item done in the brain — delete a single-feature
    note, or trim just the shipped bullet from a multi-item list.
 5. **Repeat** for the next unit, strictly sequential.
-6. **Release** exactly as in `md-fix-bugs` step 6 — build **one clean commit on
+6. **Release** only after `md-ship` Step 0 (the ship gate) holds: a feature
+   soaks on the dev stack for at least a day first. Then exactly as in
+   `md-fix-bugs` step 6 — build **one clean commit on
    top of `main`** (don't PR straight from develop, or it shows ~50 commits):
    union develop+main in a throwaway branch (`git merge -X ours origin/main`),
    reset a `release/vX.Y.Z` branch to `origin/main` and `git checkout` only the

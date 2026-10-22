@@ -369,3 +369,62 @@ func TestWriterEndsTermWhenQueueFails(t *testing.T) {
 		t.Fatalf("%d campaigns started while the previous term was still live", l.stillLive)
 	}
 }
+
+// The working set is what app replicas append onto. A writer that applies an
+// older op must not put that older body back over a newer one, or the next
+// append builds on stale text and a message is lost on disk, although every
+// append was answered 200. Seen as 148 of 150 chat messages in
+// tests/e2e-ha-durability.sh.
+func TestWriterDoesNotOverwriteNewerAppends(t *testing.T) {
+	ctx := context.Background()
+	w, q, ws, gs := newTestWriter(t)
+	app := NewQueuedStorage(ws, q, defaultWorkingSetMaxBytes)
+	next := func() DurabilityOp { op := q.ops[0]; q.ops = q.ops[1:]; return op }
+
+	if err := app.WriteFile(ctx, "team", "chat.md", []byte("# chat\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.apply(ctx, next()); err != nil {
+		t.Fatal(err)
+	}
+	_ = app.Append(ctx, "team", "chat.md", []byte("A\n"))
+	_ = app.Append(ctx, "team", "chat.md", []byte("B\n"))
+	if err := w.apply(ctx, next()); err != nil { // the "A" op, while "B" is queued
+		t.Fatal(err)
+	}
+	_ = app.Append(ctx, "team", "chat.md", []byte("C\n"))
+	for len(q.ops) > 0 {
+		if err := w.apply(ctx, next()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, _ := gs.ReadFile(ctx, "team", "chat.md")
+	if string(got) != "# chat\nA\nB\nC\n" {
+		t.Fatalf("durable chat = %q, want every append", got)
+	}
+}
+
+// hydrate runs at the start of every leadership term. It fills what is
+// missing; it must not replace a body an app replica has already changed with
+// the older copy on disk (the op carrying the change may still be queued).
+func TestWriterHydrateKeepsNewerWorkingSet(t *testing.T) {
+	ctx := context.Background()
+	w, _, ws, gs := newTestWriter(t)
+	_ = gs.MkdirAll(ctx, "team", "")
+	if err := gs.WriteFile(ctx, "team", "chat.md", []byte("old\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := gs.WriteFile(ctx, "team", "other.md", []byte("on disk\n")); err != nil {
+		t.Fatal(err)
+	}
+	_ = ws.Set(ctx, "team", "chat.md", []byte("old\nnewer, still queued\n"))
+	if err := w.hydrate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if b, _, _ := ws.Get(ctx, "team", "chat.md"); string(b) != "old\nnewer, still queued\n" {
+		t.Fatalf("hydrate replaced a newer body with the disk copy: %q", b)
+	}
+	if b, ok, _ := ws.Get(ctx, "team", "other.md"); !ok || string(b) != "on disk\n" {
+		t.Fatalf("hydrate did not fill a missing body: ok=%v %q", ok, b)
+	}
+}

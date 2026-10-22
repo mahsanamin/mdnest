@@ -23,7 +23,7 @@ NET="$TAG"
 REDIS="$TAG-redis"; WRITER="$TAG-writer"; APP="$TAG-app"
 # Docker Desktop only shares some host folders, so keep the notes next to the repo.
 NOTES_DIR="$(mktemp -d "$REPO_ROOT/../.mdnest-ha-e2e.XXXXXX")"
-MESSAGES="${MDNEST_HA_MESSAGES:-150}"
+MESSAGES="${MDNEST_HA_MESSAGES:-300}"
 
 pass=0; failed=0
 log()  { printf '\033[36m==>\033[0m %s\n' "$*"; }

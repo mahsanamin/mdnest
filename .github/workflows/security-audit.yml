@@ -86,5 +86,6 @@ jobs:
             git-sync/sync.sh \
             install-cli.sh \
             .githooks/pre-push \
+            tests/release-gate.sh \
             scripts/apply-main-branch-protection.sh \
             scripts/apply-develop-branch-protection.sh

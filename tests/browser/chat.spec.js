@@ -803,3 +803,28 @@ test('a half-typed message is still there after opening another chat and coming 
     await cleanup(page, a.plain, a.chat, b.plain, b.chat);
   }
 });
+
+// A chat clicked in the tree opens as a chat even when the note that was open
+// finishes reloading after the click. That earlier load used to clear the
+// redirect armed for the chat, so the chat opened as plain text. The delays
+// force that order instead of waiting for a slow run to hit it.
+test('a chat clicked while the open note is still reloading opens as a chat', async ({ page }) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  const { plain, chat, title } = await seed(page);
+  const hold = (name, ms) => page.route(
+    (url) => url.pathname === '/api/note' && (url.searchParams.get('path') || '').endsWith(name),
+    async (route) => { await new Promise((r) => setTimeout(r, ms)); await route.continue(); },
+  );
+  try {
+    await page.goto(`/#${NS}/${plain}`);
+    await hold(plain, 2500); // the open note's reload ends after the click...
+    await hold(chat, 6000); // ...and before the chat's own load
+    await page.reload();
+    await page.locator('.sidebar .tree-row', { hasText: chat }).first().click({ timeout: 20_000 });
+    await expect(page.locator('.chat-room-title h2')).toHaveText(title, { timeout: 20_000 });
+  } finally {
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+    await cleanup(page, plain, chat);
+  }
+});

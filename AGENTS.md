@@ -149,6 +149,7 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 - Two auth modes: `AUTH_MODE=single` (file-based, no DB) or `AUTH_MODE=multi` (Postgres)
 - Three identity providers (multi-mode only): `USER_PROVIDER=local` (default, username/password), `USER_PROVIDER=firebase` (Firebase Auth + Firestore TOTP), `USER_PROVIDER=sso` (generic OIDC). Exclusive; chosen at startup. In `sso` mode 2FA is skipped entirely (IdP owns MFA) and local password endpoints are unused. See `docs/sso-setup.md` and `docs/firebase-setup.md`.
 - **Three role values** (v3.5.0+): `superadmin` (global), `admin` (namespace-scoped via the `namespace_admins` table), `collaborator` (per-grant only). Pre-v3.5.0 `admin` is migrated to `superadmin` by migration 007. `ADMIN_EMAILS` auto-promotes to `superadmin`. Permission checks go through `middleware.PermissionChecker.hasAdminScope(uc, ns)` — superadmin bypasses everywhere; admin only for `namespace_admins` rows; everyone else falls through to grants. API tokens follow the same precedence chain (no admin bypass for tokens).
+- **The superadmin keeps full management control by default.** It can always see and revoke every API token, disable or delete users, reset 2FA and manage grants, groups and namespace admins, so the owner can act alone when someone leaves or a token leaks. A change may move or clarify one of these powers but not remove it; a narrower superadmin is a config option, off by default (`md-review-collab`, "Admin power stays with the owner").
 - In single mode, the store/ package is not initialized — zero DB dependency
 - All handlers take `notesDir` (absolute path) in constructor
 - All file APIs require `ns` query param (namespace = top-level dir under NOTES_DIR)
@@ -207,6 +208,27 @@ mdnest.conf.sample           # Template config with MOUNT_ entries
 - Uses native fetch (Node 18+), no extra HTTP deps
 
 ## Release Process
+
+**Ship carefully: other teams run mdnest in production.** Before any release,
+`md-ship` Step 0 (the ship gate) must hold, and it is blocking:
+
+- every change soaked on the dev stack (features at least a day), and at most
+  one release a day unless it fixes a security hole or data loss;
+- `develop` is green on the commit being released, and the audits were re-run
+  that day;
+- `bash tests/release-gate.sh` passed on the release commit itself. It runs the
+  pre-push release tier, Go tests against a real Redis, shellcheck and the
+  end-to-end suites the changed files call for, and records the tree it tested.
+  The pre-push hook accepts a push to `release/*` or `main` only for that tree;
+- every topology the change touches was run (single, multi, HA), and an upgrade
+  from the last release was tried when anything stored changed;
+- nothing users rely on is removed without the owner's sign-off (#135), and no
+  change narrows what a superadmin can do in the default configuration;
+- every required check on the release PR is green. `main` requires the CI jobs
+  as well as the Security Audit ones (`scripts/apply-main-branch-protection.sh`).
+
+A regression in a released version is fixed with a test shown failing on that
+tag (`MDNEST_BUILD_ROOT=<checkout of the tag>`).
 
 - **One PR per release.** Bundle all the work for a release into a single branch (`feat/<name>` or `release/v3.X.Y`) and open **one** PR against `main`. Don't open intermediate / sibling PRs for sub-features during the same release cycle — they cause merge conflicts on shared files (`CHANGELOG.md`, the three version files, `App.jsx`, docs) when one lands while another is still open. Hotfix exception: a true emergency (security CVE, prod crash) can ship as its own PR ahead of the release, but flag it before opening. v3.10.0 hit exactly this — PR #10 (v3.9.1) merged while PR #11 (v3.10.0) was open and produced six-file conflicts; resolve by merging `main` into the release branch and keeping the higher version + the deletion of any files the cutover removed.
 - **Version scheme — `develop` carries `X.Y.Z-dev`, releases drop the suffix.** `develop` always holds the in-flight version with a `-dev` pre-release suffix (e.g. `3.11.3-dev`), so a develop/staging box reads `v3.11.3-dev` ("candidate, still validating") and production reads the plain `v3.11.3`. The **release branch sets the plain `X.Y.Z`** (drops `-dev`); after the release merges, bump `develop` to the *next* `X.Y.(Z+1)-dev`. `isVersionNewer` (App.jsx) is pre-release-aware so a `-dev` build shows no false "update available" against the last release but does see the final release as newer once it ships.

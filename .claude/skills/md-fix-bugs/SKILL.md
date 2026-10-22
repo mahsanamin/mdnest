@@ -87,9 +87,21 @@ repo code already fixes it (then just verify + mark resolved).
     in a bare no-python3 container).
   - Frontend/UI: `npm run build` + `npm test`, and `bash tests/e2e-browser.sh`
     (full stack + Playwright) for user-facing flows.
-- The pre-push hook runs the fast tier on every push and the full Docker + browser
-  suites when pushing a `release/*` branch — so the release PR can't go up red.
-  Don't skip it (`MDNEST_SKIP_E2E=1`) except in a real emergency.
+  - The suite the changed files call for, using the same map as
+    `tests/release-gate.sh`: `backend/storage`, `deploy/helm` →
+    `tests/e2e-ha-durability.sh`; collab, note save paths, the Live editor,
+    `App.jsx` → `tests/e2e-collab-multi.sh`; chat members, permission
+    middleware → `tests/e2e-private-chats-multi.sh`; transfer, download →
+    `tests/e2e-transfer-multi.sh`. A change that only works in one topology
+    has not been verified.
+- **A bug in a released version: show the test failing on that tag.** Build the
+  tag in a throwaway worktree and run the suite with `MDNEST_BUILD_ROOT=<it>`
+  (or revert the fix locally and run the unit test). A regression test nobody
+  has seen fail does not prove it would catch the bug again.
+- The pre-push hook runs the fast tier on every push (Go build and vet go
+  through Docker when there is no host Go). A push to `release/*` or `main` is
+  accepted only for a tree that passed `tests/release-gate.sh` (see `md-ship`
+  Step 0). Don't skip it (`MDNEST_SKIP_E2E=1`) except in a real emergency.
 
 ### 4. Merge straight into develop (NO per-bug PR)
 - `git commit` — clear subject + body, **no co-author / generated-by footer**.
@@ -107,7 +119,9 @@ repo code already fixes it (then just verify + mark resolved).
 - Back to step 2 with the next one. Keep it strictly sequential.
 
 ### 6. Release: ONE clean PR on top of main
-Run the full smoke test on `develop` once more, then build the release as a
+**First run `md-ship` Step 0 (the ship gate).** If the soak, the green
+`develop`, or any other item there does not hold, stop: the fixes stay on
+`develop` and the release waits. Then build the release as a
 **single commit on top of current `main`** — NOT a develop-based branch. A
 develop-based PR lists every individual commit that `main` only has as squashed
 releases (~50 of them), which looks alarming even though the file diff is tiny.
@@ -147,7 +161,9 @@ carries `X.Y.Z-dev`; the release branch **drops the `-dev` suffix**. Add the
 > build shows no false "update available" against the last release but does see
 > the final release as newer once it ships.
 
-Verify (build/test/smoke), `git push -u origin release/vX.Y.Z`, and open ONE PR
+Run `bash tests/release-gate.sh` on that commit (it records the tree it
+tested; the hook pushes nothing else), `git push -u origin release/vX.Y.Z`,
+and open ONE PR
 → `main`. Because the base IS `main`, it's a 1-commit, small-diff, conflict-free
 PR (this is the fix for the "why so many commits" problem).
 

@@ -11,7 +11,7 @@
 # ($BUILDPLATFORM) and cross-compiles for the target one via GOARCH, so a
 # multi-arch release (amd64 + arm64) compiles natively instead of under QEMU
 # emulation, which is several times slower for this codebase.
-FROM --platform=$BUILDPLATFORM golang:1.26.9-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.26.10-alpine AS builder
 
 WORKDIR /app
 

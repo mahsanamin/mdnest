@@ -213,6 +213,23 @@ isn't a feature request — it's a different product.
   doesn't read, so a knob with no implementation doesn't fail — it lies. Guard
   it so it fails at install time naming what's missing, and delete the guard in
   the same change that lands the capability.
+- **Admin power stays with the owner.** The person who runs an mdnest install
+  is its superadmin, and the role exists so they can act without waiting for
+  anyone: when someone leaves, or a token may have leaked, the superadmin
+  revokes it themselves. In the default configuration a superadmin can always
+  see and revoke every API token, disable or delete any user, reset 2FA, and
+  manage every grant, group and namespace admin. A PR may move one of these
+  powers to a clearer place, show more (who owns a token, who revoked it), or
+  add a confirmation. It may not remove one or make it slower to reach. A team
+  that wants a narrower superadmin gets a config option for it, **off by
+  default**, read once at startup and enforced in the handler, not only hidden
+  in the UI. One power is deliberately not included: since v3.12.0 (#53) a
+  superadmin reads note content only through grants, like anyone else, and
+  can grant themselves access in one click. That is a decision, not a gap.
+  When a PR description says the superadmin "can do too much", check the code
+  before agreeing or disagreeing: #149 read that way, but it kept every power
+  and only moved token revocation from Settings to the Admin panel with the
+  owner shown.
 - **Two modes that can't coexist must say so.** If a new backend makes an
   existing feature meaningless, make them mutually exclusive in code. Don't
   leave the old one running against stale data.
@@ -383,6 +400,16 @@ If a PR sits stale after a recommendation, ping the thread — don't reach for t
 close button.
 
 ## Step 7 — merge
+
+- **Merging to `develop` is not shipping.** A contributor's PR lands on
+  `develop`, runs on the dev stack, and goes out only when `md-ship` Step 0
+  (the ship gate) holds. Before merging, run the end-to-end suite its files
+  call for (the path map in `tests/release-gate.sh`), not just the unit tests:
+  CI does not run the end-to-end suites.
+- **Red checks from advisories published after the PR was opened** are not the
+  contributor's fault (#149's govulncheck and npm audit). Confirm the same
+  advisory turns `develop` red, clear it on a `chore/` branch first, then ask
+  them to merge `develop` in. Never merge a PR with a red required check.
 
 - Merge into **`develop`**, never `main` outside a release. `main` is protected
   by required Security Audit checks with no bypass — that gate is authoritative,
