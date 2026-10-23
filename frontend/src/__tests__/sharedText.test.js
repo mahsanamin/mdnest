@@ -97,3 +97,22 @@ describe('which notes are shared', () => {
     expect(isSharedEligible({ path: '' })).toBe(false);
   });
 });
+
+describe('mergeThreeWay report', () => {
+  const base = 'one\ntwo\nthree\n';
+  it('counts no conflict when the two sides changed different lines', () => {
+    const report = {};
+    expect(mergeThreeWay(base, 'ONE\ntwo\nthree\n', 'one\ntwo\nTHREE\n', report)).toBe('ONE\ntwo\nTHREE\n');
+    expect(report.conflicts).toBe(0);
+  });
+  it('counts a conflict, and keeps both, when both changed the same line', () => {
+    const report = {};
+    const out = mergeThreeWay(base, 'one\ntwo mine\nthree\n', 'one\ntwo theirs\nthree\n', report);
+    expect(out).toContain('two mine');
+    expect(out).toContain('two theirs');
+    expect(report.conflicts).toBe(1);
+  });
+  it('works without a report, as before', () => {
+    expect(mergeThreeWay(base, base, 'x\n')).toBe('x\n');
+  });
+});

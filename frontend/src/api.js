@@ -307,8 +307,13 @@ export async function getTree(ns) {
   return res.json();
 }
 
-export async function getNote(ns, path) {
-  const res = await request(`/note?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}`);
+// With opts.ifNoneMatch (the etag we hold) an unchanged note comes back as
+// { notModified: true } from a 304, so a frequent check costs no body.
+export async function getNote(ns, path, opts = {}) {
+  const headers = {};
+  if (opts.ifNoneMatch) headers['If-None-Match'] = opts.ifNoneMatch;
+  const res = await request(`/note?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}`, { headers, cache: 'no-store' });
+  if (opts.ifNoneMatch && res.status === 304) return { notModified: true };
   if (!res.ok) throw new Error('Failed to get note');
   const text = await res.text();
   const etag = res.headers.get('ETag');

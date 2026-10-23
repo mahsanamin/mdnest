@@ -89,7 +89,10 @@ function splitLines(s) {
 
 const sameLines = (x, y) => x.length === y.length && x.every((l, i) => l === y[i]);
 
-export function mergeThreeWay(base, ours, theirs) {
+// report, when given, gets `conflicts`: how many places both sides changed
+// the same lines differently, so both versions were kept.
+export function mergeThreeWay(base, ours, theirs, report) {
+  if (report) report.conflicts = 0;
   base = base || '';
   ours = ours || '';
   theirs = theirs || '';
@@ -117,6 +120,7 @@ export function mergeThreeWay(base, ours, theirs) {
     else if (sameLines(a, c)) out.push(...b);
     else if (sameLines(b, c)) out.push(...b);
     else {
+      if (report) report.conflicts += 1;
       out.push(...b);
       // Keep both versions readable as separate lines.
       if (b.length && !/\n$/.test(b[b.length - 1])) out.push('\n');

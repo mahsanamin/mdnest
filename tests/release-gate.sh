@@ -20,9 +20,10 @@
 #   2. Go vet + go test -race WITH a real Redis (host Go, else Docker), so the
 #      durability-queue tests run instead of skipping
 #   3. shellcheck (host, else Docker)
-#   4. the suites the changed files call for, compared with origin/main:
+#   4. e2e-collab-multi.sh always (live collaboration only runs in multi
+#      mode), and the suites the changed files call for, compared with
+#      origin/main:
 #        backend/storage, deploy/helm, factory     -> e2e-ha-durability.sh
-#        collab, save paths, Live editor, App.jsx  -> e2e-collab-multi.sh
 #        chat members, permission middleware       -> e2e-private-chats-multi.sh
 #        transfer, download                        -> e2e-transfer-multi.sh
 #      MDNEST_GATE_ALL=1 runs all four whatever changed.
@@ -115,7 +116,10 @@ optional() { # pattern, script, why
   fi
 }
 optional '^backend/storage/|^deploy/helm/|^backend/main\.go' e2e-ha-durability.sh "HA writer, queue, leader"
-optional '^backend/collab/|^backend/handlers/notes|^frontend/src/(shared|LiveEditor|App\.jsx|echo-gate|components/LiveEditor)' e2e-collab-multi.sh "shared editing and saves"
+# Always: live collaboration and shared editing exist only in multi mode, so
+# this is the only suite that runs them, and a lockout of every Live note
+# (v4.8.10 to v4.8.12, behind a proxy) needed no change to any file above.
+run "e2e-collab-multi.sh (live collaboration and shared editing, multi mode)" e2e-collab-multi.sh.log bash tests/e2e-collab-multi.sh
 optional 'chat_members|^backend/middleware/permission|^backend/store/chat' e2e-private-chats-multi.sh "private chats"
 optional '^backend/handlers/(transfer|download|treecopy)' e2e-transfer-multi.sh "move, copy, download"
 

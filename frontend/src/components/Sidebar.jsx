@@ -489,10 +489,12 @@ function Sidebar({
               className="sidebar-actions-row"
               data-count={[onNewFolder, onNewNote, onNewDrawing, onNewSlides].filter(Boolean).length}
             >
-              {onNewFolder && <button className="sidebar-action-btn" onClick={onNewFolder} title={`New folder ${createHint}`}>+ Folder</button>}
-              {onNewNote && <button className="sidebar-action-btn" onClick={onNewNote} title={`New note ${createHint}`}>+ Note</button>}
-              {onNewDrawing && <button className="sidebar-action-btn" onClick={onNewDrawing} title={`New drawing ${createHint}`}>+ Drawing</button>}
-              {onNewSlides && <button className="sidebar-action-btn" onClick={onNewSlides} title={`New slides ${createHint}`}>+ Slides</button>}
+              {/* Disabled until a namespace is chosen: the create handlers need one,
+                  and a click during startup used to do nothing, silently. */}
+              {onNewFolder && <button className="sidebar-action-btn" onClick={onNewFolder} disabled={!selectedNs} title={`New folder ${createHint}`}>+ Folder</button>}
+              {onNewNote && <button className="sidebar-action-btn" onClick={onNewNote} disabled={!selectedNs} title={`New note ${createHint}`}>+ Note</button>}
+              {onNewDrawing && <button className="sidebar-action-btn" onClick={onNewDrawing} disabled={!selectedNs} title={`New drawing ${createHint}`}>+ Drawing</button>}
+              {onNewSlides && <button className="sidebar-action-btn" onClick={onNewSlides} disabled={!selectedNs} title={`New slides ${createHint}`}>+ Slides</button>}
             </div>
           </div>
         )}

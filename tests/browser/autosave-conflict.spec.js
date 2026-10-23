@@ -5,7 +5,9 @@
 // second save failed, a "modified by another user" banner appeared with
 // nobody else there, and when the last save was the rejected one the final
 // words never reached the server. The banner was also a row above the
-// editor, so each time it appeared the whole document jumped down.
+// editor, so each time it appeared the whole document jumped down. A real
+// change saved elsewhere is now merged with the typing (v4.8.13), and a
+// floating notice says so when both changed the same line.
 import { test, expect } from '@playwright/test';
 
 const USER = process.env.MDNEST_USER || 'e2e';
@@ -60,23 +62,28 @@ test('slow saves never overlap: no false conflict, and the last words are saved'
   await expect(page.locator('.conflict-banner')).toHaveCount(0);
 });
 
-test('a real conflict shows a floating notice that does not move the text', async ({ page }) => {
+test('a change saved elsewhere to the line being typed is merged, both kept, with a notice that does not move the text', async ({ page }) => {
   test.setTimeout(90_000);
   await page.goto(`/#${NS}/${FILE}`);
   await page.click('.toolbar button[title="Live rich editor"]');
   const p = page.locator('.live-editor-crepe-root p', { hasText: 'Start here' });
   await expect(p).toBeVisible({ timeout: 20_000 });
   const topBefore = (await p.boundingBox()).y;
-  // Someone else saves a different text; then we type, and our save is stale.
+  // Someone else saves a different version of the same line; then we type
+  // on that line, and our save is built on the old copy. It used to end in a
+  // "modified by another user" banner and our typing was never saved.
   await api(page, 'PUT', FILE, '# Slow\n\nStart here, edited elsewhere.\n');
   await p.click();
   await page.keyboard.press('End');
   await page.keyboard.type(' mine', { delay: 20 });
-  const banner = page.locator('.conflict-banner');
-  await expect(banner).toBeVisible({ timeout: 10_000 });
-  expect(await banner.evaluate((e) => getComputedStyle(e).position)).toBe('fixed');
+  await expect.poll(async () => (await api(page, 'GET', FILE)).text, { timeout: 15_000 }).toContain('mine');
+  expect((await api(page, 'GET', FILE)).text).toContain('edited elsewhere');
+  const notice = page.locator('.merge-notice');
+  await expect(notice).toBeVisible({ timeout: 10_000 });
+  expect(await notice.evaluate((e) => getComputedStyle(e).position)).toBe('fixed');
+  await expect(page.locator('.conflict-banner')).toHaveCount(0);
   const topAfter = (await page.locator('.live-editor-crepe-root p').nth(0).boundingBox()).y;
   expect(Math.abs(topAfter - topBefore), 'the document must not jump when the notice appears').toBeLessThan(2);
-  await banner.getByRole('button', { name: 'Dismiss' }).click();
-  await expect(banner).toHaveCount(0);
+  await notice.getByRole('button', { name: 'Dismiss' }).click();
+  await expect(notice).toHaveCount(0);
 });

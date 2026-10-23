@@ -98,9 +98,9 @@ The pre-push hook (`.githooks/pre-push`) verifies these match — if any disagre
 ### 3. README.md
 Only touch the "Why mdnest?" section if this is a major user-visible feature. Bug fixes and internal changes don't belong on the README.
 
-### 4. CLAUDE.md
-- New files in the project tree → add them to the structure block in the appropriate section.
-- New conventions, patterns, gotchas → add to the Conventions section.
+### 4. CLAUDE.md and docs/codemap.md
+- New files in the project tree → add them to the map in `docs/codemap.md`, in the appropriate section. A new top-level directory also goes in the short list under "Project Structure" in `CLAUDE.md`.
+- New conventions, patterns, gotchas → add to the Conventions section of `CLAUDE.md`. A trap that belongs to one file goes on that file's line in `docs/codemap.md` instead, so `CLAUDE.md` stays small enough to load in every session.
 
 ### 5. docs/
 Match the change to the right doc:

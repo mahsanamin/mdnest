@@ -78,6 +78,14 @@ import { isMarpDoc, effectiveEditorMode } from './marp.js';
 import { isExcalidrawDoc } from './excalidraw.js';
 import { isSharedEligible } from './sharedEligible.js';
 import { TREE_POLL_MS, shouldPollTree } from './tree-refresh.js';
+
+// How often the open note is checked for outside changes when nothing pushes
+// them (no live collaboration): the CLI, agents, git-sync. A 304 when nothing
+// changed, so the check is cheap.
+const NOTE_POLL_MS = 5000;
+// How long a Live note waits for its shared document before editing the
+// normal way instead.
+const SHARED_BIND_WAIT_MS = 4000;
 import {
   getToken,
   getNote,
@@ -557,6 +565,10 @@ function App() {
   const [remoteCursors, setRemoteCursors] = useState({});
   const [typingUsers, setTypingUsers] = useState({}); // {userId: username}
   const [conflictBanner, setConflictBanner] = useState(null); // {username, etag}
+  // Set when an outside change and this tab's typing touched the same lines
+  // and the merge kept both versions.
+  const [mergeNotice, setMergeNotice] = useState(false);
+  useEffect(() => { setMergeNotice(false); }, [selectedNs, currentPath]);
   // Bumped only on remote-driven reloads (another user's save/restore, or an
   // explicit Reload). The Excalidraw editor is keyed on it so its canvas remounts
   // with the fresh scene — otherwise a drawing would keep the stale scene and
@@ -620,8 +632,13 @@ function App() {
   // someone else is in the note it switches to Live, because a textarea
   // saving its own copy would fight the room.
   const sharedEditingOn = !!appConfig?.sharedEditing;
+  // Set for the rest of this page visit when a shared document never arrived:
+  // a proxy, CDN or network that refuses websockets, or accepts them and
+  // passes nothing. Notes then edit and save the normal way (which merges
+  // outside changes) instead of sitting read-only. Reload to try again.
+  const [sharedUnavailable, setSharedUnavailable] = useState(false);
   const noteLoaded = content !== null;
-  const sharedEligible = sharedEditingOn && noteLoaded
+  const sharedEligible = sharedEditingOn && !sharedUnavailable && noteLoaded
     && isSharedEligible({ path: currentPath, isDrawing: isDrawingDoc, isChat: chatNoteActive, isMarp: marpActive });
   const othersInNote = presenceUsers.some((u) => u.id !== userInfo?.id);
   const sharedForcesLive = sharedEligible && othersInNote && liveCrashedFor !== currentPath;
@@ -928,9 +945,9 @@ function App() {
       }
     } else if (isRestore) {
       setRestoreBanner({ username: msg.username, ref: msg.restoreFromRef, etag: msg.etag });
-    } else {
-      setConflictBanner({ username: msg.username, etag: msg.etag });
     }
+    // Otherwise this tab has unsaved typing: its pending autosave is refused
+    // (the etag is old) and merges both versions (see doSave).
   }, []);
 
   // Initialize collab client
@@ -1126,14 +1143,25 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sharedKey, canWriteCurrent]);
 
-  // The editor stays read-only until the shared document arrives. If the
-  // live connection is down that never happens, so say why and what works.
+  // The editor is read-only until the shared document arrives. When it has
+  // not arrived within a few seconds, stop waiting: edit and save the normal
+  // way for the rest of this visit. Before v4.8.13 the note stayed read-only
+  // for good, and behind a proxy that does not pass websockets that was
+  // nearly every note (reported by a user; see shared-unavailable.spec.js).
+  // The unbound session is never the saver, so ending it writes nothing.
   useEffect(() => {
     if (!sharedSession || sharedBound || sharedDisabled) return undefined;
-    const t = setTimeout(() => setNotice({
-      kind: 'error',
-      text: 'Waiting for the live connection to edit this note together. Basic mode works without it.',
-    }), 6000);
+    const t = setTimeout(() => {
+      const why = sharedSession.whyUnbound?.() || 'unknown';
+      console.warn(`mdnest: shared editing did not start for this note (${why}); editing the normal way instead`);
+      setSharedUnavailable(true);
+      setNotice({
+        kind: 'info',
+        text: why === 'no-connection' || why === 'no-reply' || why === 'no-hello'
+          ? `Editing together needs a live connection, and this browser can't get one right now (${why}; often a proxy that does not pass websockets both ways). Your notes save the normal way. Reload to try again.`
+          : `Editing together could not start for this note (${why}). Your notes save the normal way. Reload to try again.`,
+      });
+    }, SHARED_BIND_WAIT_MS);
     return () => clearTimeout(t);
   }, [sharedSession, sharedBound, sharedDisabled]);
 
@@ -1317,8 +1345,11 @@ function App() {
     }
   }, [authenticated, selectedNs, initialized]);
 
-  // Auto-refresh: poll the current note every 60s as fallback for external changes
-  // (CLI, git-sync). WebSocket file-changed handles real-time updates.
+  // Check the open note for outside changes (the CLI, an agent, git-sync)
+  // every few seconds. Without live collaboration this is the only way such a
+  // change reaches the screen, and once a minute meant an agent's edit could
+  // sit unseen for that long. The check sends the etag we hold, so an
+  // unchanged note is a 304 with no body. Paused while the tab is hidden.
   useEffect(() => {
     if (!authenticated || !selectedNs || !currentPath) return;
     const myPollKey = `${selectedNs}/${currentPath}`;
@@ -1327,31 +1358,35 @@ function App() {
     const interval = setInterval(async () => {
       // A shared note's saver checks the file itself (file-changed, and on
       // every 409); reloading here would replace the room's text.
-      if (sharedRef.current) return;
+      if (sharedRef.current || document.hidden) return;
       try {
-        const { text: remote, etag } = await getNote(selectedNs, currentPath);
+        const got = await getNote(selectedNs, currentPath, { ifNoneMatch: etagRef.current });
 
         // STALE CHECK: if user switched files while getNote was in flight, discard
-        if (pollPathRef.current !== myPollKey) return;
-
-        if (remote === savedContentRef.current) return; // no change
+        if (pollPathRef.current !== myPollKey || got.notModified) return;
+        const { text: remote, etag } = got;
+        if (remote === savedContentRef.current) { etagRef.current = etag; return; }
 
         if (!hasLocalEdits()) {
-          // No local unsaved changes — silently update
-          setContent(remote);
+          const base = savedContentRef.current;
+          const { mergeThreeWay } = await import('./sharedText.js');
+          if (pollPathRef.current !== myPollKey) return;
+          savedContentRef.current = remote;
           setSavedContent(remote);
           remoteLiveRef.current = null;
           etagRef.current = etag;
-        } else {
-          // User has unsaved changes AND file changed externally: show
-          // conflict. Keep the old etag (see handleFileChanged): the next
-          // save must be refused, not silently win.
-          setConflictBanner({ username: 'an external source' });
+          // Through the editor's own merge: the Live editor may hold a
+          // keystroke it has not reported yet, which a plain replace dropped.
+          showOutside(base, remote, mergeThreeWay);
         }
+        // With unsaved typing, leave it: the etag stays old, so the pending
+        // autosave is refused (409) and merges both (see doSave). A banner
+        // here used to be the end of it: the person's next saves were all
+        // refused and their typing was lost on reload.
       } catch (e) {
         // Transient errors — skip silently
       }
-    }, 60000);
+    }, NOTE_POLL_MS);
     return () => clearInterval(interval);
   }, [authenticated, selectedNs, currentPath]);
 
@@ -1848,6 +1883,64 @@ function App() {
     }
   }, [selectedNs, currentPath]);
 
+  // Merge an outside change into this tab's edit and save it. `theirs` is the
+  // note as the server holds it now ({ text, etag }). Retries if the note
+  // moves again in between. Puts the merged text on screen; typing done since
+  // the refused save started is merged on top and saved by its own debounce.
+  // The merge code is in the shared-editing chunk, loaded on first use.
+  const contentChangeRef = useRef(null);
+  // The Live editor's outside-merge function, when a non-shared Live editor is
+  // mounted (see registerOutsideMerge in LiveEditorCrepe.jsx).
+  const outsideMergeRef = useRef(null);
+  const registerOutsideMerge = useCallback((fn) => { outsideMergeRef.current = fn; }, []);
+  // Show `theirs` (already saved, as the server holds it) in the editor over
+  // `base`, keeping typing the app may not have heard about yet. Anything left
+  // that differs from what is saved is handed to the normal autosave.
+  const showOutside = useCallback((base, theirs, mergeThreeWay) => {
+    const live = outsideMergeRef.current;
+    const shown = live ? live(base, theirs, mergeThreeWay) : null;
+    if (shown === null || shown === undefined) {
+      const now = contentRef.current;
+      if (now === base || now === theirs) {
+        contentRef.current = theirs;
+        setContent(theirs);
+        return;
+      }
+      contentChangeRef.current?.(mergeThreeWay(base, now, theirs));
+      return;
+    }
+    if (shown === theirs) {
+      contentRef.current = theirs;
+      setContent(theirs);
+    } else {
+      contentChangeRef.current?.(shown);
+    }
+  }, []);
+  const mergeAndSave = useCallback(async (ns, path, base, ours, theirs) => {
+    const { mergeThreeWay } = await import('./sharedText.js');
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const report = {};
+      const merged = mergeThreeWay(base, ours, theirs.text, report);
+      try {
+        const r = await saveNote(ns, path, merged, theirs.etag);
+        if (selectedNsRef.current !== ns || currentPathRef.current !== path) return true;
+        savedContentRef.current = merged;
+        setSavedContent(merged);
+        remoteLiveRef.current = null;
+        if (r.etag) { etagRef.current = r.etag; echoGate.rememberOwnEtag(r.etag); }
+        showOutside(ours, merged, mergeThreeWay);
+        // Lines both sides changed are kept twice; say so, so the person
+        // looks at them. A merge with no overlap needs no notice.
+        if (report.conflicts > 0) setMergeNotice(true);
+        return true;
+      } catch (err) {
+        if (err.status !== 409) throw err;
+        theirs = await getNote(ns, path);
+      }
+    }
+    return false;
+  }, [showOutside]);
+
   const handleContentChange = useCallback((newContent) => {
     // Text that equals what is already saved is not an edit: no "typing"
     // signal to others, no save, no clearing of a real conflict notice. An
@@ -1914,6 +2007,13 @@ function App() {
               if (retry.etag) { etagRef.current = retry.etag; echoGate.rememberOwnEtag(retry.etag); }
               resolved = true;
             }
+            if (!resolved) {
+              // Someone else changed the note since this edit's base: the
+              // CLI, an agent, another tab. Merge their change with this
+              // typing and save the result, so neither is lost. Lines both
+              // sides changed differently keep both (sharedText.mergeThreeWay).
+              resolved = await mergeAndSave(selectedNs, currentPath, base, newContent, latest);
+            }
           } catch { /* fall through to the banner */ }
           if (!resolved) setConflictBanner({ username: 'another user', etag: e.etag });
         } else if (e.status === 404) {
@@ -1942,7 +2042,8 @@ function App() {
     };
     pendingSaveRef.current = runSave;
     saveTimerRef.current = setTimeout(runSave, 800);
-  }, [currentPath, selectedNs]);
+  }, [currentPath, selectedNs, mergeAndSave]);
+  contentChangeRef.current = handleContentChange;
 
 
   // Send cursor position to collab
@@ -2722,6 +2823,12 @@ function App() {
             <button onClick={() => setConflictBanner(null)}>Dismiss</button>
           </div>
         )}
+        {mergeNotice && (
+          <div className="merge-notice floating-notice" role="status">
+            Someone else changed this note while you were typing. Their change and yours are both kept; where you both changed the same line, both versions are there to check.
+            <button onClick={() => setMergeNotice(false)}>Dismiss</button>
+          </div>
+        )}
         {missingNote && missingNote.ns === selectedNs && missingNote.path === currentPath && (
           <div className="conflict-banner" data-testid="missing-note-banner">
             This note is no longer here: it was moved or deleted. Your latest edits were not saved.
@@ -2865,6 +2972,7 @@ function App() {
                             content={content}
                             shared={sharedSession}
                             onChange={sharedSession ? handleSharedChange : (canWriteCurrent ? handleContentChange : null)}
+                            registerOutsideMerge={sharedSession ? undefined : registerOutsideMerge}
                             // Shared: editable once the room's document is
                             // bound. Typing into the unbound placeholder
                             // would go nowhere.

@@ -35,7 +35,28 @@ function readTree(page) {
 
 const btn = (page, label) => page.locator('.sidebar-action-btn', { hasText: label });
 
+// Everything a test creates, by name, so afterEach can remove it. Without
+// this every run left its folders and notes at the namespace root, and on
+// repeated runs a later test's rows ended up out of reach and it failed.
+let made = [];
+test.beforeEach(() => { made = []; });
+test.afterEach(async ({ page }) => {
+  const names = made.slice().reverse();
+  await page.evaluate(async (list) => {
+    const t = localStorage.getItem('mdnest_token');
+    if (!t) return;
+    const nss = await (await fetch('/api/namespaces', { headers: { Authorization: 'Bearer ' + t } })).json();
+    const ns = location.hash.replace(/^#/, '').split('/')[0] || nss[0];
+    for (const n of list) {
+      await fetch(`/api/note?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(n)}`, {
+        method: 'DELETE', headers: { Authorization: 'Bearer ' + t },
+      }).catch(() => {});
+    }
+  }, names).catch(() => {});
+});
+
 async function create(page, label, name) {
+  made.push(name);
   page.once('dialog', (d) => d.accept(name));
   await btn(page, label).click();
 }

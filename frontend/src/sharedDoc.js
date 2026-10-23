@@ -215,6 +215,17 @@ export class SharedSession {
     // previous note's socket when the session is created.
     if (this.closed || this.left || this.client.ns !== this.ns || this.client.path !== this.path) return;
     this.client.sendJSON({ type: 'yjs-hello' });
+    this.helloSent = true;
+  }
+
+  // Which step a session that never bound is stuck on, for the notice the
+  // app shows when it stops waiting and for a support report.
+  whyUnbound() {
+    if (this.bound) return null;
+    if (!this.client.connected) return 'no-connection';
+    if (!this.ready) return this.helloSent ? 'no-reply' : 'no-hello';
+    if (!this.editor) return 'no-editor';
+    return 'no-seed';
   }
 
   _sendSaved(recv, own) {

@@ -141,7 +141,7 @@ if ( cd tests/browser && \
      MDNEST_USER2=bob MDNEST_PASSWORD2=bobpass123 \
      MDNEST_NOTES_DIR="$NOTES_DIR" \
      MDNEST_CLI="$REPO_ROOT/mdnest" MDNEST_CLI_HOMES="$CLI_DIR" \
-     npx playwright test ${MDNEST_E2E_SPECS:-collab-shared-editing.spec.js collab-cli.spec.js presence.spec.js} ); then
+     npx playwright test ${MDNEST_E2E_SPECS:-collab-shared-editing.spec.js collab-cli.spec.js presence.spec.js shared-unavailable.spec.js} ); then
   pass "COLLAB E2E: all specs passed"
   exit 0
 else

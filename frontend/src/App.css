@@ -3000,8 +3000,13 @@ pre:hover .code-copy-btn {
   transition: background 0.15s;
 }
 
-.sidebar-action-btn:hover {
+.sidebar-action-btn:hover:not(:disabled) {
   background: var(--surface-3);
+}
+
+.sidebar-action-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 /* ===== Multi-user: Sidebar footer ===== */

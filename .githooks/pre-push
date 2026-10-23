@@ -20,6 +20,30 @@ while read -r _lref _loid remote_ref _roid; do
   esac
 done
 
+# A release push whose tree already passed tests/release-gate.sh is done here:
+# the gate ran this whole hook on that exact tree, so running the checks again
+# only holds the SSH connection open until GitHub drops it (v4.8.12's first
+# push). A tree the gate did not pass is refused at once, not after the checks.
+if [ "$RUN_E2E" -eq 1 ] && [ "${MDNEST_GATE_INNER:-0}" != "1" ] && [ "${MDNEST_SKIP_E2E:-0}" != "1" ]; then
+  GATE_FILE="$(git rev-parse --git-path mdnest-release-gate)"
+  GATE_TREE=""; GATE_AT=""
+  [ -f "$GATE_FILE" ] && read -r GATE_TREE GATE_AT _ < "$GATE_FILE"
+  GATE_OK=1
+  for oid in "${RELEASE_OIDS[@]}"; do
+    case "$oid" in 0000000000000000000000000000000000000000) continue ;; esac
+    if [ "$(git rev-parse "$oid^{tree}" 2>/dev/null)" != "$GATE_TREE" ]; then GATE_OK=0; fi
+  done
+  if [ -n "$GATE_TREE" ] && [ "$GATE_OK" -eq 1 ]; then
+    echo "Release gate: this exact tree passed at $GATE_AT (tests/release-gate.sh ran every check)."
+    echo "=== All checks passed ==="
+    exit 0
+  fi
+  echo "Release gate: NOT RUN for this tree."
+  echo "  Run: bash tests/release-gate.sh   (then push again)"
+  echo "=== Pre-push checks FAILED — push blocked ==="
+  exit 1
+fi
+
 # 1. Frontend: verify build compiles
 echo -n "Frontend build... "
 if (cd frontend && npx vite build --mode production) > /dev/null 2>&1; then
@@ -376,23 +400,6 @@ if [ "$RUN_E2E" -eq 1 ] && [ "${MDNEST_SKIP_E2E:-0}" = "1" ]; then
   echo "Release gate: SKIPPED by MDNEST_SKIP_E2E=1. Say so in the release PR, with the run that covered this tree."
 elif [ "$RUN_E2E" -eq 1 ] && [ "${MDNEST_GATE_INNER:-0}" = "1" ]; then
   RUN_HEAVY=1
-elif [ "$RUN_E2E" -eq 1 ]; then
-  echo -n "Release gate (tests/release-gate.sh)... "
-  GATE_FILE="$(git rev-parse --git-path mdnest-release-gate)"
-  GATE_TREE=""; GATE_AT=""
-  [ -f "$GATE_FILE" ] && read -r GATE_TREE GATE_AT _ < "$GATE_FILE"
-  GATE_OK=1
-  for oid in "${RELEASE_OIDS[@]}"; do
-    case "$oid" in 0000000000000000000000000000000000000000) continue ;; esac
-    if [ "$(git rev-parse "$oid^{tree}" 2>/dev/null)" != "$GATE_TREE" ]; then GATE_OK=0; fi
-  done
-  if [ -n "$GATE_TREE" ] && [ "$GATE_OK" -eq 1 ]; then
-    echo "OK (this exact tree passed at $GATE_AT)"
-  else
-    echo "NOT RUN for this tree"
-    echo "  Run: bash tests/release-gate.sh   (then push again)"
-    FAILED=1
-  fi
 fi
 
 if [ "$RUN_HEAVY" -eq 1 ]; then

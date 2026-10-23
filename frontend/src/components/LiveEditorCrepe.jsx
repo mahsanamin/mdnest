@@ -219,6 +219,16 @@ const tableClickFixPlugin = (ctx) => async () => {
   };
 };
 
+// A block as JSON without the heading ids a plugin adds after load: a freshly
+// parsed heading has id "", the live one does not, and compared as-is every
+// heading looked changed.
+function stripBlockIds(j) {
+  let o = j;
+  if (o.attrs && Object.prototype.hasOwnProperty.call(o.attrs, 'id')) o = { ...o, attrs: { ...o.attrs, id: '' } };
+  if (o.content) o = { ...o, content: o.content.map(stripBlockIds) };
+  return o;
+}
+
 export default function LiveEditorCrepe({
   content,
   onChange,
@@ -235,6 +245,12 @@ export default function LiveEditorCrepe({
   // for the life of the editor: the parent remounts the editor when it
   // changes, because the collab plugin must be registered before create().
   shared,
+  // Registers a function the app calls to put an outside change (the CLI, an
+  // agent) into this editor: fn(base, theirs, merge) returns the text now
+  // shown. The merge runs here, against the document as it is at this
+  // moment, because markdownUpdated reaches the app a little late: merging
+  // the app's copy dropped the newest keystrokes and moved the caret.
+  registerOutsideMerge,
 }) {
   const rootRef = useRef(null);
   const sharedRef = useRef(shared || null);
@@ -549,13 +565,7 @@ export default function LiveEditorCrepe({
     // headings carry an id a plugin adds after load ("cursor"), a freshly
     // parsed one has "". Compared as-is, the first heading always differed,
     // the "changed range" began at 0, and the caret was swept to the end.
-    const strip = (j) => {
-      let o = j;
-      if (o.attrs && Object.prototype.hasOwnProperty.call(o.attrs, 'id')) o = { ...o, attrs: { ...o.attrs, id: '' } };
-      if (o.content) o = { ...o, content: o.content.map(strip) };
-      return o;
-    };
-    const key = (n) => JSON.stringify(strip(n.toJSON()));
+    const key = (n) => JSON.stringify(stripBlockIds(n.toJSON()));
     // Changed ranges, as [fromA, toA, fromB, toB]. With the same number of
     // blocks (the usual case: people edit inside paragraphs) each changed
     // block is its own range, so an edit above the caret and another below
@@ -643,6 +653,72 @@ export default function LiveEditorCrepe({
       suppressSaveRef.current = false;
     }
   }, [content, innerEditor, applyExternalDoc]);
+
+  useEffect(() => {
+    if (!registerOutsideMerge || !innerEditor || sharedRef.current) return undefined;
+    registerOutsideMerge((base, theirs, merge) => {
+      const crepe = crepeRef.current;
+      if (!crepe) return null;
+      // First choice: apply only the outside change, as whole blocks, to the
+      // document as it is now. The blocks that differ between base and
+      // theirs are found by parsing both (one parser, so no serialization
+      // differences), and replaced in the live document only if the person
+      // has not touched them. The paragraph being typed in is never
+      // rewritten, so the caret and an unreported keystroke (or a trailing
+      // space markdown would drop) stay exactly as they are.
+      let applied = false;
+      try {
+        crepe.editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx);
+          const parse = ctx.get(parserCtx);
+          const A = parse(base);
+          const B = parse(theirs);
+          const C = view.state.doc;
+          if (!A || !B || typeof A === 'string' || typeof B === 'string') return;
+          const key = (n) => JSON.stringify(stripBlockIds(n.toJSON()));
+          const min = Math.min(A.childCount, B.childCount);
+          let pre = 0;
+          while (pre < min && key(A.child(pre)) === key(B.child(pre))) pre += 1;
+          let suf = 0;
+          while (suf < min - pre && key(A.child(A.childCount - 1 - suf)) === key(B.child(B.childCount - 1 - suf))) suf += 1;
+          const aEnd = A.childCount - suf;
+          const cEnd = C.childCount - suf;
+          if (cEnd < pre || cEnd - pre !== aEnd - pre) return;
+          for (let i = pre; i < aEnd; i += 1) if (key(A.child(i)) !== key(C.child(i))) return;
+          for (let i = 0; i < suf; i += 1) {
+            if (key(A.child(A.childCount - 1 - i)) !== key(C.child(C.childCount - 1 - i))) return;
+          }
+          let from = 0;
+          for (let i = 0; i < pre; i += 1) from += C.child(i).nodeSize;
+          let to = from;
+          for (let i = pre; i < cEnd; i += 1) to += C.child(i).nodeSize;
+          const blocks = [];
+          for (let i = pre; i < B.childCount - suf; i += 1) blocks.push(B.child(i));
+          view.dispatch(view.state.tr.replaceWith(from, to, blocks));
+          applied = true;
+        });
+      } catch { applied = false; }
+      if (!applied) {
+        // The person edited a block the outside change also touched: merge
+        // the text and replace what differs (the caret may move here).
+        const now = restoreWikilinks(crepe.getMarkdown());
+        const target = merge(base, now, theirs);
+        if (target !== now) {
+          try {
+            crepe.editor.action(applyExternalDoc(target));
+          } catch {
+            crepe.editor.action(replaceAll(target));
+          }
+        }
+      }
+      const shown = restoreWikilinks(crepe.getMarkdown());
+      // The app sets this as its content next; it is what the editor holds.
+      lastPropContentRef.current = shown;
+      lastLocalContentRef.current = shown;
+      return shown;
+    });
+    return () => registerOutsideMerge(null);
+  }, [registerOutsideMerge, innerEditor, applyExternalDoc]);
 
   // Push active comment anchors into the highlight plugin whenever comments
   // change. Same logic as the legacy LiveEditor — top-level threads only,

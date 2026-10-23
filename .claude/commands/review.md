@@ -19,7 +19,7 @@ Review the entire mdnest project for consistency, correctness, and completeness.
 - Every API endpoint (GET/POST/PUT/PATCH/DELETE /api/note, etc.) should be documented in docs/api.md with examples
 - Every MCP tool should be listed in README
 - Every CLI note subcommand should be listed in README
-- CLAUDE.md project structure should list all top-level files and directories that exist
+- docs/codemap.md should list all top-level files and directories that exist
 
 ### 4. Security
 - No credentials or secrets committed (check .gitignore covers .env, mdnest.conf, git-sync/keys/)

@@ -4,6 +4,62 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v4.8.13 (in progress)
+
+### Security
+
+- **`dompurify` 3.4.17**, the library that cleans note HTML and diagrams
+  before the browser shows them. 3.4.16 and earlier have a critical advisory
+  (GHSA-cg2g-xh64-v4q7, GHSA-mrv2-3pqr-j5jr, GHSA-c6gr-qvv4-5v3f) published
+  after v4.8.12. A lock-file-only patch bump; v4.8.12 and earlier carry the
+  affected version.
+
+### Fixed
+
+- **An agent's or the CLI's change to an open note now shows, and never
+  costs the person their typing, on a default install.** With live
+  collaboration off (the default), the browser only checked an open note
+  once a minute, so a change made with `mdnest append` or by an agent could
+  sit unseen for that long. Worse, if the person was typing, their next save
+  was refused, a "modified by an external source" banner appeared, and what
+  they typed after that was lost on reload. Now:
+  - the open note is checked every 5 seconds (an unchanged note costs a
+    304, no body), and an idle note shows the change straight away;
+  - a save that was overtaken is merged with the outside change and saved
+    again, in Basic and Live, so both are kept and the caret stays where the
+    person is typing;
+  - where both changed the same line, both versions are kept and a small
+    notice says so.
+- **"+ Note", "+ Folder", "+ Drawing" and "+ Slides" did nothing when
+  clicked during startup**, before a namespace was chosen. They are disabled
+  until then.
+
+- **Live notes could stay read-only for good, behind a proxy or network
+  that does not pass websockets** (reported by a user; every note showed
+  "Waiting for the live connection to edit this note together"). Since
+  shared editing (v4.8.10) a Live note waits for its shared document over
+  the websocket, and when that never came the note never unlocked. Now a
+  note waits at most 4 seconds, then edits and saves the normal way for the
+  rest of the visit, and a notice says which step failed (no connection, no
+  reply from the server, editor not attached), so the cause can be found.
+  Every later note opens editable at once.
+
+### Tests
+
+- New: `cli-default-install.spec.js` (fails on v4.8.12 in all four cases)
+  and `shared-unavailable.spec.js` (a websocket that hangs or is refused;
+  both cases left the note read-only on v4.8.12). The release gate now runs
+  the multi-mode shared-editing suite on every release.
+- `tree-target.spec.js` removes what it creates; it left folders at the
+  namespace root and failed 2 times in 20 on repeated runs.
+
+### Release process
+
+- **A release push takes seconds.** The pre-push hook checks the release
+  gate's record before anything else: a tree the gate passed is accepted at
+  once, any other tree is refused at once. It used to rerun its own checks
+  first, and GitHub dropped the connection while it did.
+
 ## v4.8.12: No lost chat messages on HA installs, and Go 1.26.10
 
 Two important fixes. On HA installs (app replicas and one writer), appends
