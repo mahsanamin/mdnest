@@ -17,7 +17,7 @@ const PAGE = 100;
 
 // BoardColumn is one kanban column: a droppable target that lists its task
 // cards, with a collapse toggle and a live count.
-export default function BoardColumn({ column, tasks, canWrite, onOpen, onToggleStep, onEdit, resolve, onDelete, collapsed, onToggleCollapse }) {
+export default function BoardColumn({ column, tasks, canWrite, onOpen, onToggleStep, onEdit, resolve, milestoneTitle, onDelete, collapsed, onToggleCollapse }) {
   const { setNodeRef, isOver } = useDroppable({ id: column.id, disabled: !canWrite });
   // Deliberately not reset when the task list changes: a filter narrowing the
   // list can only shrink it below `shown`, which is harmless, and resetting on
@@ -42,7 +42,7 @@ export default function BoardColumn({ column, tasks, canWrite, onOpen, onToggleS
       {!collapsed && (
         <div className="tb-column-body">
           {tasks.slice(0, shown).map((t) => (
-            <TaskCard key={cardKey(t)} task={t} canWrite={canWrite} onOpen={onOpen} onToggleStep={onToggleStep} onEdit={onEdit} resolve={resolve} onDelete={onDelete} />
+            <TaskCard key={cardKey(t)} task={t} canWrite={canWrite} onOpen={onOpen} onToggleStep={onToggleStep} onEdit={onEdit} resolve={resolve} milestoneTitle={milestoneTitle} onDelete={onDelete} />
           ))}
           {tasks.length > shown && (
             <button

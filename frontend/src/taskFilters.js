@@ -11,11 +11,14 @@
 //               'related-to' (has that relation kind); '' = ignore
 //   - due:    '' (any) | 'overdue' | 'today' | 'week' (due within 7 days) |
 //             'month' (within 30 days) | 'has' (has a due date) | 'none'
+//   - milestone: a milestone id, '@none' (no milestone), or '' (any)
 //   - showDone + doneColumns: when showDone is false, tasks sitting in a "done"
 //               column are hidden (active work is the default focus)
-export function matchesTaskFilters(task, { search = '', tags = [], assignee = '', priority = '', relation = '', due = '', showDone = true, doneColumns = [], currentUser = '', today = isoToday() } = {}) {
+export function matchesTaskFilters(task, { search = '', tags = [], assignee = '', priority = '', relation = '', due = '', milestone = '', showDone = true, doneColumns = [], currentUser = '', today = isoToday() } = {}) {
   const q = String(search).trim().toLowerCase();
   if (q && !String(task.text || '').toLowerCase().includes(q)) return false;
+  if (milestone === '@none' && task.milestone) return false;
+  if (milestone && milestone !== '@none' && task.milestone !== milestone) return false;
   if (tags.length && !(task.tags || []).some((tg) => tags.includes(tg))) return false;
   if (priority && String(task.priority || '').toLowerCase() !== String(priority).toLowerCase()) return false;
   if (relation) {

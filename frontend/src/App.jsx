@@ -75,6 +75,7 @@ import { titleWithCount } from './approvals.js';
 import CollabClient from './collab.js';
 import { normalizeBoard } from './stickies.js';
 import { isMarpDoc, effectiveEditorMode } from './marp.js';
+import { isTaskListPath, isTaskOnlyDoc, taskListName } from './taskList.js';
 import { isExcalidrawDoc } from './excalidraw.js';
 import { isSharedEligible } from './sharedEligible.js';
 import { TREE_POLL_MS, shouldPollTree } from './tree-refresh.js';
@@ -202,8 +203,8 @@ function hashIsPending() {
   return appHash !== null && window.location.hash !== appHash;
 }
 
-function setHash(ns, path, stickiesBoard, taskBoard) {
-  writeRoute(formatRoute({ ns, path, stickies: stickiesBoard, board: taskBoard }));
+function setHash(ns, path, stickiesBoard, taskBoard, milestone = null) {
+  writeRoute(formatRoute({ ns, path, stickies: stickiesBoard, board: taskBoard, milestone }));
 }
 
 // decodeJwtSub returns the `sub` claim of the JWT (the username), without
@@ -414,6 +415,12 @@ function App() {
   // close over a stale value.
   const stickiesLoadRef = useRef('loading');
   const [showTaskBoard, setShowTaskBoard] = useState(false);
+  // The note the automatic task-list view was decided for, and whether the
+  // board showing was opened by it (then a prose note opened next closes it).
+  const autoViewFor = useRef(null);
+  const autoBoard = useRef(false);
+  // The board's milestones view in the URL: null = not in it, '' = all milestones, else a milestone id.
+  const [boardMilestone, setBoardMilestone] = useState(null);
   // The chats view replaces the editor area like the board does. openChat is
   // the conversation shown in it ({ns, path} | null) — chats span namespaces,
   // so it is independent of the note open underneath.
@@ -531,6 +538,9 @@ function App() {
   // the whole editor branch and the Basic/Live buttons were simply inert.
   const isDrawingDoc = excalidrawEnabled && isExcalidrawDoc(currentPath);
   const excalidrawActive = isDrawingDoc && !drawingSource;
+  // A task list (a .tasks.md, or a note holding only tasks) opens on the board.
+  const taskListActive = taskBoardEnabled && !!currentPath && !marpActive && !chatNoteActive && !isDrawingDoc
+    && (isTaskListPath(currentPath) || isTaskOnlyDoc(content));
   // Editor scroll ratio (0..1), mirrored to the Marp deck's current slide in
   // split view. The deck is paginated (not scrollable), so unlike the plain
   // Preview it can't share a scrollTop — we map the ratio to a slide instead.
@@ -1251,7 +1261,7 @@ function App() {
       }
 
       const nsList = await loadNamespaces();
-      const { ns: hashNs, path: hashPath, stickies: hashStickies, board: hashBoard, chats: hashChats, chat: hashChat, heading: hashHeading } = parseHash();
+      const { ns: hashNs, path: hashPath, stickies: hashStickies, board: hashBoard, chats: hashChats, chat: hashChat, heading: hashHeading, milestone: hashMilestone } = parseHash();
       adoptHash();
       if (hashHeading) pendingHeadingRef.current = hashHeading;
       // Opened (or refreshed) on the chats view, possibly with one chat open.
@@ -1263,6 +1273,7 @@ function App() {
       // Opened (or refreshed) on the task board: reopen it over the same
       // namespace and note.
       if (hashBoard) setShowTaskBoard(true);
+      if (hashBoard && typeof hashMilestone === 'string') setBoardMilestone(hashMilestone);
       // Opened straight onto the board. The namespace and last file are still
       // restored underneath, so closing the board lands somewhere sensible
       // rather than on an empty editor.
@@ -1478,14 +1489,14 @@ function App() {
     if (selectedNs) {
       // Until the config has loaded we can't know whether the board is
       // enabled; keep the board route rather than rewriting a deep link away.
-      setHash(selectedNs, currentPath, false, showTaskBoard && (!appConfig || taskBoardEnabled));
+      setHash(selectedNs, currentPath, false, showTaskBoard && (!appConfig || taskBoardEnabled), showTaskBoard ? boardMilestone : null);
     }
-  }, [selectedNs, currentPath, sidePanel, showTaskBoard, appConfig, taskBoardEnabled, chatsOpen, openChat, chatEnabled]);
+  }, [selectedNs, currentPath, sidePanel, showTaskBoard, boardMilestone, appConfig, taskBoardEnabled, chatsOpen, openChat, chatEnabled]);
 
   // Handle browser back/forward
   useEffect(() => {
     const onHashChange = () => {
-      const { ns, path, stickies, board, chats, chat, heading } = parseHash();
+      const { ns, path, stickies, board, chats, chat, heading, milestone } = parseHash();
       adoptHash();
       if (stickies) {
         setSidePanel('board');
@@ -1502,6 +1513,7 @@ function App() {
       setChatsOpen(false);
       setSidePanel((v) => (v === 'board' ? 'closed' : v));
       setShowTaskBoard(board);
+      setBoardMilestone(board && typeof milestone === 'string' ? milestone : null);
       if (ns && ns !== selectedNs) {
         setSelectedNs(ns);
       }
@@ -1737,7 +1749,13 @@ function App() {
   // Stable identity on purpose: this is handed to every task card, which is
   // memoised. An inline arrow here would be a new function on every App
   // render, so every card would re-render and the memo would buy nothing.
-  const openNoteFromBoard = useCallback((p) => { setShowTaskBoard(false); openNote(p); }, [openNote]);
+  const openNoteFromBoard = useCallback((p) => {
+    // Asked for the note itself: a task list must not bounce back to the board.
+    autoViewFor.current = `${selectedNs}/${p}`;
+    autoBoard.current = false;
+    setShowTaskBoard(false);
+    openNote(p);
+  }, [openNote, selectedNs]);
 
   // Delete a chat = delete its note (the note IS the chat). Confirmed first,
   // naming the note, because it removes every message too. Clears whatever
@@ -1875,6 +1893,30 @@ function App() {
     }
     setShowTaskBoard(on);
   }, [flushPendingSave]);
+
+  // Decided once per opened note, so typing never flips the view. The view
+  // picked on a task list is kept with the file, like a deck's.
+  useEffect(() => {
+    if (!selectedNs || !currentPath || content === null) return;
+    const key = `${selectedNs}/${currentPath}`;
+    if (autoViewFor.current === key) return;
+    autoViewFor.current = key;
+    if (chatsOpen) return;
+    if (taskListActive) {
+      if (showTaskBoard || getFilePrefs(selectedNs, currentPath)?.taskView === 'editor') return;
+      autoBoard.current = true;
+      setBoardActive(true);
+    } else if (autoBoard.current) {
+      autoBoard.current = false;
+      setShowTaskBoard(false);
+    }
+  }, [selectedNs, currentPath, content, chatsOpen, taskListActive, showTaskBoard, getFilePrefs, setBoardActive]);
+
+  const chooseBoardActive = useCallback((on) => {
+    if (taskListActive) setFilePrefs(selectedNs, currentPath, { taskView: on ? 'board' : 'editor' });
+    autoBoard.current = on && taskListActive;
+    setBoardActive(on);
+  }, [taskListActive, selectedNs, currentPath, setFilePrefs, setBoardActive]);
 
 
   const refreshComments = useCallback(() => {
@@ -2151,6 +2193,21 @@ function App() {
       openNote(path);
     } catch (e) {
       alert('Failed to create drawing: ' + e.message);
+    }
+  }, [selectedNs, getTargetDir, refreshTree, openNote]);
+
+  // Create an empty task list (`.tasks.md`); it opens on the board.
+  const doCreateTaskList = useCallback(async (target) => {
+    if (!selectedNs) return;
+    const name = prompt('Task list name (e.g. sprint-12.tasks.md):');
+    if (!name || !name.trim()) return;
+    const path = getTargetDir(target) + taskListName(name);
+    try {
+      await createNote(selectedNs, path);
+      await refreshTree(undefined, { broadcast: true });
+      openNote(path);
+    } catch (e) {
+      alert('Failed to create task list: ' + e.message);
     }
   }, [selectedNs, getTargetDir, refreshTree, openNote]);
 
@@ -2677,6 +2734,7 @@ function App() {
         onLogout={logout}
         onAdminPanel={isAdmin && isMulti ? () => setShowAdminPanel(true) : null}
         onNewNote={canWrite('') ? () => doCreateNote(null) : null}
+        onNewTaskList={taskBoardEnabled && canWrite('') ? () => doCreateTaskList(null) : null}
         onNewDrawing={excalidrawEnabled && canWrite('') ? () => doCreateDrawing(null) : null}
         onNewSlides={marpEnabled && canWrite('') ? () => doCreateSlides(null) : null}
         pickedFolder={pickedFolder}
@@ -2737,7 +2795,7 @@ function App() {
           onMobileViewChange={isMobile && currentPath && !excalidrawActive && !showTaskBoard && !chatsOpen ? (v) => { setMobileView(v); localStorage.setItem('mdnest_mobile_view', v); } : null}
           liveLockReason={chatNoteActive && !marpActive ? 'Disabled for chats — the rich editor would rewrite the chat tag and turn it back into a plain note' : null}
           basicLockReason={sharedForcesLive ? 'Others are editing this note: it stays in Live so everyone edits the same text' : null}
-          onSetBoardActive={taskBoardEnabled && selectedNs ? setBoardActive : null}
+          onSetBoardActive={taskBoardEnabled && selectedNs ? chooseBoardActive : null}
           onSetChatsActive={chatEnabled ? setChatsActive : null}
           chatsBackLabel={chatsBackLabel}
           approvalCount={approvalsEnabled ? approvals.length + notices.length : 0}
@@ -2901,7 +2959,10 @@ function App() {
                 currentUser={userInfo?.username}
                 refreshSignal={boardRefreshNonce}
                 onOpenNote={openNoteFromBoard}
-                onClose={() => setShowTaskBoard(false)}
+                onClose={() => { setShowTaskBoard(false); setBoardMilestone(null); }}
+                focusNote={taskListActive ? currentPath : null}
+                milestoneRoute={boardMilestone}
+                onMilestoneRoute={setBoardMilestone}
               />
             </Suspense>
             </ChunkErrorBoundary>

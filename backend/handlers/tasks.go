@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"path"
 	"regexp"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/mdnest/mdnest/backend/middleware"
 	"github.com/mdnest/mdnest/backend/storage"
@@ -91,6 +93,19 @@ type BoardConfig struct {
 	// DefaultNote is the note new tasks are appended to when the caller does not
 	// pick one (namespace-relative path, e.g. "tasks.md").
 	DefaultNote string `json:"defaultNote,omitempty"`
+	// Milestones group tasks towards a goal; a task joins one with its
+	// `milestone:` field (the milestone's id).
+	Milestones []Milestone `json:"milestones,omitempty"`
+}
+
+// Milestone is a goal of the namespace that tasks are grouped under.
+type Milestone struct {
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Start       string `json:"start,omitempty"` // YYYY-MM-DD
+	Due         string `json:"due,omitempty"`   // YYYY-MM-DD
+	Description string `json:"description,omitempty"`
+	Closed      bool   `json:"closed,omitempty"`
 }
 
 // Step is a sub-task: a checkbox nested in a task's indented detail block.
@@ -117,7 +132,11 @@ type Task struct {
 	Due             string   `json:"due,omitempty"`
 	Priority        string   `json:"priority,omitempty"`
 	Workload        string   `json:"workload,omitempty"`
-	Assignee        string   `json:"assignee,omitempty"` // who is responsible for the task
+	Assignee        string   `json:"assignee,omitempty"`  // who is responsible for the task
+	Milestone       string   `json:"milestone,omitempty"` // id of the board milestone the task belongs to
+	CreatedBy       string   `json:"createdBy,omitempty"` // username of whoever created it through mdnest
+	Created         string   `json:"created,omitempty"`   // creation time, UTC RFC 3339
+	Completed       string   `json:"completed,omitempty"` // when it was last closed through mdnest, UTC RFC 3339
 	Tags            []string `json:"tags,omitempty"`
 	DependsOn       []string `json:"dependsOn,omitempty"` // refs of tasks this one depends on (legacy notes may hold titles)
 	BlockedBy       []string `json:"blockedBy,omitempty"` // refs of tasks blocking this one
@@ -163,6 +182,7 @@ type taskSpec struct {
 	Priority        string     `json:"priority"`
 	Workload        string     `json:"workload"`
 	Assignee        string     `json:"assignee"`
+	Milestone       string     `json:"milestone"`
 	Tags            []string   `json:"tags"`
 	DependsOn       []string   `json:"dependsOn"`
 	BlockedBy       []string   `json:"blockedBy"`
@@ -170,6 +190,11 @@ type taskSpec struct {
 	DefaultExpanded bool       `json:"defaultExpanded"`
 	Steps           []stepSpec `json:"steps"`
 	Notes           string     `json:"notes"`
+	// Set by the server only: on create from the request's user and clock, on
+	// edit from the note, so a client can neither forge nor drop them.
+	CreatedBy string `json:"-"`
+	Created   string `json:"-"`
+	Completed string `json:"-"`
 }
 
 type stepSpec struct {
@@ -179,6 +204,9 @@ type stepSpec struct {
 
 // taskLineRe matches a GFM task-list item: indent, bullet, checkbox, rest.
 var taskLineRe = regexp.MustCompile(`^(\s*)([-*+])\s+\[([ xX])\]\s?(.*)$`)
+
+// taskNow is the clock that stamps a new task's `created:` field (swapped in tests).
+var taskNow = time.Now
 
 func defaultBoard() BoardConfig {
 	return BoardConfig{
@@ -328,6 +356,16 @@ func (h *TaskHandler) create(w http.ResponseWriter, r *http.Request) {
 	// New tasks get a stable human ref (namespace acronym + unique suffix).
 	if strings.TrimSpace(req.taskSpec.Ref) == "" {
 		req.taskSpec.Ref = generateTaskRef(ns, collectNoteRefs(lines))
+	}
+	req.taskSpec.CreatedBy, req.taskSpec.Created = "", taskNow().UTC().Format(time.RFC3339)
+	if u := middleware.UserFromContext(ctx); u != nil {
+		req.taskSpec.CreatedBy = u.Username
+	}
+	req.taskSpec.Completed = ""
+	for _, c := range board.Columns {
+		if c.ID == req.taskSpec.Column && c.Done {
+			req.taskSpec.Completed = req.taskSpec.Created
+		}
 	}
 	lines = append(lines, renderTaskBlock(board, req.taskSpec)...)
 	newData := []byte(strings.Join(lines, "\n") + "\n")
@@ -557,6 +595,15 @@ func unionBoards(boards []BoardConfig) BoardConfig {
 			}
 		}
 	}
+	seenMs := map[string]bool{}
+	for _, b := range boards {
+		for _, m := range b.Milestones {
+			if !seenMs[m.ID] {
+				out.Milestones = append(out.Milestones, m)
+				seenMs[m.ID] = true
+			}
+		}
+	}
 	return out
 }
 
@@ -595,6 +642,15 @@ func (h *TaskHandler) mutate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	board := h.loadBoard(ctx, ns)
+	// Closing a top-level task (not a step) stamps `completed:`, reopening it removes the stamp.
+	wasClosed, _, _ := parseTaskLine(lines[mut.Line-1])
+	isCard := false
+	for _, tk := range parseNoteTasks(relPath, data, board) {
+		if tk.Line == mut.Line {
+			isCard = true
+			break
+		}
+	}
 	// Block closing a task while it still has unresolved sub-tasks. Closing is
 	// checking it done, moving it to a Done column (drag), or saving an edit
 	// into a Done column. An editor save carries its own (possibly changed)
@@ -635,6 +691,9 @@ func (h *TaskHandler) mutate(w http.ResponseWriter, r *http.Request) {
 				mut.Replace.Ref = generateTaskRef(ns, collectNoteRefs(lines))
 			}
 		}
+		mut.Replace.CreatedBy = cardField(lines, mut.Line-1, "created-by")
+		mut.Replace.Created = cardField(lines, mut.Line-1, "created")
+		mut.Replace.Completed = cardField(lines, mut.Line-1, "completed")
 		var ok2 bool
 		lines, ok2 = replaceTaskBlock(lines, mut.Line-1, board, *mut.Replace)
 		if !ok2 {
@@ -684,6 +743,15 @@ func (h *TaskHandler) mutate(w http.ResponseWriter, r *http.Request) {
 		}
 		lines[mut.Line-1] = newLine
 	}
+	if isCard {
+		nowClosed, _, _ := parseTaskLine(lines[mut.Line-1])
+		switch {
+		case nowClosed && !wasClosed:
+			lines = setMetaField(lines, mut.Line-1, "completed", taskNow().UTC().Format(time.RFC3339))
+		case !nowClosed && wasClosed:
+			lines = setMetaField(lines, mut.Line-1, "completed", "")
+		}
+	}
 	newData := []byte(strings.Join(lines, "\n"))
 	if err := h.store.WriteFile(ctx, ns, relPath, newData); err != nil {
 		http.Error(w, `{"error":"failed to write note"}`, http.StatusInternalServerError)
@@ -722,13 +790,22 @@ func (h *TaskHandler) HandleBoard(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(h.loadBoard(ctx, ns))
 	case http.MethodPut:
+		var raw map[string]json.RawMessage
 		var b BoardConfig
-		if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+		body, err := io.ReadAll(r.Body)
+		if err != nil || json.Unmarshal(body, &raw) != nil || json.Unmarshal(body, &b) != nil {
 			http.Error(w, `{"error":"invalid body"}`, http.StatusBadRequest)
 			return
 		}
 		if !validBoard(b) {
 			http.Error(w, `{"error":"board must have columns with unique non-empty ids"}`, http.StatusBadRequest)
+			return
+		}
+		if _, ok := raw["milestones"]; !ok {
+			// A client that only knows columns must not wipe the milestones.
+			b.Milestones = h.loadBoard(ctx, ns).Milestones
+		} else if msg := invalidMilestones(b.Milestones); msg != "" {
+			http.Error(w, fmt.Sprintf(`{"error":%q}`, msg), http.StatusBadRequest)
 			return
 		}
 		if b.Version == 0 {
@@ -757,4 +834,35 @@ func validBoard(b BoardConfig) bool {
 		seen[c.ID] = true
 	}
 	return true
+}
+
+// milestoneIDRe keeps a milestone id usable as a one-word `milestone:` value.
+var milestoneIDRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+
+// invalidMilestones explains why a milestone list cannot be saved, or "".
+func invalidMilestones(ms []Milestone) string {
+	seen := make(map[string]bool, len(ms))
+	for _, m := range ms {
+		switch {
+		case !milestoneIDRe.MatchString(m.ID):
+			return "milestone id must be letters, digits, '.', '_' or '-'"
+		case seen[m.ID]:
+			return "milestone ids must be unique"
+		case strings.TrimSpace(m.Title) == "":
+			return "milestone title is required"
+		case m.Due != "" && !validDate(m.Due):
+			return "milestone due date must be YYYY-MM-DD"
+		case m.Start != "" && !validDate(m.Start):
+			return "milestone start date must be YYYY-MM-DD"
+		case m.Start != "" && m.Due != "" && m.Start > m.Due:
+			return "milestone start date must not be after its due date"
+		}
+		seen[m.ID] = true
+	}
+	return ""
+}
+
+func validDate(s string) bool {
+	_, err := time.Parse("2006-01-02", s)
+	return err == nil
 }

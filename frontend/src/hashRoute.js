@@ -7,6 +7,8 @@
 //                                "#" can only start the heading.
 //   #!board/ns[/path/to/note.md]  the task board, opened over that namespace
 //                                (and the note it was opened from, if any)
+//   #!milestones/ns[/id]          the board's milestones, or one milestone's page
+//                                (a link to share; the note underneath is not kept)
 //   #!stickies                   the full-screen sticky board
 //   #!chats[/ns/path/to/chat.md]  the chats view, optionally with one chat open
 //
@@ -21,6 +23,7 @@
 // become unreachable. A leading "!" cannot be one.
 export const STICKIES_ROUTE = '!stickies';
 export const BOARD_ROUTE = '!board';
+export const MILESTONES_ROUTE = '!milestones';
 // Chats span namespaces, so the ns/path here is the OPEN CHAT, not the note
 // underneath (the editor's note is left alone while the chats view is up).
 export const CHATS_ROUTE = '!chats';
@@ -56,6 +59,13 @@ export function parseRoute(hash) {
   if (h === BOARD_ROUTE || h.startsWith(BOARD_ROUTE + '/')) {
     return { ...parseNote(h.slice(BOARD_ROUTE.length + 1)), stickies: false, board: true };
   }
+  if (h.startsWith(MILESTONES_ROUTE + '/')) {
+    // ns/id: the id is one segment (letters, digits, '.', '_', '-'), so no path parsing.
+    const [rawNs, rawId] = h.slice(MILESTONES_ROUTE.length + 1).split('/');
+    if (rawNs) {
+      return { ns: safeDecode(rawNs), path: null, stickies: false, board: true, milestone: rawId ? safeDecode(rawId) : '' };
+    }
+  }
   return { ...parseNote(h), stickies: false, board: false };
 }
 
@@ -67,9 +77,12 @@ function formatNote(ns, path) {
 
 // The heading is a one-off: it is in a copied link and is consumed when the
 // note opens, so App never writes it back.
-export function formatRoute({ ns, path, stickies, board, chats, chat, heading }) {
+export function formatRoute({ ns, path, stickies, board, chats, chat, heading, milestone }) {
   if (stickies) return '#' + STICKIES_ROUTE;
   if (chats) return chat?.ns && chat?.path ? `#${CHATS_ROUTE}/${formatNote(chat.ns, chat.path)}` : '#' + CHATS_ROUTE;
+  if (board && ns && typeof milestone === 'string') {
+    return `#${MILESTONES_ROUTE}/${encodeURIComponent(ns)}${milestone ? '/' + encodeURIComponent(milestone) : ''}`;
+  }
   let note = '';
   if (ns) {
     note = encodeURIComponent(ns);

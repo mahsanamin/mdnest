@@ -6,6 +6,26 @@ All notable changes to mdnest are documented here.
 
 ## v4.8.13 (in progress)
 
+### Added
+
+- **Milestones on the task board, and who created and closed each task.** A
+  milestone groups tasks towards a goal over a period (start and due dates).
+  **Milestones**, next to List and Kanban, shows each one's progress (done
+  tasks plus the done sub-tasks of open ones) against the time elapsed, its
+  participants and its late or blocked tasks; each milestone has a page with
+  its own link (tasks and sub-tasks done, what needs attention, scope added
+  since the start, participants, tasks by column). Writers add, edit, close
+  and delete them there, and a task joins one with a `milestone:` field picked
+  in the task editor. Milestones live next to the columns in
+  `.mdnest/board.json`. Tasks now record `created-by`, `created` and
+  `completed` (UTC), written by the server; the card shows who created it and
+  when. Agents get `save_milestone` / `delete_milestone` and a `milestone`
+  field on the task tools.
+- **Task lists open on the board.** A note holding only tasks, or a
+  `.tasks.md` file, opens on the task board for that note instead of the
+  editor; **+ Tasks** in the sidebar creates one. Leaving it with **Editor**
+  is remembered for that note.
+
 ### Security
 
 - **`dompurify` 3.4.17**, the library that cleans note HTML and diagrams
