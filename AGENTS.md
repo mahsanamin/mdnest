@@ -1,6 +1,6 @@
 # mdnest - AI Context
 
-Privately-hosted Markdown notes app. Plain files on disk, Docker-based. Supports single-user (no database) and multi-user (PostgreSQL) modes.
+Self-hosted Markdown knowledge base for teams and their AI agents. Plain files on disk, Docker-based. Supports single-user (no database) and multi-user (PostgreSQL) modes.
 
 ## Quick Orientation
 
@@ -140,6 +140,19 @@ mdnest-server                # Server management CLI (start, stop, rebuild, rese
 setup.sh                     # Reads mdnest.conf, generates docker-compose.yml + .env
 mdnest.conf.sample           # Template config with MOUNT_ entries
 ```
+
+## Public wording (README, docs, website, release notes)
+
+mdnest is pitched as **"Your team and your AI agents, working from the same notes."**: a self-hosted Markdown knowledge base for developer teams who work with coding agents. A single developer can try it alone first, but teams are the main readers. The owner sets the audience and the pitch, so do not change either on your own.
+
+Every public sentence (this repo's `README.md`, the user-facing `docs/`, CHANGELOG entries, GitHub release notes, and the website) follows the writing standard in the website repo: `../mdnest-website/WRITING.md` ([on GitHub](https://github.com/mahsanamin/mdnest-website/blob/main/WRITING.md)). In short:
+
+- Plain English: short common words, one idea per sentence, no metaphors, no em or en dashes, no marketing words.
+- Say what the user gets, then the fact that proves it.
+- Promise only what the **released** code does. No time claims ("3 minutes"), no "one command", no "nothing leaves your server", no "built-in AI". `WRITING.md` has the full list and the wording to use instead.
+- Label features the basic install does not turn on: "Optional" (for example the task board, drawings, MCP) or "Needs team setup" (comments, presence, per-person access, groups, private chats).
+
+When a change here alters one of those defaults or what the server sends out, update the facts in `WRITING.md` in the same release. `md-ship` step 7 covers this.
 
 ## Key Conventions
 
@@ -310,6 +323,24 @@ tag (`MDNEST_BUILD_ROOT=<checkout of the tag>`).
 
 ## Testing
 
+**Three test levels: run the one that fits the step, not everything every
+time.** The entry point is `bash tests/check.sh --level <level>` (default
+`develop`). Balance accuracy and speed: no hour-long verification below ship.
+
+| Level | When | What runs | Target |
+|---|---|---|---|
+| `iterate` | while working on a branch | only what the change touches: `go vet` + `go test -race` for the changed backend packages, `npm test` if `frontend/` changed, `cli-unit.sh` if the CLI changed, and the feature's browser specs named in `MDNEST_E2E_SPECS` (add `MDNEST_E2E_HARNESS=collab` for two-user specs). Each once, no full suites | under 5 min |
+| `develop` | before merging a branch into develop | the pre-push fast tier, `go vet` + `go test -race` on the whole backend with Redis, shellcheck, and the e2e suites the files changed since `origin/develop` call for, each once, sharded. A spec whose flake was just fixed gets `MDNEST_E2E_ARGS="--repeat-each 3"`, not 10 | about 15 to 20 min |
+| `ship` | `md-ship`: a `release/*` or `main` push | the full gate, the only level that runs everything: every suite, compared with `origin/main`, recorded in `.git/mdnest-release-gate` for the hook. `bash tests/release-gate.sh` is the same thing. Upgrade checks when stored data changed stay a manual `md-ship` step | as long as it takes |
+
+At `develop` and `ship` the images are built once and the browser suites run
+in one lane beside everything else. The `@budget` timing tests run last,
+alone: always at `ship`, where a failure blocks; at `develop` only when the
+diff touches a `@budget` spec or the code it times (`BUDGET_CODE_PAT` in
+`tests/check.sh`), and there a failure is a warning that prints the machine's
+load, because those budgets react to load from other projects on the box. The pre-push hook is unchanged: it still refuses a `release/*` or
+`main` push of a tree the ship level did not pass.
+
 **Tiered, fully-local test strategy — no CI/remote needed.** All of it runs on the
 host via Docker; the pre-push hook (`.githooks/pre-push`) wires it into the
 release flow so nothing broken reaches `main`. Fast checks run on every push; the
@@ -341,6 +372,38 @@ override: `MDNEST_SKIP_E2E=1`.
     (login, tree, open/render a note, Live [Crepe] + Basic editors, search,
     create-via-UI). Installs Playwright + Chromium into `tests/browser/` on first
     run. Exit code 2 = prerequisites (docker/node) missing → the hook SKIPs it.
+- **Images are built once per tree, and the browser suites run in shards**
+  (FAST-1). Every harness gets its images from `tests/lib/e2e-images.sh`,
+  which tags them `mdnest-e2e-backend:<hash>` / `mdnest-e2e-frontend:<hash>`
+  from a hash of `backend/` (or `frontend/` plus the `mdnest` CLI) as the
+  working tree has it, uncommitted and untracked files included, and skips the
+  build when that tag exists. So the release gate and every suite in it share
+  one build, and two runs on different trees can never swap each other's
+  image (the old fixed `:test` tag allowed exactly that). Containers,
+  networks and notes folders carry the run's pid and shard number, so
+  harnesses can run side by side. `MDNEST_E2E_REBUILD=1` builds anyway;
+  `MDNEST_E2E_KEEP_IMAGES` (default 4) is how many tags `e2e_prune_images`
+  keeps. `e2e-browser.sh` and `e2e-collab-multi.sh` split their specs across
+  `MDNEST_E2E_SHARDS` stacks (default one per 3 CPUs, at most 3) with
+  `playwright test --shard=i/N`. Each shard is a whole stack of its own
+  (backend, Postgres where used, nginx, notes folder, accounts, CLI logins)
+  with one worker, so no two specs share a server, which keeps the isolation
+  the suite had on one stack: a spec that wipes the sticky board or relies on
+  the tree's layout is still alone on its server. `MDNEST_E2E_SHARDS=1` is
+  the old single-stack run. Each shard's traces go to
+  `tests/browser-results/shard-N` (all output is outside `tests/browser`, the folder Playwright walks for specs, or a shard can crash on another one's half-written folder). There are no test-only knobs that
+  shorten the app's poll intervals: the slow specs (`collab-idle`
+  and `cli-vs-typing`) exist to prove behaviour across those real
+  intervals.
+  Timing-budget tests (a fixed millisecond limit, like chat.spec.js "typing
+  stays fast in a long chat") carry `{ tag: '@budget' }`. The shards skip
+  them and one stack runs them alone afterwards (`MDNEST_E2E_BUDGET`:
+  `after` is the default, `skip`, `only`, or `inline` for no split), because
+  a budget measured while other shards use the CPU fails for reasons that
+  have nothing to do with the app. `tests/check.sh` runs them last, after
+  all of its parallel work (see the levels table above). Tag any new test
+  that compares a duration with a fixed number, and add the code it times to
+  `BUDGET_CODE_PAT` in `tests/check.sh`.
 - **Adding a regression test is part of fixing a bug** (see `md-fix-bugs`): add a
   check to the layer that would have caught it — a CLI-behaviour bug → a
   `cli-smoke-test.sh` assertion; a parser/fallback bug → a `cli-unit.sh` case; a

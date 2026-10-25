@@ -73,6 +73,15 @@ var (
 	// current saver has not typed for this long. Two people typing at once
 	// do not flip it on every keystroke.
 	yjsSaverIdle = 5 * time.Second
+	// yjsSaverStuck: an update no save has confirmed this long after it
+	// arrived means the saver is not saving (a socket the tab lost but the
+	// server still holds, a frozen or throttled background tab). The role
+	// then moves to another writer, whose tab saves the room's text. Typing
+	// alone never moved it here: a tab that reconnected within yjsSaverIdle
+	// of its old socket's last edit left the old socket as the saver, and
+	// nothing was ever written (the file kept the old text, and the room
+	// showed the new text on every return until it was dropped).
+	yjsSaverStuck = 10 * time.Second
 	// yjsUnsavedGrace: how long an empty room with unsaved updates is kept,
 	// so a reload or a quick return can still save them.
 	yjsUnsavedGrace = 2 * time.Minute
@@ -86,6 +95,8 @@ type yjsEntry struct {
 	own  int   // 1-based count of `from`'s own updates up to this one
 	// saved: a yjs-saved has confirmed the file holds this update.
 	saved bool
+	// at: when it arrived (for a snapshot, its oldest unsaved update's).
+	at time.Time
 }
 
 // roomUID is the budget bucket of a snapshot. A snapshot holds everyone's
@@ -112,6 +123,17 @@ type yjsRoom struct {
 	snapSeq   uint64 // ack of the last snapshot; a new one must not go back
 	asked     bool
 	freeTimer *time.Timer
+	// stuckTimer runs while the log holds an unsaved update (saverCheck).
+	stuckTimer *time.Timer
+	// stuck: connections that lost the role for not saving. They are not
+	// handed it again until they send something (an update, a yjs-saved),
+	// so the role does not go back and forth with a socket that is gone.
+	stuck map[*Conn]bool
+	// saverSince: when the current saver got the role. A saver is judged
+	// from then, not from when an update arrived: after everyone dropped and
+	// came back, the unsaved updates are old, and the new saver (merging the
+	// file before it binds) would lose the role at once.
+	saverSince time.Time
 }
 
 type yjsControl struct {
@@ -126,7 +148,10 @@ type yjsControl struct {
 
 // EnableSharedEditing turns on the Yjs rooms. Off, every yjs message is
 // ignored and clients keep the whole-file path.
-func (h *Hub) EnableSharedEditing() { h.shared = true }
+func (h *Hub) EnableSharedEditing() {
+	h.shared = true
+	h.saverStuck = yjsSaverStuck
+}
 
 // SharedEditing reports whether Yjs rooms are on.
 func (h *Hub) SharedEditing() bool { return h != nil && h.shared }
@@ -183,6 +208,7 @@ func (h *Hub) YjsHello(ns, path string, c *Conn) {
 	becameSaver := false
 	if r.saver == nil && !c.ReadOnly {
 		r.saver = c
+		r.saverSince = time.Now()
 		becameSaver = true
 	}
 	c.SendReliable(r.stateFrame())
@@ -251,7 +277,9 @@ func (h *Hub) YjsFrame(ns, path string, c *Conn, data []byte) {
 		r.seq++
 		m.ownSent++
 		m.lastUpdate = time.Now()
-		r.log = append(r.log, yjsEntry{seq: r.seq, data: upd, from: c, uid: c.User.ID, own: m.ownSent})
+		r.log = append(r.log, yjsEntry{seq: r.seq, data: upd, from: c, uid: c.User.ID, own: m.ownSent, at: m.lastUpdate})
+		delete(r.stuck, c)
+		h.watchSaverLocked(key, r)
 		r.bytes += len(upd)
 		r.seeded = true
 		r.seeder = nil
@@ -298,12 +326,16 @@ func (h *Hub) YjsFrame(ns, path string, c *Conn, data []byte) {
 		}
 		snap := append([]byte(nil), data[9:]...)
 		snapSaved := true
+		var snapAt time.Time
 		for _, e := range r.log {
 			if e.seq <= ack && !e.saved {
+				if snapSaved || e.at.Before(snapAt) {
+					snapAt = e.at
+				}
 				snapSaved = false
 			}
 		}
-		kept := []yjsEntry{{seq: ack, data: snap, uid: roomUID, saved: snapSaved}}
+		kept := []yjsEntry{{seq: ack, data: snap, uid: roomUID, saved: snapSaved, at: snapAt}}
 		size := len(snap)
 		var dropped []yjsEntry
 		for _, e := range r.log {
@@ -351,11 +383,63 @@ func (r *yjsRoom) pickSaver(typist *Conn) {
 	r.setSaver(typist)
 }
 
+// watchSaverLocked makes sure saverCheck runs while the room holds an update
+// no save has confirmed. Caller holds ymu.
+func (h *Hub) watchSaverLocked(key string, r *yjsRoom) {
+	if r.stuckTimer != nil {
+		return
+	}
+	room := r
+	r.stuckTimer = time.AfterFunc(h.saverStuck, func() { h.saverCheck(key, room) })
+}
+
+// saverCheck moves the saver role away from a saver that has not saved an
+// update yjsSaverStuck after it arrived, to the writer who was active most
+// recently. It runs again while anything stays unsaved, so a writer who
+// comes back to the note later still gets the role and saves.
+func (h *Hub) saverCheck(key string, r *yjsRoom) {
+	h.ymu.Lock()
+	defer h.ymu.Unlock()
+	r.stuckTimer = nil
+	if h.rooms[key] != r {
+		return
+	}
+	var oldest time.Time
+	for _, e := range r.log {
+		if !e.saved && (oldest.IsZero() || e.at.Before(oldest)) {
+			oldest = e.at
+		}
+	}
+	if oldest.IsZero() {
+		return // all saved; the next update starts the watch again
+	}
+	if r.saverSince.After(oldest) {
+		oldest = r.saverSince
+	}
+	wait := h.saverStuck - time.Since(oldest)
+	if wait <= 0 {
+		if next := r.latestWritableExcept(r.saver); next != nil {
+			log.Printf("collab: %s: the saver has not saved for %s; handing the role to %s", key, h.saverStuck, next.User.Username)
+			if r.saver != nil {
+				if r.stuck == nil {
+					r.stuck = make(map[*Conn]bool)
+				}
+				r.stuck[r.saver] = true
+			}
+			r.setSaver(next)
+		}
+		wait = h.saverStuck
+	}
+	room := r
+	r.stuckTimer = time.AfterFunc(wait, func() { h.saverCheck(key, room) })
+}
+
 func (r *yjsRoom) setSaver(c *Conn) {
 	old := r.saver
 	r.saver = c
 	if old != c {
 		r.asked = false // a pending compaction request went to the old saver
+		r.saverSince = time.Now()
 	}
 	if old != nil && old != c {
 		if _, still := r.members[old]; still {
@@ -383,6 +467,7 @@ func (h *Hub) YjsSaved(ns, path string, c *Conn, recv uint64, own int) {
 	if _, ok := r.members[c]; !ok {
 		return
 	}
+	delete(r.stuck, c)
 	for i := range r.log {
 		e := &r.log[i]
 		if e.seq <= recv || (e.from == c && e.own <= own) {
@@ -415,6 +500,7 @@ func (h *Hub) YjsLeave(ns, path string, c *Conn) {
 		return
 	}
 	delete(r.members, c)
+	delete(r.stuck, c)
 	if r.seeder == c {
 		r.seeder = nil
 		if !r.seeded {
@@ -464,11 +550,15 @@ func (r *yjsRoom) oldestWritable() *Conn {
 	return best
 }
 
-func (r *yjsRoom) latestWritable() *Conn {
+func (r *yjsRoom) latestWritable() *Conn { return r.latestWritableExcept(nil) }
+
+// latestWritableExcept is latestWritable leaving out skip and every
+// connection that lost the role for not saving.
+func (r *yjsRoom) latestWritableExcept(skip *Conn) *Conn {
 	var best *Conn
 	var at time.Time
 	for c, m := range r.members {
-		if c.ReadOnly {
+		if c.ReadOnly || c == skip || r.stuck[c] {
 			continue
 		}
 		t := m.lastUpdate
@@ -614,6 +704,10 @@ func SharedEditingEnabled(setting, role string) bool {
 // dropRoomLocked removes a room and returns its bytes to the server budget.
 // Caller holds ymu.
 func (h *Hub) dropRoomLocked(key string, r *yjsRoom) {
+	if r.stuckTimer != nil {
+		r.stuckTimer.Stop()
+		r.stuckTimer = nil
+	}
 	if h.rooms[key] == r {
 		delete(h.rooms, key)
 		for _, e := range r.log {

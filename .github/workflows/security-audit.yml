@@ -87,5 +87,7 @@ jobs:
             install-cli.sh \
             .githooks/pre-push \
             tests/release-gate.sh \
+            tests/check.sh \
+            tests/lib/e2e-images.sh \
             scripts/apply-main-branch-protection.sh \
             scripts/apply-develop-branch-protection.sh

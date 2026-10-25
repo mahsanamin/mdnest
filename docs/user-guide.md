@@ -83,6 +83,10 @@ The panel has three tabs for access, and each answers one question:
 
 Access from an IdP (OIDC) group is read from the sign-in token, so it is not part of **Can reach**.
 
+**API Tokens** (super-admins): every person's API tokens, with the owner, so you can see who connects
+CLI, MCP or API clients and **Revoke** a token someone no longer needs. Your own tokens stay in
+Settings → **API Tokens**, which only ever lists yours.
+
 ### Adding a person
 
 Admin panel → **People** → **+ Add person**:
@@ -332,7 +336,7 @@ When live collab is on, mdnest opens a WebSocket from your browser to the backen
 - **Conflict banner.** Only where shared editing does not apply (drawings, chats, decks, Basic mode alone, or an install with `SHARED_EDITING=false`): if someone else saved the note while you had unsaved edits, your next save is refused instead of overwriting theirs, and a banner offers to reload.
 - **Tree refresh.** When someone else creates / renames / deletes a file in your namespace, your sidebar updates within a second without a manual refresh. This covers changes made *through mdnest*; a write that lands straight on the filesystem (a git-sync pull, an editor on the host) sends no event, and is picked up by the sidebar's own 30-second refresh instead — that refresh runs whether or not live collab is on.
 
-Live collab is gated on the WebSocket hub being up. If `/api/ws` is unreachable (server restart, proxy hiccup), the editor still works — you just lose the presence + cursor + auto-tree-refresh features until the connection reconnects (the app retries with backoff).
+Live collab is gated on the WebSocket hub being up. If `/api/ws` is unreachable (server restart, proxy hiccup, a network that blocks websockets), the editor still works and saves as usual: you just lose the presence, cursors, typing together and auto-tree-refresh until the connection is back (the app retries with backoff). The small dot in the toolbar says which: green "Live", or grey "Not live" after a couple of seconds without a connection. A note never waits for the connection before you can type.
 
 In single-user mode or when `ENABLE_LIVE_COLLAB=false`, none of this loads — there's nothing to collaborate on.
 

@@ -236,7 +236,8 @@ Routes are registered on a standard `http.ServeMux` in `main.go`. The set varies
 | `GET /api/config` | `ConfigHandler.HandleConfig` | Unauthenticated. Tells the frontend what mode + provider + flags are live. |
 | `POST /api/auth/login` | `authHandler.Login` | Username/password (local) or `{idToken}` (Firebase). |
 | `POST /api/auth/change-password` | `authHandler.ChangePassword` | Auth required. |
-| `GET/POST/DELETE /api/auth/tokens` | `tokenHandler.HandleTokens` | API token CRUD. |
+| `GET/POST/DELETE /api/auth/tokens` | `tokenHandler.HandleTokens` | Your own API tokens (superadmins included). |
+| `GET/DELETE /api/admin/tokens` | `tokenHandler.HandleAdminTokens` | Superadmin: everyone's API tokens with their owner, revoke any. |
 | `GET /api/namespaces` | `nsHandler.ListNamespaces` | Filtered through PermissionChecker in multi mode. |
 | `GET /api/tree` | `treeHandler.GetTree` | Per-ns access required (multi mode). |
 | `* /api/note` | `noteHandler.Handle` | GET = read, POST/PUT/PATCH = write, DELETE = delete. |

@@ -844,6 +844,10 @@ func main() {
 		mux.Handle("/api/admin/groups/members", authMiddleware.Wrap(middleware.RequireSuperAdmin(http.HandlerFunc(groupsHandler.HandleMembers))))
 		mux.Handle("/api/admin/groups/grants", authMiddleware.Wrap(middleware.RequireSuperAdmin(http.HandlerFunc(groupsHandler.HandleGrants))))
 
+		// Everyone's API tokens, with their owner (Admin panel). Settings only
+		// lists and revokes the caller's own tokens, superadmins included.
+		mux.Handle("/api/admin/tokens", authMiddleware.Wrap(middleware.RequireSuperAdmin(http.HandlerFunc(tokenHandler.HandleAdminTokens))))
+
 		// Users endpoint: GET is RequireAdmin (handler scopes the list);
 		// PUT/DELETE (role change, user delete) are SuperAdmin-only —
 		// dispatched inside HandleUsers, but we lock the route shape too

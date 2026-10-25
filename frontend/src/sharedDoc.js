@@ -23,10 +23,22 @@
 // Changes from outside the room (git-sync, the CLI, an agent, a restore) are
 // merged by the saver: a three-way merge of base, the room's text and the
 // file, applied to the editor as an ordinary edit, so it reaches everyone.
+//
+// The room never blocks typing (v4.8.13). The editor is editable from the
+// start and saves the normal way (App's autosave) until the room is there.
+// Then the session binds to the editor AS IT IS at that moment: an empty room
+// is seeded from the editor's own document; a room that already has text is
+// joined at once if this tab has nothing of its own, and otherwise once the
+// room holds the same text as the editor (the room's saver merges this tab's
+// normal saves from the file; merging here as well kept a line twice when
+// the room had not caught up yet). When the socket goes
+// away, the editor is unbound again and the app takes over saving, starting
+// from the room's last save; a later rejoin starts from a fresh document, so
+// nothing this tab merged through the file is replayed into the room twice.
 import * as Y from 'yjs';
 import { Awareness, encodeAwarenessUpdate, applyAwarenessUpdate, removeAwarenessStates } from 'y-protocols/awareness';
 import { collab, collabServiceCtx } from '@milkdown/plugin-collab';
-import { undo as yUndo, redo as yRedo } from 'y-prosemirror';
+import { undo as yUndo, redo as yRedo, prosemirrorToYXmlFragment, yXmlFragmentToProseMirrorRootNode, updateYFragment } from 'y-prosemirror';
 import { prosePluginsCtx } from '@milkdown/core';
 import { saveNote, getNote, saveNoteOnLeave } from './api.js';
 import {
@@ -48,24 +60,20 @@ const OUTSIDE_GRACE = 1200;
 // room's text, so the saver does the check here instead, as a merge.)
 const OUTSIDE_POLL = 20000;
 const REMOTE = 'remote';
-// What the editor tells the person when shared editing stops for them.
-const ERROR_TEXT = {
-  'room-full': 'Too many people are in this note to edit it together. It is read-only for you; reload to try again.',
-  'no-write': 'You can no longer save this note.',
-  'server-full': 'The server is holding too many shared notes right now. This note is read-only for you; reload in a while.',
-  'room-too-big': 'Shared editing stopped for this note (it grew too large). Reload to continue.',
-};
-const errorEvent = (error) => ({ type: 'error', error, message: ERROR_TEXT[error] || ERROR_TEXT['room-too-big'] });
+// The one shared editing problem the person is told about: they lost write
+// access. Every other problem (a full room, the connection) goes back to the
+// normal way of saving, quietly.
+const NO_WRITE = { type: 'error', error: 'no-write', message: 'You can no longer save this note.' };
+const isHistory = (p) => String(p.key || '').startsWith('history$');
 const META = 'meta';
 
 let nextId = 1;
 
 export class SharedSession {
-  // initialText: what this tab shows (it seeds the room if it is first).
-  // initialBase/initialEtag: the file as last loaded or saved. They differ
-  // only if this tab had text it could not save before shared editing
-  // started; the room then starts out unsaved and the saver writes it.
-  constructor({ client, ns, path, initialText, initialBase, initialEtag, canWrite, user, onEvent }) {
+  // prepare(): { base, etag }, the file as the app last loaded or saved it,
+  // asked for at the moment the editor joins the room.
+  // saveNow(): save the normal way now (a saver waiting to join, below).
+  constructor({ client, ns, path, canWrite, user, onEvent, prepare, saveNow }) {
     this.id = nextId++;
     // For LiveEditorCrepe, which must not import this chunk itself.
     this.collabPlugin = collab;
@@ -74,27 +82,27 @@ export class SharedSession {
     this.client = client;
     this.ns = ns;
     this.path = path;
-    this.initialText = initialText || '';
-    this.initialBase = typeof initialBase === 'string' ? initialBase : this.initialText;
-    this.initialEtag = initialEtag || null;
     this.canWrite = !!canWrite;
     this.onEvent = onEvent || (() => {});
-    this.initial = splitFrontMatter(this.initialText);
+    this.prepare = prepare || (() => ({ base: '', etag: null }));
+    this.saveNow = saveNow || (() => {});
+    // The file text this session started from (or that the room had saved
+    // when the socket went). A tab still on it, with nothing typed, has
+    // nothing the room lacks.
+    this.startBase = this.prepare().base;
+    this.user = user || { name: 'someone', color: '#89b4fa' };
 
-    this.doc = new Y.Doc();
-    this.fragment = this.doc.getXmlFragment('prosemirror');
-    this.fm = this.doc.getText('frontmatter');
-    this.meta = this.doc.getMap('meta');
-    this.awareness = new Awareness(this.doc);
-    this.awareness.setLocalStateField('user', user || { name: 'someone', color: '#89b4fa' });
-
-    this.lastSeq = 0;
-    this.ownSent = 0;
     this.saver = false;
     this.seed = false;
     this.ready = false;
     this.bound = false;
     this.closed = false;
+    // Bumped every time the session lets go of the editor (the socket went).
+    // Work that awaited something (a file check, a save, a saver's join)
+    // compares it after the await and stops if it changed: applying a file
+    // check that started while bound to an editor that is now saving the
+    // normal way put the file's old text over the person's typing.
+    this.gen = 0;
     this.disabled = false;
     this.editor = null;
     this.ownEtags = new Set();
@@ -112,28 +120,57 @@ export class SharedSession {
     this._onDocUpdate = this._onDocUpdate.bind(this);
     this._onAwareness = this._onAwareness.bind(this);
     this._onPageHide = this._onPageHide.bind(this);
-    this.doc.on('update', this._onDocUpdate);
-    this.awareness.on('update', this._onAwareness);
+    this._newDoc();
     window.addEventListener('pagehide', this._onPageHide);
 
     client.shared = {
       owner: this,
       onBinary: (u8) => this._onBinary(u8),
-      onOpen: () => this._hello(),
+      onJoined: () => this._hello(),
+      onClosed: () => this._socketGone(),
     };
-    if (client.connected) this._hello();
+    if (client.joinedTo(ns, path)) this._hello();
+  }
+
+  // A fresh, empty document: at the start and after the socket went away.
+  _newDoc() {
+    if (this.doc) {
+      this.awareness.off('update', this._onAwareness);
+      this.awareness.destroy();
+      this.doc.off('update', this._onDocUpdate);
+      this.doc.destroy();
+    }
+    this.doc = new Y.Doc();
+    this.fragment = this.doc.getXmlFragment('prosemirror');
+    this.fm = this.doc.getText('frontmatter');
+    this.meta = this.doc.getMap('meta');
+    this.awareness = new Awareness(this.doc);
+    this.awareness.setLocalStateField('user', this.user);
+    this.lastSeq = 0;
+    this.ownSent = 0;
+    this.helloSent = false;
+    this.doc.on('update', this._onDocUpdate);
+    this.awareness.on('update', this._onAwareness);
   }
 
   // --- The editor ------------------------------------------------------------
 
-  // Called by LiveEditorCrepe once Crepe is created (with `collabPlugin`
-  // already .use()d). api: { editor, serialize(), applyBody(markdown) }.
+  // Called by LiveEditorCrepe once Crepe is created with `collabPlugin`
+  // .use()d. api: { editor, frontMatter(), setFrontMatter(fm), serialize(),
+  // normalize(fullText), seedDoc(), getSelection(), setSelection(sel),
+  // applyBody(markdown) }.
   attachEditor(api) {
     this.editor = api;
     this._maybeBind();
   }
 
   detachEditor() {
+    // The editor is going away (another note, Basic): nothing to hand over.
+    if (this.bound) {
+      this._confirmSaved();
+      this._unbindEditor();
+    }
+    this.bound = false;
     this.editor = null;
   }
 
@@ -143,6 +180,7 @@ export class SharedSession {
   }
 
   setUser(user) {
+    this.user = user;
     const cur = this.awareness.getLocalState()?.user;
     if (!cur || cur.id !== user.id || cur.name !== user.name || cur.color !== user.color) {
       this.awareness.setLocalStateField('user', user);
@@ -151,19 +189,52 @@ export class SharedSession {
 
   // The whole file as the room has it now.
   fullMarkdown() {
-    if (!this.editor) return null;
+    if (!this.editor || !this.bound) return null;
     return joinFrontMatter(this.fm.toString(), this.editor.serialize());
   }
 
-  _maybeBind() {
-    if (this.bound || !this.editor || !this.ready || this.closed) return;
+  // joined: set by _saverJoin, which already put the merged text in the room.
+  _maybeBind(joined = null) {
+    if (this.bound || !this.editor || !this.ready || this.closed || this.disabled) return;
     const seeding = this.seed && this.fragment.length === 0;
     if (!seeding && this.fragment.length === 0) return; // wait for the seed
-    const { editor } = this.editor;
-    editor.action((ctx) => {
+    const ed = this.editor;
+    // What the editor holds now, typed on the normal path or not, and what
+    // the file held when the app last saved or loaded it.
+    const { base, etag } = this.prepare();
+    const oursFm = ed.frontMatter();
+    const ours = joinFrontMatter(oursFm, ed.serialize());
+    const normBase = ed.normalize(base);
+    const clean = ours === base || ours === normBase;
+    if (!seeding && !joined && !(clean && base === this.startBase)) {
+      // This tab has text of its own (typed, or saved the normal way while
+      // apart from the room). It keeps saving the normal way, the room's
+      // saver merges those saves from the file, and the editor joins once
+      // the room holds the same text, so nothing is merged twice. If this
+      // tab IS the saver (everyone was away, and it came back first), nobody
+      // else will merge the file: it does, before it joins.
+      if (this.saver && this.canWrite) {
+        this._saverJoin();
+        return;
+      }
+      let room = null;
+      try { room = joinFrontMatter(this.fm.toString(), ed.serializeNode(yXmlFragmentToProseMirrorRootNode(this.fragment, ed.schema()))); } catch { room = null; }
+      if (room !== ours) {
+        this._waitForRoom();
+        return;
+      }
+    }
+    this._stopWaiting();
+    const sel = ed.getSelection();
+    this.binding = true;
+    ed.editor.action((ctx) => {
       // Undo is per person through Yjs' undo manager; ProseMirror's own
-      // history would undo other people's edits.
-      ctx.update(prosePluginsCtx, (ps) => ps.filter((p) => !String(p.key || '').startsWith('history$')));
+      // history would undo other people's edits. Kept, to put back when the
+      // editor is unbound.
+      ctx.update(prosePluginsCtx, (ps) => {
+        this.history = ps.filter(isHistory);
+        return ps.filter((p) => !isHistory(p));
+      });
       const svc = ctx.get(collabServiceCtx);
       svc.bindDoc(this.doc).setAwareness(this.awareness);
       svc.mergeOptions({
@@ -176,36 +247,175 @@ export class SharedSession {
         },
       });
       if (seeding) {
+        // The room starts as exactly the document on screen (minus what
+        // only the editor adds, see seedDoc), so binding changes nothing
+        // the person sees and the caret stays where it is.
         this.doc.transact(() => {
-          if (this.initial.frontMatter) this.fm.insert(0, this.initial.frontMatter);
+          if (oursFm) this.fm.insert(0, oursFm);
+          prosemirrorToYXmlFragment(ed.seedDoc(), this.fragment);
+          if (this.fragment.length === 0) {
+            // An empty note still needs one block, or nobody else can tell
+            // the room was seeded.
+            this.fragment.insert(0, [new Y.XmlElement('paragraph')]);
+          }
         });
-        svc.applyTemplate(this.initial.body, () => true);
-        if (this.fragment.length === 0) {
-          // An empty note still needs one block, or nobody else can tell
-          // the room was seeded.
-          this.fragment.insert(0, [new Y.XmlElement('paragraph')]);
-        }
       }
       svc.connect();
     });
+    this.binding = false;
     this.bound = true;
     this.seed = false;
     if (seeding) {
-      // Record what "unchanged" serializes to once the editor shows the
-      // seeded document (next frames), then tell the server this state is
-      // the file's.
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        if (this.closed) return;
-        const md = this.fullMarkdown();
-        this.doc.transact(() => {
-          this._setAgreed(this.initialEtag, this.initialBase, md, this.initialBase !== this.initialText);
-        }, META);
-        if (this.initialBase === this.initialText) this._sendSaved(this.lastSeq, this.ownSent);
-        else if (this.saver) this._scheduleSave(0);
-      }));
+      // What "unchanged" serializes to, and whether the room starts with
+      // text the file does not have. Told to the server at once, so leaving
+      // the note straight away leaves nothing unsaved behind.
+      const md = this.fullMarkdown();
+      this.doc.transact(() => {
+        this._setAgreed(etag, base, clean ? md : normBase, !clean);
+      }, META);
+      if (clean) this._sendSaved(this.lastSeq, this.ownSent);
+      else if (this.saver) this._scheduleSave(0);
+    } else if (joined) {
+      // The room now holds the file merged in: that file is what the room
+      // and the file agree on.
+      this.doc.transact(() => this._setAgreed(joined.etag, joined.text, joined.textMd, joined.dirty), META);
+      if (joined.dirty) this._scheduleSave(0);
+      else this._sendSaved(this.lastSeq, this.ownSent);
     }
+    ed.setSelection(sel);
     this.onEvent({ type: 'bound' });
     if (this.saver) this._becameSaver();
+  }
+
+  // Updates the editor made on its own since the last save (heading ids, a
+  // normalized table) change nothing in the file. Before going, the saver
+  // says the room matches the file, so the server does not keep it as
+  // unsaved work ("the last person left with unsaved updates").
+  _confirmSaved() {
+    if (this.bound && this.saver && this.canWrite && !this.left && !this.dirty()) {
+      this._sendSaved(this.lastSeq, this.ownSent);
+    }
+  }
+
+  // The saver, apart, with text of its own. It joins at the first moment all
+  // of that text is saved: it reads the file, merges it with the room (the
+  // three-way merge every saver does with an outside change), writes the
+  // result into the room's document WITHOUT the editor (updateYFragment
+  // changes only what differs), and then binds. The room then already holds
+  // everything on screen, so binding takes nothing away from the person, and
+  // a keystroke cannot land on stale text: the editor is never bound to a
+  // room that lacks what it shows.
+  async _saverJoin() {
+    this._waitForRoom(); // checked again until it binds
+    if (this.joiningSaver) return;
+    const ed = this.editor;
+    const { base } = this.prepare();
+    const ours = joinFrontMatter(ed.frontMatter(), ed.serialize());
+    if (ours !== base && ours !== ed.normalize(base)) {
+      // Not all saved yet (typing, or a save on its way): save the normal
+      // way now and look again.
+      this.saveNow();
+      return;
+    }
+    this.joiningSaver = true;
+    const gen = this.gen;
+    let file = null;
+    try { file = await getNote(this.ns, this.path); } catch { file = null; }
+    this.joiningSaver = false;
+    if (!file || this.closed || gen !== this.gen || this.bound || this.disabled || !this.saver || !this.ready || this.editor !== ed) return;
+    // Typed meanwhile, or another save landed: the next round.
+    if (joinFrontMatter(ed.frontMatter(), ed.serialize()) !== ours || this.prepare().base !== base) return;
+    let roomText;
+    try {
+      roomText = joinFrontMatter(this.fm.toString(), ed.serializeNode(yXmlFragmentToProseMirrorRootNode(this.fragment, ed.schema())));
+    } catch { return; }
+    const agreed = this.meta.get('hasBase') ? (this.meta.get('base') || '') : file.text;
+    const merged = mergeThreeWay(agreed, roomText, file.text);
+    // Usually the merge is exactly what is on screen (the file holds this
+    // tab's text and the room had nothing else); then the editor's own
+    // document goes in, and nothing moves at all.
+    const onScreen = merged === ours || ed.normalize(merged) === ours;
+    const split = splitFrontMatter(merged);
+    const node = onScreen ? ed.seedDoc() : ed.parseDoc(split.body);
+    if (!node) return;
+    const fmWant = onScreen ? ed.frontMatter() : split.frontMatter;
+    this.binding = true;
+    try {
+      this.doc.transact(() => {
+        if (this.fm.toString() !== fmWant) {
+          this.fm.delete(0, this.fm.length);
+          if (fmWant) this.fm.insert(0, fmWant);
+        }
+        updateYFragment(this.doc, this.fragment, node, { mapping: new Map(), isOMark: new Map() });
+      });
+    } finally {
+      this.binding = false;
+    }
+    const fileMd = ed.normalize(file.text);
+    this._maybeBind({ etag: file.etag, text: file.text, textMd: fileMd, dirty: merged !== file.text && merged !== fileMd });
+  }
+
+  // Check again shortly: the room and the editor converge through the file.
+  _waitForRoom() {
+    if (!this.waitTimer) this.waitTimer = setInterval(() => this._maybeBind(), 400);
+  }
+
+  _stopWaiting() {
+    if (this.waitTimer) clearInterval(this.waitTimer);
+    this.waitTimer = null;
+  }
+
+  // Take the editor off the room; it keeps its document and its history.
+  _unbindEditor() {
+    const ed = this.editor;
+    this.bound = false;
+    if (!ed) return;
+    let sel = null;
+    try { sel = ed.getSelection(); } catch { /* the editor is being destroyed */ }
+    try {
+      ed.editor.action((ctx) => {
+        const history = this.history || [];
+        if (history.length) ctx.update(prosePluginsCtx, (ps) => ps.concat(history.filter((h) => !ps.includes(h))));
+        ctx.get(collabServiceCtx).disconnect();
+      });
+      // Same document, so the same caret, and the keyboard stays here.
+      if (sel) ed.setSelection(sel);
+    } catch { /* the editor is being destroyed */ }
+    this.history = null;
+  }
+
+  // The socket closed or moved off this note. While bound, the editor goes
+  // back to saving the normal way, from what the room last saved, and the
+  // room's document is dropped: the next join starts from a fresh one.
+  _socketGone() {
+    if (this.closed) return;
+    this.gen += 1;
+    const wasBound = this.bound;
+    let handover = null;
+    if (wasBound) {
+      const text = this.fullMarkdown();
+      const base = this.meta.get('base');
+      this.startBase = typeof base === 'string' ? base : text;
+      handover = {
+        type: 'unbound',
+        base: typeof base === 'string' ? base : text,
+        etag: this.meta.get('etag') || null,
+        text: text !== null && !this._unchanged(text) ? text : (typeof base === 'string' ? base : text),
+      };
+      this._unbindEditor();
+    }
+    this._cancelSave();
+    this._stopPoll();
+    this._stopWaiting();
+    this.bound = false;
+    this.ready = false;
+    this.seed = false;
+    this.saver = false;
+    this.owners.clear();
+    this._newDoc();
+    // Only for the note still open: a socket that moved on to another note
+    // means this session is about to be destroyed.
+    if (handover && this.client.ns === this.ns && this.client.path === this.path) this.onEvent(handover);
   }
 
   // --- Wire ------------------------------------------------------------------
@@ -213,8 +423,20 @@ export class SharedSession {
   _hello() {
     // Only ever on a socket for this note: the client may still be on the
     // previous note's socket when the session is created.
-    if (this.closed || this.left || this.client.ns !== this.ns || this.client.path !== this.path) return;
-    this.client.sendJSON({ type: 'yjs-hello' });
+    if (this.closed || this.left || this.disabled || !this.client.joinedTo(this.ns, this.path)) return;
+    if (this.bound || this.helloSent) return;
+    this.helloSent = this.client.sendJSON({ type: 'yjs-hello' });
+  }
+
+  // Which step a session that has not bound is on, for a support report
+  // (the app logs it to the console; it never blocks or tells the person).
+  whyUnbound() {
+    if (this.bound) return null;
+    if (!this.client.connected) return 'no-connection';
+    if (!this.client.joinedTo(this.ns, this.path)) return 'no-join';
+    if (!this.ready) return this.helloSent ? 'no-reply' : 'no-hello';
+    if (!this.editor) return 'no-editor';
+    return 'no-seed';
   }
 
   _sendSaved(recv, own) {
@@ -249,9 +471,17 @@ export class SharedSession {
         }
         break;
       case 'yjs-error':
+        // The room cannot take this tab (too many people, too big, a missing
+        // note). Edit the normal way instead, for the rest of this note's
+        // visit; the reason goes to the console, not to a notice.
+        if (msg.error === 'missing') {
+          this.disabled = true;
+          this.onEvent({ type: 'missing' });
+          break;
+        }
+        console.warn(`mdnest: shared editing stopped for this note (${msg.error}); saving the normal way`);
+        this._socketGone();
         this.disabled = true;
-        this._cancelSave();
-        this.onEvent(errorEvent(msg.error));
         break;
       case 'yjs-closed':
         this.onEvent({ type: 'closed', reason: msg.reason });
@@ -297,7 +527,9 @@ export class SharedSession {
 
   _onDocUpdate(update, origin) {
     if (this.closed || this.left) return;
-    if (origin !== REMOTE && this.canWrite && !this.disabled) this._sendUpdate(update);
+    // Local updates come only from the bound editor (or the seed being put
+    // in); taking the editor off the room must not send anything.
+    if (origin !== REMOTE && this.canWrite && !this.disabled && (this.bound || this.binding)) this._sendUpdate(update);
     if (this.saver && origin !== META) this._scheduleSave();
   }
 
@@ -387,12 +619,14 @@ export class SharedSession {
     return md !== null && !this._unchanged(md);
   }
 
-  async _save() {
+  // anyTab: save even though this tab is not the saver (leaving the note).
+  async _save({ anyTab = false } = {}) {
     if (this.saving) { this.savePending = true; return this.saving; }
-    if (!this.saver || this.closed || this.disabled || !this.bound || !this.meta.get('hasBase')) return undefined;
+    if ((!this.saver && !anyTab) || this.closed || this.disabled || !this.bound || !this.meta.get('hasBase')) return undefined;
     const md = this.fullMarkdown();
     if (md === null) return undefined;
     const recv = this.lastSeq;
+    const gen = this.gen;
     const own = this.ownSent;
     if (this._unchanged(md)) {
       this._sendSaved(recv, own);
@@ -407,7 +641,8 @@ export class SharedSession {
     this.saving = (async () => {
       try {
         const res = await saveNote(this.ns, this.path, md, this.meta.get('etag'));
-        if (this.closed) return;
+        // The save landed; the room it was for is gone if gen moved.
+        if (this.closed || gen !== this.gen) return;
         if (res.etag) this.ownEtags.add(res.etag);
         const untouched = this.ownSent === own;
         this._setAgreed(res.etag || null, md, md, false);
@@ -416,7 +651,10 @@ export class SharedSession {
         this._sendSaved(recv, untouched ? this.ownSent : own);
         this.onEvent({ type: 'saved', text: md, etag: res.etag });
       } catch (e) {
-        if (this.closed) return;
+        if (this.closed || gen !== this.gen) return;
+        // Not the saver: the saver wrote first (or an outside change did) and
+        // merges the file into the room itself. Its text has ours in it.
+        if (e.status === 409 && !this.saver) return;
         if (e.status === 409) {
           await this._checkOutside();
           this.savePending = true;
@@ -425,7 +663,7 @@ export class SharedSession {
           this.destroy();
         } else if (e.name === 'PermissionError' || e.status === 403) {
           this.disabled = true;
-          this.onEvent(errorEvent('no-write'));
+          this.onEvent(NO_WRITE);
         } else {
           console.error('mdnest: shared save failed, will retry', e);
           setTimeout(() => this._scheduleSave(0), 3000);
@@ -439,12 +677,16 @@ export class SharedSession {
     return undefined;
   }
 
-  // Save now (before leaving the note). Only the saver writes; the others'
-  // text is already in the room.
+  // Save now (before leaving the note), whether or not this tab is the
+  // saver. The room has this tab's text, but when another tab or device held
+  // the saver role, the file got it only after that tab's save delay (or
+  // never, if that tab could not save): coming back showed the old file and
+  // then the room's newer text. A save that races the saver's is refused
+  // (409) and dropped here; the saver's text includes ours.
   async flush() {
     this._cancelSave();
-    if (this.saver && this.dirty()) await this._save();
-    else if (this.saving) await this.saving;
+    if (this.saving) await this.saving;
+    if (this.dirty()) await this._save({ anyTab: true });
   }
 
   _onPageHide() {
@@ -467,6 +709,7 @@ export class SharedSession {
   async _checkOutside() {
     if (this.checking) { this.recheck = true; return this.checking; }
     if (!this.saver || this.closed || !this.bound || !this.meta.get('hasBase')) return undefined;
+    const gen = this.gen;
     this.checking = (async () => {
       let file;
       try { file = await getNote(this.ns, this.path); } catch (e) {
@@ -476,7 +719,7 @@ export class SharedSession {
         }
         return;
       }
-      if (this.closed) return;
+      if (this.closed || gen !== this.gen || !this.bound) return;
       const { text, etag } = file;
       if (etag && etag === this.meta.get('etag')) return;
       const base = this.meta.get('base') || '';
@@ -519,6 +762,8 @@ export class SharedSession {
   }
 
   _applyFull(text) {
+    // Only into an editor bound to this room's document.
+    if (!this.bound) return;
     const { frontMatter, body } = splitFrontMatter(text);
     this.doc.transact(() => {
       if (this.fm.toString() !== frontMatter) {
@@ -541,17 +786,27 @@ export class SharedSession {
     const c = this.client;
     if (c.shared && c.shared.owner === this) {
       c.shared = null;
-      if (c.connected && c.ns === this.ns && c.path === this.path) c.sendJSON({ type: 'yjs-leave' });
+      if (c.joinedTo(this.ns, this.path)) {
+        // Updates the editor made on its own since the last save (heading
+        // ids, a normalized table) change nothing in the file: say the room
+        // matches it, so the server does not keep it as unsaved work.
+        this._confirmSaved();
+        c.sendJSON({ type: 'yjs-leave' });
+      }
     }
   }
 
   destroy() {
     if (this.closed) return;
     this.leave();
+    if (this.bound) this._unbindEditor();
+    this.bound = false;
     this.closed = true;
     this._cancelSave();
     this._stopPoll();
+    this._stopWaiting();
     window.removeEventListener('pagehide', this._onPageHide);
+    this.awareness.off('update', this._onAwareness);
     this.awareness.destroy();
     this.doc.off('update', this._onDocUpdate);
     this.doc.destroy();

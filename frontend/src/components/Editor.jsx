@@ -1,4 +1,5 @@
-import { useRef, useCallback, useState, useEffect } from 'react';
+import { useRef, useCallback, useState, useEffect, useLayoutEffect } from 'react';
+import { mapCaret } from '../caret.js';
 import { uploadImage } from '../api.js';
 import { htmlToMarkdown, hasRichContent } from '../html-to-md.js';
 import { looksLikeMarkdown } from '../markdown-utils.js';
@@ -179,6 +180,25 @@ function Editor({ content, onChange, currentPath, ns, readOnly, onCursorChange, 
   const [lineHeight, setLineHeight] = useState(0);
   const [textareaRect, setTextareaRect] = useState(null);
 
+  // Keep the caret where the person is typing when the text is replaced from
+  // outside (an agent's or the CLI's change merged in). shownRef is the text
+  // the textarea last showed; a content prop that differs from it came from
+  // outside, not from this textarea's own onChange.
+  const shownRef = useRef(content);
+  const caretRef = useRef(null);
+  useLayoutEffect(() => {
+    const ta = textareaRef.current;
+    const before = shownRef.current;
+    shownRef.current = content;
+    if (!ta || before === content || caretRef.current === null || document.activeElement !== ta) return;
+    const { start, end } = caretRef.current;
+    const s = mapCaret(before, content, start);
+    const e = mapCaret(before, content, end);
+    ta.setSelectionRange(s, e);
+    caretRef.current = { start: s, end: e };
+  }, [content]);
+  const rememberCaret = (ta) => { caretRef.current = { start: ta.selectionStart, end: ta.selectionEnd }; };
+
   // Measure line height on mount and content change
   useEffect(() => {
     const ta = textareaRef.current;
@@ -232,7 +252,7 @@ function Editor({ content, onChange, currentPath, ns, readOnly, onCursorChange, 
           ref={textareaRef}
           className="editor-textarea"
           value={content}
-          onChange={readOnly ? undefined : (e) => onChange(e.target.value)}
+          onChange={readOnly ? undefined : (e) => { shownRef.current = e.target.value; rememberCaret(e.target); onChange(e.target.value); }}
           onKeyDown={readOnly ? undefined : handleKeyDown}
           onPaste={readOnly ? undefined : handlePaste}
           onDrop={readOnly ? undefined : handleDrop}
@@ -242,7 +262,7 @@ function Editor({ content, onChange, currentPath, ns, readOnly, onCursorChange, 
           readOnly={readOnly}
           onClick={emitCursor}
           onKeyUp={emitCursor}
-          onSelect={emitCursor}
+          onSelect={(e) => { rememberCaret(e.target); emitCursor(e); }}
           onScroll={handleScroll}
         />
         {cursorOverlays.length > 0 && (

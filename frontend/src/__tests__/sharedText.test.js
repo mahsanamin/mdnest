@@ -97,3 +97,72 @@ describe('which notes are shared', () => {
     expect(isSharedEligible({ path: '' })).toBe(false);
   });
 });
+
+describe('mergeThreeWay report', () => {
+  const base = 'one\ntwo\nthree\n';
+  it('counts no conflict when the two sides changed different lines', () => {
+    const report = {};
+    expect(mergeThreeWay(base, 'ONE\ntwo\nthree\n', 'one\ntwo\nTHREE\n', report)).toBe('ONE\ntwo\nTHREE\n');
+    expect(report.conflicts).toBe(0);
+  });
+  it('counts a conflict, and keeps both, when both changed the same line', () => {
+    const report = {};
+    const out = mergeThreeWay(base, 'one\ntwo mine\nthree\n', 'one\ntwo theirs\nthree\n', report);
+    expect(out).toContain('two mine');
+    expect(out).toContain('two theirs');
+    expect(report.conflicts).toBe(1);
+  });
+  it('works without a report, as before', () => {
+    expect(mergeThreeWay(base, base, 'x\n')).toBe('x\n');
+  });
+});
+
+// The same typing can reach the file twice: through the room and through a
+// tab's own save after its connection dropped, the later copy with more on
+// the same line. Keeping "both" printed the shared words twice.
+describe('mergeThreeWay: one side is the other plus more', () => {
+  const base = '# Note\n\nline for alice\n\nline for bob\n';
+  it('takes the longer side once, not both', () => {
+    const room = '# Note\n\nline for alice roomA\n\nline for bob roomB\n';
+    const file = '# Note\n\nline for alice roomA apartA1 apartA2\n\nline for bob roomB apartB1\n';
+    const report = {};
+    const out = mergeThreeWay(base, room, file, report);
+    expect(out).toBe(file);
+    expect(report.conflicts).toBe(0);
+    expect(mergeThreeWay(base, file, room)).toBe(file);
+  });
+  it('still merges other lines from the shorter side', () => {
+    const room = '# Note\n\nline for alice roomA\n\nline for bob\n\nadded by carol\n';
+    const file = '# Note\n\nline for alice roomA more\n\nline for bob\n';
+    expect(mergeThreeWay(base, room, file)).toBe('# Note\n\nline for alice roomA more\n\nline for bob\n\nadded by carol\n');
+  });
+  it('never brings back a line one side deleted: keeps both instead', () => {
+    // We deleted "c", they added "d". Theirs is ours plus insertions, but
+    // ours is not the base plus insertions, so taking theirs would resurrect
+    // "c" without a word.
+    const report = {};
+    const out = mergeThreeWay('a b c\n', 'a b\n', 'a b c d\n', report);
+    expect(out).toContain('a b\n');
+    expect(out).toContain('a b c d\n');
+    expect(report.conflicts).toBe(1);
+  });
+  it('does not count a dropped trailing space as a deletion', () => {
+    // Saved mid-typing with the space, written back by the editor without.
+    const out = mergeThreeWay('x a1 \n', 'x a1\n', 'x a1 a2\n');
+    expect(out).toBe('x a1 a2\n');
+  });
+  it('takes the longer side when both only added to the base', () => {
+    expect(mergeThreeWay('x\n', 'x one\n', 'x one two\n')).toBe('x one two\n');
+    expect(mergeThreeWay('x\n', 'x one two\n', 'x one\n')).toBe('x one two\n');
+  });
+  it('keeps both when both only added, but different things', () => {
+    const out = mergeThreeWay('x\n', 'x mine\n', 'x theirs\n');
+    expect(out).toContain('x mine');
+    expect(out).toContain('x theirs');
+  });
+  it('keeps both when each side removed something the other kept', () => {
+    const out = mergeThreeWay('a b c\n', 'a c mine\n', 'a b theirs\n');
+    expect(out).toContain('a c mine');
+    expect(out).toContain('a b theirs');
+  });
+});

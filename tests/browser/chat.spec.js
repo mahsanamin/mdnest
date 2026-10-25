@@ -480,7 +480,8 @@ test('copying the prompt saves the agent\'s role, and wait repeats it to that ag
   }
 });
 
-test('typing stays fast in a long chat', async ({ page }) => {
+// @budget: a timing budget, run alone after the shards (tests/lib/e2e-images.sh).
+test('typing stays fast in a long chat', { tag: '@budget' }, async ({ page }) => {
   test.setTimeout(240_000);
   await signIn(page);
   const chat = `__chat-lag-${Date.now()}.md`;

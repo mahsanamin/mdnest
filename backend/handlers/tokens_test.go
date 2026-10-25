@@ -128,10 +128,11 @@ func TestTokenListIsScopedToOwner(t *testing.T) {
 		t.Errorf("a namespace admin must NOT see another user's token, got %s", w.Body.String())
 	}
 
-	// A superadmin sees all — the deliberate audit capability.
-	w = tokenReq(h, http.MethodGet, "", &middleware.UserContext{ID: 9, Username: "root", Role: "superadmin"})
-	if !strings.Contains(w.Body.String(), "tok-alice") || !strings.Contains(w.Body.String(), "tok-bob") {
-		t.Errorf("superadmin should see every token, got %s", w.Body.String())
+	// A superadmin's own list (Settings) holds only their own tokens too: another
+	// person's token there looks like theirs. Auditing is /api/admin/tokens.
+	w = tokenReq(h, http.MethodGet, "", &middleware.UserContext{ID: 1, Username: "alice", Role: "superadmin"})
+	if !strings.Contains(w.Body.String(), "tok-alice") || strings.Contains(w.Body.String(), "tok-bob") {
+		t.Errorf("a superadmin's own list must hold only their tokens, got %s", w.Body.String())
 	}
 
 	// Single mode (nil user context) is unaffected.
@@ -159,11 +160,56 @@ func TestTokenRevokeIsScopedToOwner(t *testing.T) {
 		t.Errorf("alice revoking her own token: want 200, got %d (%s)", w.Code, w.Body.String())
 	}
 
-	// A superadmin may revoke anyone's.
+	// A superadmin cannot revoke someone else's token from their own list either.
 	fs = twoUsersTokens()
 	h = NewTokenHandler(fs)
 	w = tokenReq(h, http.MethodDelete, "tok-bob", &middleware.UserContext{ID: 9, Username: "root", Role: "superadmin"})
+	if w.Code != http.StatusForbidden {
+		t.Errorf("superadmin revoking bob's token through /api/auth/tokens: want 403, got %d (%s)", w.Code, w.Body.String())
+	}
+	if all, _ := fs.All(); len(all) != 2 {
+		t.Errorf("bob's token must survive, have %d tokens", len(all))
+	}
+}
+
+func adminTokenReq(h *TokenHandler, method, id string, uc *middleware.UserContext) *httptest.ResponseRecorder {
+	target := "/api/admin/tokens"
+	if id != "" {
+		target += "?id=" + id
+	}
+	r := middleware.WithUser(httptest.NewRequest(method, target, nil), uc)
+	w := httptest.NewRecorder()
+	h.HandleAdminTokens(w, r)
+	return w
+}
+
+// The admin endpoint (superadmin, enforced by the route) lists every token with
+// its owner, so whose token it is shows before anyone revokes it.
+func TestAdminTokensListEveryTokenWithItsOwner(t *testing.T) {
+	fs := twoUsersTokens()
+	fs.tokens[1].Username = "bob"
+	h := NewTokenHandler(fs)
+	w := adminTokenReq(h, http.MethodGet, "", &middleware.UserContext{ID: 9, Username: "root", Role: "superadmin"})
+	body := w.Body.String()
+	if w.Code != http.StatusOK || !strings.Contains(body, "tok-alice") || !strings.Contains(body, `"username":"bob"`) {
+		t.Errorf("admin list: want every token with its owner, got %d %s", w.Code, body)
+	}
+	if strings.Contains(body, "hb") || strings.Contains(body, "token_hash") {
+		t.Errorf("admin list must not expose hashes, got %s", body)
+	}
+}
+
+func TestAdminTokensRevokeAnyToken(t *testing.T) {
+	fs := twoUsersTokens()
+	h := NewTokenHandler(fs)
+	w := adminTokenReq(h, http.MethodDelete, "tok-bob", &middleware.UserContext{ID: 9, Username: "root", Role: "superadmin"})
 	if w.Code != http.StatusOK {
-		t.Errorf("superadmin revoking bob's token: want 200, got %d (%s)", w.Code, w.Body.String())
+		t.Errorf("admin revoking bob's token: want 200, got %d (%s)", w.Code, w.Body.String())
+	}
+	if all, _ := fs.All(); len(all) != 1 || all[0].ID != "tok-alice" {
+		t.Errorf("only bob's token must be gone, have %+v", all)
+	}
+	if w := adminTokenReq(h, http.MethodDelete, "tok-bob", &middleware.UserContext{ID: 9, Role: "superadmin"}); w.Code != http.StatusNotFound {
+		t.Errorf("revoking a gone token: want 404, got %d", w.Code)
 	}
 }

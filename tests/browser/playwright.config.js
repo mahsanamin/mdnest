@@ -6,6 +6,11 @@ import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
   testDir: '.',
+  // Everything a run writes goes OUTSIDE testDir. Playwright walks testDir for
+  // specs (testIgnore filters afterwards, it does not stop the walk), so with
+  // shards one process listing test-results/ while another recreated its own
+  // output folder there crashed with ENOENT before running a single test.
+  outputDir: '../browser-results/default',
   timeout: 45_000,
   expect: { timeout: 12_000 },
   fullyParallel: false,

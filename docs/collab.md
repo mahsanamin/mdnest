@@ -19,6 +19,63 @@ a note, get the sidebar refreshed when files change, and get comments live.
 Shared editing builds on that connection so that two people typing in the same
 note both keep what they typed.
 
+## The connection
+
+Since v4.8.13 a browser opens one websocket for the whole visit
+(`/api/ws?token=...`). Opening a note sends a `join` message on it, with the
+note's namespace and path; the server checks access to that note exactly as it
+checks any request (grants, groups, path scopes, private chat members) and
+answers `joined` (with whether the person may only read) or `join-error`.
+Switching notes is one more `join` on the same socket, so a switch never
+reconnects. Everything the server sends about a note comes after its `joined`,
+so the browser drops anything that belongs to the note it just left. Joins are
+limited to a burst of 20, then 20 a second, per socket. The socket closes when
+the login it was opened with expires; the browser opens a new one.
+
+If access to a note changes while someone is in it (a grant removed, a member
+taken off a private chat), the server takes their socket out of that note and
+says so (`note-left`). The rest of the visit keeps its socket, and joining the
+note again goes through the check.
+
+A tab left open from before v4.8.13 still uses the older form,
+`/api/ws?ns=...&path=...&token=...`, one socket per note, and it keeps
+working. The other way round, a new browser against an older backend: when the
+token-only socket is refused, or no `joined` comes back within 2 seconds, the
+browser uses the per-note form for the rest of the visit.
+
+The toolbar shows one small dot next to the people in the note: green "Live"
+while the server answers, grey "Not live" once the socket has been down for
+about 2 seconds, with the tooltip "Changes save normally; others won't see your
+typing until it reconnects." Nothing else is shown about the connection.
+
+## Editing never waits for the connection
+
+A note opens editable straight away, whatever the connection is doing. Until
+the note's shared document is there, the editor saves the normal way (the
+whole note, merged with any change made elsewhere meanwhile). When the room is
+ready, the editor joins it as it is at that moment:
+
+- an empty room is filled from the editor's own document, so nothing on screen
+  changes and the caret stays put;
+- a room that already has text is joined at once when you have not changed
+  anything yet: you see the room's text, including what others are typing;
+- if you have typed (or saved while away from the room), you keep saving the
+  normal way. The room's saver merges those saves from the file like any
+  outside change, and your editor joins the room as soon as the room holds the
+  same text as your editor. Nothing is merged twice;
+- if your tab is the room's saver (everyone was away, and you came back
+  first), nobody else would merge the file, so your tab does: at the first
+  moment all your text is saved, it merges the file into the room's document
+  and only then joins. The room already holds everything on your screen, so
+  joining takes nothing away and moves nothing.
+
+The caret and the keyboard stay where they were when the editor joins or
+leaves the room. If the connection drops while editing together, the editor
+leaves the room and goes back to saving the normal way, starting from what the
+room last saved; when the connection is back it joins the room again, by the
+same rules. The note is read-only
+only for someone who may not write to it.
+
 ## Why it exists
 
 Before shared editing, every browser saved the whole note about a second after
@@ -64,6 +121,16 @@ picks it: the first person who can write, and later whoever is typing once the
 current saver has been quiet for a few seconds. When the saver leaves, the
 next person takes over and saves anything that was not saved yet.
 
+The server also checks that the saver is saving. If an update has gone 10
+seconds without a save confirming it, the role moves to the writer who was
+active most recently, and that browser saves. This covers a saver that is
+present on the server but cannot save: a connection the browser has lost
+while a proxy keeps the server's side open, or a frozen background tab. The
+old saver is not given the role again until it sends something. Before this,
+a tab that reconnected quickly could leave its old, dead connection as the
+saver, so nothing was saved: the file kept the old text, and coming back to
+the note showed the old text and then the room's newer text.
+
 The saver writes only when the editor's text differs from what was last saved.
 That is why opening a note and leaving it never rewrites the file, even though
 the Live editor would format some markdown differently (for example `*` list
@@ -86,8 +153,11 @@ never goes through the server, such as a git-sync pull or an editor on the
 host, sends no message, so the saver also checks the file every 20 seconds.
 The merge is a line-based three-way merge of the text the room last saved,
 the room's text now, and the file. A part changed on one side takes that side, a part changed
-the same way on both sides is taken once, and a part changed differently on
-both keeps both versions, the room's first. The result is applied to the
+the same way on both sides is taken once, a part where one side is the other
+side plus more takes the longer one (the same typing often reaches the file
+twice, through the room and through a tab's own save when its connection
+dropped), and a part changed differently on both keeps both versions, the
+room's first. The result is applied to the
 editor as an ordinary edit, so it reaches everyone.
 
 ### Front matter
@@ -135,8 +205,8 @@ Undo and Redo only undo your own edits.
 
 | Limit | Value | What happens past it |
 |---|---|---|
-| People in one room | 32 connections | The next person gets the note read-only, with a notice |
-| Update data in one room | 32 MB | Further updates are refused; editing stops with a notice |
+| People in one room | 32 connections | The next person edits the note the normal way (whole-file saves), not together |
+| Update data in one room | 32 MB | Further updates are refused; that person goes back to the normal way |
 | Update data across all rooms | 256 MB | Same, for whoever pushes past it |
 | Update data from one account, across rooms | 64 MB | Same, for that account |
 | One message (a big paste, a snapshot) | 8 MB | The connection closes |
@@ -162,8 +232,9 @@ chart forces it to `false` when `backend.replicaCount` is above 1 or autoscaling
 is on.
 
 The shared editing code is a separate download (about 46 KB gzipped) that the
-browser fetches only when a note is opened for shared editing. An install
-without live collaboration never loads it.
+browser fetches once, when the server says shared editing is on, so opening a
+note never waits for it. An install without live collaboration never loads
+it.
 
 ## When shared editing is off
 
@@ -178,7 +249,31 @@ always sent.
 
 - `backend/collab/yjs_test.go`: joining gets the whole log, read-only updates
   are dropped, room and server limits, the room is freed on leave (or kept
-  when unsaved), saver handover, snapshots.
+  when unsaved), saver handover, snapshots, and a saver that does not save
+  losing the role (also to a writer who comes back later) while one that
+  saves keeps it.
+- `tests/browser/content-loss.spec.js` (in both `tests/e2e-collab-multi.sh`
+  and `tests/e2e-browser.sh`): type, switch note, come back, and check the
+  file on disk, again with every tab closed, and that the server kept no room
+  with unsaved updates. One tab switching at once, after 400 ms and after
+  2 s; a second tab idle or frozen on the note; the socket dropping; the file
+  changed on disk behind the app (a git-sync stash and a reset); and a socket
+  the tab lost but the server still holds.
+- `backend/collab/connection_test.go` and `backend/routes_ws_session_test.go`:
+  the one-socket visit. Every join is checked against grants (path scopes,
+  links, `.git`, read-only), switching leaves the old note and its room with
+  the budgets returned, the join rate limit, leaving a note when a grant is
+  removed or a chat member is taken off, joins refused after the login
+  expires, API tokens refused, and the per-note URL still working.
+- `tests/browser/live-never-blocks.spec.js` (in `tests/e2e-collab-multi.sh`):
+  a note editable within 1 second with the websocket hanging or refused;
+  switching notes on one websocket with no status flicker and editable within
+  300 ms; a person opening on a slow connection while another types, nothing
+  lost; the connection cut mid-edit, typing saved and the room rejoined;
+  opening and leaving leaves nothing unsaved on the server; an older backend
+  that refuses the token-only socket; a room seeded from the editor holding
+  exactly the markdown. `frontend/src/__tests__/collab-visit.test.js` covers
+  the browser side of the socket.
 - `tests/e2e-collab-multi.sh` runs `tests/browser/collab-shared-editing.spec.js`
   against a real multi-user stack with two accounts: two people typing at
   once, opening and leaving without changing the file, the saver closing the

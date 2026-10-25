@@ -17,10 +17,13 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
     return () => { document.removeEventListener('pointerdown', onDown); document.removeEventListener('keydown', onKey); };
   }, [moreOpen]);
   const runMore = (fn) => () => { setMoreOpen(false); fn?.(); };
-  const statusLabel = wsStatus === 'connected' ? 'Live' : wsStatus === 'connecting' ? 'Reconnecting' : wsStatus === 'superseded' ? 'Session moved' : 'Offline';
-  // The dot on the menu button: only for something that is wrong, so it
-  // means "look inside" rather than being permanent decoration.
-  const moreNeedsAttention = !!wsStatus && !!currentPath && wsStatus !== 'connected';
+  // One quiet dot (v4.8.13): 'connected' is Live; 'down' (the socket has been
+  // down for a couple of seconds) is Not live. Nothing else is said, because
+  // nothing waits for the connection: changes save either way.
+  const statusLabel = wsStatus === 'connected' ? 'Live' : 'Not live';
+  const statusTitle = wsStatus === 'connected'
+    ? 'Live: others in this note see your changes as you type.'
+    : "Not live. Changes save normally; others won't see your typing until it reconnects.";
   const handleRefresh = useCallback(() => {
     if (refreshing || !onRefresh) return;
     setRefreshing(true);
@@ -276,14 +279,9 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
           floated over the content it covered the editor's own toolbar. */}
       {currentPath && presence}
       {wsStatus && currentPath && (
-        <span
-          className={`ws-status ${wsStatus}`}
-          title={wsStatus === 'connected' ? 'Live collaboration connected' : wsStatus === 'connecting' ? 'Reconnecting to live collaboration' : wsStatus === 'superseded' ? 'Session moved to another tab' : 'Live collaboration offline'}
-        >
+        <span className={`ws-status ${wsStatus}`} title={statusTitle}>
           <span className={`ws-status-dot ${wsStatus}`} />
-          <span className="ws-status-text">
-            {wsStatus === 'connected' ? 'Live' : wsStatus === 'connecting' ? 'Reconnecting' : wsStatus === 'superseded' ? 'Session moved' : 'Offline'}
-          </span>
+          <span className="ws-status-text">{statusLabel}</span>
         </span>
       )}
       {currentPath && onToggleComments && (
@@ -330,13 +328,12 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
           title="More"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
-          {moreNeedsAttention && <span className={`toolbar-more-dot ${wsStatus}`} />}
         </button>
         {moreOpen && (
           <div className="toolbar-more-menu" role="menu">
             {wsStatus && currentPath && (
               <div className="toolbar-more-status more-phone" role="presentation">
-                <span className={`ws-status-dot ${wsStatus}`} /> Live collaboration: {statusLabel}
+                <span className={`ws-status-dot ${wsStatus}`} /> {statusLabel}
               </div>
             )}
             {onSetBoardActive && (

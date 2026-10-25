@@ -46,9 +46,13 @@ work around it, do not cut the release "and fix it after".
    ```bash
    bash tests/release-gate.sh
    ```
-   It runs the whole pre-push release tier, Go tests against a real Redis,
-   shellcheck, and the end-to-end suites the changed files call for (HA,
-   shared editing, private chats, transfer). It records the exact tree that
+   This is the ship level of `tests/check.sh` (`bash tests/check.sh --level
+   ship` is the same), the only level that runs everything: the whole
+   pre-push release tier, Go tests against a real Redis, shellcheck, and every
+   end-to-end suite (browser, shared editing, HA, private chats, transfer,
+   CLI, access), with the `@budget` timing tests last and alone. Changes that
+   merged into `develop` already passed `--level develop` once each; do not
+   rerun lower levels here. It records the exact tree that
    passed, and the pre-push hook refuses to push any other tree to `release/*`
    or `main`. Run it in the background; it takes 20 to 30 minutes.
    `MDNEST_SKIP_E2E=1` is for an emergency only, and the PR must then say which
@@ -96,11 +100,13 @@ Bump all three in lockstep:
 The pre-push hook (`.githooks/pre-push`) verifies these match — if any disagrees the push is blocked.
 
 ### 3. README.md
-Only touch the "Why mdnest?" section if this is a major user-visible feature. Bug fixes and internal changes don't belong on the README.
+Touch the intro (the pitch, "How it works", "Built for teams", "What you get", "Is it for you?") only for a major user-visible feature, and never change the pitch lines without the owner asking. Bug fixes and internal changes don't belong on the README.
 
-### 4. CLAUDE.md
-- New files in the project tree → add them to the structure block in the appropriate section.
-- New conventions, patterns, gotchas → add to the Conventions section.
+Any README wording follows the website repo's writing standard, `../mdnest-website/WRITING.md` ([on GitHub](https://github.com/mahsanamin/mdnest-website/blob/main/WRITING.md)): plain English, no claim the released code does not support, and an "Optional" or "Needs team setup" label on any feature the basic install does not turn on.
+
+### 4. CLAUDE.md and docs/codemap.md
+- New files in the project tree → add them to the map in `docs/codemap.md`, in the appropriate section. A new top-level directory also goes in the short list under "Project Structure" in `CLAUDE.md`.
+- New conventions, patterns, gotchas → add to the Conventions section of `CLAUDE.md`. A trap that belongs to one file goes on that file's line in `docs/codemap.md` instead, so `CLAUDE.md` stays small enough to load in every session.
 
 ### 5. docs/
 Match the change to the right doc:
@@ -140,11 +146,10 @@ recreating in Cloudflare (Pages > mdnest-website > Settings > Builds > Deploy
 hooks). Confirm with `curl -s https://mdnest.dev/docs/changelog` that the new
 version shows.
 
-### 7. Website index.html (only for major features)
-If this is a headline feature, update `../mdnest-website/index.html`:
-- Hero badge version (`v3.X.Y`)
-- Feature grid cards (add or refresh wording)
-- CLI terminal demo if the CLI changed
+### 7. Website: writing standard and landing page
+First, read `../mdnest-website/WRITING.md`. It lists which features are off by default or need team setup, and the product facts the site relies on. If this release changes one of them (a new `ENABLE_*` flag, a changed default, a new outbound request, a feature that now needs or no longer needs multi-user mode), update `WRITING.md` in the same release. A stale fact there leads straight to a wrong claim on the site.
+
+Then, only if this is a headline feature, update `../mdnest-website/index.html`: a card in "What you work with every day" or a line in "Everything else, in one line each", or the "Built for teams" section for a team feature. Follow `WRITING.md`: plain English, the user's gain first, an "Optional" or "Needs team setup" label where it applies, and no time or privacy claims it rules out. Do not change the hero pitch unless the owner asks.
 
 Bug fixes don't need landing-page changes.
 
@@ -153,7 +158,7 @@ Only if step 7 actually changed something in the website repo:
 
 ```bash
 cd "$WEBSITE"
-git add docs/ index.html
+git add docs/ index.html WRITING.md
 git commit  # author the message describing what synced
 cd "$REPO"
 ```

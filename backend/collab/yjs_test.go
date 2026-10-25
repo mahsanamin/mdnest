@@ -593,3 +593,116 @@ func TestYjsSnapshotOnlyWhenAskedAndNoBigger(t *testing.T) {
 		t.Fatalf("a second snapshot without a request was taken: %+v", st)
 	}
 }
+
+// A saver that never saves (a socket the tab lost but the server still holds,
+// a frozen tab) loses the role once an update has gone unsaved for
+// yjsSaverStuck, even though nobody typed after the idle window. Before this
+// the reconnected tab typed within yjsSaverIdle of the old socket's last
+// edit, the old socket stayed the saver, and nothing reached the file.
+func TestYjsStuckSaverLosesTheRole(t *testing.T) {
+	defer func(i, s time.Duration) { yjsSaverIdle, yjsSaverStuck = i, s }(yjsSaverIdle, yjsSaverStuck)
+	yjsSaverIdle, yjsSaverStuck = time.Hour, 80*time.Millisecond
+	h := sharedHub()
+	ghost, tab := newTestConn(1, "a"), newTestConn(1, "a")
+	hello(h, ghost)
+	h.HandleMessage("ns", "a.md", ghost, true, upd(1))
+	h.YjsSaved("ns", "a.md", ghost, 1, 1)
+	hello(h, tab)
+	drain(ghost)
+	drain(tab)
+	h.HandleMessage("ns", "a.md", ghost, true, upd(2)) // its last edit; then it goes silent
+	h.HandleMessage("ns", "a.md", tab, true, upd(3))
+	if _, _, got := roles(func() []yjsControl { _, c := drain(tab); return c }()); got {
+		t.Fatal("the role moved before the saver was stuck")
+	}
+	time.Sleep(3 * yjsSaverStuck)
+	if _, saver, got := roles(func() []yjsControl { _, c := drain(tab); return c }()); !got || !saver {
+		t.Fatal("a saver that never saved kept the role")
+	}
+	if _, saver, got := roles(func() []yjsControl { _, c := drain(ghost); return c }()); !got || saver {
+		t.Fatal("the stuck saver was not told it no longer saves")
+	}
+	// The new saver saves: the watch stops, and the role stays where it is.
+	h.YjsSaved("ns", "a.md", tab, 3, 1)
+	time.Sleep(3 * yjsSaverStuck)
+	if _, _, got := roles(func() []yjsControl { _, c := drain(ghost); return c }()); got {
+		t.Fatal("the role moved again after everything was saved")
+	}
+	h.ymu.Lock()
+	timer := h.rooms[noteKey("ns", "a.md")].stuckTimer
+	h.ymu.Unlock()
+	if timer != nil {
+		t.Error("the watch kept running with nothing unsaved")
+	}
+}
+
+// The writer whose text went unsaved left the note before the check ran, and
+// comes back later: the check keeps running while the text is unsaved, so the
+// returning tab gets the role and saves it.
+func TestYjsStuckSaverHandsOverToAWriterWhoComesBack(t *testing.T) {
+	defer func(i, s time.Duration) { yjsSaverIdle, yjsSaverStuck = i, s }(yjsSaverIdle, yjsSaverStuck)
+	yjsSaverIdle, yjsSaverStuck = time.Hour, 80*time.Millisecond
+	h := sharedHub()
+	ghost, tab := newTestConn(1, "a"), newTestConn(1, "a")
+	hello(h, ghost)
+	hello(h, tab)
+	h.HandleMessage("ns", "a.md", ghost, true, upd(1))
+	h.HandleMessage("ns", "a.md", tab, true, upd(2))
+	h.YjsLeave("ns", "a.md", tab)
+	time.Sleep(3 * yjsSaverStuck)
+	back := newTestConn(1, "a")
+	hello(h, back)
+	drain(back)
+	time.Sleep(3 * yjsSaverStuck)
+	if _, saver, got := roles(func() []yjsControl { _, c := drain(back); return c }()); !got || !saver {
+		t.Fatal("the returning writer never got the role to save the unsaved text")
+	}
+}
+
+// A saver that saves keeps the role, however long others type.
+func TestYjsHealthySaverKeepsTheRole(t *testing.T) {
+	defer func(i, s time.Duration) { yjsSaverIdle, yjsSaverStuck = i, s }(yjsSaverIdle, yjsSaverStuck)
+	yjsSaverIdle, yjsSaverStuck = time.Hour, 80*time.Millisecond
+	h := sharedHub()
+	a, b := newTestConn(1, "a"), newTestConn(2, "b")
+	hello(h, a)
+	hello(h, b)
+	h.HandleMessage("ns", "a.md", a, true, upd(1))
+	drain(a)
+	drain(b)
+	for i := byte(0); i < 6; i++ {
+		h.HandleMessage("ns", "a.md", b, true, upd(10+i))
+		h.YjsSaved("ns", "a.md", a, uint64(2+i), 1)
+		time.Sleep(yjsSaverStuck / 2)
+	}
+	if _, _, got := roles(func() []yjsControl { _, c := drain(b); return c }()); got {
+		t.Fatal("the role left a saver that was saving")
+	}
+}
+
+// Everyone dropped and came back: the unsaved updates are older than
+// yjsSaverStuck, but the writer who came back first only just got the role
+// (it merges the file before it binds), so it keeps it for a full
+// yjsSaverStuck. Judging it from the updates' age took the role away
+// mid-join (live-never-blocks (h), throttled).
+func TestYjsNewSaverGetsAFullWindow(t *testing.T) {
+	defer func(i, s time.Duration) { yjsSaverIdle, yjsSaverStuck = i, s }(yjsSaverIdle, yjsSaverStuck)
+	yjsSaverIdle, yjsSaverStuck = time.Hour, 150*time.Millisecond
+	h := sharedHub()
+	a, b := newTestConn(1, "a"), newTestConn(2, "b")
+	hello(h, a)
+	hello(h, b)
+	h.HandleMessage("ns", "a.md", a, true, upd(1))
+	h.HandleMessage("ns", "a.md", b, true, upd(2))
+	h.YjsLeave("ns", "a.md", a)
+	h.YjsLeave("ns", "a.md", b)
+	time.Sleep(2 * yjsSaverStuck) // the updates are now old and unsaved
+	a2, b2 := newTestConn(1, "a"), newTestConn(2, "b")
+	hello(h, a2) // first back: the saver
+	hello(h, b2)
+	drain(a2)
+	time.Sleep(yjsSaverStuck / 2)
+	if _, _, got := roles(func() []yjsControl { _, c := drain(a2); return c }()); got {
+		t.Fatal("the saver who just came back lost the role before its window was up")
+	}
+}

@@ -11,6 +11,13 @@
 #
 # Usage:  tests/e2e-collab-multi.sh            (runs the collab-*.spec.js + presence)
 #         MDNEST_E2E_SPECS=collab-shared-editing.spec.js tests/e2e-collab-multi.sh
+#         MDNEST_E2E_SHARDS=1 tests/e2e-collab-multi.sh   (one stack, the old run)
+#         MDNEST_E2E_ARGS="--repeat-each 3"   (extra playwright arguments)
+#
+# Shards: the specs are split across MDNEST_E2E_SHARDS stacks (default: one
+# per 3 CPUs, at most 3). Each shard has its own Postgres, backend, nginx,
+# notes folder, alice and bob and CLI logins, with one Playwright worker, so
+# no two specs ever share a server or an account.
 # Needs:  docker, node, curl, python3. Exit 0 if every spec passes, 2 if a
 #         prerequisite is missing.
 
@@ -18,25 +25,32 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT" || exit 1
 
-BE_IMAGE="mdnest-e2e-backend:test"
-FE_IMAGE="mdnest-e2e-frontend:test"
+# shellcheck source=tests/lib/e2e-images.sh
+. "$REPO_ROOT/tests/lib/e2e-images.sh"
 SFX="$$"
-NET="mdnest-e2e-collab-net-$SFX"
-PG="mdnest-e2e-collab-pg-$SFX"
-BE="mdnest-e2e-collab-be-$SFX"
-FE="mdnest-e2e-collab-fe-$SFX"
-# Under the repo, not /tmp: the Docker VM may not see the host's temp dir.
-NOTES_DIR="$(mktemp -d "$REPO_ROOT/.e2e-notes.XXXXXX")"
+LOGDIR="$(mktemp -d "${TMPDIR:-/tmp}/mdnest-e2e-collab.XXXXXX")"
+# Per shard: names carry the run's pid and the shard number. The notes folders
+# are under the repo, not /tmp: the Docker VM may not see the host's temp dir.
+PGS=(); BES=(); FES=(); NETS=(); NOTES=(); BASES=()
 
 fail() { printf '\033[31m✗ %s\033[0m\n' "$1"; }
 pass() { printf '\033[32m✓ %s\033[0m\n' "$1"; }
 log()  { printf '\n\033[1;34m▶ %s\033[0m\n' "$1"; }
 
 cleanup() {
-  if [ -n "${KEEP_LOGS:-}" ]; then docker logs "$BE" >"$KEEP_LOGS" 2>&1 || true; fi
-  docker rm -f "$FE" "$BE" "$PG" >/dev/null 2>&1 || true
-  docker network rm "$NET" >/dev/null 2>&1 || true
-  rm -rf "$NOTES_DIR" "$NOTES_DIR.cli"
+  local i
+  for i in "${!BES[@]}"; do
+    # KEEP_LOGS=FILE saves the backend log; with shards, FILE.2, FILE.3, ...
+    # hold the other shards' logs.
+    if [ -n "${KEEP_LOGS:-}" ]; then
+      docker logs "${BES[$i]}" >"$KEEP_LOGS$([ "$i" -gt 0 ] && echo ".$((i + 1))")" 2>&1 || true
+    fi
+    docker rm -f -v "${FES[$i]}" "${BES[$i]}" "${PGS[$i]}" >/dev/null 2>&1 || true
+    docker network rm "${NETS[$i]}" >/dev/null 2>&1 || true
+    e2e_rm_dirs "${NOTES[$i]}" "${NOTES[$i]}.cli"
+  done
+  rm -rf "$LOGDIR"
+  return 0
 }
 trap cleanup EXIT
 
@@ -52,41 +66,60 @@ BUILD_ROOT="${MDNEST_BUILD_ROOT:-$REPO_ROOT}"
 EXTRA_ENV=()
 for kv in ${MDNEST_E2E_BACKEND_ENV:-}; do EXTRA_ENV+=(-e "$kv"); done
 log "Building backend + frontend images from $BUILD_ROOT"
-docker build -t "$BE_IMAGE" "$BUILD_ROOT/backend/" >/tmp/mdnest-e2e-collab-be.log 2>&1 \
-  || { fail "backend build failed"; tail -30 /tmp/mdnest-e2e-collab-be.log; exit 1; }
-docker build --build-context cli="$BUILD_ROOT" -t "$FE_IMAGE" "$BUILD_ROOT/frontend/" >/tmp/mdnest-e2e-collab-fe.log 2>&1 \
-  || { fail "frontend build failed"; tail -30 /tmp/mdnest-e2e-collab-fe.log; exit 1; }
-pass "images built"
+# Tagged by a hash of that tree (tests/lib/e2e-images.sh): a tree already
+# built, by this harness or another, is reused.
+BE_IMAGE="$(e2e_backend_image "$BUILD_ROOT" "$LOGDIR")" || { fail "backend build failed"; exit 1; }
+FE_IMAGE="$(e2e_frontend_image "$BUILD_ROOT" "$LOGDIR")" || { fail "frontend build failed"; exit 1; }
+pass "images ready: $BE_IMAGE, $FE_IMAGE"
 
-mkdir -p "$NOTES_DIR/testing_workspace"
-chmod -R a+rwX "$NOTES_DIR"
-docker network create "$NET" >/dev/null
-docker run -d --name "$PG" --network "$NET" -e POSTGRES_USER=mdnest -e POSTGRES_PASSWORD=pw \
-  -e POSTGRES_DB=mdnest postgres:16-alpine >/dev/null
-for _ in $(seq 1 30); do docker exec "$PG" pg_isready -U mdnest >/dev/null 2>&1 && break; sleep 1; done
+DEFAULT_SPECS="collab-shared-editing.spec.js collab-cli.spec.js presence.spec.js shared-unavailable.spec.js live-never-blocks.spec.js content-loss.spec.js"
+# shellcheck disable=SC2086
+SHARDS="$(e2e_cap_shards "$(e2e_shards)" ${MDNEST_E2E_SPECS:-$DEFAULT_SPECS})"
+BUDGET="$(e2e_budget_mode)"
+if [ "$BUDGET" = only ]; then
+  e2e_playwright_ready "$LOGDIR" || { fail "Playwright setup failed"; exit 1; }
+  # shellcheck disable=SC2086
+  e2e_has_budget ${MDNEST_E2E_SPECS:-$DEFAULT_SPECS} || { pass "no @budget tests in the selected specs, nothing to run"; exit 0; }
+fi
 
-docker run -d --name "$BE" --network "$NET" --network-alias backend \
-  -e AUTH_MODE=multi -e POSTGRES_HOST="$PG" -e POSTGRES_PASSWORD=pw \
-  -e MDNEST_USER=admin -e MDNEST_PASSWORD=adminpass123 -e MDNEST_JWT_SECRET=e2e-collab-secret \
-  -e NOTES_DIR=/notes -e FRONTEND_ORIGIN=http://localhost \
-  -e ENABLE_LIVE_COLLAB=true -e ENABLE_AGENT_APPROVALS=true ${EXTRA_ENV[@]+"${EXTRA_ENV[@]}"} \
-  -v "$NOTES_DIR:/notes" "$BE_IMAGE" >/dev/null
-docker run -d --name "$FE" --network "$NET" -p 127.0.0.1:0:80 "$FE_IMAGE" >/dev/null
-PORT="$(docker port "$FE" 80/tcp | head -1 | sed 's/.*://')"
-BASE="http://127.0.0.1:$PORT"
-for _ in $(seq 1 60); do curl -fsS "$BASE/api/config" >/dev/null 2>&1 && break; sleep 1; done
-curl -fsS "$BASE/api/config" | tr -d ' ' | grep -q '"liveCollab":true' \
-  || { fail "stack not healthy or live collab off"; docker logs "$BE" | tail -30; exit 1; }
-pass "multi-mode stack with live collab at $BASE"
+# boot_shard I: Postgres, backend and nginx for shard I, then alice and bob
+# with write access and a CLI login each.
+boot_shard() {
+  local i="$1"
+  NET="mdnest-e2e-collab-net-$SFX-$i"; PG="mdnest-e2e-collab-pg-$SFX-$i"
+  BE="mdnest-e2e-collab-be-$SFX-$i"; FE="mdnest-e2e-collab-fe-$SFX-$i"
+  NOTES_DIR="$(e2e_notes_dir "$REPO_ROOT")"
+  PGS[i]="$PG"; BES[i]="$BE"; FES[i]="$FE"; NETS[i]="$NET"; NOTES[i]="$NOTES_DIR"
 
-# Two collaborators with write access to testing_workspace. An invited account
-# must change its password at first sign-in; do that here so the browser signs
-# in straight to the app with the final password.
-# Each account also gets an API token and a CLI login in its own HOME, so a
-# spec can drive the real ./mdnest at a note open in a browser.
-CLI_DIR="$NOTES_DIR.cli"
-mkdir -p "$CLI_DIR"
-BASE="$BASE" CLI_DIR="$CLI_DIR" python3 - <<'PY' || { fail "could not seed users"; exit 1; }
+  mkdir -p "$NOTES_DIR/testing_workspace"
+  chmod -R a+rwX "$NOTES_DIR"
+  docker network create "$NET" >/dev/null
+  docker run -d --name "$PG" --network "$NET" -e POSTGRES_USER=mdnest -e POSTGRES_PASSWORD=pw \
+    -e POSTGRES_DB=mdnest postgres:16-alpine >/dev/null
+  for _ in $(seq 1 30); do docker exec "$PG" pg_isready -U mdnest >/dev/null 2>&1 && break; sleep 1; done
+
+  docker run -d --name "$BE" --network "$NET" --network-alias backend \
+    -e AUTH_MODE=multi -e POSTGRES_HOST="$PG" -e POSTGRES_PASSWORD=pw \
+    -e MDNEST_USER=admin -e MDNEST_PASSWORD=adminpass123 -e MDNEST_JWT_SECRET=e2e-collab-secret \
+    -e NOTES_DIR=/notes -e FRONTEND_ORIGIN=http://localhost \
+    -e ENABLE_LIVE_COLLAB=true -e ENABLE_AGENT_APPROVALS=true ${EXTRA_ENV[@]+"${EXTRA_ENV[@]}"} \
+    -v "$NOTES_DIR:/notes" "$BE_IMAGE" >/dev/null
+  docker run -d --name "$FE" --network "$NET" -p 127.0.0.1:0:80 "$FE_IMAGE" >/dev/null
+  PORT="$(docker port "$FE" 80/tcp | head -1 | sed 's/.*://')"
+  BASE="http://127.0.0.1:$PORT"
+  for _ in $(seq 1 60); do curl -fsS "$BASE/api/config" >/dev/null 2>&1 && break; sleep 1; done
+  curl -fsS "$BASE/api/config" | tr -d ' ' | grep -q '"liveCollab":true' \
+    || { fail "stack not healthy or live collab off"; docker logs "$BE" | tail -30; exit 1; }
+  pass "multi-mode stack with live collab at $BASE"
+
+  # Two collaborators with write access to testing_workspace. An invited account
+  # must change its password at first sign-in; do that here so the browser signs
+  # in straight to the app with the final password.
+  # Each account also gets an API token and a CLI login in its own HOME, so a
+  # spec can drive the real ./mdnest at a note open in a browser.
+  CLI_DIR="$NOTES_DIR.cli"
+  mkdir -p "$CLI_DIR"
+  BASE="$BASE" CLI_DIR="$CLI_DIR" python3 - <<'PY' || { fail "could not seed users"; exit 1; }
 import json, os, urllib.request, urllib.error
 BASE = os.environ["BASE"]
 def call(method, path, token=None, body=None):
@@ -119,32 +152,54 @@ for name in ("alice", "bob"):
         f.write(r["token"])
 print("seeded alice + bob")
 PY
-pass "two collaborators seeded"
-for name in alice bob; do
-  mkdir -p "$CLI_DIR/$name-home"
-  HOME="$CLI_DIR/$name-home" ./mdnest login "@$name" "$BASE" "$(cat "$CLI_DIR/$name.token")" >/dev/null 2>&1 \
-    || { fail "CLI login for $name failed"; exit 1; }
+  pass "two collaborators seeded"
+  for name in alice bob; do
+    mkdir -p "$CLI_DIR/$name-home"
+    HOME="$CLI_DIR/$name-home" ./mdnest login "@$name" "$BASE" "$(cat "$CLI_DIR/$name.token")" >/dev/null 2>&1 \
+      || { fail "CLI login for $name failed"; exit 1; }
+  done
+  pass "CLI logged in as alice (@alice) and bob (@bob)"
+  BASES[i]="$BASE"
+  return 0
+}
+
+for ((s = 0; s < SHARDS; s++)); do
+  log "Shard $((s + 1)) of $SHARDS"
+  boot_shard "$s" || exit 1
 done
-pass "CLI logged in as alice (@alice) and bob (@bob)"
 
 log "Preparing Playwright"
-( cd tests/browser
-  [ -d node_modules ] || npm install --no-audit --no-fund >/tmp/mdnest-pw-npm.log 2>&1
-  npx playwright install chromium >/tmp/mdnest-pw-browser.log 2>&1
-) || { fail "Playwright setup failed (see /tmp/mdnest-pw-*.log)"; exit 1; }
+e2e_playwright_ready "$LOGDIR" || { fail "Playwright setup failed"; cat "$LOGDIR"/playwright-*.log; exit 1; }
 
-log "Running the two-user specs against $BASE"
-# shellcheck disable=SC2086
-if ( cd tests/browser && \
-     MDNEST_BASE_URL="$BASE" \
-     MDNEST_USER=alice MDNEST_PASSWORD=alicepass123 \
-     MDNEST_USER2=bob MDNEST_PASSWORD2=bobpass123 \
-     MDNEST_NOTES_DIR="$NOTES_DIR" \
-     MDNEST_CLI="$REPO_ROOT/mdnest" MDNEST_CLI_HOMES="$CLI_DIR" \
-     npx playwright test ${MDNEST_E2E_SPECS:-collab-shared-editing.spec.js collab-cli.spec.js presence.spec.js} ); then
+# pw_run I ARGS...: playwright against shard I's stack.
+pw_run() {
+  local i="$1"; shift
+  # shellcheck disable=SC2086
+  cd tests/browser && \
+    MDNEST_BASE_URL="${BASES[$i]}" \
+    MDNEST_USER=alice MDNEST_PASSWORD=alicepass123 \
+    MDNEST_USER2=bob MDNEST_PASSWORD2=bobpass123 \
+    MDNEST_NOTES_DIR="${NOTES[$i]}" MDNEST_BACKEND_CONTAINER="${BES[$i]}" \
+    MDNEST_CLI="$REPO_ROOT/mdnest" MDNEST_CLI_HOMES="${NOTES[$i]}.cli" \
+    npx playwright test "$@" ${MDNEST_E2E_ARGS:-} ${MDNEST_E2E_SPECS:-$DEFAULT_SPECS}
+}
+# shellcheck disable=SC2046
+run_shard() { pw_run "$1" $(e2e_shard_args "$1" "$SHARDS") $(e2e_main_args "$BUDGET"); }
+rc=0
+if [ "$BUDGET" != only ]; then
+  log "Running the two-user specs on $SHARDS shard(s): ${BASES[*]}"
+  e2e_run_shards "$SHARDS" "$LOGDIR" run_shard || rc=1
+fi
+if [ "$BUDGET" = after ] || [ "$BUDGET" = only ]; then
+  # The timing-budget tests, alone on the first stack (see e2e_budget_mode).
+  log "Running the @budget timing tests alone on ${BASES[0]}"
+  # shellcheck disable=SC2046
+  ( pw_run 0 $(e2e_quiet_args) ) || rc=1
+fi
+if [ "$rc" -eq 0 ]; then
   pass "COLLAB E2E: all specs passed"
   exit 0
 else
-  fail "COLLAB E2E: failures above (traces in tests/browser/test-results)"
+  fail "COLLAB E2E: failures above (traces in tests/browser-results)"
   exit 1
 fi

@@ -180,7 +180,7 @@ func (h *ConfigHandler) HandleConfig(w http.ResponseWriter, r *http.Request) {
 		"sharedEditing": h.liveCollab && h.sharedEditing,
 		"require2FA":    h.require2FA,
 		"userProvider":  h.userProvider,
-		"version":       "4.8.12",
+		"version":       "4.8.13",
 		"commit":        Commit,
 		"buildTime":     BuildTime,
 		"defaultTheme":  h.defaultThemeOrAuto(),

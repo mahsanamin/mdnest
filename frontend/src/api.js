@@ -307,8 +307,13 @@ export async function getTree(ns) {
   return res.json();
 }
 
-export async function getNote(ns, path) {
-  const res = await request(`/note?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}`);
+// With opts.ifNoneMatch (the etag we hold) an unchanged note comes back as
+// { notModified: true } from a 304, so a frequent check costs no body.
+export async function getNote(ns, path, opts = {}) {
+  const headers = {};
+  if (opts.ifNoneMatch) headers['If-None-Match'] = opts.ifNoneMatch;
+  const res = await request(`/note?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}`, { headers, cache: 'no-store' });
+  if (opts.ifNoneMatch && res.status === 304) return { notModified: true };
   if (!res.ok) throw new Error('Failed to get note');
   const text = await res.text();
   const etag = res.headers.get('ETag');
@@ -995,6 +1000,19 @@ export async function saveMarpTheme(name, css, templates) {
 export async function adminListGroups() {
   const res = await request('/admin/groups');
   if (!res.ok) throw new Error('Failed to list groups');
+  return res.json();
+}
+
+// Everyone's API tokens with their owner (superadmin). Settings lists only your own.
+export async function adminListTokens() {
+  const res = await request('/admin/tokens');
+  if (!res.ok) throw new Error('Failed to list API tokens');
+  return res.json();
+}
+
+export async function adminRevokeToken(id) {
+  const res = await request(`/admin/tokens?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error('Failed to revoke the token');
   return res.json();
 }
 

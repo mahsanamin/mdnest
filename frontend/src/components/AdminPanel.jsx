@@ -18,6 +18,8 @@ import {
   adminCreateGroupGrant,
   adminUpdateGroupGrant,
   adminDeleteGroupGrant,
+  adminListTokens,
+  adminRevokeToken,
 } from '../api.js';
 import { clearMarpThemeCache } from '../marpThemes.js';
 import PathPicker from './PathPicker.jsx';
@@ -81,11 +83,73 @@ function AdminPanel({ onClose, namespaces, isSuperAdmin, adminNamespaces, userPr
         {isSuperAdmin && marpThemesEnabled && (
           <button className={tab === 'marp-themes' ? 'active' : ''} onClick={() => setTab('marp-themes')}>Marp Themes</button>
         )}
+        {isSuperAdmin && (
+          <button className={tab === 'api-tokens' ? 'active' : ''} onClick={() => setTab('api-tokens')}>API Tokens</button>
+        )}
       </div>
       {tab === 'people' && <PeopleTab isSuperAdmin={isSuperAdmin} namespaces={manageableNs} isFederated={isFederated} userProvider={userProvider} grantMaxDepth={grantMaxDepth} directory={directory} git={git} />}
       {tab === 'groups' && isSuperAdmin && <GroupsTab namespaces={manageableNs} grantMaxDepth={grantMaxDepth} />}
       {tab === 'namespaces' && <NamespacesTab isSuperAdmin={isSuperAdmin} namespaces={manageableNs} grantMaxDepth={grantMaxDepth} directory={directory} git={git} onNamespacesChanged={loadNamespaces} />}
       {tab === 'marp-themes' && isSuperAdmin && marpThemesEnabled && <MarpThemesTab />}
+      {tab === 'api-tokens' && isSuperAdmin && <ApiTokensTab />}
+    </div>
+  );
+}
+
+// ApiTokensTab: every person's API tokens, with the owner, for a superadmin to
+// audit and revoke. Settings > API Tokens only ever shows your own.
+function ApiTokensTab() {
+  const [tokens, setTokens] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      setTokens((await adminListTokens()) || []);
+      setError('');
+    } catch (e) { setError(e.message); }
+  }, []);
+
+  useEffect(() => { load().finally(() => setLoading(false)); }, [load]);
+
+  const handleRevoke = async (t) => {
+    const owner = t.username || 'no owner';
+    if (!window.confirm(`Revoke ${owner}'s token "${t.name}"? Their CLI, MCP and API clients using it stop working.`)) return;
+    try {
+      await adminRevokeToken(t.id);
+      await load();
+    } catch (e) { setError(e.message); }
+  };
+
+  if (loading) return <div className="admin-section">Loading...</div>;
+
+  return (
+    <div className="admin-section">
+      <div className="admin-section-header">
+        <h3>API Tokens</h3>
+      </div>
+      <p className="admin-hint">
+        Every person&apos;s API tokens. Revoking one stops every CLI, MCP or API client that uses it.
+        Your own tokens are managed in Settings.
+      </p>
+      {error && <div className="share-error">{error}</div>}
+      {tokens.length === 0 ? (
+        <div className="admin-hint">No API tokens.</div>
+      ) : (
+        <div className="token-list">
+          {tokens.map((t) => (
+            <div key={t.id} className="token-item">
+              <div className="token-info">
+                <span className="token-name">{t.name}</span>
+                <span className="token-owner">{t.username || 'no owner'}</span>
+                <span className="token-hint">mdnest_•••••{t.token_suffix || '????'}</span>
+                <span className="token-date">Created {new Date(t.created_at).toLocaleDateString()}</span>
+              </div>
+              <button className="token-revoke" onClick={() => handleRevoke(t)}>Revoke</button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

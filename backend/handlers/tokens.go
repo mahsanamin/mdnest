@@ -87,14 +87,13 @@ func (h *TokenHandler) listTokens(w http.ResponseWriter, r *http.Request) {
 
 	uc := middleware.UserFromContext(r.Context())
 
-	// Return tokens without the actual token value or hash. Scope:
-	// superadmins see all; everyone else (admin, collaborator) sees own.
-	// (As of v3.5.0 the namespace-scoped admin role no longer gets
-	// system-wide visibility into other users' tokens — that's a
-	// superadmin-only audit capability.)
+	// Return tokens without the actual token value or hash. Everyone, superadmins
+	// included, sees only their own tokens here (Settings): another person's
+	// token in your own list looks like yours. Superadmins audit every token
+	// through /api/admin/tokens (Admin panel, with the owner shown).
 	safe := make([]map[string]string, 0, len(tokens))
 	for _, t := range tokens {
-		if uc != nil && uc.Role != "superadmin" && t.UserID != uc.ID {
+		if uc != nil && t.UserID != uc.ID {
 			continue
 		}
 		safe = append(safe, map[string]string{
@@ -179,6 +178,42 @@ func (h *TokenHandler) createToken(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *TokenHandler) revokeToken(w http.ResponseWriter, r *http.Request) {
+	h.revoke(w, r, false)
+}
+
+// HandleAdminTokens serves /api/admin/tokens (superadmin only, gated by the
+// route): GET lists every token with its owner, DELETE ?id= revokes any token.
+func (h *TokenHandler) HandleAdminTokens(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		tokens, err := h.store.All()
+		if err != nil {
+			http.Error(w, `{"error":"failed to read tokens"}`, http.StatusInternalServerError)
+			return
+		}
+		out := make([]map[string]any, 0, len(tokens))
+		for _, t := range tokens {
+			out = append(out, map[string]any{
+				"id":           t.ID,
+				"name":         t.Name,
+				"token_suffix": t.TokenSuffix,
+				"created_at":   t.CreatedAt,
+				"user_id":      t.UserID,
+				"username":     t.Username,
+			})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(out)
+	case http.MethodDelete:
+		h.revoke(w, r, true)
+	default:
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+	}
+}
+
+// revoke deletes a token: the caller's own one, or any token when anyOwner
+// (the superadmin admin endpoint).
+func (h *TokenHandler) revoke(w http.ResponseWriter, r *http.Request, anyOwner bool) {
 	id := r.URL.Query().Get("id")
 	if id == "" {
 		http.Error(w, `{"error":"id is required"}`, http.StatusBadRequest)
@@ -203,8 +238,7 @@ func (h *TokenHandler) revokeToken(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"token not found"}`, http.StatusNotFound)
 		return
 	}
-	// Scope: superadmin can revoke any token; anyone else only their own.
-	if uc != nil && uc.Role != "superadmin" && target.UserID != uc.ID {
+	if uc != nil && !anyOwner && target.UserID != uc.ID {
 		http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
 		return
 	}
@@ -218,7 +252,12 @@ func (h *TokenHandler) revokeToken(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"token not found"}`, http.StatusNotFound)
 		return
 	}
-	log.Printf("API token revoked: %s (%s)", target.Name, target.ID)
+	if uc != nil {
+		log.Printf("API token revoked: %s (%s), owner %q (user %d), by %q (user %d)",
+			target.Name, target.ID, target.Username, target.UserID, uc.Username, uc.ID)
+	} else {
+		log.Printf("API token revoked: %s (%s)", target.Name, target.ID)
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "revoked"})

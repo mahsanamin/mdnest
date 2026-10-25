@@ -4,6 +4,202 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v4.8.13: No more lost typing in Live notes, and Live never waits for the connection
+
+Released 2026-10-24.
+
+This release fixes several ways typed text could be lost. The main one: in a
+shared note, text could stay only in the server's memory and disappear later.
+Live notes are also editable as soon as they open, even behind a proxy or on
+a slow connection. Upgrading is strongly recommended for everyone.
+
+### Security
+
+- **`dompurify` 3.4.17**, the library that cleans note HTML and diagrams
+  before the browser shows them. 3.4.16 and earlier have a critical advisory
+  (GHSA-cg2g-xh64-v4q7, GHSA-mrv2-3pqr-j5jr, GHSA-c6gr-qvv4-5v3f) published
+  after v4.8.12. A lock-file-only patch bump; v4.8.12 and earlier carry the
+  affected version.
+- **The MCP server's dependencies** for high advisories published after
+  v4.8.12: `zod` 4.6.7 (GHSA-mrhx-c7xc-m3w5, which covers every zod below
+  4.6.6, so the MCP server moves from zod 3 to zod 4; its tools and their
+  inputs are unchanged) and `body-parser` 2.4.0 (GHSA-27r3-jxmh-p828), plus
+  `fast-uri` 3.1.9 and `ip-address` 10.7.4 for moderate ones.
+- **`undici` 7.30.1** in the frontend's test tooling (GHSA-4qv8-2p9j-2685 and
+  two more). It is only used by the unit tests, so the app served to
+  browsers is byte for byte the same.
+
+### Changed
+
+- **Settings → API Tokens now lists only your own tokens.** Superadmins
+  revoke other people's tokens from **Admin panel → API Tokens**, which
+  shows each token's owner, names them in the confirmation, and logs who
+  revoked whose token. Anyone who used to do that from Settings will find
+  it there. Thanks to [@ecthelion77](https://github.com/ecthelion77) (Olivier Gintrand), #149.
+
+### Fixed
+
+- **Text typed in a shared note could stay only in the server's memory and
+  be lost** (reported by a user: edits were gone later, with no history
+  entry, and coming back to the note showed the old text and then the new).
+  Only one browser in a shared room, the saver, writes the file. When a
+  connection was lost but the server still held it (a proxy or tunnel keeping
+  its side open) and the tab reconnected quickly, the old connection stayed
+  the saver and nothing was saved. The room kept the text in memory, and
+  dropped it two minutes after the last person left, or on a restart. The
+  server now moves the saver role to another writer when an update has gone
+  10 seconds without being saved, and that browser saves it.
+- **Coming back to a shared note showed the old text for a moment, then the
+  new** (reported by a user, every time). Only one browser in a room, the
+  saver, wrote the file. When the note was also open in another tab or on
+  another device that held that role, your typing reached the file only
+  after that browser's save delay, so coming back straight away loaded the
+  old file and then the room's newer text. A tab leaving a note now saves
+  the room's unsaved text itself, so the file already has it.
+- **The last few letters typed in Live were lost when you switched note
+  straight away.** The Live editor tells the app about a change 200 ms after
+  the last keystroke, and switching note inside that window dropped it: the
+  app had nothing to save yet, and the editor closed before it reported. It
+  happened on every install, with or without shared editing (in a test,
+  typing and switching at once lost the text 5 times out of 5). The editor
+  now hands over that edit before the app moves to the next note.
+- **Sync now saves the open note first.** It commits what is on disk, so
+  typing that had not been saved yet missed the commit and the "Synced" date
+  did not move.
+- **A manual Sync whose pull or push failed looked like it had worked.** The
+  request answered OK either way and the label kept showing the last
+  commit's date. The response now carries `syncError`, and the sidebar shows
+  "Git sync broken" with the reason. A Sync with nothing new to commit still
+  leaves the date as it was, since the label is the last commit's date.
+- **An agent's or the CLI's change to an open note now shows, and never
+  costs the person their typing, on a default install.** With live
+  collaboration off (the default), the browser only checked an open note
+  once a minute, so a change made with `mdnest append` or by an agent could
+  sit unseen for that long. Worse, if the person was typing, their next save
+  was refused, a "modified by an external source" banner appeared, and what
+  they typed after that was lost on reload. Now:
+  - the open note is checked every 5 seconds (an unchanged note costs a
+    304, no body), and an idle note shows the change straight away;
+  - a save that was overtaken is merged with the outside change and saved
+    again, in Basic and Live, so both are kept and the caret stays where the
+    person is typing;
+  - where both changed the same line, both versions are kept and a small
+    notice says so.
+- **"+ Note", "+ Folder", "+ Drawing" and "+ Slides" did nothing when
+  clicked during startup**, before a namespace was chosen. They are disabled
+  until then.
+
+- **Live notes never wait for the connection, and switching notes is quick
+  and quiet** (reported by a user: behind a proxy or a slow or sleeping
+  connection every Live note stayed read-only, with "Waiting for the live
+  connection to edit this note together"). Since shared editing (v4.8.10) a
+  Live note waited for its shared document over the websocket before you
+  could type, and every note switch closed the websocket and opened a new
+  one, so the status flashed "Reconnecting". Now:
+  - a note is editable as soon as it opens. Until the shared document is
+    there it saves the normal way, and the editor joins it without losing
+    anything you typed and without moving the caret or the keyboard (if you
+    already typed, it joins once the others have your text);
+  - if the connection drops while you edit together, typing keeps working
+    and saving, and the note joins the others again when it is back;
+  - the browser keeps one websocket for the whole visit and switches notes
+    with a message on it. Access to each note is checked on every switch,
+    as before on every connection. A tab left open from an older version
+    keeps working, and a newer browser still works with an older server;
+  - the connection is one small dot next to the people in the note: green
+    "Live", or grey "Not live" after about 2 seconds without a connection.
+    There are no notices about the connection and no "Read-only" bar unless
+    you may not write to the note;
+  - someone removed from a private chat, or whose access was taken away,
+    leaves only that note; the rest of their visit keeps its connection.
+    The connection ends when the login it was opened with expires;
+  - opening a note and leaving it straight away no longer leaves the server
+    holding "unsaved updates" for it;
+  - when everyone's connection drops and they come back with text of their
+    own, they all rejoin within a few seconds of stopping typing, with every
+    word once and nothing disappearing from anyone's screen.
+- **Merging two versions no longer prints shared words twice when one
+  version is the other plus more**, and a note open in another tab no
+  longer drops the last keystrokes typed just after a save when someone
+  else saves the same note.
+
+- **A note read while it was being saved could come back empty or cut
+  short** (also in v4.8.12 and earlier). A save writes the file in place, and
+  reading a note did not wait for a save in progress, so the browser, the
+  CLI or an agent could get a half-written note. A browser that then merged
+  that text with its own could drop words. Reading a note now waits for a
+  save of that same note to finish.
+
+- **Your own newest typing could vanish from the screen when the note was
+  checked for outside changes** (also in v4.8.12 and earlier). The 5 second
+  check, and the reload after someone else's save, compared the answer with
+  the text saved last, read after the answer came back. When a save of yours
+  landed while the check was out, the older answer looked like a change and
+  rolled your newest words back. A check now ignores an answer that a save of
+  yours overtook.
+
+- **A change merged in from elsewhere could be written over by your next
+  autosave** (also in v4.8.12 and earlier). When a save was refused because
+  the note had changed, the app merged both versions and saved the result.
+  An autosave queued behind it, for text typed before the merge, then wrote
+  that older text over the merged one. An autosave now merges onto the
+  newest saved text first.
+
+- **An outside change merged into the Live editor right after a keystroke
+  could be saved away again** (also in v4.8.12 and earlier). The editor
+  reports a change a fifth of a second after a keystroke, and it reported the
+  text from that keystroke, before any outside change merged in meanwhile.
+  Saving that report removed the outside change from the file. The editor
+  now reports what it holds at that moment.
+
+- **A word typed right after an outside change was merged in could be glued
+  to the previous word** (also in v4.8.12 and earlier). Markdown drops a
+  paragraph's trailing space, so when a change was merged into the paragraph
+  you were typing at the end of, the space you had just typed went missing
+  and the next word joined the last one. That space is now kept.
+
+### Tests
+
+- New: `cli-default-install.spec.js` (fails on v4.8.12 in all four cases)
+  and `shared-unavailable.spec.js` (a websocket that hangs or is refused;
+  both cases left the note read-only on v4.8.12). The release gate now runs
+  the multi-mode shared-editing suite on every release.
+- New: `live-never-blocks.spec.js` in the multi-mode suite. On develop
+  before this change: a note with a hanging or refused websocket became
+  editable after 4.3 to 4.4 seconds (budget 1 second), a note switch showed
+  "Reconnecting" and the "Read-only" bar, 7 notes used 7 websockets, a person
+  opening on a slow connection could not type for 3 seconds and lost what
+  they typed, and typing while the socket was cut never reached the file. It
+  also pins the older-server fallback, a room seeded from the editor holding
+  exactly the markdown, and open-and-leave with no unsaved updates on the
+  server. Go tests pin every join against grants, the join rate limit,
+  leaving a note on a removed grant or chat membership, and the login expiry.
+- `tree-target.spec.js` removes what it creates; it left folders at the
+  namespace root and failed 2 times in 20 on repeated runs.
+
+### Release process
+
+- **A release push takes seconds.** The pre-push hook checks the release
+  gate's record before anything else: a tree the gate passed is accepted at
+  once, any other tree is refused at once. It used to rerun its own checks
+  first, and GitHub dropped the connection while it did.
+- **Three test levels and faster test runs.** `bash tests/check.sh --level
+  iterate|develop|ship` runs only what a step needs: the tests for what
+  changed while working, the suites a branch touches before it merges, and
+  everything before a release (`tests/release-gate.sh` is the ship level).
+  The test images are built once per tree and shared by every suite, and the
+  browser suites run in parallel on separate stacks. Timing tests run last,
+  alone, so load on the machine does not fail them.
+
+### Documentation
+
+- **A writing standard for public text** (#144). The README, the user docs,
+  the CHANGELOG and the release notes follow the website's `WRITING.md`:
+  plain English, and no promise the released code does not keep.
+- **The file-by-file map of the repo moved to `docs/codemap.md`** (#151), so
+  the instructions coding agents load in every session stay short. Thanks to
+  [@sanshads](https://github.com/sanshads).
+
 ## v4.8.12: No lost chat messages on HA installs, and Go 1.26.10
 
 Two important fixes. On HA installs (app replicas and one writer), appends

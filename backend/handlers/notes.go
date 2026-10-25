@@ -152,7 +152,13 @@ func (h *NoteHandler) getNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Under the note lock, like every write here: a note is written in place
+	// (truncate, then write), so a read that landed during a save could see
+	// an empty or half-written file, and a browser merging "the file" with
+	// its own text then dropped words. Per-process, like the lock itself.
+	unlock := lockNote(ns, relPath)
 	data, err := h.store.ReadFile(ctx, ns, relPath)
+	unlock()
 	if err != nil {
 		if errors.Is(err, storage.ErrNotExist) {
 			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)

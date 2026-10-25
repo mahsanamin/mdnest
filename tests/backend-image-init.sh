@@ -18,15 +18,14 @@ cd "$REPO_ROOT" || exit 1
 
 command -v docker >/dev/null 2>&1 || { echo "SKIP: docker not found"; exit 2; }
 
-IMAGE="mdnest-init-backend:test"
+# shellcheck source=tests/lib/e2e-images.sh
+. "$REPO_ROOT/tests/lib/e2e-images.sh"
+BUILD_LOGS="$(mktemp -d "${TMPDIR:-/tmp}/mdnest-e2e-build.XXXXXX")"
 CONTAINER="mdnest-init-be-$$"
-cleanup() { docker rm -f "$CONTAINER" >/dev/null 2>&1; }
+cleanup() { docker rm -f -v "$CONTAINER" >/dev/null 2>&1; rm -rf "$BUILD_LOGS"; }
 trap cleanup EXIT
 
-if ! docker build -q -t "$IMAGE" backend/ >/tmp/mdnest-init-build.log 2>&1; then
-  echo "FAIL: backend image build (see /tmp/mdnest-init-build.log)"
-  exit 1
-fi
+IMAGE="$(e2e_backend_image "$REPO_ROOT" "$BUILD_LOGS")" || { echo "FAIL: backend image build"; exit 1; }
 
 docker run -d --name "$CONTAINER" \
   -e AUTH_MODE=single -e MDNEST_USER=e2e -e MDNEST_PASSWORD=e2epass123 \

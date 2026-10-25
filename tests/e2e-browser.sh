@@ -11,35 +11,52 @@
 # the first time (a few hundred MB). Subsequent runs reuse them.
 #
 # Usage:   tests/e2e-browser.sh
+#          MDNEST_E2E_SHARDS=3 tests/e2e-browser.sh   (three stacks, see below)
+#          MDNEST_E2E_SPECS="smoke.spec.js theme.spec.js" tests/e2e-browser.sh
+#          MDNEST_E2E_ARGS="--repeat-each 3" MDNEST_E2E_SPECS=chat.spec.js tests/e2e-browser.sh
+#
+# Shards: the specs are split across MDNEST_E2E_SHARDS stacks (default: one
+# per 3 CPUs, at most 3; tests/lib/e2e-images.sh e2e_shards). Each shard is a
+# whole stack of its own (backend, nginx, notes folder, seeded notes) with one
+# Playwright worker, so no two specs ever share a server, an account or a
+# notes tree, the same isolation as one stack running them in turn.
+# MDNEST_E2E_SHARDS=1 is the old single-stack run.
+#
 # Exit:    0 if the browser suite passes, 1 otherwise, 2 if prerequisites
 #          (docker / node) are missing.
 
 set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$REPO_ROOT"
+cd "$REPO_ROOT" || exit 1
 
-BE_IMAGE="mdnest-e2e-backend:test"
-FE_IMAGE="mdnest-e2e-frontend:test"
+# shellcheck source=tests/lib/e2e-images.sh
+. "$REPO_ROOT/tests/lib/e2e-images.sh"
 SFX="$$"
-BE="mdnest-e2e-be-$SFX"
-FE="mdnest-e2e-fe-$SFX"
-NET="mdnest-e2e-net-$SFX"
-# Inside the repo, not the system temp dir: this folder is bind-mounted into
-# the backend container, and on macOS mktemp lands in /var/folders, which
-# Colima (and a Docker Desktop with narrowed file sharing) does not share —
-# the container then saw an empty /notes and the run died at "could not seed
-# note" before a single test ran. The repo is shareable by definition: the
-# dev stack already bind-mounts its namespaces from here.
-NOTES_DIR="$(mktemp -d "$REPO_ROOT/.e2e-notes.XXXXXX")"
+LOGDIR="$(mktemp -d "${TMPDIR:-/tmp}/mdnest-e2e-browser.XXXXXX")"
+# shellcheck disable=SC2086
+SHARDS="$(e2e_cap_shards "$(e2e_shards)" ${MDNEST_E2E_SPECS:-})"
+# Per shard: container names, network and notes folder. Every name carries the
+# run's pid and the shard number, so parallel runs never touch each other.
+# The notes folders live inside the repo, not the system temp dir: they are
+# bind-mounted into the backend container, and on macOS mktemp lands in
+# /var/folders, which Colima (and a Docker Desktop with narrowed file sharing)
+# does not share; the container then saw an empty /notes and the run died at
+# "could not seed note" before a single test ran.
+BES=(); FES=(); NETS=(); NOTES=(); BASES=()
 
 log()  { printf '\n\033[1;34m▶ %s\033[0m\n' "$1"; }
 fail() { printf '\033[31m✗ %s\033[0m\n' "$1"; }
 pass() { printf '\033[32m✓ %s\033[0m\n' "$1"; }
 
 cleanup() {
-  docker rm -f "$FE" "$BE" >/dev/null 2>&1 || true
-  docker network rm "$NET" >/dev/null 2>&1 || true
-  rm -rf "$NOTES_DIR"
+  local i
+  for i in "${!BES[@]}"; do
+    docker rm -f -v "${FES[$i]}" "${BES[$i]}" >/dev/null 2>&1 || true
+    docker network rm "${NETS[$i]}" >/dev/null 2>&1 || true
+    e2e_rm_dirs "${NOTES[$i]}"
+  done
+  [ -z "${KEEP:-}" ] && rm -rf "$LOGDIR"
+  return 0
 }
 trap cleanup EXIT
 
@@ -49,74 +66,160 @@ docker info >/dev/null 2>&1        || { fail "docker daemon isn't running"; exit
 command -v node >/dev/null 2>&1    || { fail "node is required for Playwright"; exit 2; }
 command -v npx  >/dev/null 2>&1    || { fail "npx is required for Playwright"; exit 2; }
 
-# ── Build both images from the working tree ──────────────────────────────────
-log "Building backend + frontend images from the working tree"
-if ! docker build -t "$BE_IMAGE" backend/  >/tmp/mdnest-be-build.log 2>&1; then
-  fail "backend build failed"; tail -30 /tmp/mdnest-be-build.log; exit 1
+BUDGET="$(e2e_budget_mode)"
+if [ "$BUDGET" = only ]; then
+  e2e_playwright_ready "$LOGDIR" || { fail "Playwright setup failed"; exit 1; }
+  # shellcheck disable=SC2086
+  e2e_has_budget ${MDNEST_E2E_SPECS:-} || { pass "no @budget tests in the selected specs, nothing to run"; exit 0; }
 fi
+
+# ── Build both images from the working tree (or reuse them) ─────────────────
+# Tagged by a hash of the tree (tests/lib/e2e-images.sh), so a tree that was
+# already built, by this harness or another one, is not built again.
+log "Building backend + frontend images from the working tree"
+BE_IMAGE="$(e2e_backend_image "$REPO_ROOT" "$LOGDIR")" || { fail "backend build failed"; exit 1; }
 # The frontend image serves the repo-root CLI at /cli/mdnest; it comes in as
 # the named "cli" build context (see frontend/Dockerfile).
-if ! docker build --build-context cli=. -t "$FE_IMAGE" frontend/ >/tmp/mdnest-fe-build.log 2>&1; then
-  fail "frontend build failed"; tail -30 /tmp/mdnest-fe-build.log; exit 1
-fi
-pass "images built"
+FE_IMAGE="$(e2e_frontend_image "$REPO_ROOT" "$LOGDIR")" || { fail "frontend build failed"; exit 1; }
+pass "images ready: $BE_IMAGE, $FE_IMAGE"
 
-# ── Boot the stack ───────────────────────────────────────────────────────────
-mkdir -p "$NOTES_DIR/testing_workspace"
-# A second namespace for the move/copy-between-namespaces specs. Named to sort
-# after testing_workspace, which stays the namespace every other spec opens in.
-mkdir -p "$NOTES_DIR/zz_e2e_target"
-docker network create "$NET" >/dev/null
+# ── Boot one shard's stack and seed it ─────────────────────────────────────
+# boot_shard I: start shard I's backend + nginx and seed its notes. Sets
+# BASE_URL and TOKEN for that shard.
+boot_shard() {
+  local i="$1"
+  BE="mdnest-e2e-be-$SFX-$i"; FE="mdnest-e2e-fe-$SFX-$i"; NET="mdnest-e2e-net-$SFX-$i"
+  NOTES_DIR="$(e2e_notes_dir "$REPO_ROOT")"
+  BES[i]="$BE"; FES[i]="$FE"; NETS[i]="$NET"; NOTES[i]="$NOTES_DIR"
+  mkdir -p "$NOTES_DIR/testing_workspace"
+  # A second namespace for the move/copy-between-namespaces specs. Named to sort
+  # after testing_workspace, which stays the namespace every other spec opens in.
+  mkdir -p "$NOTES_DIR/zz_e2e_target"
+  docker network create "$NET" >/dev/null
 
-log "Starting backend (network alias 'backend' so nginx can proxy to it)"
-docker run -d --name "$BE" --network "$NET" --network-alias backend \
-  -e AUTH_MODE=single \
-  -e MDNEST_USER=e2e \
-  -e MDNEST_PASSWORD=e2epass123 \
-  -e MDNEST_JWT_SECRET=e2e-test-secret \
-  -e NOTES_DIR=/notes \
-  -e FRONTEND_ORIGIN=http://localhost \
-  -e ENABLE_TASK_BOARD=true \
-  -e ENABLE_EXCALIDRAW=true \
-  -e ENABLE_MARP=true \
-  -e ENABLE_MARP_THEMES=true \
-  -e ENABLE_LIVE_COLLAB=true \
-  -e ENABLE_AGENT_APPROVALS=true \
-  -v "$NOTES_DIR:/notes" "$BE_IMAGE" >/dev/null
+  log "Starting backend (network alias 'backend' so nginx can proxy to it)"
+  docker run -d --name "$BE" --network "$NET" --network-alias backend \
+    -e AUTH_MODE=single \
+    -e MDNEST_USER=e2e \
+    -e MDNEST_PASSWORD=e2epass123 \
+    -e MDNEST_JWT_SECRET=e2e-test-secret \
+    -e NOTES_DIR=/notes \
+    -e FRONTEND_ORIGIN=http://localhost \
+    -e ENABLE_TASK_BOARD=true \
+    -e ENABLE_EXCALIDRAW=true \
+    -e ENABLE_MARP=true \
+    -e ENABLE_MARP_THEMES=true \
+    -e ENABLE_LIVE_COLLAB=true \
+    -e ENABLE_AGENT_APPROVALS=true \
+    -v "$NOTES_DIR:/notes" "$BE_IMAGE" >/dev/null
 
-log "Starting frontend (nginx) on an ephemeral host port"
-docker run -d --name "$FE" --network "$NET" \
-  -p 127.0.0.1:0:80 "$FE_IMAGE" >/dev/null
+  log "Starting frontend (nginx) on an ephemeral host port"
+  docker run -d --name "$FE" --network "$NET" \
+    -p 127.0.0.1:0:80 "$FE_IMAGE" >/dev/null
 
-PORT="$(docker port "$FE" 80/tcp | head -1 | sed 's/.*://')"
-[ -n "$PORT" ] || { fail "couldn't determine frontend port"; docker logs "$FE"; exit 1; }
-BASE_URL="http://127.0.0.1:$PORT"
+  PORT="$(docker port "$FE" 80/tcp | head -1 | sed 's/.*://')"
+  [ -n "$PORT" ] || { fail "couldn't determine frontend port"; docker logs "$FE"; exit 1; }
+  BASE_URL="http://127.0.0.1:$PORT"
 
-log "Waiting for the stack at $BASE_URL"
-healthy=0
-for _ in $(seq 1 40); do
-  # /api/config is proxied by nginx to the backend — proves BOTH are up + wired.
-  if curl -fsS "$BASE_URL/api/config" >/dev/null 2>&1; then healthy=1; break; fi
-  sleep 1
-done
-[ "$healthy" = 1 ] || { fail "stack never became healthy"; docker logs "$BE"; docker logs "$FE"; exit 1; }
-pass "stack healthy"
+  log "Waiting for the stack at $BASE_URL"
+  healthy=0
+  for _ in $(seq 1 40); do
+    # /api/config is proxied by nginx to the backend — proves BOTH are up + wired.
+    if curl -fsS "$BASE_URL/api/config" >/dev/null 2>&1; then healthy=1; break; fi
+    sleep 1
+  done
+  [ "$healthy" = 1 ] || { fail "stack never became healthy"; docker logs "$BE"; docker logs "$FE"; exit 1; }
+  pass "stack healthy"
 
-# ── Seed a note (via the proxied API) so the read/search/editor tests have data ─
-log "Seeding a note into testing_workspace"
-TOKEN="$(curl -fsS -X POST "$BASE_URL/api/auth/login" -H 'Content-Type: application/json' \
-  -d '{"username":"e2e","password":"e2epass123"}' | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')"
-[ -n "$TOKEN" ] || { fail "could not mint a token"; exit 1; }
-SEED_FILE="e2e-seed.md"
-SEED_TOKEN="zzq${SFX}marker"
-curl -fsS -X POST "$BASE_URL/api/note?ns=testing_workspace&path=$SEED_FILE" \
-  -H "Authorization: Bearer $TOKEN" \
-  --data "# E2E Seed
+  # ── Seed a note (via the proxied API) so the read/search/editor tests have data ─
+  log "Seeding a note into testing_workspace"
+  TOKEN="$(curl -fsS -X POST "$BASE_URL/api/auth/login" -H 'Content-Type: application/json' \
+    -d '{"username":"e2e","password":"e2epass123"}' | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')"
+  [ -n "$TOKEN" ] || { fail "could not mint a token"; exit 1; }
+  curl -fsS -X POST "$BASE_URL/api/note?ns=testing_workspace&path=$SEED_FILE" \
+    -H "Authorization: Bearer $TOKEN" \
+    --data "# E2E Seed
 
 This note exists so the browser tests have content to open, render and search.
 Unique token: $SEED_TOKEN
 " >/dev/null || { fail "could not seed note"; exit 1; }
-pass "seeded $SEED_FILE (token $SEED_TOKEN)"
+  pass "seeded $SEED_FILE (token $SEED_TOKEN)"
+
+  # A mermaid flowchart, so the suite can prove diagram labels actually render.
+  # Mermaid draws flowchart labels inside <foreignObject>; a sanitizer that drops
+  # that element leaves the boxes but silently deletes every label (v3.11.7).
+  #
+  # Node C carries a pale author fill on purpose. Rendering a label is not the
+  # same as rendering a READABLE one: in dark mode every such label used to be
+  # painted with the light ink, because the contrast walk measured mermaid's
+  # zero-area label spacer (which inherits the dark themed mainBkg) instead of
+  # the node the text actually sits on. mermaid-contrast.spec.js pins that.
+  curl -fsS -X POST "$BASE_URL/api/note?ns=testing_workspace&path=$MERMAID_FILE" \
+    -H "Authorization: Bearer $TOKEN" \
+    --data "# Mermaid render check
+
+\`\`\`mermaid
+flowchart TD
+  A[$MERMAID_LABEL] -->|\"$MERMAID_EDGE\"| B[Second Node]
+  B --> C[$MERMAID_PALE]
+  classDef pale fill:#cfe4ff,stroke:#2557d6,stroke-width:2px;
+  class C pale;
+\`\`\`
+" >/dev/null || { fail "could not seed mermaid note"; exit 1; }
+  pass "seeded $MERMAID_FILE (label $MERMAID_LABEL)"
+
+  # A note with task-list items, so the suite can drive the kanban board and the
+  # Live editor's checkbox round-trip. Ticking a checkbox is a mouse-only
+  # interaction handled inside ProseMirror — it never produces a keydown or a
+  # document-level mousedown, which is exactly how the save gate came to swallow
+  # those edits for a whole session (v4.0.0).
+  curl -fsS -X POST "$BASE_URL/api/note?ns=testing_workspace&path=$BOARD_FILE" \
+    -H "Authorization: Bearer $TOKEN" \
+    --data "# Sprint
+
+- [ ] $BOARD_TASK
+  - priority: high
+  - tags: [release]
+- [x] Already finished
+" >/dev/null || { fail "could not seed board note"; exit 1; }
+  pass "seeded $BOARD_FILE (task $BOARD_TASK)"
+
+  # Two more board notes, one per mutating spec, so the checkbox round-trip tests
+  # never depend on each other's edits and no test has to reset shared state
+  # mid-run (resetting a note the app already has open leaves the editor holding
+  # a stale ETag, which masks the very thing these specs measure).
+  for pair in "tick:[ ]" "untick:[x]"; do
+    name="${pair%%:*}"; box="${pair##*:}"
+    curl -fsS -X POST "$BASE_URL/api/note?ns=testing_workspace&path=e2e-board-$name.md" \
+      -H "Authorization: Bearer $TOKEN" \
+      --data "# $name
+
+- $box $BOARD_TASK
+  - priority: high
+" >/dev/null || { fail "could not seed e2e-board-$name.md"; exit 1; }
+  done
+  pass "seeded e2e-board-tick.md / e2e-board-untick.md"
+
+  BASES[i]="$BASE_URL"
+  return 0
+}
+
+SEED_FILE="e2e-seed.md"
+SEED_TOKEN="zzq${SFX}marker"
+MERMAID_FILE="e2e-mermaid.md"
+MERMAID_LABEL="zzm${SFX}label"
+MERMAID_PALE="zzp${SFX}pale"
+MERMAID_EDGE="zze${SFX}edge"
+BOARD_FILE="e2e-board.md"
+BOARD_TASK="zzt${SFX}task"
+for ((s = 0; s < SHARDS; s++)); do
+  log "Shard $((s + 1)) of $SHARDS"
+  boot_shard "$s" || exit 1
+done
+# The /cli/ checks below run against the first shard's stack.
+BASE_URL="${BASES[0]}"
+TOKEN="$(curl -fsS -X POST "$BASE_URL/api/auth/login" -H 'Content-Type: application/json' \
+  -d '{"username":"e2e","password":"e2epass123"}' | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')"
 
 # ── The CLI this server serves, and what the /cli/ location must not change ──
 log "Checking /cli/ and the routes around it"
@@ -181,91 +284,44 @@ else
 fi
 rm -rf "$CLI_TMP"
 
-# A mermaid flowchart, so the suite can prove diagram labels actually render.
-# Mermaid draws flowchart labels inside <foreignObject>; a sanitizer that drops
-# that element leaves the boxes but silently deletes every label (v3.11.7).
-#
-# Node C carries a pale author fill on purpose. Rendering a label is not the
-# same as rendering a READABLE one: in dark mode every such label used to be
-# painted with the light ink, because the contrast walk measured mermaid's
-# zero-area label spacer (which inherits the dark themed mainBkg) instead of
-# the node the text actually sits on. mermaid-contrast.spec.js pins that.
-MERMAID_FILE="e2e-mermaid.md"
-MERMAID_LABEL="zzm${SFX}label"
-MERMAID_PALE="zzp${SFX}pale"
-MERMAID_EDGE="zze${SFX}edge"
-curl -fsS -X POST "$BASE_URL/api/note?ns=testing_workspace&path=$MERMAID_FILE" \
-  -H "Authorization: Bearer $TOKEN" \
-  --data "# Mermaid render check
-
-\`\`\`mermaid
-flowchart TD
-  A[$MERMAID_LABEL] -->|\"$MERMAID_EDGE\"| B[Second Node]
-  B --> C[$MERMAID_PALE]
-  classDef pale fill:#cfe4ff,stroke:#2557d6,stroke-width:2px;
-  class C pale;
-\`\`\`
-" >/dev/null || { fail "could not seed mermaid note"; exit 1; }
-pass "seeded $MERMAID_FILE (label $MERMAID_LABEL)"
-
-# A note with task-list items, so the suite can drive the kanban board and the
-# Live editor's checkbox round-trip. Ticking a checkbox is a mouse-only
-# interaction handled inside ProseMirror — it never produces a keydown or a
-# document-level mousedown, which is exactly how the save gate came to swallow
-# those edits for a whole session (v4.0.0).
-BOARD_FILE="e2e-board.md"
-BOARD_TASK="zzt${SFX}task"
-curl -fsS -X POST "$BASE_URL/api/note?ns=testing_workspace&path=$BOARD_FILE" \
-  -H "Authorization: Bearer $TOKEN" \
-  --data "# Sprint
-
-- [ ] $BOARD_TASK
-  - priority: high
-  - tags: [release]
-- [x] Already finished
-" >/dev/null || { fail "could not seed board note"; exit 1; }
-pass "seeded $BOARD_FILE (task $BOARD_TASK)"
-
-# Two more board notes, one per mutating spec, so the checkbox round-trip tests
-# never depend on each other's edits and no test has to reset shared state
-# mid-run (resetting a note the app already has open leaves the editor holding
-# a stale ETag, which masks the very thing these specs measure).
-for pair in "tick:[ ]" "untick:[x]"; do
-  name="${pair%%:*}"; box="${pair##*:}"
-  curl -fsS -X POST "$BASE_URL/api/note?ns=testing_workspace&path=e2e-board-$name.md" \
-    -H "Authorization: Bearer $TOKEN" \
-    --data "# $name
-
-- $box $BOARD_TASK
-  - priority: high
-" >/dev/null || { fail "could not seed e2e-board-$name.md"; exit 1; }
-done
-pass "seeded e2e-board-tick.md / e2e-board-untick.md"
-
 # ── Install Playwright + Chromium on demand ──────────────────────────────────
 log "Preparing Playwright (installs Chromium on first run)"
-(
-  cd tests/browser
-  [ -d node_modules ] || npm install --no-audit --no-fund >/tmp/mdnest-pw-npm.log 2>&1
-  # Install just the Chromium browser if it isn't cached yet.
-  npx playwright install chromium >/tmp/mdnest-pw-browser.log 2>&1
-) || { fail "Playwright setup failed (see /tmp/mdnest-pw-*.log)"; exit 1; }
+e2e_playwright_ready "$LOGDIR" || { fail "Playwright setup failed (see $LOGDIR/playwright-*.log)"; KEEP=1; exit 1; }
 pass "Playwright ready"
 
-# ── Run the browser suite ────────────────────────────────────────────────────
-log "Running the browser suite against $BASE_URL"
-if ( cd tests/browser && \
-     MDNEST_BASE_URL="$BASE_URL" \
-     MDNEST_USER=e2e MDNEST_PASSWORD=e2epass123 \
-     MDNEST_SEED_FILE="$SEED_FILE" MDNEST_SEED_TOKEN="$SEED_TOKEN" \
-     MDNEST_MERMAID_FILE="$MERMAID_FILE" MDNEST_MERMAID_LABEL="$MERMAID_LABEL" \
-     MDNEST_MERMAID_PALE="$MERMAID_PALE" MDNEST_MERMAID_EDGE="$MERMAID_EDGE" \
-     MDNEST_BOARD_FILE="$BOARD_FILE" MDNEST_BOARD_TASK="$BOARD_TASK" \
-     MDNEST_NOTES_DIR="$NOTES_DIR" \
-     npx playwright test ${MDNEST_E2E_SPECS:-} ); then
+# ── Run the browser suite, one Playwright process per shard ─────────────────
+# pw_run I ARGS...: playwright against shard I's stack.
+pw_run() {
+  local i="$1"; shift
+  # shellcheck disable=SC2086
+  cd tests/browser && \
+    MDNEST_BASE_URL="${BASES[$i]}" \
+    MDNEST_USER=e2e MDNEST_PASSWORD=e2epass123 \
+    MDNEST_SEED_FILE="$SEED_FILE" MDNEST_SEED_TOKEN="$SEED_TOKEN" \
+    MDNEST_MERMAID_FILE="$MERMAID_FILE" MDNEST_MERMAID_LABEL="$MERMAID_LABEL" \
+    MDNEST_MERMAID_PALE="$MERMAID_PALE" MDNEST_MERMAID_EDGE="$MERMAID_EDGE" \
+    MDNEST_BOARD_FILE="$BOARD_FILE" MDNEST_BOARD_TASK="$BOARD_TASK" \
+    MDNEST_NOTES_DIR="${NOTES[$i]}" \
+    npx playwright test "$@" ${MDNEST_E2E_ARGS:-} ${MDNEST_E2E_SPECS:-}
+}
+# shellcheck disable=SC2046
+run_shard() { pw_run "$1" $(e2e_shard_args "$1" "$SHARDS") $(e2e_main_args "$BUDGET"); }
+rc=0
+if [ "$BUDGET" != only ]; then
+  log "Running the browser suite on $SHARDS shard(s): ${BASES[*]}"
+  e2e_run_shards "$SHARDS" "$LOGDIR" run_shard || rc=1
+fi
+if [ "$BUDGET" = after ] || [ "$BUDGET" = only ]; then
+  # The timing-budget tests, alone on the first stack, with nothing else from
+  # this run using the CPU.
+  log "Running the @budget timing tests alone on ${BASES[0]}"
+  # shellcheck disable=SC2046
+  ( pw_run 0 $(e2e_quiet_args) ) || rc=1
+fi
+if [ "$rc" -eq 0 ]; then
   pass "BROWSER E2E: all specs passed"
   exit 0
 else
-  fail "BROWSER E2E: failures above (traces/screenshots in tests/browser/test-results)"
+  fail "BROWSER E2E: failures above (traces/screenshots in tests/browser-results)"
   exit 1
 fi

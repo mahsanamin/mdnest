@@ -20,7 +20,9 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-IMAGE="mdnest-e2e-backend:test"
+# shellcheck source=tests/lib/e2e-images.sh
+. "$REPO_ROOT/tests/lib/e2e-images.sh"
+BUILD_LOGS="$(mktemp -d "${TMPDIR:-/tmp}/mdnest-e2e-build.XXXXXX")"
 SFX="$$"
 CONTAINER="mdnest-e2e-be-$SFX"
 NET="mdnest-e2e-net-$SFX"
@@ -30,7 +32,7 @@ NET="mdnest-e2e-net-$SFX"
 # the container then saw an empty /notes and the run died at "could not seed
 # note" before a single test ran. The repo is shareable by definition: the
 # dev stack already bind-mounts its namespaces from here.
-NOTES_DIR="$(mktemp -d "$REPO_ROOT/.e2e-notes.XXXXXX")"
+NOTES_DIR="$(e2e_notes_dir "$REPO_ROOT")"
 CLI_HOME="$(mktemp -d)"
 FAILED=0
 
@@ -39,9 +41,10 @@ fail() { printf '\033[31m✗ %s\033[0m\n' "$1"; }
 pass() { printf '\033[32m✓ %s\033[0m\n' "$1"; }
 
 cleanup() {
-  docker rm -f "$CONTAINER"  >/dev/null 2>&1 || true
+  rm -rf "$BUILD_LOGS"
+  docker rm -f -v "$CONTAINER"  >/dev/null 2>&1 || true
   docker network rm "$NET"   >/dev/null 2>&1 || true
-  rm -rf "$NOTES_DIR" "$CLI_HOME"
+  e2e_rm_dirs "$NOTES_DIR" "$CLI_HOME"
 }
 trap cleanup EXIT
 
@@ -51,10 +54,8 @@ docker info >/dev/null 2>&1        || { fail "docker daemon isn't running"; exit
 
 # ── Build the backend from the working tree ──────────────────────────────────
 log "Building backend image from the working tree"
-if ! docker build -t "$IMAGE" backend/ >/tmp/mdnest-e2e-build.log 2>&1; then
-  fail "backend image build failed"; tail -30 /tmp/mdnest-e2e-build.log; exit 1
-fi
-pass "backend image built"
+IMAGE="$(e2e_backend_image "$REPO_ROOT" "$BUILD_LOGS")" || { fail "backend image build failed"; exit 1; }
+pass "backend image ready: $IMAGE"
 
 # ── Start a throwaway single-mode instance ───────────────────────────────────
 mkdir -p "$NOTES_DIR/testing_workspace" "$NOTES_DIR/testing_workspace_2"

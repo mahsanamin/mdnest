@@ -1644,14 +1644,10 @@ pre:hover .code-copy-btn {
 }
 
 .ws-status.connected .ws-status-text { color: var(--success); }
-.ws-status.connecting .ws-status-text { color: var(--warning); }
-.ws-status.disconnected .ws-status-text { color: var(--danger); }
-.ws-status.superseded .ws-status-text { color: var(--orange); }
+.ws-status.down .ws-status-text { color: var(--text-muted); }
 
 .ws-status-dot.connected { background: var(--success); }
-.ws-status-dot.connecting { background: var(--warning); animation: pulse-dot 1.2s ease-in-out infinite; }
-.ws-status-dot.disconnected { background: var(--danger); }
-.ws-status-dot.superseded { background: var(--orange); }
+.ws-status-dot.down { background: var(--text-muted); }
 
 /* Session superseded full-screen overlay */
 .session-superseded {
@@ -1699,11 +1695,6 @@ pre:hover .code-copy-btn {
 
 .session-superseded-box button:hover {
   opacity: 0.9;
-}
-
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
 }
 
 .toolbar-refresh {
@@ -2526,6 +2517,11 @@ pre:hover .code-copy-btn {
   color: var(--text);
 }
 
+.token-owner {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
 .token-hint {
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.72rem;
@@ -3000,8 +2996,13 @@ pre:hover .code-copy-btn {
   transition: background 0.15s;
 }
 
-.sidebar-action-btn:hover {
+.sidebar-action-btn:hover:not(:disabled) {
   background: var(--surface-3);
+}
+
+.sidebar-action-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 /* ===== Multi-user: Sidebar footer ===== */
@@ -6725,7 +6726,6 @@ pre:hover .code-copy-btn {
   .toolbar-more-menu .more-phone { display: none; }
   .toolbar-more-menu .more-file { display: none; }
   /* Desktop shows the status pill on the bar; the dot is phone-only. */
-  .toolbar-more-dot { display: none; }
 }
 
 /* Phone toolbar: the bar keeps only what is used on every note, and the rest
@@ -6800,18 +6800,6 @@ pre:hover .code-copy-btn {
 }
 
 .toolbar-more-btn { cursor: pointer; }
-.toolbar-more-dot {
-  position: absolute;
-  top: 5px;
-  right: 3px;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--warning);
-  box-shadow: 0 0 0 2px var(--surface);
-}
-.toolbar-more-dot.disconnected { background: var(--danger); }
-.toolbar-more-dot.superseded { background: var(--orange); }
 
 .toolbar-more-menu {
   position: absolute;

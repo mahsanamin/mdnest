@@ -51,10 +51,26 @@ const privateID = "dddddddd-4444-4444-8444-444444444444"
 
 type memGrants struct {
 	store.GrantStore // unimplemented methods panic: the routes must not need them
+	mu               sync.Mutex
 	grants           []store.Grant
 }
 
+// revoke drops every grant of uid (a test changing access while it runs).
+func (m *memGrants) revoke(uid int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	kept := m.grants[:0]
+	for _, g := range m.grants {
+		if g.UserID != uid {
+			kept = append(kept, g)
+		}
+	}
+	m.grants = kept
+}
+
 func (m *memGrants) GetGrantsForUser(uid int) ([]store.Grant, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	var out []store.Grant
 	for _, g := range m.grants {
 		if g.UserID == uid {
@@ -180,6 +196,8 @@ type testServer struct {
 	srv       *httptest.Server
 	tokens    *handlers.TokenHandler
 	approvals *handlers.ApprovalHandler
+	hub       *collab.Hub
+	grants    *memGrants // multi mode only
 	// restarts counts how often a restart was asked for (the real one
 	// re-execs the process; here it only counts).
 	restarts atomic.Int32
@@ -258,6 +276,7 @@ func newTestServer(t *testing.T, multi bool) *testServer {
 		}}
 		na := &memNsAdmins{of: map[int][]string{uidAdele: {"beta"}}}
 		grants, groups, nsAdmins = mg, gr, na
+		ts.grants = mg
 		perms = middleware.NewPermissionChecker(mg, na, gr)
 	}
 	if perms != nil {
@@ -265,6 +284,7 @@ func newTestServer(t *testing.T, multi bool) *testServer {
 	}
 
 	hub := collab.NewHub()
+	ts.hub = hub
 	note := handlers.NewNoteHandler(stg)
 	search := handlers.NewSearchHandler(stg)
 	nsFilter := func(_ *http.Request, n []string) []string { return n }

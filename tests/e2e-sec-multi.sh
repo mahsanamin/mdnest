@@ -21,21 +21,24 @@ while IFS= read -r v; do unset "$v"; done < <(env | sed -n 's/^\(GIT_[A-Z_]*\)=.
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT" || exit 1
 
-IMAGE="mdnest-e2e-backend:sec"
+# shellcheck source=tests/lib/e2e-images.sh
+. "$REPO_ROOT/tests/lib/e2e-images.sh"
+BUILD_LOGS="$(mktemp -d "${TMPDIR:-/tmp}/mdnest-e2e-build.XXXXXX")"
 SFX="$$"
 NET="mdnest-e2e-sec-net-$SFX"
 PG="mdnest-e2e-sec-pg-$SFX"
 BE="mdnest-e2e-sec-be-$SFX"
 # Under the repo, not /tmp: the Docker VM may not see the host's temp dir.
-NOTES_DIR="$(mktemp -d "$REPO_ROOT/.e2e-notes.XXXXXX")"
+NOTES_DIR="$(e2e_notes_dir "$REPO_ROOT")"
 
 fail() { printf '\033[31m✗ %s\033[0m\n' "$1"; }
 pass() { printf '\033[32m✓ %s\033[0m\n' "$1"; }
 
 cleanup() {
-  docker rm -f "$BE" "$PG" >/dev/null 2>&1 || true
+  rm -rf "$BUILD_LOGS"
+  docker rm -f -v "$BE" "$PG" >/dev/null 2>&1 || true
   docker network rm "$NET" >/dev/null 2>&1 || true
-  rm -rf "$NOTES_DIR"
+  e2e_rm_dirs "$NOTES_DIR"
 }
 trap cleanup EXIT
 
@@ -44,7 +47,7 @@ command -v python3 >/dev/null 2>&1 || { fail "python3 is required"; exit 2; }
 command -v git >/dev/null 2>&1 || { fail "git is required"; exit 2; }
 
 echo "▶ building the backend from the working tree"
-docker build -t "$IMAGE" backend/ >/tmp/mdnest-e2e-sec-build.log 2>&1 || { fail "build failed"; tail -30 /tmp/mdnest-e2e-sec-build.log; exit 1; }
+IMAGE="$(e2e_backend_image "$REPO_ROOT" "$BUILD_LOGS")" || { fail "build failed"; exit 1; }
 
 PRIVATE_ID="dddddddd-4444-4444-8444-444444444444"
 A="$NOTES_DIR/alpha"
@@ -165,8 +168,30 @@ assert code in (200, 201), f"group grant: {code} {r}"
 pat, gus, owen = login("pat", "patpass123"), login("gus", "guspass123"), login("owen", "owenpass123")
 code, tok = call("POST", "/api/auth/tokens", pat, {"name": "e2e"})
 pat_api = tok["token"]
+pat_api_id = tok["id"]
 code, hist = call("GET", "/api/note/history?ns=alpha&path=Private/p.md", owen)
 sha = hist[0]["commit"] if isinstance(hist, list) and hist else "0000000"
+
+print("── API tokens: Settings lists your own only (superadmin included), the admin panel lists them all")
+code, r = call("GET", "/api/auth/tokens", admin)
+check("superadmin's own token list omits pat's token", code == 200 and pat_api_id not in json.dumps(r), r)
+code, r = call("DELETE", f"/api/auth/tokens?id={pat_api_id}", admin)
+check("superadmin cannot revoke pat's token from their own list (403)", code == 403, (code, r))
+code, r = call("GET", "/api/admin/tokens", pat)
+check("a collaborator cannot list everyone's tokens (403)", code == 403, (code, r))
+code, r = call("DELETE", f"/api/admin/tokens?id={pat_api_id}", pat)
+check("a collaborator cannot use the admin revoke (403)", code == 403, (code, r))
+code, r = call("GET", "/api/admin/tokens", admin)
+mine = [t for t in r if t.get("id") == pat_api_id] if isinstance(r, list) else []
+check("the admin token list shows pat's token with its owner", code == 200 and mine and mine[0].get("username") == "pat", r)
+check("the admin token list carries no hash", "token_hash" not in json.dumps(r), r)
+code, r = call("GET", "/api/search?ns=alpha&q=shared%20words", pat_api)
+check("pat's API token still works after the refused revokes", code == 200, code)
+code, gus_tok = call("POST", "/api/auth/tokens", gus, {"name": "e2e-admin-revoke"})
+code, r = call("DELETE", f"/api/admin/tokens?id={gus_tok['id']}", admin)
+check("the superadmin revokes gus's token from the admin panel", code == 200, (code, r))
+code, r = call("GET", "/api/search?ns=alpha&q=shared%20words", gus_tok["token"])
+check("…and that token stops working (401)", code == 401, code)
 
 print("── folder grants: pat (direct write /Shared), gus (group read /Shared), pat's API token")
 for who, t in (("pat", pat), ("gus", gus), ("pat's API token", pat_api)):

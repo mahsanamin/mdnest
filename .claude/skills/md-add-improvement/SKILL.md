@@ -31,10 +31,14 @@ unit, and when one ships, trim just that bullet rather than deleting the file.
 - **Scope discipline.** Solve the actual improvement; don't over-engineer or
   reach outside mdnest's box (see `CLAUDE.md` → "Scope discipline"). Confirm
   scope with the user when a feature is open-ended (offer options).
-- **Verify before merging to develop.** `npm run build` + `npm test` (frontend),
-  `bash -n mdnest` (CLI), and `tests/cli-smoke-test.sh` when CLI behavior changed,
-  plus the end-to-end suite the changed files call for (the path map in
-  `tests/release-gate.sh` and `md-fix-bugs` step 3). A feature lands **off by
+- **Verify before merging to develop.** While building the feature, run `bash
+  tests/check.sh --level iterate` with the feature's browser specs in
+  `MDNEST_E2E_SPECS` (under 5 min; add `MDNEST_E2E_HARNESS=collab` for
+  two-user specs), plus `tests/cli-smoke-test.sh` when CLI behavior changed.
+  Before the merge into `develop`, run `bash tests/check.sh --level develop`
+  once (about 15 to 20 min): it picks the end-to-end suites from the changed
+  files (the path map in `tests/check.sh` and `md-fix-bugs` step 3). The full
+  gate (`--level ship`) is for the release only. A feature lands **off by
   default** when it changes how an existing install behaves, and never removes
   something users already rely on without the owner's sign-off (`md-ship`
   Step 0, item 6).

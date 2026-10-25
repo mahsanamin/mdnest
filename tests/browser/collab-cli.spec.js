@@ -28,6 +28,21 @@ function cli(account, ...args) {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 }
+// `mdnest edit` is a guarded read-modify-write: if the note is saved between
+// its read and its write (here, by the browser's autosave while someone
+// types), it gets a 409 and writes nothing. That is the correct outcome, and
+// what a person or script does next is run the edit again. So: one retry,
+// and only after checking the 409 really said nothing was overwritten.
+function cliEdit(account, ...args) {
+  try {
+    return cli(account, 'edit', ...args);
+  } catch (e) {
+    const err = String(e.stderr || '');
+    expect(err, 'the edit failed for a reason other than a 409').toContain('Error (409)');
+    expect(err, 'a 409 must say nothing was overwritten').toContain('Nothing was overwritten');
+    return cli(account, 'edit', ...args);
+  }
+}
 const notePath = (account, file) => `@${account}/${NS}/${file}`;
 const disk = (file) => fs.readFileSync(path.join(NOTES_DIR, NS, file), 'utf8');
 
@@ -157,7 +172,7 @@ test('a CLI write while someone types merges, it never overwrites', async ({ bro
   await pageB.waitForTimeout(700);
   cli('alice', 'append', notePath('alice', file), 'cli append during typing');
   await pageB.waitForTimeout(900);
-  cli('alice', 'edit', notePath('alice', file), 'alice line', 'alice line edited by cli');
+  cliEdit('alice', notePath('alice', file), 'alice line', 'alice line edited by cli');
   await pageB.waitForTimeout(900);
   // A whole-file write based on what is on disk now, as a script would do.
   const current = disk(file);

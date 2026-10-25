@@ -187,6 +187,10 @@ func (h *SyncHandler) HandleSync(w http.ResponseWriter, r *http.Request) {
 
 	gitOutput := ""
 	lastCommit := ""
+	// syncError: the pull or push failed. The request itself still answers
+	// 200 (the commit may have worked), so the app needs this to say so;
+	// before it, a failed manual Sync looked like one that had nothing to do.
+	syncError := ""
 
 	gitDir := findGitDir(nsDir)
 	if gitDir != "" {
@@ -212,6 +216,7 @@ func (h *SyncHandler) HandleSync(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			log.Printf("git pull failed for %s: %s", ns, pullOut)
 			gitOutput += "pull: " + pullOut + "\n"
+			syncError = "pull failed: " + firstLine(pullOut)
 		} else {
 			log.Printf("git pull for %s: %s", ns, pullOut)
 			gitOutput += pullOut + "\n"
@@ -222,6 +227,9 @@ func (h *SyncHandler) HandleSync(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			log.Printf("git push failed for %s: %s", ns, pushOut)
 			gitOutput += "push failed: " + pushOut
+			if syncError == "" {
+				syncError = "push failed: " + firstLine(pushOut)
+			}
 		} else if pushOut != "" {
 			log.Printf("git push for %s: %s", ns, pushOut)
 			gitOutput += pushOut
@@ -244,7 +252,18 @@ func (h *SyncHandler) HandleSync(w http.ResponseWriter, r *http.Request) {
 		"status":     "ok",
 		"git":        gitOutput,
 		"lastCommit": lastCommit,
+		"syncError":  syncError,
 	})
+}
+
+// firstLine is the first non-empty line of git's output, for a short message.
+func firstLine(s string) string {
+	for _, l := range strings.Split(s, "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			return l
+		}
+	}
+	return "no output"
 }
 
 // fixRemoteURL detects SSH host aliases in the remote URL and rewrites them

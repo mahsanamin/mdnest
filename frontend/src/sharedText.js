@@ -3,50 +3,9 @@
 // never in the entry bundle.
 import DiffMatchPatch from 'diff-match-patch';
 
-// --- Front matter ----------------------------------------------------------
-//
-// Front matter is kept out of the shared editor. The Live editor does not
-// understand YAML front matter: on save it turns the `---` fences into `***`
-// and a setext heading, which breaks the note for every tool that reads it.
-// So the block is split off before the text goes into the editor, kept as its
-// own value in the shared document, and put back in front on every save.
-//
-// The split keeps the blank lines after the closing fence with the front
-// matter, so "front matter + serialized body" gives back the same separation
-// the file had.
-
-const FM_OPEN = /^---[ \t]*\r?\n/;
-const FM_CLOSE = /^(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/;
-
-export function splitFrontMatter(text) {
-  const s = typeof text === 'string' ? text : '';
-  const open = s.match(FM_OPEN);
-  if (!open) return { frontMatter: '', body: s };
-  let pos = open[0].length;
-  while (pos <= s.length) {
-    const rest = s.slice(pos);
-    const close = rest.match(FM_CLOSE);
-    if (close) {
-      let end = pos + close[0].length;
-      // Blank lines after the fence belong to the separation.
-      const blanks = s.slice(end).match(/^(?:[ \t]*\r?\n)*/);
-      if (blanks) end += blanks[0].length;
-      return { frontMatter: s.slice(0, end), body: s.slice(end) };
-    }
-    const nl = s.indexOf('\n', pos);
-    if (nl === -1) break;
-    pos = nl + 1;
-  }
-  // An opening fence with no close is not front matter.
-  return { frontMatter: '', body: s };
-}
-
-export function joinFrontMatter(frontMatter, body) {
-  if (!frontMatter) return body || '';
-  // A close fence at the very end of the file has no newline after it.
-  const fm = /\n$/.test(frontMatter) ? frontMatter : frontMatter + '\n';
-  return fm + (body || '');
-}
+// --- Front matter: frontMatter.js (the Live editor needs it without this
+// chunk's diff-match-patch).
+export { splitFrontMatter, joinFrontMatter } from './frontMatter.js';
 
 // --- Three-way merge ---------------------------------------------------------
 //
@@ -55,8 +14,16 @@ export function joinFrontMatter(frontMatter, body) {
 // diff3: `base` is the text the room last saved or loaded, `ours` what the
 // room has now, `theirs` the file on disk. A part changed on one side takes
 // that side; a part changed the same way on both sides is taken once; a part
-// changed differently on both keeps both, ours first, so nobody's words are
-// dropped.
+// where both sides only added to the base and one added the other's text
+// plus more takes the longer one, since keeping both would show the shared
+// words twice;
+// a part changed differently on both keeps both, ours first, so nobody's
+// words are dropped.
+//
+// The "plus more" case is common: text typed in a shared note reaches the
+// file both through the room and through a tab's own save when its
+// connection dropped (sharedDoc.js), and the later copy has more typed on
+// the same line.
 
 function lineMatches(dmp, a, b) {
   // diff-match-patch's line mode: each line becomes one character, so the
@@ -89,7 +56,17 @@ function splitLines(s) {
 
 const sameLines = (x, y) => x.length === y.length && x.every((l, i) => l === y[i]);
 
-export function mergeThreeWay(base, ours, theirs) {
+// Whether `more` is `less` with only insertions (character diff). Removed
+// whitespace does not count: the Live editor reports a trailing space while
+// it is typed and drops it when it writes the paragraph back.
+function onlyAdds(dmp, less, more) {
+  return dmp.diff_main(less, more, false).every(([op, text]) => op !== -1 || !/\S/.test(text));
+}
+
+// report, when given, gets `conflicts`: how many places both sides changed
+// the same lines differently, so both versions were kept.
+export function mergeThreeWay(base, ours, theirs, report) {
+  if (report) report.conflicts = 0;
   base = base || '';
   ours = ours || '';
   theirs = theirs || '';
@@ -116,7 +93,14 @@ export function mergeThreeWay(base, ours, theirs) {
     if (sameLines(a, b)) out.push(...c);
     else if (sameLines(a, c)) out.push(...b);
     else if (sameLines(b, c)) out.push(...b);
-    else {
+    else if (onlyAdds(dmp, a.join(''), b.join('')) && onlyAdds(dmp, a.join(''), c.join(''))
+      && (onlyAdds(dmp, b.join(''), c.join('')) || onlyAdds(dmp, c.join(''), b.join('')))) {
+      // Both only added to the base, and one added more of the same: the
+      // longer one, once. (Only then: if a side deleted something, taking
+      // the longer one could bring the deleted text back.)
+      out.push(...(onlyAdds(dmp, b.join(''), c.join('')) ? c : b));
+    } else {
+      if (report) report.conflicts += 1;
       out.push(...b);
       // Keep both versions readable as separate lines.
       if (b.length && !/\n$/.test(b[b.length - 1])) out.push('\n');

@@ -41,8 +41,11 @@ repo code already fixes it (then just verify + mark resolved).
   verified, merge it **directly into `develop`** (`git merge --no-ff` + push,
   no PR) and delete the branch. The ONLY PR in the whole cycle is the final
   release PR (`main` ← the release branch). Opening a PR per bug just adds noise.
-- **Verify every change before merging to develop** — run the smoke-test harness
-  (and `npm run build`/`npm test` for frontend changes). Don't merge red.
+- **Verify every change before merging to develop.** While fixing, run
+  `bash tests/check.sh --level iterate` (only what the fix touches, under 5
+  min). Before the merge into `develop`, run `bash tests/check.sh --level
+  develop` once (about 15 to 20 min). Don't merge red. The full gate
+  (`--level ship`) is for the release only.
 - **Sequential, not parallel.** Branch each fix from `develop` only after the
   previous one merged, so shared files (`mdnest`, `App.css`) never conflict.
 
@@ -77,7 +80,14 @@ repo code already fixes it (then just verify + mark resolved).
   part of the fix, not optional: a CLI-behaviour bug → a `tests/cli-smoke-test.sh`
   assertion; a parser/fallback bug (e.g. anything that must work without
   `python3`) → a `tests/cli-unit.sh` case; a UI bug → a `tests/browser` spec.
-- Run the tier that matches the change:
+- **Levels (tests/check.sh, see `CLAUDE.md` → Testing):** while working, `bash
+  tests/check.sh --level iterate`, with the regression spec named in
+  `MDNEST_E2E_SPECS` (add `MDNEST_E2E_HARNESS=collab` for two-user specs).
+  Before merging into `develop`, `bash tests/check.sh --level develop` once:
+  it picks the suites below from the changed files by itself. If the fix was
+  for a flaky spec, run that spec with `MDNEST_E2E_ARGS="--repeat-each 3"`,
+  not 10. No repeated full suites.
+- What those levels run, by change (useful when running one suite by hand):
   - CLI/pure helpers: `bash tests/cli-unit.sh` (instant; runs with AND without
     python3) + `bash -n mdnest`.
   - CLI end-to-end: `tests/cli-smoke-test.sh` against the disposable
@@ -88,7 +98,7 @@ repo code already fixes it (then just verify + mark resolved).
   - Frontend/UI: `npm run build` + `npm test`, and `bash tests/e2e-browser.sh`
     (full stack + Playwright) for user-facing flows.
   - The suite the changed files call for, using the same map as
-    `tests/release-gate.sh`: `backend/storage`, `deploy/helm` →
+    `tests/check.sh`: `backend/storage`, `deploy/helm` →
     `tests/e2e-ha-durability.sh`; collab, note save paths, the Live editor,
     `App.jsx` → `tests/e2e-collab-multi.sh`; chat members, permission
     middleware → `tests/e2e-private-chats-multi.sh`; transfer, download →
@@ -161,8 +171,8 @@ carries `X.Y.Z-dev`; the release branch **drops the `-dev` suffix**. Add the
 > build shows no false "update available" against the last release but does see
 > the final release as newer once it ships.
 
-Run `bash tests/release-gate.sh` on that commit (it records the tree it
-tested; the hook pushes nothing else), `git push -u origin release/vX.Y.Z`,
+Run `bash tests/release-gate.sh` (the ship level of `tests/check.sh`) on that
+commit (it records the tree it tested; the hook pushes nothing else), `git push -u origin release/vX.Y.Z`,
 and open ONE PR
 → `main`. Because the base IS `main`, it's a 1-commit, small-diff, conflict-free
 PR (this is the fix for the "why so many commits" problem).

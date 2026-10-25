@@ -35,8 +35,10 @@ import { createRoot } from 'react-dom/client';
 import { Crepe } from '@milkdown/crepe';
 import { imageSchema } from '@milkdown/preset-commonmark';
 import { imageBlockSchema } from '@milkdown/components/image-block';
-import { editorViewCtx, nodeViewCtx, parserCtx, SchemaReady } from '@milkdown/core';
-import { TextSelection } from '@milkdown/prose/state';
+import { editorViewCtx, nodeViewCtx, parserCtx, serializerCtx, SchemaReady } from '@milkdown/core';
+import { TextSelection, Plugin, PluginKey } from '@milkdown/prose/state';
+import { $prose } from '@milkdown/utils';
+import { Fragment } from '@milkdown/prose/model';
 import { insert, markdownToSlice, replaceAll } from '@milkdown/utils';
 import { blockConfig } from '@milkdown/plugin-block';
 import { uploadConfig } from '@milkdown/plugin-upload';
@@ -46,6 +48,7 @@ import { withDefaultImageTitle } from '../image-title-default.js';
 import { htmlToMarkdown, hasRichContent } from '../html-to-md.js';
 import { looksLikeMarkdown } from '../markdown-utils.js';
 import { parseWikiLink, resolveWikiLink, restoreWikilinks } from '../wikilink.js';
+import { splitFrontMatter, joinFrontMatter } from '../frontMatter.js';
 import MermaidBlock from './MermaidBlock.jsx';
 import MermaidViewer from './MermaidViewer.jsx';
 import {
@@ -219,6 +222,16 @@ const tableClickFixPlugin = (ctx) => async () => {
   };
 };
 
+// A block as JSON without the heading ids a plugin adds after load: a freshly
+// parsed heading has id "", the live one does not, and compared as-is every
+// heading looked changed.
+function stripBlockIds(j) {
+  let o = j;
+  if (o.attrs && Object.prototype.hasOwnProperty.call(o.attrs, 'id')) o = { ...o, attrs: { ...o.attrs, id: '' } };
+  if (o.content) o = { ...o, content: o.content.map(stripBlockIds) };
+  return o;
+}
+
 export default function LiveEditorCrepe({
   content,
   onChange,
@@ -231,15 +244,45 @@ export default function LiveEditorCrepe({
   onHighlightClick,
   onWikiLink,
   wikiIndex,
-  // A SharedSession (sharedDoc.js) when this note is edited together. Fixed
-  // for the life of the editor: the parent remounts the editor when it
-  // changes, because the collab plugin must be registered before create().
+  // The collab plugin (from the shared editing chunk) when this note can be
+  // edited together. Fixed for the life of the editor: it must be registered
+  // before create(). With it the editor holds the body only; front matter is
+  // kept beside it and put back in front of every change it reports.
+  collabPlugin,
+  // The SharedSession (sharedDoc.js) for this note. It may arrive after the
+  // editor is up and binds to the editor as it is then; until it is bound
+  // (sharedBound) the editor saves the normal way, through onChange.
   shared,
+  sharedBound,
+  // Registers a function the app calls to put an outside change (the CLI, an
+  // agent) into this editor: fn(base, theirs, merge) returns the text now
+  // shown. The merge runs here, against the document as it is at this
+  // moment, because markdownUpdated reaches the app a little late: merging
+  // the app's copy dropped the newest keystrokes and moved the caret.
+  registerOutsideMerge,
+  // Registers a function the app calls before it navigates away
+  // (flushPendingSave): it reports an edit the listener has not reported
+  // yet, so the app can save it.
+  registerFlush,
 }) {
   const rootRef = useRef(null);
   const sharedRef = useRef(shared || null);
+  sharedRef.current = shared || null;
+  const isBound = () => !!(sharedRef.current && sharedRef.current.bound);
+  // Body only, with the front matter kept here (see collabPlugin).
+  const bodyOnlyRef = useRef(!!collabPlugin);
+  const fmRef = useRef(collabPlugin ? splitFrontMatter(content || '').frontMatter : '');
+  const toFull = (body) => (bodyOnlyRef.current ? joinFrontMatter(fmRef.current, body) : body);
   const paneRef = useRef(null);
   const crepeRef = useRef(null);
+  // Milkdown reports a change 200 ms after the last keystroke. Switching
+  // note inside that window used to drop the edit: the app's flush had no
+  // save queued, and the editor's unmount cancelled the report. pendingEdit
+  // marks an edit the listener has not reported yet; report is the
+  // listener's own handler, so a flush runs every check it does.
+  const pendingEditRef = useRef(false);
+  const reportRef = useRef(null);
+  const lastReportedRef = useRef(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
   const onWikiLinkRef = useRef(onWikiLink);
@@ -338,12 +381,11 @@ export default function LiveEditorCrepe({
     };
 
     lastPropContentRef.current = content;
-    const sharedSession = sharedRef.current;
     const crepe = new Crepe({
       root: rootRef.current,
-      // Shared: the body only (front matter is kept out of the editor), and
-      // only until the shared document is bound, which then replaces it.
-      defaultValue: sharedSession ? sharedSession.initial.body : content,
+      // Body only when the note can be edited together (front matter is
+      // kept out of the editor, see collabPlugin).
+      defaultValue: bodyOnlyRef.current ? splitFrontMatter(content).body : content,
       features: {
         // Disable Crepe's floating selection toolbar — we render our own
         // persistent <LiveToolbar> above the editor.
@@ -442,22 +484,51 @@ export default function LiveEditorCrepe({
     tryUse(wikilinkDecorationPlugin, 'wikilinkDecorationPlugin');
     tryUse(composedMermaidPlugin, 'composedMermaidPlugin');
     tryUse(tableClickFixPlugin, 'tableClickFixPlugin');
-    if (sharedSession) tryUse(sharedSession.collabPlugin, 'collab');
+    if (collabPlugin) tryUse(collabPlugin, 'collab');
+    // The same transactions the listener counts (it skips addToHistory:
+    // false, which our own outside merges use).
+    tryUse($prose(() => new Plugin({
+      key: new PluginKey('mdnest-pending-edit'),
+      state: {
+        init: () => null,
+        apply: (tr) => {
+          if ((tr.docChanged || tr.storedMarksSet) && tr.getMeta('addToHistory') !== false) pendingEditRef.current = true;
+          return null;
+        },
+      },
+    })), 'pendingEditPlugin');
 
     crepe.on((listener) => {
-      listener.markdownUpdated((_ctx, markdown, prev) => {
+      listener.markdownUpdated((_ctx, reported, prev) => {
+        pendingEditRef.current = false;
+        lastReportedRef.current = reported;
+        reportRef.current?.(reported, prev);
+      });
+      reportRef.current = (reported, prev) => {
+        // The listener serializes the document of the last USER transaction
+        // and skips ours (an outside change is applied with addToHistory:
+        // false). When one landed in its 200 ms window, `reported` is the
+        // text from before it, and saving that wrote the outside change out
+        // of the file again (live-outside-merge-debounce.spec.js). Report
+        // what the editor holds now instead.
+        let markdown = reported;
+        try { markdown = crepe.getMarkdown(); } catch { /* not ready: use the report */ }
         // Milkdown's serializer escapes [[...]] to \[\[...]] in plain
         // text. Restore wikilink spans so documents containing them
         // round-trip byte-identical through the Live editor.
-        const restored = restoreWikilinks(markdown);
-        lastLocalContentRef.current = restored;
-        if (sharedRef.current) {
+        const body = restoreWikilinks(markdown);
+        if (isBound()) {
           // Shared: saving is the session's job, decided by comparing with
           // the last saved text, so every change (ours or someone else's) is
-          // simply reported for the preview, outline and comments.
-          if (markdown !== prev && onChangeRef.current) onChangeRef.current(restored);
+          // simply reported (the body) for the preview, outline and comments.
+          const s = sharedRef.current;
+          fmRef.current = s.fm.toString();
+          lastLocalContentRef.current = s.withFrontMatter(body);
+          if (markdown !== prev && onChangeRef.current) onChangeRef.current(body);
           return;
         }
+        const restored = toFull(body);
+        lastLocalContentRef.current = restored;
         // suppressSaveRef is armed only for the duration of a document
         // injection (Crepe's initial render and each replaceAll), because
         // re-serializing what we just put in would PUT the file back — and the
@@ -483,7 +554,7 @@ export default function LiveEditorCrepe({
         injectedEchoRef.current = null;
         const cb = onChangeRef.current;
         if (cb) cb(restored);
-      });
+      };
     });
 
     crepe.create().then(() => {
@@ -494,19 +565,6 @@ export default function LiveEditorCrepe({
       suppressSaveRef.current = false;
       setInnerEditor(crepe.editor);
       if (readOnly) crepe.setReadonly(true);
-      if (sharedSession) {
-        sharedSession.attachEditor({
-          editor: crepe.editor,
-          serialize: () => restoreWikilinks(crepe.getMarkdown()),
-          applyBody: (md) => {
-            try {
-              crepe.editor.action(applyExternalDoc(md));
-            } catch {
-              crepe.editor.action(replaceAll(md));
-            }
-          },
-        });
-      }
     }).catch((err) => {
       // eslint-disable-next-line no-console
       console.error('Crepe init failed:', err);
@@ -514,7 +572,6 @@ export default function LiveEditorCrepe({
 
     return () => {
       if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
-      if (sharedSession) sharedSession.detachEditor();
       setInnerEditor(null);
       try {
         crepe.destroy();
@@ -542,20 +599,37 @@ export default function LiveEditorCrepe({
   // changed). Not added to undo history: Cmd+Z undoes your edits, not theirs.
   const applyExternalDoc = useCallback((markdown) => (ctx) => {
     const view = ctx.get(editorViewCtx);
-    const next = ctx.get(parserCtx)(markdown);
+    let next = ctx.get(parserCtx)(markdown);
     if (!next || typeof next === 'string') throw new Error('parse failed');
     const cur = view.state.doc;
+    // Markdown drops the trailing space of a paragraph, so the incoming text
+    // never has the space the person just typed at the end of the paragraph
+    // they are in, and replacing that paragraph glued their next word to the
+    // last one ("backB0backB1"). When the caret is at the end of a top-level
+    // paragraph that ends in whitespace, and the incoming paragraph ends with
+    // the same words without it, the whitespace is kept.
+    const head = view.state.selection.head;
+    const $h = cur.resolve(head);
+    if ($h.depth === 1 && $h.parent.isTextblock && head === $h.end()) {
+      const idx = $h.index(0);
+      const cb = cur.child(idx);
+      const ws = /\s+$/.exec(cb.textContent);
+      if (ws && idx < next.childCount) {
+        const nb = next.child(idx);
+        // The words just before the caret, on the paragraph's last line only
+        // (an outside change may have touched an earlier line of it).
+        const tail = cb.textContent.slice(0, -ws[0].length);
+        const stem = tail.slice(tail.lastIndexOf('\n') + 1).slice(-24);
+        if (nb.type === cb.type && !/\s$/.test(nb.textContent) && stem && nb.textContent.endsWith(stem)) {
+          next = next.copy(next.content.replaceChild(idx, nb.copy(nb.content.append(Fragment.from(view.state.schema.text(ws[0]))))));
+        }
+      }
+    }
     // Compare blocks ignoring generated heading ids: the live document's
     // headings carry an id a plugin adds after load ("cursor"), a freshly
     // parsed one has "". Compared as-is, the first heading always differed,
     // the "changed range" began at 0, and the caret was swept to the end.
-    const strip = (j) => {
-      let o = j;
-      if (o.attrs && Object.prototype.hasOwnProperty.call(o.attrs, 'id')) o = { ...o, attrs: { ...o.attrs, id: '' } };
-      if (o.content) o = { ...o, content: o.content.map(strip) };
-      return o;
-    };
-    const key = (n) => JSON.stringify(strip(n.toJSON()));
+    const key = (n) => JSON.stringify(stripBlockIds(n.toJSON()));
     // Changed ranges, as [fromA, toA, fromB, toB]. With the same number of
     // blocks (the usual case: people edit inside paragraphs) each changed
     // block is its own range, so an edit above the caret and another below
@@ -625,24 +699,192 @@ export default function LiveEditorCrepe({
     if (content == null) return;
     // Shared: the document arrives through Yjs, and `content` is only the
     // parent echoing what this editor reported.
-    if (sharedRef.current) return;
+    if (isBound()) return;
     if (content === lastPropContentRef.current) return;
     if (content === lastLocalContentRef.current) return;
     lastPropContentRef.current = content;
     suppressSaveRef.current = true;
     try {
+      let body = content;
+      if (bodyOnlyRef.current) {
+        const split = splitFrontMatter(content);
+        fmRef.current = split.frontMatter;
+        body = split.body;
+      }
       try {
-        crepeRef.current.editor.action(applyExternalDoc(content));
+        crepeRef.current.editor.action(applyExternalDoc(body));
       } catch {
         // Anything the diff path cannot handle falls back to a full replace.
-        crepeRef.current.editor.action(replaceAll(content));
+        crepeRef.current.editor.action(replaceAll(body));
       }
       lastLocalContentRef.current = content;
-      try { injectedEchoRef.current = restoreWikilinks(crepeRef.current.getMarkdown()); } catch { injectedEchoRef.current = null; }
+      try { injectedEchoRef.current = toFull(restoreWikilinks(crepeRef.current.getMarkdown())); } catch { injectedEchoRef.current = null; }
     } catch { /* editor not ready or replaceAll failed */ } finally {
       suppressSaveRef.current = false;
     }
   }, [content, innerEditor, applyExternalDoc]);
+
+  useEffect(() => {
+    if (!registerOutsideMerge || !innerEditor) return undefined;
+    registerOutsideMerge((fullBase, fullTheirs, merge) => {
+      const crepe = crepeRef.current;
+      // A bound note's outside changes are the room saver's to merge.
+      if (!crepe || isBound()) return null;
+      let base = fullBase;
+      let theirs = fullTheirs;
+      if (bodyOnlyRef.current) {
+        const b = splitFrontMatter(fullBase);
+        const t = splitFrontMatter(fullTheirs);
+        if (t.frontMatter !== b.frontMatter) {
+          fmRef.current = fmRef.current === b.frontMatter ? t.frontMatter : merge(b.frontMatter, fmRef.current, t.frontMatter);
+        }
+        base = b.body;
+        theirs = t.body;
+      }
+      // First choice: apply only the outside change, as whole blocks, to the
+      // document as it is now. The blocks that differ between base and
+      // theirs are found by parsing both (one parser, so no serialization
+      // differences), and replaced in the live document only if the person
+      // has not touched them. The paragraph being typed in is never
+      // rewritten, so the caret and an unreported keystroke (or a trailing
+      // space markdown would drop) stay exactly as they are.
+      let applied = false;
+      try {
+        crepe.editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx);
+          const parse = ctx.get(parserCtx);
+          const A = parse(base);
+          const B = parse(theirs);
+          const C = view.state.doc;
+          if (!A || !B || typeof A === 'string' || typeof B === 'string') return;
+          const key = (n) => JSON.stringify(stripBlockIds(n.toJSON()));
+          const min = Math.min(A.childCount, B.childCount);
+          let pre = 0;
+          while (pre < min && key(A.child(pre)) === key(B.child(pre))) pre += 1;
+          let suf = 0;
+          while (suf < min - pre && key(A.child(A.childCount - 1 - suf)) === key(B.child(B.childCount - 1 - suf))) suf += 1;
+          const aEnd = A.childCount - suf;
+          const cEnd = C.childCount - suf;
+          if (cEnd < pre || cEnd - pre !== aEnd - pre) return;
+          for (let i = pre; i < aEnd; i += 1) if (key(A.child(i)) !== key(C.child(i))) return;
+          for (let i = 0; i < suf; i += 1) {
+            if (key(A.child(A.childCount - 1 - i)) !== key(C.child(C.childCount - 1 - i))) return;
+          }
+          let from = 0;
+          for (let i = 0; i < pre; i += 1) from += C.child(i).nodeSize;
+          let to = from;
+          for (let i = pre; i < cEnd; i += 1) to += C.child(i).nodeSize;
+          const blocks = [];
+          for (let i = pre; i < B.childCount - suf; i += 1) blocks.push(B.child(i));
+          view.dispatch(view.state.tr.replaceWith(from, to, blocks));
+          applied = true;
+        });
+      } catch { applied = false; }
+      if (!applied) {
+        // The person edited a block the outside change also touched: merge
+        // the text and replace what differs (the caret may move here).
+        const now = restoreWikilinks(crepe.getMarkdown());
+        const target = merge(base, now, theirs);
+        if (target !== now) {
+          try {
+            crepe.editor.action(applyExternalDoc(target));
+          } catch {
+            crepe.editor.action(replaceAll(target));
+          }
+        }
+      }
+      const shown = toFull(restoreWikilinks(crepe.getMarkdown()));
+      // The app sets this as its content next; it is what the editor holds.
+      lastPropContentRef.current = shown;
+      lastLocalContentRef.current = shown;
+      return shown;
+    });
+    return () => registerOutsideMerge(null);
+  }, [registerOutsideMerge, innerEditor, applyExternalDoc]);
+
+  // Before the app navigates away: report the edit the listener is still
+  // holding back (see pendingEditRef). Nothing pending, nothing reported, so
+  // opening a note and leaving it still writes nothing.
+  useEffect(() => {
+    if (!registerFlush) return undefined;
+    registerFlush(() => {
+      if (!pendingEditRef.current || !crepeRef.current || !reportRef.current) return;
+      pendingEditRef.current = false;
+      let md;
+      try { md = crepeRef.current.getMarkdown(); } catch { return; }
+      reportRef.current(md, lastReportedRef.current);
+      lastReportedRef.current = md;
+    });
+    return () => registerFlush(null);
+  }, [registerFlush]);
+
+  // Hand the editor to the shared session when there is one. It binds when
+  // the room is ready, to the document as it is then, and unbinds if the
+  // connection goes; the editor stays mounted and editable throughout.
+  useEffect(() => {
+    const crepe = crepeRef.current;
+    if (!shared || !innerEditor || !crepe) return undefined;
+    const withView = (fn) => {
+      let out;
+      crepe.editor.action((ctx) => { out = fn(ctx.get(editorViewCtx), ctx); });
+      return out;
+    };
+    shared.attachEditor({
+      editor: crepe.editor,
+      frontMatter: () => fmRef.current,
+      serialize: () => restoreWikilinks(crepe.getMarkdown()),
+      schema: () => withView((view) => view.state.schema),
+      serializeNode: (node) => withView((_view, ctx) => restoreWikilinks(ctx.get(serializerCtx)(node))),
+      // A text as this editor would write it back, so "unchanged" can be
+      // told apart from the serializer's own normalizing.
+      normalize: (full) => {
+        const { frontMatter, body } = splitFrontMatter(full || '');
+        let out = body;
+        try {
+          withView((_view, ctx) => {
+            const doc = ctx.get(parserCtx)(body);
+            if (doc && typeof doc !== 'string') out = restoreWikilinks(ctx.get(serializerCtx)(doc));
+          });
+        } catch { /* keep the text as it is */ }
+        return joinFrontMatter(frontMatter, out);
+      },
+      // The document to seed an empty room with, without what only this
+      // editor adds (generated heading ids): the room holds the note.
+      seedDoc: () => withView((view) => view.state.schema.nodeFromJSON(stripBlockIds(view.state.doc.toJSON()))),
+      // A body parsed the way this editor would show it (for the saver
+      // joining with a merged text, see sharedDoc _saverJoin).
+      parseDoc: (body) => withView((view, ctx) => {
+        const doc = ctx.get(parserCtx)(body);
+        return doc && typeof doc !== 'string' ? view.state.schema.nodeFromJSON(stripBlockIds(doc.toJSON())) : null;
+      }),
+      // The caret, and whether the person is typing here: joining the room
+      // re-renders the whole document, which drops keyboard focus, and
+      // whatever they type next would go nowhere.
+      getSelection: () => withView((view) => ({ anchor: view.state.selection.anchor, head: view.state.selection.head, focused: view.hasFocus() })),
+      setSelection: (sel) => {
+        if (!sel) return;
+        try {
+          withView((view) => {
+            const max = view.state.doc.content.size;
+            const clamp = (n) => Math.max(0, Math.min(n, max));
+            const tr = view.state.tr.setSelection(TextSelection.create(view.state.doc, clamp(sel.anchor), clamp(sel.head)));
+            view.dispatch(tr.setMeta('addToHistory', false));
+          });
+        } catch { /* a position that is no longer text: leave the caret */ }
+        if (sel.focused) {
+          try { withView((view) => { if (!view.hasFocus()) view.focus(); }); } catch { /* editor gone */ }
+        }
+      },
+      applyBody: (md) => {
+        try {
+          crepe.editor.action(applyExternalDoc(md));
+        } catch {
+          crepe.editor.action(replaceAll(md));
+        }
+      },
+    });
+    return () => shared.detachEditor();
+  }, [shared, innerEditor, applyExternalDoc]);
 
   // Push active comment anchors into the highlight plugin whenever comments
   // change. Same logic as the legacy LiveEditor — top-level threads only,
@@ -1035,7 +1277,7 @@ export default function LiveEditorCrepe({
   return (
     <div ref={paneRef} className={`live-editor-pane${handlesHidden ? ' handles-hidden' : ''}`}>
       {readOnly && <div className="editor-readonly-bar">Read-only</div>}
-      {!readOnly && <LiveToolbar editor={innerEditor} handlesHidden={handlesHidden} onToggleHandles={toggleHandles} undoRedo={shared ? { undo: shared.undo, redo: shared.redo } : null} />}
+      {!readOnly && <LiveToolbar editor={innerEditor} handlesHidden={handlesHidden} onToggleHandles={toggleHandles} undoRedo={shared && sharedBound ? { undo: shared.undo, redo: shared.redo } : null} />}
       <div className="live-editor-wrapper" style={{ position: 'relative', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
         <div ref={rootRef} className="live-editor-crepe-root" />
         {selectionPopup && !selectionPopup.hidden && onComment && (

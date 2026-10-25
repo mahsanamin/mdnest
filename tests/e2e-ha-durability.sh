@@ -18,7 +18,9 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_ROOT="${MDNEST_BUILD_ROOT:-$REPO_ROOT}"
 TAG="mdnest-ha-e2e-$$"
-IMAGE="mdnest-backend:$TAG"
+# shellcheck source=tests/lib/e2e-images.sh
+. "$REPO_ROOT/tests/lib/e2e-images.sh"
+BUILD_LOGS="$(mktemp -d "${TMPDIR:-/tmp}/mdnest-e2e-build.XXXXXX")"
 NET="$TAG"
 REDIS="$TAG-redis"; WRITER="$TAG-writer"; APP="$TAG-app"
 # Docker Desktop only shares some host folders, so keep the notes next to the repo.
@@ -31,17 +33,17 @@ ok()   { printf '  \033[32mPASS\033[0m %s\n' "$*"; pass=$((pass + 1)); }
 bad()  { printf '  \033[31mFAIL\033[0m %s\n' "$*"; failed=$((failed + 1)); }
 
 cleanup() {
-  docker rm -f "$APP" "$WRITER" "$REDIS" >/dev/null 2>&1 || true
+  rm -rf "$BUILD_LOGS"
+  docker rm -f -v "$APP" "$WRITER" "$REDIS" >/dev/null 2>&1 || true
   docker network rm "$NET" >/dev/null 2>&1 || true
-  docker image rm "$IMAGE" >/dev/null 2>&1 || true
-  rm -rf "$NOTES_DIR"
+  e2e_rm_dirs "$NOTES_DIR"
 }
 trap cleanup EXIT
 
 command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 || { echo "docker is required"; exit 2; }
 
 log "Building the backend from $BUILD_ROOT"
-docker build -q -t "$IMAGE" "$BUILD_ROOT/backend" >/dev/null
+IMAGE="$(e2e_backend_image "$BUILD_ROOT" "$BUILD_LOGS")"
 docker network create "$NET" >/dev/null
 mkdir -p "$NOTES_DIR/team"
 

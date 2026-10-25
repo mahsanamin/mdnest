@@ -20,6 +20,30 @@ while read -r _lref _loid remote_ref _roid; do
   esac
 done
 
+# A release push whose tree already passed tests/release-gate.sh is done here:
+# the gate ran this whole hook on that exact tree, so running the checks again
+# only holds the SSH connection open until GitHub drops it (v4.8.12's first
+# push). A tree the gate did not pass is refused at once, not after the checks.
+if [ "$RUN_E2E" -eq 1 ] && [ "${MDNEST_GATE_INNER:-0}" != "1" ] && [ "${MDNEST_SKIP_E2E:-0}" != "1" ]; then
+  GATE_FILE="$(git rev-parse --git-path mdnest-release-gate)"
+  GATE_TREE=""; GATE_AT=""
+  [ -f "$GATE_FILE" ] && read -r GATE_TREE GATE_AT _ < "$GATE_FILE"
+  GATE_OK=1
+  for oid in "${RELEASE_OIDS[@]}"; do
+    case "$oid" in 0000000000000000000000000000000000000000) continue ;; esac
+    if [ "$(git rev-parse "$oid^{tree}" 2>/dev/null)" != "$GATE_TREE" ]; then GATE_OK=0; fi
+  done
+  if [ -n "$GATE_TREE" ] && [ "$GATE_OK" -eq 1 ]; then
+    echo "Release gate: this exact tree passed at $GATE_AT (tests/release-gate.sh ran every check)."
+    echo "=== All checks passed ==="
+    exit 0
+  fi
+  echo "Release gate: NOT RUN for this tree."
+  echo "  Run: bash tests/release-gate.sh   (then push again)"
+  echo "=== Pre-push checks FAILED — push blocked ==="
+  exit 1
+fi
+
 # 1. Frontend: verify build compiles
 echo -n "Frontend build... "
 if (cd frontend && npx vite build --mode production) > /dev/null 2>&1; then
@@ -162,6 +186,18 @@ else
   FAILED=1
 fi
 
+# 2c2. The e2e image cache and shard runner (tests/lib/e2e-images.sh): the
+# tree hash must change with any change to the image's files, or a suite would
+# reuse an image built from other code. Docker-free.
+echo -n "E2E image cache and shard runner... "
+if bash tests/e2e-lib-unit.sh > /dev/null 2>&1; then
+  echo "OK"
+else
+  echo "FAILED"
+  echo "  Run: bash tests/e2e-lib-unit.sh"
+  FAILED=1
+fi
+
 # 2d. setup.sh generation tests: assert that config knobs actually reach the
 # generated .env / docker-compose.yml. The backend ignores env it does not
 # read, so a knob whose plumbing breaks does not fail — it silently reverts to
@@ -298,7 +334,19 @@ fi
 
 # 6. Lock file integrity: package-lock.json must be in sync with package.json
 echo -n "Frontend lock file... "
-if (cd frontend && npm ls) > /dev/null 2>&1; then
+if [ ! -d frontend/node_modules ]; then
+  # npm ls compares the installed tree, so with nothing installed it fails
+  # whatever the lock file says. That is a missing install, not a lock problem.
+  echo "NOT INSTALLED"
+  echo "  Run: cd frontend && npm ci   (tests/check.sh does this for you)"
+  FAILED=1
+elif [ frontend/package-lock.json -nt frontend/node_modules/.package-lock.json ]; then
+  # The lock changed after the last install (a pull, a dependency bump), so
+  # npm ls would compare against old packages. Not a lock problem.
+  echo "STALE INSTALL"
+  echo "  Run: cd frontend && npm ci   (tests/check.sh does this for you)"
+  FAILED=1
+elif (cd frontend && npm ls) > /dev/null 2>&1; then
   echo "OK"
 else
   echo "OUT OF SYNC"
@@ -307,7 +355,19 @@ else
 fi
 
 echo -n "MCP Server lock file... "
-if (cd mcp-server && npm ls) > /dev/null 2>&1; then
+if [ ! -d mcp-server/node_modules ]; then
+  # npm ls compares the installed tree, so with nothing installed it fails
+  # whatever the lock file says. That is a missing install, not a lock problem.
+  echo "NOT INSTALLED"
+  echo "  Run: cd mcp-server && npm ci   (tests/check.sh does this for you)"
+  FAILED=1
+elif [ mcp-server/package-lock.json -nt mcp-server/node_modules/.package-lock.json ]; then
+  # The lock changed after the last install (a pull, a dependency bump), so
+  # npm ls would compare against old packages. Not a lock problem.
+  echo "STALE INSTALL"
+  echo "  Run: cd mcp-server && npm ci   (tests/check.sh does this for you)"
+  FAILED=1
+elif (cd mcp-server && npm ls) > /dev/null 2>&1; then
   echo "OK"
 else
   echo "OUT OF SYNC"
@@ -338,7 +398,7 @@ fi
 # 8. Shell scripts: shellcheck, host binary or the koalaman/shellcheck image.
 # Mirrors the CI workflow gate: severity `error` only. Lower-severity
 # findings (warnings / info) are non-blocking for now.
-SC_FILES="setup.sh mdnest-server mdnest git-sync/sync.sh install-cli.sh .githooks/pre-push tests/release-gate.sh"
+SC_FILES="setup.sh mdnest-server mdnest git-sync/sync.sh install-cli.sh .githooks/pre-push tests/release-gate.sh tests/check.sh tests/lib/e2e-images.sh"
 SC_CMD=""
 if command -v shellcheck >/dev/null 2>&1; then
   SC_CMD="shellcheck"
@@ -374,25 +434,12 @@ fi
 RUN_HEAVY=0
 if [ "$RUN_E2E" -eq 1 ] && [ "${MDNEST_SKIP_E2E:-0}" = "1" ]; then
   echo "Release gate: SKIPPED by MDNEST_SKIP_E2E=1. Say so in the release PR, with the run that covered this tree."
+elif [ "$RUN_E2E" -eq 1 ] && [ "${MDNEST_GATE_INNER:-0}" = "1" ] && [ "${MDNEST_GATE_SUITES_OUTSIDE:-0}" = "1" ]; then
+  # tests/release-gate.sh runs the suites below itself, side by side with this
+  # hook's fast tier, instead of one after another in here.
+  echo "End-to-end suites: run by tests/release-gate.sh alongside this hook."
 elif [ "$RUN_E2E" -eq 1 ] && [ "${MDNEST_GATE_INNER:-0}" = "1" ]; then
   RUN_HEAVY=1
-elif [ "$RUN_E2E" -eq 1 ]; then
-  echo -n "Release gate (tests/release-gate.sh)... "
-  GATE_FILE="$(git rev-parse --git-path mdnest-release-gate)"
-  GATE_TREE=""; GATE_AT=""
-  [ -f "$GATE_FILE" ] && read -r GATE_TREE GATE_AT _ < "$GATE_FILE"
-  GATE_OK=1
-  for oid in "${RELEASE_OIDS[@]}"; do
-    case "$oid" in 0000000000000000000000000000000000000000) continue ;; esac
-    if [ "$(git rev-parse "$oid^{tree}" 2>/dev/null)" != "$GATE_TREE" ]; then GATE_OK=0; fi
-  done
-  if [ -n "$GATE_TREE" ] && [ "$GATE_OK" -eq 1 ]; then
-    echo "OK (this exact tree passed at $GATE_AT)"
-  else
-    echo "NOT RUN for this tree"
-    echo "  Run: bash tests/release-gate.sh   (then push again)"
-    FAILED=1
-  fi
 fi
 
 if [ "$RUN_HEAVY" -eq 1 ]; then
