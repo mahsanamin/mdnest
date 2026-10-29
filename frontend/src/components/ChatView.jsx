@@ -9,7 +9,7 @@ import {
   highlightMentions, mentionsName, participants, mentionQuery, completeMention,
   avatarFor, reactions, gifMarkdown, expandGifRefs, initialOf,
   pinKey, parsePins, togglePin, chatsForTab, MAX_CHAT_PINS_LENGTH,
-  roleFor, chatDeleteConsequences, loadDraft, saveDraft, rememberScroll, recallScroll,
+  roleFor, chatDeleteConsequences, loadDraft, saveDraft, rememberScroll, recallScroll, chatLinkRenderer,
 } from '../chat.js';
 import { copyPlainText } from '../mermaid-text.js';
 import { mdnestUri } from '../mdnestUri.js';
@@ -28,7 +28,7 @@ import { NO_GRAMMAR_ASSIST } from '../noGrammarAssist.js';
 // Updates are polled rather than pushed: live-collab is off by default and
 // multi-mode only, and a chat has to work on every install.
 
-const md = new Marked({ gfm: true, breaks: true });
+const md = new Marked({ gfm: true, breaks: true }).use({ renderer: chatLinkRenderer });
 // @mentions are wrapped in a span before rendering (highlightMentions skips
 // code); sanitizeHtml keeps the span's class and data-mention by design.
 // Images are namespace-relative (![nod](ChatGifs/nod.svg)), resolved with the
