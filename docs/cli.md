@@ -402,7 +402,7 @@ Needs only bash and curl. The policy file and the agent setup are in
 ```bash
 mdnest servers                   # list servers + version (and build commit, e.g. 3.11.0 (a1b2c3d))
 mdnest servers -v                # also list namespaces per server
-mdnest whoami                    # CLI version + all servers
+mdnest whoami                    # CLI version, all servers, and the account each token acts as
 mdnest logout @work              # remove one server
 mdnest logout                    # remove all
 mdnest rename @old @new          # rename a server alias (updates the default pointer too)

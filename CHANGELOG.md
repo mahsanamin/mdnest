@@ -54,6 +54,12 @@ All notable changes to mdnest are documented here.
 
 ### Fixed
 
+- **`mdnest whoami` says which account each saved token acts as**, for
+  example `alice (collaborator)`, or that a server is single-user, or that the
+  token was refused and you should log in again. It used to list only the
+  servers and versions, so an agent could not tell whose access it was using.
+  It also reads the server's answer correctly on a machine where `jq` is
+  installed but broken.
 - **A link in a chat message opens in a new tab.** It used to replace mdnest
   itself, which left the conversation, and any message you were writing,
   behind.
