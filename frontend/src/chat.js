@@ -5,6 +5,8 @@
 // format); this module only decides how the web UI names, colours, groups and
 // polls it.
 
+import { escapeHtml } from './wikilink.js';
+
 // isChatDoc mirrors the backend's IsChatNote: leading frontmatter with
 // `mdnest-chat: true`. Same frontmatter grammar as isMarpDoc (marp.js).
 export function isChatDoc(content) {
@@ -188,6 +190,17 @@ export function mentionsName(text, name) {
   }
   return false;
 }
+
+// chatLinkRenderer is the marked renderer for links in a message: every link
+// opens in a new tab. A link clicked in a chat used to replace mdnest itself,
+// which left the conversation (and any unsent draft) behind.
+export const chatLinkRenderer = {
+  link({ href, title, tokens }) {
+    const text = this.parser.parseInline(tokens);
+    const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';
+    return `<a href="${escapeHtml(href)}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`;
+  },
+};
 
 // highlightMentions wraps @name in a span before the markdown is rendered.
 // Code is left alone: inside a fence or `inline code` an @ is literal text.

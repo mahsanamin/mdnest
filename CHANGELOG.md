@@ -54,6 +54,9 @@ All notable changes to mdnest are documented here.
 
 ### Fixed
 
+- **A link in a chat message opens in a new tab.** It used to replace mdnest
+  itself, which left the conversation, and any message you were writing,
+  behind.
 - **A note with a very long heading line could stall the MCP server.** The
   Marp template list read slide headings with a pattern that took about 19
   seconds on one 10 KB line, and with `MCP_TRANSPORT=http` one process serves
