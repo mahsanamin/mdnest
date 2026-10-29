@@ -32,6 +32,7 @@ All notable changes to mdnest are documented here.
   groups, and their API tokens use them until that long after the login; a
   new login refreshes them. Leaving the IdP group takes effect at the next
   login or when the age is reached. Multi mode with `OIDC_GROUPS_CLAIM`, #157.
+  Thanks to [@ecthelion77](https://github.com/ecthelion77) (Olivier Gintrand), #158.
 
 ### Changed
 
