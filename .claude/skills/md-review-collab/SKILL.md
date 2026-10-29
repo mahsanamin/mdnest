@@ -27,6 +27,34 @@ When running unattended, see *Deciding Gate 3 without the owner* below: most
 Gate 3 questions have an answer you can derive, and only a genuine first-of-its-kind
 trade needs to wait.
 
+## What we ask the contributor for, and what we fix ourselves
+
+**As of 2026-10-29, the owner's call:** mdnest is early, with few stars and few
+contributors, so every round trip we send back costs more than the fix. The one
+thing we hold firm on is **direction** (Gate 3): a feature that joins mdnest must
+fit the product and not drift from its main idea. Code-level problems we fix
+ourselves, so contributors don't have to come back for them.
+
+- **Direction problem:** ask the contributor, as before. That is a decision, and
+  it is theirs and the owner's to make, not ours to patch around.
+- **Code-level problem that isn't drastic** (a missing `setup.sh` line, a
+  missing test, a slow regex with a known fix, a CHANGELOG in the wrong section,
+  a small conflict): approve, merge into `develop`, then fix it on our own
+  `fix/` branch from `develop`, verified the usual way (a test that fails without
+  the fix), and merge that into `develop` too. Tell the contributor in one line
+  that we did it and that nothing more is needed from them. #158 is the first
+  example: `setup.sh` dropped its new setting, and we added it after the merge.
+- **Still ask, even though it's code:** a fix that changes how the feature
+  works, or a rewrite of a large part of it. That is the contributor's design,
+  so they should say yes first.
+- **Never merge a known security hole and fix it afterwards.** `develop` runs on
+  the dev stack. Fix it on a branch first, or ask the contributor, and merge only
+  when the fix is in.
+- We still never push to their branch, close, or retarget their PR (Step 6).
+  Our fixes go on `develop`, after their commit, under our name.
+
+Revisit this when contributions grow and reviewing becomes the bottleneck.
+
 ## Step 0 — map the batch before reading any code
 
 ```bash
@@ -358,7 +386,9 @@ costs the contributor real time and costs us credibility.
 A review with twelve requests gets none of them done well. Cut to the smallest
 set that actually unblocks the merge, and say which is blocking. Everything
 else either waits for the next round or gets dropped. A contributor working
-through a backlog of our requests is a contributor we are losing.
+through a backlog of our requests is a contributor we are losing. A small
+code-level fix isn't an ask at all: we make it ourselves after the merge (see
+*What we ask the contributor for* near the top).
 
 ### How to write the one you do post
 
@@ -390,8 +420,10 @@ decision out of their hands over a few seconds of convenience.
 - **Should be closed?** Say why, say you think it should close, and ask them to
   close it. Leave it open until they do.
 - **Wrong base branch?** Ask them to retarget.
-- **Needs a rebase or a fix?** Ask, with a concrete description of the change.
-  Don't push to their branch unless they've invited it.
+- **Needs a rebase or a fix?** If it's a small code-level fix and the PR is
+  otherwise ready, merge it and make the fix on `develop` ourselves. Otherwise
+  ask, with a concrete description of the change. Either way, don't push to
+  their branch unless they've invited it.
 
 What *is* ours: merging (once it passes the gates), approving, requesting
 changes, and saying plainly what we will and won't take.
