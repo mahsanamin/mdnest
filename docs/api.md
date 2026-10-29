@@ -1452,6 +1452,11 @@ group they belong to.
 Multi mode only. All three routes are `RequireSuperAdmin`. With no groups defined
 and `OIDC_GROUPS_CLAIM` unset, behaviour is identical to before.
 
+An API token counts for its owner's user memberships. IdP-group memberships count
+for a token only with `API_TOKEN_GROUPS_MAX_AGE` set *(v4.8.14+)*: the token then uses
+the IdP groups of its owner's last SSO login while that login is younger than the
+set age (see `docs/security.md`).
+
 | Route | Methods | Purpose |
 |---|---|---|
 | `/api/admin/groups` | GET, POST, PATCH, DELETE | List / create / rename / delete a group |

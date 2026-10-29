@@ -348,6 +348,10 @@ sso:
   # (e.g. offboarding) only apply at next login, bounded to the SSO session
   # lifetime (12h); direct user membership is revoked immediately.
   groupsClaim: ""
+  # -- How long API tokens act with the IdP groups of their owner's last SSO
+  # login (Go duration, e.g. "168h"). Empty or "0" = API tokens use direct
+  # grants only. Needs `groupsClaim`; see docs/security.md.
+  apiTokenGroupsMaxAge: ""
   # -- Label shown on the SSO login button.
   providerLabel: "SSO"
   # -- Comma-separated emails auto-promoted to superadmin.

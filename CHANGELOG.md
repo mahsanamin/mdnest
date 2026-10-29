@@ -24,6 +24,14 @@ All notable changes to mdnest are documented here.
   [@ecthelion77](https://github.com/ecthelion77) (Olivier Gintrand), #153.
 - **+ Tasks** in the sidebar creates a task list, a `.tasks.md` file that
   opens on the task board for that note.
+- **API tokens can use their owner's IdP groups** (`API_TOKEN_GROUPS_MAX_AGE`,
+  off by default). A person who gets access through an access group with an
+  IdP group member (for example an Entra ID group) saw it in the browser but
+  not with an API token, so the CLI and agents could not reach it. With
+  `API_TOKEN_GROUPS_MAX_AGE=168h`, each SSO login records the person's IdP
+  groups, and their API tokens use them until that long after the login; a
+  new login refreshes them. Leaving the IdP group takes effect at the next
+  login or when the age is reached. Multi mode with `OIDC_GROUPS_CLAIM`, #157.
 
 ### Changed
 

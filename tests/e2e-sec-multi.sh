@@ -80,6 +80,7 @@ docker run -d --name "$BE" --network "$NET" \
   -e MDNEST_USER=admin -e MDNEST_PASSWORD=adminpass123 -e MDNEST_JWT_SECRET=e2e-sec-secret \
   -e NOTES_DIR=/notes -e FRONTEND_ORIGIN=http://localhost \
   -e ENABLE_LIVE_COLLAB=true -e ENABLE_TASK_BOARD=true -e DISABLE_UPDATE_CHECK=true \
+  -e API_TOKEN_GROUPS_MAX_AGE=1h \
   -v "$NOTES_DIR:/notes" -p 127.0.0.1:0:8080 "$IMAGE" >/dev/null
 PORT="$(docker port "$BE" 8080/tcp | head -1 | sed 's/.*://')"
 BASE="http://127.0.0.1:$PORT"
@@ -312,6 +313,38 @@ code, r = call("GET", "/api/note?ns=alpha&path=Private/p.md", raw)
 check("an ownerless (legacy) API token is refused (401)", code == 401 and "TOP-SECRET" not in json.dumps(r), (code, r))
 code, r = call("GET", "/api/note?ns=alpha&path=Private/p.md", pat_api)
 check("an owned API token keeps its owner's limits (403)", code == 403, code)
+
+print("── API tokens act with the owner's IdP groups of their last SSO login (API_TOKEN_GROUPS_MAX_AGE=1h)")
+def psql(sql):
+    subprocess.run(["docker", "exec", PG, "psql", "-U", "mdnest", "-d", "mdnest", "-qc", sql], check=True, capture_output=True)
+code, r = call("POST", "/api/admin/invite", admin, {"email": "olga@e2e.local", "username": "olga", "password": "olgapass123", "role": "collaborator"})
+assert code in (200, 201), f"invite olga: {code} {r}"
+code, og = call("POST", "/api/admin/groups", admin, {"name": "idp-readers", "description": "e2e"})
+call("POST", "/api/admin/groups/members", admin, {"group_id": og["id"], "oidc_group": "entra-readers", "oidc_label": "Entra readers"})
+code, r = call("POST", "/api/admin/groups/grants", admin, {"group_id": og["id"], "namespace": "alpha", "path": "/Shared", "permission": "read"})
+assert code in (200, 201), f"idp group grant: {code} {r}"
+olga = login("olga", "olgapass123")
+code, otok = call("POST", "/api/auth/tokens", olga, {"name": "e2e-groups"})
+olga_api = otok["token"]
+code, us = call("GET", "/api/admin/users", admin)
+olga_id = next(u["id"] for u in (us if isinstance(us, list) else us.get("users", [])) if u["username"] == "olga")
+code, _ = call("GET", "/api/note?ns=alpha&path=Shared/a.md", olga_api)
+check("no SSO login on record: the token has no group access (403)", code == 403, code)
+psql(f"INSERT INTO user_oidc_groups (user_id, groups) VALUES ({olga_id}, ARRAY['entra-readers'])")
+code, _ = call("GET", "/api/note?ns=alpha&path=Shared/a.md", olga_api)
+check("recent login in entra-readers: the token reads the group's folder (200)", code == 200, code)
+code, r = call("GET", "/api/note?ns=alpha&path=Private/p.md", olga_api)
+check("…and nothing outside the group's grant (403)", code == 403 and "TOP-SECRET" not in json.dumps(r), code)
+code, _ = call("PUT", "/api/note?ns=alpha&path=Shared/a.md", olga_api, raw=b"olga")
+check("…with the group's permission only (read: PUT 403)", code == 403, code)
+code, _ = call("GET", "/api/note?ns=alpha&path=Shared/a.md", olga)
+check("the password session (no IdP groups) is unchanged (403)", code == 403, code)
+psql(f"UPDATE user_oidc_groups SET groups = ARRAY[]::text[] WHERE user_id = {olga_id}")
+code, _ = call("GET", "/api/note?ns=alpha&path=Shared/a.md", olga_api)
+check("last login in no group: the token loses the access (403)", code == 403, code)
+psql(f"UPDATE user_oidc_groups SET groups = ARRAY['entra-readers'], captured_at = now() - interval '2 hours' WHERE user_id = {olga_id}")
+code, _ = call("GET", "/api/note?ns=alpha&path=Shared/a.md", olga_api)
+check("last login older than the max age: the token loses the access (403)", code == 403, code)
 
 print("── live collaboration")
 check("pat cannot join a /Private room (403)", ws_status(pat, "Private/p.md") == 403)

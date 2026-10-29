@@ -18,11 +18,22 @@ import (
 // mode).
 type TokenHandler struct {
 	store store.TokenStore
+	// groups and groupsMaxAge give an API token the IdP groups of its owner's
+	// last SSO login while that snapshot is younger than groupsMaxAge.
+	groups       store.OIDCGroupStore
+	groupsMaxAge time.Duration
 }
 
 // NewTokenHandler wires a token handler to a token store.
 func NewTokenHandler(s store.TokenStore) *TokenHandler {
 	return &TokenHandler{store: s}
+}
+
+// UseOwnerGroups lets API tokens act with their owner's OIDC groups, as captured
+// at the owner's last SSO login, for maxAge after that login. maxAge <= 0 keeps
+// tokens on direct grants only.
+func (h *TokenHandler) UseOwnerGroups(groups store.OIDCGroupStore, maxAge time.Duration) {
+	h.groups, h.groupsMaxAge = groups, maxAge
 }
 
 func generateToken() (string, error) {
@@ -56,7 +67,15 @@ func (h *TokenHandler) ResolveAPITokenUser(rawToken string) *middleware.UserCont
 	if err != nil || t == nil || t.UserID == 0 {
 		return nil
 	}
-	return &middleware.UserContext{ID: t.UserID, Username: t.Username, Role: t.UserRole}
+	uc := &middleware.UserContext{ID: t.UserID, Username: t.Username, Role: t.UserRole}
+	if h.groups != nil && h.groupsMaxAge > 0 {
+		groups, err := h.groups.OIDCGroups(t.UserID, h.groupsMaxAge)
+		if err != nil {
+			log.Printf("api token: reading the OIDC groups of user %d: %v", t.UserID, err)
+		}
+		uc.Groups = groups
+	}
+	return uc
 }
 
 func hashToken(token string) string {

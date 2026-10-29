@@ -605,6 +605,23 @@ func main() {
 	}
 	tokenHandler := handlers.NewTokenHandler(tokenStore)
 
+	// API_TOKEN_GROUPS_MAX_AGE (Go duration, e.g. 168h): API tokens act with the
+	// IdP groups of their owner's last SSO login for that long after the login.
+	// Unset or 0 = tokens use direct grants only. Needs Postgres (multi mode).
+	var oidcGroupStore store.OIDCGroupStore
+	if v := env("API_TOKEN_GROUPS_MAX_AGE", ""); v != "" {
+		maxAge, err := time.ParseDuration(v)
+		if err != nil || maxAge < 0 {
+			log.Fatalf("invalid API_TOKEN_GROUPS_MAX_AGE %q: want a Go duration such as 168h", v)
+		}
+		if maxAge > 0 && multiMode {
+			oidcGroupStore = store.NewPostgresOIDCGroupStore(db)
+			tokenHandler.UseOwnerGroups(oidcGroupStore, maxAge)
+			log.Printf("API tokens use their owner's SSO groups for %s after the owner's login", maxAge)
+		} else if maxAge > 0 {
+			log.Printf("WARNING: API_TOKEN_GROUPS_MAX_AGE needs multi mode, ignored")
+		}
+	}
 	// UI preferences follow the same split as API tokens: Postgres in multi
 	// mode, a JSON file in the secrets dir in single mode. Both modes get the
 	// endpoint — a single-user install is exactly where a browser-local
@@ -763,6 +780,9 @@ func main() {
 			ssoReturnOrigins,
 			ssoAutoProvisionUsers,
 		)
+		if oidcGroupStore != nil {
+			ssoHandler.RecordGroups(oidcGroupStore)
+		}
 		mux.HandleFunc("/api/auth/sso/start", ssoHandler.HandleStart)
 		mux.HandleFunc("/api/auth/sso/callback", ssoHandler.HandleCallback)
 	}

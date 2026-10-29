@@ -158,7 +158,23 @@ For headless callers (CLI, MCP server, scripts):
 - A SuperAdmin's token has full bypass (matches the user).
 - A namespace-admin's token gets bypass only on the namespaces in `namespace_admins` for that user (request-time lookup).
 - A collaborator's token is limited to their `access_grants`.
+- Access groups count for a token through their **user** members. An **IdP group**
+  member counts only with `API_TOKEN_GROUPS_MAX_AGE` (below).
 - Revoking a user's grant immediately revokes their tokens for that namespace — there's no lag, no per-token cache.
+
+**IdP groups for API tokens** *(v4.8.14+, opt-in)*. An API token has no login of its
+own, so it has no `groups` snapshot: by default an IdP-group member of an access group
+is ignored for tokens, and a person who reaches a namespace only through an IdP group
+sees it in the browser but not from the CLI or an agent. With
+`API_TOKEN_GROUPS_MAX_AGE` set (a Go duration, e.g. `168h`), every SSO login also
+stores the person's IdP groups in `user_oidc_groups` (one row per user, replaced at each
+login, an empty list included; deleted with the user). The person's tokens then use that
+list until `API_TOKEN_GROUPS_MAX_AGE` after the login, and none once it is older. The
+trade-off is the same as for sessions, over a longer window: leaving an IdP group takes
+effect for tokens at the person's next SSO login or when the age is reached, whichever
+comes first. Keep the age short enough for your offboarding policy, and use direct user
+members or grants where a change must apply at once. Unset or `0`: nothing is stored
+and tokens behave as before.
 
 This was a behaviour change from pre-v3.5.0 where any admin token had unconditional global bypass.
 

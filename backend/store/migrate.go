@@ -359,6 +359,18 @@ var migrations = []struct {
 			DELETE FROM chat_members WHERE path <> lower(path) AND path ~ '^[ -~]*$';
 		`,
 	},
+	{
+		// The IdP groups of each user's last SSO login, for their API tokens
+		// (API_TOKEN_GROUPS_MAX_AGE). One row per user, replaced at each login.
+		name: "019_create_user_oidc_groups",
+		sql: `
+			CREATE TABLE IF NOT EXISTS user_oidc_groups (
+				user_id     INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+				groups      TEXT[] NOT NULL,
+				captured_at TIMESTAMPTZ NOT NULL DEFAULT now()
+			);
+		`,
+	},
 }
 
 // Migrate runs all pending migrations. Safe to call on every startup.
