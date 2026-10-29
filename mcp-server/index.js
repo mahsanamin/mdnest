@@ -135,6 +135,62 @@ function treeToText(node, indent = 0) {
 }
 
 // ---------------------------------------------------------------------------
+// Partial note reads (read_note outline / section / offset+limit), so an agent
+// can load one section of a long note instead of the whole file.
+// ---------------------------------------------------------------------------
+// A trailing newline ends the last line, it does not start an empty one.
+const noteLines = (text) => text.replace(/\n$/, "").split("\n");
+
+// Headings outside fenced code blocks: [{ line (1-indexed), level, title }]
+// shortcut: a fence closes on any line starting with its marker (no info-string
+// or longer-fence rules), fine for usual notes; follow CommonMark if it misfires.
+function noteHeadings(text) {
+  const out = [];
+  let fence = null;
+  noteLines(text).forEach((raw, i) => {
+    const marker = raw.match(/^\s*(```|~~~)/);
+    if (marker) {
+      if (!fence) fence = marker[1];
+      else if (marker[1] === fence) fence = null;
+      return;
+    }
+    if (fence) return;
+    const m = raw.match(/^(#{1,6})\s+(.+?)(?:\s+#+)?\s*$/);
+    if (m) out.push({ line: i + 1, level: m[1].length, title: m[2] });
+  });
+  return out;
+}
+
+function noteOutline(text) {
+  const total = noteLines(text).length;
+  const rows = noteHeadings(text).map((h) => `${h.line}: ${"#".repeat(h.level)} ${h.title}`);
+  return `${total} lines\n${rows.join("\n")}`;
+}
+
+// The heading whose title equals `query` (else the first that contains it,
+// case-insensitive), up to the next heading of the same or higher level.
+function noteSection(text, query) {
+  const lines = noteLines(text);
+  const hs = noteHeadings(text);
+  const q = query.trim().replace(/^#+\s*/, "").toLowerCase();
+  let i = hs.findIndex((h) => h.title.toLowerCase() === q);
+  if (i === -1) i = hs.findIndex((h) => h.title.toLowerCase().includes(q));
+  if (i === -1) return null;
+  const next = hs.slice(i + 1).find((h) => h.level <= hs[i].level);
+  const end = next ? next.line - 1 : lines.length;
+  return { from: hs[i].line, to: end, text: lines.slice(hs[i].line - 1, end).join("\n") };
+}
+
+// 1-indexed offset, optional limit. null when offset is past the last line.
+function noteRange(text, offset = 1, limit) {
+  const lines = noteLines(text);
+  const from = Math.max(1, offset);
+  if (from > lines.length) return null;
+  const to = limit ? Math.min(lines.length, from + limit - 1) : lines.length;
+  return { from, to, total: lines.length, text: lines.slice(from - 1, to).join("\n") };
+}
+
+// ---------------------------------------------------------------------------
 // Excalidraw / Marp scaffolding
 // ---------------------------------------------------------------------------
 // buildExcalidraw renders an Obsidian-compatible `.excalidraw.md` document. The
@@ -695,12 +751,16 @@ server.tool(
 
 server.tool(
   "read_note",
-  "Read a note's content",
+  "Read a note's content. On long notes prefer outline:true first (headings with line numbers), then section or offset/limit to load only the part you need.",
   {
     namespace: z.string().describe("Namespace name"),
     path: z.string().describe("Path to the note within the namespace"),
+    outline: z.boolean().optional().describe("Return only line count and headings with line numbers"),
+    section: z.string().optional().describe("Return only this heading's block (exact title, else first containing it), until the next heading of same or higher level"),
+    offset: z.number().int().optional().describe("First line to return, 1-indexed"),
+    limit: z.number().int().positive().optional().describe("Max lines to return from offset"),
   },
-  async ({ namespace, path }) => {
+  async ({ namespace, path, outline, section, offset, limit }) => {
     try {
       const res = await api(
         `/api/note?ns=${encodeURIComponent(namespace)}&path=${encodeURIComponent(path)}`
@@ -710,6 +770,23 @@ server.tool(
         return { content: [{ type: "text", text: `Error ${res.status}: ${text}` }], isError: true };
       }
       const text = await res.text();
+      if (outline) {
+        return { content: [{ type: "text", text: noteOutline(text) }] };
+      }
+      if (section) {
+        const s = noteSection(text, section);
+        if (!s) {
+          return { content: [{ type: "text", text: `Error: section "${section}" not found; use outline:true` }], isError: true };
+        }
+        return { content: [{ type: "text", text: `[lines ${s.from}-${s.to}]\n${s.text}` }] };
+      }
+      if (offset || limit) {
+        const r = noteRange(text, offset, limit);
+        if (!r) {
+          return { content: [{ type: "text", text: `Error: offset ${offset} is past the end of the note (${noteLines(text).length} lines)` }], isError: true };
+        }
+        return { content: [{ type: "text", text: `[lines ${r.from}-${r.to} of ${r.total}]\n${r.text}` }] };
+      }
       return { content: [{ type: "text", text }] };
     } catch (err) {
       return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };

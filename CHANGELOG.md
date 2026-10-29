@@ -33,6 +33,14 @@ All notable changes to mdnest are documented here.
   new login refreshes them. Leaving the IdP group takes effect at the next
   login or when the age is reached. Multi mode with `OIDC_GROUPS_CLAIM`, #157.
   Thanks to [@ecthelion77](https://github.com/ecthelion77) (Olivier Gintrand), #158.
+- **`read_note` can return part of a note.** An agent reading a long note
+  used to get the whole file every time. `outline: true` returns the line
+  count and every heading with its line number (headings inside code fences
+  are skipped); `section: "<heading>"` returns that heading's block, up to
+  the next heading of the same or higher level (an exact title wins over one
+  that only contains it); `offset`/`limit` return a range of lines. Without
+  them `read_note` returns the whole note, as before. Thanks to
+  [@lglot](https://github.com/lglot) (Luigi Lotito), #156.
 
 ### Changed
 
