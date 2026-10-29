@@ -1,7 +1,7 @@
 // Unit test for the Marp slide splitter/joiner. Pure (no server): checks that a
 // deck round-trips through split/join, that a `---` inside fenced code does NOT
 // start a new slide, and that the CRUD array transforms land where expected.
-import { buildMarpDeck, splitMarp, joinMarp } from "./index.js";
+import { buildMarpDeck, splitMarp, joinMarp, parseMarpTemplates } from "./index.js";
 
 let passed = 0, failed = 0;
 const ok = (name, cond, extra = "") => { (cond ? passed++ : failed++); console.log(`${cond ? "PASS" : "FAIL"}  ${name}${extra ? "  -> " + extra : ""}`); };
@@ -47,6 +47,15 @@ ok("class, size, header and footer are written", full.includes('theme: gaia\ncla
 ok("16:9 is the default and not written", !buildMarpDeck({ size: "16:9" }).includes("size:"));
 const evil = buildMarpDeck({ theme: "x\nmarp: false", slideClass: "ok a:b" });
 ok("a theme or class cannot break the front matter", evil.includes("theme: default\nclass: ok\n") && !evil.includes("marp: false"), JSON.stringify(evil));
+
+// A template's name comes from its first heading. The old heading regex took
+// 19 s on this 10 KB line (and blocked the shared HTTP server meanwhile).
+const longLine = "# a" + " ".repeat(5000) + "x" + " ".repeat(5000);
+let t0 = Date.now();
+const tpl = parseMarpTemplates(`---\nmarp: true\n---\n\n${longLine}\n\n---\n\n## Closing ##\n`);
+const ms = Date.now() - t0;
+ok("a long heading line is parsed quickly", ms < 1000, `${ms} ms`);
+ok("template names come from headings, closing #s dropped", tpl.templates[1]?.name === "Closing", `${tpl.templates.length} templates, second: ${tpl.templates[1]?.name}`);
 
 console.log(`\n${failed === 0 ? "ALL PASS" : "FAILURES"}: ${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

@@ -141,6 +141,21 @@ function treeToText(node, indent = 0) {
 // A trailing newline ends the last line, it does not start an empty one.
 const noteLines = (text) => text.replace(/\n$/, "").split("\n");
 
+// One ATX heading line -> { level, title }, or null. Plain string work after a
+// simple match on purpose: a regex that also strips the closing #s
+// (`(.+?)(?:\s+#+)?\s*$`) backtracks on a long run of spaces, and one such line
+// held the shared HTTP server for seconds.
+function parseHeading(raw) {
+  const m = raw.match(/^(#{1,6})[ \t]/);
+  if (!m) return null;
+  let t = raw.slice(m[1].length).trim(); // trim also drops a CRLF note's \r
+  let j = t.length;
+  while (j > 0 && t[j - 1] === "#") j--;
+  // closing #s count only after a space (or as the whole title): "C#" stays "C#"
+  if (j < t.length && (j === 0 || t[j - 1] === " " || t[j - 1] === "\t")) t = t.slice(0, j).trimEnd();
+  return t ? { level: m[1].length, title: t } : null;
+}
+
 // Headings outside fenced code blocks: [{ line (1-indexed), level, title }]
 // shortcut: a fence closes on any line starting with its marker (no info-string
 // or longer-fence rules), fine for usual notes; follow CommonMark if it misfires.
@@ -155,8 +170,8 @@ function noteHeadings(text) {
       return;
     }
     if (fence) return;
-    const m = raw.match(/^(#{1,6})\s+(.+?)(?:\s+#+)?\s*$/);
-    if (m) out.push({ line: i + 1, level: m[1].length, title: m[2] });
+    const h = parseHeading(raw);
+    if (h) out.push({ line: i + 1, ...h });
   });
   return out;
 }
@@ -296,8 +311,8 @@ export function parseMarpTemplates(markdown) {
     let heading = "";
     for (const line of body.split("\n")) {
       if (/^\s*(```|~~~)/.test(line)) { inFence = !inFence; continue; }
-      const h = !inFence && line.match(/^#{1,6}\s+(.+?)\s*#*\s*$/);
-      if (h) { heading = h[1].replace(/<[^>]+>/g, "").replace(/[*_`~]/g, "").trim(); break; }
+      const h = !inFence && parseHeading(line);
+      if (h) { heading = h.title.replace(/<[^>]+>/g, "").replace(/[*_`~]/g, "").trim(); break; }
     }
     let name = (named && named[1]) || heading || `Slide ${idx + 1}`;
     const n = (seen.get(name) || 0) + 1;

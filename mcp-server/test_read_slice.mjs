@@ -30,6 +30,10 @@ const NOTE = [
   "c body",           // 13
 ].join("\n") + "\n";  // trailing newline, as editors save it
 
+// One heading line with long runs of spaces: the first heading regex took
+// about 5 s on it, holding the shared HTTP server for every user meanwhile.
+const LONG_NOTE = "# a" + " ".repeat(50000) + "x" + " ".repeat(50000) + "\n## End\nend\n";
+
 const backend = createServer((req, res) => {
   const url = new URL(req.url, "http://x");
   if (req.method === "GET" && url.pathname === "/api/config") {
@@ -39,7 +43,7 @@ const backend = createServer((req, res) => {
   }
   if (req.method === "GET" && url.pathname === "/api/note") {
     res.writeHead(200, { "Content-Type": "text/markdown; charset=utf-8" });
-    res.end(NOTE);
+    res.end(url.searchParams.get("path") === "long.md" ? LONG_NOTE : NOTE);
     return;
   }
   res.writeHead(404, { "Content-Type": "application/json" });
@@ -106,6 +110,13 @@ async function run() {
   ok("limit alone starts at line 1", !r.isError && r.text === "[lines 1-2 of 13]\n# Title\nintro", show(r.text));
   r = await callTool({ offset: 20 });
   ok("offset past the end errors", r.isError && r.text.includes("past the end"), r.text);
+
+  // 8. a long heading line: parsed quickly, title trimmed
+  const t0 = Date.now();
+  r = await callTool({ path: "long.md", outline: true });
+  const ms = Date.now() - t0;
+  ok("outline of a long heading line is quick", ms < 1000, `${ms} ms`);
+  ok("long heading line titled correctly", !r.isError && r.text === `3 lines\n1: # a${" ".repeat(50000)}x\n2: ## End`, `${r.text.length} chars`);
 }
 
 // --- orchestrate ----------------------------------------------------------

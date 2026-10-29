@@ -52,6 +52,14 @@ All notable changes to mdnest are documented here.
   remembered for that note (in this browser), and **Board** brings the board
   back.
 
+### Fixed
+
+- **A note with a very long heading line could stall the MCP server.** The
+  Marp template list read slide headings with a pattern that took about 19
+  seconds on one 10 KB line, and with `MCP_TRANSPORT=http` one process serves
+  every user, so everyone waited. Headings are now read in time proportional
+  to the line, here and in `read_note`'s new outline.
+
 ## v4.8.13: No more lost typing in Live notes, and Live never waits for the connection
 
 Released 2026-10-24.
