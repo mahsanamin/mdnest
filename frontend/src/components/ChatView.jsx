@@ -14,7 +14,7 @@ import {
 import { copyPlainText } from '../mermaid-text.js';
 import { mdnestUri } from '../mdnestUri.js';
 import { CHAT_ROLES, applyRole } from '../chatRoles.js';
-import { chatMenuGroups } from '../contextMenuItems.js';
+import { chatMenuGroups, chatRoomMenuGroups } from '../contextMenuItems.js';
 import ContextMenu from './ContextMenu.jsx';
 import ApprovalCard from './ApprovalCard.jsx';
 import { approvalIdIn, withoutApprovalMarker } from '../approvals.js';
@@ -43,14 +43,43 @@ const gifUrl = (ns, g) => (g.scope === 'builtin' ? g.path : fileUrl(ns, g.path))
 function renderMessage(text, ns, gifs) {
   const withGifs = expandGifRefs(text || '', gifs, (g) => gifUrl(ns, g));
   const html = sanitizeHtml(md.parse(highlightMentions(withGifs)));
-  if (!ns || !html.includes('<img')) return html;
+  const hasImg = !!ns && html.includes('<img');
+  const hasCode = html.includes('<pre');
+  if (!hasImg && !hasCode) return html;
   const tpl = document.createElement('template');
   tpl.innerHTML = html;
-  tpl.content.querySelectorAll('img').forEach((img) => {
-    img.setAttribute('src', fileUrl(ns, img.getAttribute('src') || ''));
-    img.setAttribute('loading', 'lazy');
+  if (hasImg) {
+    tpl.content.querySelectorAll('img').forEach((img) => {
+      img.setAttribute('src', fileUrl(ns, img.getAttribute('src') || ''));
+      img.setAttribute('loading', 'lazy');
+    });
+  }
+  // A Copy button on each code block, like the preview's. Added after
+  // sanitizing, as fixed markup; the click is handled on the message list
+  // (copyCodeFrom), since this HTML is a string with no handlers of its own.
+  tpl.content.querySelectorAll('pre').forEach((pre) => {
+    if (!pre.querySelector('code')) return;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'code-copy-btn';
+    btn.title = 'Copy code';
+    btn.textContent = 'Copy';
+    pre.appendChild(btn);
   });
   return tpl.innerHTML;
+}
+
+// copyCodeFrom handles a click on a code block's Copy button in a message.
+// Returns true when the click was one.
+function copyCodeFrom(target) {
+  const btn = target instanceof Element ? target.closest('.code-copy-btn') : null;
+  const code = btn?.closest('pre')?.querySelector('code');
+  if (!btn || !code) return false;
+  if (copyPlainText(code.textContent)) {
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+  }
+  return true;
 }
 
 // Rendered message HTML. React 19 compares dangerouslySetInnerHTML by object
@@ -582,6 +611,8 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onBack, onActivity, 
   // moved) or 'removed' (403: taken off a private chat's member list). The
   // view stops polling and says so, instead of repeating an error.
   const [gone, setGone] = useState(null);
+  // mdnest's right-click menu in the room: { x, y, n (message) | null, selection }.
+  const [roomMenu, setRoomMenu] = useState(null);
   const goneFrom = (e) => (e?.status === 404 ? 'deleted' : e?.status === 403 ? 'removed' : null);
   const [working, setWorking] = useState([]); // who said they are busy, from the server
   const [contexts, setContexts] = useState({}); // each agent's last /context report, by name
@@ -873,8 +904,49 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onBack, onActivity, 
     });
   };
 
+  // Right-click anywhere in the room but the composer opens mdnest's menu,
+  // with Copy message when it was on a message. The composer keeps the
+  // browser's menu: it carries the spelling suggestions.
+  const openRoomMenu = (e) => {
+    if (gone) return;
+    if (e.target instanceof Element && e.target.closest('textarea, input, .chat-composer')) return;
+    e.preventDefault();
+    const msgEl = e.target instanceof Element ? e.target.closest('.chat-msg[data-n]') : null;
+    const selection = (window.getSelection?.()?.toString() || '').trim();
+    setRoomMenu({ x: e.clientX, y: e.clientY, n: msgEl ? Number(msgEl.dataset.n) : null, selection });
+  };
+  const onRoomMenuAction = (action) => {
+    const m = roomMenu;
+    if (!m) return;
+    if (action === 'copy-selection') copyPlainText(m.selection);
+    if (action === 'copy-message') {
+      const msg = messages.find((x) => x.n === m.n);
+      if (msg) copyPlainText(withoutApprovalMarker(msg.text).trim());
+    }
+    if (action === 'chat-members') onDialog?.('members');
+    if (action === 'connect-agent') onDialog?.('agent');
+    if (action === 'open-note') onOpenNote(chat.ns, chat.path);
+    if (action === 'copy-path') copyPlainText(mdnestUri(serverAlias, chat.ns, chat.path));
+    if (action === 'delete-chat') onDialog?.('delete', { title: doc?.title, count: countRef.current });
+  };
+
   return (
-    <section className="chat-room">
+    <section className="chat-room" onContextMenu={openRoomMenu}>
+      <ContextMenu
+        visible={!!roomMenu}
+        x={roomMenu?.x || 0}
+        y={roomMenu?.y || 0}
+        target={roomMenu}
+        title={doc?.title || chat.path}
+        groups={chatRoomMenuGroups({
+          hasMessage: roomMenu?.n != null,
+          hasSelection: !!roomMenu?.selection,
+          canDelete: !!onDialog && !!doc?.canDelete,
+          canMembers: !!account && !!onDialog,
+        })}
+        onClose={() => setRoomMenu(null)}
+        onAction={(action) => onRoomMenuAction(action)}
+      />
       <header className="chat-room-header">
         {onBack && <button className="chat-btn chat-back" onClick={onBack} aria-label="Back to chats">‹</button>}
         <div className="chat-room-title">
@@ -926,7 +998,7 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onBack, onActivity, 
       </header>
 
       <div className="chat-messages-wrap">
-        <div className="chat-messages" ref={scrollRef} onScroll={onScroll}>
+        <div className="chat-messages" ref={scrollRef} onScroll={onScroll} onClick={(e) => { if (copyCodeFrom(e.target)) e.stopPropagation(); }}>
           {messageList}
         </div>
         {unseen > 0 && (

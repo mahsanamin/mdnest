@@ -17,7 +17,7 @@ const USER = process.env.MDNEST_USER || 'e2e';
 const PASS = process.env.MDNEST_PASSWORD || 'e2epass123';
 const NS = process.env.MDNEST_TEST_NS || 'testing_workspace';
 
-test.use({ viewport: { width: 1440, height: 900 } });
+test.use({ viewport: { width: 1440, height: 900 }, permissions: ['clipboard-read', 'clipboard-write'] });
 
 async function api(page, method, url, body) {
   return page.evaluate(async ([m, u, b]) => {
@@ -331,6 +331,41 @@ test('full-screen chats show the main workspace, with no picker of their own', a
     await expect(page.locator('.chat-list-item', { hasText: s.title }).first()).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('.chat-ns-select')).toHaveCount(0);
     await expect(page.locator('.chat-list-ns')).toHaveText(NS);
+  } finally {
+    await cleanup(page, s.plain, s.chat);
+  }
+});
+
+// Right-click inside an open, pinned chat used to show the browser's menu.
+// It now shows mdnest's chat menu with Copy message; the composer keeps the
+// browser's menu (spelling suggestions). Code blocks get a Copy button.
+test('right-click in a pinned chat copies a message, and code blocks have Copy', async ({ page }) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  const s = await seed(page);
+  const msg = 'Run this:\n\n```\nmdnest whoami\n```';
+  expect((await api(page, 'POST', `/api/chat?ns=${NS}&path=${encodeURIComponent(s.chat)}&as=agent`, msg)).status).toBe(201);
+  try {
+    await dock(page, s);
+    const bubble = panel(page).locator('.chat-bubble', { hasText: 'Run this:' });
+    await expect(bubble).toBeVisible({ timeout: 15_000 });
+
+    await bubble.click({ button: 'right' });
+    const menu = page.locator('.context-menu');
+    await expect(menu).toBeVisible();
+    await expect(menu.locator('.context-menu-item').first()).toHaveText('Copy message');
+    await menu.locator('.context-menu-item', { hasText: 'Copy message' }).click();
+    await expect(menu).toBeHidden();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(msg);
+
+    await bubble.locator('pre').hover();
+    await bubble.locator('.code-copy-btn').click();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('mdnest whoami\n');
+
+    // The composer keeps the browser's own menu.
+    await dockedDraft(page).click({ button: 'right' });
+    await expect(page.locator('.context-menu')).toHaveCount(0);
+    await page.keyboard.press('Escape');
   } finally {
     await cleanup(page, s.plain, s.chat);
   }

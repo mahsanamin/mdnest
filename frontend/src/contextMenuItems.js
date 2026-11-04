@@ -80,6 +80,26 @@ export function contextMenuGroups({
   return [create, organize, share, info, admin, danger].filter((g) => g.length > 0);
 }
 
+// The right-click menu inside an open chat (the room), so a pinned chat has
+// mdnest's menu rather than the browser's. hasMessage: the click was on a
+// message; hasSelection: text is selected. The composer keeps the browser's
+// own menu, which carries the spelling suggestions.
+export function chatRoomMenuGroups({ hasMessage = false, hasSelection = false, canDelete = false, canMembers = false } = {}) {
+  return [
+    [
+      ...(hasSelection ? [{ label: 'Copy selected text', action: 'copy-selection', icon: 'copy' }] : []),
+      ...(hasMessage ? [{ label: 'Copy message', action: 'copy-message', icon: 'copy', hint: 'Copies the message as written, in Markdown' }] : []),
+    ],
+    [
+      ...(canMembers ? [{ label: 'Members…', action: 'chat-members', icon: 'people', hint: 'See who can open this chat, and add people' }] : []),
+      { label: 'Connect an agent…', action: 'connect-agent', icon: 'link', hint: 'Get the prompt that brings an agent into this chat' },
+    ],
+    [{ label: 'Open as note', action: 'open-note', icon: 'note' }],
+    [{ label: 'Copy path for CLI', action: 'copy-path', icon: 'link', hint: 'Copies an mdnest:// address that the mdnest CLI and agents accept' }],
+    canDelete ? [{ label: 'Delete chat', action: 'delete-chat', icon: 'trash', danger: true }] : [],
+  ].filter((g) => g.length > 0);
+}
+
 // The chat list's right-click menu (one chat). Same component and look as the
 // tree's; open is the plain click, so the menu holds what a click cannot do.
 // pinned: undefined when pins could not be loaded, so no pin item is offered.

@@ -501,6 +501,14 @@
   max-width: 100%;
 }
 .chat-bubble code { font-size: 0.85em; }
+/* The code block's Copy button (renderMessage). The base look is App.css's
+   .code-copy-btn; it shows on hover there, and always where there is no
+   hover (a phone), or it could never be reached. */
+.chat-bubble pre { position: relative; }
+.chat-bubble pre:has(.code-copy-btn) { padding-right: 56px; }
+@media (hover: none) {
+  .chat-bubble .code-copy-btn { opacity: 1; }
+}
 
 .chat-working {
   border-top: 1px solid var(--border);
