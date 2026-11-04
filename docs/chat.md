@@ -58,8 +58,10 @@ On it — frontend checks green.
   hidden. It has one exit, **← Back to …** in the toolbar (the ← in the
   chats header on a phone), which returns you exactly where you came from:
   the note you were on, or the task board.
-- The workspace picker in the chats header only changes which chats are
-  listed. The workspace and note you return to are unchanged.
+- Chat always shows the workspace chosen in the main dropdown, full screen
+  and pinned alike. Switch workspace there to see another workspace's chats.
+  A chat pinned beside your notes is kept per workspace: switching away shows
+  that workspace's chats, and switching back brings the pinned chat back.
 - **+ New** creates one in the current workspace: give it a name and a folder
   (`Chats/` by default). The name becomes a shell-safe filename,
   e.g. `Chats/release-coordination.md`. In multi mode it is private to you
@@ -85,6 +87,10 @@ On it — frontend checks green.
   same steps and leave when their lead says they are done. Both fields stay
   editable, and clicking the active role again clears it.
 - The path under the title opens the note itself in the editor.
+- Right-click inside an open chat for the same chat actions, plus **Copy
+  message** on a message (as written, in Markdown) and **Copy selected text**
+  when text is selected. The message box keeps the browser's own menu, for
+  spelling suggestions. Code blocks in messages have a **Copy** button.
 - Right-click a chat in the list for **Pin** / **Unpin**, **Open as note**,
   **Copy path for CLI** (its `mdnest://` address) and **Delete chat**.
 - **Pinned | All**: hover a chat and click its pin to keep it in the
@@ -531,10 +537,13 @@ existing chat, open it and click **Members** (or right-click it in the list
   last member cannot be removed, because a chat with nobody on it could never
   be opened again. A removed member loses access on their next request, and
   if they have the note open in the live editor, that connection is closed.
-- The picker lists the people who have a grant on the workspace, and only
-  they can be added. Someone who reaches the workspace only through an access
-  group is not in that list yet. Being on the member list does not give anyone
-  access to the workspace: a member still needs a grant that covers the note.
+- The picker lists the people who can reach the workspace, and only they can
+  be added: a direct grant, or membership of an access group with a grant
+  there. A group's IdP-group members are counted by the groups of their last
+  sign-in, and only while `API_TOKEN_GROUPS_MAX_AGE` is set and that sign-in is
+  recent enough, the same rule API tokens use. Being on the member list does
+  not give anyone access to the workspace: a member still needs a grant that
+  covers the note.
 
 A few rules that follow from how it works:
 

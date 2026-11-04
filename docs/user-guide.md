@@ -45,6 +45,8 @@ Below the namespace selector, the folder tree shows all files and folders in the
 - Click a **file** to open it in the editor.
 - Hidden files (those starting with `.`) are not shown. This keeps `.git` directories and other dotfiles out of the way.
 - **The tree remembers which folders you had open, per namespace** (v3.11.4+). A refresh or namespace switch restores your expanded folders instead of re-expanding everything; the folder holding the currently-open file auto-reveals but can still be collapsed.
+- **A large file asks first** (v4.8.15+). A file over 1 MB opens only after you confirm, and then as plain text: the Basic editor, without the Live editor or the preview, which could freeze the page on a file that size. Files over 5 MB are not listed in the tree, and mdnest does not open a file over 10 MB.
+- **A link that cannot be opened says why** (v4.8.15+): you have no access to its workspace or note, or the note was moved or deleted. You stay where you were.
 
 On mobile, tap the hamburger menu icon in the top-left corner to show or hide the sidebar.
 
