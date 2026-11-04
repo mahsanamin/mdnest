@@ -140,3 +140,31 @@ func TestGetTreeHidesNotesWithoutAnyGrant(t *testing.T) {
 		t.Fatalf("ungranted member should see no notes, got %d: %s", got, w.Body.String())
 	}
 }
+
+// Each file carries its size, so the app can ask before opening a large file
+// instead of loading and rendering all of it (which froze the tab).
+func TestGetTreeCarriesFileSizes(t *testing.T) {
+	stg := localStore(t, notesDirWithTree(t))
+	w := serveTree(NewTreeHandler(stg, nil, nil), nil, "team")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", w.Code, w.Body.String())
+	}
+	var tree TreeNode
+	if err := json.Unmarshal(w.Body.Bytes(), &tree); err != nil {
+		t.Fatal(err)
+	}
+	sizes := map[string]int64{}
+	var walk func(n *TreeNode)
+	walk = func(n *TreeNode) {
+		if n.Type == "file" {
+			sizes[n.Path] = n.Size
+		}
+		for _, c := range n.Children {
+			walk(c)
+		}
+	}
+	walk(&tree)
+	if sizes["readme.md"] != int64(len("# readme")) || sizes["docs/guide.md"] != int64(len("# guide")) {
+		t.Fatalf("sizes = %v, want readme.md=8 docs/guide.md=7", sizes)
+	}
+}

@@ -113,6 +113,8 @@ import {
   logout as apiLogout,
   PermissionError, convertToChat } from './api.js';
 import { buildPathIndex } from './wikilink.js';
+import { fileSizeIn, isLargeSize, isLargeText, largeFileQuestion } from './largeFile.js';
+import { noteOpenError, workspaceLinkError } from './noteErrors.js';
 import { createEchoGate } from './echo-gate.js';
 import { broadcastTabMessage, onTabMessage } from './tab-sync.js';
 import { initFirebase, signOutFirebase } from './firebase-config.js';
@@ -229,6 +231,9 @@ function App() {
   const [ssoError, setSsoError] = useState(() => consumeSSOHashOnLoad());
   const [authenticated, setAuthenticated] = useState(!!getToken());
   const [namespaces, setNamespaces] = useState([]);
+  // Read by the hashchange handler, which is not re-bound on every list change.
+  const namespacesRef = useRef(namespaces);
+  namespacesRef.current = namespaces;
   const [namespacesEmptyReason, setNamespacesEmptyReason] = useState(''); // why the list is empty (issue #123)
   const [selectedNs, setSelectedNs] = useState(null);
   const [tree, setTree] = useState([]);
@@ -531,7 +536,10 @@ function App() {
   // heading), which silently turns the chat back into a plain note. So when
   // one is opened as a note, it is locked to Basic exactly like Marp.
   const chatNoteActive = chatEnabled && isChatDoc(content);
-  const editorModeChosen = effectiveEditorMode(editorMode, marpActive || drawingSource || chatNoteActive);
+  // A very large note (over 1 MB) froze the tab in the Live editor and the
+  // preview, so it is shown as plain text only (largeFile.js).
+  const largeNote = isLargeText(content);
+  const editorModeChosen = effectiveEditorMode(editorMode, marpActive || drawingSource || chatNoteActive || largeNote);
   // `.excalidraw.md` files open in the drawing editor (opt-in ENABLE_EXCALIDRAW),
   // bypassing the text editor/preview entirely.
   const excalidrawEnabled = !!appConfig?.excalidraw;
@@ -655,7 +663,7 @@ function App() {
   const noteLoaded = content !== null;
   // sharedMod (above) is false when the shared editing chunk could not be
   // loaded: notes then simply edit the normal way.
-  const sharedEligible = sharedEditingOn && sharedModOk && noteLoaded
+  const sharedEligible = sharedEditingOn && sharedModOk && noteLoaded && !largeNote
     && isSharedEligible({ path: currentPath, isDrawing: isDrawingDoc, isChat: chatNoteActive, isMarp: marpActive });
   const othersInNote = presenceUsers.some((u) => u.id !== userInfo?.id);
   const sharedForcesLive = sharedEligible && othersInNote && liveCrashedFor !== currentPath;
@@ -1323,10 +1331,21 @@ function App() {
       // (namespace-scoped) chat list matches the chat on screen.
       const linkedNs = hashNs || (hashChats && hashChat ? hashChat.ns : null);
 
+      // A link to a workspace this person cannot open: say so, and do not
+      // reopen their last note there as if the link had worked.
+      const badLink = !!linkedNs && !nsList.includes(linkedNs) && nsList.length > 0;
       if (linkedNs && nsList.includes(linkedNs)) {
         targetNs = linkedNs;
       } else if (nsList.length > 0) {
         targetNs = nsList[0];
+      }
+      if (badLink) {
+        setNotice({ kind: 'error', text: workspaceLinkError(linkedNs) });
+        if (hashChats) { setChatsOpen(false); setOpenChat(null); setChatNs(null); }
+        setSelectedNs(targetNs);
+        setHash(targetNs, null);
+        setInitialized(true);
+        return;
       }
 
       if (targetNs) {
@@ -1370,8 +1389,9 @@ function App() {
           // hold the scrollPct from when they were last reading.
           restoreScrollPosition(selectedNs, currentPath);
           noteLoadedRef.current?.(selectedNs, currentPath, text);
-        }).catch(() => {
+        }).catch((e) => {
           if (chatRedirectFor.current === `${selectedNs}/${currentPath}`) chatRedirectFor.current = null;
+          setNotice({ kind: 'error', text: noteOpenError(e, selectedNs, currentPath) });
           // The saved/hash-pointed file is gone (deleted on disk, renamed
           // by another client). Clear so the user gets a clean slate, and
           // forget the stale last-path so the next ns switch doesn't try
@@ -1559,6 +1579,11 @@ function App() {
       setSidePanel((v) => (v === 'board' ? 'closed' : v));
       setShowTaskBoard(board);
       setBoardMilestone(board && typeof milestone === 'string' ? milestone : null);
+      if (ns && ns !== selectedNs && namespacesRef.current.length > 0 && !namespacesRef.current.includes(ns)) {
+        setNotice({ kind: 'error', text: workspaceLinkError(ns) });
+        setHash(selectedNs, currentPath);
+        return;
+      }
       if (ns && ns !== selectedNs) {
         setSelectedNs(ns);
       }
@@ -1690,6 +1715,15 @@ function App() {
   }, [getScrollables, getFilePrefs, scrollToPendingHeading]);
 
   const openNoteDirect = useCallback(async (ns, path) => {
+    // A large file: ask first (the tree carries sizes for the open namespace).
+    // Reloading the note already open never asks again.
+    if (ns === selectedNs && path !== currentPathRef.current) {
+      const size = fileSizeIn(tree, path);
+      if (isLargeSize(size) && !window.confirm(largeFileQuestion(path, size))) {
+        setHash(ns, currentPathRef.current);
+        return;
+      }
+    }
     // Board stays open across note navigation so the chosen view persists; the
     // board's own "open source note" action closes it explicitly.
     // Write out the file we're leaving before loading the next one — see
@@ -1709,8 +1743,11 @@ function App() {
     } catch (e) {
       if (chatRedirectFor.current === `${ns}/${path}`) chatRedirectFor.current = null;
       console.error('Failed to open note:', e);
+      setNotice({ kind: 'error', text: noteOpenError(e, ns, path) });
+      // Keep the address on what is actually open, not on the link that failed.
+      setHash(ns === selectedNs ? ns : selectedNs, currentPathRef.current);
     }
-  }, [restoreScrollPosition, commentsEnabled, flushPendingSave]);
+  }, [restoreScrollPosition, commentsEnabled, flushPendingSave, selectedNs, tree]);
 
   const handleSelectNs = useCallback((ns) => {
     // Keep the task board open when switching workspace so the chosen view is
@@ -1759,6 +1796,10 @@ function App() {
     if (!selectedNs) return;
     pendingHeadingRef.current = heading || null;
     if (heading && path === currentPath) { scrollToPendingHeading(); return; }
+    if (path !== currentPath) {
+      const size = fileSizeIn(tree, path);
+      if (isLargeSize(size) && !window.confirm(largeFileQuestion(path, size))) return;
+    }
     // Board stays open across note navigation so the chosen view persists; the
     // board's own "open source note" action closes it explicitly.
     // Write out the previous file's pending edits instead of dropping them.
@@ -1783,13 +1824,10 @@ function App() {
       noteLoadedRef.current?.(selectedNs, path, text);
     } catch (e) {
       if (chatRedirectFor.current === `${selectedNs}/${path}`) chatRedirectFor.current = null;
-      if (e.name === 'PermissionError') {
-        alert('Access denied: you do not have permission to read this file.');
-      } else {
-        console.error('Failed to open note:', e);
-      }
+      if (e.name !== 'PermissionError') console.error('Failed to open note:', e);
+      setNotice({ kind: 'error', text: noteOpenError(e, selectedNs, path) });
     }
-  }, [selectedNs, currentPath, scrollToPendingHeading, restoreScrollPosition, commentsEnabled, setLastPath, flushPendingSave]);
+  }, [selectedNs, currentPath, scrollToPendingHeading, restoreScrollPosition, commentsEnabled, setLastPath, flushPendingSave, tree]);
 
   // Stable identity on purpose: this is handed to every task card, which is
   // memoised. An inline arrow here would be a new function on every App
@@ -3189,6 +3227,10 @@ function App() {
                         <MarpDeck content={content || ''} title={currentPath} scrollPct={viewMode === 'split' && !isMobile ? marpScrollPct : undefined} caret={viewMode === 'split' && !isMobile ? marpCaret : undefined} />
                       </Suspense>
                     </ChunkErrorBoundary>
+                  ) : largeNote ? (
+                    <div className="empty-state" data-testid="large-note-preview-off">
+                      <p>The preview is off for large files. The file is open as plain text in the editor.</p>
+                    </div>
                   ) : (
                     <Preview content={content || ''} currentPath={currentPath} ns={selectedNs} onCheckboxToggle={canWriteCurrent ? handleCheckboxToggle : null} pathIndex={wikiIndex} onWikiLink={openNote} />
                   )}
