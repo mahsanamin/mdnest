@@ -161,7 +161,9 @@ func TestNoteLock_ReadersDoNotPileUp(t *testing.T) {
 		t.Fatal(err)
 	}
 	stop := make(chan struct{})
+	writerDone := make(chan struct{})
 	go func() {
+		defer close(writerDone)
 		for {
 			select {
 			case <-stop:
@@ -172,7 +174,10 @@ func TestNoteLock_ReadersDoNotPileUp(t *testing.T) {
 			h.Handle(w, httptest.NewRequest(http.MethodPut, "/api/note?ns=alpha&path=n.md", strings.NewReader(big)))
 		}
 	}()
-	defer close(stop)
+	// Stop the writer AND wait for it, before t.TempDir's cleanup runs: a
+	// PUT still in flight leaves its temp file in alpha/ and the cleanup
+	// fails with "directory not empty".
+	defer func() { close(stop); <-writerDone }()
 	var wg sync.WaitGroup
 	start := time.Now()
 	for i := 0; i < 50; i++ {
