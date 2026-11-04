@@ -117,6 +117,17 @@ else
   FAILED=1
 fi
 
+# `mdnest whoami` names the account each token acts as, against fake servers,
+# with and without a working python3/jq. Loopback only; SKIPs without python3.
+echo -n "CLI whoami... "
+if bash tests/cli-whoami.sh > /dev/null 2>&1; then
+  echo "OK"
+else
+  echo "FAILED"
+  echo "  Run: bash tests/cli-whoami.sh"
+  FAILED=1
+fi
+
 # 2b-ii-b. The login prompt (token read from the terminal, not echoed, not
 # saved when the server refuses it), `update --server` refusing an error page,
 # and the installer a server serves. Fake backend on loopback; SKIPs without
