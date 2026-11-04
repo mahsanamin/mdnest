@@ -292,3 +292,46 @@ test('a docked chat you lost access to says so, and falls back to the list on re
     await cleanup(page, s.plain, s.chat);
   }
 });
+
+// Chat follows the workspace in the main dropdown. A pinned chat used to stay
+// on screen after switching workspace, and the chat had its own workspace
+// picker, so a chat could be shown that did not belong to the workspace
+// around it. Now switching shows the other workspace's chats, and switching
+// back brings the pinned chat back.
+test('a pinned chat follows the main workspace and comes back when you return', async ({ page }) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  const s = await seed(page);
+  try {
+    await dock(page, s);
+    // No workspace picker inside chat: the main dropdown is the only one.
+    await expect(panel(page).locator('.chat-ns-select')).toHaveCount(0);
+
+    await page.locator('.ns-select').selectOption('zz_e2e_target');
+    await expect(panel(page).locator('.chat-room')).toHaveCount(0, { timeout: 15_000 });
+    await expect(panel(page).locator('.chat-list')).toBeVisible({ timeout: 15_000 });
+    await expect(panel(page).locator('.chat-list-item', { hasText: s.title })).toHaveCount(0);
+
+    await page.locator('.ns-select').selectOption(NS);
+    await expect(panel(page).locator('.chat-room-title h2')).toHaveText(s.title, { timeout: 15_000 });
+  } finally {
+    await cleanup(page, s.plain, s.chat);
+  }
+});
+
+test('full-screen chats show the main workspace, with no picker of their own', async ({ page }) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  const s = await seed(page);
+  try {
+    await page.goto(`/#${NS}/${s.plain}`);
+    await page.reload();
+    await expect(page.locator('.toolbar-path')).toContainText(s.plain, { timeout: 20_000 });
+    await page.locator('.toolbar-view-chats').click();
+    await expect(page.locator('.chat-list-item', { hasText: s.title }).first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('.chat-ns-select')).toHaveCount(0);
+    await expect(page.locator('.chat-list-ns')).toHaveText(NS);
+  } finally {
+    await cleanup(page, s.plain, s.chat);
+  }
+});

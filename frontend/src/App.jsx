@@ -115,6 +115,7 @@ import {
 import { buildPathIndex } from './wikilink.js';
 import { fileSizeIn, isLargeSize, isLargeText, largeFileQuestion } from './largeFile.js';
 import { noteOpenError, workspaceLinkError } from './noteErrors.js';
+import { parseDockedChats, serializeDockedChats, withDockedChat, withoutChat } from './dockedChats.js';
 import { createEchoGate } from './echo-gate.js';
 import { broadcastTabMessage, onTabMessage } from './tab-sync.js';
 import { initFirebase, signOutFirebase } from './firebase-config.js';
@@ -399,15 +400,18 @@ function App() {
   });
   // The chat docked in the panel ({ns, path} | null = the chat list), kept
   // apart from openChat (the full-screen one) so expanding and pinning are
-  // explicit moves between the two. Remembered so a reload reopens it; the
-  // chat itself checks it is still readable and falls back to the list.
-  const [dockedChat, setDockedChat] = useState(() => {
-    try {
-      const v = JSON.parse(localStorage.getItem('mdnest_docked_chat') || 'null');
-      return v && typeof v.ns === 'string' && typeof v.path === 'string' ? { ns: v.ns, path: v.path } : null;
-    } catch { return null; }
+  // explicit moves between the two. Chat follows the workspace chosen in the
+  // main dropdown, so one chat is remembered per workspace (dockedChats.js):
+  // switching workspace shows that workspace's chat, and switching back
+  // brings the earlier one back. Remembered across a reload; the chat itself
+  // checks it is still readable and falls back to the list.
+  const [dockedChats, setDockedChats] = useState(() => {
+    try { return parseDockedChats(localStorage.getItem('mdnest_docked_chat')); } catch { return {}; }
   });
-  const [dockedNs, setDockedNs] = useState(null); // the docked list's workspace
+  const dockedChat = (selectedNs && dockedChats[selectedNs]) || null;
+  const setDockedChat = useCallback((chat) => {
+    setDockedChats((m) => withDockedChat(m, selectedNs, chat));
+  }, [selectedNs]);
   const [chatPanelWidth, setChatPanelWidth] = useState(() => {
     const v = parseInt(localStorage.getItem('mdnest_chat_panel_width'), 10);
     return Number.isFinite(v) ? v : null; // null = the default, min(40vw, 960px)
@@ -436,16 +440,16 @@ function App() {
   const [openChat, setOpenChat] = useState(null);
   // Chat mode is a place you visit and come back from. chatsReturnTo is the
   // view you came from ('editor' | 'board'), so the one Back button lands you
-  // exactly there. chatNs is the workspace the chat LIST shows; it is
-  // deliberately separate from selectedNs, so browsing another workspace's
-  // chats does not swap the workspace (and note) you return to.
+  // exactly there. The chat list always shows selectedNs, the workspace in
+  // the main dropdown: a separate chat workspace picker let the two drift
+  // apart, so a chat could be on screen that did not belong to the workspace
+  // around it.
   const [chatsReturnTo, setChatsReturnTo] = useState('editor');
   // Set when chat mode was entered by NAVIGATING to a chat note (tree click,
   // address bar): by then the note underneath is the chat itself, so Back
   // must reopen the note you were on before, not the chat's raw markdown.
   const [chatsReturnNote, setChatsReturnNote] = useState(null);
   const chatRedirectFrom = useRef(null);
-  const [chatNs, setChatNs] = useState(null);
   // Set to `${ns}/${path}` when the user NAVIGATES to a note (tree click,
   // address bar). If that note turns out to be a chat, it opens in the chat
   // view instead of the editor, so a chat always opens as a chat. "Open the
@@ -1316,7 +1320,6 @@ function App() {
       if (hashChats) {
         setChatsOpen(true);
         setOpenChat(hashChat || null);
-        setChatNs(hashChat ? hashChat.ns : null);
       }
       // Opened (or refreshed) on the task board: reopen it over the same
       // namespace and note.
@@ -1341,7 +1344,7 @@ function App() {
       }
       if (badLink) {
         setNotice({ kind: 'error', text: workspaceLinkError(linkedNs) });
-        if (hashChats) { setChatsOpen(false); setOpenChat(null); setChatNs(null); }
+        if (hashChats) { setChatsOpen(false); setOpenChat(null); }
         setSelectedNs(targetNs);
         setHash(targetNs, null);
         setInitialized(true);
@@ -1523,9 +1526,17 @@ function App() {
     if (sidePanel !== 'closed') localStorage.setItem('mdnest_side_panel_tab', sidePanel);
   }, [sidePanel]);
   useEffect(() => {
-    if (dockedChat) localStorage.setItem('mdnest_docked_chat', JSON.stringify(dockedChat));
-    else localStorage.removeItem('mdnest_docked_chat');
-  }, [dockedChat]);
+    try {
+      const v = serializeDockedChats(dockedChats);
+      if (v) localStorage.setItem('mdnest_docked_chat', v);
+      else localStorage.removeItem('mdnest_docked_chat');
+    } catch { /* storage unavailable: the pin lasts until the tab closes */ }
+  }, [dockedChats]);
+  // Chat follows the main workspace: a full-screen chat from another
+  // workspace closes when the workspace changes (its list is shown instead).
+  useEffect(() => {
+    setOpenChat((cur) => (cur && selectedNs && cur.ns !== selectedNs ? null : cur));
+  }, [selectedNs]);
 
   // Set while a navigation that came FROM the address bar (back/forward, a
   // pasted link) is still loading its note. The URL already says what the
@@ -1571,8 +1582,17 @@ function App() {
         setShowTaskBoard(false);
         setChatsReturnTo('editor');
         setChatsOpen(true);
+        // A chat in another workspace: the app follows the link there, since
+        // chat always shows the workspace chosen in the main dropdown.
+        if (chat && chat.ns !== selectedNs) {
+          if (namespacesRef.current.length > 0 && !namespacesRef.current.includes(chat.ns)) {
+            setNotice({ kind: 'error', text: workspaceLinkError(chat.ns) });
+            setOpenChat(null);
+            return;
+          }
+          handleSelectNsRef.current?.(chat.ns);
+        }
         setOpenChat(chat || null);
-        if (chat) setChatNs(chat.ns);
         return; // the chats route names a chat, not the note underneath
       }
       setChatsOpen(false);
@@ -1749,6 +1769,7 @@ function App() {
     }
   }, [restoreScrollPosition, commentsEnabled, flushPendingSave, selectedNs, tree]);
 
+  const handleSelectNsRef = useRef(null);
   const handleSelectNs = useCallback((ns) => {
     // Keep the task board open when switching workspace so the chosen view is
     // preserved — it re-scopes to the new namespace. Note navigation keeps it
@@ -1778,6 +1799,7 @@ function App() {
     }
     setTree([]);
   }, [getLastPath, flushPendingSave]);
+  handleSelectNsRef.current = handleSelectNs;
 
   // "Check again" / "Give me access" on the empty page: re-read the list and,
   // once something appears, open it the way a fresh load would. In multi mode
@@ -1853,7 +1875,7 @@ function App() {
     // Close the room only if it is the chat that went: deleting another one
     // from the list's right-click menu must leave the open chat alone.
     setOpenChat((cur) => (cur && cur.ns === ns && cur.path === path ? null : cur));
-    setDockedChat((cur) => (cur && cur.ns === ns && cur.path === path ? null : cur));
+    setDockedChats((m) => withoutChat(m, ns, path));
     return true;
   }, [selectedNs, currentPath, getLastPath, setLastPath, refreshTree]);
 
@@ -1892,7 +1914,9 @@ function App() {
     setChatsReturnTo(showTaskBoard ? 'board' : 'editor');
     setChatsReturnNote(returnNote === undefined ? null : returnNote);
     setShowTaskBoard(false);
-    setChatNs(chat?.ns || selectedNs);
+    // Chat shows the workspace chosen in the main dropdown; opening a chat
+    // from another workspace (a link, a mention) switches to it.
+    if (chat && chat.ns !== selectedNs) handleSelectNsRef.current?.(chat.ns);
     setOpenChat(chat || null);
     setChatsOpen(true);
   }, [showTaskBoard, selectedNs, flushPendingSave]);
@@ -1936,17 +1960,13 @@ function App() {
   // docked beside it.
   const pinChat = useCallback((chat) => {
     leaveChats();
-    setDockedNs(chat.ns);
-    setDockedChat(chat);
+    setDockedChats((m) => withDockedChat(m, chat.ns, chat));
     openSidePanel('chat');
   }, [leaveChats, openSidePanel]);
   // Expand: the docked chat, full screen. The panel stays on its Chat tab,
   // hidden while chats are open, so Back returns to note + docked chat.
   const expandChat = useCallback((chat) => { enterChats(chat); }, [enterChats]);
-  const selectDockedChat = useCallback((chat) => {
-    if (chat) setDockedNs(chat.ns);
-    setDockedChat(chat);
-  }, []);
+  const selectDockedChat = useCallback((chat) => { setDockedChat(chat); }, [setDockedChat]);
   // The "is this note a chat?" decision, made where a note finishes loading
   // rather than in an effect on `content`: that effect stayed armed when the
   // click reloaded identical text (or the load failed), then fired on the
@@ -3038,9 +3058,9 @@ function App() {
             >
             <Suspense fallback={<div className="editor-loading">Loading chats...</div>}>
               <ChatView
-                ns={chatNs || selectedNs}
+                ns={selectedNs}
                 namespaces={namespaces}
-                onSelectNs={(n) => { setChatNs(n); if (openChat && openChat.ns !== n) setOpenChat(null); }}
+                onSelectNs={null}
                 account={isMulti ? userInfo?.username : null}
                 serverAlias={appConfig?.serverAlias}
                 isMobile={isMobile}
@@ -3443,9 +3463,9 @@ function App() {
             <Suspense fallback={<div className="editor-loading">Loading chats...</div>}>
               <ChatView
                 docked
-                ns={dockedChat?.ns || dockedNs || selectedNs}
+                ns={selectedNs}
                 namespaces={namespaces}
-                onSelectNs={(n) => { setDockedNs(n); if (dockedChat && dockedChat.ns !== n) setDockedChat(null); }}
+                onSelectNs={null}
                 account={isMulti ? userInfo?.username : null}
                 serverAlias={appConfig?.serverAlias}
                 isMobile={false}
