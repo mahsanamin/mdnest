@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import './TaskBoard.css';
 import { buildRelationLookup, toRef, relLabel, isKnownOption } from '../relations';
 import { NO_GRAMMAR_ASSIST } from '../noGrammarAssist.js';
+import { formatCreated, sortMilestones } from '../milestones';
 
 // RelationField edits one relation kind (depends-on / blocked-by / related-to)
 // as a list of removable chips plus an add-input: picking a datalist suggestion
@@ -50,6 +51,13 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
   // Who is responsible. New tasks default to the current user; editing keeps
   // whatever the task already carries (empty stays empty).
   const [assignee, setAssignee] = useState(task ? (task.assignee || '') : (currentUser || ''));
+  const [milestone, setMilestone] = useState(task?.milestone || '');
+  // Open milestones, plus the task's own even when closed or no longer defined.
+  const milestoneOptions = useMemo(() => {
+    const list = sortMilestones(board?.milestones || []).filter((m) => !m.closed || m.id === task?.milestone);
+    if (task?.milestone && !list.some((m) => m.id === task.milestone)) list.push({ id: task.milestone, title: task.milestone });
+    return list;
+  }, [board, task]);
   const [tags, setTags] = useState((task?.tags || []).join(', '));
   // Relations are stored by stable ref (comma-free, rename-proof) as a list, so
   // a task can carry several dependencies. Kept as arrays here; entered
@@ -108,6 +116,7 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
       priority,
       workload: workload.trim(),
       assignee: assignee.trim(),
+      milestone,
       tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
       dependsOn: dependsOn.map(resolveRef),
       blockedBy: blockedBy.map(resolveRef),
@@ -123,6 +132,11 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
     <div className="tb-modal-backdrop" onClick={onCancel}>
       <div className="tb-modal tb-editor" onClick={(e) => e.stopPropagation()}>
         <h3>{isNew ? 'New task' : 'Edit task'}</h3>
+        {!isNew && (task.createdBy || task.created) && (
+          <div className="tb-provenance" data-testid="task-provenance">
+            {task.createdBy ? `Created by ${task.createdBy}` : 'Created'}{task.created ? ` on ${formatCreated(task.created)}` : ''}
+          </div>
+        )}
 
         <label className="tb-modal-field">Title
           <input className="tb-col-title" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} />
@@ -169,6 +183,14 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
               {assigneeOptions.map((u) => <option key={u} value={u}>{u}</option>)}
             </select>
           </label>
+          {milestoneOptions.length > 0 && (
+            <label className="tb-modal-field">Milestone
+              <select value={milestone} onChange={(e) => setMilestone(e.target.value)}>
+                <option value="">—</option>
+                {milestoneOptions.map((m) => <option key={m.id} value={m.id}>{m.closed ? `${m.title} (closed)` : m.title}</option>)}
+              </select>
+            </label>
+          )}
         </div>
 
         <label className="tb-modal-field">Tags

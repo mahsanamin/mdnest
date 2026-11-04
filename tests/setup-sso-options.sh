@@ -55,7 +55,7 @@ echo "── setup.sh: SSO options ──"
 # 1) Configured values reach .env verbatim.
 for kv in SSO_DISABLE_PASSWORD_LOGIN=true SSO_DISABLE_PASSWORD_LOGIN=false \
           SSO_AUTOPROVISION_USERS=true SSO_AUTOPROVISION_USERS=false \
-          OIDC_GROUPS_CLAIM=groups; do
+          OIDC_GROUPS_CLAIM=groups API_TOKEN_GROUPS_MAX_AGE=168h; do
   sb="$(generate "${SSO_BASE[@]}" "$kv")"
   if grep -qx "$kv" "$sb/.env" 2>/dev/null; then
     ok "$kv reaches .env"
@@ -96,8 +96,8 @@ for k in SSO_DISABLE_PASSWORD_LOGIN SSO_AUTOPROVISION_USERS; do
 done
 
 # 4) A value exported in the operator's shell must not leak into .env.
-sb="$(SSO_AUTOPROVISION_USERS=true OIDC_GROUPS_CLAIM=leaked generate "${SSO_BASE[@]}")"
-if grep -qx 'SSO_AUTOPROVISION_USERS=false' "$sb/.env" 2>/dev/null && ! grep -q 'leaked' "$sb/.env"; then
+sb="$(SSO_AUTOPROVISION_USERS=true OIDC_GROUPS_CLAIM=leaked API_TOKEN_GROUPS_MAX_AGE=999h generate "${SSO_BASE[@]}")"
+if grep -qx 'SSO_AUTOPROVISION_USERS=false' "$sb/.env" 2>/dev/null && ! grep -q 'leaked' "$sb/.env" && ! grep -q '999h' "$sb/.env"; then
   ok "exported shell variables do not leak into .env"
 else
   bad "exported shell variables do not leak into .env" \
@@ -106,7 +106,7 @@ fi
 rm -rf "$sb"
 
 # 5) The backend reads the name setup.sh writes, and it is documented.
-for k in SSO_DISABLE_PASSWORD_LOGIN SSO_AUTOPROVISION_USERS OIDC_GROUPS_CLAIM; do
+for k in SSO_DISABLE_PASSWORD_LOGIN SSO_AUTOPROVISION_USERS OIDC_GROUPS_CLAIM API_TOKEN_GROUPS_MAX_AGE; do
   if grep -q "\"$k\"" "$REPO_ROOT/backend/main.go"; then
     ok "the backend reads $k"
   else

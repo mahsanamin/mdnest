@@ -1,6 +1,7 @@
 import { memo, useState } from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import { cardKey } from './cardKey';
+import { formatCreated } from '../milestones';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -13,7 +14,7 @@ const REL_ICON = { 'depends-on': '⬆', 'blocked-by': '⛔', 'related-to': '🔗
 // TaskCard renders one task as a draggable kanban card: id/priority/blocked
 // badges, meta chips, tags, relation chips (resolved to their live task), a
 // progress bar and an expandable detail block, plus edit/delete/open actions.
-function TaskCard({ task, canWrite, onOpen, onToggleStep, onEdit, resolve, onDelete }) {
+function TaskCard({ task, canWrite, onOpen, onToggleStep, onEdit, resolve, milestoneTitle, onDelete }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: cardKey(task),
     data: { task },
@@ -35,6 +36,12 @@ function TaskCard({ task, canWrite, onOpen, onToggleStep, onEdit, resolve, onDel
     const r = resolve && resolve(ref);
     return r && !r.checked;
   });
+  const provenance = [
+    task.createdBy && `Created by ${task.createdBy}`,
+    task.created && `${task.createdBy ? 'on' : 'Created'} ${formatCreated(task.created)}`,
+  ].filter(Boolean).join(' ');
+  const createdLabel = [task.createdBy && `Created by ${task.createdBy}`, formatCreated(task.created)]
+    .filter(Boolean).join(' · ');
 
   return (
     // The whole card is the drag handle — it already wore a grab cursor
@@ -62,8 +69,11 @@ function TaskCard({ task, canWrite, onOpen, onToggleStep, onEdit, resolve, onDel
         <span className="tb-card-text">{task.text || <em>(empty)</em>}</span>
       </div>
 
-      {(task.due || task.workload || task.assignee || steps.length > 0) && (
+      {(task.due || task.workload || task.assignee || task.milestone || steps.length > 0) && (
         <div className="tb-card-meta">
+          {task.milestone && (
+            <span className="tb-chip tb-milestone-chip" title="Milestone">🏁 {milestoneTitle ? milestoneTitle(task.milestone) : task.milestone}</span>
+          )}
           {task.due && <span className={`tb-due${overdue ? ' overdue' : ''}`} title="Due date">📅 {task.due}</span>}
           {task.workload && <span className="tb-chip" title="Workload">🏋 {task.workload}</span>}
           {task.assignee && <span className="tb-chip" title="Assignee">👤 {task.assignee}</span>}
@@ -115,6 +125,12 @@ function TaskCard({ task, canWrite, onOpen, onToggleStep, onEdit, resolve, onDel
             </ul>
           )}
           {task.notes && <div className="tb-notes">{task.notes}</div>}
+        </div>
+      )}
+
+      {createdLabel && (
+        <div className="tb-card-created" title={task.created ? `${provenance} (${task.created})` : provenance}>
+          {createdLabel}
         </div>
       )}
 

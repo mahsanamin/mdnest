@@ -1452,6 +1452,11 @@ group they belong to.
 Multi mode only. All three routes are `RequireSuperAdmin`. With no groups defined
 and `OIDC_GROUPS_CLAIM` unset, behaviour is identical to before.
 
+An API token counts for its owner's user memberships. IdP-group memberships count
+for a token only with `API_TOKEN_GROUPS_MAX_AGE` set *(v4.8.14+)*: the token then uses
+the IdP groups of its owner's last SSO login while that login is younger than the
+set age (see `docs/security.md`).
+
 | Route | Methods | Purpose |
 |---|---|---|
 | `/api/admin/groups` | GET, POST, PATCH, DELETE | List / create / rename / delete a group |
@@ -1650,8 +1655,10 @@ Aggregate the tasks of a namespace (or of a single note).
 `Task` carries `id, path, line, raw, text, checked, column` and, when present,
 `status, due, priority, workload, assignee, tags[], defaultExpanded, steps[],
 notes`, plus the relation lists `dependsOn[], blockedBy[], relatedTo[]` and a
-stable `ref` *(v4.2.0+)*. In the cross-namespace view each task also carries
-`namespace`.
+stable `ref` *(v4.2.0+)*. A task can also carry `milestone` (a milestone id of
+the board) and, when it was created through mdnest, `createdBy` and `created`
+(UTC, RFC 3339), and `completed` once it was closed through mdnest. In the
+cross-namespace view each task also carries `namespace`.
 
 ```bash
 curl "http://localhost:8286/api/tasks?ns=work" -H "Authorization: Bearer $TOKEN"
@@ -1676,7 +1683,8 @@ everything.
 
 **Response:** same shape as `GET /api/tasks`; every task carries `namespace`, and
 `board` is the union of the per-namespace column layouts (default columns first,
-then any extra columns contributed by a namespace).
+then any extra columns contributed by a namespace) and of their milestones (by id,
+first namespace wins).
 
 ```bash
 curl "http://localhost:8286/api/tasks/all" -H "Authorization: Bearer $TOKEN"
@@ -1710,10 +1718,16 @@ if it does not exist.
 | `due` | string | `YYYY-MM-DD`. |
 | `priority` | string | `high` \| `medium` \| `low`. |
 | `workload` | string | Free text. |
+| `assignee` | string | Username. |
+| `milestone` | string | Id of one of the board's milestones. |
 | `tags` | string[] | |
 | `defaultExpanded` | bool | |
 | `steps` | `[{text, checked}]` | |
 | `notes` | string | Description (written as a `notes:` block scalar). |
+
+The server writes `created-by` (the caller's username; absent in single mode) and
+`created` (now, UTC) into the new task. They cannot be set by the caller, and an
+edit keeps them.
 
 **Response:** `201 Created` with the created `Task`.
 
@@ -1737,7 +1751,7 @@ line).
 | `toColumn: "<id>"` | Move a card to a column (rewrites `status:` and the checkbox). |
 | `checked: <bool>` | Toggle a task or step checkbox. |
 | `text: "<title>"` | Rename a task or step (checkbox preserved). |
-| `setField: {key, value}` | Set/clear one metadata field (`due`/`priority`/`tags`/`workload`/`status`; empty value removes it). |
+| `setField: {key, value}` | Set/clear one metadata field (`due`/`priority`/`tags`/`workload`/`assignee`/`milestone`/`status` and the relation lists; empty value removes it). `created-by` and `created` are not editable. |
 | `replace: <task spec>` | Replace the whole task block (checkbox line + detail block) from a full spec (same fields as POST). |
 
 **Response:** the updated `Task` when the mutated line is a top‑level task; for a
@@ -1759,7 +1773,7 @@ To Do / Doing / Done board when none is set.
 
 **Query parameters:** `ns` (required).
 
-**Response:** `{ version, defaultNote, columns: [{id, title, status, done}] }`.
+**Response:** `{ version, defaultNote, columns: [{id, title, status, done}], milestones: [{id, title, start, due, description, closed}] }`.
 
 ### PUT /api/board
 
@@ -1768,6 +1782,12 @@ Replace the board configuration.
 **Query parameters:** `ns` (required).
 
 **Body:** a `BoardConfig`. Columns must have unique, non‑empty ids and titles.
+Milestones must have unique ids made of letters, digits, `.`, `_` or `-`, a
+title, and `start` / `due` dates of `YYYY-MM-DD` when set, the start not after
+the due date; anything else is a `400` that names
+the problem. A body without a `milestones` key keeps the saved milestones, so a
+client that only edits columns cannot drop them; send `"milestones": []` to
+remove them all.
 
 **Response:** the saved `BoardConfig`.
 

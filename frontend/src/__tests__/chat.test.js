@@ -358,3 +358,16 @@ describe('chat drafts', () => {
     expect(loadDraft('other', 'Chats/b.md')).toBe('');
   });
 });
+
+describe('links in a message', () => {
+  // A link clicked in a chat replaced mdnest itself, leaving the conversation
+  // and any unsent draft behind. Every link opens in a new tab now.
+  it('open in a new tab, with formatting and attributes intact', async () => {
+    const { Marked } = await import('marked');
+    const { chatLinkRenderer } = await import('../chat.js');
+    const md = new Marked({ gfm: true, breaks: true }).use({ renderer: chatLinkRenderer });
+    const html = md.parse('see [the **docs**](https://example.com/a?b=1&c="2" "Tip") and https://x.dev');
+    expect(html).toContain('<a href="https://example.com/a?b=1&amp;c=&quot;2&quot;" title="Tip" target="_blank" rel="noopener noreferrer">the <strong>docs</strong></a>');
+    expect(html).toContain('<a href="https://x.dev" target="_blank" rel="noopener noreferrer">https://x.dev</a>');
+  });
+});

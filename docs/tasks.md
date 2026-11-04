@@ -19,6 +19,12 @@ This document specifies the on‑disk format. For how to *use* the board, see th
 [User Guide](user-guide.md#task-board); for the HTTP endpoints, see the
 [API Reference](api.md#task-board).
 
+**Task lists.** A note whose top‑level lines are only tasks, headings, one‑line
+comments or blank lines (indented lines belonging to a task) opens on the board
+instead of the editor, and so does any file named `*.tasks.md`, even empty. The
+suffix is the explicit marker rather than frontmatter, which the Live editor
+would rewrite; the file is plain markdown either way.
+
 ---
 
 ## A simple task
@@ -51,8 +57,11 @@ renders as a normal nested list in any viewer.
   - priority: high
   - workload: hard
   - assignee: alice
+  - milestone: m1-reset
   - tags: [design, ui, frontend]
   - defaultExpanded: true
+  - created-by: alice
+  - created: 2024-01-08T09:30:00Z
   - steps:
     - [x] Wireframes
     - [ ] Visual design
@@ -77,6 +86,10 @@ ignored, so you can keep your own notes alongside.
 | `priority` | `high` \| `medium` \| `low` | Shown as a coloured badge. |
 | `workload` | free text (e.g. `easy` / `medium` / `hard`) | Effort estimate. |
 | `assignee` | free text (a username) | Who is responsible for the task. Shown as a badge; the board's create form defaults it to the current user. |
+| `milestone` | a milestone id (e.g. `m1-reset`) | The [milestone](#milestones) the task belongs to. Shown as a chip with the milestone's title. |
+| `created-by` | a username | Who created the task. Written by mdnest when a task is created on the board, through the API or by an agent; never changed by an edit. Absent in single mode and on tasks written by hand. |
+| `created` | UTC time, RFC 3339 (e.g. `2026-10-23T12:05:12Z`) | When the task was created. Written and kept like `created-by`. |
+| `completed` | UTC time, RFC 3339 | When the task was last closed through mdnest (checked, moved or saved into the Done column, or created there). Removed when it is reopened, kept by edits; not editable. |
 | `tags` | `[a, b, c]` | Comma‑separated list in brackets. Shown as chips. |
 | `depends-on` | `[OGFC-q6s4c, OGFC-ab12x]` | Refs of tasks this one depends on. The board resolves each ref to the live task and flags this task **blocked** while a referenced task is still open. Titles written by older notes still resolve as a fallback. |
 | `blocked-by` | `[OGFC-q6s4c]` | Refs of tasks blocking this one (same blocked behaviour as `depends-on`). |
@@ -144,6 +157,41 @@ Columns are defined per namespace in a sidecar file, `.mdnest/board.json`
 | `columns[].status` | The value written to a task's `status:` field when it is dropped in this column. |
 | `columns[].done` | Marks the column that holds **checked** items. Exactly one column is normally `done`. |
 | `defaultNote` | Note that new tasks are appended to when the author does not pick one. |
+| `milestones` | The namespace's [milestones](#milestones). |
+
+### Milestones
+
+A milestone groups tasks towards a goal, over an optional period. Milestones
+are defined next to the columns in `.mdnest/board.json`, and a task joins one with
+its `milestone:` field:
+
+```json
+"milestones": [
+  { "id": "m1-reset", "title": "M1 Reset", "start": "2026-11-01", "due": "2026-11-15", "description": "Board and notes match the code." },
+  { "id": "m0-pilot", "title": "M0 Pilot", "closed": true }
+]
+```
+
+```markdown
+- [ ] Archive the old run reports
+  - milestone: m1-reset
+```
+
+| Field | Meaning |
+|-------|---------|
+| `id` | Stable identifier written in the tasks: letters, digits, `.`, `_` or `-`. |
+| `title` | Display name. |
+| `start` | Optional `YYYY-MM-DD`, not after `due`. With `due`, the share of the period already gone is shown next to the progress, and tasks created after it count as scope added. |
+| `due` | Optional `YYYY-MM-DD`. The milestone shows as late while it has open tasks past that date. |
+| `description` | Optional text. |
+| `closed` | A closed milestone is no longer offered for new tasks; its tasks keep it. |
+
+A milestone's progress weighs its tasks: a done task counts 1, an open task the
+share of its done steps, an open task without steps 0. Its page also shows the
+tasks done (x/y), the steps done (a/b), the open tasks past their own due date or
+blocked, and the participants (assignees and creators of its tasks).
+Deleting a milestone leaves its tasks untouched: their `milestone:` field then
+shows the bare id.
 
 Legacy note: an inline `#status` tag on the task title (e.g. `- [ ] Fix bug #doing`)
 is still read as a fallback status when there is no `status:` field. New writes

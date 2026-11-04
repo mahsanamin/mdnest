@@ -172,10 +172,13 @@ func collectNoteRefs(lines []string) map[string]bool {
 }
 
 // cardRef returns the "- ref:" value in a task's detail block, or "".
-func cardRef(lines []string, cardIdx int) string {
+func cardRef(lines []string, cardIdx int) string { return cardField(lines, cardIdx, "ref") }
+
+// cardField returns the value of the "- key:" bullet in a task's detail block, or "".
+func cardField(lines []string, cardIdx int, key string) string {
 	start, end := detailBlockRange(lines, cardIdx)
 	for j := start; j < end; j++ {
-		if m := metaLineRe.FindStringSubmatch(lines[j]); m != nil && strings.EqualFold(m[1], "ref") {
+		if m := metaLineRe.FindStringSubmatch(lines[j]); m != nil && strings.EqualFold(m[1], key) {
 			return strings.TrimSpace(m[2])
 		}
 	}
@@ -429,6 +432,14 @@ func parseCard(fp string, lines []string, cardIdx int, checked bool, rest string
 			t.Workload = val
 		case "assignee":
 			t.Assignee = val
+		case "milestone":
+			t.Milestone = val
+		case "created-by":
+			t.CreatedBy = val
+		case "created":
+			t.Created = val
+		case "completed":
+			t.Completed = val
 		case "ref":
 			t.Ref = val
 		case "tags":
@@ -534,7 +545,7 @@ func applyColumnRich(lines []string, cardIdx int, b BoardConfig, colID string) (
 // editableField reports whether key is a metadata field the API may set inline.
 func editableField(key string) bool {
 	switch key {
-	case "due", "priority", "workload", "assignee", "tags", "status", "depends-on", "blocked-by", "related-to":
+	case "due", "priority", "workload", "assignee", "milestone", "tags", "status", "depends-on", "blocked-by", "related-to":
 		return true
 	}
 	return false
@@ -556,6 +567,12 @@ func applyField(lines []string, cardIdx int, key, value string) ([]string, bool)
 	if key == "tags" && value != "" && !strings.HasPrefix(value, "[") {
 		value = "[" + value + "]"
 	}
+	return setMetaField(lines, cardIdx, key, value), true
+}
+
+// setMetaField sets, updates or removes (empty value) a "- key: value" bullet in the card's
+// detail block, whitelist aside: the server also writes the fields it owns (completed).
+func setMetaField(lines []string, cardIdx int, key, value string) []string {
 	start, end := detailBlockRange(lines, cardIdx)
 	idx := -1
 	for j := start; j < end; j++ {
@@ -568,17 +585,16 @@ func applyField(lines []string, cardIdx int, key, value string) ([]string, bool)
 		if idx >= 0 {
 			lines = append(lines[:idx], lines[idx+1:]...)
 		}
-		return lines, true
+		return lines
 	}
 	if idx >= 0 {
 		lead := lines[idx][:len(lines[idx])-len(strings.TrimLeft(lines[idx], " \t"))]
 		lines[idx] = lead + "- " + key + ": " + value
-		return lines, true
+		return lines
 	}
 	child := strings.Repeat(" ", indentWidth(lines[cardIdx])+2) + "- " + key + ": " + value
 	at := cardIdx + 1
-	lines = append(lines[:at], append([]string{child}, lines[at:]...)...)
-	return lines, true
+	return append(lines[:at], append([]string{child}, lines[at:]...)...)
 }
 
 // applyText rewrites a task or step line's title, preserving its indent, bullet
@@ -626,6 +642,7 @@ func renderTaskBlock(b BoardConfig, s taskSpec) []string {
 	add("priority", s.Priority)
 	add("workload", s.Workload)
 	add("assignee", s.Assignee)
+	add("milestone", s.Milestone)
 	var tags []string
 	for _, t := range s.Tags {
 		if t = strings.TrimSpace(t); t != "" {
@@ -646,6 +663,9 @@ func renderTaskBlock(b BoardConfig, s taskSpec) []string {
 	if s.DefaultExpanded {
 		lines = append(lines, "  - defaultExpanded: true")
 	}
+	add("created-by", s.CreatedBy)
+	add("created", s.Created)
+	add("completed", s.Completed)
 	var steps []stepSpec
 	for _, st := range s.Steps {
 		if strings.TrimSpace(st.Text) != "" {

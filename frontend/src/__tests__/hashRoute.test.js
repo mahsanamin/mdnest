@@ -15,6 +15,14 @@ describe('hash routes', () => {
     expect(formatRoute({ ns: 'bigproject', board: true })).toBe('#!board/bigproject');
     expect(parseRoute('#!board/bigproject')).toEqual({ ns: 'bigproject', path: null, stickies: false, board: true });
   });
+  it('the milestones of a board, and one milestone page, to share', () => {
+    expect(formatRoute({ ns: 'my notes', path: 'x.md', board: true, milestone: '' })).toBe('#!milestones/my%20notes');
+    expect(formatRoute({ ns: 'ops', board: true, milestone: 'm1-ci' })).toBe('#!milestones/ops/m1-ci');
+    expect(parseRoute('#!milestones/my%20notes')).toEqual({ ns: 'my notes', path: null, stickies: false, board: true, milestone: '' });
+    expect(parseRoute('#!milestones/ops/m1-ci')).toEqual({ ns: 'ops', path: null, stickies: false, board: true, milestone: 'm1-ci' });
+    // Without a milestone value the board keeps its own route.
+    expect(formatRoute({ ns: 'ops', board: true, milestone: null })).toBe('#!board/ops');
+  });
   it('a namespace literally called "board" or "stickies" is still a note route', () => {
     expect(parseRoute('#board/x.md')).toEqual({ ns: 'board', path: 'x.md', stickies: false, board: false });
     expect(parseRoute('#stickies')).toEqual({ ns: 'stickies', path: null, stickies: false, board: false });

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-MDNEST_CLI_VERSION="4.8.13"
+MDNEST_CLI_VERSION="4.8.14"
 CONFIG_DIR="${HOME}/.config/mdnest"
 SERVERS_DIR="${CONFIG_DIR}/servers"
 DEFAULT_FILE="${CONFIG_DIR}/default"
@@ -560,11 +560,11 @@ json_top_string() {
     printf '%s\n' "$out"
     return 0
   fi
-  if have jq; then
-    # `return 0`, not a bare `return`: a bare one propagates jq's exit status,
-    # and callers assign this into a plain variable, which under `set -e` would
-    # abort the script instead of yielding an empty field.
-    printf '%s' "$data" | jq -r --arg f "$field" '.[$f] // empty' 2>/dev/null
+  # Gate on jq's result, not its presence, the same as py: a jq that is there
+  # but fails used to end the lookup with an empty field, so the awk tier never
+  # ran and a multi-user server read as single-user in `mdnest whoami`.
+  if have jq && out=$(printf '%s' "$data" | jq -r --arg f "$field" '.[$f] // empty' 2>/dev/null); then
+    printf '%s\n' "$out"
     return 0
   fi
   # Bash/awk fallback: scan for "field": at object depth 1 only. Accumulates all
@@ -1165,6 +1165,60 @@ cmd_whoami() {
   echo "mdnest CLI v${MDNEST_CLI_VERSION}"
   echo ""
   cmd_servers "$@"
+  whoami_accounts
+}
+
+# whoami_accounts prints, per registered server, the account its saved token
+# acts as. Before this, whoami listed only servers and versions, so an agent
+# (or a person) could not tell whose access a command would run with, and
+# guessed from what happened to work.
+whoami_accounts() {
+  [ -d "$SERVERS_DIR" ] && [ -n "$(ls "$SERVERS_DIR" 2>/dev/null)" ] || return 0
+  echo ""
+  printf "  %-12s  %s\n" "ALIAS" "SIGNED IN AS"
+  printf "  %-12s  %s\n" "────────────" "────────────────────────────"
+  local f
+  for f in "$SERVERS_DIR"/*; do
+    printf "  %-12s  %s\n" "@$(basename "$f")" "$(whoami_account "$f")"
+  done
+  return 0
+}
+
+# whoami_account <server file> prints one line: who the token is, or why that
+# is not known.
+whoami_account() {
+  local f="$1" url tok cfg mode me code body user role
+  url=$(grep '^url=' "$f" 2>/dev/null | cut -d= -f2-) || url=""
+  tok=$(grep '^token=' "$f" 2>/dev/null | cut -d= -f2-) || tok=""
+  cfg=$(curl -s --connect-timeout 5 --max-time 8 "${url}/api/config" 2>/dev/null) || cfg=""
+  if [ -z "$cfg" ]; then
+    echo "not known (server unreachable)"
+    return 0
+  fi
+  mode=$(printf '%s' "$cfg" | json_top_string authMode) || mode=""
+  if [ "$mode" != "multi" ]; then
+    echo "the server's one account (single-user server)"
+    return 0
+  fi
+  me=$(curl -s --connect-timeout 5 --max-time 8 -w '\n%{http_code}' \
+    -H "Authorization: Bearer $tok" "${url}/api/me" 2>/dev/null) || me=""
+  code="${me##*$'\n'}"
+  body="${me%$'\n'*}"
+  case "$code" in
+    200)
+      user=$(printf '%s' "$body" | json_top_string username) || user=""
+      [ -n "$user" ] || { user=$(printf '%s' "$body" | json_top_string email) || user=""; }
+      role=$(printf '%s' "$body" | json_top_string role) || role=""
+      if [ -n "$user" ]; then
+        echo "${user}${role:+ (${role})}"
+      else
+        echo "not known (the server sent no name)"
+      fi
+      ;;
+    401|403) echo "token refused: run 'mdnest login @$(basename "$f") ${url}' again" ;;
+    *)       echo "not known (HTTP ${code:-error})" ;;
+  esac
+  return 0
 }
 
 # Self-update: re-fetch the latest mdnest CLI script from upstream and
@@ -2865,7 +2919,7 @@ SERVER MANAGEMENT
   logout   [@alias]               Remove a server (omit alias to remove all)
   rename   @old @new               Rename a server alias (also updates default)
   servers  [-v]                   List servers (add -v to include namespaces)
-  whoami   [-v]                   Show CLI version + servers
+  whoami   [-v]                   Show CLI version, servers, and the account each token acts as
   update   [--force]              Self-update to the latest release of this CLI
   update   --server @alias        Install the CLI that server was built with
 

@@ -29,7 +29,8 @@ test('refreshing on the board keeps the board, the namespace and the note', asyn
   const boardBtn = page.locator('.toolbar-view-board');
   const ok = await boardBtn.waitFor({ state: 'visible', timeout: 15_000 }).then(() => true).catch(() => false);
   if (!ok) test.skip(true, 'task board disabled (ENABLE_TASK_BOARD)');
-  expect((await api(page, 'POST', `/api/note?ns=${NS}&path=${encodeURIComponent(note)}`, '# d\n\n- [ ] deeplink task\n')).status).toBe(201);
+  // Some prose, so the note opens in the editor (a note of tasks only opens on the board).
+  expect((await api(page, 'POST', `/api/note?ns=${NS}&path=${encodeURIComponent(note)}`, '# d\n\nDeep link check.\n\n- [ ] deeplink task\n')).status).toBe(201);
 
   try {
     await page.goto(`/#${NS}/${note}`);

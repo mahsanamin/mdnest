@@ -4,6 +4,71 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v4.8.14: Milestones on the task board, and API tokens that use IdP groups
+
+### Added
+
+- **Milestones on the task board, and who created and closed each task.** A
+  milestone groups tasks towards a goal over a period (start and due dates).
+  **Milestones**, next to List and Kanban, shows each one's progress (done
+  tasks plus the done sub-tasks of open ones) against the time elapsed, its
+  participants and its late or blocked tasks; each milestone has a page with
+  its own link (tasks and sub-tasks done, what needs attention, scope added
+  since the start, participants, tasks by column). Writers add, edit, close
+  and delete them there, and a task joins one with a `milestone:` field picked
+  in the task editor. Milestones live next to the columns in
+  `.mdnest/board.json`. Tasks now record `created-by`, `created` and
+  `completed` (UTC), written by the server; the card shows who created it and
+  when. Agents get `save_milestone` / `delete_milestone` and a `milestone`
+  field on the task tools. Thanks to
+  [@ecthelion77](https://github.com/ecthelion77) (Olivier Gintrand), #153.
+- **+ Tasks** in the sidebar creates a task list, a `.tasks.md` file that
+  opens on the task board for that note.
+- **API tokens can use their owner's IdP groups** (`API_TOKEN_GROUPS_MAX_AGE`,
+  off by default). A person who gets access through an access group with an
+  IdP group member (for example an Entra ID group) saw it in the browser but
+  not with an API token, so the CLI and agents could not reach it. With
+  `API_TOKEN_GROUPS_MAX_AGE=168h`, each SSO login records the person's IdP
+  groups, and their API tokens use them until that long after the login; a
+  new login refreshes them. Leaving the IdP group takes effect at the next
+  login or when the age is reached. Multi mode with `OIDC_GROUPS_CLAIM`, #157.
+  Thanks to [@ecthelion77](https://github.com/ecthelion77) (Olivier Gintrand), #158.
+- **`read_note` can return part of a note.** An agent reading a long note
+  used to get the whole file every time. `outline: true` returns the line
+  count and every heading with its line number (headings inside code fences
+  are skipped); `section: "<heading>"` returns that heading's block, up to
+  the next heading of the same or higher level (an exact title wins over one
+  that only contains it); `offset`/`limit` return a range of lines. Without
+  them `read_note` returns the whole note, as before. Thanks to
+  [@lglot](https://github.com/lglot) (Luigi Lotito), #156.
+
+### Changed
+
+- **With the task board on, a note that holds only tasks now opens on the
+  board instead of the editor.** This includes existing notes: a note whose
+  lines are only tasks (with their fields, sub-tasks and notes), headings or
+  blank lines opens on the board, on **This note**. A note with any other
+  text opens in the editor as before. Picking **Editor** on such a note is
+  remembered for that note (in this browser), and **Board** brings the board
+  back.
+
+### Fixed
+
+- **`mdnest whoami` says which account each saved token acts as**, for
+  example `alice (collaborator)`, or that a server is single-user, or that the
+  token was refused and you should log in again. It used to list only the
+  servers and versions, so an agent could not tell whose access it was using.
+  It also reads the server's answer correctly on a machine where `jq` is
+  installed but broken.
+- **A link in a chat message opens in a new tab.** It used to replace mdnest
+  itself, which left the conversation, and any message you were writing,
+  behind.
+- **A note with a very long heading line could stall the MCP server.** The
+  Marp template list read slide headings with a pattern that took about 19
+  seconds on one 10 KB line, and with `MCP_TRANSPORT=http` one process serves
+  every user, so everyone waited. Headings are now read in time proportional
+  to the line, here and in `read_note`'s new outline.
+
 ## v4.8.13: No more lost typing in Live notes, and Live never waits for the connection
 
 Released 2026-10-24.

@@ -1,10 +1,12 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mdnest/mdnest/backend/middleware"
 	"github.com/mdnest/mdnest/backend/store"
@@ -77,6 +79,67 @@ func TestTokenHandler_ValidateAndResolve(t *testing.T) {
 	}
 	if uc := h.ResolveAPITokenUser(rawLegacy); uc != nil {
 		t.Errorf("legacy token (UserID 0) resolved to %+v, want nil", uc)
+	}
+}
+
+// fakeOIDCGroupStore keeps one snapshot per user with its age.
+type fakeOIDCGroupStore struct {
+	groups map[int][]string
+	age    map[int]time.Duration
+	err    error
+	reads  int
+}
+
+func (f *fakeOIDCGroupStore) SaveOIDCGroups(userID int, groups []string) error {
+	f.groups[userID], f.age[userID] = groups, 0
+	return nil
+}
+
+func (f *fakeOIDCGroupStore) OIDCGroups(userID int, maxAge time.Duration) ([]string, error) {
+	f.reads++
+	if f.err != nil {
+		return nil, f.err
+	}
+	g, ok := f.groups[userID]
+	if !ok || f.age[userID] >= maxAge {
+		return nil, nil
+	}
+	return g, nil
+}
+
+// An API token has no login of its own: it carries the owner's groups only when
+// the deployment opted in (API_TOKEN_GROUPS_MAX_AGE) and the owner's last SSO
+// login is recent enough. Otherwise it keeps direct grants only, as before.
+func TestResolveAPITokenUser_OwnerGroups(t *testing.T) {
+	groups := &fakeOIDCGroupStore{
+		groups: map[int][]string{7: {"entra-readers"}, 8: {"entra-writers"}},
+		age:    map[int]time.Duration{7: time.Hour, 8: 200 * time.Hour},
+	}
+	h := NewTokenHandler(&fakeTokenStore{})
+	alice, _, _ := h.CreateAPIToken("ci", 7, "alice", "collaborator")
+	bob, _, _ := h.CreateAPIToken("ci", 8, "bob", "collaborator")
+
+	if uc := h.ResolveAPITokenUser(alice); uc.Groups != nil {
+		t.Errorf("not opted in: groups = %v, want none", uc.Groups)
+	}
+
+	h.UseOwnerGroups(groups, 0)
+	if uc := h.ResolveAPITokenUser(alice); uc.Groups != nil || groups.reads != 0 {
+		t.Errorf("max age 0: groups = %v (%d reads), want none and no read", uc.Groups, groups.reads)
+	}
+
+	h.UseOwnerGroups(groups, 168*time.Hour)
+	if uc := h.ResolveAPITokenUser(alice); len(uc.Groups) != 1 || uc.Groups[0] != "entra-readers" {
+		t.Errorf("recent login: groups = %v, want [entra-readers]", uc.Groups)
+	}
+	if uc := h.ResolveAPITokenUser(bob); uc == nil || uc.Groups != nil {
+		t.Errorf("login older than the max age: %+v, want the user without groups", uc)
+	}
+
+	// A failing snapshot read must not lock the owner out of direct grants.
+	groups.err = errors.New("db down")
+	if uc := h.ResolveAPITokenUser(alice); uc == nil || uc.ID != 7 || uc.Groups != nil {
+		t.Errorf("snapshot read error: %+v, want alice without groups", uc)
 	}
 }
 

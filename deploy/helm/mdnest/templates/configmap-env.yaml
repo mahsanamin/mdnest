@@ -75,6 +75,9 @@ data:
   {{- if .Values.sso.groupsClaim }}
   OIDC_GROUPS_CLAIM: {{ .Values.sso.groupsClaim | quote }}
   {{- end }}
+  {{- if .Values.sso.apiTokenGroupsMaxAge }}
+  API_TOKEN_GROUPS_MAX_AGE: {{ .Values.sso.apiTokenGroupsMaxAge | quote }}
+  {{- end }}
   SSO_PROVIDER_LABEL: {{ .Values.sso.providerLabel | quote }}
   {{- if .Values.sso.adminEmails }}
   ADMIN_EMAILS: {{ .Values.sso.adminEmails | quote }}

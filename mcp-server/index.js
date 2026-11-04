@@ -135,6 +135,77 @@ function treeToText(node, indent = 0) {
 }
 
 // ---------------------------------------------------------------------------
+// Partial note reads (read_note outline / section / offset+limit), so an agent
+// can load one section of a long note instead of the whole file.
+// ---------------------------------------------------------------------------
+// A trailing newline ends the last line, it does not start an empty one.
+const noteLines = (text) => text.replace(/\n$/, "").split("\n");
+
+// One ATX heading line -> { level, title }, or null. Plain string work after a
+// simple match on purpose: a regex that also strips the closing #s
+// (`(.+?)(?:\s+#+)?\s*$`) backtracks on a long run of spaces, and one such line
+// held the shared HTTP server for seconds.
+function parseHeading(raw) {
+  const m = raw.match(/^(#{1,6})[ \t]/);
+  if (!m) return null;
+  let t = raw.slice(m[1].length).trim(); // trim also drops a CRLF note's \r
+  let j = t.length;
+  while (j > 0 && t[j - 1] === "#") j--;
+  // closing #s count only after a space (or as the whole title): "C#" stays "C#"
+  if (j < t.length && (j === 0 || t[j - 1] === " " || t[j - 1] === "\t")) t = t.slice(0, j).trimEnd();
+  return t ? { level: m[1].length, title: t } : null;
+}
+
+// Headings outside fenced code blocks: [{ line (1-indexed), level, title }]
+// shortcut: a fence closes on any line starting with its marker (no info-string
+// or longer-fence rules), fine for usual notes; follow CommonMark if it misfires.
+function noteHeadings(text) {
+  const out = [];
+  let fence = null;
+  noteLines(text).forEach((raw, i) => {
+    const marker = raw.match(/^\s*(```|~~~)/);
+    if (marker) {
+      if (!fence) fence = marker[1];
+      else if (marker[1] === fence) fence = null;
+      return;
+    }
+    if (fence) return;
+    const h = parseHeading(raw);
+    if (h) out.push({ line: i + 1, ...h });
+  });
+  return out;
+}
+
+function noteOutline(text) {
+  const total = noteLines(text).length;
+  const rows = noteHeadings(text).map((h) => `${h.line}: ${"#".repeat(h.level)} ${h.title}`);
+  return `${total} lines\n${rows.join("\n")}`;
+}
+
+// The heading whose title equals `query` (else the first that contains it,
+// case-insensitive), up to the next heading of the same or higher level.
+function noteSection(text, query) {
+  const lines = noteLines(text);
+  const hs = noteHeadings(text);
+  const q = query.trim().replace(/^#+\s*/, "").toLowerCase();
+  let i = hs.findIndex((h) => h.title.toLowerCase() === q);
+  if (i === -1) i = hs.findIndex((h) => h.title.toLowerCase().includes(q));
+  if (i === -1) return null;
+  const next = hs.slice(i + 1).find((h) => h.level <= hs[i].level);
+  const end = next ? next.line - 1 : lines.length;
+  return { from: hs[i].line, to: end, text: lines.slice(hs[i].line - 1, end).join("\n") };
+}
+
+// 1-indexed offset, optional limit. null when offset is past the last line.
+function noteRange(text, offset = 1, limit) {
+  const lines = noteLines(text);
+  const from = Math.max(1, offset);
+  if (from > lines.length) return null;
+  const to = limit ? Math.min(lines.length, from + limit - 1) : lines.length;
+  return { from, to, total: lines.length, text: lines.slice(from - 1, to).join("\n") };
+}
+
+// ---------------------------------------------------------------------------
 // Excalidraw / Marp scaffolding
 // ---------------------------------------------------------------------------
 // buildExcalidraw renders an Obsidian-compatible `.excalidraw.md` document. The
@@ -240,8 +311,8 @@ export function parseMarpTemplates(markdown) {
     let heading = "";
     for (const line of body.split("\n")) {
       if (/^\s*(```|~~~)/.test(line)) { inFence = !inFence; continue; }
-      const h = !inFence && line.match(/^#{1,6}\s+(.+?)\s*#*\s*$/);
-      if (h) { heading = h[1].replace(/<[^>]+>/g, "").replace(/[*_`~]/g, "").trim(); break; }
+      const h = !inFence && parseHeading(line);
+      if (h) { heading = h.title.replace(/<[^>]+>/g, "").replace(/[*_`~]/g, "").trim(); break; }
     }
     let name = (named && named[1]) || heading || `Slide ${idx + 1}`;
     const n = (seen.get(name) || 0) + 1;
@@ -695,12 +766,16 @@ server.tool(
 
 server.tool(
   "read_note",
-  "Read a note's content",
+  "Read a note's content. On long notes prefer outline:true first (headings with line numbers), then section or offset/limit to load only the part you need.",
   {
     namespace: z.string().describe("Namespace name"),
     path: z.string().describe("Path to the note within the namespace"),
+    outline: z.boolean().optional().describe("Return only line count and headings with line numbers"),
+    section: z.string().optional().describe("Return only this heading's block (exact title, else first containing it), until the next heading of same or higher level"),
+    offset: z.number().int().optional().describe("First line to return, 1-indexed"),
+    limit: z.number().int().positive().optional().describe("Max lines to return from offset"),
   },
-  async ({ namespace, path }) => {
+  async ({ namespace, path, outline, section, offset, limit }) => {
     try {
       const res = await api(
         `/api/note?ns=${encodeURIComponent(namespace)}&path=${encodeURIComponent(path)}`
@@ -710,6 +785,23 @@ server.tool(
         return { content: [{ type: "text", text: `Error ${res.status}: ${text}` }], isError: true };
       }
       const text = await res.text();
+      if (outline) {
+        return { content: [{ type: "text", text: noteOutline(text) }] };
+      }
+      if (section) {
+        const s = noteSection(text, section);
+        if (!s) {
+          return { content: [{ type: "text", text: `Error: section "${section}" not found; use outline:true` }], isError: true };
+        }
+        return { content: [{ type: "text", text: `[lines ${s.from}-${s.to}]\n${s.text}` }] };
+      }
+      if (offset || limit) {
+        const r = noteRange(text, offset, limit);
+        if (!r) {
+          return { content: [{ type: "text", text: `Error: offset ${offset} is past the end of the note (${noteLines(text).length} lines)` }], isError: true };
+        }
+        return { content: [{ type: "text", text: `[lines ${r.from}-${r.to} of ${r.total}]\n${r.text}` }] };
+      }
       return { content: [{ type: "text", text }] };
     } catch (err) {
       return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
@@ -1278,7 +1370,7 @@ server.tool(
 
 if (features.taskBoard) server.tool(
   "list_tasks",
-  "List the task-board tasks of a namespace (optionally scoped to a single note). Returns the board columns and every task with its `path`, `line` and `raw` — you need those three to move or edit a task. A task may carry status, due, priority, workload, tags, steps and notes. Tasks are plain markdown checkboxes in the notes.",
+  "List the task-board tasks of a namespace (optionally scoped to a single note). Returns the board (columns and milestones) and every task with its `path`, `line` and `raw` — you need those three to move or edit a task. A task may carry status, due, priority, workload, assignee, milestone (a milestone id), tags, steps and notes, plus `createdBy` / `created` when it was created through mdnest. Tasks are plain markdown checkboxes in the notes.",
   {
     namespace: z.string().describe("Namespace name"),
     note: z.string().optional().describe("Optional note path to scope to a single note"),
@@ -1301,7 +1393,7 @@ if (features.taskBoard) server.tool(
 
 if (features.taskBoard) server.tool(
   "create_task",
-  "Create a task by appending it to a note (the given note, else the board's default note; the note is created if missing). Column ids come from the board returned by list_tasks.",
+  "Create a task by appending it to a note (the given note, else the board's default note; the note is created if missing). Column and milestone ids come from the board returned by list_tasks. mdnest records who created the task and when.",
   {
     namespace: z.string().describe("Namespace name"),
     title: z.string().describe("Task title"),
@@ -1312,6 +1404,7 @@ if (features.taskBoard) server.tool(
     priority: z.string().optional().describe("high | medium | low"),
     workload: z.string().optional().describe("Effort estimate (free text)"),
     assignee: z.string().optional().describe("Who is responsible for the task (free text)"),
+    milestone: z.string().optional().describe("Milestone id (from the board's milestones)"),
     tags: z.array(z.string()).optional().describe("Tags"),
     dependsOn: z.array(z.string()).optional().describe("Refs (from list_tasks) of tasks this one depends on"),
     blockedBy: z.array(z.string()).optional().describe("Refs of tasks blocking this one"),
@@ -1320,12 +1413,12 @@ if (features.taskBoard) server.tool(
     steps: z.array(z.object({ text: z.string(), checked: z.boolean().optional() })).optional().describe("Sub-tasks"),
     defaultExpanded: z.boolean().optional().describe("Expand the card by default"),
   },
-  async ({ namespace, title, note, column, status, due, priority, workload, assignee, tags, dependsOn, blockedBy, relatedTo, notes, steps, defaultExpanded }) => {
+  async ({ namespace, title, note, column, status, due, priority, workload, assignee, milestone, tags, dependsOn, blockedBy, relatedTo, notes, steps, defaultExpanded }) => {
     try {
       const res = await api(`/api/tasks?ns=${encodeURIComponent(namespace)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, note, column, status, due, priority, workload, assignee, tags, dependsOn, blockedBy, relatedTo, notes, steps, defaultExpanded }),
+        body: JSON.stringify({ title, note, column, status, due, priority, workload, assignee, milestone, tags, dependsOn, blockedBy, relatedTo, notes, steps, defaultExpanded }),
       });
       if (!res.ok) {
         const text = await res.text().catch(() => "");
@@ -1383,6 +1476,7 @@ if (features.taskBoard) server.tool(
     priority: z.string().optional().describe("high | medium | low"),
     workload: z.string().optional().describe("Effort estimate (free text)"),
     assignee: z.string().optional().describe("Who is responsible for the task (free text)"),
+    milestone: z.string().optional().describe("Milestone id (from the board's milestones)"),
     tags: z.array(z.string()).optional().describe("Tags"),
     dependsOn: z.array(z.string()).optional().describe("Refs (from list_tasks) of tasks this one depends on"),
     blockedBy: z.array(z.string()).optional().describe("Refs of tasks blocking this one"),
@@ -1391,9 +1485,9 @@ if (features.taskBoard) server.tool(
     steps: z.array(z.object({ text: z.string(), checked: z.boolean().optional() })).optional().describe("Sub-tasks"),
     defaultExpanded: z.boolean().optional().describe("Expand the card by default"),
   },
-  async ({ namespace, path, line, raw, title, ref, column, status, due, priority, workload, assignee, tags, dependsOn, blockedBy, relatedTo, notes, steps, defaultExpanded }) => {
+  async ({ namespace, path, line, raw, title, ref, column, status, due, priority, workload, assignee, milestone, tags, dependsOn, blockedBy, relatedTo, notes, steps, defaultExpanded }) => {
     try {
-      const replace = { title, ref, column, status, due, priority, workload, assignee, tags, dependsOn, blockedBy, relatedTo, notes, steps, defaultExpanded };
+      const replace = { title, ref, column, status, due, priority, workload, assignee, milestone, tags, dependsOn, blockedBy, relatedTo, notes, steps, defaultExpanded };
       const res = await api(
         `/api/tasks?ns=${encodeURIComponent(namespace)}&path=${encodeURIComponent(path)}`,
         { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ line, raw, replace }) }
@@ -1444,7 +1538,7 @@ if (features.taskBoard) server.tool(
     path: z.string().describe("Note path that owns the task"),
     line: z.number().describe("1-based line of the task's checkbox (from list_tasks)"),
     raw: z.string().describe("Exact source line (from list_tasks) for optimistic concurrency"),
-    key: z.enum(["due", "priority", "workload", "assignee", "status", "tags", "depends-on", "blocked-by", "related-to"]).describe("Field to set"),
+    key: z.enum(["due", "priority", "workload", "assignee", "milestone", "status", "tags", "depends-on", "blocked-by", "related-to"]).describe("Field to set (milestone takes a milestone id)"),
     value: z.string().describe("New value. For tags/depends-on/blocked-by/related-to pass a comma-separated list. Empty string clears the field."),
   },
   async ({ namespace, path, line, raw, key, value }) => {
@@ -1505,12 +1599,13 @@ if (features.taskBoard) server.tool(
     status: z.string().optional().describe("Only tasks with this status"),
     priority: z.string().optional().describe("Only tasks with this priority (high|medium|low)"),
     assignee: z.string().optional().describe("Case-insensitive substring matched against the assignee"),
+    milestone: z.string().optional().describe("Only tasks of this milestone id"),
     tags: z.array(z.string()).optional().describe("Only tasks carrying ALL of these tags"),
     checked: z.boolean().optional().describe("Filter by done (true) / not done (false)"),
     relatesTo: z.string().optional().describe("Only tasks whose depends-on/blocked-by/related-to references this ref (or title)"),
     dueBefore: z.string().optional().describe("Only tasks with a due date <= this YYYY-MM-DD (lexicographic)"),
   },
-  async ({ namespace, global, note, text, column, status, priority, assignee, tags, checked, relatesTo, dueBefore }) => {
+  async ({ namespace, global, note, text, column, status, priority, assignee, milestone, tags, checked, relatesTo, dueBefore }) => {
     try {
       if (!global && !namespace) {
         return { content: [{ type: "text", text: "Provide `namespace` or set `global` to true." }], isError: true };
@@ -1540,6 +1635,7 @@ if (features.taskBoard) server.tool(
         if (status && tk.status !== status) return false;
         if (priority && lc(tk.priority) !== lc(priority)) return false;
         if (assignee && !lc(tk.assignee).includes(lc(assignee))) return false;
+        if (milestone && tk.milestone !== milestone) return false;
         if (typeof checked === "boolean" && !!tk.checked !== checked) return false;
         if (wantTags.length) {
           const have = (tk.tags || []).map(lc);
@@ -1558,6 +1654,70 @@ if (features.taskBoard) server.tool(
         return { content: [{ type: "text", text: "No matching tasks." }] };
       }
       return { content: [{ type: "text", text: JSON.stringify(matches, null, 2) }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+// Milestones live in the board sidecar next to the columns: read it, change the
+// list, write it back (the server validates ids, titles and due dates).
+async function updateMilestones(namespace, change) {
+  const ns = encodeURIComponent(namespace);
+  const cur = await api(`/api/board?ns=${ns}`);
+  if (!cur.ok) throw new Error(`${cur.status}: ${await cur.text().catch(() => "")}`);
+  const board = await cur.json();
+  const milestones = change(board.milestones || []);
+  const res = await api(`/api/board?ns=${ns}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...board, milestones }),
+  });
+  if (!res.ok) throw new Error(`${res.status}: ${await res.text().catch(() => "")}`);
+  return (await res.json()).milestones || [];
+}
+
+if (features.taskBoard) server.tool(
+  "save_milestone",
+  "Create a milestone, or update the one with this id. A milestone groups tasks towards a goal; a task joins it with its `milestone` field (create_task, edit_task or set_task_field). Returns the namespace's milestones.",
+  {
+    namespace: z.string().describe("Namespace name"),
+    id: z.string().describe("Milestone id: letters, digits, '.', '_' or '-' (e.g. m1-ci). Reuse an existing id to update it."),
+    title: z.string().describe("Milestone title"),
+    start: z.string().optional().describe("Start date, YYYY-MM-DD (progress is then compared with the time elapsed)"),
+    due: z.string().optional().describe("Due date, YYYY-MM-DD"),
+    description: z.string().optional().describe("What the milestone delivers"),
+    closed: z.boolean().optional().describe("true closes the milestone, false reopens it"),
+  },
+  async ({ namespace, id, title, start, due, description, closed }) => {
+    try {
+      const milestones = await updateMilestones(namespace, (list) => {
+        const next = { id, title, start: start || "", due: due || "", description: description || "", closed: !!closed };
+        return list.some((m) => m.id === id) ? list.map((m) => (m.id === id ? next : m)) : [...list, next];
+      });
+      return { content: [{ type: "text", text: JSON.stringify(milestones, null, 2) }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+if (features.taskBoard) server.tool(
+  "delete_milestone",
+  "Delete a milestone from the board. Its tasks keep their `milestone` field (clear it with set_task_field if needed). Returns the remaining milestones.",
+  {
+    namespace: z.string().describe("Namespace name"),
+    id: z.string().describe("Milestone id"),
+  },
+  async ({ namespace, id }) => {
+    try {
+      let found = false;
+      const milestones = await updateMilestones(namespace, (list) => {
+        found = list.some((m) => m.id === id);
+        return list.filter((m) => m.id !== id);
+      });
+      if (!found) return { content: [{ type: "text", text: `No milestone "${id}" in ${namespace}.` }], isError: true };
+      return { content: [{ type: "text", text: JSON.stringify(milestones, null, 2) }] };
     } catch (err) {
       return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
     }

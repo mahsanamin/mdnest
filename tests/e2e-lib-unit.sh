@@ -63,7 +63,8 @@ N="$T/notes"; mkdir -p "$N"
 dead=999999; while kill -0 "$dead" 2>/dev/null; do dead=$((dead - 1)); done
 mkdir -p "$N/.e2e-notes.$$.live1" "$N/.e2e-notes.$$.live1.cli" "$N/.e2e-notes.$dead.gone1" \
   "$N/.e2e-notes.$dead.gone1.cli" "$N/.e2e-notes.fresh1" "$N/.e2e-notes.old1"
-touch -d '2 days ago' "$N/.e2e-notes.old1"
+# -t is POSIX (GNU and BSD touch); -d '2 days ago' is GNU only and fails on macOS.
+touch -t 202001010000 "$N/.e2e-notes.old1"
 e2e_sweep_notes "$N"
 [ -d "$N/.e2e-notes.$$.live1" ] && [ -d "$N/.e2e-notes.$$.live1.cli" ] \
   && ok "a running run's folders are kept" || bad "a running run's folders are kept"

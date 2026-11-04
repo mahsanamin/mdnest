@@ -177,6 +177,8 @@ flowchart TD
     -H "Authorization: Bearer $TOKEN" \
     --data "# Sprint
 
+The line of prose keeps this note in the editor: a note of tasks only opens on the board.
+
 - [ ] $BOARD_TASK
   - priority: high
   - tags: [release]
@@ -193,6 +195,8 @@ flowchart TD
     curl -fsS -X POST "$BASE_URL/api/note?ns=testing_workspace&path=e2e-board-$name.md" \
       -H "Authorization: Bearer $TOKEN" \
       --data "# $name
+
+A line of prose, so the note opens in the editor.
 
 - $box $BOARD_TASK
   - priority: high

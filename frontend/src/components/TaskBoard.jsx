@@ -18,6 +18,8 @@ import TaskCard from './TaskCard';
 import BoardColumn from './BoardColumn';
 import BoardColumnsEditor from './BoardColumnsEditor';
 import TaskEditor from './TaskEditor';
+import MilestonesView from './MilestonesView';
+import { milestoneLabel, sortMilestones } from '../milestones';
 import './TaskBoard.css';
 
 // Drop target = the column lane under the pointer (see boardLanes.js), so a
@@ -44,19 +46,21 @@ function makeLaneCollision(livePointer) {
 // item in the namespace, either as a flat list (with checkbox toggling) or as
 // a kanban board (drag a card between columns). Both views project the same
 // data — the notes themselves — so a change in one is reflected in the other.
-export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPath, currentUser, refreshSignal }) {
+export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPath, currentUser, refreshSignal, focusNote = null, milestoneRoute = null, onMilestoneRoute }) {
   const [board, setBoard] = useState(null);
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [mode, setMode] = useState(() => localStorage.getItem('mdnest_taskboard_mode') || 'board');
+  const [mode, setMode] = useState(() => (typeof milestoneRoute === 'string' ? 'milestones' : localStorage.getItem('mdnest_taskboard_mode') || 'board'));
   const [editingColumns, setEditingColumns] = useState(false);
   const [activeTask, setActiveTask] = useState(null);
   // Mirror of activeTask for the auto-refresh effect, so a background poll can
   // bail out mid-drag without re-subscribing on every drag.
   const activeTaskRef = useRef(null);
   useEffect(() => { activeTaskRef.current = activeTask; }, [activeTask]);
-  const [scope, setScope] = useState(() => localStorage.getItem('mdnest_taskboard_scope') || 'workspace');
+  const [scope, setScope] = useState(() => (focusNote ? 'note' : localStorage.getItem('mdnest_taskboard_scope') || 'workspace'));
+  // A task list opened on the board shows its own tasks.
+  useEffect(() => { if (focusNote) setScope('note'); }, [focusNote]);
   // Default 'note' deliberately: the board has always shown tasks in the order
   // they appear in your notes, and most boards are small enough that paging
   // never applies. See task-sort.js.
@@ -76,6 +80,15 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
   const [priorityFilter, setPriorityFilter] = useState(''); // '' | high | medium | low
   const [relationFilter, setRelationFilter] = useState(''); // '' | any | depends-on | blocked-by | related-to
   const [dueFilter, setDueFilter] = useState(''); // '' | overdue | today | week | month | has | none
+  const [milestoneFilter, setMilestoneFilter] = useState(''); // '' | '@none' | <milestone id>
+  // The milestone page on show in the Milestones mode ('' = all milestones); kept in the URL by App.
+  const [selectedMilestone, setSelectedMilestone] = useState(milestoneRoute || '');
+  useEffect(() => {
+    if (typeof milestoneRoute === 'string') {
+      setMode('milestones');
+      setSelectedMilestone(milestoneRoute);
+    }
+  }, [milestoneRoute]);
   // Done tasks are hidden by default so the views focus on active work; a
   // toggle brings them back. (Kanban's Done column is also collapsed by default.)
   const [showDone, setShowDone] = useState(false);
@@ -90,7 +103,8 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
 
   // The note-scoped view only makes sense with a note open; the global view
   // spans every workspace and ignores the current note/namespace for reads.
-  const effectiveScope = scope === 'note' && !currentPath ? 'workspace' : scope;
+  // Milestones count every task of the workspace, whatever scope the other views use.
+  const effectiveScope = mode === 'milestones' ? 'workspace' : (scope === 'note' && !currentPath ? 'workspace' : scope);
   const isGlobal = effectiveScope === 'global';
 
   const sensors = useSensors(
@@ -172,8 +186,15 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
 
   const setModePersist = useCallback((m) => {
     setMode(m);
-    localStorage.setItem('mdnest_taskboard_mode', m);
-  }, []);
+    // The Milestones mode lives in the URL, not in the remembered view.
+    if (m !== 'milestones') localStorage.setItem('mdnest_taskboard_mode', m);
+    if (onMilestoneRoute) onMilestoneRoute(m === 'milestones' ? '' : null);
+    if (m === 'milestones') setSelectedMilestone('');
+  }, [onMilestoneRoute]);
+  const selectMilestone = useCallback((id) => {
+    setSelectedMilestone(id);
+    if (onMilestoneRoute) onMilestoneRoute(id);
+  }, [onMilestoneRoute]);
 
   const setScopePersist = useCallback((s) => {
     setScope(s);
@@ -458,6 +479,11 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
   const relationLookupRef = useRef(relationLookup);
   relationLookupRef.current = relationLookup;
   const resolveRelation = useCallback((value) => resolveTask(relationLookupRef.current, value), []);
+  // Blocked = waits on an open task (depends-on / blocked-by), as on the cards.
+  const isBlocked = useCallback((t) => [...(t.dependsOn || []), ...(t.blockedBy || [])].some((ref) => {
+    const r = resolveTask(relationLookupRef.current, ref);
+    return r && !r.checked;
+  }), []);
   // {ref, title} pairs so the relations editor can search/pick a task by its
   // stable ref or its title, then store the ref (comma-free, rename-proof).
   const taskRefs = useMemo(() => {
@@ -472,6 +498,15 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
   const toggleTag = useCallback((tag) => {
     setTagFilter((cur) => (cur.includes(tag) ? cur.filter((t) => t !== tag) : [...cur, tag]));
   }, []);
+
+  // Milestones come with the board (.mdnest/board.json); a task names one by id.
+  const milestones = useMemo(() => board?.milestones || [], [board]);
+  const showMilestoneFilter = milestones.length > 0 || tasks.some((t) => t.milestone);
+  // Identity-stable for the memoised cards, like resolveRelation above.
+  const milestonesRef = useRef(milestones);
+  milestonesRef.current = milestones;
+  const milestoneTitle = useCallback((id) => milestoneLabel(milestonesRef.current, id), []);
+
   const activeFilterCount =
     (search.trim() !== '' ? 1 : 0) +
     (tagFilter.length > 0 ? 1 : 0) +
@@ -479,10 +514,11 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
     (priorityFilter !== '' ? 1 : 0) +
     (relationFilter !== '' ? 1 : 0) +
     (dueFilter !== '' ? 1 : 0) +
+    (milestoneFilter !== '' ? 1 : 0) +
     (showDone && mode === 'list' ? 1 : 0);
   const filtersActive = activeFilterCount > 0;
   const clearFilters = useCallback(() => {
-    setSearch(''); setTagFilter([]); setAssigneeFilter(''); setPriorityFilter(''); setRelationFilter(''); setDueFilter(''); setShowDone(false);
+    setSearch(''); setTagFilter([]); setAssigneeFilter(''); setPriorityFilter(''); setRelationFilter(''); setDueFilter(''); setMilestoneFilter(''); setShowDone(false);
   }, []);
 
   // Hiding done tasks only applies to the flat list — the kanban board keeps
@@ -501,9 +537,9 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
   const filteredTasks = useMemo(
     () => tasks.filter((t) => matchesTaskFilters(t, {
       search: deferredSearch, tags: tagFilter, assignee: assigneeFilter, priority: priorityFilter,
-      relation: relationFilter, due: dueFilter, showDone: effectiveShowDone, doneColumns: doneColumnIds, currentUser,
+      relation: relationFilter, due: dueFilter, milestone: milestoneFilter, showDone: effectiveShowDone, doneColumns: doneColumnIds, currentUser,
     })),
-    [tasks, deferredSearch, tagFilter, assigneeFilter, priorityFilter, relationFilter, dueFilter, effectiveShowDone, doneColumnIds, currentUser],
+    [tasks, deferredSearch, tagFilter, assigneeFilter, priorityFilter, relationFilter, dueFilter, milestoneFilter, effectiveShowDone, doneColumnIds, currentUser],
   );
 
   // First time a board is shown (no stored collapse state), collapse the Done
@@ -568,14 +604,19 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
           <div className="tb-mode-toggle">
             <button className={mode === 'list' ? 'active' : ''} onClick={() => setModePersist('list')}>List</button>
             <button className={mode === 'board' ? 'active' : ''} onClick={() => setModePersist('board')}>Kanban</button>
-          </div>
-          <div className="tb-mode-toggle tb-scope-toggle">
-            <button className={effectiveScope === 'workspace' ? 'active' : ''} onClick={() => setScopePersist('workspace')} title="All notes in this workspace">Workspace</button>
-            {currentPath && (
-              <button className={effectiveScope === 'note' ? 'active' : ''} onClick={() => setScopePersist('note')} title="Only the current note">This note</button>
+            {!isGlobal && (
+              <button className={mode === 'milestones' ? 'active' : ''} onClick={() => setModePersist('milestones')}>Milestones</button>
             )}
-            <button className={effectiveScope === 'global' ? 'active' : ''} onClick={chooseGlobalScope} title="Tasks across every workspace you can access">All workspaces</button>
           </div>
+          {mode !== 'milestones' && (
+            <div className="tb-mode-toggle tb-scope-toggle">
+              <button className={effectiveScope === 'workspace' ? 'active' : ''} onClick={() => setScopePersist('workspace')} title="All notes in this workspace">Workspace</button>
+              {currentPath && (
+                <button className={effectiveScope === 'note' ? 'active' : ''} onClick={() => setScopePersist('note')} title="Only the current note">This note</button>
+              )}
+              <button className={effectiveScope === 'global' ? 'active' : ''} onClick={chooseGlobalScope} title="Tasks across every workspace you can access">All workspaces</button>
+            </div>
+          )}
         </div>
         <div className="tb-header-right">
           <button
@@ -602,7 +643,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
         </div>
       </div>
 
-      {!loading && tasks.length > 0 && (
+      {!loading && tasks.length > 0 && mode !== 'milestones' && (
         <div className={`tb-filters${filtersOpen ? ' open' : ''}`}>
           <button
             type="button"
@@ -671,6 +712,24 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
                 <option value="has">Has a due date</option>
                 <option value="none">No due date</option>
               </select>
+              {showMilestoneFilter && (
+                <select
+                  className="tb-filter-priority tb-filter-milestone"
+                  value={milestoneFilter}
+                  onChange={(e) => setMilestoneFilter(e.target.value)}
+                  title="Filter by milestone"
+                  aria-label="Milestone"
+                >
+                  <option value="">Any milestone</option>
+                  <option value="@none">No milestone</option>
+                  {sortMilestones(milestones).map((m) => (
+                    <option key={m.id} value={m.id}>{m.closed ? `${m.title} (closed)` : m.title}</option>
+                  ))}
+                  {milestoneFilter && milestoneFilter !== '@none' && !milestones.some((m) => m.id === milestoneFilter) && (
+                    <option value={milestoneFilter}>{milestoneFilter}</option>
+                  )}
+                </select>
+              )}
               <select
                 className="tb-filter-priority tb-filter-sort"
                 value={sortMode}
@@ -716,6 +775,29 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
 
       {loading ? (
         <div className="tb-loading">Loading tasks…</div>
+      ) : mode === 'milestones' ? (
+        <MilestonesView
+          milestones={milestones}
+          tasks={tasks}
+          columns={columns}
+          doneColumns={doneColumnIds}
+          isBlocked={isBlocked}
+          canWrite={canWrite}
+          selected={selectedMilestone}
+          onSelect={selectMilestone}
+          onSave={async (next) => {
+            const saved = await saveBoard(ns, { ...board, milestones: next });
+            setBoard(saved);
+          }}
+          onShowOnBoard={(id) => { setMilestoneFilter(id); setFiltersOpen(true); setModePersist('board'); }}
+          onEditTask={openEdit}
+          onOpenNote={onOpenNote}
+        />
+      ) : tasks.length === 0 && effectiveScope === 'note' ? (
+        <div className="tb-empty">
+          No tasks in this note yet.
+          {canWrite && <> <button type="button" className="tb-link-btn" onClick={openCreate}>Add the first task</button></>}
+        </div>
       ) : tasks.length === 0 ? (
         <div className="tb-empty">No task-list items found in this namespace. Add <code>- [ ] something</code> to a note.</div>
       ) : filteredTasks.length === 0 ? (
@@ -745,6 +827,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
                 onToggleStep={handleToggleStep}
                 onEdit={openEdit}
                 resolve={resolveRelation}
+                milestoneTitle={milestoneTitle}
                 onDelete={handleDelete}
                 collapsed={!!collapsedCols && collapsedCols.has(col.id)}
                 onToggleCollapse={() => toggleCollapse(col.id)}
@@ -850,7 +933,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
         <TaskEditor
           board={board}
           task={editorTask}
-          defaultNote={editorTask ? editorTask.path : (board?.defaultNote || (effectiveScope === 'note' ? currentPath : '') || '')}
+          defaultNote={editorTask ? editorTask.path : ((effectiveScope === 'note' && currentPath) || board?.defaultNote || '')}
           defaultColumn={editorTask ? editorTask.column : ''}
           notePaths={[...new Set(tasks.map((t) => t.path))]}
           currentUser={currentUser}

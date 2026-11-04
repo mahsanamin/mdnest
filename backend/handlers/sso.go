@@ -49,6 +49,14 @@ type SSOHandler struct {
 	// Off by default. The operator opts in only when they trust their IdP to
 	// gate who may obtain a token (e.g. a domain-restricted enterprise IdP).
 	autoProvisionUsers bool
+	// groupSnapshots, when set, records the IdP groups of each login so the
+	// user's API tokens can use them (TokenHandler.UseOwnerGroups).
+	groupSnapshots store.OIDCGroupStore
+}
+
+// RecordGroups keeps the IdP groups of each SSO login in s.
+func (h *SSOHandler) RecordGroups(s store.OIDCGroupStore) {
+	h.groupSnapshots = s
 }
 
 // NewSSOHandler wires an SSO client to a user store. frontendURL is the
@@ -239,6 +247,12 @@ func (h *SSOHandler) HandleCallback(w http.ResponseWriter, r *http.Request) {
 	// can be resolved per request. Omitted when the IdP emits none.
 	if len(claims.Groups) > 0 {
 		token.Claims.(jwt.MapClaims)["groups"] = claims.Groups
+	}
+	// The same snapshot for the user's API tokens; an empty one too (left every group).
+	if h.groupSnapshots != nil {
+		if err := h.groupSnapshots.SaveOIDCGroups(user.ID, claims.Groups); err != nil {
+			log.Printf("sso: recording the groups of user %d: %v", user.ID, err)
+		}
 	}
 	signed, err := token.SignedString(h.secret)
 	if err != nil {

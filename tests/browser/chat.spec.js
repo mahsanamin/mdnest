@@ -323,6 +323,29 @@ test('the GIF picker shows its images whole, even in a short window', async ({ p
   }
 });
 
+test('a link in a message opens in a new tab, and the chat stays open', async ({ page }) => {
+  test.setTimeout(60_000);
+  await signIn(page);
+  const { plain, chat, title } = await seed(page);
+  try {
+    const target = new URL('/?from-chat-link', page.url()).href;
+    expect((await api(page, 'POST', `/api/chat?ns=${NS}&path=${encodeURIComponent(chat)}&as=agent`, `read [the guide](${target})`)).status).toBe(201);
+    await page.goto(`/#!chats/${NS}/${chat}`);
+    await expect(page.locator('.chat-room-title h2')).toHaveText(title, { timeout: 20_000 });
+    const link = page.locator('.chat-bubble a', { hasText: 'the guide' });
+    await expect(link).toHaveAttribute('target', '_blank', { timeout: 10_000 });
+    await expect(link).toHaveAttribute('rel', /noopener/);
+    const before = page.url();
+    const [popup] = await Promise.all([page.waitForEvent('popup'), link.click()]);
+    expect(popup.url()).toContain('from-chat-link');
+    await popup.close();
+    expect(page.url()).toBe(before);
+    await expect(page.locator('.chat-room-title h2')).toHaveText(title);
+  } finally {
+    await cleanup(page, plain, chat);
+  }
+});
+
 test('the message box grows with a long message, and Enter still sends it', async ({ page }) => {
   test.setTimeout(90_000);
   await page.setViewportSize({ width: 1100, height: 760 });

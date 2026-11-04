@@ -87,6 +87,7 @@ function Sidebar({
   onLogout,
   onAdminPanel,
   onNewNote,
+  onNewTaskList,
   onNewDrawing,
   onNewSlides,
   onNewFolder,
@@ -500,12 +501,13 @@ function Sidebar({
                 buttons go two by two when one row would be cramped. */}
             <div
               className="sidebar-actions-row"
-              data-count={[onNewFolder, onNewNote, onNewDrawing, onNewSlides].filter(Boolean).length}
+              data-count={[onNewFolder, onNewNote, onNewTaskList, onNewDrawing, onNewSlides].filter(Boolean).length}
             >
               {/* Disabled until a namespace is chosen: the create handlers need one,
                   and a click during startup used to do nothing, silently. */}
               {onNewFolder && <button className="sidebar-action-btn" onClick={onNewFolder} disabled={!selectedNs} title={`New folder ${createHint}`}>+ Folder</button>}
               {onNewNote && <button className="sidebar-action-btn" onClick={onNewNote} disabled={!selectedNs} title={`New note ${createHint}`}>+ Note</button>}
+              {onNewTaskList && <button className="sidebar-action-btn" onClick={onNewTaskList} disabled={!selectedNs} title={`New task list ${createHint}`}>+ Tasks</button>}
               {onNewDrawing && <button className="sidebar-action-btn" onClick={onNewDrawing} disabled={!selectedNs} title={`New drawing ${createHint}`}>+ Drawing</button>}
               {onNewSlides && <button className="sidebar-action-btn" onClick={onNewSlides} disabled={!selectedNs} title={`New slides ${createHint}`}>+ Slides</button>}
             </div>

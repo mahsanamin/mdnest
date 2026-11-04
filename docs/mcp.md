@@ -17,7 +17,7 @@ transports**:
 > `write_note`, `edit_note`, `append_note`, `prepend_note`, `create_note`, `create_folder`,
 > `delete_item`, `move_item` (optionally into another namespace), `copy_item`, `search_notes`, `list_tasks`, `create_task`,
 > `move_task`, `edit_task`, `set_task_field`, `toggle_task`, `delete_task`,
-> `search_tasks`, `create_excalidraw`, `draw_excalidraw`, `read_excalidraw`,
+> `search_tasks`, `save_milestone`, `delete_milestone`, `create_excalidraw`, `draw_excalidraw`, `read_excalidraw`,
 > `edit_excalidraw_node`, `edit_excalidraw_edge`, `delete_excalidraw_element`,
 > `list_marp_themes`, `create_marp`, `add_marp_slide`, `list_marp_slides`, `read_marp_slide`,
 > `edit_marp_slide`, `delete_marp_slide`, `move_marp_slide`.
@@ -265,14 +265,16 @@ and rewrite that markdown.
 
 | Tool | Purpose | Key inputs |
 |------|---------|------------|
-| `list_tasks` | Board columns + every task in a namespace (or one note). Returns each task's `path`, `line` and `raw` — needed to mutate it. | `namespace`, `note?` |
-| `create_task` | Append a whole task to a note (the note, else the board's default note; created if missing). | `namespace`, `title`, `note?`, `column?`, `status?`, `due?`, `priority?`, `workload?`, `assignee?`, `tags?`, `dependsOn?`, `blockedBy?`, `relatedTo?`, `notes?`, `steps?`, `defaultExpanded?` |
+| `list_tasks` | Board columns and milestones + every task in a namespace (or one note). Returns each task's `path`, `line` and `raw` — needed to mutate it. | `namespace`, `note?` |
+| `create_task` | Append a whole task to a note (the note, else the board's default note; created if missing). mdnest records who created it and when. | `namespace`, `title`, `note?`, `column?`, `status?`, `due?`, `priority?`, `workload?`, `assignee?`, `milestone?`, `tags?`, `dependsOn?`, `blockedBy?`, `relatedTo?`, `notes?`, `steps?`, `defaultExpanded?` |
 | `move_task` | Move a task to a column (sets its status; checks the box for the Done column). | `namespace`, `path`, `line`, `raw`, `column` |
-| `edit_task` | Replace a task's whole definition (omitted fields are cleared; pass `ref` to keep the stable id). | `namespace`, `path`, `line`, `raw`, `title`, `ref?`, `column?`, `status?`, `due?`, `priority?`, `workload?`, `assignee?`, `tags?`, `dependsOn?`, `blockedBy?`, `relatedTo?`, `notes?`, `steps?`, `defaultExpanded?` |
-| `set_task_field` | Set or clear a single field without resending the whole task. | `namespace`, `path`, `line`, `raw`, `key`, `value` |
+| `edit_task` | Replace a task's whole definition (omitted fields are cleared; pass `ref` to keep the stable id; who created it and when are kept). | `namespace`, `path`, `line`, `raw`, `title`, `ref?`, `column?`, `status?`, `due?`, `priority?`, `workload?`, `assignee?`, `milestone?`, `tags?`, `dependsOn?`, `blockedBy?`, `relatedTo?`, `notes?`, `steps?`, `defaultExpanded?` |
+| `set_task_field` | Set or clear a single field (including `milestone`) without resending the whole task. | `namespace`, `path`, `line`, `raw`, `key`, `value` |
 | `toggle_task` | Check/uncheck a task or one of its steps (blocked with `422` if closing over open steps). | `namespace`, `path`, `line`, `raw`, `checked` |
 | `delete_task` | Delete a task (checkbox + detail block). | `namespace`, `path`, `line`, `raw` |
-| `search_tasks` | Filter tasks in a namespace, or across all of them with `global`. Filters are ANDed. | `namespace?`, `global?`, `note?`, `text?`, `column?`, `status?`, `priority?`, `assignee?`, `tags?`, `checked?`, `relatesTo?`, `dueBefore?` |
+| `search_tasks` | Filter tasks in a namespace, or across all of them with `global`. Filters are ANDed. | `namespace?`, `global?`, `note?`, `text?`, `column?`, `status?`, `priority?`, `assignee?`, `milestone?`, `tags?`, `checked?`, `relatesTo?`, `dueBefore?` |
+| `save_milestone` | Create a milestone, or update the one with this id (title, start and due dates, description, closed). | `namespace`, `id`, `title`, `start?`, `due?`, `description?`, `closed?` |
+| `delete_milestone` | Delete a milestone; its tasks keep their `milestone` field. | `namespace`, `id` |
 
 Relations (`dependsOn` / `blockedBy` / `relatedTo`) reference other tasks by
 their stable `ref` (shown by `list_tasks`). `set_task_field` takes those same

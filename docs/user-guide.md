@@ -136,6 +136,7 @@ At the top of the sidebar:
 
 - **+ Folder** -- creates a new folder. You will be prompted for a name.
 - **+ Note** -- creates a new markdown file. You will be prompted for a filename.
+- **+ Tasks** -- creates a new `.tasks.md` task list (when the task board is enabled). It opens on the [task board](#task-board), showing its own tasks.
 - **+ Drawing** -- creates a new `.excalidraw.md` drawing (when drawings are enabled).
 - **+ Slides** -- creates a new Marp slide deck (when slides are enabled). A dialog asks for the name and title, the theme (the themes of **Admin > Marp Themes** first, then Marp's built-in ones) and the look of the whole deck (a class such as `light` or `dark`). Then pick the slides: a theme with slide templates offers each kind of slide it has (title, section divider, cards, metrics, timeline…), so you can take all of them or only some, and each becomes one slide with its own style. A theme without templates offers a title slide and a content slide. Size (16:9 or 4:3), slide numbers, header and footer complete it, and a live preview shows the deck before you create it. On a desktop a deck opens in split view, text on the left and slides on the right, and the slide shown follows the cursor as you type. A view you pick for a deck is kept for that deck only.
 
@@ -467,6 +468,8 @@ The task board gathers every task-list item in a namespace and presents it as a 
 
 **Opening it.** Click **Board** in the toolbar. The board replaces the editor pane (the sidebar and header stay put) and is scoped to the current namespace.
 
+**Task lists open on the board.** A note that is only tasks (headings and blank lines aside, each task with its fields, sub-tasks and notes) and any `.tasks.md` file open straight on the board, on **This note**. Leave it with **Editor** and that note opens in the editor from then on; **Board** brings the board back for it. Opening a task's note from the board shows the note, and opening a prose note next closes a board that opened by itself.
+
 **Getting back.** Either works: the same button now reads **Editor**, or use the back button at the start of the board's own header, which names the note you came from (**← my-note.md**).
 
 **A link of its own** *(v4.5.2+).* The board has its own address, `#!board/<workspace>/<note>`, so a browser refresh keeps you on the board instead of dropping you back into the editor, and a board can be bookmarked or shared. The link keeps the workspace and the note you opened it from, so the back button and the **This note** scope still work after a refresh. Back and forward open and close it like any other page.
@@ -488,9 +491,11 @@ The task board gathers every task-list item in a namespace and presents it as a 
 
 **Sub-tasks gate closing** *(v4.2.0+).* A task with unresolved sub-steps can't be closed — checking it done, dragging it to a Done column, and saving an edit into one are all refused, with the reason shown. Tick the remaining steps first. This is enforced by the server, so it holds however you reach it.
 
-**Cards.** Each card shows the title, a priority badge, the due date (red when overdue), tags, workload and a step progress bar. **More** expands the steps (tick them off individually) and the description.
+**Cards.** Each card shows the title, a priority badge, the due date (red when overdue), tags, workload, its milestone and a step progress bar. **More** expands the steps (tick them off individually) and the description. The foot of the card shows who created the task and when.
 
-**Creating a task.** Click **+ New task** to open the editor: title, target note (defaults to the board's default note), column, due date, priority, workload, tags, steps and a description. The task is appended to the chosen note (created if it doesn't exist).
+**Milestones.** **Milestones**, next to List and Kanban, shows one card per milestone: its dates and how many days are left (or how late it is), its progress (done tasks plus the done sub-tasks of open ones) and, with a start date, the share of the period already gone (marked *behind* when time runs ahead of the work), its participants and its late or blocked tasks. Click a card to open the milestone's page: tasks and sub-tasks done, what needs attention, the tasks added since the start, a breakdown by column, the participants with their open and done tasks, and the tasks by column. The page has its own link (`#!milestones/<workspace>/<id>`) to share; **Show on the Kanban** filters the board to the milestone. If you can write to the workspace you can add, edit, close, reopen and delete milestones there, and pick a task's milestone in the task editor. See [Task Model](tasks.md#milestones).
+
+**Creating a task.** Click **+ New task** to open the editor: title, target note (defaults to the board's default note), column, due date, priority, workload, assignee, milestone, tags, steps and a description. The task is appended to the chosen note (created if it doesn't exist), with who created it and when.
 
 **Editing a task.** Click **✎ edit** on any card or list row to open the same editor pre-filled; saving rewrites the whole task in its note.
 
