@@ -42,6 +42,15 @@ type GrantStore interface {
 // PostgresGrantStore implements GrantStore against a Postgres database.
 type PostgresGrantStore struct {
 	db *DB
+	// oidcGroupsMaxAge is API_TOKEN_GROUPS_MAX_AGE: how long a user's recorded
+	// IdP groups (user_oidc_groups) are trusted. 0 = not at all.
+	oidcGroupsMaxAge time.Duration
+}
+
+// UseOIDCGroupsMaxAge lets UsersForNamespace count IdP-group members by their
+// recorded groups, under the same age limit API tokens use.
+func (s *PostgresGrantStore) UseOIDCGroupsMaxAge(maxAge time.Duration) {
+	s.oidcGroupsMaxAge = maxAge
 }
 
 // NewPostgresGrantStore creates a new PostgresGrantStore.
@@ -175,7 +184,8 @@ type NamespaceUser struct {
 // not), or membership of an access group that holds a grant there. A group's
 // user members always count; its IdP-group members count for the users whose
 // recorded IdP groups (user_oidc_groups, written at SSO login when
-// API_TOKEN_GROUPS_MAX_AGE is on) include that group, since a user's IdP
+// API_TOKEN_GROUPS_MAX_AGE is on) include that group, and only while that
+// record is younger than the same age limit API tokens use. A user's IdP
 // groups are otherwise only known inside their own session. Ordered by
 // username for a stable picker.
 func (s *PostgresGrantStore) UsersForNamespace(namespace string) ([]NamespaceUser, error) {
@@ -192,10 +202,11 @@ func (s *PostgresGrantStore) UsersForNamespace(namespace string) ([]NamespaceUse
 		   OR EXISTS (SELECT 1 FROM access_group_members m
 		                JOIN access_group_grants gg ON gg.group_id = m.group_id
 		                JOIN user_oidc_groups og ON og.user_id = u.id
-		               WHERE gg.namespace = $1 AND m.oidc_group IS NOT NULL
+		               WHERE $2::float8 > 0 AND gg.namespace = $1 AND m.oidc_group IS NOT NULL
+		                 AND og.captured_at > now() - make_interval(secs => $2::float8)
 		                 AND m.oidc_group = ANY(og.groups))
 		    )
-		  ORDER BY u.username`, namespace,
+		  ORDER BY u.username`, namespace, s.oidcGroupsMaxAge.Seconds(),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("users for namespace: %w", err)

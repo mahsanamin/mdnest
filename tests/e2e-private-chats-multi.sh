@@ -58,7 +58,7 @@ for _ in $(seq 1 30); do docker exec "$PG" pg_isready -U mdnest >/dev/null 2>&1 
 docker run -d --name "$BE" --network "$NET" \
   -e AUTH_MODE=multi -e POSTGRES_HOST="$PG" -e POSTGRES_PASSWORD=pw \
   -e MDNEST_USER=admin -e MDNEST_PASSWORD=adminpass123 -e MDNEST_JWT_SECRET=e2e-multi-secret \
-  -e NOTES_DIR=/notes -e FRONTEND_ORIGIN=http://localhost \
+  -e NOTES_DIR=/notes -e FRONTEND_ORIGIN=http://localhost -e API_TOKEN_GROUPS_MAX_AGE=168h \
   -v "$NOTES_DIR:/notes" -p 127.0.0.1:0:8080 "$IMAGE" >/dev/null
 PORT="$(docker port "$BE" 8080/tcp | head -1 | sed 's/.*://')"
 BASE="http://127.0.0.1:$PORT"
@@ -271,6 +271,12 @@ code, r = call("GET", "/api/namespace/users?ns=alpha", owen)
 names = {u["username"] for u in (r if isinstance(r, list) else r.get("users", []))} if code == 200 else set()
 check("the member picker lists gina (group user member)", "gina" in names, f"{code} {r}")
 check("the member picker lists ivan (IdP group member)", "ivan" in names, f"{code} {r}")
+# A recorded IdP group older than API_TOKEN_GROUPS_MAX_AGE is not trusted.
+subprocess.run(["docker", "exec", os.environ["PG"], "psql", "-q", "-U", "mdnest", "-d", "mdnest", "-c",
+                f"UPDATE user_oidc_groups SET captured_at = now() - interval '200 hours' WHERE user_id = {ids['ivan']}"], check=True, stdout=subprocess.DEVNULL)
+code, r = call("GET", "/api/namespace/users?ns=alpha", owen)
+stale = {u["username"] for u in r} if code == 200 else set()
+check("a stale IdP group record (older than the max age) no longer counts", "ivan" not in stale and "gina" in stale, f"{code} {r}")
 check("the member picker leaves out zed (no access)", "zed" not in names, f"{code} {r}")
 code, r = call("POST", "/api/chat/members?ns=alpha&path=Rooms/room.md", owen, {"userId": ids["gina"]})
 check("owen adds gina to the private chat", code == 200 and any(m["username"] == "gina" for m in r["members"]), f"{code} {r}")

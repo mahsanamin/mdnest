@@ -617,6 +617,10 @@ func main() {
 		if maxAge > 0 && multiMode {
 			oidcGroupStore = store.NewPostgresOIDCGroupStore(db)
 			tokenHandler.UseOwnerGroups(oidcGroupStore, maxAge)
+			// The member pickers trust the same snapshot for the same time.
+			if gs, ok := grantStore.(*store.PostgresGrantStore); ok {
+				gs.UseOIDCGroupsMaxAge(maxAge)
+			}
 			log.Printf("API tokens use their owner's SSO groups for %s after the owner's login", maxAge)
 		} else if maxAge > 0 {
 			log.Printf("WARNING: API_TOKEN_GROUPS_MAX_AGE needs multi mode, ignored")
