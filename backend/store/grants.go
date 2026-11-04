@@ -169,14 +169,32 @@ type NamespaceUser struct {
 	Username string `json:"username"`
 }
 
-// UsersForNamespace returns the distinct users who hold a grant on the namespace
-// (namespace admins are auto-granted, so they are included; superadmins have no
-// grant rows and are not). Ordered by username for a stable picker.
+// UsersForNamespace returns the distinct users who have access to the namespace,
+// for assignment and chat-member pickers: a direct grant (namespace admins are
+// auto-granted, so they are included; superadmins have no grant rows and are
+// not), or membership of an access group that holds a grant there. A group's
+// user members always count; its IdP-group members count for the users whose
+// recorded IdP groups (user_oidc_groups, written at SSO login when
+// API_TOKEN_GROUPS_MAX_AGE is on) include that group, since a user's IdP
+// groups are otherwise only known inside their own session. Ordered by
+// username for a stable picker.
 func (s *PostgresGrantStore) UsersForNamespace(namespace string) ([]NamespaceUser, error) {
 	rows, err := s.db.Query(
 		`SELECT DISTINCT u.id, u.username
-		   FROM access_grants g JOIN users u ON g.user_id = u.id
-		  WHERE g.namespace = $1 AND u.username <> ''
+		   FROM users u
+		  WHERE u.username <> ''
+		    AND (
+		      EXISTS (SELECT 1 FROM access_grants g
+		               WHERE g.user_id = u.id AND g.namespace = $1)
+		   OR EXISTS (SELECT 1 FROM access_group_members m
+		                JOIN access_group_grants gg ON gg.group_id = m.group_id
+		               WHERE gg.namespace = $1 AND m.user_id = u.id)
+		   OR EXISTS (SELECT 1 FROM access_group_members m
+		                JOIN access_group_grants gg ON gg.group_id = m.group_id
+		                JOIN user_oidc_groups og ON og.user_id = u.id
+		               WHERE gg.namespace = $1 AND m.oidc_group IS NOT NULL
+		                 AND m.oidc_group = ANY(og.groups))
+		    )
 		  ORDER BY u.username`, namespace,
 	)
 	if err != nil {
