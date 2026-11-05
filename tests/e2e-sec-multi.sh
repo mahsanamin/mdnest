@@ -14,6 +14,10 @@
 # Needs:  docker, curl, python3, git. Exit 0 if every check passes.
 
 set -uo pipefail
+# Git hooks export GIT_DIR (and in a worktree it points at this branch), so
+# the throwaway repo below would be created and committed in the real one:
+# a push from a worktree once left a commit deleting every file. Clear it.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_PREFIX GIT_OBJECT_DIRECTORY
 # Run from a git hook (the pre-push gate), git exports GIT_DIR and friends, and
 # every `git -C <fixture>` below would act on THIS repository instead: commit
 # the fixture onto the branch being pushed, rewrite its config. Clear them.

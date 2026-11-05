@@ -6,6 +6,10 @@
 # while passing. The shard runner must fail when any one shard fails.
 set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Git hooks export GIT_DIR (and in a worktree it points at this branch), so
+# the throwaway repo below would be created and committed in the real one:
+# a push from a worktree once left a commit deleting every file. Clear it.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_PREFIX GIT_OBJECT_DIRECTORY
 # shellcheck source=tests/lib/e2e-images.sh
 . "$REPO_ROOT/tests/lib/e2e-images.sh"
 
