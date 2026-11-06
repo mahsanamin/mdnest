@@ -6,6 +6,17 @@ All notable changes to mdnest are documented here.
 
 ## v4.8.15 (in progress)
 
+### Fixed
+
+- **People who get access through an access group can be assigned tasks and
+  invited to private chats.** The assignee and chat member pickers listed only
+  people with a grant of their own, so a group member could not be picked, and
+  the server refused to add them to a chat. They now list everyone with access
+  through a group too: user members, and IdP group members (Entra ID,
+  Keycloak...) once they have signed in with SSO. For that, with
+  `OIDC_GROUPS_CLAIM` set, each SSO login now records the person's IdP groups,
+  not only when `API_TOKEN_GROUPS_MAX_AGE` is set. #160.
+
 ## v4.8.14: Milestones on the task board, and API tokens that use IdP groups
 
 ### Added

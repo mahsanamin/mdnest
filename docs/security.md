@@ -165,16 +165,20 @@ For headless callers (CLI, MCP server, scripts):
 **IdP groups for API tokens** *(v4.8.14+, opt-in)*. An API token has no login of its
 own, so it has no `groups` snapshot: by default an IdP-group member of an access group
 is ignored for tokens, and a person who reaches a namespace only through an IdP group
-sees it in the browser but not from the CLI or an agent. With
-`API_TOKEN_GROUPS_MAX_AGE` set (a Go duration, e.g. `168h`), every SSO login also
-stores the person's IdP groups in `user_oidc_groups` (one row per user, replaced at each
-login, an empty list included; deleted with the user). The person's tokens then use that
+sees it in the browser but not from the CLI or an agent. In multi mode with
+`OIDC_GROUPS_CLAIM` set, every SSO login stores the person's IdP groups in
+`user_oidc_groups` (one row per user, replaced at each login, an empty list included;
+deleted with the user) *(v4.8.15+; before, only with `API_TOKEN_GROUPS_MAX_AGE`)*. The
+namespace member list (`/api/namespace/users`: assignee and chat member pickers) uses it
+to include the IdP-group members of access groups; it grants nothing, access is still
+checked on every request. With `API_TOKEN_GROUPS_MAX_AGE` set (a Go duration, e.g.
+`168h`), the person's tokens use that
 list until `API_TOKEN_GROUPS_MAX_AGE` after the login, and none once it is older. The
 trade-off is the same as for sessions, over a longer window: leaving an IdP group takes
 effect for tokens at the person's next SSO login or when the age is reached, whichever
 comes first. Keep the age short enough for your offboarding policy, and use direct user
-members or grants where a change must apply at once. Unset or `0`: nothing is stored
-and tokens behave as before.
+members or grants where a change must apply at once. Unset or `0`: tokens behave as
+before.
 
 This was a behaviour change from pre-v3.5.0 where any admin token had unconditional global bypass.
 
