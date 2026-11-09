@@ -1684,7 +1684,9 @@ everything.
 **Response:** same shape as `GET /api/tasks`; every task carries `namespace`, and
 `board` is the union of the per-namespace column layouts (default columns first,
 then any extra columns contributed by a namespace) and of their milestones (by id,
-first namespace wins).
+first namespace wins). *(v4.8.15+)* `boards` maps each of those namespaces to its
+own board (columns and milestones), so milestones that share an id in two
+namespaces stay apart.
 
 ```bash
 curl "http://localhost:8286/api/tasks/all" -H "Authorization: Bearer $TOKEN"

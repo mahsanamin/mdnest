@@ -63,6 +63,51 @@ func TestHandleGlobalTasks(t *testing.T) {
 	}
 }
 
+// The merged board keeps one milestone per id; each namespace's own milestones
+// (same id, different titles) still come back apart, and never for a namespace
+// the caller cannot see.
+func TestHandleGlobalTasks_BoardsPerNamespace(t *testing.T) {
+	root := t.TempDir()
+	board := func(title string) string {
+		return `{"version":1,"columns":[{"id":"todo","title":"To Do"},{"id":"done","title":"Done","done":true}],"milestones":[{"id":"v1","title":"` + title + `"}]}`
+	}
+	writeNs(t, root, "team-a", "plan.md", "- [ ] Alpha\n  - milestone: v1\n")
+	writeNs(t, root, "team-a/.mdnest", "board.json", board("Alpha launch"))
+	writeNs(t, root, "team-b", "todo.md", "- [ ] Beta\n  - milestone: v1\n")
+	writeNs(t, root, "team-b/.mdnest", "board.json", board("Beta launch"))
+	writeNs(t, root, "secret", "s.md", "- [ ] Hidden\n")
+	writeNs(t, root, "secret/.mdnest", "board.json", board("Secret launch"))
+	stg, _ := storage.NewLocalStorage(root)
+	h := NewTaskHandler(stg, func(_ *http.Request, names []string) []string {
+		var out []string
+		for _, n := range names {
+			if n != "secret" {
+				out = append(out, n)
+			}
+		}
+		return out
+	}, func(_ *http.Request, _, _ string) bool { return true })
+
+	w := httptest.NewRecorder()
+	h.HandleGlobalTasks(w, httptest.NewRequest(http.MethodGet, "/api/tasks/all", nil))
+	var resp TasksResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Board.Milestones) != 1 {
+		t.Fatalf("merged board milestones = %+v", resp.Board.Milestones)
+	}
+	if len(resp.Boards) != 2 {
+		t.Fatalf("want the boards of team-a and team-b only, got %v", resp.Boards)
+	}
+	for ns, title := range map[string]string{"team-a": "Alpha launch", "team-b": "Beta launch"} {
+		ms := resp.Boards[ns].Milestones
+		if len(ms) != 1 || ms[0].Title != title {
+			t.Errorf("%s milestones = %+v, want %q", ns, ms, title)
+		}
+	}
+}
+
 func TestHandleGlobalTasks_FilterEnforced(t *testing.T) {
 	root := t.TempDir()
 	writeNs(t, root, "team-a", "plan.md", "- [ ] Alpha\n")
