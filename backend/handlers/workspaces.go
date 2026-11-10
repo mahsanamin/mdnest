@@ -115,6 +115,25 @@ func IsPersonalNamespaceName(ns string) bool {
 	return strings.Contains(ns, "@")
 }
 
+// LiveProvisionedCredential makes the namespaces of the deployment's Git
+// connection (GIT_REMOTE_URL) push with the deployment's token as it is now,
+// read on every lookup, instead of the copy sealed at boot. The token file is
+// often a mounted Secret rotated while the server runs (short-lived tokens):
+// the sealed copy would fail every push until a restart. An empty token keeps
+// the sealed copy, as the boot reconcile does.
+func LiveProvisionedCredential(lookup func(ns string) (*store.WorkspaceRemote, error), current func() string) func(ns string) (*store.WorkspaceRemote, error) {
+	return func(ns string) (*store.WorkspaceRemote, error) {
+		r, err := lookup(ns)
+		if err != nil || r == nil || !r.Provisioned {
+			return r, err
+		}
+		if token := current(); token != "" {
+			r.Credential = token
+		}
+		return r, nil
+	}
+}
+
 // WorkspaceRemoteResolver adapts the workspaces store to the git writer's
 // remote resolver. A personal namespace only ever pushes to the repository its
 // owner set up: with the backup paused, turned off or its owner deleted it is
