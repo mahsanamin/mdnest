@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { contextMenuGroups } from '../contextMenuItems.js';
+import { contextMenuGroups, chatRoomMenuGroups } from '../contextMenuItems.js';
 
 const labels = (groups) => groups.map((g) => g.map((i) => i.label));
 const file = { type: 'file', path: 'Notes/plan.md' };
@@ -82,5 +82,19 @@ describe('right-click menu groups', () => {
     const all = contextMenuGroups({ target: file, hasWrite: true, multi: true }).flat()
       .concat(contextMenuGroups({ target: folder, hasWrite: true, isAdmin: true, excalidraw: true, chat: true }).flat());
     for (const i of all) expect(i.icon, i.label).toBeTruthy();
+  });
+});
+
+
+describe('chatRoomMenuGroups', () => {
+  const actions = (o) => chatRoomMenuGroups(o).flat().map((i) => i.action);
+  it('offers Copy message only on a message, and Copy selected text only with a selection', () => {
+    expect(actions({})).not.toContain('copy-message');
+    expect(actions({ hasMessage: true })[0]).toBe('copy-message');
+    expect(actions({ hasMessage: true, hasSelection: true }).slice(0, 2)).toEqual(['copy-selection', 'copy-message']);
+  });
+  it('keeps the chat actions, members only in multi mode and delete only when allowed', () => {
+    expect(actions({})).toEqual(['connect-agent', 'open-note', 'copy-path']);
+    expect(actions({ canMembers: true, canDelete: true })).toEqual(['chat-members', 'connect-agent', 'open-note', 'copy-path', 'delete-chat']);
   });
 });

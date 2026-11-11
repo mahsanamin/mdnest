@@ -17,7 +17,7 @@ const USER = process.env.MDNEST_USER || 'e2e';
 const PASS = process.env.MDNEST_PASSWORD || 'e2epass123';
 const NS = process.env.MDNEST_TEST_NS || 'testing_workspace';
 
-test.use({ viewport: { width: 1440, height: 900 } });
+test.use({ viewport: { width: 1440, height: 900 }, permissions: ['clipboard-read', 'clipboard-write'] });
 
 async function api(page, method, url, body) {
   return page.evaluate(async ([m, u, b]) => {
@@ -289,6 +289,84 @@ test('a docked chat you lost access to says so, and falls back to the list on re
     expect(await page.evaluate(() => localStorage.getItem('mdnest_docked_chat'))).toBe(null);
   } finally {
     await page.unroute('**/*').catch(() => {});
+    await cleanup(page, s.plain, s.chat);
+  }
+});
+
+// Chat follows the workspace in the main dropdown. A pinned chat used to stay
+// on screen after switching workspace, and the chat had its own workspace
+// picker, so a chat could be shown that did not belong to the workspace
+// around it. Now switching shows the other workspace's chats, and switching
+// back brings the pinned chat back.
+test('a pinned chat follows the main workspace and comes back when you return', async ({ page }) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  const s = await seed(page);
+  try {
+    await dock(page, s);
+    // No workspace picker inside chat: the main dropdown is the only one.
+    await expect(panel(page).locator('.chat-ns-select')).toHaveCount(0);
+
+    await page.locator('.ns-select').selectOption('zz_e2e_target');
+    await expect(panel(page).locator('.chat-room')).toHaveCount(0, { timeout: 15_000 });
+    await expect(panel(page).locator('.chat-list')).toBeVisible({ timeout: 15_000 });
+    await expect(panel(page).locator('.chat-list-item', { hasText: s.title })).toHaveCount(0);
+
+    await page.locator('.ns-select').selectOption(NS);
+    await expect(panel(page).locator('.chat-room-title h2')).toHaveText(s.title, { timeout: 15_000 });
+  } finally {
+    await cleanup(page, s.plain, s.chat);
+  }
+});
+
+test('full-screen chats show the main workspace, with no picker of their own', async ({ page }) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  const s = await seed(page);
+  try {
+    await page.goto(`/#${NS}/${s.plain}`);
+    await page.reload();
+    await expect(page.locator('.toolbar-path')).toContainText(s.plain, { timeout: 20_000 });
+    await page.locator('.toolbar-view-chats').click();
+    await expect(page.locator('.chat-list-item', { hasText: s.title }).first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('.chat-ns-select')).toHaveCount(0);
+    await expect(page.locator('.chat-list-ns')).toHaveText(NS);
+  } finally {
+    await cleanup(page, s.plain, s.chat);
+  }
+});
+
+// Right-click inside an open, pinned chat used to show the browser's menu.
+// It now shows mdnest's chat menu with Copy message; the composer keeps the
+// browser's menu (spelling suggestions). Code blocks get a Copy button.
+test('right-click in a pinned chat copies a message, and code blocks have Copy', async ({ page }) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  const s = await seed(page);
+  const msg = 'Run this:\n\n```\nmdnest whoami\n```';
+  expect((await api(page, 'POST', `/api/chat?ns=${NS}&path=${encodeURIComponent(s.chat)}&as=agent`, msg)).status).toBe(201);
+  try {
+    await dock(page, s);
+    const bubble = panel(page).locator('.chat-bubble', { hasText: 'Run this:' });
+    await expect(bubble).toBeVisible({ timeout: 15_000 });
+
+    await bubble.click({ button: 'right' });
+    const menu = page.locator('.context-menu');
+    await expect(menu).toBeVisible();
+    await expect(menu.locator('.context-menu-item').first()).toHaveText('Copy message');
+    await menu.locator('.context-menu-item', { hasText: 'Copy message' }).click();
+    await expect(menu).toBeHidden();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(msg);
+
+    await bubble.locator('pre').hover();
+    await bubble.locator('.code-copy-btn').click();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('mdnest whoami\n');
+
+    // The composer keeps the browser's own menu.
+    await dockedDraft(page).click({ button: 'right' });
+    await expect(page.locator('.context-menu')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+  } finally {
     await cleanup(page, s.plain, s.chat);
   }
 });
