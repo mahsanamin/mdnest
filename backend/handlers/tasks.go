@@ -150,6 +150,10 @@ type Task struct {
 type TasksResponse struct {
 	Board BoardConfig `json:"board"`
 	Tasks []Task      `json:"tasks"`
+	// Boards is each namespace's own board, keyed by namespace, on the
+	// all-workspaces view only: the merged Board above keeps one milestone per
+	// id, while the Milestones view lists every namespace's milestones apart.
+	Boards map[string]BoardConfig `json:"boards,omitempty"`
 }
 
 // taskMutation is the body of PATCH /api/tasks. Exactly one of ToColumn or
@@ -538,6 +542,7 @@ func (h *TaskHandler) HandleGlobalTasks(w http.ResponseWriter, r *http.Request) 
 		mu       sync.Mutex
 		allTasks []Task
 		boards   []BoardConfig
+		byNs     = map[string]BoardConfig{}
 		wg       sync.WaitGroup
 		sem      = make(chan struct{}, 4)
 	)
@@ -560,6 +565,7 @@ func (h *TaskHandler) HandleGlobalTasks(w http.ResponseWriter, r *http.Request) 
 			mu.Lock()
 			allTasks = append(allTasks, ts...)
 			boards = append(boards, board)
+			byNs[ns] = board
 			mu.Unlock()
 		}(ns)
 	}
@@ -576,7 +582,7 @@ func (h *TaskHandler) HandleGlobalTasks(w http.ResponseWriter, r *http.Request) 
 	})
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(TasksResponse{Board: unionBoards(boards), Tasks: allTasks})
+	json.NewEncoder(w).Encode(TasksResponse{Board: unionBoards(boards), Tasks: allTasks, Boards: byNs})
 }
 
 // unionBoards merges per-namespace column layouts into one: the default columns

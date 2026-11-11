@@ -78,9 +78,17 @@ describe('right-click menu groups', () => {
     ]);
   });
 
+  it('Task board on folders and the root when the board is on, read-only included; never on a note', () => {
+    const info = (target, opts = {}) => contextMenuGroups({ target, hasWrite: false, ...opts }).flat().filter((i) => i.action === 'task-board');
+    expect(info(folder, { taskBoard: true }).map((i) => i.label)).toEqual(['Task board']);
+    expect(info(null, { taskBoard: true })).toHaveLength(1);
+    expect(info(file, { taskBoard: true })).toHaveLength(0);
+    expect(info(folder)).toHaveLength(0);
+  });
+
   it('every item has an icon', () => {
     const all = contextMenuGroups({ target: file, hasWrite: true, multi: true }).flat()
-      .concat(contextMenuGroups({ target: folder, hasWrite: true, isAdmin: true, excalidraw: true, chat: true }).flat());
+      .concat(contextMenuGroups({ target: folder, hasWrite: true, isAdmin: true, excalidraw: true, chat: true, taskBoard: true }).flat());
     for (const i of all) expect(i.icon, i.label).toBeTruthy();
   });
 });

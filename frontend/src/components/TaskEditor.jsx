@@ -38,8 +38,9 @@ function RelationField({ icon, label, values, listId, isOption, labelFor, onAdd,
 // TaskEditor is the full create/edit form for a task and its detail block
 // (status/column, due, priority, workload, assignee, tags, steps, notes). It
 // emits a spec the backend renders to markdown, so the note stays the source of
-// truth.
-export default function TaskEditor({ board, task, defaultNote, defaultColumn, notePaths, currentUser, users, tagSuggestions, taskTitles, taskRefs, onSave, onCancel }) {
+// truth. `inline` draws it as a side panel (the milestone page's task detail)
+// instead of a dialog; `readOnly` shows the task without letting it change.
+export default function TaskEditor({ board, task, defaultNote, defaultColumn, notePaths, currentUser, users, tagSuggestions, taskTitles, taskRefs, onSave, onCancel, onOpenNote, inline = false, readOnly = false }) {
   const isNew = !task;
   const cols = board?.columns || [];
   const [title, setTitle] = useState(task?.text || '');
@@ -128,18 +129,26 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
     Promise.resolve(onSave(spec, isNew ? note.trim() : task.path)).catch((e) => setErr(e?.message || 'Failed to save task'));
   };
 
-  return (
-    <div className="tb-modal-backdrop" onClick={onCancel}>
-      <div className="tb-modal tb-editor" onClick={(e) => e.stopPropagation()}>
-        <h3>{isNew ? 'New task' : 'Edit task'}</h3>
+  const heading = isNew ? 'New task' : (inline ? 'Task' : 'Edit task');
+  const form = (
+      <div className={`tb-modal tb-editor${inline ? ' tb-editor-inline' : ''}`} onClick={(e) => e.stopPropagation()}
+        role={inline ? 'complementary' : undefined} aria-label={inline ? 'Task detail' : undefined}>
+        <div className="tb-editor-head">
+          <h3>{heading}</h3>
+          {inline && <button type="button" className="tb-editor-close" onClick={onCancel} aria-label="Close task detail" title="Close">✕</button>}
+        </div>
         {!isNew && (task.createdBy || task.created) && (
           <div className="tb-provenance" data-testid="task-provenance">
             {task.createdBy ? `Created by ${task.createdBy}` : 'Created'}{task.created ? ` on ${formatCreated(task.created)}` : ''}
           </div>
         )}
+        {inline && !isNew && onOpenNote && (
+          <button type="button" className="tb-card-source tb-editor-source" title={`Open ${task.path}`} onClick={() => onOpenNote(task.path)}>{task.path}</button>
+        )}
 
+        <fieldset className="tb-editor-fields" disabled={readOnly}>
         <label className="tb-modal-field">Title
-          <input className="tb-col-title" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} />
+          <input className="tb-col-title" autoFocus={!inline} value={title} onChange={(e) => setTitle(e.target.value)} />
         </label>
 
         {isNew && (
@@ -248,13 +257,19 @@ export default function TaskEditor({ board, task, defaultNote, defaultColumn, no
         <label className="tb-modal-field">Notes
           <textarea {...NO_GRAMMAR_ASSIST} rows={4} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </label>
+        </fieldset>
 
         {err && <div className="tb-error">{err}</div>}
         <div className="tb-modal-actions">
-          <button onClick={onCancel}>Cancel</button>
-          <button className="primary" onClick={submit}>{isNew ? 'Create' : 'Save'}</button>
+          <button onClick={onCancel}>{readOnly ? 'Close' : 'Cancel'}</button>
+          {!readOnly && <button className="primary" onClick={submit}>{isNew ? 'Create' : 'Save'}</button>}
         </div>
       </div>
+  );
+  if (inline) return form;
+  return (
+    <div className="tb-modal-backdrop" onClick={onCancel}>
+      {form}
     </div>
   );
 }

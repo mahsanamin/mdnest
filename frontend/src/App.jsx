@@ -606,11 +606,21 @@ function App() {
   // the root, so with a folder open in front of you the new file appeared
   // outside it.
   const [pickedFolder, setPickedFolder] = useState(null);
+  // The folder the task board is asked to show ({ path, n }, '' = the whole
+  // workspace): set from the tree while the board is open, or by the folder's
+  // "Task board" menu item. `n` makes picking the same folder again count.
+  const [boardFolder, setBoardFolder] = useState(null);
+  const pickFolder = useCallback((path) => {
+    setPickedFolder(path);
+    if (showTaskBoard) setBoardFolder({ path, n: Date.now() });
+  }, [showTaskBoard]);
+  // A board opened later (toolbar, link) starts from its remembered scope.
+  useEffect(() => { if (!showTaskBoard) setBoardFolder(null); }, [showTaskBoard]);
 
   // Source view is a per-file choice, not a preference: a drawing always opens
   // as a drawing, even if the last one was left showing its markdown.
   useEffect(() => { setDrawingSource(false); }, [selectedNs, currentPath]);
-  useEffect(() => { setPickedFolder(null); }, [selectedNs]);
+  useEffect(() => { setPickedFolder(null); setBoardFolder(null); }, [selectedNs]);
   // restoreBanner is shown when another user used the History modal to
   // restore an older version of the current file. It's deliberately a
   // separate state from conflictBanner because a restore is an
@@ -2458,6 +2468,11 @@ function App() {
       case 'new-drawing': await doCreateDrawing(target); break;
       case 'new-slides': doCreateSlides(target); break;
       case 'new-folder': await doCreateFolder(target); break;
+      case 'task-board':
+        // The board over this folder (the namespace root: the whole workspace).
+        setBoardFolder({ path: target?.path || '', n: Date.now() });
+        setBoardActive(true);
+        break;
       case 'delete-file': {
         if (!target || !selectedNs) return;
         // A chat gets the same warning as in the chats view: deleting it
@@ -2611,7 +2626,7 @@ function App() {
         break;
       }
     }
-  }, [selectedNs, currentPath, refreshTree, doCreateNote, doCreateDrawing, doCreateSlides, doCreateFolder, getLastPath, setLastPath, enterChats, flushPendingSave, runDownload, copyFileContents]);
+  }, [selectedNs, currentPath, refreshTree, doCreateNote, doCreateDrawing, doCreateSlides, doCreateFolder, getLastPath, setLastPath, enterChats, flushPendingSave, runDownload, copyFileContents, setBoardActive]);
 
   const handleTreeDrop = useCallback(async (fromPath, toFolderPath) => {
     if (!selectedNs) return;
@@ -2872,7 +2887,7 @@ function App() {
         onNewDrawing={excalidrawEnabled && canWrite('') ? () => doCreateDrawing(null) : null}
         onNewSlides={marpEnabled && canWrite('') ? () => doCreateSlides(null) : null}
         pickedFolder={pickedFolder}
-        onPickFolder={setPickedFolder}
+        onPickFolder={pickFolder}
         onNewFolder={canWrite('') ? () => doCreateFolder(null) : null}
         onRefreshTree={handleRefresh}
         onBeforeSync={flushPendingSave}
@@ -3096,8 +3111,10 @@ function App() {
                 onOpenNote={openNoteFromBoard}
                 onClose={() => { setShowTaskBoard(false); setBoardMilestone(null); }}
                 focusNote={taskListActive ? currentPath : null}
+                focusFolder={boardFolder}
                 milestoneRoute={boardMilestone}
                 onMilestoneRoute={setBoardMilestone}
+                onOpenWorkspaceMilestone={(n, id) => { handleSelectNs(n); setBoardMilestone(id); }}
               />
             </Suspense>
             </ChunkErrorBoundary>
@@ -3406,6 +3423,7 @@ function App() {
         excalidraw={excalidrawEnabled}
         marp={marpEnabled}
         chat={chatEnabled}
+        taskBoard={taskBoardEnabled}
       />
       {showApprovals && approvalsEnabled && (
         <ApprovalsPanel

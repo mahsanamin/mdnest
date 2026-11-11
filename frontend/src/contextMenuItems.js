@@ -9,7 +9,7 @@
 //   create    New note / folder / drawing / slides / chat, Paste here (folder, root)
 //   organize  Rename, Move to…, Copy to…
 //   share     Download, Copy file contents, Copy browser link, Copy path for CLI
-//   info      History, Authors                                  (files)
+//   info      History, Authors (files); Task board (folder, root)
 //   admin     Manage access
 //   danger    Delete
 //
@@ -18,7 +18,7 @@
 // click, so change one only together with tests/browser.
 
 export function contextMenuGroups({
-  target, hasWrite = true, isAdmin = false, multi = false, excalidraw = false, marp = false, chat = false,
+  target, hasWrite = true, isAdmin = false, multi = false, excalidraw = false, marp = false, chat = false, taskBoard = false,
 }) {
   const isFolder = !!target && (target.type === 'folder' || target.type === 'directory');
   const isFile = !!target && !isFolder && !!target.path;
@@ -68,6 +68,10 @@ export function contextMenuGroups({
   if (isFile) {
     info.push({ label: 'History', action: 'history', icon: 'history' });
     if (multi) info.push({ label: 'Authors', action: 'authors', icon: 'people' });
+  }
+  // The task board (List, Kanban, Milestones) over the tasks of this folder.
+  if ((isFolder || isRoot) && taskBoard) {
+    info.push({ label: 'Task board', action: 'task-board', icon: 'board', hint: isFolder ? 'Tasks of this folder and its sub-folders' : 'Tasks of the whole workspace' });
   }
 
   const admin = [];

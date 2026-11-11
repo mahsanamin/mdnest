@@ -6,6 +6,18 @@ All notable changes to mdnest are documented here.
 
 ## v4.8.15 (in progress)
 
+### Added
+
+- **A folder's task board, and a task's detail next to its milestone.** With
+  the task board open, clicking a folder in the tree shows the tasks of that
+  folder and its sub-folders (List, Kanban and Milestones); "Task board" in a
+  folder's right-click menu opens it there. Milestones follow the board's scope
+  (workspace, folder, this note, all workspaces): on a folder or a note they
+  count the tasks there, and over every workspace they are grouped by
+  workspace. Clicking a task on a milestone page opens it in full on the right
+  of the page, to read or edit in place. Thanks to
+  [@ecthelion77](https://github.com/ecthelion77) (Olivier Gintrand), #162.
+
 ### Fixed
 
 - **People who get access through an access group can be assigned tasks and
