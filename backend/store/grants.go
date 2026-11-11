@@ -169,14 +169,27 @@ type NamespaceUser struct {
 	Username string `json:"username"`
 }
 
-// UsersForNamespace returns the distinct users who hold a grant on the namespace
-// (namespace admins are auto-granted, so they are included; superadmins have no
-// grant rows and are not). Ordered by username for a stable picker.
+// UsersForNamespace returns the distinct users who have access to the namespace:
+// a grant of their own (namespace admins are auto-granted, so they are
+// included; superadmins have no grant rows and are not), or membership of an
+// access group with a grant on it, as a user member or through an IdP group of
+// their last SSO login (user_oidc_groups). Ordered by username for a stable
+// picker. It also bounds who can be invited to a private chat.
 func (s *PostgresGrantStore) UsersForNamespace(namespace string) ([]NamespaceUser, error) {
 	rows, err := s.db.Query(
-		`SELECT DISTINCT u.id, u.username
-		   FROM access_grants g JOIN users u ON g.user_id = u.id
-		  WHERE g.namespace = $1 AND u.username <> ''
+		`SELECT u.id, u.username
+		   FROM users u
+		  WHERE u.username <> ''
+		    AND (EXISTS (SELECT 1 FROM access_grants g
+		                  WHERE g.namespace = $1 AND g.user_id = u.id)
+		      OR EXISTS (SELECT 1
+		                   FROM access_group_grants gg
+		                   JOIN access_group_members m ON m.group_id = gg.group_id
+		                  WHERE gg.namespace = $1
+		                    AND (m.user_id = u.id
+		                         OR m.oidc_group IN (SELECT unnest(o.groups)
+		                                               FROM user_oidc_groups o
+		                                              WHERE o.user_id = u.id))))
 		  ORDER BY u.username`, namespace,
 	)
 	if err != nil {

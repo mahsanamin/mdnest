@@ -80,7 +80,7 @@ docker run -d --name "$BE" --network "$NET" \
   -e MDNEST_USER=admin -e MDNEST_PASSWORD=adminpass123 -e MDNEST_JWT_SECRET=e2e-sec-secret \
   -e NOTES_DIR=/notes -e FRONTEND_ORIGIN=http://localhost \
   -e ENABLE_LIVE_COLLAB=true -e ENABLE_TASK_BOARD=true -e DISABLE_UPDATE_CHECK=true \
-  -e API_TOKEN_GROUPS_MAX_AGE=1h \
+  -e API_TOKEN_GROUPS_MAX_AGE=1h -e OIDC_GROUPS_CLAIM=groups \
   -v "$NOTES_DIR:/notes" -p 127.0.0.1:0:8080 "$IMAGE" >/dev/null
 PORT="$(docker port "$BE" 8080/tcp | head -1 | sed 's/.*://')"
 BASE="http://127.0.0.1:$PORT"
@@ -328,9 +328,21 @@ code, otok = call("POST", "/api/auth/tokens", olga, {"name": "e2e-groups"})
 olga_api = otok["token"]
 code, us = call("GET", "/api/admin/users", admin)
 olga_id = next(u["id"] for u in (us if isinstance(us, list) else us.get("users", [])) if u["username"] == "olga")
+tess_id = next(u["id"] for u in (us if isinstance(us, list) else us.get("users", [])) if u["username"] == "tess")
+def members():
+    code, r = call("GET", "/api/namespace/users?ns=alpha", pat)
+    return [u["username"] for u in r] if code == 200 and isinstance(r, list) else (code, r)
+m = members()
+check("member list: a user member of an access group is listed (#160)", "gus" in m, m)
+check("member list: an IdP group member with no SSO login on record is not", "olga" not in m and "tess" not in m, m)
 code, _ = call("GET", "/api/note?ns=alpha&path=Shared/a.md", olga_api)
 check("no SSO login on record: the token has no group access (403)", code == 403, code)
 psql(f"INSERT INTO user_oidc_groups (user_id, groups) VALUES ({olga_id}, ARRAY['entra-readers'])")
+check("member list: an IdP group member is listed after an SSO login in that group", "olga" in members(), members())
+code, r = call("POST", f"/api/chat/convert?ns=alpha&path=Shared/group-room.md&private=1&members={ids['gus']},{olga_id}", pat)
+check("a new private chat can invite the group members", code in (200, 201), (code, r))
+code, r = call("POST", f"/api/chat/convert?ns=alpha&path=Shared/stranger-room.md&private=1&members={tess_id}", pat)
+check("…but not someone without access to the namespace (404)", code == 404, (code, r))
 code, _ = call("GET", "/api/note?ns=alpha&path=Shared/a.md", olga_api)
 check("recent login in entra-readers: the token reads the group's folder (200)", code == 200, code)
 code, r = call("GET", "/api/note?ns=alpha&path=Private/p.md", olga_api)
@@ -342,6 +354,7 @@ check("the password session (no IdP groups) is unchanged (403)", code == 403, co
 psql(f"UPDATE user_oidc_groups SET groups = ARRAY[]::text[] WHERE user_id = {olga_id}")
 code, _ = call("GET", "/api/note?ns=alpha&path=Shared/a.md", olga_api)
 check("last login in no group: the token loses the access (403)", code == 403, code)
+check("member list: last login in no group, not listed", "olga" not in members(), members())
 psql(f"UPDATE user_oidc_groups SET groups = ARRAY['entra-readers'], captured_at = now() - interval '2 hours' WHERE user_id = {olga_id}")
 code, _ = call("GET", "/api/note?ns=alpha&path=Shared/a.md", olga_api)
 check("last login older than the max age: the token loses the access (403)", code == 403, code)

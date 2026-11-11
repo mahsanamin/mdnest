@@ -485,7 +485,7 @@ The task board gathers every task-list item in a namespace and presents it as a 
 
 **Filtering** *(v4.2.0+).* A filter bar narrows the loaded tasks by title text, tags (click chips to toggle; matching is OR) and assignee (**All / Me / Unassigned / a member**). It applies to every scope and both views, and filters before grouping, so it's instant with no extra round-trip.
 
-**Assignees** *(v4.2.0+).* A task can carry an `assignee`, picked from the workspace's members in the task editor. New tasks default to you. In single mode, where there's no member list, it's a free-choice field.
+**Assignees** *(v4.2.0+).* A task can carry an `assignee`, picked from the workspace's members in the task editor: everyone with access to it, through their own grant or an access group *(v4.8.15+)*. New tasks default to you. In single mode, where there's no member list, it's a free-choice field.
 
 **Relations** *(v4.2.0+).* A task can declare `depends-on`, `blocked-by` and `related-to` links to other tasks, shown on the card and resolved by each task's stable `ref`.
 
