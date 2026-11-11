@@ -376,7 +376,8 @@ func main() {
 		// this adapter feeds the git committer, overriding the coarse
 		// GIT_REMOTE_URL default per namespace.
 		workspaceStore = store.NewPostgresWorkspaceStore(db, encryptionSecret)
-		wsResolver.Set(handlers.WorkspaceRemoteResolver(workspaceStore.RemoteForNamespace))
+		wsResolver.Set(handlers.WorkspaceRemoteResolver(
+			handlers.LiveProvisionedCredential(workspaceStore.RemoteForNamespace, readGitToken)))
 
 		// The durability writer records each namespace's last mirror sync outcome
 		// on its workspace row so the owner sees why mirroring fails (bad token,
