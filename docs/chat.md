@@ -540,7 +540,8 @@ existing chat, open it and click **Members** (or right-click it in the list
 - The picker lists the people who can reach the workspace, and only they can
   be added: a direct grant, or membership of an access group with a grant
   there. A group's IdP-group members are counted by the groups of their last
-  SSO sign-in (with `OIDC_GROUPS_CLAIM` set). Being on the member list does
+  SSO sign-in (with `OIDC_GROUPS_CLAIM` set) for 30 days after it, or for
+  `API_TOKEN_GROUPS_MAX_AGE` when that is longer. Being on the member list does
   not give anyone access to the workspace: a member still needs a grant that
   covers the note.
 

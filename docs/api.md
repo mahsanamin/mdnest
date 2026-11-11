@@ -1702,9 +1702,12 @@ frontend degrades to a free-choice list.
 
 **Response:** `[{ "id": 1, "username": "sam" }, ...]` — usernames only, ordered
 for a stable picker. Emails are never returned. Namespace admins appear (they
-hold grants); superadmins do not (they have no grant rows). A person who reaches
-the namespace only through an IdP group appears once they have signed in with
-SSO at least once.
+hold grants); superadmins do not (they have no grant rows), and blocked accounts
+do not. A person who reaches the namespace only through an IdP group appears
+while their last SSO sign-in in that group is less than 30 days old, or less
+than `API_TOKEN_GROUPS_MAX_AGE` when that is longer. mdnest only sees a
+person's IdP groups when they sign in, so someone removed from the group, or
+who left, drops off the list after that time.
 
 ### POST /api/tasks
 

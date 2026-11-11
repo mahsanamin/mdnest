@@ -58,7 +58,7 @@ for _ in $(seq 1 30); do docker exec "$PG" pg_isready -U mdnest >/dev/null 2>&1 
 docker run -d --name "$BE" --network "$NET" \
   -e AUTH_MODE=multi -e POSTGRES_HOST="$PG" -e POSTGRES_PASSWORD=pw \
   -e MDNEST_USER=admin -e MDNEST_PASSWORD=adminpass123 -e MDNEST_JWT_SECRET=e2e-multi-secret \
-  -e NOTES_DIR=/notes -e FRONTEND_ORIGIN=http://localhost -e OIDC_GROUPS_CLAIM=groups \
+  -e NOTES_DIR=/notes -e FRONTEND_ORIGIN=http://localhost -e OIDC_GROUPS_CLAIM=groups -e API_TOKEN_GROUPS_MAX_AGE=1080h \
   -v "$NOTES_DIR:/notes" -p 127.0.0.1:0:8080 "$IMAGE" >/dev/null
 PORT="$(docker port "$BE" 8080/tcp | head -1 | sed 's/.*://')"
 BASE="http://127.0.0.1:$PORT"
@@ -277,6 +277,27 @@ subprocess.run(["docker", "exec", os.environ["PG"], "psql", "-q", "-U", "mdnest"
 code, r = call("GET", "/api/namespace/users?ns=alpha", owen)
 left = {u["username"] for u in r} if code == 200 else set()
 check("after a sign-in without the IdP group, ivan is no longer listed", "ivan" not in left and "gina" in left, f"{code} {r}")
+# The recorded groups count for a while after that sign-in, then not: someone
+# removed from the IdP group, or gone from the company, never signs in again.
+# The window is 30 days, or API_TOKEN_GROUPS_MAX_AGE when longer (45 days
+# here), since the person's API tokens reach the workspace for that long.
+subprocess.run(["docker", "exec", os.environ["PG"], "psql", "-q", "-U", "mdnest", "-d", "mdnest", "-c",
+                f"UPDATE user_oidc_groups SET groups = ARRAY['idp-alpha'], captured_at = now() - interval '44 days' WHERE user_id = {ids['ivan']}"], check=True, stdout=subprocess.DEVNULL)
+code, r = call("GET", "/api/namespace/users?ns=alpha", owen)
+check("a sign-in 44 days ago in the IdP group still counts (token age 45 days)", code == 200 and "ivan" in {u["username"] for u in r}, f"{code} {r}")
+subprocess.run(["docker", "exec", os.environ["PG"], "psql", "-q", "-U", "mdnest", "-d", "mdnest", "-c",
+                f"UPDATE user_oidc_groups SET captured_at = now() - interval '46 days' WHERE user_id = {ids['ivan']}"], check=True, stdout=subprocess.DEVNULL)
+code, r = call("GET", "/api/namespace/users?ns=alpha", owen)
+check("a sign-in 46 days ago no longer counts", code == 200 and "ivan" not in {u["username"] for u in r} and "gina" in {u["username"] for u in r}, f"{code} {r}")
+code, r = call("POST", "/api/chat/members?ns=alpha&path=Rooms/room.md", owen, {"userId": ids["ivan"]})
+check("so he cannot be added to the private chat", code in (403, 404), f"{code} {r}")
+# A blocked account cannot sign in, so it is not offered either.
+subprocess.run(["docker", "exec", os.environ["PG"], "psql", "-q", "-U", "mdnest", "-d", "mdnest", "-c",
+                f"UPDATE users SET blocked = true WHERE id = {ids['gina']}"], check=True, stdout=subprocess.DEVNULL)
+code, r = call("GET", "/api/namespace/users?ns=alpha", owen)
+check("a blocked account is not listed", code == 200 and "gina" not in {u["username"] for u in r}, f"{code} {r}")
+subprocess.run(["docker", "exec", os.environ["PG"], "psql", "-q", "-U", "mdnest", "-d", "mdnest", "-c",
+                f"UPDATE users SET blocked = false WHERE id = {ids['gina']}"], check=True, stdout=subprocess.DEVNULL)
 check("the member picker leaves out zed (no access)", "zed" not in names, f"{code} {r}")
 code, r = call("POST", "/api/chat/members?ns=alpha&path=Rooms/room.md", owen, {"userId": ids["gina"]})
 check("owen adds gina to the private chat", code == 200 and any(m["username"] == "gina" for m in r["members"]), f"{code} {r}")

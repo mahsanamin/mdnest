@@ -362,6 +362,7 @@ check("member list: last login in no group, not listed", "olga" not in members()
 psql(f"UPDATE user_oidc_groups SET groups = ARRAY['entra-readers'], captured_at = now() - interval '2 hours' WHERE user_id = {olga_id}")
 code, _ = call("GET", "/api/note?ns=alpha&path=Shared/a.md", olga_api)
 check("last login older than the max age: the token loses the access (403)", code == 403, code)
+check("member list: that login still counts there, for 30 days (not the 1h token age)", "olga" in members(), members())
 
 print("── live collaboration")
 check("pat cannot join a /Private room (403)", ws_status(pat, "Private/p.md") == 403)

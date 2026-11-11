@@ -13,9 +13,12 @@ All notable changes to mdnest are documented here.
   people with a grant of their own, so a group member could not be picked, and
   the server refused to add them to a chat. They now list everyone with access
   through a group too: user members, and IdP group members (Entra ID,
-  Keycloak...) once they have signed in with SSO. For that, with
+  Keycloak...) for 30 days after an SSO sign-in in that group (or
+  `API_TOKEN_GROUPS_MAX_AGE` when longer), so someone removed from the group
+  drops off even if they never sign in again. For that, with
   `OIDC_GROUPS_CLAIM` set, each SSO login now records the person's IdP groups,
-  not only when `API_TOKEN_GROUPS_MAX_AGE` is set. #160. Thanks to
+  not only when `API_TOKEN_GROUPS_MAX_AGE` is set. Blocked accounts are not
+  listed. #160. Thanks to
   [@ecthelion77](https://github.com/ecthelion77) (Olivier Gintrand), #161.
 - **A link you cannot open says so.** A link to a workspace you are not in
   used to land you on the last note you had open there, with the address

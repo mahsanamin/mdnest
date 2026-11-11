@@ -42,11 +42,39 @@ type GrantStore interface {
 // PostgresGrantStore implements GrantStore against a Postgres database.
 type PostgresGrantStore struct {
 	db *DB
+	// memberGroupsWindow is how long the IdP groups of a person's last SSO
+	// login count for the namespace member list (see UsersForNamespace).
+	memberGroupsWindow time.Duration
 }
 
 // NewPostgresGrantStore creates a new PostgresGrantStore.
 func NewPostgresGrantStore(db *DB) *PostgresGrantStore {
-	return &PostgresGrantStore{db: db}
+	return &PostgresGrantStore{db: db, memberGroupsWindow: MemberGroupsWindow(0)}
+}
+
+// DefaultMemberGroupsWindow is how long the IdP groups recorded at a person's
+// last SSO login keep them on a namespace's member list. mdnest cannot ask
+// the IdP who is in a group; it only sees the groups in each login. A browser
+// session carries them for 12 hours, but a teammate who signs in every few
+// days must not drop off the assignee and chat pickers in between, while
+// someone removed from the group (or from the company) never signs in again
+// and must not stay listed forever. 30 days covers both.
+const DefaultMemberGroupsWindow = 30 * 24 * time.Hour
+
+// MemberGroupsWindow returns the member-list window for a given
+// API_TOKEN_GROUPS_MAX_AGE: the default, or the token age when it is longer,
+// since a person's API tokens reach the namespace for that long.
+func MemberGroupsWindow(tokenGroupsMaxAge time.Duration) time.Duration {
+	if tokenGroupsMaxAge > DefaultMemberGroupsWindow {
+		return tokenGroupsMaxAge
+	}
+	return DefaultMemberGroupsWindow
+}
+
+// UseTokenGroupsMaxAge widens the member-list window to the API token one when
+// that is longer (API_TOKEN_GROUPS_MAX_AGE).
+func (s *PostgresGrantStore) UseTokenGroupsMaxAge(maxAge time.Duration) {
+	s.memberGroupsWindow = MemberGroupsWindow(maxAge)
 }
 
 func (s *PostgresGrantStore) CreateGrant(userID int, namespace, path, permission string, grantedBy *int) (*Grant, error) {
@@ -173,13 +201,15 @@ type NamespaceUser struct {
 // a grant of their own (namespace admins are auto-granted, so they are
 // included; superadmins have no grant rows and are not), or membership of an
 // access group with a grant on it, as a user member or through an IdP group of
-// their last SSO login (user_oidc_groups). Ordered by username for a stable
-// picker. It also bounds who can be invited to a private chat.
+// their last SSO login (user_oidc_groups), while that login is within
+// memberGroupsWindow. Blocked accounts are left out: they cannot sign in.
+// Ordered by username for a stable picker. It also bounds who can be invited
+// to a private chat.
 func (s *PostgresGrantStore) UsersForNamespace(namespace string) ([]NamespaceUser, error) {
 	rows, err := s.db.Query(
 		`SELECT u.id, u.username
 		   FROM users u
-		  WHERE u.username <> ''
+		  WHERE u.username <> '' AND NOT u.blocked
 		    AND (EXISTS (SELECT 1 FROM access_grants g
 		                  WHERE g.namespace = $1 AND g.user_id = u.id)
 		      OR EXISTS (SELECT 1
@@ -189,8 +219,9 @@ func (s *PostgresGrantStore) UsersForNamespace(namespace string) ([]NamespaceUse
 		                    AND (m.user_id = u.id
 		                         OR m.oidc_group IN (SELECT unnest(o.groups)
 		                                               FROM user_oidc_groups o
-		                                              WHERE o.user_id = u.id))))
-		  ORDER BY u.username`, namespace,
+		                                              WHERE o.user_id = u.id
+		                                                AND o.captured_at > now() - make_interval(secs => $2::float8)))))
+		  ORDER BY u.username`, namespace, s.memberGroupsWindow.Seconds(),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("users for namespace: %w", err)

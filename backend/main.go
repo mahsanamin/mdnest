@@ -624,6 +624,11 @@ func main() {
 		}
 		if maxAge > 0 && oidcGroupStore != nil {
 			tokenHandler.UseOwnerGroups(oidcGroupStore, maxAge)
+			// The member list keeps these people listed at least as long as
+			// their tokens can reach the namespace.
+			if gs, ok := grantStore.(*store.PostgresGrantStore); ok {
+				gs.UseTokenGroupsMaxAge(maxAge)
+			}
 			log.Printf("API tokens use their owner's SSO groups for %s after the owner's login", maxAge)
 		} else if maxAge > 0 {
 			log.Printf("WARNING: API_TOKEN_GROUPS_MAX_AGE needs multi mode and OIDC_GROUPS_CLAIM, ignored")

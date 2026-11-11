@@ -170,7 +170,9 @@ sees it in the browser but not from the CLI or an agent. In multi mode with
 `user_oidc_groups` (one row per user, replaced at each login, an empty list included;
 deleted with the user) *(v4.8.15+; before, only with `API_TOKEN_GROUPS_MAX_AGE`)*. The
 namespace member list (`/api/namespace/users`: assignee and chat member pickers) uses it
-to include the IdP-group members of access groups; it grants nothing, access is still
+to include the IdP-group members of access groups, for 30 days after that login (or
+`API_TOKEN_GROUPS_MAX_AGE` when longer), so a person removed from the IdP group drops off
+it even if they never sign in again; it grants nothing, access is still
 checked on every request. With `API_TOKEN_GROUPS_MAX_AGE` set (a Go duration, e.g.
 `168h`), the person's tokens use that
 list until `API_TOKEN_GROUPS_MAX_AGE` after the login, and none once it is older. The
