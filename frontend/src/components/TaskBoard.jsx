@@ -349,27 +349,51 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
     }
   }, [ns, editorTask, reload]);
 
-  // The task shown in full next to a milestone page. Kept as its location and
-  // found again in every load, so it follows saves and background refreshes,
-  // and closes by itself when the task is gone.
+  // The task shown in full next to a milestone page, found again in every load
+  // so it follows saves and background refreshes, and closes by itself when the
+  // task is gone. It is found by its first line (relocateTask), never by its
+  // line number alone: a task added above it in the same note shifts it down,
+  // and the old line then holds ANOTHER task, which passes the server's stale
+  // check, so a save there wrote the form over that other task. `prevRaw` is
+  // the first line before our own save, so the panel stays on the task until
+  // the reload brings the saved line in.
   const [detailAt, setDetailAt] = useState(null);
-  const detailTask = useMemo(() => (detailAt ? tasks.find((t) => sameTask(t, detailAt)) || null : null), [tasks, detailAt]);
+  const detailTask = useMemo(() => {
+    if (!detailAt) return null;
+    return relocateTask(tasks, detailAt)
+      || (detailAt.prevRaw != null ? relocateTask(tasks, { ...detailAt, raw: detailAt.prevRaw }) : null);
+  }, [tasks, detailAt]);
+  // Keep the location current, so the nearest copy of an identical line wins.
+  useEffect(() => {
+    if (!detailTask || !detailAt) return;
+    const settled = detailTask.raw === detailAt.raw;
+    if (detailTask.line !== detailAt.line || (settled && detailAt.prevRaw != null)) {
+      setDetailAt((d) => (d ? { ...d, line: detailTask.line, prevRaw: settled ? null : d.prevRaw } : d));
+    }
+  }, [detailTask, detailAt]);
+  const detailSeq = useRef(0);
   const openDetail = useCallback((task) => {
-    setDetailAt((cur) => (sameTask(cur, task) ? null : { namespace: task.namespace, path: task.path, line: task.line }));
-  }, []);
+    setDetailAt((cur) => (cur && sameTask(detailTask, task) ? null
+      : { namespace: task.namespace, path: task.path, line: task.line, raw: task.raw, prevRaw: null, seq: ++detailSeq.current }));
+  }, [detailTask]);
   // Another milestone, another mode or another workspace: nothing to follow.
   useEffect(() => { setDetailAt(null); }, [selectedMilestone, mode, ns, effectiveScope]);
   const handleDetailSave = useCallback(async (spec) => {
     const t = detailTask;
     if (!t) return;
+    let saved;
     try {
-      await patchTask(t.namespace || ns, t.path, { line: t.line, raw: t.raw, replace: spec });
+      saved = await patchTask(t.namespace || ns, t.path, { line: t.line, raw: t.raw, replace: spec });
     } catch (e) {
       if (e.status === 409) {
         await reload({ silent: true, force: true });
         throw new Error('This task changed in its note in the meantime. It is reloaded; check it and save again.');
       }
       throw e;
+    }
+    // The server answers with the task as saved: follow its new first line.
+    if (saved && typeof saved.raw === 'string') {
+      setDetailAt((d) => (d ? { ...d, line: saved.line || d.line, raw: saved.raw, prevRaw: t.raw } : d));
     }
     await reload({ silent: true });
   }, [ns, detailTask, reload]);
@@ -852,7 +876,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
             }}
             onShowOnBoard={(id) => { setMilestoneFilter(id); setFiltersOpen(true); setModePersist('board'); }}
             onOpenTask={openDetail}
-            isSelectedTask={(t) => sameTask(t, detailAt)}
+            isSelectedTask={(t) => sameTask(t, detailTask)}
             onOpenNote={onOpenNote}
             scope={effectiveScope}
             scopeHint={effectiveScope === 'folder' ? `Counting the tasks in 📁 ${folder}` : effectiveScope === 'note' ? `Counting the tasks in ${currentPath}` : ''}
@@ -862,7 +886,8 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
           {detailTask && (
             <div className="tb-ms-detail">
               <TaskEditor
-                key={`${detailTask.namespace || ''}\u0000${detailTask.path}\u0000${detailTask.line}`}
+                // Per opening, not per line: a line shift must not reset the form.
+                key={detailAt.seq}
                 inline
                 readOnly={!canWrite}
                 board={board}

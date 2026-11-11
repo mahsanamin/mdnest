@@ -171,3 +171,58 @@ test('over every workspace, milestones are grouped by workspace and open in thei
     await cleanup(page, s);
   }
 });
+
+// The detail must follow its task, not its line number. A task added above it
+// in the same note (by someone else, the CLI, an agent) shifts it down; the
+// next background refresh then finds a DIFFERENT task at the old line. Saving
+// the detail at that point passed the server's stale-line check (it compares
+// the line it is given with the note) and wrote the form over that other task.
+test('the task detail follows its task when a line is added above it', async ({ page }) => {
+  test.setTimeout(90_000);
+  await login(page);
+  const id = Date.now().toString(36);
+  const ms = `shift-${id}`;
+  const note = `__shift-${id}.md`;
+  const [a, b, z] = [`Alpha ${id}`, `Bravo ${id}`, `Zulu ${id}`];
+  const body = (tasks) => `# Shift\n\n${tasks.map((t) => `- [ ] ${t}\n  - milestone: ${ms}\n`).join('')}`;
+  try {
+    expect((await api(page, 'POST', `/api/note?ns=${NS}&path=${q(note)}`, body([a, b]))).status).toBe(201);
+    const board = JSON.parse((await api(page, 'GET', `/api/board?ns=${NS}`)).text);
+    board.milestones = [...(board.milestones || []), { id: ms, title: `Shift ${id}` }];
+    expect((await api(page, 'PUT', `/api/board?ns=${NS}`, JSON.stringify(board))).status).toBe(200);
+
+    await page.goto(`/#!milestones/${NS}/${ms}`);
+    const msPage = page.locator(`.tb-ms-page[data-milestone="${ms}"]`);
+    await expect(msPage).toBeVisible({ timeout: 30_000 });
+    const rowB = msPage.locator('.tb-ms-task', { hasText: b });
+    await rowB.locator('.tb-ms-task-title').click();
+    const detail = page.locator('.tb-ms-detail');
+    await expect(detail.getByLabel('Title')).toHaveValue(b);
+
+    // Someone adds a task above both, then the board refreshes in the background.
+    expect((await api(page, 'PUT', `/api/note?ns=${NS}&path=${q(note)}`, body([z, a, b]))).status).toBeLessThan(300);
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await expect(msPage.locator('.tb-ms-task', { hasText: z })).toBeVisible();
+
+    // Still Bravo, in the list and in the detail.
+    await expect(rowB).toHaveClass(/selected/);
+    await expect(msPage.locator('.tb-ms-task', { hasText: a })).not.toHaveClass(/selected/);
+    await expect(detail.locator('.tb-editor-source')).toHaveText(note);
+
+    const renamed = `${b} renamed`;
+    await detail.getByLabel('Title').fill(renamed);
+    await detail.getByRole('button', { name: 'Save' }).click();
+    await expect.poll(async () => (await api(page, 'GET', `/api/note?ns=${NS}&path=${q(note)}`)).text).toContain(renamed);
+    const text = (await api(page, 'GET', `/api/note?ns=${NS}&path=${q(note)}`)).text;
+    // Alpha is untouched, and Bravo was renamed rather than copied over it.
+    expect(text).toContain(`- [ ] ${a}`);
+    expect(text).toContain(`- [ ] ${z}`);
+    expect(text).not.toContain(`- [ ] ${b}\n`);
+    await expect(detail.getByLabel('Title')).toHaveValue(renamed);
+  } finally {
+    const board = JSON.parse((await api(page, 'GET', `/api/board?ns=${NS}`)).text);
+    board.milestones = (board.milestones || []).filter((m) => m.id !== ms);
+    await api(page, 'PUT', `/api/board?ns=${NS}`, JSON.stringify(board));
+    await api(page, 'DELETE', `/api/note?ns=${NS}&path=${q(note)}`);
+  }
+});
