@@ -45,6 +45,8 @@ Below the namespace selector, the folder tree shows all files and folders in the
 - Click a **file** to open it in the editor.
 - Hidden files (those starting with `.`) are not shown. This keeps `.git` directories and other dotfiles out of the way.
 - **The tree remembers which folders you had open, per namespace** (v3.11.4+). A refresh or namespace switch restores your expanded folders instead of re-expanding everything; the folder holding the currently-open file auto-reveals but can still be collapsed.
+- **A large file asks first** (v4.8.15+). A file over 1 MB opens only after you confirm, and then as plain text: the Basic editor, without the Live editor or the preview, which could freeze the page on a file that size. Files over 5 MB are not listed in the tree, and mdnest does not open a file over 10 MB.
+- **A link that cannot be opened says why** (v4.8.15+): you have no access to its workspace or note, or the note was moved or deleted. You stay where you were.
 
 On mobile, tap the hamburger menu icon in the top-left corner to show or hide the sidebar.
 
@@ -482,10 +484,11 @@ The task board gathers every task-list item in a namespace and presents it as a 
 
 - **Kanban / List** -- a toggle at the top left. Kanban shows one column per board column (drag a card between columns to change its status — grab it anywhere, and drop anywhere in the target column's lane, including below its last card or on a collapsed column; hold a card at the board's left or right edge to scroll to columns off-screen); List shows tasks grouped by note with quick checkboxes.
 - **Workspace / This note / All workspaces** -- when a note is open, scope the board to the whole namespace, just the current note, or *(v4.2.0+)* every workspace you can access. In the cross-workspace view each card shows which workspace it came from; creating tasks and editing columns are hidden there, since both belong to one specific workspace.
+- **📁 Folder** *(v4.8.15+)* -- with the board open, click a folder in the tree to see the tasks of that folder and its sub-folders, or right-click a folder (or the workspace root) and pick **Task board**. The folder's button stays next to **Workspace** to come back to it. A folder board shows the tasks you can read there, like the workspace board.
 
 **Filtering** *(v4.2.0+).* A filter bar narrows the loaded tasks by title text, tags (click chips to toggle; matching is OR) and assignee (**All / Me / Unassigned / a member**). It applies to every scope and both views, and filters before grouping, so it's instant with no extra round-trip.
 
-**Assignees** *(v4.2.0+).* A task can carry an `assignee`, picked from the workspace's members in the task editor. New tasks default to you. In single mode, where there's no member list, it's a free-choice field.
+**Assignees** *(v4.2.0+).* A task can carry an `assignee`, picked from the workspace's members in the task editor: everyone with access to it, through their own grant or an access group *(v4.8.15+)*. New tasks default to you. In single mode, where there's no member list, it's a free-choice field.
 
 **Relations** *(v4.2.0+).* A task can declare `depends-on`, `blocked-by` and `related-to` links to other tasks, shown on the card and resolved by each task's stable `ref`.
 
@@ -494,6 +497,8 @@ The task board gathers every task-list item in a namespace and presents it as a 
 **Cards.** Each card shows the title, a priority badge, the due date (red when overdue), tags, workload, its milestone and a step progress bar. **More** expands the steps (tick them off individually) and the description. The foot of the card shows who created the task and when.
 
 **Milestones.** **Milestones**, next to List and Kanban, shows one card per milestone: its dates and how many days are left (or how late it is), its progress (done tasks plus the done sub-tasks of open ones) and, with a start date, the share of the period already gone (marked *behind* when time runs ahead of the work), its participants and its late or blocked tasks. Click a card to open the milestone's page: tasks and sub-tasks done, what needs attention, the tasks added since the start, a breakdown by column, the participants with their open and done tasks, and the tasks by column. The page has its own link (`#!milestones/<workspace>/<id>`) to share; **Show on the Kanban** filters the board to the milestone. If you can write to the workspace you can add, edit, close, reopen and delete milestones there, and pick a task's milestone in the task editor. See [Task Model](tasks.md#milestones).
+
+*(v4.8.15+)* Click a task on a milestone page to open it in full on the right of the page: edit it in place and **Save**, or just read it without write access. Milestones follow the board's scope: on a folder or a note only the milestones with tasks there are listed and their progress counts those tasks; over **All workspaces** each workspace's milestones show in their own section, and a card opens the milestone in its workspace.
 
 **Creating a task.** Click **+ New task** to open the editor: title, target note (defaults to the board's default note), column, due date, priority, workload, assignee, milestone, tags, steps and a description. The task is appended to the chosen note (created if it doesn't exist), with who created it and when.
 

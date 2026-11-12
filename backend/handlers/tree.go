@@ -20,9 +20,12 @@ type TreeHandler struct {
 }
 
 type TreeNode struct {
-	Name     string      `json:"name"`
-	Type     string      `json:"type"`
-	Path     string      `json:"path,omitempty"`
+	Name string `json:"name"`
+	Type string `json:"type"`
+	Path string `json:"path,omitempty"`
+	// Size is a file's size in bytes, so the app can ask before opening a
+	// large one instead of loading and rendering all of it.
+	Size     int64       `json:"size,omitempty"`
 	Children []*TreeNode `json:"children,omitempty"`
 }
 
@@ -237,6 +240,7 @@ func buildTree(ctx context.Context, stg storage.Storage, ns, relPath string) (*T
 				Name: name,
 				Type: "file",
 				Path: childRelPath,
+				Size: entry.Size,
 			})
 		}
 	}

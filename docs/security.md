@@ -165,16 +165,22 @@ For headless callers (CLI, MCP server, scripts):
 **IdP groups for API tokens** *(v4.8.14+, opt-in)*. An API token has no login of its
 own, so it has no `groups` snapshot: by default an IdP-group member of an access group
 is ignored for tokens, and a person who reaches a namespace only through an IdP group
-sees it in the browser but not from the CLI or an agent. With
-`API_TOKEN_GROUPS_MAX_AGE` set (a Go duration, e.g. `168h`), every SSO login also
-stores the person's IdP groups in `user_oidc_groups` (one row per user, replaced at each
-login, an empty list included; deleted with the user). The person's tokens then use that
+sees it in the browser but not from the CLI or an agent. In multi mode with
+`OIDC_GROUPS_CLAIM` set, every SSO login stores the person's IdP groups in
+`user_oidc_groups` (one row per user, replaced at each login, an empty list included;
+deleted with the user) *(v4.8.15+; before, only with `API_TOKEN_GROUPS_MAX_AGE`)*. The
+namespace member list (`/api/namespace/users`: assignee and chat member pickers) uses it
+to include the IdP-group members of access groups, for 30 days after that login (or
+`API_TOKEN_GROUPS_MAX_AGE` when longer), so a person removed from the IdP group drops off
+it even if they never sign in again; it grants nothing, access is still
+checked on every request. With `API_TOKEN_GROUPS_MAX_AGE` set (a Go duration, e.g.
+`168h`), the person's tokens use that
 list until `API_TOKEN_GROUPS_MAX_AGE` after the login, and none once it is older. The
 trade-off is the same as for sessions, over a longer window: leaving an IdP group takes
 effect for tokens at the person's next SSO login or when the age is reached, whichever
 comes first. Keep the age short enough for your offboarding policy, and use direct user
-members or grants where a change must apply at once. Unset or `0`: nothing is stored
-and tokens behave as before.
+members or grants where a change must apply at once. Unset or `0`: tokens behave as
+before.
 
 This was a behaviour change from pre-v3.5.0 where any admin token had unconditional global bypass.
 
@@ -544,6 +550,7 @@ When a namespace mirrors to its own repository (Admin → Namespaces → Git bac
 
 - **Never read back.** The API only ever reports `has_credential`; the ciphertext is decrypted solely at push time, in the writer, to build the git operation. It is never returned to a client and never logged.
 - **Never in argv or a URL.** HTTPS uses a `GIT_ASKPASS` helper reading a private temp file; SSH stages the key to a private temp file wired through `GIT_SSH_COMMAND -i`. Only the *username* is embedded in the remote URL. Staged secret files are removed after each push, and `GIT_TERMINAL_PROMPT=0` prevents interactive prompts.
+- **The deployment's Git connection follows its token.** The Git connection declared by the deployment (`GIT_REMOTE_URL`) is sealed at boot like the others, but its namespaces push with the token in `GIT_TOKEN_FILE` (or `GIT_TOKEN`) as read at each push. A token file mounted from a Secret can be rotated, even every hour, without a restart; the sealed copy is only used while the file is empty.
 - **Fail-closed.** If `MDNEST_ENCRYPTION_KEY` is unset **and** `MDNEST_JWT_SECRET` is still the default, mdnest **refuses** to enable mirroring or store a credential (HTTP `403`) rather than sealing secrets under a guessable key. Startup logs a warning. Set a dedicated, high-entropy `MDNEST_ENCRYPTION_KEY` to enable the feature.
 - **Rotation is a re-credentialing event.** There is no key-versioned envelope, so **changing `MDNEST_ENCRYPTION_KEY` makes every stored credential undecryptable**. Sync then fails and the error surfaces on the namespace card in **Admin → Namespaces** (`last_sync_error`). Recovery: a super-admin re-enters the token / key there, for a namespace with its own repository and for each Git connection; each user re-enters the one for their personal namespace in **Settings → Personal namespace**, where the error shows too. Plan the rotation as a maintenance window and notify owners. *(A future key-versioned envelope could allow rolling rotation without re-entry — tracked as a follow-up.)*
 - **No flag smuggling.** `remote_url` and `branch` are positional arguments to `git`, so a value starting with `-` would otherwise be parsed as an option (`--upload-pack=<cmd>` executes `<cmd>`). The API rejects both shapes and the exec site passes `--end-of-options`; either layer alone stops it.

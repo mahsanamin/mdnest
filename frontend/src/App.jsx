@@ -113,6 +113,9 @@ import {
   logout as apiLogout,
   PermissionError, convertToChat } from './api.js';
 import { buildPathIndex } from './wikilink.js';
+import { fileSizeIn, isLargeSize, isLargeText, largeFileQuestion } from './largeFile.js';
+import { noteOpenError, workspaceLinkError } from './noteErrors.js';
+import { parseDockedChats, serializeDockedChats, withDockedChat, withoutChat } from './dockedChats.js';
 import { createEchoGate } from './echo-gate.js';
 import { broadcastTabMessage, onTabMessage } from './tab-sync.js';
 import { initFirebase, signOutFirebase } from './firebase-config.js';
@@ -229,6 +232,9 @@ function App() {
   const [ssoError, setSsoError] = useState(() => consumeSSOHashOnLoad());
   const [authenticated, setAuthenticated] = useState(!!getToken());
   const [namespaces, setNamespaces] = useState([]);
+  // Read by the hashchange handler, which is not re-bound on every list change.
+  const namespacesRef = useRef(namespaces);
+  namespacesRef.current = namespaces;
   const [namespacesEmptyReason, setNamespacesEmptyReason] = useState(''); // why the list is empty (issue #123)
   const [selectedNs, setSelectedNs] = useState(null);
   const [tree, setTree] = useState([]);
@@ -394,15 +400,18 @@ function App() {
   });
   // The chat docked in the panel ({ns, path} | null = the chat list), kept
   // apart from openChat (the full-screen one) so expanding and pinning are
-  // explicit moves between the two. Remembered so a reload reopens it; the
-  // chat itself checks it is still readable and falls back to the list.
-  const [dockedChat, setDockedChat] = useState(() => {
-    try {
-      const v = JSON.parse(localStorage.getItem('mdnest_docked_chat') || 'null');
-      return v && typeof v.ns === 'string' && typeof v.path === 'string' ? { ns: v.ns, path: v.path } : null;
-    } catch { return null; }
+  // explicit moves between the two. Chat follows the workspace chosen in the
+  // main dropdown, so one chat is remembered per workspace (dockedChats.js):
+  // switching workspace shows that workspace's chat, and switching back
+  // brings the earlier one back. Remembered across a reload; the chat itself
+  // checks it is still readable and falls back to the list.
+  const [dockedChats, setDockedChats] = useState(() => {
+    try { return parseDockedChats(localStorage.getItem('mdnest_docked_chat')); } catch { return {}; }
   });
-  const [dockedNs, setDockedNs] = useState(null); // the docked list's workspace
+  const dockedChat = (selectedNs && dockedChats[selectedNs]) || null;
+  const setDockedChat = useCallback((chat) => {
+    setDockedChats((m) => withDockedChat(m, selectedNs, chat));
+  }, [selectedNs]);
   const [chatPanelWidth, setChatPanelWidth] = useState(() => {
     const v = parseInt(localStorage.getItem('mdnest_chat_panel_width'), 10);
     return Number.isFinite(v) ? v : null; // null = the default, min(40vw, 960px)
@@ -431,16 +440,16 @@ function App() {
   const [openChat, setOpenChat] = useState(null);
   // Chat mode is a place you visit and come back from. chatsReturnTo is the
   // view you came from ('editor' | 'board'), so the one Back button lands you
-  // exactly there. chatNs is the workspace the chat LIST shows; it is
-  // deliberately separate from selectedNs, so browsing another workspace's
-  // chats does not swap the workspace (and note) you return to.
+  // exactly there. The chat list always shows selectedNs, the workspace in
+  // the main dropdown: a separate chat workspace picker let the two drift
+  // apart, so a chat could be on screen that did not belong to the workspace
+  // around it.
   const [chatsReturnTo, setChatsReturnTo] = useState('editor');
   // Set when chat mode was entered by NAVIGATING to a chat note (tree click,
   // address bar): by then the note underneath is the chat itself, so Back
   // must reopen the note you were on before, not the chat's raw markdown.
   const [chatsReturnNote, setChatsReturnNote] = useState(null);
   const chatRedirectFrom = useRef(null);
-  const [chatNs, setChatNs] = useState(null);
   // Set to `${ns}/${path}` when the user NAVIGATES to a note (tree click,
   // address bar). If that note turns out to be a chat, it opens in the chat
   // view instead of the editor, so a chat always opens as a chat. "Open the
@@ -531,7 +540,10 @@ function App() {
   // heading), which silently turns the chat back into a plain note. So when
   // one is opened as a note, it is locked to Basic exactly like Marp.
   const chatNoteActive = chatEnabled && isChatDoc(content);
-  const editorModeChosen = effectiveEditorMode(editorMode, marpActive || drawingSource || chatNoteActive);
+  // A very large note (over 1 MB) froze the tab in the Live editor and the
+  // preview, so it is shown as plain text only (largeFile.js).
+  const largeNote = isLargeText(content);
+  const editorModeChosen = effectiveEditorMode(editorMode, marpActive || drawingSource || chatNoteActive || largeNote);
   // `.excalidraw.md` files open in the drawing editor (opt-in ENABLE_EXCALIDRAW),
   // bypassing the text editor/preview entirely.
   const excalidrawEnabled = !!appConfig?.excalidraw;
@@ -594,11 +606,21 @@ function App() {
   // the root, so with a folder open in front of you the new file appeared
   // outside it.
   const [pickedFolder, setPickedFolder] = useState(null);
+  // The folder the task board is asked to show ({ path, n }, '' = the whole
+  // workspace): set from the tree while the board is open, or by the folder's
+  // "Task board" menu item. `n` makes picking the same folder again count.
+  const [boardFolder, setBoardFolder] = useState(null);
+  const pickFolder = useCallback((path) => {
+    setPickedFolder(path);
+    if (showTaskBoard) setBoardFolder({ path, n: Date.now() });
+  }, [showTaskBoard]);
+  // A board opened later (toolbar, link) starts from its remembered scope.
+  useEffect(() => { if (!showTaskBoard) setBoardFolder(null); }, [showTaskBoard]);
 
   // Source view is a per-file choice, not a preference: a drawing always opens
   // as a drawing, even if the last one was left showing its markdown.
   useEffect(() => { setDrawingSource(false); }, [selectedNs, currentPath]);
-  useEffect(() => { setPickedFolder(null); }, [selectedNs]);
+  useEffect(() => { setPickedFolder(null); setBoardFolder(null); }, [selectedNs]);
   // restoreBanner is shown when another user used the History modal to
   // restore an older version of the current file. It's deliberately a
   // separate state from conflictBanner because a restore is an
@@ -655,7 +677,7 @@ function App() {
   const noteLoaded = content !== null;
   // sharedMod (above) is false when the shared editing chunk could not be
   // loaded: notes then simply edit the normal way.
-  const sharedEligible = sharedEditingOn && sharedModOk && noteLoaded
+  const sharedEligible = sharedEditingOn && sharedModOk && noteLoaded && !largeNote
     && isSharedEligible({ path: currentPath, isDrawing: isDrawingDoc, isChat: chatNoteActive, isMarp: marpActive });
   const othersInNote = presenceUsers.some((u) => u.id !== userInfo?.id);
   const sharedForcesLive = sharedEligible && othersInNote && liveCrashedFor !== currentPath;
@@ -1308,7 +1330,6 @@ function App() {
       if (hashChats) {
         setChatsOpen(true);
         setOpenChat(hashChat || null);
-        setChatNs(hashChat ? hashChat.ns : null);
       }
       // Opened (or refreshed) on the task board: reopen it over the same
       // namespace and note.
@@ -1323,10 +1344,21 @@ function App() {
       // (namespace-scoped) chat list matches the chat on screen.
       const linkedNs = hashNs || (hashChats && hashChat ? hashChat.ns : null);
 
+      // A link to a workspace this person cannot open: say so, and do not
+      // reopen their last note there as if the link had worked.
+      const badLink = !!linkedNs && !nsList.includes(linkedNs) && nsList.length > 0;
       if (linkedNs && nsList.includes(linkedNs)) {
         targetNs = linkedNs;
       } else if (nsList.length > 0) {
         targetNs = nsList[0];
+      }
+      if (badLink) {
+        setNotice({ kind: 'error', text: workspaceLinkError(linkedNs) });
+        if (hashChats) { setChatsOpen(false); setOpenChat(null); }
+        setSelectedNs(targetNs);
+        setHash(targetNs, null);
+        setInitialized(true);
+        return;
       }
 
       if (targetNs) {
@@ -1370,8 +1402,9 @@ function App() {
           // hold the scrollPct from when they were last reading.
           restoreScrollPosition(selectedNs, currentPath);
           noteLoadedRef.current?.(selectedNs, currentPath, text);
-        }).catch(() => {
+        }).catch((e) => {
           if (chatRedirectFor.current === `${selectedNs}/${currentPath}`) chatRedirectFor.current = null;
+          setNotice({ kind: 'error', text: noteOpenError(e, selectedNs, currentPath) });
           // The saved/hash-pointed file is gone (deleted on disk, renamed
           // by another client). Clear so the user gets a clean slate, and
           // forget the stale last-path so the next ns switch doesn't try
@@ -1503,9 +1536,17 @@ function App() {
     if (sidePanel !== 'closed') localStorage.setItem('mdnest_side_panel_tab', sidePanel);
   }, [sidePanel]);
   useEffect(() => {
-    if (dockedChat) localStorage.setItem('mdnest_docked_chat', JSON.stringify(dockedChat));
-    else localStorage.removeItem('mdnest_docked_chat');
-  }, [dockedChat]);
+    try {
+      const v = serializeDockedChats(dockedChats);
+      if (v) localStorage.setItem('mdnest_docked_chat', v);
+      else localStorage.removeItem('mdnest_docked_chat');
+    } catch { /* storage unavailable: the pin lasts until the tab closes */ }
+  }, [dockedChats]);
+  // Chat follows the main workspace: a full-screen chat from another
+  // workspace closes when the workspace changes (its list is shown instead).
+  useEffect(() => {
+    setOpenChat((cur) => (cur && selectedNs && cur.ns !== selectedNs ? null : cur));
+  }, [selectedNs]);
 
   // Set while a navigation that came FROM the address bar (back/forward, a
   // pasted link) is still loading its note. The URL already says what the
@@ -1551,14 +1592,28 @@ function App() {
         setShowTaskBoard(false);
         setChatsReturnTo('editor');
         setChatsOpen(true);
+        // A chat in another workspace: the app follows the link there, since
+        // chat always shows the workspace chosen in the main dropdown.
+        if (chat && chat.ns !== selectedNs) {
+          if (namespacesRef.current.length > 0 && !namespacesRef.current.includes(chat.ns)) {
+            setNotice({ kind: 'error', text: workspaceLinkError(chat.ns) });
+            setOpenChat(null);
+            return;
+          }
+          handleSelectNsRef.current?.(chat.ns);
+        }
         setOpenChat(chat || null);
-        if (chat) setChatNs(chat.ns);
         return; // the chats route names a chat, not the note underneath
       }
       setChatsOpen(false);
       setSidePanel((v) => (v === 'board' ? 'closed' : v));
       setShowTaskBoard(board);
       setBoardMilestone(board && typeof milestone === 'string' ? milestone : null);
+      if (ns && ns !== selectedNs && namespacesRef.current.length > 0 && !namespacesRef.current.includes(ns)) {
+        setNotice({ kind: 'error', text: workspaceLinkError(ns) });
+        setHash(selectedNs, currentPath);
+        return;
+      }
       if (ns && ns !== selectedNs) {
         setSelectedNs(ns);
       }
@@ -1690,6 +1745,15 @@ function App() {
   }, [getScrollables, getFilePrefs, scrollToPendingHeading]);
 
   const openNoteDirect = useCallback(async (ns, path) => {
+    // A large file: ask first (the tree carries sizes for the open namespace).
+    // Reloading the note already open never asks again.
+    if (ns === selectedNs && path !== currentPathRef.current) {
+      const size = fileSizeIn(tree, path);
+      if (isLargeSize(size) && !window.confirm(largeFileQuestion(path, size))) {
+        setHash(ns, currentPathRef.current);
+        return;
+      }
+    }
     // Board stays open across note navigation so the chosen view persists; the
     // board's own "open source note" action closes it explicitly.
     // Write out the file we're leaving before loading the next one — see
@@ -1709,9 +1773,13 @@ function App() {
     } catch (e) {
       if (chatRedirectFor.current === `${ns}/${path}`) chatRedirectFor.current = null;
       console.error('Failed to open note:', e);
+      setNotice({ kind: 'error', text: noteOpenError(e, ns, path) });
+      // Keep the address on what is actually open, not on the link that failed.
+      setHash(ns === selectedNs ? ns : selectedNs, currentPathRef.current);
     }
-  }, [restoreScrollPosition, commentsEnabled, flushPendingSave]);
+  }, [restoreScrollPosition, commentsEnabled, flushPendingSave, selectedNs, tree]);
 
+  const handleSelectNsRef = useRef(null);
   const handleSelectNs = useCallback((ns) => {
     // Keep the task board open when switching workspace so the chosen view is
     // preserved — it re-scopes to the new namespace. Note navigation keeps it
@@ -1741,6 +1809,7 @@ function App() {
     }
     setTree([]);
   }, [getLastPath, flushPendingSave]);
+  handleSelectNsRef.current = handleSelectNs;
 
   // "Check again" / "Give me access" on the empty page: re-read the list and,
   // once something appears, open it the way a fresh load would. In multi mode
@@ -1759,6 +1828,10 @@ function App() {
     if (!selectedNs) return;
     pendingHeadingRef.current = heading || null;
     if (heading && path === currentPath) { scrollToPendingHeading(); return; }
+    if (path !== currentPath) {
+      const size = fileSizeIn(tree, path);
+      if (isLargeSize(size) && !window.confirm(largeFileQuestion(path, size))) return;
+    }
     // Board stays open across note navigation so the chosen view persists; the
     // board's own "open source note" action closes it explicitly.
     // Write out the previous file's pending edits instead of dropping them.
@@ -1783,13 +1856,10 @@ function App() {
       noteLoadedRef.current?.(selectedNs, path, text);
     } catch (e) {
       if (chatRedirectFor.current === `${selectedNs}/${path}`) chatRedirectFor.current = null;
-      if (e.name === 'PermissionError') {
-        alert('Access denied: you do not have permission to read this file.');
-      } else {
-        console.error('Failed to open note:', e);
-      }
+      if (e.name !== 'PermissionError') console.error('Failed to open note:', e);
+      setNotice({ kind: 'error', text: noteOpenError(e, selectedNs, path) });
     }
-  }, [selectedNs, currentPath, scrollToPendingHeading, restoreScrollPosition, commentsEnabled, setLastPath, flushPendingSave]);
+  }, [selectedNs, currentPath, scrollToPendingHeading, restoreScrollPosition, commentsEnabled, setLastPath, flushPendingSave, tree]);
 
   // Stable identity on purpose: this is handed to every task card, which is
   // memoised. An inline arrow here would be a new function on every App
@@ -1815,7 +1885,7 @@ function App() {
     // Close the room only if it is the chat that went: deleting another one
     // from the list's right-click menu must leave the open chat alone.
     setOpenChat((cur) => (cur && cur.ns === ns && cur.path === path ? null : cur));
-    setDockedChat((cur) => (cur && cur.ns === ns && cur.path === path ? null : cur));
+    setDockedChats((m) => withoutChat(m, ns, path));
     return true;
   }, [selectedNs, currentPath, getLastPath, setLastPath, refreshTree]);
 
@@ -1854,7 +1924,9 @@ function App() {
     setChatsReturnTo(showTaskBoard ? 'board' : 'editor');
     setChatsReturnNote(returnNote === undefined ? null : returnNote);
     setShowTaskBoard(false);
-    setChatNs(chat?.ns || selectedNs);
+    // Chat shows the workspace chosen in the main dropdown; opening a chat
+    // from another workspace (a link, a mention) switches to it.
+    if (chat && chat.ns !== selectedNs) handleSelectNsRef.current?.(chat.ns);
     setOpenChat(chat || null);
     setChatsOpen(true);
   }, [showTaskBoard, selectedNs, flushPendingSave]);
@@ -1898,17 +1970,13 @@ function App() {
   // docked beside it.
   const pinChat = useCallback((chat) => {
     leaveChats();
-    setDockedNs(chat.ns);
-    setDockedChat(chat);
+    setDockedChats((m) => withDockedChat(m, chat.ns, chat));
     openSidePanel('chat');
   }, [leaveChats, openSidePanel]);
   // Expand: the docked chat, full screen. The panel stays on its Chat tab,
   // hidden while chats are open, so Back returns to note + docked chat.
   const expandChat = useCallback((chat) => { enterChats(chat); }, [enterChats]);
-  const selectDockedChat = useCallback((chat) => {
-    if (chat) setDockedNs(chat.ns);
-    setDockedChat(chat);
-  }, []);
+  const selectDockedChat = useCallback((chat) => { setDockedChat(chat); }, [setDockedChat]);
   // The "is this note a chat?" decision, made where a note finishes loading
   // rather than in an effect on `content`: that effect stayed armed when the
   // click reloaded identical text (or the load failed), then fired on the
@@ -2400,6 +2468,11 @@ function App() {
       case 'new-drawing': await doCreateDrawing(target); break;
       case 'new-slides': doCreateSlides(target); break;
       case 'new-folder': await doCreateFolder(target); break;
+      case 'task-board':
+        // The board over this folder (the namespace root: the whole workspace).
+        setBoardFolder({ path: target?.path || '', n: Date.now() });
+        setBoardActive(true);
+        break;
       case 'delete-file': {
         if (!target || !selectedNs) return;
         // A chat gets the same warning as in the chats view: deleting it
@@ -2553,7 +2626,7 @@ function App() {
         break;
       }
     }
-  }, [selectedNs, currentPath, refreshTree, doCreateNote, doCreateDrawing, doCreateSlides, doCreateFolder, getLastPath, setLastPath, enterChats, flushPendingSave, runDownload, copyFileContents]);
+  }, [selectedNs, currentPath, refreshTree, doCreateNote, doCreateDrawing, doCreateSlides, doCreateFolder, getLastPath, setLastPath, enterChats, flushPendingSave, runDownload, copyFileContents, setBoardActive]);
 
   const handleTreeDrop = useCallback(async (fromPath, toFolderPath) => {
     if (!selectedNs) return;
@@ -2814,7 +2887,7 @@ function App() {
         onNewDrawing={excalidrawEnabled && canWrite('') ? () => doCreateDrawing(null) : null}
         onNewSlides={marpEnabled && canWrite('') ? () => doCreateSlides(null) : null}
         pickedFolder={pickedFolder}
-        onPickFolder={setPickedFolder}
+        onPickFolder={pickFolder}
         onNewFolder={canWrite('') ? () => doCreateFolder(null) : null}
         onRefreshTree={handleRefresh}
         onBeforeSync={flushPendingSave}
@@ -3000,9 +3073,9 @@ function App() {
             >
             <Suspense fallback={<div className="editor-loading">Loading chats...</div>}>
               <ChatView
-                ns={chatNs || selectedNs}
+                ns={selectedNs}
                 namespaces={namespaces}
-                onSelectNs={(n) => { setChatNs(n); if (openChat && openChat.ns !== n) setOpenChat(null); }}
+                onSelectNs={null}
                 account={isMulti ? userInfo?.username : null}
                 serverAlias={appConfig?.serverAlias}
                 isMobile={isMobile}
@@ -3038,8 +3111,10 @@ function App() {
                 onOpenNote={openNoteFromBoard}
                 onClose={() => { setShowTaskBoard(false); setBoardMilestone(null); }}
                 focusNote={taskListActive ? currentPath : null}
+                focusFolder={boardFolder}
                 milestoneRoute={boardMilestone}
                 onMilestoneRoute={setBoardMilestone}
+                onOpenWorkspaceMilestone={(n, id) => { handleSelectNs(n); setBoardMilestone(id); }}
               />
             </Suspense>
             </ChunkErrorBoundary>
@@ -3189,6 +3264,10 @@ function App() {
                         <MarpDeck content={content || ''} title={currentPath} scrollPct={viewMode === 'split' && !isMobile ? marpScrollPct : undefined} caret={viewMode === 'split' && !isMobile ? marpCaret : undefined} />
                       </Suspense>
                     </ChunkErrorBoundary>
+                  ) : largeNote ? (
+                    <div className="empty-state" data-testid="large-note-preview-off">
+                      <p>The preview is off for large files. The file is open as plain text in the editor.</p>
+                    </div>
                   ) : (
                     <Preview content={content || ''} currentPath={currentPath} ns={selectedNs} onCheckboxToggle={canWriteCurrent ? handleCheckboxToggle : null} pathIndex={wikiIndex} onWikiLink={openNote} />
                   )}
@@ -3344,6 +3423,7 @@ function App() {
         excalidraw={excalidrawEnabled}
         marp={marpEnabled}
         chat={chatEnabled}
+        taskBoard={taskBoardEnabled}
       />
       {showApprovals && approvalsEnabled && (
         <ApprovalsPanel
@@ -3401,9 +3481,9 @@ function App() {
             <Suspense fallback={<div className="editor-loading">Loading chats...</div>}>
               <ChatView
                 docked
-                ns={dockedChat?.ns || dockedNs || selectedNs}
+                ns={selectedNs}
                 namespaces={namespaces}
-                onSelectNs={(n) => { setDockedNs(n); if (dockedChat && dockedChat.ns !== n) setDockedChat(null); }}
+                onSelectNs={null}
                 account={isMulti ? userInfo?.username : null}
                 serverAlias={appConfig?.serverAlias}
                 isMobile={false}

@@ -314,7 +314,13 @@ export async function getNote(ns, path, opts = {}) {
   if (opts.ifNoneMatch) headers['If-None-Match'] = opts.ifNoneMatch;
   const res = await request(`/note?ns=${encodeURIComponent(ns)}&path=${encodeURIComponent(path)}`, { headers, cache: 'no-store' });
   if (opts.ifNoneMatch && res.status === 304) return { notModified: true };
-  if (!res.ok) throw new Error('Failed to get note');
+  if (!res.ok) {
+    // Keep the status: a missing note (404) and a refused large one (413) need
+    // different words for the person who clicked.
+    const err = new Error('Failed to get note');
+    err.status = res.status;
+    throw err;
+  }
   const text = await res.text();
   const etag = res.headers.get('ETag');
   const noteId = res.headers.get('X-Note-ID');

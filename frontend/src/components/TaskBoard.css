@@ -859,3 +859,55 @@
 .tb-ms-participants { border-collapse: collapse; font-size: 13px; }
 .tb-ms-participants th, .tb-ms-participants td { text-align: left; padding: 4px 16px 4px 0; border-bottom: 1px solid var(--border); }
 .tb-ms-participants th { font-size: 11px; color: var(--text-muted); font-weight: 600; }
+
+/* --- milestone page: the task detail on the free right-hand side --------- */
+.tb-ms-split { flex: 1 1 auto; min-height: 0; display: flex; }
+.tb-ms-split > .tb-milestones-view { min-width: 0; }
+.tb-ms-detail {
+  flex: 0 0 min(480px, 42%);
+  min-height: 0;
+  overflow-y: auto;
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+}
+.tb-editor.tb-editor-inline {
+  width: auto;
+  max-width: none;
+  max-height: none;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.tb-editor-head { display: flex; align-items: center; gap: 8px; }
+.tb-editor-head h3 { flex: 1; }
+.tb-editor-close { background: none; border: 0; color: var(--text-secondary); cursor: pointer; font-size: 16px; padding: 2px 6px; }
+.tb-editor-close:hover { color: var(--text); }
+.tb-editor-source { margin: 0 0 12px; }
+.tb-editor-fields { border: 0; margin: 0; padding: 0; min-width: 0; }
+.tb-ms-task { cursor: pointer; }
+.tb-ms-task:hover { background: var(--surface); }
+.tb-ms-task.selected { background: var(--surface-2); box-shadow: inset 3px 0 0 var(--accent); }
+.tb-ms-task-title {
+  background: none;
+  border: 0;
+  padding: 0 0 0 6px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.tb-ms-task-title:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tb-ms-scope-hint { font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
+.tb-ms-workspace { margin-bottom: 20px; }
+.tb-ms-workspace-title { font-size: 14px; margin: 0 0 8px; }
+/* Narrow screens have no free side: the detail covers the page. */
+@media (max-width: 900px) {
+  .tb-ms-detail {
+    position: fixed;
+    inset: 0;
+    z-index: 900;
+    border-left: 0;
+    padding: 8px;
+  }
+}

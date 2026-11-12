@@ -9,7 +9,7 @@
 //   create    New note / folder / drawing / slides / chat, Paste here (folder, root)
 //   organize  Rename, Move to…, Copy to…
 //   share     Download, Copy file contents, Copy browser link, Copy path for CLI
-//   info      History, Authors                                  (files)
+//   info      History, Authors (files); Task board (folder, root)
 //   admin     Manage access
 //   danger    Delete
 //
@@ -18,7 +18,7 @@
 // click, so change one only together with tests/browser.
 
 export function contextMenuGroups({
-  target, hasWrite = true, isAdmin = false, multi = false, excalidraw = false, marp = false, chat = false,
+  target, hasWrite = true, isAdmin = false, multi = false, excalidraw = false, marp = false, chat = false, taskBoard = false,
 }) {
   const isFolder = !!target && (target.type === 'folder' || target.type === 'directory');
   const isFile = !!target && !isFolder && !!target.path;
@@ -69,6 +69,10 @@ export function contextMenuGroups({
     info.push({ label: 'History', action: 'history', icon: 'history' });
     if (multi) info.push({ label: 'Authors', action: 'authors', icon: 'people' });
   }
+  // The task board (List, Kanban, Milestones) over the tasks of this folder.
+  if ((isFolder || isRoot) && taskBoard) {
+    info.push({ label: 'Task board', action: 'task-board', icon: 'board', hint: isFolder ? 'Tasks of this folder and its sub-folders' : 'Tasks of the whole workspace' });
+  }
 
   const admin = [];
   if ((isFolder || isRoot) && isAdmin) admin.push({ label: 'Manage access', action: 'manage-access', icon: 'lock' });
@@ -78,6 +82,26 @@ export function contextMenuGroups({
   if (isFolder && hasWrite) danger.push({ label: 'Delete folder', action: 'delete-folder', icon: 'trash', danger: true });
 
   return [create, organize, share, info, admin, danger].filter((g) => g.length > 0);
+}
+
+// The right-click menu inside an open chat (the room), so a pinned chat has
+// mdnest's menu rather than the browser's. hasMessage: the click was on a
+// message; hasSelection: text is selected. The composer keeps the browser's
+// own menu, which carries the spelling suggestions.
+export function chatRoomMenuGroups({ hasMessage = false, hasSelection = false, canDelete = false, canMembers = false } = {}) {
+  return [
+    [
+      ...(hasSelection ? [{ label: 'Copy selected text', action: 'copy-selection', icon: 'copy' }] : []),
+      ...(hasMessage ? [{ label: 'Copy message', action: 'copy-message', icon: 'copy', hint: 'Copies the message as written, in Markdown' }] : []),
+    ],
+    [
+      ...(canMembers ? [{ label: 'Members…', action: 'chat-members', icon: 'people', hint: 'See who can open this chat, and add people' }] : []),
+      { label: 'Connect an agent…', action: 'connect-agent', icon: 'link', hint: 'Get the prompt that brings an agent into this chat' },
+    ],
+    [{ label: 'Open as note', action: 'open-note', icon: 'note' }],
+    [{ label: 'Copy path for CLI', action: 'copy-path', icon: 'link', hint: 'Copies an mdnest:// address that the mdnest CLI and agents accept' }],
+    canDelete ? [{ label: 'Delete chat', action: 'delete-chat', icon: 'trash', danger: true }] : [],
+  ].filter((g) => g.length > 0);
 }
 
 // The chat list's right-click menu (one chat). Same component and look as the
