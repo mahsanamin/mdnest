@@ -4,7 +4,7 @@ All notable changes to mdnest are documented here.
 
 ---
 
-## v4.8.15 (in progress)
+## v4.8.15: A folder's task board, and access-group members in the pickers
 
 ### Added
 
@@ -57,6 +57,18 @@ All notable changes to mdnest are documented here.
 
 - **The README is short** and points to the guides on mdnest.dev. It has
   prompts to paste into a coding agent that sets mdnest up for you.
+
+### Removed
+
+- **Chat's own workspace picker.** Chat now always shows the workspace chosen
+  in the main dropdown. To see another workspace's chats, switch workspace
+  there; a chat pinned in each workspace comes back when you return to it.
+
+### Security
+
+- **Go 1.26.11.** The backend is built with Go 1.26.11, which fixes
+  GO-2026-6859, a crash in Go's HTTP/1 server caused by a race in
+  `MaxBytesReader` (net/http).
 
 ## v4.8.14: Milestones on the task board, and API tokens that use IdP groups
 
