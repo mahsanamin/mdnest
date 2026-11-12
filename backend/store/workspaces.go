@@ -48,6 +48,10 @@ type WorkspaceRemote struct {
 	Branch     string
 	KnownHosts string
 	Credential string
+	// Provisioned is true when the remote comes from the Git connection the
+	// deployment declares (GIT_REMOTE_URL): its Credential is the copy sealed
+	// at boot, the deployment's token may be newer.
+	Provisioned bool
 }
 
 // WorkspaceInput carries the writable fields of a workspace. Credential is the
@@ -285,19 +289,20 @@ func (s *PostgresWorkspaceStore) RemoteForNamespace(ns string) (*WorkspaceRemote
 		gBranch     sql.NullString
 		gKnownHosts sql.NullString
 		gEnc        sql.NullString
+		gSource     sql.NullString
 	)
 	r.Namespace = ns
 	err := s.db.QueryRow(
 		`SELECT w.git_enabled, w.group_id, w.transport, w.remote_url, w.username,
 		        w.branch, w.known_hosts, w.credential_encrypted,
 		        g.transport, g.base_url, g.username, g.branch, g.known_hosts,
-		        g.credential_encrypted
+		        g.credential_encrypted, g.source
 		 FROM workspaces w
 		 LEFT JOIN workspace_groups g ON g.id = w.group_id
 		 WHERE w.namespace = $1`, ns,
 	).Scan(&gitEnabled, &groupID, &r.Transport, &r.RemoteURL, &r.Username,
 		&r.Branch, &r.KnownHosts, &enc,
-		&gTransport, &gBaseURL, &gUsername, &gBranch, &gKnownHosts, &gEnc)
+		&gTransport, &gBaseURL, &gUsername, &gBranch, &gKnownHosts, &gEnc, &gSource)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -315,6 +320,7 @@ func (s *PostgresWorkspaceStore) RemoteForNamespace(ns string) (*WorkspaceRemote
 		r.Username = gUsername.String
 		r.Branch = gBranch.String
 		r.KnownHosts = gKnownHosts.String
+		r.Provisioned = gSource.String == "provisioned"
 		enc = gEnc.String
 	} else if r.RemoteURL == "" {
 		// Standalone workspace with no remote configured.

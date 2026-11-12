@@ -1684,7 +1684,9 @@ everything.
 **Response:** same shape as `GET /api/tasks`; every task carries `namespace`, and
 `board` is the union of the per-namespace column layouts (default columns first,
 then any extra columns contributed by a namespace) and of their milestones (by id,
-first namespace wins).
+first namespace wins). *(v4.8.15+)* `boards` maps each of those namespaces to its
+own board (columns and milestones), so milestones that share an id in two
+namespaces stay apart.
 
 ```bash
 curl "http://localhost:8286/api/tasks/all" -H "Authorization: Bearer $TOKEN"
@@ -1692,14 +1694,22 @@ curl "http://localhost:8286/api/tasks/all" -H "Authorization: Bearer $TOKEN"
 
 ### GET /api/namespace/users *(v4.2.0+)*
 
-List the users who hold a grant on a namespace, to populate the assignee picker.
+List the users who have access to a namespace, to populate the assignee picker
+and the chat member picker: a grant of their own, or membership of an access
+group with a grant on the namespace *(v4.8.15+)*, as a user member or through an
+IdP group of their last SSO login (`OIDC_GROUPS_CLAIM`).
 Requires read access to the namespace: anyone who can see it may see who else is
 on it. Multi mode only — the route is not registered in single mode, and the
 frontend degrades to a free-choice list.
 
 **Response:** `[{ "id": 1, "username": "sam" }, ...]` — usernames only, ordered
 for a stable picker. Emails are never returned. Namespace admins appear (they
-hold grants); superadmins do not (they have no grant rows).
+hold grants); superadmins do not (they have no grant rows), and blocked accounts
+do not. A person who reaches the namespace only through an IdP group appears
+while their last SSO sign-in in that group is less than 30 days old, or less
+than `API_TOKEN_GROUPS_MAX_AGE` when that is longer. mdnest only sees a
+person's IdP groups when they sign in, so someone removed from the group, or
+who left, drops off the list after that time.
 
 ### POST /api/tasks
 
@@ -1913,7 +1923,7 @@ registered in single mode (`404`).
   An open chat answers `{"private":false,"members":[]}`.
 - `POST` (write access), body `{"userId":N}` or empty: adds the caller and,
   if given, user `N`. On an open chat this is what makes it private. `N` must
-  hold a grant in the namespace (the `/api/namespace/users` list); anyone else
+  have access to the namespace (the `/api/namespace/users` list); anyone else
   is a `404` "no such user in this workspace", whether or not the account
   exists.
 - `DELETE ?...&userId=N` (write access): removes user `N`. `409` for the last

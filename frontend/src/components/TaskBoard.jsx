@@ -20,6 +20,7 @@ import BoardColumnsEditor from './BoardColumnsEditor';
 import TaskEditor from './TaskEditor';
 import MilestonesView from './MilestonesView';
 import { milestoneLabel, sortMilestones } from '../milestones';
+import { effectiveScope as scopeIn, scopeTasks, workspaceGroups, sameTask } from '../taskScope';
 import './TaskBoard.css';
 
 // Drop target = the column lane under the pointer (see boardLanes.js), so a
@@ -46,8 +47,12 @@ function makeLaneCollision(livePointer) {
 // item in the namespace, either as a flat list (with checkbox toggling) or as
 // a kanban board (drag a card between columns). Both views project the same
 // data — the notes themselves — so a change in one is reflected in the other.
-export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPath, currentUser, refreshSignal, focusNote = null, milestoneRoute = null, onMilestoneRoute }) {
+// focusFolder ({ path, n }) comes from the tree: a folder path shows that
+// folder's tasks, '' the whole workspace; `n` makes a repeated pick count.
+export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPath, currentUser, refreshSignal, focusNote = null, focusFolder = null, milestoneRoute = null, onMilestoneRoute, onOpenWorkspaceMilestone }) {
   const [board, setBoard] = useState(null);
+  // Each workspace's own board, on the all-workspaces view (milestones by workspace).
+  const [boards, setBoards] = useState(null);
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -61,6 +66,22 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
   const [scope, setScope] = useState(() => (focusNote ? 'note' : localStorage.getItem('mdnest_taskboard_scope') || 'workspace'));
   // A task list opened on the board shows its own tasks.
   useEffect(() => { if (focusNote) setScope('note'); }, [focusNote]);
+  // The folder picked in the tree; the Folder scope shows it and what is below it.
+  const [folder, setFolder] = useState(() => focusFolder?.path || '');
+  useEffect(() => {
+    if (!focusFolder) return;
+    setFolder(focusFolder.path || '');
+    const s = focusFolder.path ? 'folder' : 'workspace';
+    setScope(s);
+    localStorage.setItem('mdnest_taskboard_scope', s);
+  }, [focusFolder]);
+  // A new workspace has other folders.
+  const nsRef = useRef(ns);
+  useEffect(() => {
+    if (nsRef.current === ns) return;
+    nsRef.current = ns;
+    setFolder('');
+  }, [ns]);
   // Default 'note' deliberately: the board has always shown tasks in the order
   // they appear in your notes, and most boards are small enough that paging
   // never applies. See task-sort.js.
@@ -101,10 +122,11 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
   // The header action buttons fold into a ⋯ menu on mobile (see CSS).
   const [actionsOpen, setActionsOpen] = useState(false);
 
-  // The note-scoped view only makes sense with a note open; the global view
-  // spans every workspace and ignores the current note/namespace for reads.
-  // Milestones count every task of the workspace, whatever scope the other views use.
-  const effectiveScope = mode === 'milestones' ? 'workspace' : (scope === 'note' && !currentPath ? 'workspace' : scope);
+  // The note-scoped view only makes sense with a note open, the folder one with
+  // a folder picked; the global view spans every workspace and ignores the
+  // current note/namespace for reads. Every mode follows the scope, Milestones
+  // included: on a folder or a note it counts the tasks there.
+  const effectiveScope = scopeIn(scope, { currentPath, folder });
   const isGlobal = effectiveScope === 'global';
 
   const sensors = useSensors(
@@ -129,6 +151,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
       const data = await fetchTasks(opts.force);
       if (opts.afterDrop && activeTaskRef.current) return;
       setBoard(data.board);
+      setBoards(data.boards || null);
       setTasks((cur) => withStableIds(cur, data.tasks || []));
       // A quiet post-drop refresh must not wipe the message a failed move set.
       if (!opts.afterDrop) setError(null);
@@ -200,6 +223,14 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
     setScope(s);
     localStorage.setItem('mdnest_taskboard_scope', s);
   }, []);
+
+  // A milestone card of the all-workspaces view opens its page in its own
+  // workspace, where its tasks can be followed and edited.
+  const openWorkspaceMilestone = useCallback((targetNs, id) => {
+    setScopePersist('workspace');
+    if (targetNs !== ns && onOpenWorkspaceMilestone) onOpenWorkspaceMilestone(targetNs, id);
+    else selectMilestone(id);
+  }, [ns, onOpenWorkspaceMilestone, selectMilestone, setScopePersist]);
 
   // "All workspaces" scans every workspace you can read, which on a large
   // install is the one action here that can take a noticeable moment. Warn
@@ -318,6 +349,55 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
     }
   }, [ns, editorTask, reload]);
 
+  // The task shown in full next to a milestone page, found again in every load
+  // so it follows saves and background refreshes, and closes by itself when the
+  // task is gone. It is found by its first line (relocateTask), never by its
+  // line number alone: a task added above it in the same note shifts it down,
+  // and the old line then holds ANOTHER task, which passes the server's stale
+  // check, so a save there wrote the form over that other task. `prevRaw` is
+  // the first line before our own save, so the panel stays on the task until
+  // the reload brings the saved line in.
+  const [detailAt, setDetailAt] = useState(null);
+  const detailTask = useMemo(() => {
+    if (!detailAt) return null;
+    return relocateTask(tasks, detailAt)
+      || (detailAt.prevRaw != null ? relocateTask(tasks, { ...detailAt, raw: detailAt.prevRaw }) : null);
+  }, [tasks, detailAt]);
+  // Keep the location current, so the nearest copy of an identical line wins.
+  useEffect(() => {
+    if (!detailTask || !detailAt) return;
+    const settled = detailTask.raw === detailAt.raw;
+    if (detailTask.line !== detailAt.line || (settled && detailAt.prevRaw != null)) {
+      setDetailAt((d) => (d ? { ...d, line: detailTask.line, prevRaw: settled ? null : d.prevRaw } : d));
+    }
+  }, [detailTask, detailAt]);
+  const detailSeq = useRef(0);
+  const openDetail = useCallback((task) => {
+    setDetailAt((cur) => (cur && sameTask(detailTask, task) ? null
+      : { namespace: task.namespace, path: task.path, line: task.line, raw: task.raw, prevRaw: null, seq: ++detailSeq.current }));
+  }, [detailTask]);
+  // Another milestone, another mode or another workspace: nothing to follow.
+  useEffect(() => { setDetailAt(null); }, [selectedMilestone, mode, ns, effectiveScope]);
+  const handleDetailSave = useCallback(async (spec) => {
+    const t = detailTask;
+    if (!t) return;
+    let saved;
+    try {
+      saved = await patchTask(t.namespace || ns, t.path, { line: t.line, raw: t.raw, replace: spec });
+    } catch (e) {
+      if (e.status === 409) {
+        await reload({ silent: true, force: true });
+        throw new Error('This task changed in its note in the meantime. It is reloaded; check it and save again.');
+      }
+      throw e;
+    }
+    // The server answers with the task as saved: follow its new first line.
+    if (saved && typeof saved.raw === 'string') {
+      setDetailAt((d) => (d ? { ...d, line: saved.line || d.line, raw: saved.raw, prevRaw: t.raw } : d));
+    }
+    await reload({ silent: true });
+  }, [ns, detailTask, reload]);
+
   const handleDragStart = useCallback((event) => {
     setActiveTask(event.active?.data?.current?.task || null);
   }, []);
@@ -419,6 +499,10 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
 
   const columns = board?.columns || [];
 
+  // What the views show. The folder scope is cut from the workspace's tasks;
+  // relations still resolve against every loaded task (a dependency can live
+  // outside the folder).
+  const scopedTasks = useMemo(() => scopeTasks(tasks, effectiveScope, folder), [tasks, effectiveScope, folder]);
   // Column ids that count as "done" — used to hide finished tasks by default.
   const doneColumnIds = useMemo(
     () => columns.filter((c) => c.done || c.id === 'done').map((c) => c.id),
@@ -432,22 +516,22 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
     const s = new Set();
     // Tags carried only by done tasks are dropped from the filter (unless the
     // user opts into showing done), regardless of the current view.
-    for (const t of tasks) {
+    for (const t of scopedTasks) {
       if (!showDone && doneColumnIds.includes(t.column)) continue;
       for (const tag of (t.tags || [])) s.add(tag);
     }
     return [...s].sort((a, b) => a.localeCompare(b));
-  }, [tasks, showDone, doneColumnIds]);
+  }, [scopedTasks, showDone, doneColumnIds]);
   const assigneeChoices = useMemo(() => {
     const s = new Set();
-    for (const t of tasks) if (t.assignee) s.add(t.assignee);
+    for (const t of scopedTasks) if (t.assignee) s.add(t.assignee);
     return [...s].sort((a, b) => a.localeCompare(b));
-  }, [tasks]);
+  }, [scopedTasks]);
   const priorityChoices = useMemo(() => {
     const s = new Set();
-    for (const t of tasks) if (t.priority) s.add(String(t.priority));
+    for (const t of scopedTasks) if (t.priority) s.add(String(t.priority));
     return [...s].sort((a, b) => a.localeCompare(b));
-  }, [tasks]);
+  }, [scopedTasks]);
   // Relation filtering only makes sense once tasks carry relation metadata
   // (depends-on / blocked-by / related-to); the control stays hidden otherwise.
   const hasAnyRelations = useMemo(
@@ -501,7 +585,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
 
   // Milestones come with the board (.mdnest/board.json); a task names one by id.
   const milestones = useMemo(() => board?.milestones || [], [board]);
-  const showMilestoneFilter = milestones.length > 0 || tasks.some((t) => t.milestone);
+  const showMilestoneFilter = milestones.length > 0 || scopedTasks.some((t) => t.milestone);
   // Identity-stable for the memoised cards, like resolveRelation above.
   const milestonesRef = useRef(milestones);
   milestonesRef.current = milestones;
@@ -535,11 +619,11 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
   // can drop superseded work while you are still typing.
   const deferredSearch = useDeferredValue(search);
   const filteredTasks = useMemo(
-    () => tasks.filter((t) => matchesTaskFilters(t, {
+    () => scopedTasks.filter((t) => matchesTaskFilters(t, {
       search: deferredSearch, tags: tagFilter, assignee: assigneeFilter, priority: priorityFilter,
       relation: relationFilter, due: dueFilter, milestone: milestoneFilter, showDone: effectiveShowDone, doneColumns: doneColumnIds, currentUser,
     })),
-    [tasks, deferredSearch, tagFilter, assigneeFilter, priorityFilter, relationFilter, dueFilter, milestoneFilter, effectiveShowDone, doneColumnIds, currentUser],
+    [scopedTasks, deferredSearch, tagFilter, assigneeFilter, priorityFilter, relationFilter, dueFilter, milestoneFilter, effectiveShowDone, doneColumnIds, currentUser],
   );
 
   // First time a board is shown (no stored collapse state), collapse the Done
@@ -579,7 +663,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
   // The List view paints a page at a time, like the Kanban columns (see
   // listPage.js). Back to one page when the workspace or scope changes.
   const [listShown, setListShown] = useState(LIST_PAGE);
-  useEffect(() => { setListShown(LIST_PAGE); }, [ns, effectiveScope]);
+  useEffect(() => { setListShown(LIST_PAGE); }, [ns, effectiveScope, folder]);
   const listPage = useMemo(() => pageGroups(tasksByNote, listShown), [tasksByNote, listShown]);
 
   return (
@@ -604,19 +688,19 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
           <div className="tb-mode-toggle">
             <button className={mode === 'list' ? 'active' : ''} onClick={() => setModePersist('list')}>List</button>
             <button className={mode === 'board' ? 'active' : ''} onClick={() => setModePersist('board')}>Kanban</button>
-            {!isGlobal && (
-              <button className={mode === 'milestones' ? 'active' : ''} onClick={() => setModePersist('milestones')}>Milestones</button>
-            )}
+            <button className={mode === 'milestones' ? 'active' : ''} onClick={() => setModePersist('milestones')}>Milestones</button>
           </div>
-          {mode !== 'milestones' && (
-            <div className="tb-mode-toggle tb-scope-toggle">
-              <button className={effectiveScope === 'workspace' ? 'active' : ''} onClick={() => setScopePersist('workspace')} title="All notes in this workspace">Workspace</button>
-              {currentPath && (
-                <button className={effectiveScope === 'note' ? 'active' : ''} onClick={() => setScopePersist('note')} title="Only the current note">This note</button>
-              )}
-              <button className={effectiveScope === 'global' ? 'active' : ''} onClick={chooseGlobalScope} title="Tasks across every workspace you can access">All workspaces</button>
-            </div>
-          )}
+          <div className="tb-mode-toggle tb-scope-toggle">
+            <button className={effectiveScope === 'workspace' ? 'active' : ''} onClick={() => setScopePersist('workspace')} title="All notes in this workspace">Workspace</button>
+            {folder && (
+              <button className={`tb-scope-folder${effectiveScope === 'folder' ? ' active' : ''}`} onClick={() => setScopePersist('folder')}
+                title={`Notes in ${folder} and its sub-folders`}>📁 {folder.split('/').pop()}</button>
+            )}
+            {currentPath && (
+              <button className={effectiveScope === 'note' ? 'active' : ''} onClick={() => setScopePersist('note')} title="Only the current note">This note</button>
+            )}
+            <button className={effectiveScope === 'global' ? 'active' : ''} onClick={chooseGlobalScope} title="Tasks across every workspace you can access">All workspaces</button>
+          </div>
         </div>
         <div className="tb-header-right">
           <button
@@ -643,7 +727,7 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
         </div>
       </div>
 
-      {!loading && tasks.length > 0 && mode !== 'milestones' && (
+      {!loading && scopedTasks.length > 0 && mode !== 'milestones' && (
         <div className={`tb-filters${filtersOpen ? ' open' : ''}`}>
           <button
             type="button"
@@ -776,29 +860,60 @@ export default function TaskBoard({ ns, canWrite, onOpenNote, onClose, currentPa
       {loading ? (
         <div className="tb-loading">Loading tasks…</div>
       ) : mode === 'milestones' ? (
-        <MilestonesView
-          milestones={milestones}
-          tasks={tasks}
-          columns={columns}
-          doneColumns={doneColumnIds}
-          isBlocked={isBlocked}
-          canWrite={canWrite}
-          selected={selectedMilestone}
-          onSelect={selectMilestone}
-          onSave={async (next) => {
-            const saved = await saveBoard(ns, { ...board, milestones: next });
-            setBoard(saved);
-          }}
-          onShowOnBoard={(id) => { setMilestoneFilter(id); setFiltersOpen(true); setModePersist('board'); }}
-          onEditTask={openEdit}
-          onOpenNote={onOpenNote}
-        />
-      ) : tasks.length === 0 && effectiveScope === 'note' ? (
+        <div className={`tb-ms-split${detailTask ? ' with-detail' : ''}`}>
+          <MilestonesView
+            milestones={milestones}
+            tasks={scopedTasks}
+            columns={columns}
+            doneColumns={doneColumnIds}
+            isBlocked={isBlocked}
+            canWrite={canWrite}
+            selected={selectedMilestone}
+            onSelect={selectMilestone}
+            onSave={async (next) => {
+              const saved = await saveBoard(ns, { ...board, milestones: next });
+              setBoard(saved);
+            }}
+            onShowOnBoard={(id) => { setMilestoneFilter(id); setFiltersOpen(true); setModePersist('board'); }}
+            onOpenTask={openDetail}
+            isSelectedTask={(t) => sameTask(t, detailTask)}
+            onOpenNote={onOpenNote}
+            scope={effectiveScope}
+            scopeHint={effectiveScope === 'folder' ? `Counting the tasks in 📁 ${folder}` : effectiveScope === 'note' ? `Counting the tasks in ${currentPath}` : ''}
+            groups={isGlobal ? workspaceGroups(boards, tasks) : null}
+            onOpenWorkspaceMilestone={openWorkspaceMilestone}
+          />
+          {detailTask && (
+            <div className="tb-ms-detail">
+              <TaskEditor
+                // Per opening, not per line: a line shift must not reset the form.
+                key={detailAt.seq}
+                inline
+                readOnly={!canWrite}
+                board={board}
+                task={detailTask}
+                defaultNote={detailTask.path}
+                defaultColumn={detailTask.column}
+                currentUser={currentUser}
+                users={nsUsers}
+                tagSuggestions={allTags}
+                taskTitles={taskTitles}
+                taskRefs={taskRefs}
+                onSave={handleDetailSave}
+                onCancel={() => setDetailAt(null)}
+                onOpenNote={onOpenNote}
+              />
+            </div>
+          )}
+        </div>
+      ) : scopedTasks.length === 0 && effectiveScope === 'note' ? (
         <div className="tb-empty">
           No tasks in this note yet.
           {canWrite && <> <button type="button" className="tb-link-btn" onClick={openCreate}>Add the first task</button></>}
         </div>
-      ) : tasks.length === 0 ? (
+      ) : scopedTasks.length === 0 && effectiveScope === 'folder' ? (
+        <div className="tb-empty">No task-list items in 📁 {folder} or its sub-folders.</div>
+      ) : scopedTasks.length === 0 ? (
         <div className="tb-empty">No task-list items found in this namespace. Add <code>- [ ] something</code> to a note.</div>
       ) : filteredTasks.length === 0 ? (
         <div className="tb-empty">No tasks match the current filters. <button type="button" className="tb-link-btn" onClick={clearFilters}>Clear filters</button></div>

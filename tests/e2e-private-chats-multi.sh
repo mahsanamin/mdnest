@@ -58,7 +58,7 @@ for _ in $(seq 1 30); do docker exec "$PG" pg_isready -U mdnest >/dev/null 2>&1 
 docker run -d --name "$BE" --network "$NET" \
   -e AUTH_MODE=multi -e POSTGRES_HOST="$PG" -e POSTGRES_PASSWORD=pw \
   -e MDNEST_USER=admin -e MDNEST_PASSWORD=adminpass123 -e MDNEST_JWT_SECRET=e2e-multi-secret \
-  -e NOTES_DIR=/notes -e FRONTEND_ORIGIN=http://localhost \
+  -e NOTES_DIR=/notes -e FRONTEND_ORIGIN=http://localhost -e OIDC_GROUPS_CLAIM=groups -e API_TOKEN_GROUPS_MAX_AGE=1080h \
   -v "$NOTES_DIR:/notes" -p 127.0.0.1:0:8080 "$IMAGE" >/dev/null
 PORT="$(docker port "$BE" 8080/tcp | head -1 | sed 's/.*://')"
 BASE="http://127.0.0.1:$PORT"
@@ -85,8 +85,8 @@ else
   fail "migration 018: keys are [$LEGACY_KEYS]"; exit 1
 fi
 
-BASE="$BASE" NOTES="$NOTES_DIR" python3 - <<'PY'
-import json, os, sys, threading, urllib.request, urllib.error
+BASE="$BASE" NOTES="$NOTES_DIR" PG="$PG" python3 - <<'PY'
+import json, os, subprocess, sys, threading, urllib.request, urllib.error
 
 BASE, NOTES = os.environ["BASE"], os.environ["NOTES"]
 passed = failed = 0
@@ -248,6 +248,61 @@ for _ in range(15):
     if any(m["username"] == "nate" for m in r["members"]):
         lost += 1
 check("a removed member never stays on the list (15 rounds)", lost == 0, f"re-added in {lost} rounds")
+
+print("── people with access through an access group can be added to a chat")
+# gina reaches alpha only as a user member of a group; ivan only through an IdP
+# group, known from his recorded IdP groups (user_oidc_groups). zed has no
+# access to alpha at all. None of them holds a direct grant.
+for name in ("gina", "ivan", "zed"):
+    code, r = call("POST", "/api/admin/invite", admin, {"email": f"{name}@e2e.local", "username": name, "password": name + "pass123", "role": "collaborator"})
+    assert code in (200, 201), f"invite {name}: {code} {r}"
+code, all_users = call("GET", "/api/admin/users", admin)
+ids = {u["username"]: u["id"] for u in (all_users if isinstance(all_users, list) else all_users.get("users", []))}
+code, grp = call("POST", "/api/admin/groups", admin, {"name": "alpha-team", "description": ""})
+assert code in (200, 201), f"group: {code} {grp}"
+for body in ({"group_id": grp["id"], "user_id": ids["gina"]}, {"group_id": grp["id"], "oidc_group": "idp-alpha", "oidc_label": "Alpha"}):
+    code, r = call("POST", "/api/admin/groups/members", admin, body)
+    assert code in (200, 201, 204), f"group member: {code} {r}"
+code, r = call("POST", "/api/admin/groups/grants", admin, {"group_id": grp["id"], "namespace": "alpha", "path": "/", "permission": "write"})
+assert code in (200, 201, 204), f"group grant: {code} {r}"
+subprocess.run(["docker", "exec", os.environ["PG"], "psql", "-q", "-U", "mdnest", "-d", "mdnest", "-c",
+                f"INSERT INTO user_oidc_groups (user_id, groups) VALUES ({ids['ivan']}, ARRAY['idp-alpha'])"], check=True, stdout=subprocess.DEVNULL)
+code, r = call("GET", "/api/namespace/users?ns=alpha", owen)
+names = {u["username"] for u in (r if isinstance(r, list) else r.get("users", []))} if code == 200 else set()
+check("the member picker lists gina (group user member)", "gina" in names, f"{code} {r}")
+check("the member picker lists ivan (IdP group member)", "ivan" in names, f"{code} {r}")
+# His last sign-in no longer had the IdP group: he is no longer counted.
+subprocess.run(["docker", "exec", os.environ["PG"], "psql", "-q", "-U", "mdnest", "-d", "mdnest", "-c",
+                f"UPDATE user_oidc_groups SET groups = ARRAY[]::text[] WHERE user_id = {ids['ivan']}"], check=True, stdout=subprocess.DEVNULL)
+code, r = call("GET", "/api/namespace/users?ns=alpha", owen)
+left = {u["username"] for u in r} if code == 200 else set()
+check("after a sign-in without the IdP group, ivan is no longer listed", "ivan" not in left and "gina" in left, f"{code} {r}")
+# The recorded groups count for a while after that sign-in, then not: someone
+# removed from the IdP group, or gone from the company, never signs in again.
+# The window is 30 days, or API_TOKEN_GROUPS_MAX_AGE when longer (45 days
+# here), since the person's API tokens reach the workspace for that long.
+subprocess.run(["docker", "exec", os.environ["PG"], "psql", "-q", "-U", "mdnest", "-d", "mdnest", "-c",
+                f"UPDATE user_oidc_groups SET groups = ARRAY['idp-alpha'], captured_at = now() - interval '44 days' WHERE user_id = {ids['ivan']}"], check=True, stdout=subprocess.DEVNULL)
+code, r = call("GET", "/api/namespace/users?ns=alpha", owen)
+check("a sign-in 44 days ago in the IdP group still counts (token age 45 days)", code == 200 and "ivan" in {u["username"] for u in r}, f"{code} {r}")
+subprocess.run(["docker", "exec", os.environ["PG"], "psql", "-q", "-U", "mdnest", "-d", "mdnest", "-c",
+                f"UPDATE user_oidc_groups SET captured_at = now() - interval '46 days' WHERE user_id = {ids['ivan']}"], check=True, stdout=subprocess.DEVNULL)
+code, r = call("GET", "/api/namespace/users?ns=alpha", owen)
+check("a sign-in 46 days ago no longer counts", code == 200 and "ivan" not in {u["username"] for u in r} and "gina" in {u["username"] for u in r}, f"{code} {r}")
+code, r = call("POST", "/api/chat/members?ns=alpha&path=Rooms/room.md", owen, {"userId": ids["ivan"]})
+check("so he cannot be added to the private chat", code in (403, 404), f"{code} {r}")
+# A blocked account cannot sign in, so it is not offered either.
+subprocess.run(["docker", "exec", os.environ["PG"], "psql", "-q", "-U", "mdnest", "-d", "mdnest", "-c",
+                f"UPDATE users SET blocked = true WHERE id = {ids['gina']}"], check=True, stdout=subprocess.DEVNULL)
+code, r = call("GET", "/api/namespace/users?ns=alpha", owen)
+check("a blocked account is not listed", code == 200 and "gina" not in {u["username"] for u in r}, f"{code} {r}")
+subprocess.run(["docker", "exec", os.environ["PG"], "psql", "-q", "-U", "mdnest", "-d", "mdnest", "-c",
+                f"UPDATE users SET blocked = false WHERE id = {ids['gina']}"], check=True, stdout=subprocess.DEVNULL)
+check("the member picker leaves out zed (no access)", "zed" not in names, f"{code} {r}")
+code, r = call("POST", "/api/chat/members?ns=alpha&path=Rooms/room.md", owen, {"userId": ids["gina"]})
+check("owen adds gina to the private chat", code == 200 and any(m["username"] == "gina" for m in r["members"]), f"{code} {r}")
+code, r = call("POST", "/api/chat/members?ns=alpha&path=Rooms/room.md", owen, {"userId": ids["zed"]})
+check("adding zed is still refused", code in (403, 404), f"{code} {r}")
 
 print("── a deleted account does not open the chat")
 code, r = call("POST", "/api/chat/convert?ns=alpha&path=Solo.md&private=1", mia)

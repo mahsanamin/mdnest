@@ -4,6 +4,72 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v4.8.15: A folder's task board, and access-group members in the pickers
+
+### Added
+
+- **A folder's task board, and a task's detail next to its milestone.** With
+  the task board open, clicking a folder in the tree shows the tasks of that
+  folder and its sub-folders (List, Kanban and Milestones); "Task board" in a
+  folder's right-click menu opens it there. Milestones follow the board's scope
+  (workspace, folder, this note, all workspaces): on a folder or a note they
+  count the tasks there, and over every workspace they are grouped by
+  workspace. Clicking a task on a milestone page opens it in full on the right
+  of the page, to read or edit in place. Thanks to
+  [@ecthelion77](https://github.com/ecthelion77) (Olivier Gintrand), #162.
+
+### Fixed
+
+- **People who get access through an access group can be assigned tasks and
+  invited to private chats.** The assignee and chat member pickers listed only
+  people with a grant of their own, so a group member could not be picked, and
+  the server refused to add them to a chat. They now list everyone with access
+  through a group too: user members, and IdP group members (Entra ID,
+  Keycloak...) for 30 days after an SSO sign-in in that group (or
+  `API_TOKEN_GROUPS_MAX_AGE` when longer), so someone removed from the group
+  drops off even if they never sign in again. For that, with
+  `OIDC_GROUPS_CLAIM` set, each SSO login now records the person's IdP groups,
+  not only when `API_TOKEN_GROUPS_MAX_AGE` is set. Blocked accounts are not
+  listed. #160. Thanks to
+  [@ecthelion77](https://github.com/ecthelion77) (Olivier Gintrand), #161.
+- **A link you cannot open says so.** A link to a workspace you are not in
+  used to land you on the last note you had open there, with the address
+  changed to it and no word about the link. A note that could not be read
+  left an empty editor. Both now show a message (no access, not found, too
+  large) and leave you where you were.
+- **A large file no longer freezes the page.** Opening a file over 1 MB asks
+  first, and it opens as plain text: the Basic editor, without the Live
+  editor or the preview.
+- **Saving a note or uploading an image over 1 MB works with the bundled
+  web server.** Its nginx refused any request over 1 MB before mdnest saw it.
+  It now allows 32 MB; mdnest itself still limits a note to 10 MB.
+- **Chat follows the workspace you are in.** Chat had its own workspace
+  picker, and a pinned chat stayed when you switched workspace, so a chat
+  from one workspace could sit next to notes from another. Chat now always
+  shows the workspace chosen in the main dropdown. A pinned chat is kept per
+  workspace and comes back when you switch back.
+- **Right-click in an open chat shows mdnest's menu**, with **Copy message**
+  on a message, instead of the browser's menu. The message box keeps the
+  browser's menu for spelling suggestions. Code blocks in chat messages have
+  a **Copy** button.
+
+### Changed
+
+- **The README is short** and points to the guides on mdnest.dev. It has
+  prompts to paste into a coding agent that sets mdnest up for you.
+
+### Removed
+
+- **Chat's own workspace picker.** Chat now always shows the workspace chosen
+  in the main dropdown. To see another workspace's chats, switch workspace
+  there; a chat pinned in each workspace comes back when you return to it.
+
+### Security
+
+- **Go 1.26.11.** The backend is built with Go 1.26.11, which fixes
+  GO-2026-6859, a crash in Go's HTTP/1 server caused by a race in
+  `MaxBytesReader` (net/http).
+
 ## v4.8.14: Milestones on the task board, and API tokens that use IdP groups
 
 ### Added

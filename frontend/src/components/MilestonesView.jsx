@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { milestoneStats, sortMilestones, milestoneId, dueLabel, formatCreated } from '../milestones';
+import { milestonesInScope } from '../taskScope';
 import { NO_GRAMMAR_ASSIST } from '../noGrammarAssist.js';
 import './TaskBoard.css';
 
@@ -91,21 +92,22 @@ function People({ participants, max = 6 }) {
 }
 
 // TaskRow is one task of the milestone page, with what matters to follow it.
-function TaskRow({ task, today, canWrite, onEditTask, onOpenNote }) {
+// A click opens the task's detail next to the page.
+function TaskRow({ task, today, selected, onOpenTask, onOpenNote }) {
   const steps = task.steps || [];
   const late = !task.checked && task.due && task.due < today;
   return (
-    <li className={`tb-ms-task${task.checked ? ' checked' : ''}`}>
-      <span className="tb-ms-task-title">
+    <li className={`tb-ms-task${task.checked ? ' checked' : ''}${selected ? ' selected' : ''}`} onClick={() => onOpenTask(task)}>
+      <button type="button" className="tb-ms-task-title" aria-pressed={selected} title="Show this task"
+        onClick={(e) => { e.stopPropagation(); onOpenTask(task); }}>
         {task.ref && <span className="tb-ref">{task.ref}</span>} {task.text || <em>(empty)</em>}
-      </span>
+      </button>
       <span className="tb-ms-task-meta">
         {task.assignee && <span className="tb-chip" title="Assignee">👤 {task.assignee}</span>}
         {steps.length > 0 && <span className="tb-chip" title="Steps done">☑ {steps.filter((s) => s.checked).length}/{steps.length}</span>}
         {task.due && <span className={`tb-due${late ? ' overdue' : ''}`} title="Due date">📅 {task.due}</span>}
         {task.completed && <span className="tb-chip" title={`Completed ${task.completed}`}>✓ {formatCreated(task.completed)}</span>}
-        {canWrite && <button type="button" className="tb-expand" onClick={() => onEditTask(task)}>✎ edit</button>}
-        <button type="button" className="tb-card-source" title={`Open ${task.path}`} onClick={() => onOpenNote(task.path)}>{task.path}</button>
+        <button type="button" className="tb-card-source" title={`Open ${task.path}`} onClick={(e) => { e.stopPropagation(); onOpenNote(task.path); }}>{task.path}</button>
       </span>
     </li>
   );
@@ -113,12 +115,16 @@ function TaskRow({ task, today, canWrite, onEditTask, onOpenNote }) {
 
 // MilestonePage is one milestone in full: dates and status, progress against
 // time, scope, what needs attention, participants, and its tasks by column.
-function MilestonePage({ milestone, stats, columns, today, canWrite, busy, onBack, onUpdate, onDelete, onShowOnBoard, onEditTask, onOpenNote }) {
+function MilestonePage({ milestone, stats, columns, today, canWrite, busy, scopeHint, onBack, onUpdate, onDelete, onShowOnBoard, onOpenTask, isSelectedTask, onOpenNote }) {
   const [editing, setEditing] = useState(false);
   const attention = [...new Set([...stats.overdue, ...stats.blocked])];
+  const row = (t) => (
+    <TaskRow key={`${t.path}:${t.line}`} task={t} today={today} selected={isSelectedTask(t)} onOpenTask={onOpenTask} onOpenNote={onOpenNote} />
+  );
   return (
     <div className="tb-ms-page" data-milestone={milestone.id}>
       <button type="button" className="tb-link-btn tb-ms-back" onClick={onBack}>← All milestones</button>
+      {scopeHint && <div className="tb-ms-scope-hint">{scopeHint}</div>}
       {editing ? (
         <MilestoneForm initial={{ title: milestone.title, start: milestone.start || '', due: milestone.due || '', description: milestone.description || '' }}
           busy={busy} submitLabel="Save" onCancel={() => setEditing(false)}
@@ -179,9 +185,7 @@ function MilestonePage({ milestone, stats, columns, today, canWrite, busy, onBac
         <section className="tb-ms-section tb-ms-attention">
           <h3>Needs attention</h3>
           <ul className="tb-ms-tasks">
-            {attention.map((t) => (
-              <TaskRow key={`${t.path}:${t.line}`} task={t} today={today} canWrite={canWrite} onEditTask={onEditTask} onOpenNote={onOpenNote} />
-            ))}
+            {attention.map(row)}
           </ul>
         </section>
       )}
@@ -209,9 +213,7 @@ function MilestonePage({ milestone, stats, columns, today, canWrite, busy, onBac
         <section key={c.id} className="tb-ms-section">
           <h3>{c.title} <span className="tb-column-count">{stats.byColumn[c.id]}</span></h3>
           <ul className="tb-ms-tasks">
-            {stats.tasks.filter((t) => t.column === c.id).map((t) => (
-              <TaskRow key={`${t.path}:${t.line}`} task={t} today={today} canWrite={canWrite} onEditTask={onEditTask} onOpenNote={onOpenNote} />
-            ))}
+            {stats.tasks.filter((t) => t.column === c.id).map(row)}
           </ul>
         </section>
       ))}
@@ -220,11 +222,72 @@ function MilestonePage({ milestone, stats, columns, today, canWrite, busy, onBac
   );
 }
 
+// MilestoneCard is one milestone in the overview grid.
+function MilestoneCard({ m, s, onOpen }) {
+  return (
+    <button type="button" className={`tb-ms-card${m.closed ? ' closed' : ''}`} data-milestone={m.id} onClick={onOpen}>
+      <div className="tb-ms-card-head">
+        <span className="tb-milestone-title">🏁 {m.title}</span>
+        <span className="tb-milestone-count" title="Tasks done">{s.done}/{s.total} · {s.percent}%</span>
+      </div>
+      <div className="tb-milestone-head"><StatusChips milestone={m} stats={s} /></div>
+      <ProgressBars stats={s} label={m.title} />
+      <div className="tb-ms-card-foot">
+        <People participants={s.participants} />
+        <span className="tb-ms-card-flags">
+          {s.overdue.length > 0 && <span className="tb-chip tb-ms-late" title="Open tasks past their due date">{s.overdue.length} late</span>}
+          {s.blocked.length > 0 && <span className="tb-blocked" title="Open tasks waiting on another open task">⛔ {s.blocked.length}</span>}
+        </span>
+      </div>
+    </button>
+  );
+}
+
+// WorkspaceMilestones is the Milestones mode over every workspace: one section
+// per workspace, its milestones counted on its own tasks. A card opens the
+// milestone's page in its workspace, where it can be edited.
+function WorkspaceMilestones({ groups, isBlocked, onOpenWorkspaceMilestone }) {
+  const [showClosed, setShowClosed] = useState(false);
+  const today = new Date().toISOString().slice(0, 10);
+  const sections = useMemo(() => groups.map((g) => ({
+    ...g,
+    all: sortMilestones(g.milestones).map((m) => ({ m, s: milestoneStats(m, g.tasks, { doneColumns: g.doneColumns, today, isBlocked }) })),
+  })), [groups, today, isBlocked]);
+  const closedCount = sections.reduce((n, g) => n + g.all.filter(({ m }) => m.closed).length, 0);
+  return (
+    <div className="tb-milestones-view">
+      <div className="tb-ms-toolbar">
+        {closedCount > 0 && (
+          <label className="tb-filter-showdone">
+            <input type="checkbox" checked={showClosed} onChange={(e) => setShowClosed(e.target.checked)} />
+            Show closed ({closedCount})
+          </label>
+        )}
+      </div>
+      {sections.length === 0 && <div className="tb-empty">No workspace you can read has milestones yet.</div>}
+      {sections.map((g) => {
+        const shown = g.all.filter(({ m }) => showClosed || !m.closed);
+        if (shown.length === 0) return null;
+        return (
+          <section key={g.ns} className="tb-ms-workspace" data-namespace={g.ns}>
+            <h3 className="tb-ms-workspace-title">🗂 {g.ns}</h3>
+            <div className="tb-ms-grid">
+              {shown.map(({ m, s }) => <MilestoneCard key={m.id} m={m} s={s} onOpen={() => onOpenWorkspaceMilestone(g.ns, m.id)} />)}
+            </div>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
 // MilestonesView is the board's Milestones mode: every milestone as a card
 // (progress against time, participants, what needs attention), and a page per
 // milestone. Milestones live in .mdnest/board.json; a task joins one with
-// `milestone: <id>`.
-export default function MilestonesView({ milestones, tasks, columns, doneColumns, isBlocked, canWrite, selected, onSelect, onSave, onShowOnBoard, onEditTask, onOpenNote }) {
+// `milestone: <id>`. The board's scope decides which tasks count: on a folder
+// or a note, only the milestones with tasks there are listed. Over every
+// workspace (`groups`), each workspace's milestones show in their own section.
+export default function MilestonesView({ milestones, tasks, columns, doneColumns, isBlocked, canWrite, selected, onSelect, onSave, onShowOnBoard, onOpenTask, isSelectedTask = () => false, onOpenNote, scope = 'workspace', scopeHint = '', groups = null, onOpenWorkspaceMilestone }) {
   const [creating, setCreating] = useState(false);
   const [showClosed, setShowClosed] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -232,6 +295,13 @@ export default function MilestonesView({ milestones, tasks, columns, doneColumns
   const today = new Date().toISOString().slice(0, 10);
   const all = useMemo(() => sortMilestones(milestones).map((m) => ({ m, s: milestoneStats(m, tasks, { doneColumns, today, isBlocked }) })),
     [milestones, tasks, doneColumns, today, isBlocked]);
+  // The overview lists what the scope holds; a page reached by its link still opens.
+  const listed = useMemo(() => {
+    const keep = new Set(milestonesInScope(milestones, tasks, scope).map((m) => m.id));
+    return all.filter(({ m }) => keep.has(m.id));
+  }, [all, milestones, tasks, scope]);
+
+  if (groups) return <WorkspaceMilestones groups={groups} isBlocked={isBlocked} onOpenWorkspaceMilestone={onOpenWorkspaceMilestone} />;
 
   const save = async (next) => {
     setBusy(true);
@@ -256,19 +326,25 @@ export default function MilestonesView({ milestones, tasks, columns, doneColumns
     return (
       <div className="tb-milestones-view">
         {err && <div className="tb-error">{err}</div>}
-        <MilestonePage milestone={current.m} stats={current.s} columns={columns} today={today} canWrite={canWrite} busy={busy}
+        <MilestonePage milestone={current.m} stats={current.s} columns={columns} today={today} canWrite={canWrite} busy={busy} scopeHint={scopeHint}
           onBack={() => onSelect('')} onUpdate={update} onDelete={remove} onShowOnBoard={onShowOnBoard}
-          onEditTask={onEditTask} onOpenNote={onOpenNote} />
+          onOpenTask={onOpenTask} isSelectedTask={isSelectedTask} onOpenNote={onOpenNote} />
       </div>
     );
   }
 
-  const shown = all.filter(({ m }) => showClosed || !m.closed);
-  const closedCount = all.length - all.filter(({ m }) => !m.closed).length;
+  const shown = listed.filter(({ m }) => showClosed || !m.closed);
+  const closedCount = listed.filter(({ m }) => m.closed).length;
+  const hiddenByScope = all.length - listed.length;
   return (
     <div className="tb-milestones-view">
       {selected && !current && <div className="tb-error">Milestone “{selected}” does not exist on this board.</div>}
       {err && <div className="tb-error">{err}</div>}
+      {scopeHint && (
+        <div className="tb-ms-scope-hint">
+          {scopeHint}{hiddenByScope > 0 ? ` · ${hiddenByScope} milestone${hiddenByScope > 1 ? 's' : ''} without tasks here not shown` : ''}
+        </div>
+      )}
       <div className="tb-ms-toolbar">
         {canWrite && !creating && <button type="button" className="tb-btn primary" onClick={() => setCreating(true)}>+ New milestone</button>}
         {closedCount > 0 && (
@@ -287,27 +363,13 @@ export default function MilestonesView({ milestones, tasks, columns, doneColumns
             }} />
         </div>
       )}
-      {all.length === 0 && !creating && (
-        <div className="tb-empty">No milestones yet. A milestone groups tasks towards a goal and shows how far along they are.</div>
+      {listed.length === 0 && !creating && (
+        <div className="tb-empty">{all.length === 0
+          ? 'No milestones yet. A milestone groups tasks towards a goal and shows how far along they are.'
+          : 'No milestone has tasks here yet.'}</div>
       )}
       <div className="tb-ms-grid">
-        {shown.map(({ m, s }) => (
-          <button key={m.id} type="button" className={`tb-ms-card${m.closed ? ' closed' : ''}`} data-milestone={m.id} onClick={() => onSelect(m.id)}>
-            <div className="tb-ms-card-head">
-              <span className="tb-milestone-title">🏁 {m.title}</span>
-              <span className="tb-milestone-count" title="Tasks done">{s.done}/{s.total} · {s.percent}%</span>
-            </div>
-            <div className="tb-milestone-head"><StatusChips milestone={m} stats={s} /></div>
-            <ProgressBars stats={s} label={m.title} />
-            <div className="tb-ms-card-foot">
-              <People participants={s.participants} />
-              <span className="tb-ms-card-flags">
-                {s.overdue.length > 0 && <span className="tb-chip tb-ms-late" title="Open tasks past their due date">{s.overdue.length} late</span>}
-                {s.blocked.length > 0 && <span className="tb-blocked" title="Open tasks waiting on another open task">⛔ {s.blocked.length}</span>}
-              </span>
-            </div>
-          </button>
-        ))}
+        {shown.map(({ m, s }) => <MilestoneCard key={m.id} m={m} s={s} onOpen={() => onSelect(m.id)} />)}
       </div>
     </div>
   );
