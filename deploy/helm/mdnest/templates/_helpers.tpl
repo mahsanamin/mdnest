@@ -37,6 +37,18 @@ app.kubernetes.io/name: {{ include "mdnest.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
+{{/*
+Annotations of a Deployment / StatefulSet: commonAnnotations plus the
+workload's own `annotations` (which win on the same key). Workload metadata
+only, never volumeClaimTemplates (immutable).
+Usage: include "mdnest.workloadAnnotations" (dict "root" . "annotations" .Values.backend.annotations)
+*/}}
+{{- define "mdnest.workloadAnnotations" -}}
+{{- with merge (dict) (.annotations | default dict) (.root.Values.commonAnnotations | default dict) -}}
+{{- toYaml . -}}
+{{- end -}}
+{{- end -}}
+
 {{/* Component-scoped names. */}}
 {{- define "mdnest.backend.fullname" -}}{{ printf "%s-backend" (include "mdnest.fullname" .) }}{{- end -}}
 {{- define "mdnest.backend.headlessName" -}}{{ printf "%s-backend-headless" (include "mdnest.fullname" .) }}{{- end -}}

@@ -5,9 +5,9 @@ metadata:
   labels:
     {{- include "mdnest.labels" . | nindent 4 }}
     app.kubernetes.io/component: frontend
-  {{- with .Values.commonAnnotations }}
+  {{- with (include "mdnest.workloadAnnotations" (dict "root" . "annotations" .Values.frontend.annotations)) }}
   annotations:
-    {{- toYaml . | nindent 4 }}
+    {{- . | nindent 4 }}
   {{- end }}
 spec:
   replicas: {{ .Values.frontend.replicaCount }}

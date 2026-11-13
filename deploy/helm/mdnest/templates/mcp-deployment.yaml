@@ -6,9 +6,9 @@ metadata:
   labels:
     {{- include "mdnest.labels" . | nindent 4 }}
     app.kubernetes.io/component: mcp
-  {{- with .Values.commonAnnotations }}
+  {{- with (include "mdnest.workloadAnnotations" (dict "root" . "annotations" .Values.mcp.annotations)) }}
   annotations:
-    {{- toYaml . | nindent 4 }}
+    {{- . | nindent 4 }}
   {{- end }}
 spec:
   replicas: {{ .Values.mcp.replicaCount }}

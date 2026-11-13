@@ -12,9 +12,9 @@ metadata:
   labels:
     {{- include "mdnest.labels" . | nindent 4 }}
     app.kubernetes.io/component: git-sync
-  {{- with .Values.commonAnnotations }}
+  {{- with (include "mdnest.workloadAnnotations" (dict "root" . "annotations" .Values.gitSync.annotations)) }}
   annotations:
-    {{- toYaml . | nindent 4 }}
+    {{- . | nindent 4 }}
   {{- end }}
 spec:
   # git-sync is a single-writer daemon: exactly one replica, even in
