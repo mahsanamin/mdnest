@@ -29,7 +29,10 @@ fullnameOverride: ""
 
 # -- Labels added to every resource created by the chart.
 commonLabels: {}
-# -- Annotations added to every resource created by the chart.
+# -- Annotations added to every resource created by the chart, including the
+# volumeClaimTemplates of the StatefulSets (immutable: changing them on an
+# existing release fails the upgrade). For annotations on one workload only
+# (e.g. Stakater Reloader), use `<workload>.annotations`.
 commonAnnotations: {}
 
 # -- Image pull secrets for private registries (list of `{name}`).
@@ -88,6 +91,8 @@ backend:
   namespaces: []
   # -- Image used by the namespace-provisioning init container.
   namespaceInitImage: busybox:1.36
+  # -- Annotations on the backend StatefulSet, or the app Deployment in git-native HA (merged over `commonAnnotations`). Not put on the volumeClaimTemplates.
+  annotations: {}
   # -- Extra pod annotations for the backend.
   podAnnotations: {}
   # -- Extra pod labels for the backend.
@@ -143,6 +148,8 @@ backend:
 frontend:
   # -- Number of frontend (nginx) replicas.
   replicaCount: 1
+  # -- Annotations on the frontend Deployment (merged over `commonAnnotations`).
+  annotations: {}
   # -- Extra pod annotations for the frontend.
   podAnnotations: {}
   # -- Extra pod labels for the frontend.
@@ -493,6 +500,8 @@ persistence:
 # persistence.notes (size/storageClass/accessMode); only sizing/scheduling here.
 # -----------------------------------------------------------------------------
 writer:
+  # -- Annotations on the writer StatefulSet (merged over `commonAnnotations`). Not put on its volumeClaimTemplate.
+  annotations: {}
   # -- Writer resource requests/limits.
   resources: {}
   # -- Node selector for the writer pod.
@@ -510,6 +519,8 @@ writer:
 gitSync:
   # -- Enable the git-sync sidecar (mirrors the notes repo to a git remote).
   enabled: false
+  # -- Annotations on the git-sync Deployment (merged over `commonAnnotations`).
+  annotations: {}
   # -- git-sync sidecar image.
   image:
     repository: alpine/git
@@ -622,6 +633,8 @@ mcp:
   extraEnv: []
   # -- MCP resource requests/limits.
   resources: {}
+  # -- Annotations on the MCP server Deployment (merged over `commonAnnotations`).
+  annotations: {}
   # -- Extra pod annotations for the MCP server.
   podAnnotations: {}
   # -- Extra pod labels for the MCP server.

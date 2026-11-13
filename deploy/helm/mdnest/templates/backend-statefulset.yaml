@@ -9,9 +9,9 @@ metadata:
   labels:
     {{- include "mdnest.labels" . | nindent 4 }}
     app.kubernetes.io/component: backend
-  {{- with .Values.commonAnnotations }}
+  {{- with (include "mdnest.workloadAnnotations" (dict "root" . "annotations" .Values.backend.annotations)) }}
   annotations:
-    {{- toYaml . | nindent 4 }}
+    {{- . | nindent 4 }}
   {{- end }}
 spec:
   serviceName: {{ include "mdnest.backend.headlessName" . }}

@@ -109,6 +109,30 @@ jobs:
             --set mcp.oauth.publicUrl=https://mcp.example \
             --set mcp.oauth.ssoAuthorizeUrl=https://notes.example/api/auth/sso/start \
             --set mcp.oauth.secret.value=ci-oauth-secret > rendered-ha.yaml
+      - name: Workload annotations stay off the volumeClaimTemplates
+        # volumeClaimTemplates are immutable: an annotation there fails every
+        # upgrade of an existing release.
+        run: |
+          set -eu
+          # check <workloads expected to carry the annotation> [helm args...]
+          check() {
+            expected=$1; shift
+            helm template ci deploy/helm/mdnest "$@" \
+              --set-string 'backend.annotations.example\.com/reload=app' \
+              --set-string 'writer.annotations.example\.com/reload=app' > rendered-annotations.yaml
+            got=$(yq ea '[select(.metadata.annotations["example.com/reload"] == "app") | .kind + "/" + .metadata.name] | sort | join(",")' rendered-annotations.yaml)
+            leaked=$(yq ea '[select(.kind == "StatefulSet") | .spec.volumeClaimTemplates[] | select(.metadata.annotations["example.com/reload"] != null)] | length' rendered-annotations.yaml)
+            echo "annotated: $got; in volumeClaimTemplates: $leaked"
+            if [ "$got" != "$expected" ] || [ "$leaked" != 0 ]; then
+              echo "::error::expected the annotation on $expected only"
+              exit 1
+            fi
+          }
+          check StatefulSet/ci-mdnest-backend
+          check Deployment/ci-mdnest-backend,StatefulSet/ci-mdnest-writer \
+            --set auth.mode=multi --set postgres.host=pg.example --set postgres.password=x \
+            --set collab.enabled=true --set collab.redis.url=redis://redis.example:6379/0 \
+            --set storage.backend=git --set backend.replicaCount=3 --set persistence.secrets.enabled=false
       - name: Reject options the code does not implement
         # The chart's values surface must not outrun the backend. Each option
         # here would otherwise deploy "healthy" while doing the wrong thing, so
