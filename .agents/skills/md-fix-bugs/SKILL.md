@@ -15,7 +15,27 @@ finally opens **one** clean release PR, built on top of `main`.
 Run it whenever the user points you at the bug folder. (Sibling skill:
 `md-add-improvement` does the same for the `Features/` backlog.)
 
-## mdnest brain locations (the backlog lives here, not in the repo)
+## Contributor or maintainer? Read this first
+
+Most of this skill describes the **maintainer's** cycle (a private backlog,
+merging straight into `develop`, releasing). If you are a **contributor**
+working from a fork, or you cannot reach `@srv-ahsan-mini/...`, do this instead:
+
+1. The bug comes from the user's description or a GitHub issue (for an issue,
+   `md-issue-process` covers the whole arc).
+2. Confirm it is still a bug on the latest `develop`. Some reports are against an
+   old installed CLI.
+3. Branch `fix/<slug>` from the latest `develop`, fix it, and add the regression
+   test from step 3 below, shown failing without the fix.
+4. Verify with step 3's levels (`iterate` while working, `develop` once before
+   handing in). Name any suite you could not run.
+5. Open a PR with base `develop` (never `main`). No version bump, no release
+   section in `CHANGELOG.md`, no tag. Skip steps 1, 4 (merge), 6 and every
+   `mdnest` backlog command below.
+
+The conventions and the verification section apply to everyone.
+
+## mdnest brain locations (maintainer only; the backlog lives here, not in the repo)
 
 - **Bugs (input):** `@srv-ahsan-mini/mahsan_brain/MyProjects/mdNest/Bugs/`
 - **TODOs (output):** `@srv-ahsan-mini/mahsan_brain/MyProjects/mdNest/ToDos/`
@@ -32,8 +52,8 @@ repo code already fixes it (then just verify + mark resolved).
 
 ## Critical conventions (read before committing anything)
 
-- **Clean commits — no attribution.** Do NOT add a `Co-Authored-By: Codex …`
-  trailer or any "Generated with Codex" footer to commits or PR bodies for
+- **Clean commits — no attribution.** Do NOT add a `Co-Authored-By:` AI
+  trailer or any "Generated with ..." footer to commits or PR bodies for
   this project. The user wants the history clean. (This intentionally overrides
   the global default commit/PR footer.)
 - **No per-bug PRs — merge each fix straight into `develop`.** Each bug gets its
@@ -41,8 +61,11 @@ repo code already fixes it (then just verify + mark resolved).
   verified, merge it **directly into `develop`** (`git merge --no-ff` + push,
   no PR) and delete the branch. The ONLY PR in the whole cycle is the final
   release PR (`main` ← the release branch). Opening a PR per bug just adds noise.
-- **Verify every change before merging to develop** — run the smoke-test harness
-  (and `npm run build`/`npm test` for frontend changes). Don't merge red.
+- **Verify every change before merging to develop.** While fixing, run
+  `bash tests/check.sh --level iterate` (only what the fix touches, under 5
+  min). Before the merge into `develop`, run `bash tests/check.sh --level
+  develop` once (about 15 to 20 min). Don't merge red. The full gate
+  (`--level ship`) is for the release only.
 - **Sequential, not parallel.** Branch each fix from `develop` only after the
   previous one merged, so shared files (`mdnest`, `App.css`) never conflict.
 
@@ -77,7 +100,14 @@ repo code already fixes it (then just verify + mark resolved).
   part of the fix, not optional: a CLI-behaviour bug → a `tests/cli-smoke-test.sh`
   assertion; a parser/fallback bug (e.g. anything that must work without
   `python3`) → a `tests/cli-unit.sh` case; a UI bug → a `tests/browser` spec.
-- Run the tier that matches the change:
+- **Levels (tests/check.sh, see `tests/AGENTS.md`):** while working, `bash
+  tests/check.sh --level iterate`, with the regression spec named in
+  `MDNEST_E2E_SPECS` (add `MDNEST_E2E_HARNESS=collab` for two-user specs).
+  Before merging into `develop`, `bash tests/check.sh --level develop` once:
+  it picks the suites below from the changed files by itself. If the fix was
+  for a flaky spec, run that spec with `MDNEST_E2E_ARGS="--repeat-each 3"`,
+  not 10. No repeated full suites.
+- What those levels run, by change (useful when running one suite by hand):
   - CLI/pure helpers: `bash tests/cli-unit.sh` (instant; runs with AND without
     python3) + `bash -n mdnest`.
   - CLI end-to-end: `tests/cli-smoke-test.sh` against the disposable
@@ -87,9 +117,21 @@ repo code already fixes it (then just verify + mark resolved).
     in a bare no-python3 container).
   - Frontend/UI: `npm run build` + `npm test`, and `bash tests/e2e-browser.sh`
     (full stack + Playwright) for user-facing flows.
-- The pre-push hook runs the fast tier on every push and the full Docker + browser
-  suites when pushing a `release/*` branch — so the release PR can't go up red.
-  Don't skip it (`MDNEST_SKIP_E2E=1`) except in a real emergency.
+  - The suite the changed files call for, using the same map as
+    `tests/check.sh`: `backend/storage`, `deploy/helm` →
+    `tests/e2e-ha-durability.sh`; collab, note save paths, the Live editor,
+    `App.jsx` → `tests/e2e-collab-multi.sh`; chat members, permission
+    middleware → `tests/e2e-private-chats-multi.sh`; transfer, download →
+    `tests/e2e-transfer-multi.sh`. A change that only works in one topology
+    has not been verified.
+- **A bug in a released version: show the test failing on that tag.** Build the
+  tag in a throwaway worktree and run the suite with `MDNEST_BUILD_ROOT=<it>`
+  (or revert the fix locally and run the unit test). A regression test nobody
+  has seen fail does not prove it would catch the bug again.
+- The pre-push hook runs the fast tier on every push (Go build and vet go
+  through Docker when there is no host Go). A push to `release/*` or `main` is
+  accepted only for a tree that passed `tests/release-gate.sh` (see `md-ship`
+  Step 0). Don't skip it (`MDNEST_SKIP_E2E=1`) except in a real emergency.
 
 ### 4. Merge straight into develop (NO per-bug PR)
 - `git commit` — clear subject + body, **no co-author / generated-by footer**.
@@ -107,7 +149,9 @@ repo code already fixes it (then just verify + mark resolved).
 - Back to step 2 with the next one. Keep it strictly sequential.
 
 ### 6. Release: ONE clean PR on top of main
-Run the full smoke test on `develop` once more, then build the release as a
+**First run `md-ship` Step 0 (the ship gate).** If the soak, the green
+`develop`, or any other item there does not hold, stop: the fixes stay on
+`develop` and the release waits. Then build the release as a
 **single commit on top of current `main`** — NOT a develop-based branch. A
 develop-based PR lists every individual commit that `main` only has as squashed
 releases (~50 of them), which looks alarming even though the file diff is tiny.
@@ -147,7 +191,9 @@ carries `X.Y.Z-dev`; the release branch **drops the `-dev` suffix**. Add the
 > build shows no false "update available" against the last release but does see
 > the final release as newer once it ships.
 
-Verify (build/test/smoke), `git push -u origin release/vX.Y.Z`, and open ONE PR
+Run `bash tests/release-gate.sh` (the ship level of `tests/check.sh`) on that
+commit (it records the tree it tested; the hook pushes nothing else), `git push -u origin release/vX.Y.Z`,
+and open ONE PR
 → `main`. Because the base IS `main`, it's a 1-commit, small-diff, conflict-free
 PR (this is the fix for the "why so many commits" problem).
 
@@ -163,7 +209,7 @@ PR (this is the fix for the "why so many commits" problem).
   again.
 - Optionally run `/md-ship` to sync docs + website.
 
-See the "Release Process" section of `AGENTS.md`.
+See `docs/dev/release.md`.
 
 ## Done criteria
 - Every actionable bug is fixed, verified (green harness + a regression check),
@@ -172,4 +218,4 @@ See the "Release Process" section of `AGENTS.md`.
 - **One** clean release PR (a single commit on top of `main`, small diff) is
   open/merged, version bumped, CHANGELOG updated, tag + GitHub Release published,
   and `develop` reconciled with `main`.
-- No per-bug PRs. Commit history clean (no Codex attribution).
+- No per-bug PRs. Commit history clean (no AI attribution).

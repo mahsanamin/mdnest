@@ -78,7 +78,7 @@ entirely by "fix the Fedora traceback".
 traceback came from the reporter's own broken `matplotlib` `.pth`. We could not
 fix his python — but mdnest was the thing that surfaced it, so `-S -E` plus
 "drop stderr and fall back" was ours to write. Fix our layer; **don't try to
-police theirs** (see AGENTS.md "Scope discipline").
+police theirs** (see `AGENTS.md`, "Rules for every change").
 
 ## Step 3 — Reproduce the *mechanism*, not the environment
 
@@ -128,7 +128,7 @@ Follow **`md-fix-bugs` steps 2 and 4** exactly — they are authoritative:
 
 Two things this repo's CLI will bite you with: it runs under `set -e` (a helper
 used as a bare statement must `return 0` on success), and that `set -e` leaks
-into anything that *sources* it. See the "Client CLI" section of AGENTS.md before
+into anything that *sources* it. See `docs/dev/cli.md` before
 touching `mdnest`.
 
 **If you find an adjacent bug while in there, fix it on its own branch** and say
@@ -156,7 +156,7 @@ checks the good path would have passed throughout #87.
 
 ## Step 6 — Verify before merging (gate)
 
-Run the tier that matches the change (see AGENTS.md "Testing"): `cli-unit.sh` +
+Run the tier that matches the change (see `tests/AGENTS.md`): `cli-unit.sh` +
 `bash -n` for CLI helpers, `cli-smoke-test.sh` for CLI end-to-end,
 `npm test`/`npm run build` for frontend, `tests/e2e-docker.sh` for the
 fresh-machine path, `tests/e2e-browser.sh` for UI flows. **Don't merge red.**
