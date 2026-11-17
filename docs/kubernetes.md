@@ -88,3 +88,14 @@ The opt-in mirror (`storage.git.remote.url`) pushes each namespace repo to an ex
 `helm upgrade` with the new chart version. Image tags default to the chart's `appVersion`, which tracks the mdnest release, so upgrading the chart upgrades mdnest. Pin explicitly with `image.backend.tag` / `image.frontend.tag` if you'd rather control that yourself.
 
 The backend runs as a StatefulSet, so each pod's notes volume has a stable identity across restarts. Upgrading a pre-`0.2.0` (Deployment-based) release must adopt the old notes PVC via `persistence.notes.existingClaim: <release>-notes`, otherwise Helm deletes the old volume and the StatefulSet provisions an empty one. The install-time `validateUpgrade` guard refuses a CLI upgrade that would hit this and names the value to set; a GitOps render won't trigger the guard, so the same note lives in `values.yaml`.
+
+A StatefulSet's `volumeClaimTemplates` cannot change once created, and `commonAnnotations` is copied into them: adding or changing it on an existing release fails the upgrade. To annotate the workloads themselves, use `backend.annotations`, `writer.annotations`, `frontend.annotations`, `mcp.annotations` or `gitSync.annotations`, which go on that Deployment or StatefulSet only. For example, to have [Stakater Reloader](https://github.com/stakater/Reloader) restart the backend and the writer when the Secret holding the SSO client secret is renewed:
+
+```yaml
+backend:
+  annotations:
+    secret.reloader.stakater.com/reload: mdnest-app-secrets
+writer:
+  annotations:
+    secret.reloader.stakater.com/reload: mdnest-app-secrets
+```

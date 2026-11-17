@@ -20,6 +20,16 @@ All notable changes to mdnest are documented here.
   right test level, and open a pull request into `develop`. Nothing changes in
   the app itself.
 
+### Added
+
+- **Helm chart: annotations for one workload.** `backend.annotations`,
+  `writer.annotations`, `frontend.annotations`, `mcp.annotations` and
+  `gitSync.annotations` annotate that Deployment or StatefulSet only, for
+  example so Stakater Reloader restarts the backend and the writer when the SSO
+  client secret is renewed. Unlike `commonAnnotations`, they never go into the
+  StatefulSets' volume claim templates, which cannot change on an existing
+  install. #165.
+
 ## v4.8.15: A folder's task board, and access-group members in the pickers
 
 ### Added
