@@ -76,7 +76,8 @@ user asked in their own words. If your tool cannot run skills, open the
   [WRITING.md](https://github.com/mahsanamin/mdnest-website/blob/main/WRITING.md):
   plain English, no em or en dashes, no marketing words, promise only what the
   released code does, and label features the basic install does not turn on
-  ("Optional" or "Needs team setup").
+  ("Optional" or "Needs team setup"). Do not change the pitch or the audience
+  on your own; the long version is "Public wording" in `docs/dev/release.md`.
 - **Commits:** clear messages in the repo's style, no AI co-author trailer or
   "Generated with" footer.
 - **When you add, move or remove a file**, update `docs/codemap.md`. When you learn

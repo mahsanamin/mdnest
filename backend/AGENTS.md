@@ -18,7 +18,8 @@ names. Per-file traps are in `docs/codemap.md`.
 ## Modes and identity
 
 - `AUTH_MODE=single` (files only, the `store/` package is not even initialized)
-  or `AUTH_MODE=multi` (Postgres). Nothing may add a database to single mode.
+  or `AUTH_MODE=multi` (Postgres). Nothing may add a database to single mode, and
+  every multi-user feature must be fully conditional so single mode keeps working.
 - `USER_PROVIDER=local | firebase | sso`, chosen at startup. In `sso` mode 2FA is
   skipped. IdP-specific rules go in `sso.checkIdentity`, keyed on the issuer.
 - Roles: `superadmin` (global management, but NO implicit access to note

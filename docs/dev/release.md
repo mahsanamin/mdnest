@@ -114,3 +114,17 @@ tag (`MDNEST_BUILD_ROOT=<checkout of the tag>`).
 
 `main` is still the default branch, so GitHub prefills `main` as the base for fork PRs and contributors have to retarget by hand. This is a known, accepted rough edge — the trunk-based model (PRs into `main`, release branches cut off it) is the ecosystem norm that contributors expect, whereas mdnest uses git-flow because it ships explicit versioned self-hosted releases with an in-app update banner keyed to GitHub Releases. Two ways to close it if the friction becomes real: make `develop` the default branch (**repoint `main-branch`'s condition from `~DEFAULT_BRANCH` to literal `refs/heads/main` first**, or the whole security gate silently follows the default onto `develop`), and/or add a required check on `main` that fails when a PR's head isn't `develop` / `release/*` / `hotfix/*`. Neither is in place yet.
 
+
+## Public wording (README, docs, website, release notes)
+
+mdnest is pitched as **"Your team and your AI agents, working from the same notes."**: a self-hosted Markdown knowledge base for developer teams who work with coding agents. A single developer can try it alone first, but teams are the main readers. The owner sets the audience and the pitch, so do not change either on your own.
+
+Every public sentence (this repo's `README.md`, the user-facing `docs/`, CHANGELOG entries, GitHub release notes, and the website) follows the writing standard in the website repo: `../mdnest-website/WRITING.md` ([on GitHub](https://github.com/mahsanamin/mdnest-website/blob/main/WRITING.md)). In short:
+
+- Plain English: short common words, one idea per sentence, no metaphors, no em or en dashes, no marketing words.
+- Say what the user gets, then the fact that proves it.
+- Promise only what the **released** code does. No time claims ("3 minutes"), no "one command", no "nothing leaves your server", no "built-in AI". `WRITING.md` has the full list and the wording to use instead.
+- Label features the basic install does not turn on: "Optional" (for example the task board, drawings, MCP) or "Needs team setup" (comments, presence, per-person access, groups, private chats).
+
+When a change here alters one of those defaults or what the server sends out, update the facts in `WRITING.md` in the same release. `md-ship` step 7 covers this.
+
