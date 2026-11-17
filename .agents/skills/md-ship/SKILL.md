@@ -92,12 +92,13 @@ seen failing on the broken code does not count.
 Add the change to the current version section at the top. If the latest version is already shipped (tagged + pushed), create a new patch / minor section above it, matching the existing format (bold feature name + description). Don't append new entries to a tagged release.
 
 ### 2. Version bump (only if a new version section was created)
-Bump all three in lockstep:
+Bump all four in lockstep:
 - `backend/handlers/config.go` — `"version": "X.Y.Z"`
 - `frontend/package.json` — `"version": "X.Y.Z"`
 - `mdnest` CLI — `MDNEST_CLI_VERSION="X.Y.Z"`
+- `deploy/helm/mdnest/Chart.yaml` — `appVersion: "X.Y.Z"` (not `version:`, which is the chart's own)
 
-The pre-push hook (`.githooks/pre-push`) verifies these match — if any disagrees the push is blocked.
+The pre-push hook (`.githooks/pre-push`) verifies the first three match (it does not check `Chart.yaml`) — if any disagrees the push is blocked.
 
 ### 3. README.md
 Touch the intro (the pitch, "How it works", "Built for teams", "What you get", "Is it for you?") only for a major user-visible feature, and never change the pitch lines without the owner asking. Bug fixes and internal changes don't belong on the README.
@@ -264,7 +265,7 @@ tracker and cut a patch rather than leaving it.
 
 - Hardcoding `/Volumes/Work/...` absolute paths — those are machine-specific and break for any other contributor (or the same operator on a different laptop).
 - Adding entries to a CHANGELOG section that's already been tagged + pushed. Always create a new section for new fixes after a release ships.
-- Skipping the version-consistency check across the three files; the pre-push hook will reject the push if they drift.
+- Skipping the version-consistency check across the four files; the pre-push hook will reject the push if they drift.
 - Pushing directly to `main` when branch protection is on. Push to a release branch and open a PR — the PR body should track the CHANGELOG entry.
 - Tagging before diffing the merged tree against the release branch (Step 10a).
   A squash merge that drops a workflow change is invisible until a user hits it.
