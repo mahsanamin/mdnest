@@ -4,6 +4,20 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v4.8.16: One short guide for AI coding agents, for contributors too
+
+### Changed
+
+- **One short guide for AI coding agents, for contributors too.** Claude Code,
+  Codex and Gemini CLI now read the same `AGENTS.md`, about 6 KB instead of the
+  85 KB `CLAUDE.md` every session used to load. Each of `backend/`,
+  `frontend/`, `mcp-server/`, `deploy/` and `tests/` has its own short
+  `AGENTS.md`, and the long notes are in `docs/dev/`. The repo skills
+  (`md-add-improvement`, `md-fix-bugs`, `md-issue-process`) now have a path for
+  contributors working from a fork: build on a branch from `develop`, run the
+  right test level, and open a pull request into `develop`. Nothing changes in
+  the app itself.
+
 ## v4.8.15: A folder's task board, and access-group members in the pickers
 
 ### Added

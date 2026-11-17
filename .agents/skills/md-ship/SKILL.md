@@ -1,6 +1,6 @@
 ---
 name: md-ship
-description: After implementing a feature or fix in mdnest, run this to update CHANGELOG, docs, website, bump version, sync, and rebuild the local dev stack. Say "/md-ship" after completing any code change. (Part of the md-* mdnest skill family alongside md-fix-bugs and md-add-improvement.)
+description: Ship an mdnest release carefully. Runs the blocking ship gate first (soak, green develop, tests/release-gate.sh on the release commit, every touched topology, upgrade path, nothing users rely on removed), then CHANGELOG, docs, version bump, website, tag, GitHub Release and artifact checks. Say "/md-ship" when a release is wanted, or after completing a code change to update docs and the dev stack. (Part of the md-* mdnest skill family alongside md-fix-bugs and md-add-improvement.)
 ---
 
 ## Purpose
@@ -10,9 +10,81 @@ Automate the post-implementation checklist for mdnest: update all documentation,
 ## Conventions
 
 - All paths in this skill are relative to the repo root unless absolutely required to be absolute.
-- Resolve the repo root with `git rev-parse --show-toplevel` (or just `pwd` if Codex was started in the repo).
+- Resolve the repo root with `git rev-parse --show-toplevel` (or just `pwd` if Claude Code was started in the repo).
 - The website repo is expected as a sibling directory at `../mdnest-website` relative to this repo. If that path doesn't exist, skip the website-sync steps and tell the user.
 - The local dev stack lives in this repo and is started/rebuilt via `./mdnest-server rebuild` (uses `COMPOSE_PROJECT_NAME` from `mdnest.conf` to pick a compose project name — see `mdnest.conf.sample`).
+
+## Step 0: the ship gate (blocking, read it every time)
+
+Other people run mdnest for their teams. A release that breaks something lands
+on them, not on us, and they find out in production. The history is why this
+section exists:
+
+| Release | What broke | How it got out |
+|---|---|---|
+| v4.0.0 | published without its MCP image (#76) | nobody checked the artifacts the chart names |
+| v4.8.4 | removed the personal Git remote screen that installs were using (#135), undone in v4.8.7 | a removal was treated as a cleanup, not as a breaking change |
+| v4.8.10 | CLI appends no longer showed live in an open note | fixed in v4.8.11, the day after |
+| up to v4.8.10 | HA writer filled Redis and stopped for good (#147) | no test ever ran the writer and app replicas together |
+| 2026-10-06 to 10-20 | 12 releases in 15 days, three on 2026-10-07 | a release was cut whenever something merged |
+
+Every item below must hold. If one does not, **stop and say which one**. Do not
+work around it, do not cut the release "and fix it after".
+
+1. **Soak.** Each change in the release has run on the owner's dev stack or the
+   test server (`./mdnest-server rebuild`) since it merged to `develop`. A
+   feature waits at least a day there. A fix may ship the same day only if it
+   comes with a test that fails on the last released tag. **At most one release
+   a day**, unless it fixes a security hole or data loss.
+2. **develop is green right now.** `gh run list --branch develop --limit 4`
+   shows CI and Security Audit passed on the commit you are releasing. Advisories
+   are published between runs (GO-2026-6809 and the katex advisory turned
+   `develop` red the day after v4.8.11), so re-run the audits locally on the
+   day of the release, not just before.
+3. **The release gate passed on the release commit itself.** After the version
+   bump commit on `release/vX.Y.Z`, run:
+   ```bash
+   bash tests/release-gate.sh
+   ```
+   This is the ship level of `tests/check.sh` (`bash tests/check.sh --level
+   ship` is the same), the only level that runs everything: the whole
+   pre-push release tier, Go tests against a real Redis, shellcheck, and every
+   end-to-end suite (browser, shared editing, HA, private chats, transfer,
+   CLI, access), with the `@budget` timing tests last and alone. Changes that
+   merged into `develop` already passed `--level develop` once each; do not
+   rerun lower levels here. It records the exact tree that
+   passed, and the pre-push hook refuses to push any other tree to `release/*`
+   or `main`. Run it in the background; it takes 20 to 30 minutes.
+   `MDNEST_SKIP_E2E=1` is for an emergency only, and the PR must then say which
+   run covered this tree.
+4. **Every topology the change touches was run.** Single mode, multi mode
+   (Postgres), HA (writer + app replicas + Redis). The gate picks suites by
+   path; if your change affects a topology through a path it does not list,
+   run that suite by hand and add the path to the gate in the same release.
+5. **Upgrade from the last release works.** If the release changes anything
+   stored (note format, front matter, DB schema, the durability stream, config
+   names, a volume), run the new build against data the old one wrote. The
+   suites take `MDNEST_BUILD_ROOT=<checkout>` to build an older tree, which is
+   how v4.8.11 was proven against v4.8.10.
+6. **Nothing users rely on disappears.** Removing or renaming a screen,
+   endpoint, CLI command, env var or setting is a breaking change: it needs the
+   owner's sign-off, a CHANGELOG entry under **Removed** that says what to do
+   instead, and a check that nothing still running depends on it (#135: the
+   backend still served personal mirrors nobody could manage any more).
+7. **The owner keeps control.** No release narrows what a superadmin can do in
+   the default configuration (see "Admin power stays with the owner" in
+   `md-review-collab`).
+8. **Every required check on the release PR is green** before merging, and
+   `main` requires the CI jobs as well as the Security Audit ones
+   (`scripts/apply-main-branch-protection.sh`). A pending check is not a pass.
+9. **After publishing, verify before announcing.** Artifacts (step 12) first,
+   then the issue replies. Never tell a reporter to upgrade to an image that is
+   not on the registry yet.
+
+When a regression is reported against a released version, the fix comes with a
+test that fails on that released tag and passes on the fix, shown by running
+the suite with `MDNEST_BUILD_ROOT` pointed at the tag. A test that was never
+seen failing on the broken code does not count.
 
 ## Steps
 
@@ -20,21 +92,22 @@ Automate the post-implementation checklist for mdnest: update all documentation,
 Add the change to the current version section at the top. If the latest version is already shipped (tagged + pushed), create a new patch / minor section above it, matching the existing format (bold feature name + description). Don't append new entries to a tagged release.
 
 ### 2. Version bump (only if a new version section was created)
-Bump all three in lockstep:
+Bump all four in lockstep:
 - `backend/handlers/config.go` — `"version": "X.Y.Z"`
 - `frontend/package.json` — `"version": "X.Y.Z"`
 - `mdnest` CLI — `MDNEST_CLI_VERSION="X.Y.Z"`
+- `deploy/helm/mdnest/Chart.yaml` — `appVersion: "X.Y.Z"` (not `version:`, which is the chart's own)
 
-The pre-push hook (`.githooks/pre-push`) verifies these match — if any disagrees the push is blocked.
+The pre-push hook (`.githooks/pre-push`) verifies the first three match (it does not check `Chart.yaml`) — if any disagrees the push is blocked.
 
 ### 3. README.md
 Touch the intro (the pitch, "How it works", "Built for teams", "What you get", "Is it for you?") only for a major user-visible feature, and never change the pitch lines without the owner asking. Bug fixes and internal changes don't belong on the README.
 
 Any README wording follows the website repo's writing standard, `../mdnest-website/WRITING.md` ([on GitHub](https://github.com/mahsanamin/mdnest-website/blob/main/WRITING.md)): plain English, no claim the released code does not support, and an "Optional" or "Needs team setup" label on any feature the basic install does not turn on.
 
-### 4. AGENTS.md
-- New files in the project tree → add them to the structure block in the appropriate section.
-- New conventions, patterns, gotchas → add to the Conventions section.
+### 4. AGENTS.md, docs/dev/ and docs/codemap.md
+- New files in the project tree → add them to the map in `docs/codemap.md`, in the appropriate section. A new top-level directory also goes in the folder table in the root `AGENTS.md` (with its own `AGENTS.md` and a one-line `CLAUDE.md` containing `@AGENTS.md` if it needs rules).
+- New conventions, patterns, gotchas → a trap that belongs to one file goes on that file's line in `docs/codemap.md`; a rule for a folder goes in that folder's `AGENTS.md` as one short line, with the long explanation in the matching `docs/dev/*.md`. The root `AGENTS.md` only takes rules that apply to every change, so it stays small enough to load in every session.
 
 ### 5. docs/
 Match the change to the right doc:
@@ -58,16 +131,21 @@ grep -c '<new-command>' mdnest          # expect ≥ 3 (if added there)
 ```
 
 ### 6. Website sync
-If `../mdnest-website` exists, copy the doc set + CHANGELOG over:
+Do not copy docs into `../mdnest-website`. Its copies are gitignored: the
+Cloudflare Pages build pulls `docs/*.md` and `CHANGELOG.md` from mdnest's
+`main` on every deploy. So the site only changes AFTER the release is on
+`main`, and only once a build runs. After step 11, start one:
 
 ```bash
-REPO="$(git rev-parse --show-toplevel)"
-WEBSITE="$REPO/../mdnest-website"
-[ -d "$WEBSITE" ] || { echo "no sibling mdnest-website — skipping website sync"; }
-
-cp "$REPO"/docs/*.md "$WEBSITE/docs/"
-cp "$REPO"/CHANGELOG.md "$WEBSITE/docs/changelog.md"
+cd ../mdnest-website && bash scripts/deploy.sh rebuild
 ```
+
+If the deploy hook is rejected (it returned HTTP 400 on 2026-10-13), a push
+to the website's `main` also builds it: `git commit --allow-empty -m
+"Rebuild for mdnest vX.Y.Z"` and push. Then tell the owner the hook needs
+recreating in Cloudflare (Pages > mdnest-website > Settings > Builds > Deploy
+hooks). Confirm with `curl -s https://mdnest.dev/docs/changelog` that the new
+version shows.
 
 ### 7. Website: writing standard and landing page
 First, read `../mdnest-website/WRITING.md`. It lists which features are off by default or need team setup, and the product facts the site relies on. If this release changes one of them (a new `ENABLE_*` flag, a changed default, a new outbound request, a feature that now needs or no longer needs multi-user mode), update `WRITING.md` in the same release. A stale fact there leads straight to a wrong claim on the site.
@@ -77,7 +155,7 @@ Then, only if this is a headline feature, update `../mdnest-website/index.html`:
 Bug fixes don't need landing-page changes.
 
 ### 8. Commit website
-Only if step 6 or 7 actually changed something in the website repo:
+Only if step 7 actually changed something in the website repo:
 
 ```bash
 cd "$WEBSITE"
@@ -178,9 +256,16 @@ tracker and cut a patch rather than leaving it.
 
 ## Anti-patterns to avoid
 
+- Cutting a release because something merged. Releases are cut when the soak
+  and the gate say so (Step 0), not on a timer and not to close an issue fast.
+- Running the long tier inside `git push`. GitHub drops the connection; run
+  `tests/release-gate.sh` first, then push.
+- Fixing a failure on the release branch only. Fix it on `develop`, rebuild the
+  release branch from it, and run the gate again.
+
 - Hardcoding `/Volumes/Work/...` absolute paths — those are machine-specific and break for any other contributor (or the same operator on a different laptop).
 - Adding entries to a CHANGELOG section that's already been tagged + pushed. Always create a new section for new fixes after a release ships.
-- Skipping the version-consistency check across the three files; the pre-push hook will reject the push if they drift.
+- Skipping the version-consistency check across the four files; the pre-push hook will reject the push if they drift.
 - Pushing directly to `main` when branch protection is on. Push to a release branch and open a PR — the PR body should track the CHANGELOG entry.
 - Tagging before diffing the merged tree against the release branch (Step 10a).
   A squash merge that drops a workflow change is invisible until a user hits it.
