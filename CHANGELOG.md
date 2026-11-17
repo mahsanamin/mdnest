@@ -4,7 +4,9 @@ All notable changes to mdnest are documented here.
 
 ---
 
-## v4.8.16 (in progress)
+## v4.8.17 (in progress)
+
+## v4.8.16: One short guide for AI coding agents, for contributors too
 
 ### Changed
 
