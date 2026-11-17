@@ -27,6 +27,34 @@ When running unattended, see *Deciding Gate 3 without the owner* below: most
 Gate 3 questions have an answer you can derive, and only a genuine first-of-its-kind
 trade needs to wait.
 
+## What we ask the contributor for, and what we fix ourselves
+
+**As of 2026-10-29, the owner's call:** mdnest is early, with few stars and few
+contributors, so every round trip we send back costs more than the fix. The one
+thing we hold firm on is **direction** (Gate 3): a feature that joins mdnest must
+fit the product and not drift from its main idea. Code-level problems we fix
+ourselves, so contributors don't have to come back for them.
+
+- **Direction problem:** ask the contributor, as before. That is a decision, and
+  it is theirs and the owner's to make, not ours to patch around.
+- **Code-level problem that isn't drastic** (a missing `setup.sh` line, a
+  missing test, a slow regex with a known fix, a CHANGELOG in the wrong section,
+  a small conflict): approve, merge into `develop`, then fix it on our own
+  `fix/` branch from `develop`, verified the usual way (a test that fails without
+  the fix), and merge that into `develop` too. Tell the contributor in one line
+  that we did it and that nothing more is needed from them. #158 is the first
+  example: `setup.sh` dropped its new setting, and we added it after the merge.
+- **Still ask, even though it's code:** a fix that changes how the feature
+  works, or a rewrite of a large part of it. That is the contributor's design,
+  so they should say yes first.
+- **Never merge a known security hole and fix it afterwards.** `develop` runs on
+  the dev stack. Fix it on a branch first, or ask the contributor, and merge only
+  when the fix is in.
+- We still never push to their branch, close, or retarget their PR (Step 6).
+  Our fixes go on `develop`, after their commit, under our name.
+
+Revisit this when contributions grow and reviewing becomes the bottleneck.
+
 ## Step 0 — map the batch before reading any code
 
 ```bash
@@ -213,6 +241,23 @@ isn't a feature request — it's a different product.
   doesn't read, so a knob with no implementation doesn't fail — it lies. Guard
   it so it fails at install time naming what's missing, and delete the guard in
   the same change that lands the capability.
+- **Admin power stays with the owner.** The person who runs an mdnest install
+  is its superadmin, and the role exists so they can act without waiting for
+  anyone: when someone leaves, or a token may have leaked, the superadmin
+  revokes it themselves. In the default configuration a superadmin can always
+  see and revoke every API token, disable or delete any user, reset 2FA, and
+  manage every grant, group and namespace admin. A PR may move one of these
+  powers to a clearer place, show more (who owns a token, who revoked it), or
+  add a confirmation. It may not remove one or make it slower to reach. A team
+  that wants a narrower superadmin gets a config option for it, **off by
+  default**, read once at startup and enforced in the handler, not only hidden
+  in the UI. One power is deliberately not included: since v3.12.0 (#53) a
+  superadmin reads note content only through grants, like anyone else, and
+  can grant themselves access in one click. That is a decision, not a gap.
+  When a PR description says the superadmin "can do too much", check the code
+  before agreeing or disagreeing: #149 read that way, but it kept every power
+  and only moved token revocation from Settings to the Admin panel with the
+  owner shown.
 - **Two modes that can't coexist must say so.** If a new backend makes an
   existing feature meaningless, make them mutually exclusive in code. Don't
   leave the old one running against stale data.
@@ -341,7 +386,9 @@ costs the contributor real time and costs us credibility.
 A review with twelve requests gets none of them done well. Cut to the smallest
 set that actually unblocks the merge, and say which is blocking. Everything
 else either waits for the next round or gets dropped. A contributor working
-through a backlog of our requests is a contributor we are losing.
+through a backlog of our requests is a contributor we are losing. A small
+code-level fix isn't an ask at all: we make it ourselves after the merge (see
+*What we ask the contributor for* near the top).
 
 ### How to write the one you do post
 
@@ -373,8 +420,10 @@ decision out of their hands over a few seconds of convenience.
 - **Should be closed?** Say why, say you think it should close, and ask them to
   close it. Leave it open until they do.
 - **Wrong base branch?** Ask them to retarget.
-- **Needs a rebase or a fix?** Ask, with a concrete description of the change.
-  Don't push to their branch unless they've invited it.
+- **Needs a rebase or a fix?** If it's a small code-level fix and the PR is
+  otherwise ready, merge it and make the fix on `develop` ourselves. Otherwise
+  ask, with a concrete description of the change. Either way, don't push to
+  their branch unless they've invited it.
 
 What *is* ours: merging (once it passes the gates), approving, requesting
 changes, and saying plainly what we will and won't take.
@@ -384,6 +433,16 @@ close button.
 
 ## Step 7 — merge
 
+- **Merging to `develop` is not shipping.** A contributor's PR lands on
+  `develop`, runs on the dev stack, and goes out only when `md-ship` Step 0
+  (the ship gate) holds. Before merging, run the end-to-end suite its files
+  call for (the path map in `tests/release-gate.sh`), not just the unit tests:
+  CI does not run the end-to-end suites.
+- **Red checks from advisories published after the PR was opened** are not the
+  contributor's fault (#149's govulncheck and npm audit). Confirm the same
+  advisory turns `develop` red, clear it on a `chore/` branch first, then ask
+  them to merge `develop` in. Never merge a PR with a red required check.
+
 - Merge into **`develop`**, never `main` outside a release. `main` is protected
   by required Security Audit checks with no bypass — that gate is authoritative,
   and the local pre-push hook is not a substitute (it silently skips
@@ -391,7 +450,7 @@ close button.
 - **Your own `--request-changes` review blocks the merge.** `gh pr merge` fails
   with "the base branch policy prohibits the merge". Once the blocker is
   verified fixed, `gh pr review <n> --approve` first, then merge.
-- **Clean commits — no `Co-Authored-By` or "Generated with Codex"
+- **Clean commits — no `Co-Authored-By` or "Generated with Claude Code"
   footers.** This overrides the global default.
 - Credit the contributor by name in the CHANGELOG entry for the release.
 - After merging, tell the contributor which of their other PRs now need a
@@ -444,6 +503,20 @@ instead of isolating what actually differed.
 
 ## Field notes (things that cost a round trip)
 
+- **`<scratch>` in this skill means a folder Docker can see**, such as
+  `/Volumes/Work/ahsan/repos/WorkTrees/mdnest/review-pr-<n>`, never `/tmp`
+  or a session scratchpad under `/private/tmp`. Colima only shares the work
+  volume and the home folder, so a worktree under `/tmp` is mounted as an
+  empty folder: Go reports "does not contain main module", `e2e-docker.sh`
+  cannot find `/src/mdnest`, and the browser suite gets a 404 seeding a note.
+  Every suite fails in seconds and none of it says anything about the PR.
+  Probes you write yourself (a node script, a regex timing) can stay in the
+  scratchpad.
+- **Running the contributor's own scripts needs permission rules.** Auto mode
+  refuses `npm ci` and `bash tests/check.sh` in a contributor's tree unless
+  `.claude/settings.local.json` allows them. If they are refused, finish the
+  static review and hand the owner the exact command, with the worktree on
+  the work volume and the cleanup on the same line.
 - `go test -race` needs cgo, which `golang:*-alpine` lacks by default:
   ```bash
   docker run --rm -e CGO_ENABLED=1 -v "$PWD/backend":/src -w /src \

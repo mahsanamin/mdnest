@@ -1,6 +1,6 @@
 # Code map
 
-A file-by-file map of the repo, with the traps worth knowing about each file. It used to live in `CLAUDE.md`; it moved here so it is read when a task needs it instead of being loaded into every agent session.
+A file-by-file map of the repo, with the traps worth knowing about each file. Agents read it when a task needs it; it is not loaded into every session. The rules for each folder are in that folder's `AGENTS.md`, and the root `AGENTS.md` says where to start.
 
 When you add, move or remove a file, update its line here.
 
