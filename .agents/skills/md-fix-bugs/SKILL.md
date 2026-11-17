@@ -175,9 +175,10 @@ git checkout -B release/vX.Y.Z origin/main
 git checkout _rel-tmp -- $FILES
 git branch -D _rel-tmp
 ```
-Then set the version in all three files (`backend/handlers/config.go`,
-`frontend/package.json`, `mdnest`’s `MDNEST_CLI_VERSION`) to the **plain release
-number `X.Y.Z`** — the next bump above **`main`'s** current version (main may be
+Then set the version in all four version files (the list is in `md-ship` step 2
+and `docs/dev/release.md`: `backend/handlers/config.go`, `frontend/package.json`,
+`mdnest`’s `MDNEST_CLI_VERSION`, and `appVersion` in
+`deploy/helm/mdnest/Chart.yaml`) to the **plain release number `X.Y.Z`** — the next bump above **`main`'s** current version (main may be
 ahead of develop from parallel work; don't trust develop's number). Note develop
 carries `X.Y.Z-dev`; the release branch **drops the `-dev` suffix**. Add the
 `CHANGELOG.md` section, and commit it all as **one** `Release vX.Y.Z` commit.
@@ -204,7 +205,7 @@ PR (this is the fix for the "why so many commits" problem).
   update banner only notices Releases, not bare tags.
 - **Reconcile develop + open the next `-dev`:** `git checkout develop &&
   git merge -s ours origin/main` (records main's release commit as an ancestor of
-  develop, content-neutral), then bump develop's three version files to the next
+  develop, content-neutral), then bump develop's four version files to the next
   pre-release (`X.Y.(Z+1)-dev`) and push. develop is now ahead of the release
   again.
 - Optionally run `/md-ship` to sync docs + website.

@@ -25,6 +25,18 @@ name several, or say "the open ones", process them **one at a time, oldest
 first**, and finish one before starting the next (the release at the end can
 cover several issues — see step 7).
 
+## Contributor or maintainer?
+
+Steps 0 to 6 are for everyone. Steps 7 to 9 (release, replying under the
+owner's name, closing, the private notes server) are the **maintainer's**. If
+you are a contributor working from a fork:
+
+- In step 4, do not merge into `develop`: keep each fix on its own `fix/<slug>`
+  branch from the latest `develop`.
+- After step 6, open a PR with base `develop` that says `Fixes #<n>`, what the
+  cause was, and which test levels ran. Do not bump versions, release, reply
+  for the owner or close the issue. Stop there.
+
 ---
 
 ## Step 0 — Read the whole issue, including the pictures
