@@ -356,6 +356,96 @@ minutes (set it again during long work); the next post, or going back to
 to end its turn while its last chat command was a wait is sent back to
 waiting, until it runs `chat leave`. Setup is in [chat.md](chat.md).
 
+### Optional local chat workers
+
+Structured chat reads support `--last N`, `--type`, `--unseen-only` and `--json`.
+JSON returns parsed messages with stable `id`, `author`, `time`, `type`,
+`reply_to`, `meta`, `claimed_by` and `body` fields. `text` and message numbers
+remain available for older callers. Filters run before the limit. A normal
+recent read returns the last matching messages. An unseen read returns the
+oldest pending batch first, so acknowledgment cannot skip earlier work.
+
+```bash
+mdnest chat post notes/Chats/team.md "Please review" --as builder --type review --meta '{"verdict":"pending"}'
+mdnest chat read notes/Chats/team.md --as reviewer --unseen-only --last 6 --json
+mdnest chat read notes/Chats/team.md --as reviewer --unseen-only --type review --ack --json
+mdnest chat claim notes/Chats/team.md --msg-id m_example --as reviewer --worker host1 --ttl 300
+mdnest chat agent notes/Chats/team.md --as reviewer --prompt "Review the tests"
+mdnest chat roster notes/Chats/team.md
+```
+
+New structured reads do not acknowledge unless `--ack` is explicit. Plain
+`read --as` keeps its earlier local-cursor behavior. Claims return a lease ID;
+renew with the same handle, worker and `--lease-id`. A competing active claim
+returns an error with its holder and expiry. Claims coordinate one backend
+writer only, and reject symlink aliases and the multi-writer app role.
+
+`watch --exec` and `crew` require Node 22 or newer only when invoked. They run
+commands on the machine where the CLI runs, never on the HTTP server:
+
+```bash
+mdnest chat watch notes/Chats/team.md --as reviewer --trait "Review tests" --mentions --exec 'my-review-worker' --timeout 15m
+mdnest chat crew "Review the tests" --note notes/Chats/new-team.md --agent 'reviewer:Review tests:my-review-worker' --max-turns 8 --timeout 15m
+```
+
+A worker receives its prompt on stdin and the `MDNEST_NOTE`, `MDNEST_MSG_ID`,
+`MDNEST_MSG_AUTHOR`, `MDNEST_MSG_TYPE`, `MDNEST_MSG_BODY`, `MDNEST_MSG_META`,
+`MDNEST_AGENT_HANDLE` and `MDNEST_AGENT_TRAIT` environment fields. Quotes and
+newlines remain data, never shell substitutions. The explicitly supplied
+`--exec` command is shell code, so use only a command you trust locally.
+Output is prefixed by handle. No model is called while idle.
+
+Children use a temporary home containing only this server's mdnest connection,
+removed on exit. The normal home, ambient credential environment, interpreter
+startup variables and MCP protocol streams are not inherited. Pass a required
+provider credential by name with `--pass-env PROVIDER_API_KEY`, or use a local
+wrapper with its own explicit configuration. `--cwd` selects a trusted local
+working directory. This is environment separation, not an OS sandbox: a local
+command still has the launching account's filesystem and network permissions. Existing interactive
+provider login/profile support is not confirmed by the fake-process tests.
+Do not expect a CLI to find a login in the temporary home automatically.
+
+`crew --config crew.yaml` also accepts local JSON, or this limited YAML shape:
+
+```yaml
+max_turns: 8
+timeout: "15m"
+human_handle: "human"
+agents:
+  - handle: reviewer
+    trait: "Review tests"
+    cmd: "my-review-worker"
+```
+
+Config files are local trusted input. Commands copied into shared notes are
+never used as launch configuration. Startup/post operations are not exactly-once:
+if a response is lost, check the room before retrying. The CLI refuses a second
+create at the same path on the supported single backend writer. This does not
+serialize external filesystem writers, hard links, differently cased aliases or
+two namespaces mounting the same physical file. A crew creates a new note and refuses to
+overwrite an existing one. It registers its roster and cursors, mentions the
+first agent in the goal, and supplies recent context and handoff instructions.
+Post with `--done` for completion. A pause, timeout, local turn cap or signal
+stops children and pauses the crew rather than falsely marking it completed.
+The local deadline and attempt cap cannot be raised by editing the note.
+The human handle defaults to the authenticated account. A saved prompt edit is
+read again for each invocation as untrusted persona data, while the executable,
+working directory, inherited environment and budgets stay fixed locally.
+
+A handle identifies one logical consumer per authenticated account. Duplicate
+watchers using the same handle share its durable acknowledged IDs and compete
+for leases; use different handles for independent consumers. A restart keeps
+that handle's cursor. A new message ID at an old position is still unseen. Edits to the same saved
+prompt are last-write-wins; reopen it before changing a prompt someone else
+may also be editing.
+
+Workers claim before execution and acknowledge only after a successful exit.
+Lease expiry or a crash between work and acknowledgment can replay a task.
+Handlers must be idempotent. These cooperative leases do not fence external
+side effects. The runner renews a lease during work and cancels its child if
+renewal fails. Normal note writers can edit coordination state, so room limits
+are not an authorization boundary.
+
 ### Agent approvals *(experimental; server `ENABLE_AGENT_APPROVALS=true`)*
 
 Lets you answer an agent's permission prompts and questions from mdnest, and

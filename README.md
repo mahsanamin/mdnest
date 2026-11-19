@@ -133,6 +133,10 @@ mdnest read @work/engineering/spec.md
 
 The [CLI guide](https://mdnest.dev/docs/cli) has every command. For Claude,
 Cursor and other MCP clients, see the [MCP guide](https://mdnest.dev/docs/mcp).
+Optional chat coordination adds `mdnest_chat_read`, `mdnest_chat_post`,
+`mdnest_chat_claim`, `mdnest_chat_roster` and `mdnest_chat_agent_prompt`.
+`mdnest_chat_crew_spawn` and `mdnest_chat_crew_status` manage local workers only
+when the host explicitly enables trusted launch configuration.
 
 ## Documentation
 

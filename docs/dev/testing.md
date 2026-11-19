@@ -13,6 +13,14 @@ time.** The entry point is `bash tests/check.sh --level <level>` (default
 | `develop` | before merging a branch into develop | the pre-push fast tier, `go vet` + `go test -race` on the whole backend with Redis, shellcheck, and the e2e suites the files changed since `origin/develop` call for, each once, sharded. A spec whose flake was just fixed gets `MDNEST_E2E_ARGS="--repeat-each 3"`, not 10 | about 15 to 20 min |
 | `ship` | `md-ship`: a `release/*` or `main` push | the full gate, the only level that runs everything: every suite, compared with `origin/main`, recorded in `.git/mdnest-release-gate` for the hook. `bash tests/release-gate.sh` is the same thing. Upgrade checks when stored data changed stay a manual `md-ship` step | as long as it takes |
 
+Optional local chat coordination has two focused fake-only suites:
+`node tests/chat-runner.mjs` and `npm --prefix mcp-server test` (including
+`test_chat_coordination.mjs`). They never launch a provider or use live notes.
+The runner suite checks trigger data, persona refresh, leases/ack, local limits
+and process-group cleanup. The MCP suite checks trusted local launch opt-in,
+concurrent caps, subscriptions and shutdown. Backend coordination and stream
+contracts run under Go race tests; the Agents popup has unit/browser coverage.
+
 At `develop` and `ship` the images are built once and the browser suites run
 in one lane beside everything else. The `@budget` timing tests run last,
 alone: always at `ship`, where a failure blocks; at `develop` only when the

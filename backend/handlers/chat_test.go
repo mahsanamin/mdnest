@@ -528,8 +528,10 @@ func TestChat_OwnMarkerSurvivesPostsAndAppends(t *testing.T) {
 	if strings.Contains(string(b), victim) {
 		t.Fatalf("a posted marker stayed in the chat:\n%s", b)
 	}
-	if strings.Count(string(b), "<!-- mdnest:") != 1 {
-		t.Fatalf("marker count changed:\n%s", b)
+	// Coordination comments also use the mdnest prefix. Only note-ID
+	// markers identify the note; message metadata must not count as one.
+	if strings.Count(string(b), "<!-- mdnest:"+own+" -->") != 1 {
+		t.Fatalf("note-ID marker count changed:\n%s", b)
 	}
 	doc := ParseChat(string(b))
 	if !doc.IsChat || len(doc.Messages) < 2 {

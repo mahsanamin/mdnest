@@ -503,6 +503,34 @@ test('copying the prompt saves the agent\'s role, and wait repeats it to that ag
   }
 });
 
+test('an external CLI role appears in open Agents and its prompt can be edited', async ({ page }) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  const { plain, chat, title } = await seed(page);
+  const qs = `ns=${NS}&path=${encodeURIComponent(chat)}`;
+  try {
+    await page.goto(`/#!chats/${NS}/${chat}`);
+    await expect(page.locator('.chat-room-title h2')).toHaveText(title, { timeout: 20_000 });
+    await page.locator('.chat-btn', { hasText: /Connect an agent|Agents/ }).first().click();
+    const panel = page.locator('.chat-agent');
+    // This is the same supported /role request issued by the CLI. No agent
+    // process or real provider is started by this regression.
+    expect((await api(page, 'POST', `/api/chat?${qs}&as=builder`, '/role Review the implementation')).status).toBe(200);
+    await expect(panel.getByTestId('chat-agent-saved')).toContainText('builder', { timeout: 10_000 });
+    await panel.getByRole('button', { name: "Edit builder's prompt" }).click();
+    await expect(panel.getByRole('textbox', { name: 'Agent name' })).toHaveValue('builder');
+    const prompt = 'Review "quoted inputs".\nThen check cleanup and permissions.';
+    await panel.getByRole('textbox', { name: 'What this agent should do' }).fill(prompt);
+    await panel.getByRole('button', { name: 'Save prompt', exact: true }).click();
+    await expect(panel.getByRole('button', { name: 'Save prompt', exact: true })).toBeEnabled();
+    const saved = JSON.parse((await api(page, 'GET', `/api/chat?${qs}`)).text);
+    expect(saved.prompts.builder).toBe(prompt);
+    await panel.getByRole('button', { name: "Edit builder's prompt" }).click();
+    await expect(panel.getByRole('textbox', { name: 'What this agent should do' })).toHaveValue(prompt);
+    await page.screenshot({ path: '../browser-results/agent-prompt-edit.png', fullPage: true });
+  } finally { await cleanup(page, plain, chat); }
+});
+
 // @budget: a timing budget, run alone after the shards (tests/lib/e2e-images.sh).
 test('typing stays fast in a long chat', { tag: '@budget' }, async ({ page }) => {
   test.setTimeout(240_000);

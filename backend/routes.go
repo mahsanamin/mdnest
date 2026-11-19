@@ -116,6 +116,11 @@ func registerContentRoutes(mux *http.ServeMux, c contentRoutes) {
 			// nothing is written, so no search invalidation.
 			mux.Handle("/api/chat/status", auth(perms.RequireWrite(http.HandlerFunc(c.chat.HandleStatus))))
 			mux.Handle("/api/chat/agents", auth(perms.RequireWrite(http.HandlerFunc(c.chat.HandleAgents))))
+			mux.Handle("/api/chat/stream", auth(perms.RequireRead(http.HandlerFunc(c.chat.HandleStream))))
+			mux.Handle("/api/chat/claim", auth(perms.RequireWrite(invalidateSearch(http.HandlerFunc(c.chat.HandleClaim)))))
+			mux.Handle("/api/chat/ack", auth(perms.RequireWrite(invalidateSearch(http.HandlerFunc(c.chat.HandleAck)))))
+			mux.Handle("/api/chat/stop", auth(perms.RequireWrite(invalidateSearch(http.HandlerFunc(c.chat.HandleStop)))))
+			mux.Handle("/api/chat/room", auth(perms.ReadWriteRouter(invalidateSearch(http.HandlerFunc(c.chat.HandleRoom)))))
 			// Cross-namespace: self-filters, like /api/tasks/all.
 			mux.Handle("/api/chats", auth(http.HandlerFunc(c.chat.HandleList)))
 			// The chat image library: any access to the namespace may list it,
@@ -157,6 +162,11 @@ func registerContentRoutes(mux *http.ServeMux, c contentRoutes) {
 			mux.Handle("/api/chat/convert", auth(invalidateSearch(http.HandlerFunc(c.chat.HandleConvert))))
 			mux.Handle("/api/chat/status", auth(http.HandlerFunc(c.chat.HandleStatus)))
 			mux.Handle("/api/chat/agents", auth(http.HandlerFunc(c.chat.HandleAgents)))
+			mux.Handle("/api/chat/stream", auth(http.HandlerFunc(c.chat.HandleStream)))
+			mux.Handle("/api/chat/claim", auth(invalidateSearch(http.HandlerFunc(c.chat.HandleClaim))))
+			mux.Handle("/api/chat/ack", auth(invalidateSearch(http.HandlerFunc(c.chat.HandleAck))))
+			mux.Handle("/api/chat/stop", auth(invalidateSearch(http.HandlerFunc(c.chat.HandleStop))))
+			mux.Handle("/api/chat/room", auth(invalidateSearch(http.HandlerFunc(c.chat.HandleRoom))))
 			mux.Handle("/api/chats", auth(http.HandlerFunc(c.chat.HandleList)))
 			mux.Handle("/api/chat/gifs", auth(http.HandlerFunc(c.chat.HandleGifs)))
 			mux.HandleFunc(handlers.BuiltinGifRoute, handlers.HandleBuiltinGif)

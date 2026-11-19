@@ -489,19 +489,36 @@ function ChatDeleteConfirm({ chat, onCancel, onConfirm }) {
 // How an agent joins a chat: a name, what it should do here, and the prompt to
 // paste into it. It reads the saved roles itself, so it also works for a chat
 // opened from the list's right-click menu without opening it first.
-function ChatAgentPanel({ chat, serverAlias, onClose }) {
+export function ChatAgentPanel({ chat, serverAlias, onClose }) {
   const [agents, setAgents] = useState({}); // each agent's saved role, by name (kept in the note)
   const [agentName, setAgentName] = useState('');
   const [agentIntent, setAgentIntent] = useState('');
   const [agentRole, setAgentRole] = useState(''); // a CHAT_ROLES id, or '' for none
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState('');
-  const loadAgents = useCallback(() => getChat(chat.ns, chat.path, Number.MAX_SAFE_INTEGER)
-    .then((r) => setAgents(r.agents || {}))
-    .catch((e) => setError(e.message)), [chat.ns, chat.path]);
-  useEffect(() => { loadAgents(); }, [loadAgents]);
-  const saveRole = (name, role) => {
-    saveChatAgentRole(chat.ns, chat.path, name, role).then(loadAgents).catch((e) => setError(e.message));
+  const [prompts, setPrompts] = useState({});
+  const [saving, setSaving] = useState(false);
+  const nameRef = useRef(null);
+  const mounted = useRef(false);
+  const generation = useRef(0);
+  const loadAgents = useCallback(async () => {
+    const current = ++generation.current;
+    try {
+      const r = await getChat(chat.ns, chat.path, Number.MAX_SAFE_INTEGER);
+      if (mounted.current && current === generation.current) { setAgents(r.agents || {}); setPrompts(r.prompts || {}); }
+    } catch (e) { if (mounted.current && current === generation.current) setError(e.message); }
+  }, [chat.ns, chat.path]);
+  useEffect(() => {
+    mounted.current = true;
+    loadAgents();
+    const timer = setInterval(loadAgents, CHAT_POLL_MS);
+    return () => { mounted.current = false; generation.current++; clearInterval(timer); };
+  }, [loadAgents]);
+  const saveRole = async (name, role) => {
+    setSaving(true); setError('');
+    try { await saveChatAgentRole(chat.ns, chat.path, name, role); await loadAgents(); }
+    catch (e) { setError(e.message); }
+    finally { setSaving(false); }
   };
   const prompt = agentInstructions(serverAlias, chat.ns, chat.path, agentName || 'AGENT_NAME', agentIntent);
 
@@ -530,7 +547,9 @@ function ChatAgentPanel({ chat, serverAlias, onClose }) {
             <div key={name} className="chat-agent-saved-row">
               <strong style={{ color: `var(${colorForAuthor(name)})` }}>{name}</strong>
               <span className="chat-agent-saved-role">{role}</span>
-              <button type="button" className="chat-btn chat-btn-icon" onClick={() => saveRole(name, '')}
+              <button type="button" className="chat-btn" aria-label={`Edit ${name}'s prompt`}
+                onClick={() => { setAgentName(name); setAgentIntent(prompts[name] ?? role); setAgentRole(''); nameRef.current?.focus(); }}>Edit</button>
+              <button type="button" className="chat-btn chat-btn-icon" disabled={saving} onClick={() => saveRole(name, '')}
                 title={`Remove ${name}'s role`} aria-label={`Remove ${name}'s role`}>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
               </button>
@@ -563,6 +582,7 @@ function ChatAgentPanel({ chat, serverAlias, onClose }) {
       <div className="chat-agent-step">2. Name it and say what it should do</div>
       <input
         className="chat-input chat-agent-name"
+        ref={nameRef}
         placeholder="Agent name, e.g. codxu"
         value={agentName}
         onChange={(e) => setAgentName(e.target.value.replace(/[^\w.-]/g, ''))}
@@ -582,7 +602,9 @@ function ChatAgentPanel({ chat, serverAlias, onClose }) {
         rows={3}
         aria-label="What this agent should do"
       />
-      <p className="chat-agent-hint">This is saved as the agent's role in the chat when you copy the prompt. Keep it to a line or two: it is repeated to the agent every time new messages arrive.</p>
+      <p className="chat-agent-hint">Save or update the agent's prompt here. Quotes and line breaks are preserved. A short role reminder is repeated when new messages arrive. Saved roles are separate from participants who are only listening.</p>
+      <button type="button" className="chat-btn" disabled={saving || !agentName || !agentIntent.trim()}
+        onClick={() => saveRole(agentName, agentIntent)}>{saving ? 'Saving...' : 'Save prompt'}</button>
       <div className="chat-agent-step">3. Copy the prompt into the agent</div>
       <pre>{prompt}</pre>
       {error && <div className="chat-error">{error}</div>}
@@ -890,10 +912,10 @@ function ChatRoom({ chat, account, serverAlias, onOpenNote, onBack, onActivity, 
   const suggestions = useMemo(() => {
     if (query === null) return [];
     const q = query.toLowerCase();
-    return [...participants(messages), 'all']
+    return [...participants(messages, agents), 'all']
       .filter((n) => n && n !== effectiveAs && n.toLowerCase().startsWith(q))
       .slice(0, 6);
-  }, [query, messages, effectiveAs]);
+  }, [query, messages, agents, effectiveAs]);
   const applySuggestion = (name) => {
     const r = completeMention(draft, caret, name);
     setDraft(r.text);

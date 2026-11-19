@@ -47,11 +47,17 @@ var chatViaRe = regexp.MustCompile(`^(.*\S) \(via ([^()]+)\)$`)
 // ChatMessage is one parsed message. N is its 1-based position in the file;
 // because chats are append-only it is a stable cursor ("everything after 12").
 type ChatMessage struct {
-	N      int    `json:"n"`
-	Author string `json:"author"`
-	Via    string `json:"via,omitempty"`
-	Time   string `json:"time"`
-	Text   string `json:"text"`
+	N         int            `json:"n"`
+	Author    string         `json:"author"`
+	Via       string         `json:"via,omitempty"`
+	Time      string         `json:"time"`
+	Text      string         `json:"text"`
+	ID        string         `json:"id"`
+	Type      string         `json:"type,omitempty"`
+	ReplyTo   string         `json:"reply_to,omitempty"`
+	Meta      map[string]any `json:"meta"`
+	ClaimedBy string         `json:"claimed_by,omitempty"`
+	Body      string         `json:"body"`
 }
 
 // ChatDoc is a parsed chat note.
@@ -61,7 +67,9 @@ type ChatDoc struct {
 	Description string
 	Messages    []ChatMessage
 	// Agents is each agent's saved role, by name (chat_traits.go).
-	Agents map[string]string
+	Agents       map[string]string
+	Coordination ChatCoordination
+	PostedID     string
 }
 
 // splitFrontMatter returns the front-matter body (without the --- fences) and
@@ -132,8 +140,9 @@ func IsChatNote(content string) bool {
 // false) so callers can tell "not a chat" apart from "empty chat".
 func ParseChat(content string) ChatDoc {
 	_, content = ExtractNoteID(content)
+	coordination := readCoordination(content)
 	fm, rest, ok := splitFrontMatter(content)
-	doc := ChatDoc{}
+	doc := ChatDoc{Coordination: coordination}
 	if ok {
 		v, _ := frontMatterValue(fm, chatMarkerKey)
 		doc.IsChat = strings.EqualFold(v, "true")
@@ -147,9 +156,24 @@ func ParseChat(content string) ChatDoc {
 	var desc []string
 	var cur *ChatMessage
 	var body []string
+	seenIDs := map[string]bool{}
 	flush := func() {
 		if cur != nil {
+			if len(body) > 0 && parseMessageMetadata(body[0], cur) {
+				body = body[1:]
+			}
 			cur.Text = unescapeChatBody(strings.Trim(strings.Join(body, "\n"), "\n"))
+			cur.Body = cur.Text
+			if cur.ID == "" || seenIDs[cur.ID] {
+				cur.ID = legacyChatMessageID(*cur)
+			}
+			seenIDs[cur.ID] = true
+			if cur.Meta == nil {
+				cur.Meta = map[string]any{}
+			}
+			if lease, ok := coordination.Claims[cur.ID]; ok {
+				cur.ClaimedBy = lease.By
+			}
 			doc.Messages = append(doc.Messages, *cur)
 		}
 		body = nil
@@ -162,6 +186,9 @@ func ParseChat(content string) ChatDoc {
 				author, via = v[1], v[2]
 			}
 			cur = &ChatMessage{N: len(doc.Messages) + 1, Author: author, Via: via, Time: m[2]}
+			continue
+		}
+		if line == chatDoneMarker {
 			continue
 		}
 		if cur == nil {
@@ -204,7 +231,7 @@ func escapeChatBody(text string) string {
 	for i, l := range lines {
 		// Escape already-escaped lines too, so unescape (which strips exactly
 		// one backslash) round-trips a body that literally contains one.
-		if chatHeaderRe.MatchString(strings.TrimLeft(l, `\`)) {
+		if chatHeaderRe.MatchString(strings.TrimLeft(l, `\`)) || chatControlLine(strings.TrimLeft(l, `\`)) {
 			lines[i] = `\` + l
 		}
 	}
@@ -214,7 +241,7 @@ func escapeChatBody(text string) string {
 func unescapeChatBody(text string) string {
 	lines := strings.Split(text, "\n")
 	for i, l := range lines {
-		if strings.HasPrefix(l, `\`) && chatHeaderRe.MatchString(strings.TrimLeft(l, "\\")) {
+		if strings.HasPrefix(l, `\`) && (chatHeaderRe.MatchString(strings.TrimLeft(l, "\\")) || chatControlLine(strings.TrimLeft(l, "\\"))) {
 			lines[i] = l[1:]
 		}
 	}

@@ -314,6 +314,15 @@ if m chat new "$CHAT" "Smoke" >/dev/null 2>&1; then
   esac
   assert_fails "chat status without text is a usage error" -- m chat status "$CHAT" --as smoke-agent
   assert_succeeds "chat status --clear" -- m chat status "$CHAT" --clear --as smoke-agent
+  role_out="$(m chat post "$CHAT" '/role Review the implementation' --as smoke-agent 2>&1)"
+  assert_contains "role save is not reported as an empty message number" "agent settings saved" "$role_out"
+  assert_succeeds "agent prompt can be edited" -- m chat agent "$CHAT" --as smoke-agent --prompt $'Review "quotes".\nThen check cleanup.'
+  structured="$(m chat post "$CHAT" 'structured task' --as human --type task --meta '{"literal":"quoted"}' --json 2>&1)"
+  assert_contains "structured post returns a stable ID" '"msg_id":"m_' "$structured"
+  assert_contains "structured read retains metadata" '"literal":"quoted"' "$(m chat read "$CHAT" --last 1 --json 2>&1)"
+  assert_contains "unseen read defaults to no acknowledgment" 'structured task' "$(m chat read "$CHAT" --as smoke-agent --unseen-only --type task --json 2>&1)"
+  assert_succeeds "unseen read can acknowledge explicitly" -- m chat read "$CHAT" --as smoke-agent --unseen-only --type task --ack --json
+  assert_eq "acknowledged filtered work disappears" '[]' "$(m chat read "$CHAT" --as smoke-agent --unseen-only --type task --json 2>/dev/null)"
 else
   echo "  SKIP chat status (chat is off on this server)"
 fi
