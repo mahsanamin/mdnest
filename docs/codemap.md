@@ -120,7 +120,8 @@ frontend/
     transfer.js              # Pure module for issue #114: the cross-server clipboard payload ({mdnest:"file/v1",name,content}, 1 MB measured in UTF-8 BYTES via TextEncoder, not string length), safeFileName (a pasted name never picks a folder), suggestCopyName, localLinks, describeRefusal (409/413/429 bodies in words), filenameFromDisposition.
     echo-gate.js             # v4.1.1+ — pure module (no React): suppresses the file-changed echo of a tab's own save. In-flight-save window + epoch token: broadcasts arriving before the PUT response resolves are deferred and re-checked once the save settles; reset() on note switch invalidates the window. Closes the self-conflict-banner race (issue #82).
     __tests__/echo-gate.test.js # Pins the echo-beats-response race, late echoes, note-switch epochs
-    frontMatter.js           # v4.8.13+: splitFrontMatter / joinFrontMatter with no dependencies (the Live editor needs them; sharedText.js re-exports them).
+    frontMatter.js           # v4.8.13+: splitFrontMatter / joinFrontMatter with no dependencies (the Live editor needs them; sharedText.js re-exports them); frontMatterInner / withFrontMatterInner feed the Live editor's header box and always put edits back between the same fences.
+    __tests__/frontMatterInner.test.js # Pins the header box round trip: unchanged box gives the same bytes, any edit keeps the --- fences
     sharedDoc.js             # v4.8.10+: shared editing session, a LAZY chunk (yjs, y-prosemirror, y-protocols, @milkdown/plugin-collab pinned to our Crepe version, diff-match-patch). marp-entry-bundle.test.js forbids those packages in the entry. Only the saver saves, and only when the serialized markdown differs from the last agreed text in the doc's 'meta' map; that comparison is why opening a note never rewrites it. Keep meta values PLAIN (Map.set): a diffed Y.Text shrank the log but made snapshots grow with history (scripts/measure-shared-room.mjs). Front matter is a separate Y.Text, never in the editor. Outside changes are merged by the saver with sharedText.mergeThreeWay. The Live editor stays mounted (hidden) in Preview for a shared note, since the editor is what serializes the doc. v4.8.13: binds to an already-mounted editor and unbinds on a lost socket; see "A Live note never waits for the room".
     sharedText.js            # v4.8.10+, pure: splitFrontMatter/joinFrontMatter, mergeThreeWay (line diff3: same change on both sides taken once, conflicting changes keep both), frame encode/decode matching collab/yjs.go.
     sharedEligible.js        # v4.8.10+: which notes are shared (plain .md, not drawings/chats/Marp). Separate file so App can ask without pulling diff-match-patch into the entry.
@@ -143,7 +144,7 @@ frontend/
       Toolbar.jsx            # Top bar: hamburger, +Note, +Folder, path display
       Editor.jsx             # Basic mode: textarea with tab/paste/drop support
       EditorToolbar.jsx      # Markdown formatting buttons (basic mode)
-      LiveEditorCrepe.jsx    # Live mode: @milkdown/crepe-based rich editor (v3.10.0+)
+      LiveEditorCrepe.jsx    # Live mode: @milkdown/crepe-based rich editor (v3.10.0+) Front matter never goes into the editor (it would write `---` back as `***` + a setext underline): without shared editing it is shown and edited in the `.live-frontmatter` box above the body; with it, it stays hidden in fmRef.
       live-editor-plugins.jsx# Shared Milkdown plugins (comments, table-cell checkboxes, clearEmptyBlock) + LiveToolbar component
       MermaidBlock.jsx       # Inline mermaid with Source/Preview toggle + click-to-edit labels
       Preview.jsx            # Rendered markdown (marked + mermaid)
