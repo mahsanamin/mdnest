@@ -88,6 +88,30 @@ for (const mode of ['Basic', 'Live']) {
     }
   });
 
+  // Bug: `mdnest chat new` on an empty note open in the Live editor. The
+  // editor took the new header in, then saved its own reformatted copy
+  // (`---` became `***` plus a heading underline), so the note stopped being
+  // a chat. An editor nobody typed in must never write over an outside change.
+  test(`${mode}: a chat header written to an open empty note is not rewritten`, async ({ page }) => {
+    test.setTimeout(60_000);
+    await signIn(page);
+    const file = `default-chatnew-${mode}-${Date.now()}.md`;
+    expect((await api(page, 'POST', noteUrl(file), '')).status).toBe(201);
+    try {
+      await open(page, file, mode);
+      expect((await api(page, 'POST', `/api/chat/convert?ns=${NS}&path=${encodeURIComponent(file)}&title=T`)).status).toBe(200);
+      const written = await onDisk(page, file);
+      expect(written.startsWith('---')).toBe(true);
+      // Long enough for the note poll (5 s) to bring it in and an autosave
+      // to follow.
+      await page.waitForTimeout(9_000);
+      expect(await onDisk(page, file)).toBe(written);
+      expect((await api(page, 'GET', `/api/chat?ns=${NS}&path=${encodeURIComponent(file)}`)).status).toBe(200);
+    } finally {
+      await api(page, 'DELETE', noteUrl(file));
+    }
+  });
+
   test(`${mode}: an agent's append while someone types keeps both, with no banner`, async ({ page }) => {
     test.setTimeout(90_000);
     await signIn(page);

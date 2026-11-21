@@ -732,6 +732,7 @@ export default function LiveEditorCrepe({
       if (!crepe || isBound()) return null;
       let base = fullBase;
       let theirs = fullTheirs;
+      const fmBefore = fmRef.current;
       if (bodyOnlyRef.current) {
         const b = splitFrontMatter(fullBase);
         const t = splitFrontMatter(fullTheirs);
@@ -741,6 +742,25 @@ export default function LiveEditorCrepe({
         base = b.body;
         theirs = t.body;
       }
+      // Has the person changed anything? The editor holds the base as it
+      // would write it (`---` front matter becomes `***` and a heading
+      // underline, `-` bullets become `*`), so compare with that form. When
+      // nothing changed, the outside text is what the note now is, byte for
+      // byte: handing back the editor's own re-serialized copy made the app
+      // autosave it over the change (a chat header written by the CLI was
+      // rewritten into a note the server no longer saw as a chat).
+      let clean = false;
+      try {
+        clean = !pendingEditRef.current
+          && (!bodyOnlyRef.current || fmBefore === splitFrontMatter(fullBase).frontMatter);
+        if (clean) {
+          crepe.editor.action((ctx) => {
+            const doc = ctx.get(parserCtx)(base);
+            const asWritten = doc && typeof doc !== 'string' ? restoreWikilinks(ctx.get(serializerCtx)(doc)) : base;
+            clean = restoreWikilinks(crepe.getMarkdown()) === asWritten;
+          });
+        }
+      } catch { clean = false; }
       // First choice: apply only the outside change, as whole blocks, to the
       // document as it is now. The blocks that differ between base and
       // theirs are found by parsing both (one parser, so no serialization
@@ -776,7 +796,9 @@ export default function LiveEditorCrepe({
           for (let i = pre; i < cEnd; i += 1) to += C.child(i).nodeSize;
           const blocks = [];
           for (let i = pre; i < B.childCount - suf; i += 1) blocks.push(B.child(i));
-          view.dispatch(view.state.tr.replaceWith(from, to, blocks));
+          // Not the person's edit: kept out of undo, and out of the change
+          // listener and pendingEdit, which would report it as typing.
+          view.dispatch(view.state.tr.replaceWith(from, to, blocks).setMeta('addToHistory', false));
           applied = true;
         });
       } catch { applied = false; }
@@ -793,7 +815,7 @@ export default function LiveEditorCrepe({
           }
         }
       }
-      const shown = toFull(restoreWikilinks(crepe.getMarkdown()));
+      const shown = clean ? fullTheirs : toFull(restoreWikilinks(crepe.getMarkdown()));
       // The app sets this as its content next; it is what the editor holds.
       lastPropContentRef.current = shown;
       lastLocalContentRef.current = shown;
