@@ -48,7 +48,7 @@ import { withDefaultImageTitle } from '../image-title-default.js';
 import { htmlToMarkdown, hasRichContent } from '../html-to-md.js';
 import { looksLikeMarkdown } from '../markdown-utils.js';
 import { parseWikiLink, resolveWikiLink, restoreWikilinks } from '../wikilink.js';
-import { splitFrontMatter, joinFrontMatter } from '../frontMatter.js';
+import { splitFrontMatter, joinFrontMatter, frontMatterInner, withFrontMatterInner } from '../frontMatter.js';
 import MermaidBlock from './MermaidBlock.jsx';
 import MermaidViewer from './MermaidViewer.jsx';
 import {
@@ -63,7 +63,7 @@ import {
 
 import '@milkdown/crepe/theme/common/style.css';
 import '@milkdown/crepe/theme/frame-dark.css';
-import { markNoGrammarAssist } from '../noGrammarAssist.js';
+import { markNoGrammarAssist, NO_GRAMMAR_ASSIST } from '../noGrammarAssist.js';
 
 // Detect plain text that looks like mermaid diagram source. Strict on
 // purpose:
@@ -246,8 +246,7 @@ export default function LiveEditorCrepe({
   wikiIndex,
   // The collab plugin (from the shared editing chunk) when this note can be
   // edited together. Fixed for the life of the editor: it must be registered
-  // before create(). With it the editor holds the body only; front matter is
-  // kept beside it and put back in front of every change it reports.
+  // before create(). The editor always holds the body only (see bodyOnlyRef).
   collabPlugin,
   // The SharedSession (sharedDoc.js) for this note. It may arrive after the
   // editor is up and binds to the editor as it is then; until it is bound
@@ -269,9 +268,18 @@ export default function LiveEditorCrepe({
   const sharedRef = useRef(shared || null);
   sharedRef.current = shared || null;
   const isBound = () => !!(sharedRef.current && sharedRef.current.bound);
-  // Body only, with the front matter kept here (see collabPlugin).
-  const bodyOnlyRef = useRef(!!collabPlugin);
-  const fmRef = useRef(collabPlugin ? splitFrontMatter(content || '').frontMatter : '');
+  // Body only, with the front matter kept here and put back in front of
+  // every change the editor reports. Always, not only when shared: the
+  // editor turns `---` front matter into `***` and a heading underline, so
+  // typing in a note with front matter broke its header (a chat stopped
+  // being a chat). See frontMatter.js.
+  const bodyOnlyRef = useRef(true);
+  const fmRef = useRef(splitFrontMatter(content || '').frontMatter);
+  // The front matter as the header box shows it. Without shared editing the
+  // header is shown and edited there, above the body (with it, the header
+  // stays out of view as before). Kept in step with fmRef by setFrontMatter.
+  const [fmShown, setFmShown] = useState(fmRef.current);
+  const setFrontMatter = (fm) => { fmRef.current = fm; setFmShown(fm); };
   const toFull = (body) => (bodyOnlyRef.current ? joinFrontMatter(fmRef.current, body) : body);
   const paneRef = useRef(null);
   const crepeRef = useRef(null);
@@ -383,8 +391,7 @@ export default function LiveEditorCrepe({
     lastPropContentRef.current = content;
     const crepe = new Crepe({
       root: rootRef.current,
-      // Body only when the note can be edited together (front matter is
-      // kept out of the editor, see collabPlugin).
+      // Body only (front matter is kept out of the editor, see bodyOnlyRef).
       defaultValue: bodyOnlyRef.current ? splitFrontMatter(content).body : content,
       features: {
         // Disable Crepe's floating selection toolbar — we render our own
@@ -708,7 +715,7 @@ export default function LiveEditorCrepe({
       let body = content;
       if (bodyOnlyRef.current) {
         const split = splitFrontMatter(content);
-        fmRef.current = split.frontMatter;
+        setFrontMatter(split.frontMatter);
         body = split.body;
       }
       try {
@@ -737,7 +744,7 @@ export default function LiveEditorCrepe({
         const b = splitFrontMatter(fullBase);
         const t = splitFrontMatter(fullTheirs);
         if (t.frontMatter !== b.frontMatter) {
-          fmRef.current = fmRef.current === b.frontMatter ? t.frontMatter : merge(b.frontMatter, fmRef.current, t.frontMatter);
+          setFrontMatter(fmRef.current === b.frontMatter ? t.frontMatter : merge(b.frontMatter, fmRef.current, t.frontMatter));
         }
         base = b.body;
         theirs = t.body;
@@ -1296,11 +1303,42 @@ export default function LiveEditorCrepe({
     return () => el.removeEventListener('paste', handlePaste, true);
   }, [ns, currentPath, readOnly]);
 
+  // An edit in the header box: the new header in front of the body as it
+  // stands. The body is the text last reported (so editing only the header
+  // does not re-serialize the body), or the editor's own when it holds
+  // typing not reported yet.
+  const onFrontMatterEdit = (inner) => {
+    const fm = withFrontMatterInner(fmRef.current, inner);
+    if (fm === fmRef.current) return;
+    setFrontMatter(fm);
+    let body = splitFrontMatter(lastLocalContentRef.current || '').body;
+    if (pendingEditRef.current && crepeRef.current) {
+      try { body = restoreWikilinks(crepeRef.current.getMarkdown()); } catch { /* keep the reported body */ }
+    }
+    const full = joinFrontMatter(fm, body);
+    lastLocalContentRef.current = full;
+    onChangeRef.current?.(full);
+  };
+
   return (
     <div ref={paneRef} className={`live-editor-pane${handlesHidden ? ' handles-hidden' : ''}`}>
       {readOnly && <div className="editor-readonly-bar">Read-only</div>}
       {!readOnly && <LiveToolbar editor={innerEditor} handlesHidden={handlesHidden} onToggleHandles={toggleHandles} undoRedo={shared && sharedBound ? { undo: shared.undo, redo: shared.redo } : null} />}
       <div className="live-editor-wrapper" style={{ position: 'relative', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+        {!collabPlugin && fmShown && (
+          <textarea
+            {...NO_GRAMMAR_ASSIST}
+            className="live-frontmatter"
+            data-testid="live-frontmatter"
+            aria-label="Front matter"
+            title="Front matter (YAML between the --- lines)"
+            spellCheck={false}
+            readOnly={!!readOnly}
+            rows={Math.min(8, frontMatterInner(fmShown).split('\n').length)}
+            value={frontMatterInner(fmShown)}
+            onChange={(e) => onFrontMatterEdit(e.target.value)}
+          />
+        )}
         <div ref={rootRef} className="live-editor-crepe-root" />
         {selectionPopup && !selectionPopup.hidden && onComment && (
           <button

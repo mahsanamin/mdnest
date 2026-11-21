@@ -153,4 +153,83 @@ for (const mode of ['Basic', 'Live']) {
       await api(page, 'DELETE', noteUrl(file));
     }
   });
+
+  // Bug: typing in a Live note with front matter saved the editor's copy of
+  // it, where `---` had become `***` plus a heading underline, so the header
+  // (a chat's, a deck's) was gone. Front matter is kept out of the editor and
+  // written back unchanged.
+  test(`${mode}: typing in a note with front matter keeps the header`, async ({ page }) => {
+    test.setTimeout(60_000);
+    await signIn(page);
+    const file = `default-fm-${mode}-${Date.now()}.md`;
+    const header = '---\ntitle: Kept\ntags: [a, b]\n---\n\n';
+    expect((await api(page, 'POST', noteUrl(file), `${header}# Note\n\nmy paragraph\n`)).status).toBe(201);
+    try {
+      const shown = await open(page, file, mode);
+      await expect.poll(shown, { timeout: 5_000 }).toContain('my paragraph');
+      await caretAfter(page, mode, 'my paragraph');
+      await page.keyboard.type(' typed');
+      await expect.poll(() => onDisk(page, file), { timeout: 15_000 }).toContain('my paragraph typed');
+      expect((await onDisk(page, file)).startsWith(header)).toBe(true);
+    } finally {
+      await api(page, 'DELETE', noteUrl(file));
+    }
+  });
+
 }
+
+// The Live editor without shared editing shows a note's front matter in a
+// header box above the body (the editor itself would rewrite the fences).
+test('Live: the front matter is shown, and editing it saves a valid --- block', async ({ page }) => {
+  test.setTimeout(60_000);
+  await signIn(page);
+  const file = `default-fm-box-${Date.now()}.md`;
+  expect((await api(page, 'POST', noteUrl(file), '---\ntitle: Kept\ntags: [a, b]\n---\n\n# Note\n\nmy paragraph\n')).status).toBe(201);
+  try {
+    const shown = await open(page, file, 'Live');
+    const box = page.getByTestId('live-frontmatter');
+    await expect(box).toBeVisible({ timeout: 10_000 });
+    await expect(box).toHaveValue('title: Kept\ntags: [a, b]');
+    // The header is not in the body as a rule and a heading.
+    await expect.poll(shown, { timeout: 5_000 }).toContain('my paragraph');
+    expect(await shown()).not.toContain('title: Kept');
+
+    await box.click();
+    await page.keyboard.press('Control+End');
+    await page.keyboard.type('\nextra: 1');
+    await expect.poll(() => onDisk(page, file), { timeout: 15_000 })
+      .toBe('---\ntitle: Kept\ntags: [a, b]\nextra: 1\n---\n\n# Note\n\nmy paragraph\n');
+  } finally {
+    await api(page, 'DELETE', noteUrl(file));
+  }
+});
+
+test('Live: a chat still opens as a chat after typing in another note', async ({ page }) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  const chatsOn = await page.locator('.toolbar-view-chats').waitFor({ state: 'visible', timeout: 10_000 }).then(() => true).catch(() => false);
+  if (!chatsOn) test.skip(true, 'chat disabled (ENABLE_CHAT)');
+  const id = Date.now();
+  const file = `default-fm-other-${id}.md`;
+  const chat = `default-fm-chat-${id}.md`;
+  expect((await api(page, 'POST', noteUrl(file), '# Note\n\nmy paragraph\n')).status).toBe(201);
+  expect((await api(page, 'POST', `/api/chat/convert?ns=${NS}&path=${encodeURIComponent(chat)}&title=Still%20a%20chat`)).status).toBe(201);
+  try {
+    // Both files were made after the page loaded: reload so the tree lists
+    // them (open() only changes the hash).
+    await page.reload();
+    await expect(page.locator('.sidebar .tree-row', { hasText: chat }).first()).toBeVisible({ timeout: 20_000 });
+    await open(page, file, 'Live');
+    await caretAfter(page, 'Live', 'my paragraph');
+    await page.keyboard.type(' typed');
+    await expect.poll(() => onDisk(page, file), { timeout: 15_000 }).toContain('my paragraph typed');
+
+    await page.locator('.sidebar .tree-row', { hasText: chat }).first().click({ timeout: 20_000 });
+    await expect(page.locator('.chat-room-title h2')).toHaveText('Still a chat', { timeout: 15_000 });
+    expect((await onDisk(page, chat)).startsWith('---\n')).toBe(true);
+    expect((await api(page, 'GET', `/api/chat?ns=${NS}&path=${encodeURIComponent(chat)}`)).status).toBe(200);
+  } finally {
+    await api(page, 'DELETE', noteUrl(file));
+    await api(page, 'DELETE', noteUrl(chat));
+  }
+});

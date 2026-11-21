@@ -44,3 +44,23 @@ export function joinFrontMatter(frontMatter, body) {
   return fm + (body || '');
 }
 
+
+// The lines between the fences of a front matter block (from splitFrontMatter),
+// without the newline that ends the last one: what the Live editor's header
+// box shows. withFrontMatterInner puts edited lines back between the SAME
+// fences and the same blank lines after them, so the block stays valid
+// whatever is typed, and an unchanged box gives back the same bytes.
+const FM_PARTS = /^(---[ \t]*\r?\n)([\s\S]*?)((?:---|\.\.\.)[ \t]*(?:\r?\n|$)(?:[ \t]*\r?\n)*)$/;
+
+export function frontMatterInner(frontMatter) {
+  const m = typeof frontMatter === 'string' ? frontMatter.match(FM_PARTS) : null;
+  if (!m) return '';
+  return m[2].replace(/\r?\n$/, '');
+}
+
+export function withFrontMatterInner(frontMatter, inner) {
+  const m = typeof frontMatter === 'string' ? frontMatter.match(FM_PARTS) : null;
+  if (!m) return frontMatter;
+  const lines = (inner || '').replace(/\r\n/g, '\n');
+  return m[1] + (lines ? lines + '\n' : '') + m[3];
+}

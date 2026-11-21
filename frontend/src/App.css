@@ -3219,6 +3219,26 @@ pre:hover .code-copy-btn {
 
 /* Crepe's root sits inside `.live-editor-pane` (a flex column) below the
    LiveToolbar — make it grow to fill the remaining height. */
+/* The header box above a Live note's body: its front matter, shown and
+   edited as plain text so the editor never rewrites the --- fences. */
+.live-frontmatter {
+  flex: none;
+  margin: 8px 12px 0;
+  padding: 6px 10px;
+  max-height: 12em;
+  resize: vertical;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  background: var(--surface-tint);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+.live-frontmatter:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 .live-editor-crepe-root {
   flex: 1;
   min-height: 0;
