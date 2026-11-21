@@ -1992,7 +1992,9 @@ function App() {
   // Expand: the docked chat, full screen. The panel stays on its Chat tab,
   // hidden while chats are open, so Back returns to note + docked chat.
   const expandChat = useCallback((chat) => { pickChatMode('full'); enterChats(chat); }, [enterChats, pickChatMode]);
-  const selectDockedChat = useCallback((chat) => { setDockedChat(chat); }, [setDockedChat]);
+  // Picking a chat in the docked panel is choosing pinned mode too: a chat
+  // docked through the panel's Chat tab never went through Pin.
+  const selectDockedChat = useCallback((chat) => { setDockedChat(chat); if (chat) pickChatMode('pinned'); }, [setDockedChat, pickChatMode]);
   // The "is this note a chat?" decision, made where a note finishes loading
   // rather than in an effect on `content`: that effect stayed armed when the
   // click reloaded identical text (or the load failed), then fired on the
@@ -2017,6 +2019,7 @@ function App() {
       // after Pin. Where a chat cannot dock it opens full screen below.
       setDockedChats((m) => withDockedChat(m, ns, { ns, path }));
       openSidePanel('chat');
+      pickChatMode('pinned');
       if (back === 'none') {
         setCurrentPath(null); setContent(null); setSavedContent('');
       } else {
@@ -2902,7 +2905,7 @@ function App() {
         // Opening a file hands the create-target back to that file's folder,
         // so it tracks where you actually are rather than the last folder
         // you happened to expand.
-        onSelect={(p) => { setPickedFolder(null); setChatsOpen(false); chatRedirectFor.current = `${selectedNs}/${p}`; chatRedirectDock.current = chatMode === 'pinned'; chatRedirectFrom.current = currentPath ? { ns: selectedNs, path: currentPath } : null; openNote(p); }}
+        onSelect={(p) => { setPickedFolder(null); setChatsOpen(false); chatRedirectFor.current = `${selectedNs}/${p}`; chatRedirectDock.current = chatDocked || chatMode === 'pinned'; chatRedirectFrom.current = currentPath ? { ns: selectedNs, path: currentPath } : null; openNote(p); }}
         currentPath={currentPath}
         namespaces={namespaces}
         selectedNs={selectedNs}

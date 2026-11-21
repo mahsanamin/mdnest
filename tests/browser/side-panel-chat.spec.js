@@ -184,15 +184,60 @@ test('a chat opened from the tree uses the last picked mode, pinned or full scre
     await expect(page.locator('.toolbar-path')).toContainText(s.plain);
     await expect(page.locator('.chat-panel:not(.docked)')).toHaveCount(0);
 
-    // Expand picks full screen. Back to the note, and the next tree click
-    // opens full screen.
+    // Expand picks full screen. Back brings the docked chat back, and while
+    // a chat is docked and showing, a tree click keeps it docked (it looks
+    // pinned, so it stays pinned).
     await page.getByTestId('chat-expand').click();
     await expect(panel(page)).toHaveCount(0);
     await page.locator('.toolbar-chats-back').click();
     await expect(page.locator('.toolbar-path')).toContainText(s.plain, { timeout: 15_000 });
+    await expect(panel(page).locator('.chat-room-title h2')).toHaveText(s.title, { timeout: 15_000 });
+    await treeRow(other).click({ timeout: 20_000 });
+    await expect(panel(page).locator('.chat-room-title h2')).toHaveText(otherTitle, { timeout: 15_000 });
+    await expect(page.locator('.toolbar-path')).toContainText(s.plain);
+    await expect(page.locator('.chat-panel:not(.docked)')).toHaveCount(0);
+
+    // With no chat showing, the remembered mode decides: Expand again, Back,
+    // close the panel, and the next tree click opens full screen.
+    await page.getByTestId('chat-expand').click();
+    await expect(panel(page)).toHaveCount(0);
+    await page.locator('.toolbar-chats-back').click();
+    await expect(page.locator('.toolbar-path')).toContainText(s.plain, { timeout: 15_000 });
+    await page.getByTestId('side-panel-tab-chat').focus();
+    await page.keyboard.press('Escape');
+    await expect(panel(page)).toHaveCount(0);
     await treeRow(other).click({ timeout: 20_000 });
     await expect(page.locator('.chat-panel:not(.docked) .chat-room-title h2')).toHaveText(otherTitle, { timeout: 15_000 });
     await expect(panel(page)).toHaveCount(0);
+  } finally {
+    await cleanup(page, s.plain, s.chat, other);
+  }
+});
+
+test('a chat docked from the panel Chat tab, not Pin, stays docked on a tree click', async ({ page }) => {
+  test.setTimeout(120_000);
+  await signIn(page);
+  const s = await seed(page);
+  const other = `__dock-${Date.now()}-${Math.random().toString(36).slice(2, 6)}-room2.md`;
+  const otherTitle = `Dock other ${other.slice(7, 20)}`;
+  expect((await api(page, 'POST', `/api/chat/convert?ns=${NS}&path=${encodeURIComponent(other)}&title=${encodeURIComponent(otherTitle)}`)).status).toBe(201);
+  const treeRow = (file) => page.locator('.sidebar .tree-row', { hasText: file }).first();
+  try {
+    // The remembered mode says full screen (the default before Pin is ever used).
+    await page.goto(`/#${NS}/${s.plain}`);
+    await page.evaluate(() => localStorage.setItem('mdnest_chat_mode', 'full'));
+    await page.reload();
+    await expect(page.locator('.toolbar-path')).toContainText(s.plain, { timeout: 20_000 });
+    // Dock through the side panel: Stickies button, Chat tab, pick the chat.
+    await page.locator('.toolbar-stickies').first().click();
+    await page.getByTestId('side-panel-tab-chat').click();
+    await panel(page).locator('.chat-list-item', { hasText: s.title }).first().click();
+    await expect(panel(page).locator('.chat-room-title h2')).toHaveText(s.title, { timeout: 15_000 });
+    // A tree click on another chat swaps the docked chat; nothing goes full screen.
+    await treeRow(other).click({ timeout: 20_000 });
+    await expect(panel(page).locator('.chat-room-title h2')).toHaveText(otherTitle, { timeout: 15_000 });
+    await expect(page.locator('.toolbar-path')).toContainText(s.plain);
+    await expect(page.locator('.chat-panel:not(.docked)')).toHaveCount(0);
   } finally {
     await cleanup(page, s.plain, s.chat, other);
   }
