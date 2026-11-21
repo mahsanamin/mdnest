@@ -13,9 +13,11 @@ const secret = () => randomBytes(24).toString('hex');
 const privateWrite = (path, content) => writeFile(path, content, { mode: 0o600 });
 if (mode === 'init') {
   await mkdir(join(dir, 'logs'), { recursive: true, mode: 0o700 });
+  // The mounted notes may live apart from the private fixture (args[1]).
+  const notes = args[1] || dir;
   for (const ns of ['team-alpha', 'team-beta']) {
-    await mkdir(join(dir, ns), { mode: 0o700 });
-    await privateWrite(join(dir, ns, 'Welcome.md'), `# ${ns}\n\nSynthetic read-only inspection baseline.\n`);
+    await mkdir(join(notes, ns), { recursive: true });
+    await writeFile(join(notes, ns, 'Welcome.md'), `# ${ns}\n\nSynthetic read-only inspection baseline.\n`);
   }
   const pgPassword = secret(), password = secret();
   await privateWrite(join(dir, 'postgres.env'), `POSTGRES_USER=mdnest\nPOSTGRES_DB=mdnest\nPOSTGRES_PASSWORD=${pgPassword}\n`);
