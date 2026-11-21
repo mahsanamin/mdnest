@@ -456,6 +456,20 @@ function App() {
   // note" from inside a chat does not set it, which is how you still reach
   // the raw markdown on purpose.
   const chatRedirectFor = useRef(null);
+  // Whether the chat mode was "pinned" when that navigation started. A chat
+  // opened from the tree then goes into the side panel instead of full
+  // screen (see chatMode).
+  const chatRedirectDock = useRef(false);
+  // The chat mode the person last picked: 'pinned' (Pin) or 'full' (Expand).
+  // A chat opened from the tree uses it, also after the panel was closed or
+  // a reload. Remembered per browser, like the panel's width and tab.
+  const [chatMode, setChatMode] = useState(() => {
+    try { return localStorage.getItem('mdnest_chat_mode') === 'pinned' ? 'pinned' : 'full'; } catch { return 'full'; }
+  });
+  const pickChatMode = useCallback((mode) => {
+    setChatMode(mode);
+    try { localStorage.setItem('mdnest_chat_mode', mode); } catch { /* storage unavailable: kept until the tab closes */ }
+  }, []);
   // Bumped by the toolbar Refresh so the task board reloads its tasks too
   // (the board isn't part of the note/tree refresh path).
   const [boardRefreshNonce, setBoardRefreshNonce] = useState(0);
@@ -1625,6 +1639,7 @@ function App() {
       if (path !== currentPath) {
         if (path && ns) {
           chatRedirectFor.current = `${ns}/${path}`;
+          chatRedirectDock.current = false;
           hashNavPending.current = true;
           openNoteDirect(ns, path).finally(() => { hashNavPending.current = false; });
         } else {
@@ -1972,10 +1987,11 @@ function App() {
     leaveChats();
     setDockedChats((m) => withDockedChat(m, chat.ns, chat));
     openSidePanel('chat');
-  }, [leaveChats, openSidePanel]);
+    pickChatMode('pinned');
+  }, [leaveChats, openSidePanel, pickChatMode]);
   // Expand: the docked chat, full screen. The panel stays on its Chat tab,
   // hidden while chats are open, so Back returns to note + docked chat.
-  const expandChat = useCallback((chat) => { enterChats(chat); }, [enterChats]);
+  const expandChat = useCallback((chat) => { pickChatMode('full'); enterChats(chat); }, [enterChats, pickChatMode]);
   const selectDockedChat = useCallback((chat) => { setDockedChat(chat); }, [setDockedChat]);
   // The "is this note a chat?" decision, made where a note finishes loading
   // rather than in an effect on `content`: that effect stayed armed when the
@@ -1991,8 +2007,24 @@ function App() {
     chatRedirectFor.current = null;
     const from = chatRedirectFrom.current;
     chatRedirectFrom.current = null;
+    const dock = chatRedirectDock.current;
+    chatRedirectDock.current = false;
     if (!chatEnabled || !isChatDoc(text)) return;
-    enterChats({ ns, path }, from && !(from.ns === ns && from.path === path) ? from : 'none');
+    const back = from && !(from.ns === ns && from.path === path) ? from : 'none';
+    if (dock && chatCanDock) {
+      // Pinned mode stays pinned: the new chat takes the panel (opened if it
+      // was closed) and the note that was open comes back underneath, as
+      // after Pin. Where a chat cannot dock it opens full screen below.
+      setDockedChats((m) => withDockedChat(m, ns, { ns, path }));
+      openSidePanel('chat');
+      if (back === 'none') {
+        setCurrentPath(null); setContent(null); setSavedContent('');
+      } else {
+        openNoteDirect(back.ns, back.path);
+      }
+      return;
+    }
+    enterChats({ ns, path }, back);
   };
   const chatsBackLabel = chatsReturnTo === 'board'
     ? 'Task board'
@@ -2870,7 +2902,7 @@ function App() {
         // Opening a file hands the create-target back to that file's folder,
         // so it tracks where you actually are rather than the last folder
         // you happened to expand.
-        onSelect={(p) => { setPickedFolder(null); setChatsOpen(false); chatRedirectFor.current = `${selectedNs}/${p}`; chatRedirectFrom.current = currentPath ? { ns: selectedNs, path: currentPath } : null; openNote(p); }}
+        onSelect={(p) => { setPickedFolder(null); setChatsOpen(false); chatRedirectFor.current = `${selectedNs}/${p}`; chatRedirectDock.current = chatMode === 'pinned'; chatRedirectFrom.current = currentPath ? { ns: selectedNs, path: currentPath } : null; openNote(p); }}
         currentPath={currentPath}
         namespaces={namespaces}
         selectedNs={selectedNs}

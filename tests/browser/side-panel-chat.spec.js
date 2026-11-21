@@ -151,6 +151,53 @@ test('switching tabs, Expand and Pin keep the unsent draft', async ({ page }) =>
   }
 });
 
+// Bug: with a chat pinned, opening another chat from the file tree went full
+// screen, so the pin was lost. The mode the person last picked (Pin or
+// Expand) is remembered, also with the panel closed and across a reload, and
+// a chat opened from the tree uses it.
+test('a chat opened from the tree uses the last picked mode, pinned or full screen', async ({ page }) => {
+  test.setTimeout(120_000);
+  await signIn(page);
+  const s = await seed(page);
+  const other = `__dock-${Date.now()}-${Math.random().toString(36).slice(2, 6)}-room2.md`;
+  const otherTitle = `Dock other ${other.slice(7, 20)}`;
+  expect((await api(page, 'POST', `/api/chat/convert?ns=${NS}&path=${encodeURIComponent(other)}&title=${encodeURIComponent(otherTitle)}`)).status).toBe(201);
+  const treeRow = (file) => page.locator('.sidebar .tree-row', { hasText: file }).first();
+  try {
+    await dock(page, s);
+    // Pinned: the tree click swaps the docked chat and keeps the note.
+    await treeRow(other).click({ timeout: 20_000 });
+    await expect(panel(page).locator('.chat-room-title h2')).toHaveText(otherTitle, { timeout: 15_000 });
+    await expect(page.locator('.toolbar-path')).toContainText(s.plain);
+    await expect(page.locator('.chat-panel:not(.docked)')).toHaveCount(0);
+    expect(page.url()).toContain(`#${NS}/${s.plain}`);
+
+    // Pinned, with the panel closed and after a reload: still opens pinned.
+    await page.getByTestId('side-panel-tab-chat').focus();
+    await page.keyboard.press('Escape');
+    await expect(panel(page)).toHaveCount(0);
+    await page.reload();
+    await expect(page.locator('.toolbar-path')).toContainText(s.plain, { timeout: 20_000 });
+    await expect(panel(page)).toHaveCount(0);
+    await treeRow(s.chat).click({ timeout: 20_000 });
+    await expect(panel(page).locator('.chat-room-title h2')).toHaveText(s.title, { timeout: 15_000 });
+    await expect(page.locator('.toolbar-path')).toContainText(s.plain);
+    await expect(page.locator('.chat-panel:not(.docked)')).toHaveCount(0);
+
+    // Expand picks full screen. Back to the note, and the next tree click
+    // opens full screen.
+    await page.getByTestId('chat-expand').click();
+    await expect(panel(page)).toHaveCount(0);
+    await page.locator('.toolbar-chats-back').click();
+    await expect(page.locator('.toolbar-path')).toContainText(s.plain, { timeout: 15_000 });
+    await treeRow(other).click({ timeout: 20_000 });
+    await expect(page.locator('.chat-panel:not(.docked) .chat-room-title h2')).toHaveText(otherTitle, { timeout: 15_000 });
+    await expect(panel(page)).toHaveCount(0);
+  } finally {
+    await cleanup(page, s.plain, s.chat, other);
+  }
+});
+
 test('Expand and Pin keep the spot you were reading, not the newest message', async ({ page }) => {
   test.setTimeout(120_000);
   await signIn(page);
