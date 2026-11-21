@@ -523,6 +523,23 @@ func TestRoutes_ChatStatusNeedsWriteOnTheChat(t *testing.T) {
 	}
 }
 
+func TestRoutes_ChatCoordinationNeedsAccessOnTheNote(t *testing.T) {
+	ts := newTestServer(t, true)
+	pat := jwtFor(t, uidPat, "collaborator", nil)
+	for _, route := range []string{"claim", "ack", "room", "stop"} {
+		code, body := ts.do(pat, http.MethodPost, "/api/chat/"+route+"?ns=alpha&path=Private/room.md&as=builder&msg_id=m_test", strings.NewReader("[]"), "")
+		if code != http.StatusForbidden {
+			t.Errorf("%s mutation outside grant: %d %s", route, code, body)
+		}
+	}
+	for _, route := range []string{"room", "stream"} {
+		code, body := ts.get(pat, "/api/chat/"+route+"?ns=alpha&path=Private/room.md")
+		if code != http.StatusForbidden {
+			t.Errorf("%s read outside grant: %d %s", route, code, body)
+		}
+	}
+}
+
 func TestRoutes_TreeAdminOfAnotherNamespaceIsStillFiltered(t *testing.T) {
 	ts := newTestServer(t, true)
 	_, body := ts.get(jwtFor(t, uidAdele, "admin", nil), "/api/tree?ns=alpha")
@@ -715,7 +732,8 @@ func TestRoutes_TempTokenIsNotASession(t *testing.T) {
 	if code != 200 {
 		t.Errorf("a session token stopped working: %d", code)
 	}
-	code, _ = ts.get("", "/api/files/alpha/Shared/a.md?token="+jwtFor(t, uidOwen, "collaborator", nil))
+	queryToken := jwtFor(t, uidOwen, "collaborator", nil)
+	code, _ = ts.get("", "/api/files/alpha/Shared/a.md?token="+queryToken)
 	if code != 200 {
 		t.Errorf("?token= fallback stopped working: %d", code)
 	}

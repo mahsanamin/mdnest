@@ -354,7 +354,7 @@ List users. Available to any admin role, and every admin gets the full list *(v4
 
 ```json
 [
-  {"id": 1, "email": "admin@mdnest.local", "username": "admin", "role": "superadmin", "created_at": "2026-03-28T10:00:00Z"},
+  {"id": 1, "email": "admin@example.com", "username": "admin", "role": "superadmin", "created_at": "2026-03-28T10:00:00Z"},
   {"id": 2, "email": "bob@example.com", "username": "bob", "role": "collaborator", "invited_by": 1, "created_at": "2026-03-28T12:00:00Z"}
 ]
 ```
@@ -1877,6 +1877,74 @@ Returns `201 {"status":"posted","count":N,"message":{...}}`.
 curl -X POST "$URL/api/chat?ns=work&path=Chats/release.md&as=api-agent" \
   -H "Authorization: Bearer $TOKEN" --data-raw "Migrations done"
 ```
+
+### Optional structured chat fields
+
+`GET /api/chat` also accepts `last=1..10000`, `type`, `as`, `worker`, and
+`unseen_only=true`. Filters run before `last`. Normal recent reads return the
+last matches; unseen batches return the oldest pending matches. The JSON
+response adds `room` and full `prompts`. Each message adds `id`, `type`,
+`reply_to`, `meta`, `claimed_by` and `body` while preserving `n`, `time` and
+`text`. `format=json-array` returns only the message array. `include_ids=true` adds `X-Chat-IDs` for an explicit CLI acknowledgment
+batch capped at 1024 encoded header bytes. A shorter prefix sets
+`X-Chat-More: true`; repeat an unseen acknowledgment read to continue.
+Ordinary reads do not add that header. GET never advances a cursor.
+
+`POST /api/chat` accepts query parameters `type` (`task`, `review`, `patch`,
+`question`, `ack`, `error`), `reply_to`, `meta` (a JSON object up to 8 KB) and
+`done=true`. It returns `msg_id`, `consecutive_agent_turns` and `max_agent_turns`
+with its existing fields. The reply ID must exist. An explicit done post
+persists completion; a body containing a done comment does not.
+
+### POST /api/chat/ack?ns=&path=&as=[&worker=]
+
+Needs write access. Body: a JSON array of up to 1000 delivered message IDs.
+Persists that account/handle/worker's acknowledged message IDs in the note.
+Sparse acknowledgment preserves earlier unseen messages omitted by a type or
+mention filter. A different ID at an earlier position remains unseen. Unknown
+IDs return `400`. Plain GET `ack=true` is refused; use this write endpoint.
+
+### POST /api/chat/claim?ns=&path=&msg_id=&as=[&worker=][&ttl_seconds=300][&lease_id=]
+
+Needs write access. TTL is 1 to 86400 seconds. Returns
+`{claimed:true,held_by,expires,lease_id}`. A live competing lease returns `409`
+with `ALREADY_CLAIMED`, holder and expiry. Renew with the same authenticated
+account, handle, worker and lease ID. Expired leases can be acquired again.
+These cooperative leases require one backend writer and reject symlink aliases
+and the app role, even when ordinary chat is enabled there.
+
+### GET/POST /api/chat/room?ns=&path=
+
+GET needs read access and returns the durable roster, cursors, claims, turn
+count and crew status. POST needs write access and initializes a room exactly
+once, using `{max_agent_turns,human_handle,agents:[{handle,trait}],handles:[],goal}`.
+An optional initial goal is appended under the same initialization lock and
+does not consume an agent turn. It requires an empty room and at least one agent.
+It never accepts commands. Limits are 1 to 10000 turns and 32 agents. The room
+is paused when its threshold post is accepted; later agent posts return `409`.
+A matching human post resets the count. Multi-mode reset requires a matching
+account without an alternate label and without an API token. Single mode uses
+a cooperative label convention. Direct note writers can edit this state.
+
+### POST /api/chat/stop?ns=&path=
+
+Needs write access. Pauses a configured room after local cancellation or a
+local launch limit. It never changes a completed room back to paused.
+
+### GET /api/chat/stream?ns=&path=
+
+Authenticated SSE change hints, with `change`, `heartbeat` and `gone` events.
+The client re-reads durable messages after a hint. Permission is rechecked on
+each wake/heartbeat. Streams end after 55 seconds for reconnect, and are bounded
+to eight per account and 128 total. `X-Accel-Buffering: no` keeps the nginx
+proxy from buffering. Slow writes are bounded. Clients must support polling
+fallback. Streaming requires a single-writer backend.
+
+### POST /api/chat/agents?ns=&path=&name=
+
+Needs write access. The raw body saves a prompt of up to 2000 characters;
+an empty body removes it. Quotes/newlines are preserved in the full prompt,
+while the legacy `agents` map stays a short role reminder.
 
 ### POST /api/chat/status?ns=&path=[&as=label]
 

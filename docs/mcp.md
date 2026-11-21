@@ -50,6 +50,62 @@ transports**:
 
 ---
 
+## Optional chat coordination
+
+Existing `read_chat` and `post_chat` accept structured read/post options. The
+explicit tools `mdnest_chat_read` and `mdnest_chat_post` return JSON containing
+message IDs, semantic types, reply IDs and metadata. Reads accept `last`,
+`unseen_only`, `type`, `as` and explicit `ack`. Posting accepts `type`,
+`reply_to`, `meta` and `done` and reports the message ID and room turn limits.
+
+Additional tools:
+
+- `mdnest_chat_claim`: acquire a lease using `msg_id`, `as`, optional `worker`
+  and `ttl_seconds`. Renew by supplying the returned `lease_id`.
+- `mdnest_chat_roster`: saved personas, durable cursors and crew status.
+- `mdnest_chat_agent_prompt`: save an existing agent's prompt without posting.
+- `mdnest_chat_crew_spawn`: optional local spawning from trusted host config.
+- `mdnest_chat_crew_status`: inspect a local launch ID for startup/exit status.
+
+The transcript resource is `mdnest://chat/namespace/path.md/transcript`.
+`agent_handoff_protocol` supplies the roster and claim/work/post instructions,
+with shared room text labelled as untrusted context. Resource subscriptions
+send `notifications/resources/updated` on stdio. The HTTP transport remains
+stateless, so it does not offer live subscriptions or local spawning.
+
+### Local spawning, off by default
+
+The host owner must set `MDNEST_MCP_LOCAL_CREW=true` and
+`MDNEST_MCP_CREW_CONFIG` to an absolute private local config path before starting
+stdio MCP. That file maps permitted handles to trusted launch commands:
+
+```json
+{
+  "cli": "/opt/mdnest/mdnest",
+  "cwd": "/workspace/project",
+  "agents": { "reviewer": "my-review-worker" },
+  "max_turns": 8,
+  "timeout": "15m",
+  "pass_env": ["PROVIDER_API_KEY"]
+}
+```
+
+The tool accepts only handles and traits, never `cmd`. Requested budgets are
+clamped to the trusted local limits. Shared-note command strings stay inert.
+Child logs go to stderr, never MCP protocol stdout. Local spawning needs Node
+22 or newer for the CLI runner. It creates a new room rather than overwriting
+one and returns a launch ID; inspect that ID for asynchronous startup errors.
+At most four pending or active crews may run at once. Finished status records
+expire after one minute and do not occupy an active launch slot. Closing stdio
+or sending SIGINT/SIGTERM stops and awaits owned crews and removes their
+temporary connection homes. No hosted agent service is required.
+
+The [CLI worker contract](cli.md#optional-local-chat-workers) describes safe
+environment passing, success-only acknowledgment, temporary home cleanup and
+the limits of cooperative leases. A process launched locally still has the
+launching account's OS permissions. This option grants execution authority to
+the connected stdio client, so enable it only for a client you trust.
+
 ## 1. Get an API token
 
 Every mode needs mdnest credentials. The recommended credential is a long-lived
@@ -117,8 +173,9 @@ transport**:
 
 ```bash
 docker build -t mdnest-mcp ./mcp-server
+MDNEST_HOST_URL=http://host.docker.internal:8286 # boundary-ok: standard Docker host alias
 docker run --rm -p 3000:3000 \
-  -e MDNEST_URL=http://host.docker.internal:8286 \
+  -e MDNEST_URL="$MDNEST_HOST_URL" \
   -e MDNEST_TOKEN=mdnest_your_token_here \
   mdnest-mcp
 ```

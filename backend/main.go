@@ -255,7 +255,7 @@ func main() {
 			log.Fatalf("failed to count users: %v", err)
 		}
 		if count == 0 {
-			email := user + "@mdnest.local"
+			email := user + "@mdnest.local" // boundary-ok: generated product address
 			// Seed the bootstrap account as superadmin (global role), NOT the
 			// literal "admin". Since v3.5.0 the role model is three-tier:
 			// superadmin (global), admin (scoped to namespace_admins rows),
@@ -577,6 +577,7 @@ func main() {
 		chatCanRead = func(_ *http.Request, _, _ string) bool { return true }
 	}
 	chatHandler := handlers.NewChatHandler(stg, taskNsFilter, chatCanRead, env("MDNEST_USER", "admin"), multiMode)
+	chatHandler.SetCoordinationRole(env("MDNEST_ROLE", "single"))
 	if collabHub != nil {
 		chatHandler.SetCollabHub(collabHub)
 	}
@@ -680,6 +681,9 @@ func main() {
 			}
 			if ns := r.URL.Query().Get("ns"); ns != "" {
 				searchHandler.InvalidateCache(ns)
+				if enableChat {
+					chatHandler.WakeNamespace(ns)
+				}
 				if collabHub != nil {
 					collabHub.BroadcastTreeChanged(ns)
 					closeMovedRooms(collabHub, stg, ns)

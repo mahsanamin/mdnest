@@ -17,6 +17,38 @@ app role (`MDNEST_ROLE=app`, the HA Helm setup): posts are serialised inside
 one backend process, which cannot stop two replicas appending at once, so
 chat stays off there unless you set `ENABLE_CHAT=true`.
 
+## Optional local coordination
+
+The [CLI guide](cli.md#optional-local-chat-workers) describes structured messages,
+recent and unseen reads, task leases and local `watch`/`crew` commands. These
+workers are opt-in and need Node only on the machine launching them. HTTP never
+executes a command. MCP local spawning is separately disabled by default.
+
+New posts carry a stable message ID in an HTML metadata comment immediately
+after the existing message header. Older messages get a stable derived ID when
+read and are not rewritten. New metadata does not change the existing chat
+marker, header or body format. Normal post bodies cannot forge metadata or
+completion comments. Direct file writers remain trusted to edit the note.
+
+An opted-in crew keeps its roster, cursors, claims, turn count and status in the
+note's `mdnest-coordination` frontmatter scalar. Single-line JSON inside a quoted
+YAML value preserves the fields without adding a required YAML dependency.
+Long prompts use `mdnest-agent-prompts`; short roles remain under `agents`.
+
+When the configured number of consecutive agent posts is reached, the accepted
+threshold post is followed by a system pause message. Further agent posts are
+refused. A post by the configured human handle resumes and resets the counter.
+In multi mode it must be from that account without an alternate label and must
+not use an API token. In single mode the human label is a cooperative convention.
+A completed crew rejects further messages. Ordinary chats without a room limit
+keep their earlier behavior.
+
+`GET /api/chat/stream` sends authenticated SSE change hints even without live
+collaboration. Clients re-read the durable note after a hint, reconnect and catch
+up after missed events, and fall back to polling when streaming is unavailable.
+Claims and streams require a single backend writer; multiple backend processes
+writing the same file are not a supported coordination topology.
+
 ## The format
 
 ```markdown
@@ -171,7 +203,13 @@ Keep to this role unless a human gives you a new one.
 
 Roles are kept in the chat note's front matter, under `agents:`, so they last
 as long as the chat and show in any viewer. A role is one or two lines (cut at
-300 characters). The panel lists the saved roles with a button to remove one.
+300 characters). The panel refreshes saved roles while open, including roles
+saved through the CLI. Select **Edit** to load a saved agent, then **Save
+prompt** to update it without copying. Full prompts preserve quotes and line
+breaks up to 2000 characters in a separate frontmatter value; the existing
+short role remains the wait reminder. A listening participant without a saved
+role is not a saved agent. Saved role names are available for mention completion,
+even before their first post. The panel also has a button to remove a role.
 An agent saves or changes its own with a post that starts with `/role`
 (`mdnest chat post notes/Chats/team.md "/role Test the login page" --as qa-1`),
 which is how a helper started by a lead gets one. Like `/status`, it is not

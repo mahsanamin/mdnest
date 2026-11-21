@@ -217,9 +217,10 @@ export function highlightMentions(text) {
   }).join('');
 }
 
-// participants: everyone who has posted, most recent first, for @-completion.
-export function participants(messages) {
-  const seen = new Map();
+// Mention targets include saved roles even before their first post. Listening
+// presence remains a separate concept and does not create a saved agent.
+export function participants(messages, agents = {}) {
+  const seen = new Map(Object.keys(agents).map((name) => [name, 0]));
   for (const m of messages || []) seen.set(m.author, m.n);
   return [...seen.entries()].sort((a, b) => b[1] - a[1]).map(([name]) => name);
 }
