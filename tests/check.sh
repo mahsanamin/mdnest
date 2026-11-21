@@ -265,6 +265,7 @@ browser_lane() {
   # Live note (v4.8.10 to v4.8.12, behind a proxy) needed no change to any
   # file it watches.
   suite "$COLLAB_PAT" e2e-collab-multi.sh "live collaboration and shared editing, multi mode" MDNEST_E2E_BUDGET=skip
+  suite '^backend/handlers/chat|^backend/routes|^mdnest$|^mcp-server/|^frontend/src/(chat|components/Chat)|^tests/(e2e-agentic-multi\.sh|agentic-multi\.mjs)$' e2e-agentic-multi.sh "real two-namespace agent coordination" KEEP=0
 }
 other_lane() {
   run "pre-push hook, $([ "$LEVEL" = ship ] && echo release || echo fast) tier (builds, unit, CLI, audits)" hook.log hook_tier

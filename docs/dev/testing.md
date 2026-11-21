@@ -21,6 +21,22 @@ and process-group cleanup. The MCP suite checks trusted local launch opt-in,
 concurrent caps, subscriptions and shutdown. Backend coordination and stream
 contracts run under Go race tests; the Agents popup has unit/browser coverage.
 
+`bash tests/e2e-agentic-multi.sh` adds the real integration boundary: one
+multi-user backend, isolated Postgres, two distinct mounted namespaces,
+synthetic role/grant identities, real browser/CLI/API/MCP requests and fake
+command workers that post through the actual CLI. It checks cross-namespace
+and read-only denials, browser-human versus API-token reset, durable unseen/ack
+across restart, concurrent claims, mention handoff/done and pause/timeout
+cleanup. No paid model is used. Credentials stay in mode-0600 files under a
+fresh private temporary directory and never appear in logs.
+
+Use `KEEP=1` to retain a browser-ready inspection site. The output gives its
+loopback URL and private login-details path, not credentials. Baseline notes
+stay in both namespaces; manifest.json records the source and image identity.
+Ordinary develop runs clean up only the resources this fixture created.
+When the contribution is already on origin/develop, use `MDNEST_GATE_ALL=1`
+so the full develop gate does not mistake an empty origin diff for no coverage.
+
 At `develop` and `ship` the images are built once and the browser suites run
 in one lane beside everything else. The `@budget` timing tests run last,
 alone: always at `ship`, where a failure blocks; at `develop` only when the
