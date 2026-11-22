@@ -27,6 +27,8 @@
 
 set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# The CLI install and login below must not stop to ask the AI agent skills question.
+export MDNEST_AGENT_SKILLS=0
 cd "$REPO_ROOT" || exit 1
 
 # shellcheck source=tests/lib/e2e-images.sh

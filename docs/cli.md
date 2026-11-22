@@ -20,9 +20,10 @@ fork: the CLI you get matches the server, which the GitHub copy may not. If the
 server cannot serve the CLI (an older server, or a proxy in the way), the
 installer falls back to the latest release from GitHub and says so.
 
-It only installs. It then prints `mdnest login https://notes.example.com`,
-which you run to connect the CLI to the server; it asks for a token at the
-terminal (see [Login](#login)). Installing and connecting are separate steps
+It only installs (and may ask the one question about AI tools described in
+[AI agent skills](#ai-agent-skills)). It then prints
+`mdnest login https://notes.example.com`, which you run to connect the CLI to
+the server; it asks for a token at the terminal (see [Login](#login)). Installing and connecting are separate steps
 because most people already have the CLI connected, or are only updating it.
 
 ### From GitHub
@@ -50,6 +51,42 @@ publishes the moment a fix lands on `main`), then jsDelivr, then `mdnest.dev`
 `mdnest update` uses the same chain.
 
 **No dependencies — just bash and curl.** `python3`/`jq` are used when present (for prettier JSON), but the CLI falls back to pure-bash/awk so every command works without them. The installer downloads to a temp file and installs atomically (using `sudo` only if `/usr/local/bin` isn't writable, and falling back to `~/.local/bin` with a PATH hint if it can't) — so it never leaves a half-written binary or aborts mid-download on a fresh machine.
+
+### AI agent skills
+
+At the end of the install, if an AI tool is on your computer (the `claude`,
+`codex` or `gemini` command, or a `~/.claude`, `~/.codex` or `~/.agents`
+folder) and the mdnest skill is not set up yet, the installer asks once:
+
+```text
+Let your AI tools (Claude Code, Codex, ...) use mdnest? [Y/n]
+```
+
+- **Enter or y** runs `mdnest agent install` and says how to undo it
+  (`mdnest agent remove`). See
+  [Use mdnest from your AI agent](#use-mdnest-from-your-ai-agent-optional).
+- **n** installs nothing and writes `~/.config/mdnest/agent-skills-declined`,
+  so no installer, login or update asks or reminds you again.
+- **No terminal** (an AI agent or a script is running the installer): nothing
+  is installed and the installer prints a one-line tip instead.
+
+`mdnest login` asks the same question once after a successful login, for
+people who installed the CLI before the installer asked. `mdnest update` never
+asks; it only prints the tip.
+
+To decide up front, pass a flag to the installer:
+
+```bash
+# set up the skill without asking (useful when an agent runs the install)
+curl -fsSL https://mdnest.dev/install.sh | bash -s -- --agent-skills
+# never ask
+curl -fsSL https://mdnest.dev/install.sh | bash -s -- --no-agent-skills
+# the same, for your own server's installer
+curl -fsSL https://notes.example.com/cli/install.sh | bash -s -- https://notes.example.com --agent-skills
+```
+
+`MDNEST_AGENT_SKILLS=1` (install) or `MDNEST_AGENT_SKILLS=0` (never ask) does
+the same as the flags, and also applies to `mdnest login`.
 
 ### Install from a specific branch
 
@@ -90,6 +127,10 @@ The prompt reads from the terminal itself, not from standard input, so it works
 under `curl ... | bash`. With no terminal at all (a script or CI job), login
 without a token prints the usage and exits 1, as before; pass the token on the
 command line there.
+
+After a successful login, if an AI tool is on your computer and the mdnest
+skill is not set up, login asks the [AI agent skills](#ai-agent-skills)
+question once. It is not asked again after a no, or with no terminal.
 
 ### Pick the alias yourself
 
@@ -523,7 +564,9 @@ Needs only bash and curl. The policy file and the agent setup are in
 ## Use mdnest from your AI agent *(optional)*
 
 AI agents such as Claude Code, Codex and Gemini CLI can learn to use mdnest
-from the CLI itself. Nothing is set up for them unless you ask.
+from the CLI itself. Nothing is set up for them unless you say yes to the
+installer's question (see [AI agent skills](#ai-agent-skills)) or run the
+command yourself.
 
 ```bash
 mdnest docs agents        # the guide for AI agents: paths, which command to use, writing safely, chat
@@ -554,6 +597,10 @@ know, with no reinstall.
   file mdnest did not write is never deleted.
 - Other tools: point them at `mdnest docs agents` in their own instructions
   file.
+- To undo it, run `mdnest agent remove`.
+- If you answered no to the installer's question, it is not asked again. To
+  be asked again, delete `~/.config/mdnest/agent-skills-declined`. You can
+  also just run `mdnest agent install`.
 
 **Claude Code plugin.** Instead of `agent install`, Claude Code users can add
 the same skill as a plugin:

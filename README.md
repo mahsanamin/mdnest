@@ -131,16 +131,28 @@ Optional chat coordination adds `mdnest_chat_read`, `mdnest_chat_post`,
 `mdnest_chat_crew_spawn` and `mdnest_chat_crew_status` manage local workers only
 when the host explicitly enables trusted launch configuration.
 
-To teach your AI agents (Claude Code, Codex, Gemini CLI and others) how to
-use mdnest, run `mdnest agent install` *(optional)*. It adds a small skill that
-tells the agent to read `mdnest docs agents`, the guide that ships with the
-CLI, so updating the CLI keeps the agent current. In Claude Code you can add
-the same skill as a plugin:
+### Use mdnest from your AI agent
+
+Install the CLI with the command above. If Claude Code, Codex or another AI
+tool is on your computer, the installer asks once:
+
+```text
+Let your AI tools (Claude Code, Codex, ...) use mdnest? [Y/n]
+```
+
+Press Enter to say yes. Your AI tools can then read and write your notes
+through the CLI. If you said no, or installed the CLI before it asked, run
+`mdnest agent install` at any time. `mdnest agent remove` undoes it.
+
+In Claude Code you can add the same skill as a plugin instead *(optional)*:
 
 ```text
 /plugin marketplace add mahsanamin/mdnest
 /plugin install mdnest@mdnest
 ```
+
+Updates need nothing: the skill tells the agent to read `mdnest docs agents`,
+which ships with the CLI, so `mdnest update` keeps your agents current.
 
 ## Documentation
 

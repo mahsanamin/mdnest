@@ -19,6 +19,8 @@ set -u
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CLI="$REPO_ROOT/mdnest"
 PTY="$REPO_ROOT/tests/pty-drive.py"
+# No AI agent skills question during login (it has its own cases below).
+export MDNEST_AGENT_SKILLS=0
 
 PASS=0; FAIL=0
 green() { printf '\033[32m%s\033[0m' "$1"; }
@@ -215,6 +217,86 @@ rc=0
 out="$(bash "$REPO_ROOT/frontend/public/cli/install.sh" 2>&1 </dev/null)" || rc=$?
 eq "installer: no server URL fails" "1" "$rc"
 contains "installer: no server URL shows how" "$out" "install.sh | bash -s -- https://"
+
+# ── the agent skills question: served installer and login ──────────────────
+# Run with MDNEST_AGENT_SKILLS unset, a HOME with ~/.claude, and a PATH
+# without the machine's own claude/codex. A case that must not ask still lists
+# the question as a prompt, so a wrong question fails the case instead of
+# hanging it.
+echo "── agent skills question ──"
+Q="use mdnest? [Y/n] "
+SKILL=".claude/skills/mdnest/SKILL.md"
+PY="$(command -v python3)"
+SAFE_PATH=/usr/bin:/bin:/usr/sbin:/sbin
+rm -rf "$WORK/ibin"
+inst_pty() {  # inst_pty <prompts> <answers> [installer args...]
+  local prompts="$1" answers="$2"; shift 2
+  env -u MDNEST_AGENT_SKILLS HOME="$H" PATH="$SAFE_PATH" MDNEST_BIN_DIR="$WORK/ibin" \
+    PTY_PROMPTS="$prompts" PTY_ANSWERS="$answers" \
+    "$PY" "$PTY" -- /bin/bash "$REPO_ROOT/frontend/public/cli/install.sh" "$@" 2>&1
+}
+login_pty() {  # login_pty <prompts> <answers>
+  env -u MDNEST_AGENT_SKILLS HOME="$H" PATH="$SAFE_PATH" \
+    PTY_PROMPTS="$1" PTY_ANSWERS="$2" "$PY" "$PTY" -- "$CLI" login "$URL" 2>&1
+}
+
+H="$(new_home)"; mkdir -p "$H/.claude"
+out="$(inst_pty "$Q" "" "$URL")"; rc=$?
+eq "installer + Enter: exits 0" "0" "$rc"
+contains "installer: asks the question" "$out" "Let your AI tools (Claude Code, Codex, ...) use mdnest? [Y/n]"
+[ -f "$H/$SKILL" ] && ok "installer + Enter: installs the skill" || bad "installer + Enter: installs the skill" "$out"
+contains "installer + Enter: says how to undo it" "$out" "mdnest agent remove"
+
+H="$(new_home)"; mkdir -p "$H/.claude"
+out="$(inst_pty "$Q" "n" "$URL")"
+[ ! -e "$H/$SKILL" ] && ok "installer + no: installs nothing" || bad "installer + no: installs nothing" "$out"
+[ -f "$H/.config/mdnest/agent-skills-declined" ] && ok "installer + no: remembers it" || bad "installer + no: remembers it" "$out"
+echo "srvalias" > "$WORK/alias"
+out="$(login_pty "$(printf 'Token (not shown): \n%s' "$Q")" "$(printf 'mdnest_good\ny')")"; rc=$?
+eq "login after no: logs in" "0" "$rc"
+case "$out" in *"$Q"*) bad "login after no: does not ask again" "$out" ;; *) ok "login after no: does not ask again" ;; esac
+out="$(inst_pty "$Q" "y" "$URL")"
+case "$out" in *"$Q"*) bad "installer after no: does not ask again" "$out" ;; *) ok "installer after no: does not ask again" ;; esac
+
+H="$(new_home)"; mkdir -p "$H/.claude"
+out="$(env -u MDNEST_AGENT_SKILLS HOME="$H" PATH="$SAFE_PATH" MDNEST_BIN_DIR="$WORK/ibin" MDNEST_TTY="$H/no-such-tty" \
+  bash "$REPO_ROOT/frontend/public/cli/install.sh" "$URL" 2>&1 </dev/null)"; rc=$?
+eq "installer, no terminal: exits 0" "0" "$rc"
+contains "installer, no terminal: prints the hint" "$out" "Run 'mdnest agent install'"
+[ ! -e "$H/$SKILL" ] && ok "installer, no terminal: installs nothing" || bad "installer, no terminal: installs nothing" "$out"
+
+out="$(env -u MDNEST_AGENT_SKILLS HOME="$H" PATH="$SAFE_PATH" MDNEST_BIN_DIR="$WORK/ibin" MDNEST_TTY="$H/no-such-tty" \
+  bash "$REPO_ROOT/frontend/public/cli/install.sh" --agent-skills "$URL" 2>&1 </dev/null)"; rc=$?
+eq "installer --agent-skills (flag first): exits 0" "0" "$rc"
+[ -f "$H/$SKILL" ] && ok "installer --agent-skills: installs without asking" || bad "installer --agent-skills: installs without asking" "$out"
+case "$out" in *"$Q"*) bad "installer --agent-skills: no question" "$out" ;; *) ok "installer --agent-skills: no question" ;; esac
+out="$(inst_pty "$Q" "y" "$URL")"
+case "$out" in *"$Q"*) bad "installer, already installed: no question" "$out" ;; *) ok "installer, already installed: no question" ;; esac
+
+H="$(new_home)"; mkdir -p "$H/.claude"
+out="$(inst_pty "$Q" "y" "$URL" --no-agent-skills)"; rc=$?
+eq "installer --no-agent-skills: exits 0" "0" "$rc"
+case "$out" in *"$Q"*) bad "installer --no-agent-skills: never asks" "$out" ;; *) ok "installer --no-agent-skills: never asks" ;; esac
+[ ! -e "$H/$SKILL" ] && ok "installer --no-agent-skills: installs nothing" || bad "installer --no-agent-skills: installs nothing" "$out"
+
+# Someone who installed the CLI before the installer asked: login asks once.
+out="$(login_pty "$(printf 'Token (not shown): \n%s' "$Q")" "$(printf 'mdnest_good\n')")"; rc=$?
+eq "login: logs in" "0" "$rc"
+contains "login: asks the question after logging in" "$out" "Let your AI tools"
+[ -f "$H/$SKILL" ] && ok "login + Enter: installs the skill" || bad "login + Enter: installs the skill" "$out"
+out="$(login_pty "$(printf 'Token (not shown): \n%s' "$Q")" "$(printf 'mdnest_good\ny')")"
+case "$out" in *"$Q"*) bad "login, already installed: no question" "$out" ;; *) ok "login, already installed: no question" ;; esac
+
+# A failed login asks nothing.
+H="$(new_home)"; mkdir -p "$H/.claude"
+out="$(login_pty "$(printf 'Token (not shown): \n%s' "$Q")" "$(printf 'mdnest_wrong\ny')")"
+case "$out" in *"$Q"*) bad "login refused: no question" "$out" ;; *) ok "login refused: no question" ;; esac
+
+# update keeps the hint and never asks.
+out="$(env -u MDNEST_AGENT_SKILLS HOME="$H" PATH="$SAFE_PATH" PTY_PROMPTS="$Q" PTY_ANSWERS="y" \
+  "$PY" "$PTY" -- "$WORK/ibin/mdnest" update --server "$URL" 2>&1)"
+case "$out" in *"$Q"*) bad "update: never asks" "$out" ;; *) ok "update: never asks" ;; esac
+contains "update: keeps the hint" "$out" "Run 'mdnest agent install'"
 
 echo
 echo "=== $((PASS+FAIL)) checks: $PASS passed, $FAIL failed ==="

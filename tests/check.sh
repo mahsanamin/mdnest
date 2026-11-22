@@ -59,6 +59,11 @@ STAMP="$(git rev-parse --git-path mdnest-release-gate)"
 LOGDIR="$(mktemp -d "${TMPDIR:-/tmp}/mdnest-check.XXXXXX")"
 GO_VER="$(awk '/^go[[:space:]]/{print $2; exit}' backend/go.mod)"
 
+# Every `mdnest login` in the suites would otherwise ask the AI agent skills
+# question on a real terminal when claude/codex is installed, and wait for an
+# answer. The suites that test the question unset this themselves.
+export MDNEST_AGENT_SKILLS=0
+
 pass=0; failed=0; ran=()
 step() { printf '\033[36m==>\033[0m %s\n' "$*"; }
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -191,8 +196,9 @@ if [ "$LEVEL" = iterate ]; then
   else
     echo "  skip npm test: nothing in frontend/ changed"
   fi
-  if echo "$CHANGED" | grep -qE '^mdnest$|^tests/cli-unit\.sh$|^install-cli\.sh$|^docs/agents\.md$|^plugins/'; then
+  if echo "$CHANGED" | grep -qE '^mdnest$|^tests/cli-unit\.sh$|^tests/cli-login-update\.sh$|^install-cli\.sh$|^frontend/public/cli/|^docs/agents\.md$|^plugins/'; then
     run "cli-unit.sh" cli-unit.log bash tests/cli-unit.sh
+    run "cli-login-update.sh" cli-login-update.log bash tests/cli-login-update.sh
     if have node; then run "chat local runner" chat-runner.log node tests/chat-runner.mjs; fi
   fi
   if echo "$CHANGED" | grep -qE '^tests/lib/|^tests/e2e-lib-unit\.sh$'; then
