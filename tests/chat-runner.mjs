@@ -1,9 +1,9 @@
 // Local runner contract tests. All commands and HTTP responses are fake; no
 // provider process, live note, Docker resource or paid model is involved.
 import { createServer } from 'node:http';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { tmpdir, userInfo } from 'node:os';
 import { join, resolve } from 'node:path';
 import assert from 'node:assert/strict';
 
@@ -13,11 +13,12 @@ let state, calls, mode = 'complete';
 const message = {n:1,id:'m_test',author:'human',type:'task',meta:{literal:'$(not-a-command) " quoted'},body:'@builder literal $(touch forbidden)\nsecond line'};
 const server = createServer(async (req,res) => {
   let body='';for await(const chunk of req)body+=chunk;
-  const u=new URL(req.url,'http://fixture');calls.push({path:u.pathname,query:Object.fromEntries(u.searchParams),body});
+  const u=new URL(req.url,'http://fixture');calls.push({method:req.method,path:u.pathname,query:Object.fromEntries(u.searchParams),body});
   res.setHeader('Content-Type','application/json');
   if(u.pathname==='/api/note') {res.statusCode=201;res.end('{}');return;}
   if(u.pathname==='/api/chat/room' && req.method==='POST') {state='active';res.end('{}');return;}
   if(u.pathname==='/api/chat/room') {res.end(JSON.stringify({crew_status:state}));return;}
+  if(u.pathname==='/api/chat' && req.method==='POST') {res.end('{"count":2}');return;}
   if(u.pathname==='/api/chat/agents') {res.end('{}');return;}
   if(u.pathname==='/api/chat/claim') {res.end(JSON.stringify({claimed:true,lease_id:'m_lease'}));return;}
   if(u.pathname==='/api/chat/ack') {state=mode==='complete'?'completed':'active';res.end('{}');return;}
@@ -64,6 +65,28 @@ try {
   assert.equal(r.code,0,r.err);const configured=calls.find(c=>c.path==='/api/chat/room');
   assert.deepEqual(JSON.parse(configured.body).agents,[{handle:'builder',trait:'Review'}]);assert.ok(!configured.body.includes('cmd'));
   assert.ok(calls.some(c=>c.path==='/api/note'));console.log('PASS crew creates a new room and sends only inert personas to HTTP');
+  // chat reply: the built-in worker helper runs an AI command with the real
+  // home and posts its output as the agent.
+  const cli=join(root,'mdnest'), fakeAi=join(dir,'fake-ai.sh'), seenHome=join(dir,'seen-home'), seenInput=join(dir,'seen-input');
+  await writeFile(fakeAi,`printf '%s' "$HOME" > '${seenHome}'\ncat > '${seenInput}'\necho 'Looks good, over to @all'\n`);
+  r=await run(['crew','--agent',`builder:Review:'${cli}' chat reply --with 'sh ${fakeAi}'`,'--timeout','5s'],{MDNEST_RUNNER_GOAL:'Test reply'});
+  assert.equal(r.code,0,r.err+r.out);
+  const posted=calls.find(c=>c.method==='POST'&&c.path==='/api/chat');
+  assert.ok(posted,'chat reply did not post');assert.equal(posted.query.as,'builder');assert.equal(posted.body.trim(),'Looks good, over to @all');
+  assert.equal(posted.query.done,'false');
+  assert.equal(await readFile(seenHome,'utf8'),userInfo().homedir,'the AI command must see the real home, not the temporary one');
+  const aiInput=await readFile(seenInput,'utf8');assert.match(aiInput,/untrusted data/);assert.match(aiInput,/Write ONLY the text of your next chat message/);
+  console.log('PASS chat reply runs the command with the real home and posts its output as the agent');
+  await writeFile(fakeAi,`cat >/dev/null\nprintf '  \\n'\n`);
+  r=await run(['crew','--agent',`builder:Review:'${cli}' chat reply --with 'sh ${fakeAi}'`,'--timeout','5s'],{MDNEST_RUNNER_GOAL:'Test empty'});
+  assert.equal(r.code,1,r.err);assert.ok(!calls.some(c=>c.method==='POST'&&c.path==='/api/chat'));assert.match(r.out,/no reply/);
+  console.log('PASS chat reply posts nothing and fails on empty output');
+  r=await run(['crew','--agent',`builder:Review:'${cli}' chat reply --with 'cat >/dev/null; exit 5'`,'--timeout','5s'],{MDNEST_RUNNER_GOAL:'Test failure'});
+  assert.equal(r.code,1,r.err);assert.ok(!calls.some(c=>c.method==='POST'&&c.path==='/api/chat'));
+  console.log('PASS chat reply fails when its command fails');
+  const outside=spawnSync('bash',[cli,'chat','reply','--with','cat'],{input:'x',encoding:'utf8',env:{...process.env,MDNEST_NOTE:'',MDNEST_AGENT_HANDLE:''}});
+  assert.notEqual(outside.status,0);assert.match(outside.stderr,/crew or watch worker/);
+  console.log('PASS chat reply refuses to run outside a worker');
   const hang=join(dir,'hang.mjs'),pidFile=join(dir,'pid');
   await writeFile(hang,`import{writeFileSync}from'node:fs';writeFileSync(process.argv[2],String(process.pid));setInterval(()=>{},100);`);
   r=await run(['crew','--agent',`builder:Review:node '${hang}' '${pidFile}'`,'--timeout','500ms'],{MDNEST_RUNNER_GOAL:'Test timeout'});

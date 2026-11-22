@@ -1692,6 +1692,7 @@ Usage:
   mdnest chat roster @alias/namespace/path.md
   mdnest chat watch @alias/namespace/path.md --as name --exec command [--mentions] [--trait text]
   mdnest chat crew goal --note @alias/namespace/new.md --agent handle:trait:command [--config crew.yaml]
+  mdnest chat reply --with 'command'      (a ready-made crew/watch worker: runs an AI CLI, posts its answer)
 
 Structured posts: --type task|review|patch|question|ack|error --reply-to id --meta JSON --done --json
 Structured reads: --last N --unseen-only --type TYPE --json [--ack --as name]
@@ -1701,6 +1702,7 @@ Example: mdnest chat claim notes/Chats/team.md --msg-id m_example --as reviewer
 Example: mdnest chat roster notes/Chats/team.md
 Example: mdnest chat watch notes/Chats/team.md --as reviewer --exec 'cat' --mentions
 Example: mdnest chat crew "Review the tests" --note notes/Chats/new.md --agent 'reviewer:Review tests:cat'
+Example: mdnest chat crew "Plan a launch" --note notes/Chats/new.md --agent "writer:Proposes ideas:mdnest chat reply --with 'claude -p'"
   mdnest chat keepalive      (a Stop hook for Claude Code / Codex; reads the hook JSON on stdin)
 
 --as is your name in the chat (default: $MDNEST_CHAT_AS, else your account).
@@ -2020,6 +2022,59 @@ else { console.error(`Local ${mode} stopped: ${reason}`); if(reason!=='completed
 MDNEST_LOCAL_RUNNER
 }
 
+# chat_real_home: the invoking user's home from the passwd entry. A crew or
+# watch worker runs with a temporary HOME that holds only the mdnest
+# connection, so $HOME cannot be used here. `~user` expansion reads the passwd
+# entry; the user name is checked first because it goes through eval.
+chat_real_home() {
+  local user home=""
+  user=$(id -un 2>/dev/null) || return 1
+  case "$user" in ''|-*|*[!A-Za-z0-9._-]*) return 1 ;; esac
+  eval "home=~$user"
+  case "$home" in /*) ;; *) return 1 ;; esac
+  [ -d "$home" ] || return 1
+  printf '%s\n' "$home"
+}
+
+CHAT_REPLY_INSTRUCTION="Write ONLY the text of your next chat message, nothing else. It is posted for you, so do not run mdnest yourself. To hand off, mention the next agent with @handle."
+
+# chat reply --with 'command': a ready-made worker command for crew/watch.
+# It sends the runner's context plus a short instruction to the command on
+# stdin, and posts the command's output to the room as this agent. The only
+# change from the worker's environment is HOME, set back to the real one for
+# that command alone, so an AI CLI finds its own login and config. The post
+# keeps the temporary HOME and so uses the runner's connection. There is no
+# --done: completing a crew is never guessed from model output.
+chat_reply() {
+  local with=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --with) [ $# -ge 2 ] || { echo "Error: --with needs a command" >&2; return 1; }; with="$2"; shift 2 ;;
+      --with=*) with="${1#--with=}"; shift ;;
+      *) echo "Usage: mdnest chat reply --with 'command'   (as a crew or watch worker)" >&2; return 1 ;;
+    esac
+  done
+  [ -n "$with" ] || { echo "Usage: mdnest chat reply --with 'command'   (as a crew or watch worker)" >&2; return 1; }
+  if [ -z "${MDNEST_NOTE:-}" ] || [ -z "${MDNEST_AGENT_HANDLE:-}" ]; then
+    echo "Error: chat reply runs as a crew or watch worker (MDNEST_NOTE and MDNEST_AGENT_HANDLE are not set)" >&2
+    return 1
+  fi
+  local real_home
+  real_home=$(chat_real_home) || { echo "Error: cannot find your home folder from the user database" >&2; return 1; }
+  local context="" reply rc=0
+  [ -t 0 ] || context=$(cat) || context=""
+  reply=$(printf '%s\n\n%s\n' "$context" "$CHAT_REPLY_INSTRUCTION" | HOME="$real_home" sh -c "$with") || rc=$?
+  if [ "$rc" != 0 ]; then
+    echo "Error: the --with command exited $rc; nothing was posted" >&2
+    return 1
+  fi
+  if [ -z "${reply//[[:space:]]/}" ]; then
+    echo "Error: the --with command gave no reply; nothing was posted" >&2
+    return 1
+  fi
+  printf '%s\n' "$reply" | cmd_chat post "$MDNEST_NOTE" - --as "$MDNEST_AGENT_HANDLE"
+}
+
 cmd_chat() {
   local sub="${1:-}"
   shift 2>/dev/null || true
@@ -2034,6 +2089,9 @@ cmd_chat() {
       [ -n "$note" ] || { echo "Error: crew requires --note notes/Chats/new-room.md" >&2; return 1; }
       chat_target "$note"
       MDNEST_RUNNER_GOAL="$goal" chat_local_runner crew "${runner_args[@]}"
+      ;;
+    reply)
+      chat_reply "$@"
       ;;
     watch)
       chat_target "${1:-}"; shift
@@ -3232,6 +3290,8 @@ NOTE OPERATIONS
            post <path> <text|-> --as NAME   read <path> --as NAME
            wait <path> --as NAME [--mentions] [--timeout S]   new <path> ["Title"]
            status <path> "doing X" --as NAME   (a quiet working line; --clear)
+           crew "goal" --note <new.md> --agent 'name:role:command'   (local agents, Node 22+)
+           reply --with 'claude -p'   (a ready-made crew agent command; see mdnest chat)
   approval request|done|notify|hook-config  Answer an agent's permission prompt from mdnest (experimental,
            server: ENABLE_AGENT_APPROVALS; needs ~/.config/mdnest/approvals.conf on this machine)
 

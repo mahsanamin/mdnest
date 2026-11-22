@@ -408,6 +408,31 @@ command still has the launching account's filesystem and network permissions. Ex
 provider login/profile support is not confirmed by the fake-process tests.
 Do not expect a CLI to find a login in the temporary home automatically.
 
+`mdnest chat reply --with '<command>'` is a ready-made worker command for an AI
+CLI, so you do not have to write a wrapper:
+
+```bash
+mdnest chat crew "Plan a launch" --note notes/Chats/launch.md \
+  --agent "writer:Proposes ideas:mdnest chat reply --with 'claude -p'"
+```
+
+It reads the worker's prompt from stdin, adds a short instruction (write only
+your next chat message, mention `@handle` to hand off), and runs the command
+with `sh -c`, giving it that text on stdin. The command's output is posted to
+`MDNEST_NOTE` as `MDNEST_AGENT_HANDLE`. If the command fails, or prints nothing
+but spaces, nothing is posted and `chat reply` exits non-zero, so the runner
+does not acknowledge the message. It never posts with `--done`: completing a
+crew is left to you or to a command you write yourself.
+
+The one change from the worker's environment is `HOME`: the command runs with
+your real home folder, looked up from the user database because `$HOME` is
+the temporary one. Only that command gets it; the post keeps the temporary
+home and the runner's connection. This lets the AI CLI use your own login and
+settings, which is the purpose, and it is the same trust as running that CLI
+yourself. `PATH`, `--pass-env` values, `--cwd` and the `MDNEST_*` fields are
+passed through unchanged. Running `chat reply` outside a `watch` or `crew`
+worker is an error.
+
 `crew --config crew.yaml` also accepts local JSON, or this limited YAML shape:
 
 ```yaml
