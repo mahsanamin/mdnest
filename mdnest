@@ -3491,7 +3491,10 @@ agent_target_found() {
   esac
 }
 
-agent_tidy_path() { echo "${1/#$HOME/~}"; }
+# The ~ comes from a variable: a literal ~ in the replacement is expanded to
+# $HOME by bash 5.2 and later, and a backslash-escaped one prints the
+# backslash on bash 3.2 (macOS). A variable reads the same on every version.
+agent_tidy_path() { local tilde="~"; echo "${1/#$HOME/$tilde}"; }
 
 agent_sum() { cksum | awk '{print $1 "-" $2}'; }
 
