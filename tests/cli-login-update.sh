@@ -47,7 +47,7 @@ trap cleanup EXIT
 # The fake backend reads its behaviour from files in $WORK on every request,
 # so one server covers every case:
 #   alias       the SERVER_ALIAS to report (empty file: none)
-#   cli_mode    what /cli/mdnest serves: real | newer | html | junk | missing
+#   cli_mode    what /cli/mdnest serves: real | samever | newer | html | junk | missing
 cat > "$WORK/fake_backend.py" <<'PY'
 import os, sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -89,6 +89,10 @@ class H(BaseHTTPRequestHandler):
             if mode == "real":
                 with open(REAL_CLI, "rb") as f:
                     return self.send(200, f.read())
+            if mode == "samever":
+                # A later develop build: same version label, different bytes.
+                with open(REAL_CLI, "rb") as f:
+                    return self.send(200, f.read() + b"\n# a later build with the same version label\n")
             if mode == "newer":
                 return self.send(200, '#!/bin/bash\nMDNEST_CLI_VERSION="99.0.0"\necho "fake newer cli"\n')
             if mode == "html":
@@ -192,6 +196,29 @@ rc=0
 out="$(HOME="$H" "$WORK/bin/mdnest" update --server @fake 2>&1)" || rc=$?
 eq "update --server: same version is a no-op" "0" "$rc"
 contains "update --server: says up to date" "$out" "up to date"
+
+# Between releases every develop build has the same version label, so only
+# the bytes tell an older copy from a newer one.
+case "$("$WORK/bin/mdnest" --version)" in
+  "mdnest CLI v"*" ("[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]")") ok "--version: shows a content fingerprint" ;;
+  *) bad "--version: shows a content fingerprint" "got [$("$WORK/bin/mdnest" --version)]" ;;
+esac
+echo "samever" > "$WORK/cli_mode"
+rc=0
+out="$(HOME="$H" "$WORK/bin/mdnest" update --server @fake 2>&1)" || rc=$?
+eq "update: same label, new bytes: exits 0" "0" "$rc"
+contains "update: same label, new bytes: says it updates" "$out" "Updating mdnest CLI"
+case "$(tail -1 "$WORK/bin/mdnest")" in
+  *"same version label"*) ok "update: same label, new bytes: installs the served file" ;;
+  *) bad "update: same label, new bytes: installs the served file" "the old file is still installed" ;;
+esac
+rc=0
+out="$(HOME="$H" "$WORK/bin/mdnest" update --server @fake 2>&1)" || rc=$?
+eq "update: byte-identical: exits 0" "0" "$rc"
+contains "update: byte-identical: says up to date" "$out" "up to date"
+rc=0
+out="$(HOME="$H" "$WORK/bin/mdnest" update --server @fake --force 2>&1)" || rc=$?
+contains "update --force: re-installs a byte-identical copy" "$out" "Updating mdnest CLI"
 
 echo "newer" > "$WORK/cli_mode"
 rc=0
