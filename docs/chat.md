@@ -55,6 +55,50 @@ up after missed events, and fall back to polling when streaming is unavailable.
 Claims and streams require a single backend writer; multiple backend processes
 writing the same file are not a supported coordination topology.
 
+### Try a crew
+
+*Optional. Needs Node 22 or newer on the machine that runs the crew, and an AI
+CLI such as Claude Code that can answer a prompt from the command line.*
+
+1. Update the CLI: **Settings → CLI** shows the install command, or run
+   `mdnest update`.
+2. Start a crew in a new note. Each `--agent` is `name:role:command`, and
+   `mdnest chat reply --with '<command>'` is a ready-made command: it sends the
+   chat to your AI CLI and posts the answer as that agent.
+
+   ```bash
+   mdnest chat crew "Plan a small product launch" --note @alias/ns/Chats/launch.md \
+     --agent "writer:Proposes ideas:mdnest chat reply --with 'claude -p'" \
+     --agent "critic:Finds problems with ideas:mdnest chat reply --with 'claude -p'"
+   ```
+
+3. Open the note in the web UI and follow along. The goal is posted as your
+   first message and mentions the first agent.
+
+Crew agents answer only messages that mention them. Write `@writer` to talk to
+one agent, or `@all` to talk to all of them. A message with no mention is
+ignored by the agents, so people can talk among themselves in the same chat.
+An agent hands off by mentioning the next one.
+
+What stops a crew:
+
+- The `--timeout` (15 minutes by default), the turn limit (8 agent turns by
+  default, set with `--max-turns`), or Ctrl+C in the terminal pause the crew,
+  and the `crew` command exits. A post by you (the crew's human handle, your
+  account unless the config sets `human_handle`) resumes the room and resets
+  its turn count. The agents run only while a local command runs
+  for them, so to go on, run a `watch` for each agent, for example
+  `mdnest chat watch @alias/ns/Chats/launch.md --as writer --mentions --exec "mdnest chat reply --with 'claude -p'"`.
+- A post with `--done` completes the crew and stops its agents. The chat itself
+  stays open for anyone to post. `chat reply` never sends `--done`, so a crew
+  ends only when you or a command you wrote chooses to.
+
+`chat reply` runs your AI CLI with your real home folder (the worker's
+temporary home has only the mdnest connection), so the CLI finds your own login
+and settings. That is the point, and it is the same trust as running the CLI
+yourself. Everything else the worker gets stays the same. See
+[the CLI guide](cli.md#optional-local-chat-workers) for the details.
+
 ## The format
 
 ```markdown

@@ -8,6 +8,17 @@ All notable changes to mdnest are documented here.
 
 ### Added
 
+- **Local agent crews in a chat** *(Optional: needs Node 22 or newer on the
+  machine that runs them)*. `mdnest chat crew "goal" --note <new note> --agent
+  'name:role:command'` starts a chat where local agents take turns: each
+  answers only when mentioned, hands off with `@name`, and the crew pauses at a
+  turn limit, a timeout or Ctrl+C until you post. `mdnest chat watch` runs one
+  agent on an existing chat. Commands run only on your machine, never on the
+  server. Structured messages, task leases and editing an agent's prompt from
+  the chat come with it. `mdnest chat reply --with 'claude -p'` is a
+  ready-made agent command: it runs your AI CLI with your own login and posts
+  its answer, so you do not need to write a wrapper. See "Try a crew" in
+  `docs/chat.md`. Thanks to [@sanshads](https://github.com/sanshads), #168.
 - **Helm chart: annotations for one workload.** `backend.annotations`,
   `writer.annotations`, `frontend.annotations`, `mcp.annotations` and
   `gitSync.annotations` annotate that Deployment or StatefulSet only, for
