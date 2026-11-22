@@ -995,6 +995,8 @@ EOF
         cli_update_notice "$SERVER_VER" "@${alias}"
       fi
     fi
+    # Covers people who installed the CLI before the installer asked.
+    agent_offer
   else
     echo "Warning: could not reach $url — credentials saved, will retry on next command"
   fi
@@ -3492,10 +3494,75 @@ agent_installed() {
   grep -qs '"mdnest@mdnest"' "$HOME/.claude/plugins/installed_plugins.json"
 }
 
+# Written when someone answers "no" to the agent skills question, so no
+# installer, login or update asks (or hints) again. Delete it to be asked again.
+AGENT_DECLINED_FILE="${CONFIG_DIR}/agent-skills-declined"
+
 agent_hint() {
   agent_installed && return 0
+  [ -f "$AGENT_DECLINED_FILE" ] && return 0
   echo ""
   echo "Tip: AI agents (Claude Code, Codex and others) can learn to use mdnest. Run 'mdnest agent install'."
+  return 0
+}
+
+# agent_any_tool_found: is any AI tool (Claude Code, Codex, Gemini, ...) here?
+agent_any_tool_found() {
+  local t
+  for t in $(agent_targets); do
+    agent_target_found "$t" && return 0
+  done
+  return 1
+}
+
+# agent_offer [--yes|--no]: the one question the installers and `mdnest login`
+# ask. Nothing is installed without a yes: --yes (or MDNEST_AGENT_SKILLS=1)
+# installs without asking, --no (or MDNEST_AGENT_SKILLS=0) never asks, and
+# with no terminal (an agent or a script is installing) it only prints the
+# hint. The answer is read from the terminal, not stdin, because under
+# `curl ... | bash` stdin is the installer. Never fails: it runs at the end of
+# an install that has already worked.
+# agent_offer_install: install, then say how to undo it.
+agent_offer_install() {
+  if cmd_agent install; then
+    echo "Your AI tools now know how to use mdnest. To undo this, run 'mdnest agent remove'."
+  fi
+  return 0
+}
+
+agent_offer() {
+  local mode="${MDNEST_AGENT_SKILLS:-}" answer
+  case "${1:-}" in
+    --yes) mode=1 ;;
+    --no)  mode=0 ;;
+  esac
+  agent_installed && return 0
+  case "$mode" in
+    1|yes|true)
+      echo ""
+      agent_offer_install
+      return 0 ;;
+    0|no|false) return 0 ;;
+  esac
+  [ -f "$AGENT_DECLINED_FILE" ] && return 0
+  if ! agent_any_tool_found || ! have_tty; then
+    agent_hint
+    return 0
+  fi
+  echo ""
+  answer="$(read_tty_line "Let your AI tools (Claude Code, Codex, ...) use mdnest? [Y/n] ")" || answer=""
+  case "$answer" in
+    ""|y|Y|yes|Yes|YES)
+      agent_offer_install ;;
+    n|N|no|No|NO)
+      if mkdir -p "$CONFIG_DIR" 2>/dev/null && : > "$AGENT_DECLINED_FILE" 2>/dev/null; then
+        echo "OK, you will not be asked again. Run 'mdnest agent install' any time to set it up."
+      else
+        echo "OK. Run 'mdnest agent install' any time to set it up."
+      fi ;;
+    *)
+      echo "Not set up. Run 'mdnest agent install' any time to set it up." ;;
+  esac
   return 0
 }
 
@@ -3519,6 +3586,11 @@ remove   Delete only the skill files this command wrote. An edited one needs
 --tool   Only this one (codex and gemini are accepted as names for agents).
          With --tool, install writes the skill even if the tool is not found.
 
+offer    Ask once whether to install (what the installers and 'mdnest login'
+         run). --yes installs without asking, --no does nothing. Answering
+         no writes ~/.config/mdnest/agent-skills-declined so it is not asked
+         again; delete that file to be asked again.
+
 Claude Code users can install the plugin instead:
   /plugin marketplace add mahsanamin/mdnest
   /plugin install mdnest@mdnest
@@ -3527,6 +3599,13 @@ USAGE
 
 cmd_agent() {
   local sub="${1:-}" tool="" force=0 targets t file state label shown rc=0 found_any=0
+  if [ "$sub" = offer ]; then
+    shift
+    case "${1:-}" in
+      ""|--yes|--no) agent_offer "${1:-}"; return 0 ;;
+      *) echo "Usage: mdnest agent offer [--yes|--no]" >&2; return 1 ;;
+    esac
+  fi
   shift 2>/dev/null || true
   while [ $# -gt 0 ]; do
     case "$1" in

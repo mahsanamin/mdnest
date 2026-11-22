@@ -15,7 +15,18 @@
 # anything. The download and install steps below mirror it; keep them alike.
 set -e
 
-SERVER="${1:-${MDNEST_SERVER:-}}"
+# The server address, plus the optional --agent-skills (set up the AI agent
+# skill without asking) or --no-agent-skills (never ask), in any order.
+# MDNEST_AGENT_SKILLS=1 or 0 does the same as the flags.
+SERVER="${MDNEST_SERVER:-}"
+AGENT_SKILLS="${MDNEST_AGENT_SKILLS:-}"
+for arg in "$@"; do
+  case "$arg" in
+    --agent-skills) AGENT_SKILLS=1 ;;
+    --no-agent-skills) AGENT_SKILLS=0 ;;
+    *) SERVER="$arg" ;;
+  esac
+done
 SERVER="${SERVER%/}"
 case "$SERVER" in
   http://?*|https://?*) ;;
@@ -122,3 +133,12 @@ echo ""
 echo "To connect it to ${SERVER}, run this and paste a token when it asks"
 echo "(create one in Settings, CLI or API Tokens):"
 echo "  mdnest login ${SERVER}"
+
+# Offer the AI agent skill once. The CLI asks on the terminal (Enter or y
+# installs, n is remembered), only when an AI tool is on this machine and the
+# skill is not there yet; with no terminal it prints a one-line hint instead.
+# --agent-skills installs without asking, --no-agent-skills never asks. A CLI
+# too old to have `agent offer` is skipped. It never fails the install.
+if grep -q '^agent_offer()' "$DEST" 2>/dev/null; then
+  MDNEST_AGENT_SKILLS="$AGENT_SKILLS" "$DEST" agent offer </dev/null || true
+fi

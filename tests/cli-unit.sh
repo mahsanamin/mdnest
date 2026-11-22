@@ -676,6 +676,114 @@ run_agent_suite() {
   rm -rf "$h"
 }
 
+# ── agent skills question ───────────────────────────────────────────────────
+# `mdnest agent offer` is the one question the installers and `mdnest login`
+# ask. Nothing is installed without a yes or --yes; "no" is remembered; with
+# no terminal only the hint is printed. Driven on a pty by tests/pty-drive.py
+# with a throwaway HOME and a PATH without claude/codex/gemini, so the
+# machine's own tools never count. A case that must NOT ask still lists the
+# question as a prompt (answered "y"): if it is asked anyway the case fails
+# on the output instead of hanging on a question nobody answers.
+run_agent_offer_suite() {
+  echo "── agent skills question ──"
+  local h out rc py q="use mdnest? [Y/n] "
+  local skill_rel=".claude/skills/mdnest/SKILL.md"
+  offer() { HOME="$h" PATH=/usr/bin:/bin "$REPO_ROOT/mdnest" agent offer "$@" 2>&1; }
+  offer_pty() {
+    local prompts="$1" answers="$2"; shift 2
+    HOME="$h" PATH=/usr/bin:/bin PTY_PROMPTS="$prompts" PTY_ANSWERS="$answers" \
+      "$py" "$REPO_ROOT/tests/pty-drive.py" -- "$REPO_ROOT/mdnest" agent offer "$@" 2>&1
+  }
+  newh() { h=$(mktemp -d "${TMPDIR:-/tmp}/mdnest-offer.XXXXXX"); mkdir -p "$h/.claude"; }
+  unset MDNEST_AGENT_SKILLS
+
+  # No terminal: the hint only, nothing written.
+  newh
+  out=$(HOME="$h" PATH=/usr/bin:/bin MDNEST_TTY="$h/no-such-tty" "$REPO_ROOT/mdnest" agent offer 2>&1 </dev/null); rc=$?
+  eq "offer: no terminal exits 0" "0" "$rc"
+  case "$out" in *"Run 'mdnest agent install'"*) ok "offer: no terminal prints the hint" ;; *) bad "offer: no terminal prints the hint" "$out" ;; esac
+  case "$out" in *"$q"*) bad "offer: no terminal does not ask" "$out" ;; *) ok "offer: no terminal does not ask" ;; esac
+  [ ! -e "$h/$skill_rel" ] && ok "offer: no terminal installs nothing" || bad "offer: no terminal installs nothing" "skill written"
+
+  # --yes and MDNEST_AGENT_SKILLS=1 install without asking, even with no terminal.
+  out=$(HOME="$h" PATH=/usr/bin:/bin MDNEST_TTY="$h/no-such-tty" "$REPO_ROOT/mdnest" agent offer --yes 2>&1 </dev/null)
+  [ -f "$h/$skill_rel" ] && ok "offer --yes: installs without asking" || bad "offer --yes: installs without asking" "$out"
+  case "$out" in *"mdnest agent remove"*) ok "offer --yes: says how to undo it" ;; *) bad "offer --yes: says how to undo it" "$out" ;; esac
+  rm -rf "$h"; newh
+  out=$(HOME="$h" PATH=/usr/bin:/bin MDNEST_TTY="$h/no-such-tty" MDNEST_AGENT_SKILLS=1 "$REPO_ROOT/mdnest" agent offer 2>&1 </dev/null)
+  [ -f "$h/$skill_rel" ] && ok "offer: MDNEST_AGENT_SKILLS=1 installs" || bad "offer: MDNEST_AGENT_SKILLS=1 installs" "$out"
+  rm -rf "$h"
+
+  # Without a tool on this machine there is nothing to ask about.
+  h=$(mktemp -d "${TMPDIR:-/tmp}/mdnest-offer.XXXXXX")
+  eq "offer --yes: no AI tool is not an error" "0" "$(offer --yes >/dev/null; echo $?)"
+  rm -rf "$h"
+
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "  (python3 not present: skipping the terminal checks)"
+    return 0
+  fi
+  py="$(command -v python3)"
+
+  # Enter means yes.
+  newh
+  out=$(offer_pty "$q" ""); rc=$?
+  eq "offer: Enter exits 0" "0" "$rc"
+  case "$out" in *"Let your AI tools (Claude Code, Codex, ...) use mdnest? [Y/n]"*) ok "offer: asks the question" ;; *) bad "offer: asks the question" "$out" ;; esac
+  [ -f "$h/$skill_rel" ] && ok "offer: Enter installs the skill" || bad "offer: Enter installs the skill" "$out"
+  case "$out" in *"To undo this, run 'mdnest agent remove'"*) ok "offer: says how to undo it" ;; *) bad "offer: says how to undo it" "$out" ;; esac
+  # Already installed: not asked again.
+  out=$(offer_pty "$q" "y")
+  case "$out" in *"$q"*) bad "offer: installed means no question" "$out" ;; *) ok "offer: installed means no question" ;; esac
+  rm -rf "$h"
+
+  # No is remembered, and silences the hint too.
+  newh
+  out=$(offer_pty "$q" "n")
+  [ ! -e "$h/$skill_rel" ] && ok "offer: no installs nothing" || bad "offer: no installs nothing" "$out"
+  [ -f "$h/.config/mdnest/agent-skills-declined" ] && ok "offer: no writes the declined marker" || bad "offer: no writes the declined marker" "$out"
+  out=$(offer_pty "$q" "y")
+  case "$out" in *"$q"*) bad "offer: a declined user is not asked again" "$out" ;; *) ok "offer: a declined user is not asked again" ;; esac
+  [ ! -e "$h/$skill_rel" ] && ok "offer: still nothing installed after no" || bad "offer: still nothing installed after no" "$out"
+  out=$(HOME="$h" PATH=/usr/bin:/bin MDNEST_TTY="$h/no-such-tty" "$REPO_ROOT/mdnest" agent offer 2>&1 </dev/null)
+  case "$out" in *"mdnest agent install"*) bad "agent hint: skipped after no" "$out" ;; *) ok "agent hint: skipped after no" ;; esac
+  # Deleting the marker brings the question back.
+  rm -f "$h/.config/mdnest/agent-skills-declined"
+  out=$(offer_pty "$q" "n")
+  case "$out" in *"$q"*) ok "offer: asked again once the marker is deleted" ;; *) bad "offer: asked again once the marker is deleted" "$out" ;; esac
+  rm -rf "$h"
+
+  # Any other answer: nothing installed, nothing remembered.
+  newh
+  out=$(offer_pty "$q" "maybe")
+  [ ! -e "$h/$skill_rel" ] && [ ! -e "$h/.config/mdnest/agent-skills-declined" ] && ok "offer: an unclear answer changes nothing" || bad "offer: an unclear answer changes nothing" "$out"
+
+  # --no and MDNEST_AGENT_SKILLS=0 never ask.
+  out=$(offer_pty "$q" "y" --no)
+  case "$out" in *"$q"*) bad "offer --no: never asks" "$out" ;; *) ok "offer --no: never asks" ;; esac
+  out=$(MDNEST_AGENT_SKILLS=0 offer_pty "$q" "y")
+  case "$out" in *"$q"*) bad "offer: MDNEST_AGENT_SKILLS=0 never asks" "$out" ;; *) ok "offer: MDNEST_AGENT_SKILLS=0 never asks" ;; esac
+  [ ! -e "$h/$skill_rel" ] && ok "offer --no: installs nothing" || bad "offer --no: installs nothing" "$out"
+  rm -rf "$h"
+
+  # A terminal but no AI tool: no question, the hint only.
+  h=$(mktemp -d "${TMPDIR:-/tmp}/mdnest-offer.XXXXXX")
+  out=$(offer_pty "$q" "y")
+  case "$out" in *"$q"*) bad "offer: no AI tool means no question" "$out" ;; *) ok "offer: no AI tool means no question" ;; esac
+  rm -rf "$h"
+
+  # Both installers end with the same offer block and read the same flags.
+  local a b
+  a="$(sed -n '/^# Offer the AI agent skill once/,$p' "$REPO_ROOT/install-cli.sh")"
+  b="$(sed -n '/^# Offer the AI agent skill once/,$p' "$REPO_ROOT/frontend/public/cli/install.sh")"
+  if [ -n "$a" ] && [ "$a" = "$b" ]; then ok "installers: the same offer block in both"; else bad "installers: the same offer block in both" "install-cli.sh and frontend/public/cli/install.sh differ"; fi
+  for f in install-cli.sh frontend/public/cli/install.sh; do
+    case "$(cat "$REPO_ROOT/$f")" in *"--agent-skills) AGENT_SKILLS=1"*"--no-agent-skills) AGENT_SKILLS=0"*) ok "$f: reads --agent-skills and --no-agent-skills" ;;
+      *) bad "$f: reads --agent-skills and --no-agent-skills" "flags missing" ;; esac
+  done
+  grep -q '^agent_offer()' "$REPO_ROOT/mdnest" && ok "installers: the CLI has the agent_offer() they look for" || bad "installers: the CLI has the agent_offer() they look for" "renamed?"
+}
+
 # ── CLI download sources ────────────────────────────────────────────────────
 # The install one-liner started returning 503 for everyone in a region:
 # raw.githubusercontent.com is one Fastly tier, a POP ran out of backend
@@ -1017,6 +1125,7 @@ run_keepalive_suite
 run_keepalive_no_policy_suite
 run_approval_suite
 run_agent_suite
+run_agent_offer_suite
 run_errexit_lint
 
 echo

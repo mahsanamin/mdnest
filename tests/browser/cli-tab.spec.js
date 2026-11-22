@@ -42,6 +42,14 @@ test.describe('Settings CLI tab', () => {
     await expect(page.locator('.settings-content')).not.toContainText('mdnest_yourtoken');
   });
 
+  test('says the installer offers to set up AI agent skills', async ({ page }) => {
+    await signIn(page);
+    await openCliTab(page);
+    const note = page.locator('.cli-agent-skills-note');
+    await expect(note).toContainText('offers to set up AI agent skills');
+    await expect(note.locator('code')).toHaveText('mdnest agent install');
+  });
+
   test('every Settings tab fits on one row on a desktop screen', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await signIn(page);

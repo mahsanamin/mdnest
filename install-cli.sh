@@ -9,6 +9,17 @@
 #   curl -fsSL https://raw.githubusercontent.com/mahsanamin/mdnest/main/install-cli.sh | bash
 set -e
 
+# Optional: set up the AI agent skill without asking (--agent-skills), or never
+# ask (--no-agent-skills). MDNEST_AGENT_SKILLS=1 or 0 does the same.
+#   curl -fsSL https://mdnest.dev/install.sh | bash -s -- --agent-skills
+AGENT_SKILLS="${MDNEST_AGENT_SKILLS:-}"
+for arg in "$@"; do
+  case "$arg" in
+    --agent-skills) AGENT_SKILLS=1 ;;
+    --no-agent-skills) AGENT_SKILLS=0 ;;
+  esac
+done
+
 # Which branch to pull the CLI from (default: main = the latest release).
 BRANCH="${MDNEST_BRANCH:-main}"
 BIN_DIR="/usr/local/bin"
@@ -137,10 +148,11 @@ echo "  mdnest servers"
 echo ""
 echo "Create an API token from your mdnest web UI: Settings > API Tokens"
 
-# A hint only: nothing is installed for AI tools unless the user asks. Skipped
-# when the mdnest skill or the Claude Code plugin is already there.
-if [ ! -f "$HOME/.claude/skills/mdnest/SKILL.md" ] && [ ! -f "$HOME/.agents/skills/mdnest/SKILL.md" ] \
-   && ! grep -qs '"mdnest@mdnest"' "$HOME/.claude/plugins/installed_plugins.json"; then
-  echo ""
-  echo "Tip: AI agents (Claude Code, Codex and others) can learn to use mdnest. Run 'mdnest agent install'."
+# Offer the AI agent skill once. The CLI asks on the terminal (Enter or y
+# installs, n is remembered), only when an AI tool is on this machine and the
+# skill is not there yet; with no terminal it prints a one-line hint instead.
+# --agent-skills installs without asking, --no-agent-skills never asks. A CLI
+# too old to have `agent offer` is skipped. It never fails the install.
+if grep -q '^agent_offer()' "$DEST" 2>/dev/null; then
+  MDNEST_AGENT_SKILLS="$AGENT_SKILLS" "$DEST" agent offer </dev/null || true
 fi

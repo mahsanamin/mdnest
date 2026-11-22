@@ -29,8 +29,17 @@ All notable changes to mdnest are documented here.
   shows what is installed, and `agent remove` deletes only the files mdnest
   wrote. Claude Code users can install the same skill as a plugin with
   `/plugin marketplace add mahsanamin/mdnest` and
-  `/plugin install mdnest@mdnest`. The installer and `mdnest update` print a
-  one-line hint about it; nothing is installed unless you ask. `mdnest docs`
+  `/plugin install mdnest@mdnest`. When an AI tool is on your computer, the
+  CLI installers (`mdnest.dev/install.sh` and your server's
+  `/cli/install.sh`) ask once at the end, "Let your AI tools (Claude Code,
+  Codex, ...) use mdnest? [Y/n]", and `mdnest login` asks the same once for
+  people who installed the CLI earlier. Enter installs the skill; no is
+  remembered in `~/.config/mdnest/agent-skills-declined`, so nothing asks
+  again. With no terminal (an agent or a script running the install) nothing
+  is installed and a one-line tip is printed. `--agent-skills` installs
+  without asking and `--no-agent-skills` never asks
+  (`curl ... | bash -s -- --agent-skills`; `MDNEST_AGENT_SKILLS=1` or `0`
+  does the same). `mdnest update` only prints the tip. `mdnest docs`
   now prints the address of the CLI guide when the guide is not installed
   next to the CLI, instead of a bare "not found".
 - **Helm chart: annotations for one workload.** `backend.annotations`,

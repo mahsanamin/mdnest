@@ -356,6 +356,11 @@ function CliTab({ serverVersion }) {
       <p className="settings-description">
         Not installed yet? This installs the CLI version this server runs.
       </p>
+      <p className="settings-description cli-agent-skills-note">
+        If an AI tool such as Claude Code or Codex is on your computer, the installer also
+        offers to set up AI agent skills so it can use your notes. You can do this later
+        with <code>mdnest agent install</code>.
+      </p>
       <CodeBlock code={`curl -fsSL ${serverUrl}/cli/install.sh | bash -s -- ${serverUrl}`} />
 
       <h4 className="settings-section-title">Update</h4>
