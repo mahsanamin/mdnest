@@ -1,6 +1,6 @@
 # Setup and Configuration
 
-This guide covers installing, configuring, and running mdnest.
+This guide is the reference: every way to install mdnest and every setting. For the shortest path to a running server with your agent connected, see the [Quick Start](https://mdnest.dev/docs/quick-start).
 
 > Running mdnest in an existing Kubernetes cluster instead — including active/active with the git-native HA topology — is covered in [kubernetes.md](kubernetes.md). This guide is the Docker Compose install.
 
@@ -298,6 +298,33 @@ Namespace names (the part after `MOUNT_`) must be simple identifiers:
 By default, mdnest runs in **single-user mode** -- one user, file-based auth, no database needed. This is the simplest setup and works for personal use.
 
 **Multi-user mode** adds PostgreSQL-backed user management with roles and namespace-level access control. When enabled, `setup.sh` automatically adds a Postgres container to `docker-compose.yml`.
+
+### Multi-User Mode with Plain Docker Compose
+
+If you installed with the [plain Docker Compose](#plain-docker-compose-or-docker-run)
+file, the multi-user block is already at the end of `docker-compose.yml`,
+commented out:
+
+1. Follow that block: add the `AUTH_MODE` and `POSTGRES_*` lines to the
+   backend's `environment`, add the `postgres` service, and add
+   `mdnest-pgdata:` under `volumes`.
+2. Add a database password to `.env`:
+
+   ```bash
+   echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)" >> .env
+   ```
+
+3. For comments and presence, also add `ENABLE_LIVE_COLLAB: "true"` to the
+   backend's `environment`.
+4. Restart with `docker compose up -d`.
+
+The `admin` account (`MDNEST_USER`) becomes the first administrator, and your
+notes are not changed. For company sign-in, add the settings from the
+[SSO setup guide](sso-setup.md) to the backend's `environment`: each setting in
+this guide is an environment variable with the same name. To invite people and
+give them access, see [Roles & administration](user-guide.md#roles--administration-multi-user-mode).
+
+The sections below are for the guided setup (`mdnest.conf`).
 
 ### Enabling Multi-User Mode (New Install)
 
