@@ -19,6 +19,20 @@ All notable changes to mdnest are documented here.
   ready-made agent command: it runs your AI CLI with your own login and posts
   its answer, so you do not need to write a wrapper. See "Try a crew" in
   `docs/chat.md`. Thanks to [@sanshads](https://github.com/sanshads), #168.
+- **Teach your AI agents to use mdnest** *(Optional)*. `mdnest docs agents`
+  prints a short guide for AI agents: how to find servers and paths, which
+  command to use, how to write content without breaking code blocks, how
+  notes render, and how to use chat. `mdnest agent install` adds a small skill
+  to Claude Code (`~/.claude/skills`) and to Codex, Gemini CLI and other tools
+  that read `~/.agents/skills`. The skill only points at `mdnest docs agents`,
+  so `mdnest update` keeps agents current with no reinstall. `agent status`
+  shows what is installed, and `agent remove` deletes only the files mdnest
+  wrote. Claude Code users can install the same skill as a plugin with
+  `/plugin marketplace add mahsanamin/mdnest` and
+  `/plugin install mdnest@mdnest`. The installer and `mdnest update` print a
+  one-line hint about it; nothing is installed unless you ask. `mdnest docs`
+  now prints the address of the CLI guide when the guide is not installed
+  next to the CLI, instead of a bare "not found".
 - **Helm chart: annotations for one workload.** `backend.annotations`,
   `writer.annotations`, `frontend.annotations`, `mcp.annotations` and
   `gitSync.annotations` annotate that Deployment or StatefulSet only, for

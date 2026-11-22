@@ -191,7 +191,7 @@ if [ "$LEVEL" = iterate ]; then
   else
     echo "  skip npm test: nothing in frontend/ changed"
   fi
-  if echo "$CHANGED" | grep -qE '^mdnest$|^tests/cli-unit\.sh$'; then
+  if echo "$CHANGED" | grep -qE '^mdnest$|^tests/cli-unit\.sh$|^install-cli\.sh$|^docs/agents\.md$|^plugins/'; then
     run "cli-unit.sh" cli-unit.log bash tests/cli-unit.sh
     if have node; then run "chat local runner" chat-runner.log node tests/chat-runner.mjs; fi
   fi

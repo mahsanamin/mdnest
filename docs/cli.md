@@ -520,6 +520,56 @@ waits, and only while its own question is open.
 Needs only bash and curl. The policy file and the agent setup are in
 [chat.md](chat.md#agent-approvals-experimental-off-by-default).
 
+## Use mdnest from your AI agent *(optional)*
+
+AI agents such as Claude Code, Codex and Gemini CLI can learn to use mdnest
+from the CLI itself. Nothing is set up for them unless you ask.
+
+```bash
+mdnest docs agents        # the guide for AI agents: paths, which command to use, writing safely, chat
+mdnest agent install      # add a small mdnest skill to each AI tool found on this machine
+mdnest agent status       # what is installed where
+mdnest agent remove       # delete the skill files mdnest wrote
+```
+
+`agent install` writes one file per tool:
+
+| Tool | File |
+|---|---|
+| Claude Code | `~/.claude/skills/mdnest/SKILL.md` |
+| Codex, Gemini CLI and other tools that read the shared skills folder | `~/.agents/skills/mdnest/SKILL.md` |
+
+The skill only tells the agent to run `mdnest docs agents` and follow it. The
+guide is part of the CLI, so `mdnest update` also updates what your agents
+know, with no reinstall.
+
+- A tool counts as found when its folder (`~/.claude`, `~/.agents`, `~/.codex`
+  or `~/.gemini`) or its command (`claude`, `codex`, `gemini`) exists.
+  `--tool claude` or `--tool agents` installs for one tool even if it was not
+  found (`codex` and `gemini` are accepted as names for `agents`).
+- Each file has a mark line with a checksum. If you edit the file, or a file
+  mdnest did not write is already at that path, `install` leaves it alone
+  unless you pass `--force`.
+- `remove` deletes only files mdnest wrote. An edited one needs `--force`. A
+  file mdnest did not write is never deleted.
+- Other tools: point them at `mdnest docs agents` in their own instructions
+  file.
+
+**Claude Code plugin.** Instead of `agent install`, Claude Code users can add
+the same skill as a plugin:
+
+```text
+/plugin marketplace add mahsanamin/mdnest
+/plugin install mdnest@mdnest
+```
+
+The plugin holds only the skill. It still needs the `mdnest` CLI installed and
+logged in.
+
+`mdnest docs` prints this CLI reference when the CLI sits in a clone of the
+repository. A CLI installed with the one-line installer is a single file, so
+there it prints the address of this page instead.
+
 ## Server management
 
 ```bash

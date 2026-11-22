@@ -136,3 +136,11 @@ echo "  mdnest login https://notes.example.com mdnest_yourtoken"
 echo "  mdnest servers"
 echo ""
 echo "Create an API token from your mdnest web UI: Settings > API Tokens"
+
+# A hint only: nothing is installed for AI tools unless the user asks. Skipped
+# when the mdnest skill or the Claude Code plugin is already there.
+if [ ! -f "$HOME/.claude/skills/mdnest/SKILL.md" ] && [ ! -f "$HOME/.agents/skills/mdnest/SKILL.md" ] \
+   && ! grep -qs '"mdnest@mdnest"' "$HOME/.claude/plugins/installed_plugins.json"; then
+  echo ""
+  echo "Tip: AI agents (Claude Code, Codex and others) can learn to use mdnest. Run 'mdnest agent install'."
+fi
