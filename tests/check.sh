@@ -193,6 +193,7 @@ if [ "$LEVEL" = iterate ]; then
   fi
   if echo "$CHANGED" | grep -qE '^mdnest$|^tests/cli-unit\.sh$'; then
     run "cli-unit.sh" cli-unit.log bash tests/cli-unit.sh
+    if have node; then run "chat local runner" chat-runner.log node tests/chat-runner.mjs; fi
   fi
   if echo "$CHANGED" | grep -qE '^tests/lib/|^tests/e2e-lib-unit\.sh$'; then
     run "e2e-lib-unit.sh" e2e-lib-unit.log bash tests/e2e-lib-unit.sh
@@ -264,11 +265,13 @@ browser_lane() {
   # Live note (v4.8.10 to v4.8.12, behind a proxy) needed no change to any
   # file it watches.
   suite "$COLLAB_PAT" e2e-collab-multi.sh "live collaboration and shared editing, multi mode" MDNEST_E2E_BUDGET=skip
+  suite '^backend/handlers/chat|^backend/routes|^mdnest$|^mcp-server/|^frontend/src/(chat|components/Chat)|^tests/(e2e-agentic-multi\.sh|agentic-multi\.mjs)$' e2e-agentic-multi.sh "real two-namespace agent coordination" KEEP=0
 }
 other_lane() {
   run "pre-push hook, $([ "$LEVEL" = ship ] && echo release || echo fast) tier (builds, unit, CLI, audits)" hook.log hook_tier
   run "Go vet + go test -race, with Redis" go.log go_suite
   run "shellcheck" shellcheck.log shellcheck_suite
+  if wants '^mdnest$|^tests/chat-runner\.mjs$'; then run "chat local runner" chat-runner.log node tests/chat-runner.mjs; fi
   suite "^mdnest$|^backend/|^tests/e2e-docker\.sh$|^tests/cli-smoke-test\.sh$|$LIB" e2e-docker.sh "CLI against the backend, host and bare alpine"
   suite "^backend/(middleware|handlers|store|relpath|storage|collab)/|^backend/main\.go$|^tests/e2e-sec-multi\.sh$|$LIB" e2e-sec-multi.sh "multi-mode access"
   suite "^backend/Dockerfile$|^backend/gitproc/|^tests/backend-image-init\.sh$|$LIB" backend-image-init.sh "tini reaps orphans"

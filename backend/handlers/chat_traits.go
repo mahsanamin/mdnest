@@ -36,6 +36,48 @@ import (
 // "/role ..." (the same slash rule as /status and /context).
 
 const chatAgentsKey = "agents"
+const chatPromptsKey = "mdnest-agent-prompts"
+
+func ChatPrompts(content string) map[string]string {
+	fm, _, _ := splitFrontMatter(content)
+	out := map[string]string{}
+	if raw, ok := frontMatterValue(fm, chatPromptsKey); ok {
+		if decoded, err := strconv.Unquote(`"` + raw + `"`); err == nil {
+			_ = json.Unmarshal([]byte(decoded), &out)
+		}
+	}
+	if out == nil {
+		out = map[string]string{}
+	}
+	return out
+}
+
+func setChatPrompt(content, name, prompt string) string {
+	prompts := ChatPrompts(content)
+	for k := range prompts {
+		if strings.EqualFold(k, name) {
+			delete(prompts, k)
+		}
+	}
+	if prompt != "" {
+		prompts[name] = prompt
+	}
+	fm, rest, _ := splitFrontMatter(content)
+	var b strings.Builder
+	b.WriteString("---\n")
+	for _, line := range strings.Split(strings.TrimSuffix(fm, "\n"), "\n") {
+		key, _, _ := strings.Cut(line, ":")
+		if key != chatPromptsKey {
+			b.WriteString(line + "\n")
+		}
+	}
+	if len(prompts) > 0 {
+		data, _ := json.Marshal(prompts)
+		b.WriteString(chatPromptsKey + ": " + strconv.Quote(string(data)) + "\n")
+	}
+	b.WriteString("---\n")
+	return b.String() + rest
+}
 
 // maxChatTrait keeps a role to the line or two it is meant to be: it is
 // repeated on every wait, so a long one would crowd out the messages.
@@ -155,7 +197,16 @@ func SetChatTrait(content, name, trait string) (string, error) {
 	if !ok {
 		return "", errors.New("this note is not a chat")
 	}
+	if len([]rune(trait)) > 2000 {
+		return "", errors.New("agent prompt must be at most 2000 characters")
+	}
+	prompt := strings.TrimSpace(strings.ReplaceAll(trait, "\r\n", "\n"))
 	trait = cleanChatTrait(trait)
+	// Short single-line roles already live losslessly in agents. Store an
+	// additional prompt only when the short reminder cannot preserve it.
+	if prompt == trait {
+		prompt = ""
+	}
 	before, after, entries, _ := splitAgentsBlock(fm)
 	kept := entries[:0]
 	replaced := false
@@ -187,7 +238,7 @@ func SetChatTrait(content, name, trait string) (string, error) {
 		b.WriteString(l + "\n")
 	}
 	b.WriteString("---\n")
-	return b.String() + rest, nil
+	return setChatPrompt(b.String()+rest, name, prompt), nil
 }
 
 // chatTraitReminder is the line added after the new messages a waiting agent
@@ -225,9 +276,13 @@ func (h *ChatHandler) HandleAgents(w http.ResponseWriter, r *http.Request) {
 		chatJSONError(w, http.StatusForbidden, "cannot attribute this change to a user")
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, 8192))
+	body, err := io.ReadAll(io.LimitReader(r.Body, 8193))
 	if err != nil {
 		chatJSONError(w, http.StatusBadRequest, "failed to read body")
+		return
+	}
+	if len(body) > 8192 {
+		chatJSONError(w, 413, "agent prompt too long")
 		return
 	}
 	h.applyTrait(w, r, ns, relPath, strings.TrimSpace(r.URL.Query().Get("name")), string(body))
