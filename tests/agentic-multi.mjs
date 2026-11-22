@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { homedir } from 'node:os';
 
 const root = resolve(import.meta.dirname, '..');
 const [mode, dir, ...args] = process.argv.slice(2);
@@ -61,6 +62,12 @@ if (mode === 'init') {
   const redact = text => { let out = String(text || '').replace(/mdnest_[A-Za-z0-9_-]+/g, 'mdnest_<redacted>'); for (const a of Object.values(f.accounts)) for (const v of [a.password, a.apiToken, a.browserToken]) if (v) out = out.split(v).join('<redacted>'); return out.slice(-2000); };
   const ok = (what, r) => assert.equal(r.code, 0, `${what} exited ${r.code}: ${redact((r.stderr || "") + (r.stdout || ""))}`);
   const sleep = ms => new Promise(r => setTimeout(r, ms));
+  // docker keeps the real Docker settings: run() gives every command the
+  // fixture HOME, which hides ~/.docker and its context (colima, OrbStack,
+  // rootless), and docker then falls back to a socket that may not exist.
+  const dockerEnv = { DOCKER_CONFIG: process.env.DOCKER_CONFIG || join(homedir(), '.docker') };
+  for (const k of ['DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_CERT_PATH', 'DOCKER_TLS_VERIFY']) if (process.env[k] !== undefined) dockerEnv[k] = process.env[k];
+  const docker = (argv, options = {}) => run('docker', argv, { ...options, env: { ...dockerEnv, ...options.env } });
   async function up(url) { try { const res = await fetch(url + '/api/config', { signal: AbortSignal.timeout(2000) }); return res.status === 200; } catch { return false; } }
   try {
     f.accounts.admin.browserToken = await login('admin', f.accounts.admin.password);
@@ -115,12 +122,12 @@ if (mode === 'init') {
     const persistedPrompt='Durable "prompt"\nSecond line';
     await expect('POST','/api/chat/agents?'+query('team-alpha','Chat.md',{name:'persisted'}),alpha.apiToken,persistedPrompt,200);
     const claimWinner=races.find(r=>r.status===200).data;
-    ok('docker restart', await run('docker', ['restart', f.backend]));
+    ok('docker restart', await docker(['restart', f.backend]));
     // The host port is published as 0, so it changes on restart: read the new
     // one first (it is not there until the container is running again), then
     // wait until the backend answers directly and through the frontend.
     let mapped;
-    for (let i = 0; i < 120; i++) { mapped = await run('docker', ['port', f.backend, '8080/tcp']); if (mapped.code === 0 && mapped.stdout.trim()) break; await sleep(250); }
+    for (let i = 0; i < 120; i++) { mapped = await docker(['port', f.backend, '8080/tcp']); if (mapped.code === 0 && mapped.stdout.trim()) break; await sleep(250); }
     ok('docker port after restart', mapped);
     f.backendURL = 'http://127.0.0.1:' + mapped.stdout.trim().split('\n')[0].split(':').at(-1);
     let ready = false;
