@@ -1,6 +1,6 @@
 # Setup and Configuration
 
-This guide covers installing, configuring, and running mdnest.
+This guide is the reference: every way to install mdnest and every setting. For the shortest path to a running server with your agent connected, see the [Quick Start](https://mdnest.dev/docs/quick-start).
 
 > Running mdnest in an existing Kubernetes cluster instead — including active/active with the git-native HA topology — is covered in [kubernetes.md](kubernetes.md). This guide is the Docker Compose install.
 
@@ -31,15 +31,10 @@ mdnest.
 
 ## Plain Docker Compose (or docker run)
 
-No clone, no setup script, nothing to build. Four commands:
-
-```bash
-mkdir mdnest && cd mdnest
-curl -fsSLo docker-compose.yml https://raw.githubusercontent.com/mahsanamin/mdnest/main/deploy/compose/docker-compose.yml
-echo "MDNEST_PASSWORD=$(openssl rand -base64 18)"  > .env
-echo "MDNEST_JWT_SECRET=$(openssl rand -hex 32)"  >> .env
-docker compose up -d
-```
+No clone, no setup script, nothing to build. Follow the
+[basic setup in the Quick Start](https://mdnest.dev/docs/quick-start#1-basic-setup): it downloads
+`docker-compose.yml`, writes two secrets to `.env`, and runs
+`docker compose up -d`.
 
 Open `http://localhost:3236` and sign in as `admin` with the password from
 `.env` (`cat .env`). If you forget a secret, `docker compose up` refuses to
@@ -303,6 +298,33 @@ Namespace names (the part after `MOUNT_`) must be simple identifiers:
 By default, mdnest runs in **single-user mode** -- one user, file-based auth, no database needed. This is the simplest setup and works for personal use.
 
 **Multi-user mode** adds PostgreSQL-backed user management with roles and namespace-level access control. When enabled, `setup.sh` automatically adds a Postgres container to `docker-compose.yml`.
+
+### Multi-User Mode with Plain Docker Compose
+
+If you installed with the [plain Docker Compose](#plain-docker-compose-or-docker-run)
+file, the multi-user block is already at the end of `docker-compose.yml`,
+commented out:
+
+1. Follow that block: add the `AUTH_MODE` and `POSTGRES_*` lines to the
+   backend's `environment`, add the `postgres` service, and add
+   `mdnest-pgdata:` under `volumes`.
+2. Add a database password to `.env`:
+
+   ```bash
+   echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)" >> .env
+   ```
+
+3. For comments and presence, also add `ENABLE_LIVE_COLLAB: "true"` to the
+   backend's `environment`.
+4. Restart with `docker compose up -d`.
+
+The `admin` account (`MDNEST_USER`) becomes the first administrator, and your
+notes are not changed. For company sign-in, add the settings from the
+[SSO setup guide](sso-setup.md) to the backend's `environment`: each setting in
+this guide is an environment variable with the same name. To invite people and
+give them access, see [Roles & administration](user-guide.md#roles--administration-multi-user-mode).
+
+The sections below are for the guided setup (`mdnest.conf`).
 
 ### Enabling Multi-User Mode (New Install)
 
@@ -595,13 +617,7 @@ Caddy listens on ports 80 and 443. HTTP requests are automatically redirected to
 
 ### Option 2: Tailscale Serve
 
-If you use [Tailscale](https://tailscale.com/), expose the frontend port:
-
-```bash
-tailscale serve --bg 3236
-```
-
-This gives you a `https://your-machine.tailnet-name.ts.net` URL accessible from any device on your Tailscale network. No additional configuration is needed.
+If you use [Tailscale](https://tailscale.com/), one `tailscale serve` command gives mdnest a trusted HTTPS address that only devices on your tailnet can reach, with no firewall ports opened. The [Tailscale guide](https://mdnest.dev/docs/tailscale) has the command and the steps for your phone.
 
 ### Option 3: Nginx Reverse Proxy + Certbot
 

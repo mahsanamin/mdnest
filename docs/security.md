@@ -40,13 +40,13 @@ Tailscale builds an encrypted private network (a tailnet) between machines you c
 - Every connection is end-to-end encrypted with WireGuard.
 - Only devices you've authorized can join your tailnet.
 - No firewall ports are opened, no public IP is needed.
-- `tailscale serve --bg --https 3236 http://127.0.0.1:3236` adds a free trusted HTTPS certificate that's only valid inside your tailnet.
+- `tailscale serve` adds a free trusted HTTPS certificate that's only valid inside your tailnet.
 
 ```bash
 tailscale serve --bg --https 3236 http://127.0.0.1:3236
 ```
 
-Result: `https://<your-host>.<tailnet>.ts.net:3236`. Outside the tailnet the hostname doesn't resolve — there's nothing to brute-force.
+Result: `https://<your-host>.<tailnet>.ts.net:3236`. Outside the tailnet the hostname doesn't resolve, so there's nothing to brute-force. The [Tailscale guide](https://mdnest.dev/docs/tailscale) walks through it, including your phone.
 
 ### Team: HTTPS reverse proxy (recommended for shared deployments)
 
@@ -519,7 +519,7 @@ Resetting another user's password is a privileged operation, and the system spli
 
 | Reset target | Allowed actor | Path |
 |---|---|---|
-| Collaborator / namespace-admin | Any super-admin | Admin Panel → Users → **Reset password** (`POST /api/admin/reset-password`) |
+| Collaborator / namespace-admin | Any super-admin | Admin Panel → People → **Reset password** (`POST /api/admin/reset-password`) |
 | Super-admin | Anyone with shell access on the host | `./mdnest-server reset-password <email>` |
 
 The web endpoint refuses to act on a super-admin target (`403`). That's deliberate: web sessions are easier to compromise than host-shell access, and "any super-admin can replace any other super-admin's password from the UI" is a one-click takeover primitive — one phished super-admin can lock out every other super-admin and then own the system. Forcing the cross-super-admin case through the host CLI raises the bar to whoever has SSH on the box, which is typically a much smaller and better-protected set of people.

@@ -12,6 +12,9 @@ teammate's DM.
 Try it on your own machine first, then add your team. Requires Docker and
 Compose. AI agents are optional; connect your own.
 
+**Install:** see the [Quick Start](https://mdnest.dev/docs/quick-start#1-basic-setup)
+(five commands, nothing to clone or build).
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/dark-hero-team.webp">
   <img alt="The mdnest app with a team workspace open: a folder tree on the left, a project brief with a plan in the middle, and a teammate's comment beside one highlighted step" src="docs/images/light-hero-team.webp">
@@ -51,15 +54,10 @@ The full feature list is on [mdnest.dev](https://mdnest.dev).
 ## Try it on your machine
 
 You need [Docker](https://docs.docker.com/get-docker/) with Compose v2, `curl`
-and `openssl`, and port 3236 free.
-
-```bash
-mkdir mdnest && cd mdnest
-curl -fsSLo docker-compose.yml https://raw.githubusercontent.com/mahsanamin/mdnest/main/deploy/compose/docker-compose.yml
-echo "MDNEST_PASSWORD=$(openssl rand -base64 18)"  > .env
-echo "MDNEST_JWT_SECRET=$(openssl rand -hex 32)"  >> .env
-docker compose up -d
-```
+and `openssl`, and port 3236 free. The
+[basic setup in the Quick Start](https://mdnest.dev/docs/quick-start#1-basic-setup) is five commands in a
+terminal: download one compose file, write two secrets to `.env`, and run
+`docker compose up -d`. Nothing to clone or build.
 
 Open [http://localhost:3236](http://localhost:3236) and sign in as `admin`
 with the password in `.env`. Your notes are plain `.md` files in `./notes`.
@@ -71,21 +69,15 @@ the [setup guide](https://mdnest.dev/docs/setup).
 
 ## Set it up with an AI agent
 
-A coding agent such as Claude Code can do the setup for you. Paste one of
-these prompts into it, on the machine that will run mdnest. Each prompt tells
-the agent to read the setup guide first and to ask you for anything it would
-otherwise have to guess.
+A coding agent such as Claude Code or Codex can do the setup for you.
 
-**Just me, on this machine**
+**Just me, on this machine:** use the
+[tested prompt in the Quick Start](https://mdnest.dev/docs/quick-start#or-let-your-coding-agent-do-it). The
+agent runs the basic setup, and you create the API token and log in yourself,
+so it never sees your password or token.
 
-```text
-Set up mdnest (https://github.com/mahsanamin/mdnest) on this machine, for me alone.
-Read https://mdnest.dev/docs/setup first and follow its plain Docker Compose steps.
-Use a new folder called mdnest in my home folder, generate the password and the
-JWT secret with openssl, and start it with docker compose up -d. Do not open any
-port to the internet. When it runs, check that http://localhost:3236 answers, then
-tell me the admin password from .env and the folder where my notes are kept.
-```
+The prompts below are for larger setups. Each one tells the agent to read the
+setup guide first and to ask you for anything it would otherwise have to guess.
 
 **My team, with company sign-in**
 
@@ -115,9 +107,10 @@ note and show me the commit that reached the repository.
 Install the mdnest CLI on this machine and connect it to our mdnest server.
 Read https://mdnest.dev/docs/cli first. Install it with:
 curl -fsSL https://mdnest.dev/install.sh | bash
-Ask me for the server address and an API token (made in mdnest under Settings,
-API Tokens), and log in with mdnest login. Run mdnest servers -v to check it,
-then show me how to read a note and append a line to one.
+Ask me for the server address. Then ask me to create an API token in mdnest
+(Settings, then API Tokens) and to run mdnest login <address> in my own
+terminal. Never ask me for the token. Run mdnest servers -v to check it, then
+show me how to read a note and append a line to one.
 ```
 
 ## Connect your agents
