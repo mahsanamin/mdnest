@@ -95,11 +95,13 @@ else
   bad "release publishes arm64 images" "release.yml builds no linux/arm64; the file fails on ARM hosts"
 fi
 
+# The install commands live in the Quick Start on mdnest.dev (the website
+# repo). The repo docs link to its basic setup instead of repeating them.
 for doc in README.md docs/setup.md; do
-  if grep -qF "mdnest/main/$REL" "$REPO_ROOT/$doc"; then
-    ok "$doc downloads $REL"
+  if grep -qF "mdnest.dev/docs/quick-start#1-basic-setup" "$REPO_ROOT/$doc"; then
+    ok "$doc links to the Quick Start basic setup"
   else
-    bad "$doc downloads $REL" "the documented curl one-liner points somewhere else"
+    bad "$doc links to the Quick Start basic setup" "the install commands are documented only there"
   fi
 done
 

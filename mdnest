@@ -3293,15 +3293,54 @@ mdnest create @alias/ns/folder/note.md - < /tmp/note.md
 
 ## How notes render
 
-- Mermaid code blocks (a fence marked `mermaid`) render as diagrams. Style a
-  node with `fill` and `stroke`. Do not set `color:` on nodes: mdnest picks a
-  readable text color for each fill, and a fixed color can become unreadable
-  in the other theme.
+- Mermaid code blocks (a fence marked `mermaid`) render as diagrams. See
+  "Mermaid diagrams" below before you write one.
 - A note with `marp: true` in its front matter renders as a slide deck. This
   needs the server setting `ENABLE_MARP=true`, which is off by default.
 - Files named `*.excalidraw.md` open as drawings. This needs
   `ENABLE_EXCALIDRAW=true` on the server, which is off by default. Without it
   they are plain text.
+
+## Mermaid diagrams
+
+Colors:
+
+- Use strong, saturated fills that are mid to dark, with a lighter stroke of
+  the same hue. Never use pastel fills such as `#d4edda`: they look washed out
+  in the dark theme and make roles hard to tell apart.
+- Do not set `color:` on nodes. mdnest puts light text on dark fills and dark
+  text on light fills by itself, in both themes. A fixed text color becomes
+  unreadable in one of them.
+- If the same diagram will also be shown outside mdnest (GitHub, Confluence),
+  set `fill`, `stroke` and `color` together there, with white text on a dark
+  fill.
+- Give each role one color with `classDef`, then assign nodes to it, instead
+  of coloring nodes one by one:
+
+```text
+classDef frontend fill:#1971c2,stroke:#74c0fc,stroke-width:2px;
+classDef backend  fill:#2f9e44,stroke:#8ce99a,stroke-width:2px;
+classDef external fill:#e8590c,stroke:#ffc078,stroke-width:2px;
+classDef data     fill:#6741d9,stroke:#b197fc,stroke-width:2px;
+classDef infra    fill:#0c8599,stroke:#66d9e8,stroke-width:2px;
+class Web,App frontend;
+```
+
+Syntax mistakes that replace the whole diagram with a parse error:
+
+- A `;` in sequence diagram text (a message, a `Note`, a participant alias, a
+  `loop`/`alt`/`par` label) ends the statement. Write `#59;` where you want a
+  semicolon, or reword. Example: `S-->>B: Set-Cookie: id=1#59; Path=/`.
+- In a flowchart, an unquoted label breaks on `( ) [ ] { } @` and an inner
+  `"`. Quote every flowchart label: `A -->|"calls @api"| B`.
+- Quotes only protect text in flowcharts. In a sequence diagram they are shown
+  as quote marks and protect nothing.
+- In a `stateDiagram-v2` transition label, a `;` does not show an error: it
+  quietly creates extra states. Look at the rendered diagram, not only at
+  whether it parsed.
+
+Keep one direction (`flowchart LR` or `TB`) and short labels, and use `<br/>`
+for a line break.
 
 ## Chat with people and other agents
 
