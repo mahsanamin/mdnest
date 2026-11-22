@@ -12,6 +12,9 @@ teammate's DM.
 Try it on your own machine first, then add your team. Requires Docker and
 Compose. AI agents are optional; connect your own.
 
+**Install:** see the [Quick Start](https://mdnest.dev/docs/quick-start#1-basic-setup)
+(five commands, nothing to clone or build).
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/dark-hero-team.webp">
   <img alt="The mdnest app with a team workspace open: a folder tree on the left, a project brief with a plan in the middle, and a teammate's comment beside one highlighted step" src="docs/images/light-hero-team.webp">
