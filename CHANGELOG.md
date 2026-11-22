@@ -58,6 +58,16 @@ All notable changes to mdnest are documented here.
   StatefulSets' volume claim templates, which cannot change on an existing
   install. Thanks to
   [@ecthelion77](https://github.com/ecthelion77) (Olivier Gintrand), #165, #166.
+- **Clearer CLI setup output.** `mdnest login`, `update`, `version`,
+  `agent` and the install scripts mark finished steps with a green check,
+  notes and warnings in yellow, errors in red, and the command to run next in
+  bold. `mdnest agent status` shows an aligned list. Colour is only used in a
+  terminal: piped output, `NO_COLOR` and commands that print notes or data
+  (including `--json`) stay plain text, exactly as before.
+  `MDNEST_COLOR=always` or `never` overrides it.
+- **Settings > CLI has an AI tools section.** It shows how to check, install
+  and remove the AI tool skills (`mdnest agent status`, `install`, `remove`)
+  and how to add mdnest to Claude Code as a plugin.
 
 ### Fixed
 
@@ -73,6 +83,13 @@ All notable changes to mdnest are documented here.
   save, which also turned a chat back into a plain note. In single-user mode,
   Live now shows the header in a small box above the note, where you can edit
   it.
+- **`mdnest update` replaces an older CLI with the same version label.** Every
+  build between two releases says, for example, `4.8.17-dev`, so an older copy
+  said "up to date" and kept itself. Update now compares the file itself.
+  `mdnest version` also shows a short fingerprint of the file, such as
+  `mdnest CLI v4.8.17-dev (a1b2c3d)`, so two copies can be told apart.
+- **CLI paths print as `~/...` again on bash 5.2 and newer.** `mdnest agent`
+  showed the full home folder path there.
 
 ## v4.8.16: One short guide for AI coding agents, for contributors too
 
