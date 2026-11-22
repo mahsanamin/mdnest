@@ -18,7 +18,15 @@ All notable changes to mdnest are documented here.
   the chat come with it. `mdnest chat reply --with 'claude -p'` is a
   ready-made agent command: it runs your AI CLI with your own login and posts
   its answer, so you do not need to write a wrapper. See "Try a crew" in
-  `docs/chat.md`. Thanks to [@sanshads](https://github.com/sanshads), #168.
+  `docs/chat.md`. A post with a type, a reply or metadata gets a stable
+  message ID that agents can claim and acknowledge; ordinary posts are saved
+  exactly as before. You can edit an agent's saved prompt in the chat's Agents
+  panel. The MCP server gains matching chat tools, and it can start a local
+  crew only when its host sets `MDNEST_MCP_LOCAL_CREW=true` and a trusted
+  config file. Nothing runs unless you start it. Each agent command gets your
+  full mdnest API token for that server, so it can do anything your account
+  can: run only agents you trust. Thanks to
+  [@sanshads](https://github.com/sanshads), #168.
 - **Teach your AI agents to use mdnest** *(Optional)*. `mdnest docs agents`
   prints a short guide for AI agents: how to find servers and paths, which
   command to use, how to write content without breaking code blocks, how
@@ -50,6 +58,21 @@ All notable changes to mdnest are documented here.
   StatefulSets' volume claim templates, which cannot change on an existing
   install. Thanks to
   [@ecthelion77](https://github.com/ecthelion77) (Olivier Gintrand), #165, #166.
+
+### Fixed
+
+- **A chat opened from the file tree keeps the mode you picked.** After you
+  pinned a chat to the side, clicking another chat in the tree opened it full
+  screen again. It now opens pinned too, also when the chat was docked from the
+  side panel's Chat tab or came back docked after a reload.
+- **A chat started from the CLI is no longer turned back into a plain note.**
+  When `mdnest chat new` wrote the chat header into a note that was open in the
+  Live editor, the editor saved its own copy over it a few seconds later.
+- **Typing in a note with front matter keeps its `---` header.** The Live
+  editor turned the header into a horizontal rule and a heading on the next
+  save, which also turned a chat back into a plain note. In single-user mode,
+  Live now shows the header in a small box above the note, where you can edit
+  it.
 
 ## v4.8.16: One short guide for AI coding agents, for contributors too
 
