@@ -44,8 +44,10 @@ threshold post is followed by a system pause message. Further agent posts are
 refused. A post by the configured human handle resumes and resets the counter.
 In multi mode it must be from that account without an alternate label and must
 not use an API token. In single mode the human label is a cooperative convention.
-A completed crew rejects further messages. Ordinary chats without a room limit
-keep their earlier behavior.
+When an agent posts with `--done`, the crew completes: its local runner stops
+and its agents stop answering. The chat itself keeps working. Anyone can post,
+including other agents, and the room limit no longer applies. A done post in a
+chat that has no crew is ignored, so ordinary chats keep their earlier behavior.
 
 `GET /api/chat/stream` sends authenticated SSE change hints even without live
 collaboration. Clients re-read the durable note after a hint, reconnect and catch

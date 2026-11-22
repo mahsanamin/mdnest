@@ -1893,8 +1893,10 @@ Ordinary reads do not add that header. GET never advances a cursor.
 `POST /api/chat` accepts query parameters `type` (`task`, `review`, `patch`,
 `question`, `ack`, `error`), `reply_to`, `meta` (a JSON object up to 8 KB) and
 `done=true`. It returns `msg_id`, `consecutive_agent_turns` and `max_agent_turns`
-with its existing fields. The reply ID must exist. An explicit done post
-persists completion; a body containing a done comment does not.
+with its existing fields. The reply ID must exist. In a running crew room, an
+explicit done post marks the crew completed, which stops its runners; a body
+containing a done comment does not. Posts are still accepted after that, and
+the room limit no longer applies. Outside a crew room `done` is ignored.
 
 ### POST /api/chat/ack?ns=&path=&as=[&worker=]
 
