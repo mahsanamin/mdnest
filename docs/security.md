@@ -40,13 +40,13 @@ Tailscale builds an encrypted private network (a tailnet) between machines you c
 - Every connection is end-to-end encrypted with WireGuard.
 - Only devices you've authorized can join your tailnet.
 - No firewall ports are opened, no public IP is needed.
-- `tailscale serve --bg --https 3236 http://127.0.0.1:3236` adds a free trusted HTTPS certificate that's only valid inside your tailnet.
+- `tailscale serve` adds a free trusted HTTPS certificate that's only valid inside your tailnet.
 
 ```bash
 tailscale serve --bg --https 3236 http://127.0.0.1:3236
 ```
 
-Result: `https://<your-host>.<tailnet>.ts.net:3236`. Outside the tailnet the hostname doesn't resolve — there's nothing to brute-force.
+Result: `https://<your-host>.<tailnet>.ts.net:3236`. Outside the tailnet the hostname doesn't resolve, so there's nothing to brute-force. The [Tailscale guide](https://mdnest.dev/docs/tailscale) walks through it, including your phone.
 
 ### Team: HTTPS reverse proxy (recommended for shared deployments)
 

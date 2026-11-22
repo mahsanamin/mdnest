@@ -31,15 +31,10 @@ mdnest.
 
 ## Plain Docker Compose (or docker run)
 
-No clone, no setup script, nothing to build. Four commands:
-
-```bash
-mkdir mdnest && cd mdnest
-curl -fsSLo docker-compose.yml https://raw.githubusercontent.com/mahsanamin/mdnest/main/deploy/compose/docker-compose.yml
-echo "MDNEST_PASSWORD=$(openssl rand -base64 18)"  > .env
-echo "MDNEST_JWT_SECRET=$(openssl rand -hex 32)"  >> .env
-docker compose up -d
-```
+No clone, no setup script, nothing to build. Follow the
+[basic setup in the Quick Start](https://mdnest.dev/docs/quick-start#1-basic-setup): it downloads
+`docker-compose.yml`, writes two secrets to `.env`, and runs
+`docker compose up -d`.
 
 Open `http://localhost:3236` and sign in as `admin` with the password from
 `.env` (`cat .env`). If you forget a secret, `docker compose up` refuses to
@@ -595,13 +590,7 @@ Caddy listens on ports 80 and 443. HTTP requests are automatically redirected to
 
 ### Option 2: Tailscale Serve
 
-If you use [Tailscale](https://tailscale.com/), expose the frontend port:
-
-```bash
-tailscale serve --bg 3236
-```
-
-This gives you a `https://your-machine.tailnet-name.ts.net` URL accessible from any device on your Tailscale network. No additional configuration is needed.
+If you use [Tailscale](https://tailscale.com/), one `tailscale serve` command gives mdnest a trusted HTTPS address that only devices on your tailnet can reach, with no firewall ports opened. The [Tailscale guide](https://mdnest.dev/docs/tailscale) has the command and the steps for your phone.
 
 ### Option 3: Nginx Reverse Proxy + Certbot
 
