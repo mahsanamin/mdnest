@@ -56,7 +56,7 @@ BE_PORT="$(docker port "$BE" 8080/tcp | cut -d: -f2)"
 FE_PORT="$(docker port "$FE" 80/tcp | cut -d: -f2)"
 BASE="http://127.0.0.1:$FE_PORT"
 for _ in $(seq 1 60); do curl -fsS "$BASE/api/config" >/dev/null 2>&1 && break; sleep 1; done
-node tests/agentic-multi.mjs configure "$FIXTURE" "$BASE" "http://127.0.0.1:$BE_PORT" "$BE" "$FE" "$PG" "$NET" "$BE_IMAGE" "$FE_IMAGE" || exit 1
+node tests/agentic-multi.mjs configure "$FIXTURE" "$BASE" "http://127.0.0.1:$BE_PORT" "$BE" "$FE" "$PG" "$NET" "$BE_IMAGE" "$FE_IMAGE" "$NOTES" || exit 1
 GIT_HEAD="$(git rev-parse HEAD)" GIT_TREE="$(e2e_tree_hash "$ROOT" backend frontend mdnest mcp-server tests/e2e-agentic-multi.sh tests/agentic-multi.mjs)" \
   node tests/agentic-multi.mjs manifest "$FIXTURE" || exit 1
 printf 'Multi-user inspection site: %s\nNamespaces: team-alpha, team-beta\nPrivate login details: %s/login-details.txt\n' "$BASE" "$FIXTURE"

@@ -25,9 +25,9 @@ if (mode === 'init') {
   await privateWrite(join(dir, 'backend.env'), `AUTH_MODE=multi\nPOSTGRES_HOST=${args[0]}\nPOSTGRES_PASSWORD=${pgPassword}\nMDNEST_USER=admin\nMDNEST_PASSWORD=${password}\nMDNEST_JWT_SECRET=${secret()}\nNOTES_DIR=/notes\nFRONTEND_ORIGIN=http://localhost\nENABLE_CHAT=true\nENABLE_LIVE_COLLAB=false\n`);
   await privateWrite(join(dir, 'bootstrap.json'), JSON.stringify({ password }));
 } else if (mode === 'configure') {
-  const [base, backendURL, backend, frontend, postgres, network, backendImage, frontendImage] = args;
+  const [base, backendURL, backend, frontend, postgres, network, backendImage, frontendImage, notes] = args;
   const { password } = JSON.parse(await readFile(join(dir, 'bootstrap.json'), 'utf8'));
-  await privateWrite(join(dir, 'fixture.json'), JSON.stringify({ base, backendURL, backend, frontend, postgres, network, backendImage, frontendImage, dir, root, accounts: { admin: { password } } }));
+  await privateWrite(join(dir, 'fixture.json'), JSON.stringify({ base, backendURL, backend, frontend, postgres, network, backendImage, frontendImage, dir, notes: notes || dir, root, accounts: { admin: { password } } }));
 } else if (mode === 'manifest') {
   const f=JSON.parse(await readFile(join(dir,'fixture.json'),'utf8'));
   const inspect=await new Promise((resolve,reject)=>{const p=spawn('docker',['inspect',f.backend,f.frontend],{stdio:['ignore','pipe','ignore']});let out='';p.stdout.on('data',c=>out+=c);p.on('close',code=>code===0?resolve(JSON.parse(out)):reject(Error('fixture inspect failed')));});
@@ -191,7 +191,7 @@ if (mode === 'init') {
       const denied = await client.callTool({ name: 'mdnest_chat_read', arguments: { namespace: 'team-beta', path: 'Welcome.md', last: 1 } });
       check('MCP cross-namespace error is surfaced', denied.isError && denied.content[0].text.includes('403'));
     } finally { await client.close(); await transport.close(); }
-    check('both mounted files remain present and namespace denial wrote nothing', (await readFile(join(dir, 'team-alpha', 'Welcome.md'), 'utf8')).includes('team-alpha') && (await readFile(join(dir, 'team-beta', 'Welcome.md'), 'utf8')).includes('team-beta') && !(await stat(join(dir, 'team-beta', 'denied.md')).catch(() => null)));
+    check('both mounted files remain present and namespace denial wrote nothing', (await readFile(join(f.notes, 'team-alpha', 'Welcome.md'), 'utf8')).includes('team-alpha') && (await readFile(join(f.notes, 'team-beta', 'Welcome.md'), 'utf8')).includes('team-beta') && !(await stat(join(f.notes, 'team-beta', 'denied.md')).catch(() => null)));
     console.log(`RESULT ${results.length} passed, 0 failed`);
   } catch (e) {
     console.error(`FAIL ${e.message.replace(/mdnest_[A-Za-z0-9_-]+/g, '[redacted]')}`); process.exitCode = 1;
