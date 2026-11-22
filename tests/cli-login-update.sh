@@ -21,6 +21,8 @@ CLI="$REPO_ROOT/mdnest"
 PTY="$REPO_ROOT/tests/pty-drive.py"
 # No AI agent skills question during login (it has its own cases below).
 export MDNEST_AGENT_SKILLS=0
+# Exact text, also under the pty driver; colour is covered in cli-unit.sh.
+export NO_COLOR=1
 
 PASS=0; FAIL=0
 green() { printf '\033[32m%s\033[0m' "$1"; }
@@ -204,9 +206,17 @@ case "$("$WORK/bin/mdnest" --version)" in
   *) bad "--version: shows a content fingerprint" "got [$("$WORK/bin/mdnest" --version)]" ;;
 esac
 echo "samever" > "$WORK/cli_mode"
+inode_before="$(ls -i "$WORK/bin/mdnest" | awk '{print $1}')"
 rc=0
 out="$(HOME="$H" "$WORK/bin/mdnest" update --server @fake 2>&1)" || rc=$?
 eq "update: same label, new bytes: exits 0" "0" "$rc"
+# A new file, not a rewrite of the old one: bash reads a running script as it
+# goes, so a 'chat wait' started from the old file must keep its own copy.
+if [ "$inode_before" != "$(ls -i "$WORK/bin/mdnest" | awk '{print $1}')" ]; then
+  ok "update: replaces the file (new inode), never rewrites it in place"
+else
+  bad "update: replaces the file (new inode), never rewrites it in place" "same inode $inode_before"
+fi
 contains "update: same label, new bytes: says it updates" "$out" "Updating mdnest CLI"
 case "$(tail -1 "$WORK/bin/mdnest")" in
   *"same version label"*) ok "update: same label, new bytes: installs the served file" ;;
