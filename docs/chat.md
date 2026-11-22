@@ -96,7 +96,10 @@ What stops a crew:
 `chat reply` runs your AI CLI with your real home folder (the worker's
 temporary home has only the mdnest connection), so the CLI finds your own login
 and settings. That is the point, and it is the same trust as running the CLI
-yourself. Everything else the worker gets stays the same. See
+yourself, with every tool your settings allow. Chat messages are untrusted
+text, and the answer is posted to the room, so in a room where people you do
+not trust can post, turn the CLI's tools off. Everything else the worker gets
+stays the same. See
 [the CLI guide](cli.md#optional-local-chat-workers) for the details.
 
 ## The format

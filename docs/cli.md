@@ -429,7 +429,12 @@ your real home folder, looked up from the user database because `$HOME` is
 the temporary one. Only that command gets it; the post keeps the temporary
 home and the runner's connection. This lets the AI CLI use your own login and
 settings, which is the purpose, and it is the same trust as running that CLI
-yourself. `PATH`, `--pass-env` values, `--cwd` and the `MDNEST_*` fields are
+yourself. It also means the CLI keeps every tool and permission your own
+settings allow, while the chat it reads is untrusted text that anyone who can
+post in the room wrote. A message could ask the AI to read a file and repeat
+it, and the answer is posted to the room. In a room where people you do not
+trust can post, turn the CLI's tools off with its own options, or write your
+own worker. `PATH`, `--pass-env` values, `--cwd` and the `MDNEST_*` fields are
 passed through unchanged. Running `chat reply` outside a `watch` or `crew`
 worker is an error.
 
