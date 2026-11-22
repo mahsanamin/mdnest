@@ -172,6 +172,30 @@ func TestChatBreakerAndControlInjection(t *testing.T) {
 	if readCoordination(string(data)).Status != "completed" {
 		t.Fatal("completion not persisted")
 	}
+	// A finished crew stops only its own agents. The chat keeps working for
+	// people and for any other agent, past the old room limit too.
+	for i, who := range []string{"human", "builder", "builder", "builder", "other-agent"} {
+		if w := chatDo(t, h.Handle, "POST", "/api/chat?ns=work&path=room.md&as="+who, "after completion", nil); w.Code != 201 {
+			t.Fatalf("post %d by %s after completion: %d %s", i, who, w.Code, w.Body.String())
+		}
+	}
+}
+
+func TestChatDoneInOrdinaryChatDoesNotLockIt(t *testing.T) {
+	h, root := newChatTestHandler(t)
+	chatDo(t, h.HandleConvert, "POST", "/api/chat/convert?ns=work&path=plain.md", "", nil)
+	if w := chatDo(t, h.Handle, "POST", "/api/chat?ns=work&path=plain.md&as=bot&done=true", "finished", nil); w.Code != 201 {
+		t.Fatalf("done post: %d %s", w.Code, w.Body.String())
+	}
+	for _, who := range []string{"", "bot"} {
+		if w := chatDo(t, h.Handle, "POST", "/api/chat?ns=work&path=plain.md&as="+who, "still here", nil); w.Code != 201 {
+			t.Fatalf("post by %q after a done post: %d %s", who, w.Code, w.Body.String())
+		}
+	}
+	data, _ := os.ReadFile(filepath.Join(root, "work", "plain.md"))
+	if strings.Contains(string(data), chatDoneMarker) || strings.Contains(string(data), "mdnest-coordination") {
+		t.Fatalf("a done post changed a plain chat:\n%s", data)
+	}
 }
 
 type pausedCreateBody struct {

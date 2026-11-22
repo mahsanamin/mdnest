@@ -448,12 +448,12 @@ func (h *ChatHandler) appendStructuredMessage(r *http.Request, ns, relPath, labe
 		return ChatDoc{}, http.StatusBadRequest, "this note is not a chat — convert it first"
 	}
 	c := readCoordination(content)
-	if c.Status == "completed" {
-		unlock()
-		return ChatDoc{}, http.StatusConflict, "crew completed"
-	}
+	// A crew only ever stops its own agents: a finished crew, or a done post in
+	// a chat that never had a crew, must not stop anyone posting. Once a crew
+	// completes, its room limit is off and the chat is an ordinary chat again.
+	crew := c.MaxTurns > 0 && c.Status != "completed"
 	human := h.humanPost(r, c, label, via)
-	if c.MaxTurns > 0 && !human && (c.Status == "paused" || c.Turns >= c.MaxTurns) {
+	if crew && !human && (c.Status == "paused" || c.Turns >= c.MaxTurns) {
 		unlock()
 		return ChatDoc{}, http.StatusConflict, "crew paused: waiting for human"
 	}
@@ -488,7 +488,7 @@ func (h *ChatHandler) appendStructuredMessage(r *http.Request, ns, relPath, labe
 	}
 	before := len(ParseChat(content).Messages)
 	updated := AppendChatMessage(content, block)
-	if c.MaxTurns > 0 {
+	if crew {
 		if human {
 			c.Turns = 0
 			c.Status = "active"
@@ -501,11 +501,13 @@ func (h *ChatHandler) appendStructuredMessage(r *http.Request, ns, relPath, labe
 			updated = AppendChatMessage(updated, RenderChatMessage("System", "", at, pause))
 		}
 	}
-	if options.Done {
+	// Done only means something to a running crew. Elsewhere it is ignored,
+	// so a plain chat is written exactly as it was before crews existed.
+	if options.Done && crew {
 		c.Status = "completed"
 		updated = AppendChatMessage(updated, "\n"+chatDoneMarker+"\n")
 	}
-	if c.MaxTurns > 0 || options.Done {
+	if crew {
 		updated = setCoordination(updated, c)
 	}
 	if len(updated) > maxNoteSize {
