@@ -223,7 +223,8 @@ func TestChatCrewCreateDoesNotOverwriteConcurrentCreator(t *testing.T) {
 func TestChatAckDoesNotHideNewIDAtOldPosition(t *testing.T) {
 	h, root := newChatTestHandler(t)
 	chatDo(t, h.HandleConvert, "POST", "/api/chat/convert?ns=work&path=room.md", "", nil)
-	posted := chatDo(t, h.Handle, "POST", "/api/chat?ns=work&path=room.md", "old", nil)
+	// Typed, so the message has a metadata line whose ID can be swapped.
+	posted := chatDo(t, h.Handle, "POST", "/api/chat?ns=work&path=room.md&type=task", "old", nil)
 	var response struct {
 		Message ChatMessage `json:"message"`
 	}
@@ -361,5 +362,46 @@ func TestChatLegacyMessagesHaveStableIDs(t *testing.T) {
 			firstID = id
 			content = AppendChatMessage(content, RenderChatMessage("other", "", fixedChatTime, "later"))
 		}
+	}
+}
+
+// A plain post in a plain chat writes exactly the bytes it wrote before the
+// agent fields existed, and its legacy ID still works for claims. A typed
+// post still gets the metadata line.
+func TestChatPlainPostKeepsDevelopFormat(t *testing.T) {
+	h, root := newChatTestHandler(t)
+	h.now = func() time.Time { return fixedChatTime }
+	chatDo(t, h.HandleConvert, "POST", "/api/chat/convert?ns=work&path=room.md", "", nil)
+	file := filepath.Join(root, "work", "room.md")
+	before, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := chatDo(t, h.Handle, "POST", "/api/chat?ns=work&path=room.md&as=human&type=&reply_to=&meta=&done=0", "plain words" /* the CLI sends empty fields */, nil)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("post: %d %s", w.Code, w.Body.String())
+	}
+	after, _ := os.ReadFile(file)
+	want := AppendChatMessage(string(before), RenderChatMessage("human", "", fixedChatTime, "plain words"))
+	if string(after) != want {
+		t.Fatalf("plain post changed the note format:\n got %q\nwant %q", after, want)
+	}
+	var posted struct {
+		Message map[string]any `json:"message"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &posted); err != nil {
+		t.Fatal(err)
+	}
+	id, _ := posted.Message["id"].(string)
+	if id == "" || id != ParseChat(string(after)).Messages[0].ID {
+		t.Fatalf("posted ID %q does not match the parsed legacy ID", id)
+	}
+	if c := chatDo(t, h.HandleClaim, "POST", "/api/chat/claim?ns=work&path=room.md&msg_id="+id+"&as=reviewer&worker=w1", "", nil); c.Code != http.StatusOK {
+		t.Fatalf("claim on a plain post: %d %s", c.Code, c.Body.String())
+	}
+	chatDo(t, h.Handle, "POST", "/api/chat?ns=work&path=room.md&as=builder&type=review", "typed", nil)
+	data, _ := os.ReadFile(file)
+	if strings.Count(string(data), "<!-- mdnest:msg ") != 1 {
+		t.Fatalf("want exactly one metadata line, for the typed post:\n%s", data)
 	}
 }

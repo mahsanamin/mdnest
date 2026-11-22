@@ -24,9 +24,13 @@ recent and unseen reads, task leases and local `watch`/`crew` commands. These
 workers are opt-in and need Node only on the machine launching them. HTTP never
 executes a command. MCP local spawning is separately disabled by default.
 
-New posts carry a stable message ID in an HTML metadata comment immediately
-after the existing message header. Older messages get a stable derived ID when
-read and are not rewritten. New metadata does not change the existing chat
+A post with a type, a reply, metadata, or in a crew's room carries a stable
+message ID in an HTML metadata comment immediately after the existing message
+header. Any other post is written exactly as before, and it, like every older
+message, gets a derived ID when read and is never rewritten. A derived ID
+includes the message's position, so deleting or editing an earlier message
+changes the IDs after it and a watcher can see those messages again; worker
+handlers must be idempotent. Metadata does not change the existing chat
 marker, header or body format. Normal post bodies cannot forge metadata or
 completion comments. Direct file writers remain trusted to edit the note.
 

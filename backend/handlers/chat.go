@@ -470,15 +470,23 @@ func (h *ChatHandler) appendStructuredMessage(r *http.Request, ns, relPath, labe
 			return ChatDoc{}, http.StatusBadRequest, "reply_to message not found"
 		}
 	}
-	id, err := newChatMessageID()
-	if err != nil {
-		unlock()
-		return ChatDoc{}, http.StatusInternalServerError, "failed to generate message ID"
-	}
 	at := h.now()
 	block := RenderChatMessage(label, via, at, text)
-	boundary := strings.Index(block[1:], "\n") + 1
-	block = block[:boundary+1] + metadataLine(ChatMessage{ID: id, Type: options.Type, ReplyTo: options.ReplyTo, Meta: options.Meta}) + "\n" + block[boundary+1:]
+	// A plain post in a plain chat is written exactly as before the agent
+	// fields existed: no metadata line, so the note on disk does not change
+	// format for people who never use them. Its ID is then the legacy one,
+	// which claims and acks accept the same way.
+	id := ""
+	if options.Type != "" || options.ReplyTo != "" || len(options.Meta) > 0 || c.MaxTurns > 0 {
+		var err error
+		if id, err = newChatMessageID(); err != nil {
+			unlock()
+			return ChatDoc{}, http.StatusInternalServerError, "failed to generate message ID"
+		}
+		boundary := strings.Index(block[1:], "\n") + 1
+		block = block[:boundary+1] + metadataLine(ChatMessage{ID: id, Type: options.Type, ReplyTo: options.ReplyTo, Meta: options.Meta}) + "\n" + block[boundary+1:]
+	}
+	before := len(ParseChat(content).Messages)
 	updated := AppendChatMessage(content, block)
 	if c.MaxTurns > 0 {
 		if human {
@@ -514,6 +522,9 @@ func (h *ChatHandler) appendStructuredMessage(r *http.Request, ns, relPath, labe
 	h.status.posted(ns, relPath, label)
 	h.notify(r, ns, relPath, updated)
 	doc := ParseChat(updated)
+	if id == "" && before < len(doc.Messages) {
+		id = doc.Messages[before].ID
+	}
 	doc.PostedID = id
 	return doc, 0, ""
 }

@@ -95,6 +95,8 @@ func (h *ChatHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 	end := time.NewTimer(55 * time.Second)
 	defer end.Stop()
 	for {
+		// Grants are re-checked on every pass; the token itself is checked
+		// once, when the stream opens, and the 55 s cap bounds the rest.
 		if h.canRead == nil || !h.canRead(r, ns, p) {
 			write("gone", map[string]any{"status": 403})
 			return

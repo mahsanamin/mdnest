@@ -396,7 +396,10 @@ newlines remain data, never shell substitutions. The explicitly supplied
 Output is prefixed by handle. No model is called while idle.
 
 Children use a temporary home containing only this server's mdnest connection,
-removed on exit. The normal home, ambient credential environment, interpreter
+removed on exit. That connection is your full mdnest API token for this
+server, so any agent command you run can do anything your account can. Run
+only agents you trust, and use a separate account limited to the namespaces
+it needs for agents you do not trust. The normal home, ambient credential environment, interpreter
 startup variables and MCP protocol streams are not inherited. Pass a required
 provider credential by name with `--pass-env PROVIDER_API_KEY`, or use a local
 wrapper with its own explicit configuration. `--cwd` selects a trusted local

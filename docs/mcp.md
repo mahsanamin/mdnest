@@ -90,6 +90,11 @@ stdio MCP. That file maps permitted handles to trusted launch commands:
 }
 ```
 
+The spawned workers get the MCP server's full mdnest API token for this
+server, so any agent command they run can do anything that account can. Run
+only agents you trust, and give this MCP server a separate account limited to
+the namespaces it needs if its agents are not trusted.
+
 The tool accepts only handles and traits, never `cmd`. Requested budgets are
 clamped to the trusted local limits. Shared-note command strings stay inert.
 Child logs go to stderr, never MCP protocol stdout. Local spawning needs Node
