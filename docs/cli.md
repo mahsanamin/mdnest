@@ -650,6 +650,12 @@ SERVER_ALIAS=work
 
 This makes Copy Path produce `@work/namespace/path` which the CLI can use directly.
 
+The setup commands (`login`, `update`, `version`, `agent`, and the install
+scripts) use colour and a check mark when they print to a terminal. In a pipe,
+or with `NO_COLOR` set, they print plain text. `MDNEST_COLOR=never` or
+`MDNEST_COLOR=always` overrides that. Commands that print notes or data
+(`read`, `list`, `search`, `chat`) never add colour.
+
 ## Version compatibility
 
 The CLI and the server ship from the same repo at the same version number, so

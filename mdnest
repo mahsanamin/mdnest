@@ -9,6 +9,32 @@ DEFAULT_FILE="${CONFIG_DIR}/default"
 # Legacy single-server config (backward compat)
 LEGACY_CONFIG="${CONFIG_DIR}/config"
 
+# ─── Output colour (setup commands only) ────────────────────────────────────
+# Colour is for a person at a terminal: never in a pipe, never with NO_COLOR
+# (https://no-color.org) or TERM=dumb. MDNEST_COLOR=always or never overrides
+# it. Decided once, here: inside $(...) stdout is never a terminal. With
+# colour off, every helper prints exactly the text it was given, so scripts
+# and tests see the same bytes as before. Data commands (read, list, search,
+# chat) never use these.
+MDNEST_C1=0; MDNEST_C2=0
+case "${MDNEST_COLOR:-auto}" in
+  always) MDNEST_C1=1; MDNEST_C2=1 ;;
+  never) ;;
+  *)
+    if [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != dumb ]; then
+      if [ -t 1 ]; then MDNEST_C1=1; fi
+      if [ -t 2 ]; then MDNEST_C2=1; fi
+    fi ;;
+esac
+# _paint <on> <sgr> <text>: the text, wrapped in that colour when <on> is 1.
+_paint() { if [ "$1" = 1 ]; then printf '\033[%sm%s\033[0m' "$2" "$3"; else printf '%s' "$3"; fi; }
+c_ok()   { if [ "$MDNEST_C1" = 1 ]; then printf '\033[32m\342\234\223\033[0m %s\n' "$*"; else printf '%s\n' "$*"; fi; }
+c_note() { _paint "$MDNEST_C1" 33 "$*"; printf '\n'; }        # yellow, stdout
+c_warn() { { _paint "$MDNEST_C2" 33 "$*"; printf '\n'; } >&2; }  # yellow, stderr
+c_err()  { { _paint "$MDNEST_C2" 31 "$*"; printf '\n'; } >&2; }  # red, stderr
+c_dim()  { _paint "$MDNEST_C1" 2 "$*"; printf '\n'; }         # dim line
+c_cmd()  { _paint "$MDNEST_C1" 1 "$*"; }                      # bold, inline
+
 # ─── Server config helpers ──────────────────────────────────────────────────
 
 get_server_file() {
@@ -939,7 +965,7 @@ ERR
     tok_code=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 10 \
       -H "Authorization: Bearer $tok" "${url}/api/namespaces" 2>/dev/null) || tok_code="000"
     if [ "$tok_code" = "401" ]; then
-      echo "Error: ${url} did not accept that token. Nothing was saved." >&2
+      c_err "Error: ${url} did not accept that token. Nothing was saved."
       echo "Check it was copied in full, or create a new one, then run: mdnest login @${alias} ${url}" >&2
       exit 1
     fi
@@ -953,7 +979,7 @@ ERR
     local existing_url
     existing_url=$(grep '^url=' "$(get_server_file "$alias")" 2>/dev/null | cut -d= -f2-) || existing_url=""
     if [ -n "$existing_url" ] && [ "$existing_url" != "$url" ]; then
-      echo "Warning: @${alias} currently points at ${existing_url}; replacing with ${url}."
+      c_note "Warning: @${alias} currently points at ${existing_url}; replacing with ${url}."
     fi
   fi
 
@@ -976,7 +1002,7 @@ EOF
   if MDNEST_URL="$url" MDNEST_TOKEN="$tok" api GET "/namespaces" > /dev/null 2>&1; then
     local resolution_note=""
     [ "$alias_source" = "autodetect" ] && resolution_note=" (SERVER_ALIAS from /api/config)"
-    echo "Logged in to @${alias} (${url})${resolution_note}"
+    c_ok "Logged in to @${alias} (${url})${resolution_note}"
     # json_top_string, NOT `grep -o '"version"'`: /api/config carries BOTH a
     # top-level "version" and latestRelease.version, and the nested one is
     # emitted FIRST, so the naive grep returned two lines. It went unnoticed
@@ -987,7 +1013,7 @@ EOF
       CLI_MAJOR="${MDNEST_CLI_VERSION%%.*}"
       SRV_MAJOR="${SERVER_VER%%.*}"
       if [ "$CLI_MAJOR" != "$SRV_MAJOR" ]; then
-        echo "Warning: CLI v${MDNEST_CLI_VERSION} may not be compatible with server v${SERVER_VER}"
+        c_note "Warning: CLI v${MDNEST_CLI_VERSION} may not be compatible with server v${SERVER_VER}"
       else
         # Same major: not a compatibility problem, but the CLI may still be
         # stale. The old check only fired across a major bump, so a client
@@ -1274,9 +1300,10 @@ cli_fp() {
 }
 
 # cli_label: "v4.8.17-dev (a1b2c3d)", or just the version without a hash tool.
+# The fingerprint is dim on a terminal.
 cli_label() {
   local fp; fp="$(cli_fp "$2")"
-  if [ -n "$fp" ]; then printf 'v%s (%s)' "$1" "$fp"; else printf 'v%s' "$1"; fi
+  if [ -n "$fp" ]; then printf 'v%s %s' "$1" "$(_paint "$MDNEST_C1" 2 "($fp)")"; else printf 'v%s' "$1"; fi
 }
 
 # cli_fetch downloads the CLI into $2, trying every source twice. On failure
@@ -1321,7 +1348,7 @@ $sources
 SOURCES
 
   if [ -z "$got" ]; then
-    echo "Error: couldn't download the mdnest CLI from any source." >&2
+    c_err "Error: couldn't download the mdnest CLI from any source."
     echo "Tried:$why" >&2
     echo "" >&2
     if [ -n "$server" ]; then
@@ -1403,15 +1430,15 @@ cmd_update() {
   # says e.g. 4.8.17-dev. Only a byte-identical download is "up to date".
   if [ "$CURRENT" = "$LATEST" ] && [ "$force" = "0" ] && cmp -s "$tmp" "$TARGET"; then
     rm -f "$tmp"
-    echo "mdnest CLI is up to date ($(cli_label "$CURRENT" "$TARGET"))."
-    echo "Pass --force to re-download anyway."
+    c_ok "mdnest CLI is up to date ($(cli_label "$CURRENT" "$TARGET"))."
+    c_dim "Pass --force to re-download anyway."
     agent_hint
     return 0
   fi
 
   echo "Updating mdnest CLI: $(cli_label "$CURRENT" "$TARGET") -> $(cli_label "$LATEST" "$tmp")"
-  echo "Source: ${CLI_FETCHED_FROM}"
-  echo "Target: $TARGET"
+  c_dim "Source: ${CLI_FETCHED_FROM}"
+  c_dim "Target: $TARGET"
 
   # Installed from the temp file with install(1), never by curl writing to
   # $TARGET directly — a direct write can abort mid-stream (curl 56) and leave
@@ -1423,7 +1450,7 @@ cmd_update() {
     sudo install -m 0755 "$tmp" "$TARGET"
   fi
   rm -f "$tmp"
-  echo "Updated. Run 'mdnest version' to confirm."
+  c_ok "Updated. Run '$(c_cmd "mdnest version")' to confirm."
   agent_hint
 }
 
@@ -3523,7 +3550,7 @@ agent_hint() {
   agent_installed && return 0
   [ -f "$AGENT_DECLINED_FILE" ] && return 0
   echo ""
-  echo "Tip: AI agents (Claude Code, Codex and others) can learn to use mdnest. Run 'mdnest agent install'."
+  c_note "Tip: AI agents (Claude Code, Codex and others) can learn to use mdnest. Run '$(c_cmd "mdnest agent install")'."
   return 0
 }
 
@@ -3546,7 +3573,7 @@ agent_any_tool_found() {
 # agent_offer_install: install, then say how to undo it.
 agent_offer_install() {
   if cmd_agent install; then
-    echo "Your AI tools now know how to use mdnest. To undo this, run 'mdnest agent remove'."
+    c_ok "Your AI tools now know how to use mdnest. To undo this, run '$(c_cmd "mdnest agent remove")'."
   fi
   return 0
 }
@@ -3577,14 +3604,34 @@ agent_offer() {
       agent_offer_install ;;
     n|N|no|No|NO)
       if mkdir -p "$CONFIG_DIR" 2>/dev/null && : > "$AGENT_DECLINED_FILE" 2>/dev/null; then
-        echo "OK, you will not be asked again. Run 'mdnest agent install' any time to set it up."
+        c_note "OK, you will not be asked again. Run '$(c_cmd "mdnest agent install")' any time to set it up."
       else
-        echo "OK. Run 'mdnest agent install' any time to set it up."
+        c_note "OK. Run '$(c_cmd "mdnest agent install")' any time to set it up."
       fi ;;
     *)
-      echo "Not set up. Run 'mdnest agent install' any time to set it up." ;;
+      c_note "Not set up. Run '$(c_cmd "mdnest agent install")' any time to set it up." ;;
   esac
   return 0
+}
+
+# agent_status_row <target> <state text> <path>: one aligned, coloured line
+# for 'mdnest agent status' on a terminal. Pipes keep the plain two-line form.
+agent_status_row() {
+  local name mark
+  case "$1" in
+    claude) name="Claude Code" ;;
+    *)      name="Codex, Gemini, ..." ;;
+  esac
+  case "$2" in
+    "installed, up to date") mark="$(_paint 1 32 "$(printf '%-16s' "✓ installed")")" ;;
+    "not installed"*)        mark="$(_paint 1 2 "$(printf '%-16s' "not installed")")" ;;
+    *)                       mark="$(_paint 1 33 "$(printf '%-16s' "! see note")")" ;;
+  esac
+  printf '  %-20s %s %s\n' "$name" "$mark" "$(_paint 1 2 "$3")"
+  case "$2" in
+    "installed, up to date"|"not installed") ;;
+    *) printf '  %-20s %s\n' "" "$(_paint 1 33 "$2")" ;;
+  esac
 }
 
 agent_usage() {
@@ -3657,33 +3704,33 @@ cmd_agent() {
         label="$(agent_target_label "$t")"
         state="$(agent_state "$file")" || state=""
         case "$state" in
-          current) echo "Up to date: $shown ($label)" ;;
+          current) c_ok "Up to date: $shown ($label)" ;;
           missing|outdated)
             if agent_write "$file"; then
-              [ "$state" = missing ] && echo "Installed: $shown ($label)" || echo "Updated: $shown ($label)"
+              if [ "$state" = missing ]; then c_ok "Installed: $shown ($label)"; else c_ok "Updated: $shown ($label)"; fi
             else
-              echo "Error: could not write $shown" >&2; rc=1
+              c_err "Error: could not write $shown"; rc=1
             fi ;;
           edited|foreign)
             if [ "$force" = 1 ]; then
-              if agent_write "$file"; then echo "Replaced: $shown ($label)"; else echo "Error: could not write $shown" >&2; rc=1; fi
+              if agent_write "$file"; then c_ok "Replaced: $shown ($label)"; else c_err "Error: could not write $shown"; rc=1; fi
             else
               if [ "$state" = edited ]; then
-                echo "Skipped: $shown was edited after mdnest wrote it. Pass --force to replace it." >&2
+                c_warn "Skipped: $shown was edited after mdnest wrote it. Pass --force to replace it."
               else
-                echo "Skipped: $shown exists and was not written by mdnest. Pass --force to replace it." >&2
+                c_warn "Skipped: $shown exists and was not written by mdnest. Pass --force to replace it."
               fi
               rc=1
             fi ;;
         esac
       done
       if [ "$found_any" = 0 ]; then
-        echo "No AI tool found. Looked for ~/.claude, ~/.agents, ~/.codex and ~/.gemini, and the claude, codex and gemini commands." >&2
+        c_err "No AI tool found. Looked for ~/.claude, ~/.agents, ~/.codex and ~/.gemini, and the claude, codex and gemini commands."
         echo "Install for one anyway with: mdnest agent install --tool claude   (or --tool agents)" >&2
         return 1
       fi
       if [ "$rc" = 0 ]; then
-        echo "Agents read the guide with 'mdnest docs agents', so 'mdnest update' keeps them current."
+        c_dim "Agents read the guide with 'mdnest docs agents', so 'mdnest update' keeps them current."
       fi
       return "$rc" ;;
     status)
@@ -3698,8 +3745,12 @@ cmd_agent() {
           missing)
             if agent_target_found "$t"; then state="not installed"; else state="not installed (tool not found)"; fi ;;
         esac
-        echo "$t: $shown: $state"
-        echo "  for $(agent_target_label "$t")"
+        if [ "$MDNEST_C1" = 1 ]; then
+          agent_status_row "$t" "$state" "$shown"
+        else
+          echo "$t: $shown: $state"
+          echo "  for $(agent_target_label "$t")"
+        fi
       done
       if grep -qs '"mdnest@mdnest"' "$HOME/.claude/plugins/installed_plugins.json"; then
         echo "Claude Code plugin mdnest@mdnest: installed"
@@ -3710,19 +3761,19 @@ cmd_agent() {
         file="$(agent_target_file "$t")"; shown="$(agent_tidy_path "$file")"
         state="$(agent_state "$file")" || state=""
         case "$state" in
-          missing) echo "Not installed: $shown" ;;
+          missing) c_dim "Not installed: $shown" ;;
           current|outdated)
             rm -f "$file" && rmdir "$(dirname "$file")" 2>/dev/null || true
-            echo "Removed: $shown" ;;
+            c_ok "Removed: $shown" ;;
           edited)
             if [ "$force" = 1 ]; then
               rm -f "$file" && rmdir "$(dirname "$file")" 2>/dev/null || true
-              echo "Removed: $shown (it had been edited)"
+              c_ok "Removed: $shown (it had been edited)"
             else
-              echo "Skipped: $shown was edited after mdnest wrote it. Pass --force to delete it anyway." >&2
+              c_warn "Skipped: $shown was edited after mdnest wrote it. Pass --force to delete it anyway."
               rc=1
             fi ;;
-          foreign) echo "Left alone: $shown was not written by mdnest." ;;
+          foreign) c_note "Left alone: $shown was not written by mdnest." ;;
         esac
       done
       return "$rc" ;;

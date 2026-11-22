@@ -9,6 +9,25 @@
 #   curl -fsSL https://raw.githubusercontent.com/mahsanamin/mdnest/main/install-cli.sh | bash
 set -e
 
+# Colour only for a person at a terminal: never in a pipe, with NO_COLOR
+# (https://no-color.org) or TERM=dumb. MDNEST_COLOR=always or never overrides
+# it. With colour off these print exactly the text they are given.
+C1=0; C2=0
+case "${MDNEST_COLOR:-auto}" in
+  always) C1=1; C2=1 ;;
+  never) ;;
+  *)
+    if [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != dumb ]; then
+      if [ -t 1 ]; then C1=1; fi
+      if [ -t 2 ]; then C2=1; fi
+    fi ;;
+esac
+paint() { if [ "$1" = 1 ]; then printf '\033[%sm%s\033[0m' "$2" "$3"; else printf '%s' "$3"; fi; }
+say_ok()   { if [ "$C1" = 1 ]; then printf '\033[32m\342\234\223\033[0m %s\n' "$*"; else printf '%s\n' "$*"; fi; }
+say_note() { paint "$C1" 33 "$*"; printf '\n'; }
+say_err()  { { paint "$C2" 31 "$*"; printf '\n'; } >&2; }
+say_cmd()  { paint "$C1" 1 "$*"; printf '\n'; }
+
 # Optional: set up the AI agent skill without asking (--agent-skills), or never
 # ask (--no-agent-skills). MDNEST_AGENT_SKILLS=1 or 0 does the same.
 #   curl -fsSL https://mdnest.dev/install.sh | bash -s -- --agent-skills
@@ -100,7 +119,7 @@ $(mdnest_sources "$BRANCH" "$NAME")
 SOURCES
 
 if [ -z "$GOT" ]; then
-  echo "Error: couldn't download the mdnest CLI from any source." >&2
+  say_err "Error: couldn't download the mdnest CLI from any source."
   echo "Tried:$WHY" >&2
   echo "" >&2
   echo "A 503 from raw.githubusercontent.com is GitHub's CDN, not your network" >&2
@@ -131,19 +150,19 @@ fi
 # Install atomically with the right mode.
 $SUDO install -m 0755 "$TMP" "$DEST"
 
-echo "Installed: $DEST"
+say_ok "Installed: $DEST"
 
 # If we fell back to ~/.local/bin and it isn't on PATH, tell the user.
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
   *) echo ""
-     echo "Note: $BIN_DIR is not on your PATH. Add this to your shell profile:"
-     echo "  export PATH=\"$BIN_DIR:\$PATH\"" ;;
+     say_note "Note: $BIN_DIR is not on your PATH. Add this to your shell profile:"
+     say_cmd "  export PATH=\"$BIN_DIR:\$PATH\"" ;;
 esac
 
 echo ""
 echo "Get started:"
-echo "  mdnest login https://notes.example.com mdnest_yourtoken"
+say_cmd "  mdnest login https://notes.example.com mdnest_yourtoken"
 echo "  mdnest servers"
 echo ""
 echo "Create an API token from your mdnest web UI: Settings > API Tokens"

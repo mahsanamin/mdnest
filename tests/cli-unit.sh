@@ -16,6 +16,9 @@
 
 set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# These checks compare exact text. Some run the CLI in a pseudo-terminal,
+# where it would add colour; run_color_suite covers the colour.
+export NO_COLOR=1
 
 PASS=0; FAIL=0
 green() { printf '\033[32m%s\033[0m' "$1"; }
@@ -676,6 +679,29 @@ run_agent_suite() {
   rm -rf "$h"
 }
 
+# ── colour ─────────────────────────────────────────────────────────────────
+# Setup commands colour their output only for a terminal. Plain output (a
+# pipe, NO_COLOR) is the same text as before; every other check here pins it.
+run_color_suite() {
+  echo "── colour ──"
+  local h out esc
+  esc="$(printf '\033')"
+  h="$(mktemp -d "${TMPDIR:-/tmp}/mdnest-color.XXXXXX")"
+  out="$(HOME="$h" MDNEST_COLOR=always "$REPO_ROOT/mdnest" agent install --tool claude 2>&1)"
+  case "$out" in *"${esc}[32m"*"Installed: "*) ok "colour: an ok line has a green mark" ;; *) bad "colour: an ok line has a green mark" "$(printf '%s' "$out" | od -c | head -3)" ;; esac
+  echo "edited" >> "$h/.claude/skills/mdnest/SKILL.md"
+  out="$(HOME="$h" MDNEST_COLOR=always "$REPO_ROOT/mdnest" agent install --tool claude 2>&1)"
+  case "$out" in *"${esc}[33mSkipped: "*) ok "colour: a warning line is yellow" ;; *) bad "colour: a warning line is yellow" "$(printf '%s' "$out" | od -c | head -3)" ;; esac
+  out="$(HOME="$h" MDNEST_COLOR=always NO_COLOR=1 "$REPO_ROOT/mdnest" agent remove --tool claude --force 2>&1)"
+  case "$out" in *"${esc}["*) ok "colour: MDNEST_COLOR=always wins over NO_COLOR" ;; *) bad "colour: MDNEST_COLOR=always wins over NO_COLOR" "$out" ;; esac
+  out="$(HOME="$h" "$REPO_ROOT/mdnest" agent install --tool claude 2>&1)"
+  case "$out" in *"$esc"*) bad "colour: none in a pipe" "$(printf '%s' "$out" | od -c | head -3)" ;; *) ok "colour: none in a pipe" ;; esac
+  case "$(printf '%s\n' "$out" | head -1)" in "Installed: "*"/.claude/skills/mdnest/SKILL.md (Claude Code)") ok "colour: plain ok line is today's text" ;; *) bad "colour: plain ok line is today's text" "$out" ;; esac
+  out="$(HOME="$h" MDNEST_COLOR=never "$REPO_ROOT/mdnest" --version)"
+  case "$out" in *"$esc"*) bad "colour: MDNEST_COLOR=never is plain" "$out" ;; *) ok "colour: MDNEST_COLOR=never is plain" ;; esac
+  rm -rf "$h"
+}
+
 # ── agent skills question ───────────────────────────────────────────────────
 # `mdnest agent offer` is the one question the installers and `mdnest login`
 # ask. Nothing is installed without a yes or --yes; "no" is remembered; with
@@ -1125,6 +1151,7 @@ run_keepalive_suite
 run_keepalive_no_policy_suite
 run_approval_suite
 run_agent_suite
+run_color_suite
 run_agent_offer_suite
 run_errexit_lint
 
