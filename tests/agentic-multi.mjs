@@ -57,6 +57,11 @@ if (mode === 'init') {
     return { code, stdout, stderr };
   }
   const cli = (name, argv, options = {}) => run(join(root, 'mdnest'), argv, { ...options, env: { ...options.env, HOME: f.accounts[name].profileHome } });
+  // A failed command says what failed, with tokens and passwords removed.
+  const redact = text => { let out = String(text || '').replace(/mdnest_[A-Za-z0-9_-]+/g, 'mdnest_<redacted>'); for (const a of Object.values(f.accounts)) for (const v of [a.password, a.apiToken, a.browserToken]) if (v) out = out.split(v).join('<redacted>'); return out.slice(-2000); };
+  const ok = (what, r) => assert.equal(r.code, 0, `${what} exited ${r.code}: ${redact((r.stderr || "") + (r.stdout || ""))}`);
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  async function up(url) { try { const res = await fetch(url + '/api/config', { signal: AbortSignal.timeout(2000) }); return res.status === 200; } catch { return false; } }
   try {
     f.accounts.admin.browserToken = await login('admin', f.accounts.admin.password);
     for (const name of ['alpha-writer', 'alpha-reader', 'beta-writer', 'alpha-admin']) {
@@ -110,10 +115,17 @@ if (mode === 'init') {
     const persistedPrompt='Durable "prompt"\nSecond line';
     await expect('POST','/api/chat/agents?'+query('team-alpha','Chat.md',{name:'persisted'}),alpha.apiToken,persistedPrompt,200);
     const claimWinner=races.find(r=>r.status===200).data;
-    const restarted = await run('docker', ['restart', f.backend]); assert.equal(restarted.code, 0);
-    for (let i = 0; i < 60; i++) { try { if ((await api('GET', '/api/config')).status === 200) break; } catch {} await new Promise(r => setTimeout(r, 250)); }
-    const mapped=await run('docker',['port',f.backend,'8080/tcp']);assert.equal(mapped.code,0);
-    f.backendURL='http://127.0.0.1:'+mapped.stdout.trim().split(':').at(-1);
+    ok('docker restart', await run('docker', ['restart', f.backend]));
+    // The host port is published as 0, so it changes on restart: read the new
+    // one first (it is not there until the container is running again), then
+    // wait until the backend answers directly and through the frontend.
+    let mapped;
+    for (let i = 0; i < 120; i++) { mapped = await run('docker', ['port', f.backend, '8080/tcp']); if (mapped.code === 0 && mapped.stdout.trim()) break; await sleep(250); }
+    ok('docker port after restart', mapped);
+    f.backendURL = 'http://127.0.0.1:' + mapped.stdout.trim().split('\n')[0].split(':').at(-1);
+    let ready = false;
+    for (let i = 0; i < 240 && !ready; i++) { ready = await up(f.backendURL) && await up(f.base); if (!ready) await sleep(250); }
+    assert.ok(ready, `backend not answering 60 s after restart (direct ${f.backendURL} and via ${f.base})`);
     await privateWrite(join(dir,'fixture.json'),JSON.stringify(f));
     const after = await expect('GET', unseenURL, alpha.apiToken, undefined, 200);
     check('durable unseen ack survives backend restart', after.messages.length === 0);
@@ -130,7 +142,7 @@ if (mode === 'init') {
       await page.locator('.chat-room-title h2').waitFor({ timeout: 20000 });
       await page.locator('.chat-btn', { hasText: /Connect an agent|Agents/ }).first().click();
       const panel = page.locator('.chat-agent');
-      r = await cli('alpha-writer', ['chat', 'post', '@fixture/' + target, '/role Review inputs', '--as', 'reviewer']); assert.equal(r.code, 0);
+      r = await cli('alpha-writer', ['chat', 'post', '@fixture/' + target, '/role Review inputs', '--as', 'reviewer']); ok('CLI /role post', r);
       await panel.getByTestId('chat-agent-saved').getByText('reviewer', { exact: true }).waitFor({ timeout: 10000 });
       await panel.getByRole('button', { name: "Edit reviewer's prompt" }).click();
       const prompt = 'Review "quotes".\nThen check permissions.';
