@@ -577,6 +577,105 @@ PROBE
   esac
 }
 
+# ── agent kit ───────────────────────────────────────────────────────────────
+# `mdnest docs agents` and the thin skill are embedded in the CLI (a curl
+# install is one file), and each has a readable copy in the repo. These checks
+# fail when a copy drifts, and walk agent install/status/remove through a
+# throwaway HOME: it installs, refuses to clobber a file it did not write,
+# updates its own older file, and removes only its own files.
+run_agent_suite() {
+  echo "── agent kit ──"
+  local h out rc f
+  if [ "$(agents_guide)" = "$(cat "$REPO_ROOT/docs/agents.md")" ]; then
+    ok "docs agents: the embedded guide matches docs/agents.md"
+  else
+    bad "docs agents: the embedded guide matches docs/agents.md" \
+        "edit agents_guide in mdnest and docs/agents.md together: $(diff <(agents_guide) "$REPO_ROOT/docs/agents.md" | head -5)"
+  fi
+  if [ "$(agent_skill_text)" = "$(cat "$REPO_ROOT/plugins/mdnest/skills/mdnest/SKILL.md")" ]; then
+    ok "agent skill: the embedded skill matches the plugin's SKILL.md"
+  else
+    bad "agent skill: the embedded skill matches the plugin's SKILL.md" \
+        "edit agent_skill_text in mdnest and plugins/mdnest/skills/mdnest/SKILL.md together"
+  fi
+  case "$(agents_guide)" in *'| `create <path> -` |'*) ok "docs agents: the guide has the command table" ;;
+    *) bad "docs agents: the guide has the command table" "not found" ;; esac
+  case "$(agent_skill_text)" in *'mdnest docs agents'*) ok "agent skill: points at 'mdnest docs agents'" ;;
+    *) bad "agent skill: points at 'mdnest docs agents'" "the skill must not copy the guide" ;; esac
+
+  # Through the real dispatch, as a user runs it. PATH is cut down so a
+  # claude/codex/gemini on this machine does not count as "found".
+  h=$(mktemp -d "${TMPDIR:-/tmp}/mdnest-agent.XXXXXX")
+  ag() { HOME="$h" PATH=/usr/bin:/bin "$REPO_ROOT/mdnest" "$@" 2>&1; }
+  out=$(ag docs agents); rc=$?
+  eq "docs agents: exit 0" "0" "$rc"
+  eq "docs agents: prints the guide" "$(cat "$REPO_ROOT/docs/agents.md")" "$out"
+
+  out=$(ag agent install); rc=$?
+  eq "agent install: no AI tool found exits 1" "1" "$rc"
+  case "$out" in *"No AI tool found"*) ok "agent install: says no tool was found" ;; *) bad "agent install: says no tool was found" "$out" ;; esac
+  eq "agent install: wrote nothing without a tool" "" "$(find "$h" -name SKILL.md)"
+
+  mkdir -p "$h/.claude"
+  out=$(ag agent install); rc=$?
+  f="$h/.claude/skills/mdnest/SKILL.md"
+  eq "agent install: exit 0 with ~/.claude present" "0" "$rc"
+  [ -f "$f" ] && ok "agent install: wrote ~/.claude/skills/mdnest/SKILL.md" || bad "agent install: wrote ~/.claude/skills/mdnest/SKILL.md" "$out"
+  [ ! -e "$h/.agents/skills/mdnest/SKILL.md" ] && ok "agent install: skipped ~/.agents (no tool found)" || bad "agent install: skipped ~/.agents (no tool found)" "$out"
+  eq "agent install: front matter stays on line 1" "---" "$(head -1 "$f")"
+  eq "agent install: the file is the skill plus one mark line" "$(agent_skill_text)" "$(grep -v '^<!-- mdnest-agent-skill sum=' "$f")"
+  eq "agent install: second run is a no-op" "0" "$(ag agent install >/dev/null; echo $?)"
+  case "$(ag agent status)" in *"claude: ~/.claude/skills/mdnest/SKILL.md: installed, up to date"*) ok "agent status: reports the install" ;;
+    *) bad "agent status: reports the install" "$(ag agent status)" ;; esac
+
+  # A file mdnest did not write: install refuses without --force, remove
+  # never deletes it.
+  mkdir -p "$h/.agents/skills/mdnest"
+  printf 'my own skill\n' > "$h/.agents/skills/mdnest/SKILL.md"
+  out=$(ag agent install --tool codex); rc=$?
+  eq "agent install: refuses to clobber a foreign file" "1" "$rc"
+  eq "agent install: foreign file is untouched" "my own skill" "$(cat "$h/.agents/skills/mdnest/SKILL.md")"
+  ag agent remove --tool agents --force >/dev/null
+  eq "agent remove: never deletes a foreign file, even with --force" "my own skill" "$(cat "$h/.agents/skills/mdnest/SKILL.md")"
+  out=$(ag agent install --tool agents --force); rc=$?
+  eq "agent install --force: replaces a foreign file" "0" "$rc"
+  eq "agent install --force: wrote the skill" "$(agent_skill_text)" "$(grep -v '^<!-- mdnest-agent-skill sum=' "$h/.agents/skills/mdnest/SKILL.md")"
+
+  # An edited file of ours: left alone by install and remove without --force.
+  printf 'my note\n' >> "$f"
+  out=$(ag agent install --tool claude); rc=$?
+  eq "agent install: refuses to overwrite an edited file" "1" "$rc"
+  case "$(cat "$f")" in *"my note"*) ok "agent install: the edit survives" ;; *) bad "agent install: the edit survives" "edit lost" ;; esac
+  out=$(ag agent remove --tool claude); rc=$?
+  eq "agent remove: refuses an edited file" "1" "$rc"
+  [ -f "$f" ] && ok "agent remove: the edited file is still there" || bad "agent remove: the edited file is still there" "$out"
+  ag agent remove --tool claude --force >/dev/null
+  [ ! -e "$f" ] && ok "agent remove --force: deletes an edited file of ours" || bad "agent remove --force: deletes an edited file of ours" "still there"
+
+  # Our own older text (as after a CLI update) is updated without --force.
+  ( agent_skill_text() { printf -- '---\nname: mdnest\ndescription: old\n---\nold body\n'; }
+    HOME="$h"; agent_write "$f" )
+  case "$(ag agent status)" in *"installed, older text"*) ok "agent status: sees our older text" ;; *) bad "agent status: sees our older text" "$(ag agent status)" ;; esac
+  out=$(ag agent install --tool claude); rc=$?
+  eq "agent install: updates our older text" "0" "$rc"
+  case "$out" in *"Updated:"*) ok "agent install: says Updated" ;; *) bad "agent install: says Updated" "$out" ;; esac
+
+  # remove takes only our files and their now-empty folders.
+  out=$(ag agent remove); rc=$?
+  eq "agent remove: exit 0" "0" "$rc"
+  [ ! -e "$h/.claude/skills/mdnest" ] && ok "agent remove: deleted our file and its folder" || bad "agent remove: deleted our file and its folder" "$out"
+  [ ! -e "$h/.agents/skills/mdnest/SKILL.md" ] && ok "agent remove: deleted the --force-written file (it is ours now)" || bad "agent remove: deleted the --force-written file (it is ours now)" "$out"
+
+  # The hint after install/update shows only when nothing is installed.
+  eq "agent hint: shown when nothing is installed" "1" "$(HOME="$h" agent_hint | grep -c 'mdnest agent install')"
+  ag agent install --tool claude >/dev/null
+  eq "agent hint: skipped once installed" "" "$(HOME="$h" agent_hint)"
+  ag agent remove >/dev/null
+  mkdir -p "$h/.claude/plugins"; printf '{"plugins":{"mdnest@mdnest":[]}}' > "$h/.claude/plugins/installed_plugins.json"
+  eq "agent hint: skipped when the Claude Code plugin is installed" "" "$(HOME="$h" agent_hint)"
+  rm -rf "$h"
+}
+
 # ── CLI download sources ────────────────────────────────────────────────────
 # The install one-liner started returning 503 for everyone in a region:
 # raw.githubusercontent.com is one Fastly tier, a POP ran out of backend
@@ -917,6 +1016,7 @@ run_version_suite
 run_keepalive_suite
 run_keepalive_no_policy_suite
 run_approval_suite
+run_agent_suite
 run_errexit_lint
 
 echo

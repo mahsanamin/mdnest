@@ -1,0 +1,12 @@
+{
+  "name": "mdnest",
+  "description": "The mdnest plugin for Claude Code.",
+  "owner": { "name": "Ahsan Amin", "url": "https://github.com/mahsanamin" },
+  "plugins": [
+    {
+      "name": "mdnest",
+      "source": "./plugins/mdnest",
+      "description": "Teaches Claude Code to use the mdnest CLI for notes and chats."
+    }
+  ]
+}
