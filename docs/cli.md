@@ -696,7 +696,7 @@ version your server is running, so you have something concrete to compare
 
 ```bash
 mdnest update                 # self-update from main
-mdnest update --force         # re-download even if the version matches
+mdnest update --force         # reinstall even if the downloaded file is identical
 MDNEST_BRANCH=develop mdnest update --force   # track an unreleased build
 mdnest update --server @work  # the CLI the @work server was built with (4.8.5+)
 mdnest update --server https://notes.example.com   # same, by address
@@ -706,6 +706,12 @@ A CLI older than 4.8.5 does not know `--server`: it ignores the option, updates
 from GitHub, and may report "up to date" while the server runs a newer
 version. Run the server's install command once (see
 [From your own server](#from-your-own-server-485)) to get past that.
+
+`mdnest update` compares the downloaded file with the installed one, not only
+the version label, so it also replaces an older build that has the same label
+(every build between two releases says, for example, `4.8.17-dev`).
+`mdnest version` prints a short fingerprint of the file next to the version,
+`mdnest CLI v4.8.17-dev (a1b2c3d)`, so you can tell two copies apart.
 
 `--server` downloads only from that server's `/cli/mdnest`; it never falls
 back to GitHub, because the point is to match the server. Like every update it
