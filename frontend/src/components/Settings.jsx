@@ -390,6 +390,22 @@ echo "text" | mdnest append notes/log.md -`} />
       <p className="settings-description">
         <code>mdnest help</code> lists every command.
       </p>
+
+      <h4 className="settings-section-title">AI tools</h4>
+      <p className="settings-description">
+        Let Claude Code, Codex and other AI tools use your notes. The installer offers this;
+        you can also run it yourself.
+      </p>
+      <div className="cli-ai-tools">
+        <CodeBlock label="See what is installed" code="mdnest agent status" />
+        <CodeBlock label="Install" code="mdnest agent install" />
+        <CodeBlock label="Remove" code="mdnest agent remove" />
+      </div>
+      <p className="settings-description">Or, in Claude Code, add it as a plugin:</p>
+      <div className="cli-ai-tools-plugin">
+        <CodeBlock code={`/plugin marketplace add mahsanamin/mdnest
+/plugin install mdnest@mdnest`} />
+      </div>
     </div>
   );
 }
