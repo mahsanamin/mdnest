@@ -1021,6 +1021,19 @@ func main() {
 		}
 	}()
 	log.Printf("mdnest backend listening on :%s (NOTES_DIR=%s)", port, absNotesDir)
+	// Script mode: page files are served by their own listener, on another
+	// origin, and by nothing else. No API route, no CORS, read only.
+	var pagesSrv *http.Server
+	if pagesHandler != nil && pagesHandler.ScriptMode() {
+		pagesPort := env("PAGES_LISTEN_PORT", "8081")
+		pagesSrv = &http.Server{Addr: ":" + pagesPort, Handler: pagesHandler.SiteHandler(), ReadHeaderTimeout: 10 * time.Second}
+		go func() {
+			if err := pagesSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("pages server error: %v", err)
+			}
+		}()
+		log.Printf("pages listener on :%s (served as %s)", pagesPort, pagesCfg.Origin)
+	}
 	logNamespacesAtStartup(appCtx, stg, absNotesDir)
 
 	restart := false
@@ -1035,6 +1048,9 @@ func main() {
 	defer cancel()
 	if err := srv.Shutdown(shutCtx); err != nil {
 		log.Printf("graceful shutdown error: %v", err)
+	}
+	if pagesSrv != nil {
+		pagesSrv.Shutdown(shutCtx)
 	}
 	if restart {
 		stopSignals() // cancels appCtx: background work stops as on SIGTERM
