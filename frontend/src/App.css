@@ -6207,6 +6207,8 @@ pre:hover .code-copy-btn {
   bottom: 0;
   width: 6px;
   cursor: col-resize;
+  /* A touch drag on the edge resizes instead of scrolling the page. */
+  touch-action: none;
   z-index: 10;
 }
 
@@ -7344,11 +7346,15 @@ pre:hover .code-copy-btn {
   user-select: none;
 }
 
-/* Side panel resize: a drag follows the pointer with no easing, and reduced
-   motion turns the easing off entirely. */
+/* Side panel resize: a drag follows the pointer with no easing, iframes let
+   the pointer through to the drag (StickiesPanel), and reduced motion turns
+   the easing off entirely. */
 body.side-panel-resizing .stickies-panel,
 body.side-panel-resizing .main {
   transition: none;
+}
+body.side-panel-resizing iframe {
+  pointer-events: none;
 }
 @media (prefers-reduced-motion: reduce) {
   .stickies-panel,

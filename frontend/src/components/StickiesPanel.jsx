@@ -99,27 +99,47 @@ function StickiesPanel({
             e.preventDefault();
             onWidthChange(clampWidth(next));
           }}
-          onMouseDown={(e) => {
+          onPointerDown={(e) => {
+            if (e.button !== 0) return;
             e.preventDefault();
             const startX = e.clientX;
             const startWidth = width || 320;
+            let next = null;
+            let frame = 0;
+            // At most one width change per screen frame: each one re-renders
+            // the app, and a mouse can report several moves per frame.
+            const flush = () => {
+              frame = 0;
+              if (next !== null) onWidthChange(next);
+            };
             const onMove = (ev) => {
+              // Released somewhere we never heard about: end the drag.
+              if (ev.buttons === 0) { onUp(); return; }
               // Anchored to the right edge, so dragging left widens it.
-              onWidthChange(clampWidth(startWidth + startX - ev.clientX));
+              next = clampWidth(startWidth + startX - ev.clientX);
+              if (!frame) frame = requestAnimationFrame(flush);
             };
             const onUp = () => {
-              document.removeEventListener('mousemove', onMove);
-              document.removeEventListener('mouseup', onUp);
+              if (frame) { cancelAnimationFrame(frame); flush(); }
+              document.removeEventListener('pointermove', onMove);
+              document.removeEventListener('pointerup', onUp);
+              document.removeEventListener('pointercancel', onUp);
+              window.removeEventListener('blur', onUp);
               document.body.style.cursor = '';
               document.body.style.userSelect = '';
               document.body.classList.remove('side-panel-resizing');
             };
             document.body.style.cursor = 'col-resize';
             document.body.style.userSelect = 'none';
-            // A drag follows the pointer exactly: no easing while it lasts.
+            // While dragging: no easing (the edge follows the pointer), and
+            // iframes (an HTML page, a preview) ignore the pointer, so moving
+            // over them, or letting go over them, still reaches this handler.
+            // Without that the drag stalls going left and never ends.
             document.body.classList.add('side-panel-resizing');
-            document.addEventListener('mousemove', onMove);
-            document.addEventListener('mouseup', onUp);
+            document.addEventListener('pointermove', onMove);
+            document.addEventListener('pointerup', onUp);
+            document.addEventListener('pointercancel', onUp);
+            window.addEventListener('blur', onUp);
           }}
         />
       )}

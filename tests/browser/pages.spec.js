@@ -419,6 +419,50 @@ test('the Pages view: cards, description, search, sort, reveal in tree, and noth
   await expect(page.locator('.page-bar')).toContainText(`Zulu ${run}`, { timeout: 10_000 });
 });
 
+test('the side panel resizes smoothly both ways while an HTML page is open beside it', async ({ page, request }) => {
+  test.skip(MODE !== 'static', 'the same in both modes');
+  // Dragging the edge left passes over the page's iframe. The frame swallows
+  // mouse events, so without a guard the drag stalls on the way left (it
+  // worked on the way right, over the panel itself).
+  const path = `${DIR}/drag/wide.page.md`;
+  const r = await request.put(`/api/pages?ns=${NS}&path=${encodeURIComponent(path)}`, {
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'text/html' },
+    data: `<title>Drag ${run}</title><body style="margin:0"><p id="b" style="height:2000px">DRAG-${run}</p></body>`,
+  });
+  expect(r.status(), await r.text()).toBe(200);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await login(page);
+  await page.goto(`/#${NS}/${path}`);
+  await expect(page.frameLocator('[data-testid=page-frame]').locator('#b')).toHaveText(`DRAG-${run}`, { timeout: 15_000 });
+  await page.locator('[data-testid=toolbar-stickies]').click();
+  const panel = page.locator('[data-testid=side-panel]');
+  await expect(panel).toBeVisible();
+  await page.waitForTimeout(300); // let the open settle
+  const width = async () => Math.round((await panel.boundingBox()).width);
+  const w0 = await width();
+  const h = await panel.locator('.stickies-resize-handle').boundingBox();
+  const x = h.x + h.width / 2, y = h.y + 300;
+  // Left (wider), across the page frame, then right (narrower).
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x - 150, y, { steps: 15 });
+  await page.mouse.up();
+  expect(Math.abs((await width()) - (w0 + 150)), 'dragging left over the page widens the panel').toBeLessThanOrEqual(3);
+  // Released over the page: the drag is over, moving on does not resize.
+  await page.mouse.move(x - 300, y, { steps: 10 });
+  await page.waitForTimeout(100);
+  expect(Math.abs((await width()) - (w0 + 150)), 'the panel stops following the mouse after release').toBeLessThanOrEqual(3);
+  const h2 = await panel.locator('.stickies-resize-handle').boundingBox();
+  const x2 = h2.x + h2.width / 2;
+  await page.mouse.move(x2, y);
+  await page.mouse.down();
+  await page.mouse.move(x2 + 100, y, { steps: 10 });
+  await page.mouse.up();
+  expect(Math.abs((await width()) - (w0 + 50)), 'dragging right narrows it').toBeLessThanOrEqual(3);
+  // After the drag the page is clickable again (the guard is lifted).
+  expect(await page.locator('[data-testid=page-frame]').evaluate((f) => getComputedStyle(f).pointerEvents)).not.toBe('none');
+});
+
 test('the Pages tab in the side panel: open two pages in a row, reveal one, panel stays open', async ({ page, request }) => {
   test.skip(MODE !== 'static', 'the same in both modes');
   const auth = { Authorization: `Bearer ${token}` };
