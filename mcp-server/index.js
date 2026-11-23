@@ -830,6 +830,9 @@ server.tool(
         }
         return { content: [{ type: "text", text: `[lines ${r.from}-${r.to} of ${r.total}]\n${r.text}` }] };
       }
+      if (features.pages && path.endsWith(".page.md")) {
+        return { content: [{ type: "text", text: text + (await pageTextSuffix(namespace, path)) }] };
+      }
       return { content: [{ type: "text", text }] };
     } catch (err) {
       return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
@@ -1537,14 +1540,31 @@ async function pageError(res) {
   return { content: [{ type: "text", text: `Error ${res.status}: ${text}` }], isError: true };
 }
 
-const pageSlugSchema = z.string().regex(/^[a-z0-9-]{1,64}$/).describe("Page name: 1 to 64 lowercase letters, digits or hyphens");
+const handlePathSchema = z.string().describe("Path of the page's handle in the namespace, e.g. Reports/q3-report (\".page.md\" is added when missing). The page shows in the notes tree as that file.");
+const asHandle = (p) => (p.endsWith(".page.md") ? p : `${p}.page.md`);
+
+// pageTextSuffix: what read_note adds after a page handle. The text pulled out
+// of the published page, under a marker line, or the server's reason when the
+// page is not here (for example "this page was published in another
+// namespace: publish it again here"). Empty when the file is not a handle.
+async function pageTextSuffix(namespace, path) {
+  try {
+    const res = await api(`/api/pages/text?ns=${encodeURIComponent(namespace)}&path=${encodeURIComponent(path)}&format=text`);
+    if (res.ok) return `\n----- page text (extracted from the published HTML) -----\n${await res.text()}`;
+    if (res.status === 404) {
+      const data = await res.json().catch(() => null);
+      if (data && data.error) return `\n----- page text -----\n${data.error}\n`;
+    }
+  } catch { /* the handle alone */ }
+  return "";
+}
 
 if (features.pages) server.tool(
   "publish_page",
-  "Publish an HTML page (a report or dashboard) to a namespace, for people to view in mdnest. Publishing to an existing name replaces that page. Pages are view only and separate from notes. Scripts run only when the server has a pages origin set up; otherwise the page shows without scripts.",
+  "Publish an HTML page (a report or dashboard) for people to view in mdnest. It shows in the notes tree as <path>.page.md, in any folder; publishing to a path that already has a page replaces it. Pages are view only. Scripts run only when the server has a pages origin set up; otherwise the page shows without scripts.",
   {
     namespace: z.string().describe("Namespace name"),
-    slug: pageSlugSchema,
+    path: handlePathSchema,
     html: z.string().describe("The page's index.html"),
     files: z.array(z.object({
       path: z.string().describe("Path inside the page, e.g. css/style.css or data/q3.json"),
@@ -1552,9 +1572,9 @@ if (features.pages) server.tool(
       encoding: z.enum(["utf8", "base64"]).optional().describe("base64 for images and other binary files"),
     })).optional().describe("Other files the page links to with relative paths"),
   },
-  async ({ namespace, slug, html, files }) => {
+  async ({ namespace, path, html, files }) => {
     try {
-      const q = `ns=${encodeURIComponent(namespace)}&slug=${encodeURIComponent(slug)}`;
+      const q = `ns=${encodeURIComponent(namespace)}&path=${encodeURIComponent(asHandle(path))}`;
       let res;
       if (!files || files.length === 0) {
         res = await api(`/api/pages?${q}`, { method: "PUT", headers: { "Content-Type": "text/html; charset=utf-8" }, body: html });
@@ -1577,16 +1597,16 @@ if (features.pages) server.tool(
 
 if (features.pages) server.tool(
   "list_pages",
-  "List the HTML pages published in a namespace (title, author, date). With query, only pages whose text contains every word.",
+  "List the HTML pages in a namespace that you can read: each one's handle path, title, author and date. With query, only pages whose text contains every word.",
   {
     namespace: z.string().describe("Namespace name"),
     query: z.string().optional().describe("Search the pages' text"),
   },
   async ({ namespace, query }) => {
     try {
-      let path = `/api/pages?ns=${encodeURIComponent(namespace)}`;
-      if (query) path += `&q=${encodeURIComponent(query)}`;
-      const res = await api(path);
+      let p = `/api/pages?ns=${encodeURIComponent(namespace)}`;
+      if (query) p += `&q=${encodeURIComponent(query)}`;
+      const res = await api(p);
       if (!res.ok) return pageError(res);
       const data = await res.json();
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
@@ -1598,14 +1618,14 @@ if (features.pages) server.tool(
 
 if (features.pages) server.tool(
   "read_page",
-  "Read an HTML page's details and its visible text (pulled out when it was published). Does not return the raw HTML.",
+  "Read an HTML page's details and its visible text (pulled out when it was published), by its handle path. Does not return the raw HTML. read_note on the handle gives the same text after the handle.",
   {
     namespace: z.string().describe("Namespace name"),
-    slug: pageSlugSchema,
+    path: handlePathSchema,
   },
-  async ({ namespace, slug }) => {
+  async ({ namespace, path }) => {
     try {
-      const res = await api(`/api/pages/text?ns=${encodeURIComponent(namespace)}&slug=${encodeURIComponent(slug)}`);
+      const res = await api(`/api/pages/text?ns=${encodeURIComponent(namespace)}&path=${encodeURIComponent(asHandle(path))}`);
       if (!res.ok) return pageError(res);
       const data = await res.json();
       return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };

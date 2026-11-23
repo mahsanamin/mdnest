@@ -1576,6 +1576,27 @@ cmd_read() {
   require_server
   [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] && { echo "Usage: mdnest read @alias/namespace/path.md" >&2; exit 1; }
   print_note "$PARSED_NS" "$PARSED_PATH"
+  case "$PARSED_PATH" in *.page.md) print_page_text "$PARSED_NS" "$PARSED_PATH" ;; esac
+  return 0
+}
+
+# print_page_text <ns> <handle>: after a page handle, the text pulled out of
+# the published page, under a marker line, so an agent reading the handle
+# gets the content too. Prints nothing when the server has pages off or the
+# file is not a handle; a page that is not here prints the server's reason.
+print_page_text() {
+  local tmp code curl_rc=0
+  tmp=$(mktemp) || return 0
+  code=$(curl -s -o "$tmp" -w "%{http_code}" --connect-timeout "${MDNEST_TIMEOUT:-10}" -H "Authorization: Bearer $MDNEST_TOKEN" "${MDNEST_URL}/api/pages/text?ns=$(urlencode "$1")&path=$(urlencode "$2")&format=text") || curl_rc=$?
+  if [ "$curl_rc" = "0" ] && [ "$code" = "200" ]; then
+    printf '\n----- page text (extracted from the published HTML) -----\n'
+    cat "$tmp"
+  elif [ "$curl_rc" = "0" ] && [ "$code" = "404" ] && grep -q '"error"' "$tmp" 2>/dev/null; then
+    printf '\n----- page text -----\n'
+    sed -n 's/.*"error":"\([^"]*\)".*/\1/p' "$tmp"
+  fi
+  rm -f "$tmp"
+  return 0
 }
 
 # print_note <ns> <path> — print a note's body byte-for-byte, adding a final
@@ -2828,31 +2849,38 @@ cmd_search() {
 }
 
 # ─── HTML pages (server: ENABLE_PAGES) ──────────────────────────────────────
-# A page is a folder with an index.html, or one .html file. Publishing sends a
-# gzipped tar of the folder (made by the system tar) or the file as text/html;
-# publishing again replaces the page. The server checks every path, the size
-# and the file count, so the CLI only checks there is an index.html to send.
+# A page is a folder with an index.html, or one .html file. It lives in the
+# notes tree as a handle file, <name>.page.md, which the server writes; the
+# page's files are stored apart from the notes. Publishing sends a gzipped tar
+# of the folder (made by the system tar) or the file as text/html; publishing
+# again replaces the page. The server checks every path, the size and the file
+# count, so the CLI only checks there is an index.html to send.
 
 page_usage() {
   cat >&2 <<'USAGE'
 Usage:
-  mdnest page publish @alias/namespace/page-name <folder-or-file.html>
+  mdnest page publish @alias/namespace/folder/name <folder-or-file.html>
   mdnest page list    @alias/namespace [query] [--json]
-  mdnest page pull    @alias/namespace/page-name <new-folder>
-  mdnest page delete  @alias/namespace/page-name
-A page name is 1 to 64 lowercase letters, digits or hyphens.
+  mdnest page pull    @alias/namespace/folder/name <new-folder>
+  mdnest page delete  @alias/namespace/folder/name
+A page shows in the notes tree as folder/name.page.md (the suffix is added
+when you leave it out). mdnest read on that file prints the page's text.
 USAGE
 }
 
-# page_target <ref> <need-slug>: sets PAGE_NS and PAGE_SLUG, or prints usage.
+# page_target <ref> <need-path>: sets PAGE_NS and PAGE_PATH (the handle,
+# ending in .page.md), or prints usage.
 page_target() {
   parse_path "${1:-}"
   require_server
   PAGE_NS="$PARSED_NS"
-  PAGE_SLUG="${PARSED_PATH%/}"
-  if [ -z "$PAGE_NS" ] || { [ "$2" = 1 ] && [ -z "$PAGE_SLUG" ]; } || [[ "$PAGE_SLUG" == */* ]]; then
+  PAGE_PATH="${PARSED_PATH%/}"
+  if [ -z "$PAGE_NS" ] || { [ "$2" = 1 ] && [ -z "$PAGE_PATH" ]; }; then
     page_usage
     exit 1
+  fi
+  if [ -n "$PAGE_PATH" ]; then
+    case "$PAGE_PATH" in *.page.md) ;; *) PAGE_PATH="${PAGE_PATH}.page.md" ;; esac
   fi
   return 0
 }
@@ -2897,7 +2925,7 @@ page_publish() {
   page_target "${1:-}" 1
   local src="${2:-}" tmp body ct q
   if [ -z "$src" ]; then page_usage; exit 1; fi
-  q="ns=$(urlencode "$PAGE_NS")&slug=$(urlencode "$PAGE_SLUG")"
+  q="ns=$(urlencode "$PAGE_NS")&path=$(urlencode "$PAGE_PATH")"
   tmp=$(mktemp) || { echo "Error: cannot create a temp file" >&2; exit 1; }
   if [ -d "$src" ]; then
     if [ ! -f "$src/index.html" ]; then
@@ -2931,7 +2959,7 @@ page_publish() {
   local title
   title=$(json_top_string title < "$tmp") || title=""
   rm -f "$tmp"
-  c_ok "Published @${CURRENT_ALIAS}/${PAGE_NS}/${PAGE_SLUG}${title:+ ($title)}"
+  c_ok "Published @${CURRENT_ALIAS}/${PAGE_NS}/${PAGE_PATH}${title:+ ($title)}"
   return 0
 }
 
@@ -2957,8 +2985,8 @@ page_list() {
   else
     awk -F '\t' '{
       date = substr($4, 1, 10)
-      who = ($3 == "") ? "" : "  by " $3
-      printf "%-24s %s  (%s%s, %s files)\n", $1, $2, date, who, $5
+      who = ($3 == "") ? "" : " by " $3
+      printf "%s\n    %s  (%s%s, %s files)\n", $1, $2, date, who, $5
     }' "$tmp"
   fi
   rm -f "$tmp"
@@ -2974,7 +3002,7 @@ page_pull() {
     exit 1
   fi
   tmp=$(mktemp) || { echo "Error: cannot create a temp file" >&2; exit 1; }
-  if ! page_curl GET "/pages/archive?ns=$(urlencode "$PAGE_NS")&slug=$(urlencode "$PAGE_SLUG")" "$tmp" >/dev/null; then
+  if ! page_curl GET "/pages/archive?ns=$(urlencode "$PAGE_NS")&path=$(urlencode "$PAGE_PATH")" "$tmp" >/dev/null; then
     rm -f "$tmp"
     exit 1
   fi
@@ -2985,7 +3013,7 @@ page_pull() {
     exit 1
   fi
   rm -f "$tmp"
-  c_ok "Saved @${CURRENT_ALIAS}/${PAGE_NS}/${PAGE_SLUG} to $dir"
+  c_ok "Saved @${CURRENT_ALIAS}/${PAGE_NS}/${PAGE_PATH} to $dir"
   return 0
 }
 
@@ -2993,12 +3021,12 @@ page_delete() {
   page_target "${1:-}" 1
   local tmp
   tmp=$(mktemp) || { echo "Error: cannot create a temp file" >&2; exit 1; }
-  if ! page_curl DELETE "/pages?ns=$(urlencode "$PAGE_NS")&slug=$(urlencode "$PAGE_SLUG")" "$tmp" >/dev/null; then
+  if ! page_curl DELETE "/pages?ns=$(urlencode "$PAGE_NS")&path=$(urlencode "$PAGE_PATH")" "$tmp" >/dev/null; then
     rm -f "$tmp"
     exit 1
   fi
   rm -f "$tmp"
-  c_ok "Deleted @${CURRENT_ALIAS}/${PAGE_NS}/${PAGE_SLUG}"
+  c_ok "Deleted @${CURRENT_ALIAS}/${PAGE_NS}/${PAGE_PATH}"
   return 0
 }
 
@@ -4044,8 +4072,8 @@ NOTE OPERATIONS
            [--json]               ...as the raw API JSON instead (for scripts)
   search   <ns-path> "query"      Search note contents
   page     publish|list|pull|delete  HTML pages, view only (server: ENABLE_PAGES)
-           publish <@alias/ns/name> <folder-or-file.html>   (publishing again replaces it)
-           list <@alias/ns> [query]   pull <@alias/ns/name> <new-folder>   delete <@alias/ns/name>
+           publish <@alias/ns/folder/name> <folder-or-file.html>   (shows as name.page.md; again replaces it)
+           list <@alias/ns> [query]   pull <@alias/ns/folder/name> <new-folder>   delete <@alias/ns/folder/name>
   chat     list|new|post|status|read|wait  File-based chat in a note (server: ENABLE_CHAT)
            post <path> <text|-> --as NAME   read <path> --as NAME
            wait <path> --as NAME [--mentions] [--timeout S]   new <path> ["Title"]
@@ -4120,7 +4148,7 @@ EXAMPLES
   # Download a note, or a whole folder as a zip
   mdnest download @work/engineering/Architecture
   mdnest download @work/engineering/notes/meeting.md ./meeting.md
-  mdnest page publish @work/engineering/q3-report ./report-folder
+  mdnest page publish @work/engineering/Reports/q3-report ./report-folder
   mdnest page list @work/engineering revenue
 
   # Chat — two agents (or an agent and you) talking through one note
