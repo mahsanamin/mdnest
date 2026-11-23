@@ -33,6 +33,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -456,6 +457,19 @@ func (h *PagesHandler) handlePublish(w http.ResponseWriter, r *http.Request) {
 		pagesError(w, http.StatusInternalServerError, "failed to read the handle")
 		return
 	}
+	if id != "" && h.pageStored(ns, id) {
+		// Replacing a page changes what every one of its handles shows. A
+		// handle is readable, so its id is not a secret from readers: without
+		// this, someone who can write one folder could write a handle naming
+		// another folder's page and publish over it. Replacing needs write on
+		// every handle in the namespace that names the page.
+		for _, ref := range h.handlesIn(ctx, ns, "") {
+			if ref.id == id && ref.path != rel && !h.canWritePath(r, ns, ref.path) {
+				pagesError(w, http.StatusForbidden, "this page also has a handle in a folder you cannot write; publish under a new name instead")
+				return
+			}
+		}
+	}
 	if id == "" {
 		id = newPageID()
 	}
@@ -694,4 +708,138 @@ func (h *PagesHandler) HandlePass(w http.ResponseWriter, r *http.Request) {
 		"author":      m.Author,
 		"publishedAt": m.PublishedAt,
 	})
+}
+
+// ---- carrying a page across namespaces (transfer.go) ----
+
+// rewriteHandleID returns the handle with its `page:` line set to id. Only the
+// first `page:` key in the front matter is changed; the rest is kept as is.
+func rewriteHandleID(content, id string) (string, bool) {
+	c := strings.TrimPrefix(content, "\ufeff")
+	if !strings.HasPrefix(c, "---\n") && !strings.HasPrefix(c, "---\r\n") {
+		return content, false
+	}
+	lines := strings.SplitAfter(c, "\n")
+	for i := 1; i < len(lines); i++ {
+		line := strings.TrimRight(lines[i], "\r\n")
+		if line == "---" {
+			break
+		}
+		if k, _, ok := strings.Cut(line, ":"); ok && strings.TrimSpace(k) == "page" && !strings.HasPrefix(line, " ") {
+			nl := lines[i][len(strings.TrimRight(lines[i], "\r\n")):]
+			lines[i] = "page: " + id + nl
+			return strings.Join(lines, ""), true
+		}
+	}
+	return content, false
+}
+
+// pageStored reports whether a namespace holds the page id.
+func (h *PagesHandler) pageStored(ns, id string) bool {
+	p := h.metaPath(ns, id)
+	if p == "" {
+		return false
+	}
+	_, err := os.Stat(p)
+	return err == nil
+}
+
+// copyPageFiles copies a page folder's regular files. A package variable so
+// a test can make a carry fail and check the rollback.
+var copyPageFiles = func(src, dst string) error {
+	return filepath.WalkDir(src, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, p)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0755)
+		}
+		if !d.Type().IsRegular() {
+			return nil // never stored; never carried
+		}
+		in, err := os.Open(p)
+		if err != nil {
+			return err
+		}
+		defer in.Close()
+		out, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+		if err != nil {
+			return err
+		}
+		if _, err := io.Copy(out, in); err != nil {
+			out.Close()
+			return err
+		}
+		return out.Close()
+	})
+}
+
+// CarryPage copies the page id of fromNS into toNS for a handle being
+// transferred, and returns the id the destination handle must name: the same
+// id, or a new one when toNS already has a page under it. carried is false
+// when fromNS does not hold the page (the handle then travels alone, and
+// shows the "published in another namespace" 404). The copy is complete or
+// absent: it is built in a temp folder and renamed into place.
+func (h *PagesHandler) CarryPage(fromNS, id, toNS string) (destID string, carried bool, err error) {
+	if !ValidPageID(id) || !h.pageStored(fromNS, id) {
+		return id, false, nil
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	destID = id
+	if h.pageStored(toNS, destID) {
+		destID = newPageID()
+	}
+	nsDir := h.nsDir(toNS)
+	if nsDir == "" {
+		return "", false, fmt.Errorf("invalid namespace %q", toNS)
+	}
+	if err := os.MkdirAll(filepath.Join(nsDir, pagesMetaDir), 0755); err != nil {
+		return "", false, err
+	}
+	tmp := filepath.Join(nsDir, ".tmp-"+randHex(8))
+	defer os.RemoveAll(tmp)
+	if err := copyPageFiles(h.pageDir(fromNS, id), tmp); err != nil {
+		return "", false, err
+	}
+	m, err := h.readMeta(fromNS, id)
+	if err != nil {
+		return "", false, err
+	}
+	m.ID = destID
+	mb, _ := json.Marshal(pageMetaFile{PageMeta: *m, Version: randHex(12)})
+	tmpMeta := h.metaPath(toNS, destID) + ".tmp-" + randHex(4)
+	if err := os.WriteFile(tmpMeta, mb, 0644); err != nil {
+		os.Remove(tmpMeta)
+		return "", false, err
+	}
+	if err := os.Rename(tmp, h.pageDir(toNS, destID)); err != nil {
+		os.Remove(tmpMeta)
+		return "", false, err
+	}
+	if err := os.Rename(tmpMeta, h.metaPath(toNS, destID)); err != nil {
+		os.Remove(tmpMeta)
+		os.RemoveAll(h.pageDir(toNS, destID))
+		return "", false, err
+	}
+	return destID, true, nil
+}
+
+// UndoCarry removes a page CarryPage put in toNS (a failed transfer).
+func (h *PagesHandler) UndoCarry(toNS, destID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.removeStored(toNS, destID)
+}
+
+// AfterMove is called once a move across namespaces is complete: each page
+// carried out of fromNS is removed there, unless a handle left in fromNS
+// still names it (then the move was, for the page, a copy).
+func (h *PagesHandler) AfterMove(ctx context.Context, fromNS string, ids []string) {
+	h.collectIfUnreferenced(ctx, fromNS, ids)
 }

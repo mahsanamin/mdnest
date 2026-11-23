@@ -119,6 +119,28 @@ func TestRoutes_PageAccessFollowsTheHandleFolder(t *testing.T) {
 		}
 	}
 
+	// A handle is readable, so its page id is no secret from readers. A
+	// writer of one folder who copies (or writes) a handle naming another
+	// folder's page must not be able to publish over that page.
+	_, privHandle := ts.get(owen, "/api/note?ns=alpha&path="+q("Private/boss.page.md"))
+	if code, b := ts.do(pat, http.MethodPost, "/api/note?ns=alpha&path="+q("Shared/forged.page.md"), strings.NewReader(privHandle), ""); code >= 300 {
+		t.Fatalf("pat writes a handle in Shared: %d %s", code, b)
+	}
+	if code, b := publish(pat, "Shared/forged.page.md", "<p>DEFACED</p>"); code != http.StatusForbidden {
+		t.Fatalf("publish over another folder's page through a forged handle: %d %s", code, b)
+	}
+	if _, b := ts.get(owen, "/api/pages/text?ns=alpha&path="+q("Private/boss.page.md")); !strings.Contains(b, "PRIVATE-BODY") || strings.Contains(b, "DEFACED") {
+		t.Fatalf("the Private page changed: %s", b)
+	}
+	ts.do(pat, http.MethodDelete, "/api/note?ns=alpha&path="+q("Shared/forged.page.md"), nil, "")
+	if _, b := ts.get(owen, "/api/pages/text?ns=alpha&path="+q("Private/boss.page.md")); !strings.Contains(b, "PRIVATE-BODY") {
+		t.Fatalf("deleting the forged handle deleted the Private page: %s", b)
+	}
+	// A writer of every handle may republish (Owen writes the whole namespace).
+	if code, b := publish(owen, "Private/boss.page.md", "<title>Boss</title><p>PRIVATE-BODY v2</p>"); code != 200 {
+		t.Fatalf("owner republish: %d %s", code, b)
+	}
+
 	// Viewing follows the folder: a subfolder-only reader sees the page in
 	// that folder and not the one in a sibling folder.
 	for name, tok := range map[string]string{"pat": pat, "gus": gus, "adele": adele} {

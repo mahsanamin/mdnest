@@ -1005,6 +1005,7 @@ func main() {
 	if enablePages {
 		pagesHandler = handlers.NewPagesHandler(pagesCfg, stg, perms)
 		routes.pages = pagesHandler
+		transferHandler.SetPages(pagesHandler)
 		configHandler.SetPages(true, pagesHandler.ScriptMode())
 	}
 	registerContentRoutes(mux, routes)
