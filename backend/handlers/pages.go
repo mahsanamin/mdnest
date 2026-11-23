@@ -142,6 +142,16 @@ type PageMeta struct {
 	Bytes       int64  `json:"bytes"`
 	Files       int    `json:"files"`
 	Text        string `json:"text,omitempty"`
+	// Version is a random id set on every publish. A pass carries it, so a
+	// pass made before a republish or a delete never opens what replaced it.
+	Version string `json:"-"`
+}
+
+// pageMetaFile is PageMeta as stored, with the version, which no API
+// response shows.
+type pageMetaFile struct {
+	PageMeta
+	Version string `json:"version"`
 }
 
 type PagesHandler struct {
@@ -251,11 +261,13 @@ func (h *PagesHandler) readMeta(ns, slug string) (*PageMeta, error) {
 	if err != nil {
 		return nil, err
 	}
-	var m PageMeta
-	if err := json.Unmarshal(b, &m); err != nil {
+	var f pageMetaFile
+	if err := json.Unmarshal(b, &f); err != nil {
 		return nil, err
 	}
+	m := f.PageMeta
 	m.Slug = slug
+	m.Version = f.Version
 	return &m, nil
 }
 
@@ -303,6 +315,17 @@ func (h *PagesHandler) handleList(w http.ResponseWriter, r *http.Request) {
 		}
 		return pages[i].Slug < pages[j].Slug
 	})
+	if r.URL.Query().Get("format") == "tsv" {
+		// One page per line for the CLI, which renders it in awk:
+		// slug, title, author, publishedAt, files, bytes. Tabs and line
+		// breaks inside a field become spaces.
+		w.Header().Set("Content-Type", "text/tab-separated-values; charset=utf-8")
+		clean := strings.NewReplacer("\t", " ", "\n", " ", "\r", " ")
+		for _, p := range pages {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%d\n", p.Slug, clean.Replace(p.Title), clean.Replace(p.Author), p.PublishedAt, p.Files, p.Bytes)
+		}
+		return
+	}
 	pagesJSON(w, http.StatusOK, map[string]any{"pages": pages})
 }
 
@@ -495,6 +518,7 @@ func (h *PagesHandler) handlePublish(w http.ResponseWriter, r *http.Request) {
 		Bytes:       total,
 		Files:       files,
 		Text:        text,
+		Version:     randHex(12),
 	}
 
 	h.mu.Lock()
@@ -524,7 +548,7 @@ func (h *PagesHandler) handlePublish(w http.ResponseWriter, r *http.Request) {
 	if old != "" {
 		os.RemoveAll(old)
 	}
-	mb, _ := json.Marshal(meta)
+	mb, _ := json.Marshal(pageMetaFile{PageMeta: meta, Version: meta.Version})
 	tmpMeta := metaFile + ".tmp-" + randHex(4)
 	if err := os.WriteFile(tmpMeta, mb, 0644); err != nil || os.Rename(tmpMeta, metaFile) != nil {
 		os.Remove(tmpMeta)
@@ -756,15 +780,17 @@ type pageClaims struct {
 	Purpose   string `json:"purpose"`
 	Namespace string `json:"ns"`
 	Slug      string `json:"slug"`
+	Version   string `json:"v"`
 	jwt.RegisteredClaims
 }
 
-func (h *PagesHandler) mintPass(ns, slug string) (string, time.Time, error) {
+func (h *PagesHandler) mintPass(ns, slug, version string) (string, time.Time, error) {
 	exp := time.Now().Add(h.cfg.PassTTL)
 	c := pageClaims{
 		Purpose:   pagePassPurpose,
 		Namespace: ns,
 		Slug:      slug,
+		Version:   version,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(exp),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -775,7 +801,8 @@ func (h *PagesHandler) mintPass(ns, slug string) (string, time.Time, error) {
 }
 
 // parsePass returns the namespace and slug a pass is good for, or ok=false
-// when it is malformed, not a page pass, tampered with or expired.
+// when it is malformed, not a page pass, tampered with, expired, or made for
+// a version of the page that has since been replaced or deleted.
 func (h *PagesHandler) parsePass(s string) (string, string, bool) {
 	var c pageClaims
 	tok, err := jwt.ParseWithClaims(s, &c, func(t *jwt.Token) (any, error) {
@@ -787,7 +814,11 @@ func (h *PagesHandler) parsePass(s string) (string, string, bool) {
 	if err != nil || !tok.Valid || c.Purpose != pagePassPurpose {
 		return "", "", false
 	}
-	if !ValidNamespaceName(c.Namespace) || !ValidPageSlug(c.Slug) {
+	if !ValidNamespaceName(c.Namespace) || !ValidPageSlug(c.Slug) || c.Version == "" {
+		return "", "", false
+	}
+	m, err := h.readMeta(c.Namespace, c.Slug)
+	if err != nil || m.Version != c.Version {
 		return "", "", false
 	}
 	return c.Namespace, c.Slug, true
@@ -809,11 +840,12 @@ func (h *PagesHandler) HandlePass(w http.ResponseWriter, r *http.Request) {
 		middleware.DenyJSON(w)
 		return
 	}
-	if _, err := h.readMeta(ns, slug); err != nil {
+	m, err := h.readMeta(ns, slug)
+	if err != nil {
 		pagesError(w, http.StatusNotFound, "page not found")
 		return
 	}
-	pass, exp, err := h.mintPass(ns, slug)
+	pass, exp, err := h.mintPass(ns, slug, m.Version)
 	if err != nil {
 		pagesError(w, http.StatusInternalServerError, "failed to create page pass")
 		return

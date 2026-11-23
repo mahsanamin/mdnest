@@ -141,6 +141,13 @@ func TestPages_PublishListViewText(t *testing.T) {
 		}
 	}
 
+	// TSV for the CLI: one line per page, no tabs inside fields.
+	w = httptest.NewRecorder()
+	h.Handle(w, httptest.NewRequest(http.MethodGet, "/api/pages?ns=alpha&format=tsv", nil))
+	if lines := strings.Split(strings.TrimSpace(w.Body.String()), "\n"); len(lines) != 1 || len(strings.Split(lines[0], "\t")) != 6 || !strings.HasPrefix(lines[0], "q3-report\tQ3 report\tadmin\t") {
+		t.Fatalf("tsv = %q", w.Body.String())
+	}
+
 	// Text: extracted once, without HTML or script.
 	w = httptest.NewRecorder()
 	h.HandleText(w, httptest.NewRequest(http.MethodGet, "/api/pages/text?ns=alpha&slug=q3-report", nil))
@@ -378,11 +385,16 @@ func TestPages_PassRules(t *testing.T) {
 		t.Fatal("pass for one served page two")
 	}
 
+	var c0 pageClaims
+	jwt.ParseWithClaims(pass, &c0, func(*jwt.Token) (any, error) { return []byte(pagesTestSecret), nil })
+	if c0.Version == "" {
+		t.Fatal("pass carries no version")
+	}
 	mint := func(claims jwt.MapClaims, secret string) string {
 		s, _ := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(secret))
 		return s
 	}
-	base := jwt.MapClaims{"purpose": "page", "ns": "alpha", "slug": "one"}
+	base := jwt.MapClaims{"purpose": "page", "ns": "alpha", "slug": "one", "v": c0.Version}
 	with := func(k string, v any) jwt.MapClaims {
 		c := jwt.MapClaims{}
 		for a, b := range base {
@@ -391,12 +403,24 @@ func TestPages_PassRules(t *testing.T) {
 		c[k] = v
 		return c
 	}
+	withExp := func(k string, v any) jwt.MapClaims {
+		c := with(k, v)
+		c["exp"] = time.Now().Add(time.Hour).Unix()
+		return c
+	}
+	// Control: a correct hand-made pass opens the page, so each case below
+	// fails for its own reason only.
+	if w := view(h, "/api/pages/view/"+mint(withExp("v", c0.Version), pagesTestSecret)+"/"); w.Code != http.StatusOK {
+		t.Fatalf("control pass: %d", w.Code)
+	}
 	cases := map[string]string{
-		"expired":      mint(with("exp", time.Now().Add(-time.Minute).Unix()), pagesTestSecret),
-		"no-expiry":    mint(base, pagesTestSecret),
-		"wrong-secret": mint(with("exp", time.Now().Add(time.Hour).Unix()), "other"),
-		"bad-slug":     mint(with("slug", "../alpha"), pagesTestSecret),
-		"tampered":     pass[:len(pass)-2] + "xx",
+		"expired":       mint(with("exp", time.Now().Add(-time.Minute).Unix()), pagesTestSecret),
+		"no-expiry":     mint(base, pagesTestSecret),
+		"wrong-secret":  mint(with("exp", time.Now().Add(time.Hour).Unix()), "other"),
+		"bad-slug":      mint(with("slug", "../alpha"), pagesTestSecret),
+		"no-version":    mint(withExp("v", ""), pagesTestSecret),
+		"wrong-version": mint(withExp("v", "0000"), pagesTestSecret),
+		"tampered":      pass[:len(pass)-2] + "xx",
 	}
 	for name, p := range cases {
 		w := view(h, "/api/pages/view/"+p+"/")
@@ -407,6 +431,33 @@ func TestPages_PassRules(t *testing.T) {
 			t.Errorf("%s: error response missing safety headers", name)
 		}
 	}
+	// A pass is bound to the version it was made for: after a republish it
+	// no longer opens the page, and a new pass does.
+	if w := view(h, u); w.Code != http.StatusOK {
+		t.Fatalf("pass before republish: %d", w.Code)
+	}
+	publish(h, "alpha", "one", "text/html", []byte("<p>ONE v2</p>"))
+	if w := view(h, u); w.Code != http.StatusForbidden || strings.Contains(w.Body.String(), "v2") {
+		t.Fatalf("old pass after republish: %d %s", w.Code, w.Body.String())
+	}
+	if w := view(h, passURL(t, h, "alpha", "one")); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "v2") {
+		t.Fatalf("new pass after republish: %d", w.Code)
+	}
+	// ...and after a delete and a new page with the same name.
+	u2 := passURL(t, h, "alpha", "two")
+	dw := httptest.NewRecorder()
+	h.Handle(dw, httptest.NewRequest(http.MethodDelete, "/api/pages?ns=alpha&slug=two", nil))
+	publish(h, "alpha", "two", "text/html", []byte("<p>NEW TWO</p>"))
+	if w := view(h, u2); w.Code != http.StatusForbidden {
+		t.Fatalf("old pass after delete and recreate: %d", w.Code)
+	}
+	// The version never shows in an API response.
+	lw := httptest.NewRecorder()
+	h.Handle(lw, httptest.NewRequest(http.MethodGet, "/api/pages?ns=alpha", nil))
+	if strings.Contains(lw.Body.String(), "version") {
+		t.Fatalf("list leaks the version: %s", lw.Body.String())
+	}
+
 	// A fresh pass lasts 30 minutes by default.
 	var c pageClaims
 	jwt.ParseWithClaims(pass, &c, func(*jwt.Token) (any, error) { return []byte(pagesTestSecret), nil })
