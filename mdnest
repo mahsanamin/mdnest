@@ -2827,6 +2827,181 @@ cmd_search() {
   api GET "/search?ns=$(urlencode "$PARSED_NS")&q=$(urlencode "$query")"
 }
 
+# ─── HTML pages (server: ENABLE_PAGES) ──────────────────────────────────────
+# A page is a folder with an index.html, or one .html file. Publishing sends a
+# gzipped tar of the folder (made by the system tar) or the file as text/html;
+# publishing again replaces the page. The server checks every path, the size
+# and the file count, so the CLI only checks there is an index.html to send.
+
+page_usage() {
+  cat >&2 <<'USAGE'
+Usage:
+  mdnest page publish @alias/namespace/page-name <folder-or-file.html>
+  mdnest page list    @alias/namespace [query] [--json]
+  mdnest page pull    @alias/namespace/page-name <new-folder>
+  mdnest page delete  @alias/namespace/page-name
+A page name is 1 to 64 lowercase letters, digits or hyphens.
+USAGE
+}
+
+# page_target <ref> <need-slug>: sets PAGE_NS and PAGE_SLUG, or prints usage.
+page_target() {
+  parse_path "${1:-}"
+  require_server
+  PAGE_NS="$PARSED_NS"
+  PAGE_SLUG="${PARSED_PATH%/}"
+  if [ -z "$PAGE_NS" ] || { [ "$2" = 1 ] && [ -z "$PAGE_SLUG" ]; } || [[ "$PAGE_SLUG" == */* ]]; then
+    page_usage
+    exit 1
+  fi
+  return 0
+}
+
+# page_curl <method> <query-path> <out-file> [curl args...]: prints the HTTP
+# status; the body goes to <out-file>. Exits with a clear message when the
+# server cannot be reached.
+page_curl() {
+  local method="$1" path="$2" out="$3" code curl_rc=0
+  shift 3
+  # Guarded on the same line: see api() for why an unguarded assignment from a
+  # command substitution kills the script under set -e.
+  code=$(curl -s -o "$out" -w "%{http_code}" --connect-timeout "${MDNEST_TIMEOUT:-10}" -H "Authorization: Bearer $MDNEST_TOKEN" -X "$method" "$@" "${MDNEST_URL}/api${path}") || curl_rc=$?
+  if [ "$curl_rc" != "0" ]; then
+    echo "Error: couldn't reach ${MDNEST_URL}: $(curl_reason "$curl_rc")." >&2
+    return 1
+  fi
+  if [ "$code" = "404" ] && grep -q '404 page not found' "$out" 2>/dev/null; then
+    echo "Error: this server has pages turned off (ENABLE_PAGES)." >&2
+    return 1
+  fi
+  if [ "$code" -ge 400 ] 2>/dev/null; then
+    echo "Error ($code): $(cat "$out")" >&2
+    return 1
+  fi
+  return 0
+}
+
+cmd_page() {
+  local sub="${1:-}"
+  [ $# -gt 0 ] && shift
+  case "$sub" in
+    publish) page_publish "$@" ;;
+    list)    page_list "$@" ;;
+    pull)    page_pull "$@" ;;
+    delete)  page_delete "$@" ;;
+    *)       page_usage; exit 1 ;;
+  esac
+}
+
+page_publish() {
+  page_target "${1:-}" 1
+  local src="${2:-}" tmp body ct q
+  if [ -z "$src" ]; then page_usage; exit 1; fi
+  q="ns=$(urlencode "$PAGE_NS")&slug=$(urlencode "$PAGE_SLUG")"
+  tmp=$(mktemp) || { echo "Error: cannot create a temp file" >&2; exit 1; }
+  if [ -d "$src" ]; then
+    if [ ! -f "$src/index.html" ]; then
+      rm -f "$tmp"
+      echo "Error: $src has no index.html at its top level." >&2
+      exit 1
+    fi
+    body=$(mktemp) || { rm -f "$tmp"; echo "Error: cannot create a temp file" >&2; exit 1; }
+    if ! tar -C "$src" -czf "$body" . 2>/dev/null; then
+      rm -f "$tmp" "$body"
+      echo "Error: could not pack $src with tar." >&2
+      exit 1
+    fi
+    ct="application/gzip"
+  elif [ -f "$src" ]; then
+    case "$src" in
+      *.html|*.htm|*.HTML|*.HTM) ;;
+      *) rm -f "$tmp"; echo "Error: $src is not an .html file; pass a folder with an index.html, or one .html file." >&2; exit 1 ;;
+    esac
+    body="$src"
+    ct="text/html"
+  else
+    rm -f "$tmp"
+    echo "Error: $src does not exist." >&2
+    exit 1
+  fi
+  local rc=0
+  page_curl PUT "/pages?$q" "$tmp" -H "Content-Type: $ct" --data-binary "@$body" >/dev/null || rc=$?
+  if [ "$body" != "$src" ]; then rm -f "$body"; fi
+  if [ "$rc" != 0 ]; then rm -f "$tmp"; exit 1; fi
+  local title
+  title=$(json_top_string title < "$tmp") || title=""
+  rm -f "$tmp"
+  c_ok "Published @${CURRENT_ALIAS}/${PAGE_NS}/${PAGE_SLUG}${title:+ ($title)}"
+  return 0
+}
+
+page_list() {
+  local as_json="${MDNEST_JSON:-0}" ref="" query=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --json) as_json=1 ;;
+      *) if [ -z "$ref" ]; then ref="$1"; else query="$1"; fi ;;
+    esac
+    shift
+  done
+  page_target "$ref" 0
+  local q="ns=$(urlencode "$PAGE_NS")" tmp
+  [ -n "$query" ] && q+="&q=$(urlencode "$query")"
+  [ "$as_json" = 1 ] || q+="&format=tsv"
+  tmp=$(mktemp) || { echo "Error: cannot create a temp file" >&2; exit 1; }
+  if ! page_curl GET "/pages?$q" "$tmp" >/dev/null; then rm -f "$tmp"; exit 1; fi
+  if [ "$as_json" = 1 ]; then
+    cat "$tmp"; echo
+  elif [ ! -s "$tmp" ]; then
+    echo "No pages${query:+ match \"$query\"} in ${PAGE_NS}."
+  else
+    awk -F '\t' '{
+      date = substr($4, 1, 10)
+      who = ($3 == "") ? "" : "  by " $3
+      printf "%-24s %s  (%s%s, %s files)\n", $1, $2, date, who, $5
+    }' "$tmp"
+  fi
+  rm -f "$tmp"
+  return 0
+}
+
+page_pull() {
+  page_target "${1:-}" 1
+  local dir="${2:-}" tmp
+  if [ -z "$dir" ]; then page_usage; exit 1; fi
+  if [ -e "$dir" ] && [ -n "$(ls -A "$dir" 2>/dev/null || true)" ]; then
+    echo "Error: $dir already exists and is not empty; choose a new folder." >&2
+    exit 1
+  fi
+  tmp=$(mktemp) || { echo "Error: cannot create a temp file" >&2; exit 1; }
+  if ! page_curl GET "/pages/archive?ns=$(urlencode "$PAGE_NS")&slug=$(urlencode "$PAGE_SLUG")" "$tmp" >/dev/null; then
+    rm -f "$tmp"
+    exit 1
+  fi
+  mkdir -p "$dir"
+  if ! tar -xf "$tmp" -C "$dir" 2>/dev/null; then
+    rm -f "$tmp"
+    echo "Error: the page archive could not be unpacked into $dir." >&2
+    exit 1
+  fi
+  rm -f "$tmp"
+  c_ok "Saved @${CURRENT_ALIAS}/${PAGE_NS}/${PAGE_SLUG} to $dir"
+  return 0
+}
+
+page_delete() {
+  page_target "${1:-}" 1
+  local tmp
+  tmp=$(mktemp) || { echo "Error: cannot create a temp file" >&2; exit 1; }
+  if ! page_curl DELETE "/pages?ns=$(urlencode "$PAGE_NS")&slug=$(urlencode "$PAGE_SLUG")" "$tmp" >/dev/null; then
+    rm -f "$tmp"
+    exit 1
+  fi
+  rm -f "$tmp"
+  c_ok "Deleted @${CURRENT_ALIAS}/${PAGE_NS}/${PAGE_SLUG}"
+  return 0
+}
+
 # ─── Legacy compat: mdnest note <subcmd> <ns> <path> ───────────────────────
 
 # ─── Agent approvals (experimental; server: ENABLE_AGENT_APPROVALS) ─────────
@@ -3852,6 +4027,9 @@ NOTE OPERATIONS
   list     [@alias/namespace]     List namespaces, or a namespace/folder as a tree
            [--json]               ...as the raw API JSON instead (for scripts)
   search   <ns-path> "query"      Search note contents
+  page     publish|list|pull|delete  HTML pages, view only (server: ENABLE_PAGES)
+           publish <@alias/ns/name> <folder-or-file.html>   (publishing again replaces it)
+           list <@alias/ns> [query]   pull <@alias/ns/name> <new-folder>   delete <@alias/ns/name>
   chat     list|new|post|status|read|wait  File-based chat in a note (server: ENABLE_CHAT)
            post <path> <text|-> --as NAME   read <path> --as NAME
            wait <path> --as NAME [--mentions] [--timeout S]   new <path> ["Title"]
@@ -3926,6 +4104,8 @@ EXAMPLES
   # Download a note, or a whole folder as a zip
   mdnest download @work/engineering/Architecture
   mdnest download @work/engineering/notes/meeting.md ./meeting.md
+  mdnest page publish @work/engineering/q3-report ./report-folder
+  mdnest page list @work/engineering revenue
 
   # Chat — two agents (or an agent and you) talking through one note
   mdnest chat new  @work/engineering/Chats/release.md "Release"
@@ -3988,6 +4168,7 @@ case "$CMD" in
   copy)     load_default; warn_if_default_alias; cmd_copy "$@" ;;
   download) load_default; warn_if_default_alias; cmd_download "$@" ;;
   search)   load_default; warn_if_default_alias; cmd_search "$@" ;;
+  page)     load_default; warn_if_default_alias; cmd_page "$@" ;;
   chat)
     if [ "${1:-}" = "keepalive" ]; then cmd_chat_keepalive; else load_default; warn_if_default_alias; cmd_chat "$@"; fi ;;
   approval) cmd_approval "$@" ;;

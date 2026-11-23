@@ -73,6 +73,7 @@ cleanup() {
   m delete "$ROOT" >/dev/null 2>&1 || true
   [ -n "$ROOT2" ] && m delete "$ROOT2" >/dev/null 2>&1
   [ -n "${DL_DIR:-}" ] && rm -rf "$DL_DIR"
+  [ -n "${PAGE_REF:-}" ] && m page delete "$PAGE_REF" >/dev/null 2>&1
   return 0
 }
 trap cleanup EXIT
@@ -326,6 +327,44 @@ if m chat new "$CHAT" "Smoke" >/dev/null 2>&1; then
 else
   echo "  SKIP chat status (chat is off on this server)"
 fi
+
+# ── pages (server: ENABLE_PAGES; skipped when the server has it off) ────────
+echo "── pages ──"
+PAGE_SLUG="clitest-$$-${RANDOM}"
+PAGE_REF="${BASE}/${PAGE_SLUG}"
+page_err=$(m page list "$BASE" 2>&1 >/dev/null) || true
+case "$page_err" in
+  *"pages turned off"*) echo "  SKIP — this server has pages off (ENABLE_PAGES)" ;;
+  *)
+    PG_DIR=$(mktemp -d)
+    mkdir -p "$PG_DIR/site/css"
+    printf '<html><head><title>Smoke page</title></head><body><p>pagetoken%s</p><script>var hidden_word_xyz=1</script></body></html>' "$$" > "$PG_DIR/site/index.html"
+    printf 'p{color:red}' > "$PG_DIR/site/css/s.css"
+    assert_succeeds "page publish (folder)" -- m page publish "$PAGE_REF" "$PG_DIR/site"
+    listing=$(m page list "$BASE" 2>&1) || listing=""
+    assert_contains "page list shows the page and its title" "$PAGE_SLUG" "$listing"
+    assert_contains "  …with the title from <title>" "Smoke page" "$listing"
+    assert_contains "page list searches the page text" "$PAGE_SLUG" "$(m page list "$BASE" "pagetoken$$" 2>&1)"
+    assert_contains "page list does not search script content" "No pages" "$(m page list "$BASE" "hidden_word_xyz" 2>&1)"
+    assert_contains "page list --json is raw JSON" '"pages"' "$(m page list --json "$BASE" 2>&1)"
+    assert_succeeds "page pull into a new folder" -- m page pull "$PAGE_REF" "$PG_DIR/pulled"
+    assert_eq "  …index.html comes back byte-exact" "$(od -c < "$PG_DIR/site/index.html")" "$(od -c < "$PG_DIR/pulled/index.html" 2>/dev/null)"
+    assert_eq "  …and the subfolder file too" "p{color:red}" "$(cat "$PG_DIR/pulled/css/s.css" 2>/dev/null)"
+    assert_fails "page pull refuses a non-empty folder" -- m page pull "$PAGE_REF" "$PG_DIR/pulled"
+    printf '<title>One file</title><p>single</p>' > "$PG_DIR/one.html"
+    assert_succeeds "page publish (one .html file) replaces the page" -- m page publish "$PAGE_REF" "$PG_DIR/one.html"
+    assert_contains "  …list shows the new title" "One file" "$(m page list "$BASE" 2>&1)"
+    rm -rf "$PG_DIR/pulled2"
+    m page pull "$PAGE_REF" "$PG_DIR/pulled2" >/dev/null 2>&1
+    assert_eq "  …and the old files are gone" "no" "$([ -e "$PG_DIR/pulled2/css/s.css" ] && echo yes || echo no)"
+    assert_fails "page publish refuses a folder without index.html" -- m page publish "$PAGE_REF" "$PG_DIR/site/css"
+    assert_fails "page publish refuses a bad page name" -- m page publish "${BASE}/Bad_Name" "$PG_DIR/one.html"
+    assert_succeeds "page delete" -- m page delete "$PAGE_REF"
+    assert_contains "  …and it is gone from the list" "No pages" "$(m page list "$BASE" "pagetoken$$" 2>&1)"
+    assert_fails "page delete of a missing page fails" -- m page delete "$PAGE_REF"
+    rm -rf "$PG_DIR"
+    ;;
+esac
 
 # ── Summary ─────────────────────────────────────────────────────────────────
 echo
