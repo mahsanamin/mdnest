@@ -148,6 +148,7 @@ type PageMeta struct {
 	PublishedAt string `json:"publishedAt"`
 	Bytes       int64  `json:"bytes"`
 	Files       int    `json:"files"`
+	Description string `json:"description,omitempty"` // <meta name="description">, when the page has one
 	Text        string `json:"text,omitempty"`
 	// Version is a random id set on every publish. A pass carries it, so a
 	// pass made before a republish or a delete never opens what replaced it.
@@ -439,23 +440,48 @@ func (h *PagesHandler) extractTar(body io.Reader, dir string) (int64, int, error
 	return total, files, nil
 }
 
-// ExtractPageText returns the <title> and the visible text of an HTML
+// maxPageDescription caps the stored <meta name="description">.
+const maxPageDescription = 500
+
+// ExtractPageText returns the <title>, the first <meta name="description">
+// and the visible text of an HTML
 // document, with script, style and template content left out and whitespace
 // collapsed. It runs once, at publish time.
-func ExtractPageText(doc []byte) (string, string) {
+func ExtractPageText(doc []byte) (title, description, text string) {
 	z := html.NewTokenizer(bytes.NewReader(doc))
-	var title, text strings.Builder
+	var tb, xb strings.Builder
 	skip := 0 // depth inside script/style/noscript/template
 	inTitle := false
+	haveDesc := false
 	for {
 		tt := z.Next()
 		switch tt {
 		case html.ErrorToken:
-			return collapseSpace(plainField(title.String())), truncateText(collapseSpace(plainField(text.String())))
-		case html.StartTagToken, html.EndTagToken:
-			name, _ := z.TagName()
+			return collapseSpace(plainField(tb.String())), description, truncateText(collapseSpace(plainField(xb.String())))
+		case html.StartTagToken, html.EndTagToken, html.SelfClosingTagToken:
+			name, hasAttr := z.TagName()
 			a := atom.Lookup(name)
-			isStart := tt == html.StartTagToken
+			isStart := tt != html.EndTagToken
+			if a == atom.Meta && isStart && hasAttr && !haveDesc {
+				var metaName, content string
+				for {
+					k, v, more := z.TagAttr()
+					switch strings.ToLower(string(k)) {
+					case "name":
+						metaName = strings.ToLower(strings.TrimSpace(string(v)))
+					case "content":
+						content = string(v)
+					}
+					if !more {
+						break
+					}
+				}
+				if metaName == "description" {
+					haveDesc = true
+					description = truncateRunes(collapseSpace(plainField(content)), maxPageDescription)
+				}
+				continue
+			}
 			switch a {
 			case atom.Script, atom.Style, atom.Noscript, atom.Template:
 				if isStart {
@@ -467,7 +493,7 @@ func ExtractPageText(doc []byte) (string, string) {
 				inTitle = isStart
 			}
 			if isBlockAtom(a) {
-				text.WriteByte(' ')
+				xb.WriteByte(' ')
 			}
 		case html.TextToken:
 			if skip > 0 {
@@ -475,11 +501,11 @@ func ExtractPageText(doc []byte) (string, string) {
 			}
 			t := string(z.Text())
 			if inTitle {
-				title.WriteString(t)
+				tb.WriteString(t)
 				continue
 			}
-			if text.Len() < maxPageText*2 {
-				text.WriteString(t)
+			if xb.Len() < maxPageText*2 {
+				xb.WriteString(t)
 			}
 		}
 	}
@@ -493,6 +519,15 @@ func isBlockAtom(a atom.Atom) bool {
 		return true
 	}
 	return false
+}
+
+// truncateRunes cuts s to at most n characters.
+func truncateRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n])
 }
 
 func collapseSpace(s string) string { return strings.Join(strings.Fields(s), " ") }

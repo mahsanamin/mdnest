@@ -172,6 +172,16 @@ func TestPages_PublishListViewText(t *testing.T) {
 	if list.Pages[0].Text != "" {
 		t.Fatal("the list must not carry the page text")
 	}
+	if list.Pages[0].Description != "" {
+		t.Fatalf("a page without a description meta has description %q", list.Pages[0].Description)
+	}
+	publish(h, "alpha", "ProjA/described", "text/html", []byte(`<title>D</title><meta name="description" content="A page about widgets"><p>x</p>`))
+	w = httptest.NewRecorder()
+	h.Handle(w, httptest.NewRequest(http.MethodGet, "/api/pages?ns=alpha&q=widgets", nil))
+	if !strings.Contains(w.Body.String(), `"description":"A page about widgets"`) || !strings.Contains(w.Body.String(), "described.page.md") {
+		t.Fatalf("description in list and search: %s", w.Body.String())
+	}
+	os.Remove(filepath.Join(notesOf(pagesDir), "alpha", "ProjA", "described.page.md"))
 
 	// Search runs on the stored text, never on script content.
 	for q, want := range map[string]int{"revenue": 1, "grew 12%": 1, "secretCode": 0, "nothing-here": 0} {
@@ -800,10 +810,19 @@ func TestResolvePagesOrigin(t *testing.T) {
 }
 
 func TestExtractPageText(t *testing.T) {
-	title, text := ExtractPageText([]byte(`<!doctype html><html><head><title> My
-	Page </title><script>alert("no")</script></head><body><noscript>nojs</noscript><template>tpl</template><p>Hello&amp;bye</p><div>next</div><style>p{color:red}</style></body></html>`))
-	if title != "My Page" || text != "Hello&bye next" {
-		t.Fatalf("title=%q text=%q", title, text)
+	title, desc, text := ExtractPageText([]byte(`<!doctype html><html><head><title> My
+	Page </title><META NAME="Description" content="  Quarterly
+	numbers &amp; notes[2J "><meta name="description" content="second one ignored"><script>alert("no")</script></head><body><noscript>nojs</noscript><template>tpl</template><p>Hello&amp;bye</p><div>next</div><style>p{color:red}</style></body></html>`))
+	if title != "My Page" || text != "Hello&bye next" || desc != "Quarterly numbers & notes [2J" {
+		t.Fatalf("title=%q desc=%q text=%q", title, desc, text)
+	}
+	// No description: empty, never the start of the text.
+	if _, d, _ := ExtractPageText([]byte(`<meta name="viewport" content="width=device-width"><p>Body words</p>`)); d != "" {
+		t.Fatalf("description without a description meta: %q", d)
+	}
+	// Capped.
+	if _, d, _ := ExtractPageText([]byte(`<meta name="description" content="` + strings.Repeat("é", 900) + `">`)); len([]rune(d)) != maxPageDescription {
+		t.Fatalf("description length %d", len([]rune(d)))
 	}
 }
 

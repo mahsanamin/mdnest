@@ -233,7 +233,7 @@ func (h *PagesHandler) handleList(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	terms := strings.Fields(strings.ToLower(r.URL.Query().Get("q")))
 	match := func(m *PageMeta) bool {
-		hay := strings.ToLower(m.Title + " " + m.Path + " " + m.Text)
+		hay := strings.ToLower(m.Title + " " + m.Path + " " + m.Description + " " + m.Text)
 		for _, t := range terms {
 			if !strings.Contains(hay, t) {
 				return false
@@ -507,13 +507,14 @@ func (h *PagesHandler) handlePublish(w http.ResponseWriter, r *http.Request) {
 		pagesError(w, http.StatusBadRequest, "a page needs an index.html at its top level")
 		return
 	}
-	title, text := ExtractPageText(indexBytes)
+	title, description, text := ExtractPageText(indexBytes)
 	if title == "" {
 		title = strings.TrimSuffix(path.Base(rel), PageHandleSuffix)
 	}
 	meta := PageMeta{
 		ID:          id,
 		Title:       title,
+		Description: description,
 		Author:      plainField(h.author(r)),
 		PublishedAt: time.Now().UTC().Format(time.RFC3339),
 		Bytes:       total,
