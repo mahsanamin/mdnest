@@ -74,6 +74,12 @@ SHARED_EDITING=""
 DOWNLOAD_MAX_FILES=""
 DOWNLOAD_MAX_MB=""
 DOWNLOAD_MAX_CONCURRENT=""
+ENABLE_PAGES=""
+PAGES_DIR=""
+PAGES_ORIGIN=""
+PAGES_NETWORK=""
+PAGES_MAX_MB=""
+PAGES_MAX_FILES=""
 declare -a MOUNT_NAMES=()
 declare -a MOUNT_PATHS=()
 
@@ -111,6 +117,12 @@ while IFS= read -r line; do
     ENABLE_EXCALIDRAW) ENABLE_EXCALIDRAW="$value" ;;
     ENABLE_CHAT) ENABLE_CHAT="$value" ;;
     ENABLE_AGENT_APPROVALS) ENABLE_AGENT_APPROVALS="$value" ;;
+    ENABLE_PAGES) ENABLE_PAGES="$value" ;;
+    PAGES_DIR) PAGES_DIR="$value" ;;
+    PAGES_ORIGIN) PAGES_ORIGIN="$value" ;;
+    PAGES_NETWORK) PAGES_NETWORK="$value" ;;
+    PAGES_MAX_MB) PAGES_MAX_MB="$value" ;;
+    PAGES_MAX_FILES) PAGES_MAX_FILES="$value" ;;
     DEFAULT_THEME) DEFAULT_THEME="$value" ;;
     EXCALIDRAW_LIBRARIES) EXCALIDRAW_LIBRARIES="$value" ;;
     REQUIRE_2FA) REQUIRE_2FA="$value" ;;
@@ -268,6 +280,58 @@ case "${ENABLE_AGENT_APPROVALS:-false}" in
     ;;
 esac
 
+# HTML pages (optional, off by default). Nothing below changes the generated
+# files unless ENABLE_PAGES=true; the second port or hostname is added only in
+# script mode (PAGES_ORIGIN set).
+PAGES_PORT=""
+case "${ENABLE_PAGES:-false}" in
+  true)
+    case "${PAGES_NETWORK:-strict}" in
+      strict|open) ;;
+      *) echo "Error: PAGES_NETWORK must be strict or open (got '${PAGES_NETWORK}')."; exit 1 ;;
+    esac
+    for v in PAGES_MAX_MB PAGES_MAX_FILES; do
+      val="${!v}"
+      if [ -n "$val" ] && ! [[ "$val" =~ ^[1-9][0-9]*$ ]]; then
+        echo "Error: $v must be a whole number above 0 (got '$val')."
+        exit 1
+      fi
+    done
+    if [ "${PAGES_MAX_MB:-20}" -gt 30 ]; then
+      echo "  Warning: PAGES_MAX_MB=${PAGES_MAX_MB} is above 30. The web server in front of"
+      echo "           mdnest accepts uploads up to 32 MB, so a larger page is refused there."
+    fi
+    if [ -n "$PAGES_ORIGIN" ]; then
+      if ! [[ "$PAGES_ORIGIN" =~ ^https?://[^/:]+(:[0-9]+)?/?$ ]]; then
+        echo "Error: PAGES_ORIGIN must be a bare origin like http://localhost:3237 or https://pages.example.com (got '${PAGES_ORIGIN}')."
+        exit 1
+      fi
+      PAGES_ORIGIN="${PAGES_ORIGIN%/}"
+      if [ "$PAGES_ORIGIN" = "${FRONTEND_ORIGIN%/}" ]; then
+        echo "Error: PAGES_ORIGIN must differ from FRONTEND_ORIGIN (another hostname or port)."
+        echo "       On the same origin a page's script could act as the person viewing it."
+        exit 1
+      fi
+      pages_hostport="${PAGES_ORIGIN#*://}"
+      if [[ "$pages_hostport" == *:* ]]; then PAGES_PORT="${pages_hostport##*:}"; fi
+      if [ -z "$CADDY_DOMAIN" ] && [ -z "$PAGES_PORT" ]; then
+        echo "Error: PAGES_ORIGIN=${PAGES_ORIGIN} has no port. Without CADDY_DOMAIN, pages are served"
+        echo "       on a second port: use e.g. http://localhost:3237. For a second hostname, set"
+        echo "       CADDY_DOMAIN, or route that hostname to the backend's port 8081 yourself."
+        exit 1
+      fi
+      echo "HTML pages: on, script mode (pages served from ${PAGES_ORIGIN}, network ${PAGES_NETWORK:-strict})."
+    else
+      echo "HTML pages: on, static mode (scripts off). Set PAGES_ORIGIN to let page scripts run."
+    fi
+    ;;
+  false) ;;
+  *)
+    echo "Error: ENABLE_PAGES must be true or false (got '${ENABLE_PAGES}')."
+    exit 1
+    ;;
+esac
+
 if [ ${#MOUNT_NAMES[@]} -eq 0 ]; then
   echo "Error: No MOUNT_ entries found in $CONF."
   echo "Add at least one line like: MOUNT_myrepo=/path/to/directory"
@@ -358,6 +422,22 @@ if [ -n "$COMPOSE_PROJECT_NAME" ]; then
   echo "COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME}" >> .env
 fi
 
+if [ "$ENABLE_PAGES" = "true" ]; then
+  cat >> .env <<EOF
+ENABLE_PAGES=true
+PAGES_DIR=/data/pages
+PAGES_NETWORK=${PAGES_NETWORK:-strict}
+PAGES_MAX_MB=${PAGES_MAX_MB:-20}
+PAGES_MAX_FILES=${PAGES_MAX_FILES:-500}
+EOF
+  if [ -n "$PAGES_ORIGIN" ]; then
+    cat >> .env <<EOF
+PAGES_ORIGIN=${PAGES_ORIGIN}
+PAGES_LISTEN_PORT=8081
+EOF
+  fi
+fi
+
 if [ "$USER_PROVIDER" = "firebase" ]; then
   cat >> .env <<EOF
 FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID}
@@ -443,6 +523,22 @@ if [ "$ENABLE_MARP_THEMES" = "true" ]; then
 fi
 
 # SSH key for git pull/push (backend sync button + git-sync sidecar)
+# HTML pages: app data that is not notes, so it needs its own volume or a
+# rebuild loses it. A host folder when PAGES_DIR is set, a named volume
+# otherwise.
+PAGES_NAMED_VOLUME=""
+if [ "$ENABLE_PAGES" = "true" ]; then
+  if [ -n "$PAGES_DIR" ]; then
+    mkdir -p "$PAGES_DIR"
+    BACKEND_VOLUMES="${BACKEND_VOLUMES}      - ${PAGES_DIR}:/data/pages
+"
+  else
+    BACKEND_VOLUMES="${BACKEND_VOLUMES}      - mdnest-pages:/data/pages
+"
+    PAGES_NAMED_VOLUME="  mdnest-pages:"
+  fi
+fi
+
 SSH_KEY_VOLUME=""
 SSH_KEY_GITSYNC=""
 if [ -n "$SSH_KEY_PATH" ]; then
@@ -531,6 +627,22 @@ ${CADDY_DOMAIN} {
     reverse_proxy frontend:80
 }
 CADDYEOF
+  # Script-mode pages: their own site, straight to the backend's pages
+  # listener, which serves page files and nothing else.
+  CADDY_PAGES_PORT=""
+  if [ "$ENABLE_PAGES" = "true" ] && [ -n "$PAGES_ORIGIN" ]; then
+    cat >> Caddyfile <<CADDYEOF
+
+${PAGES_ORIGIN} {
+    reverse_proxy backend:8081
+}
+CADDYEOF
+    case "$PAGES_PORT" in
+      ""|80|443) ;;
+      *) CADDY_PAGES_PORT="
+      - \"${PAGES_PORT}:${PAGES_PORT}\"" ;;
+    esac
+  fi
   echo "Generated Caddyfile"
 
   # Backend/frontend use expose (internal only) when Caddy is in front
@@ -544,7 +656,7 @@ CADDYEOF
     image: caddy:2-alpine
     ports:
       - \"80:80\"
-      - \"443:443\"
+      - \"443:443\"${CADDY_PAGES_PORT}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
@@ -571,6 +683,11 @@ else
       - \"${ip}:${BACKEND_PORT}:8080\""
     FRONTEND_PORT_LINE="${FRONTEND_PORT_LINE}
       - \"${ip}:${FRONTEND_PORT}:80\""
+    # Script-mode pages: the backend's pages listener on the second port.
+    if [ "$ENABLE_PAGES" = "true" ] && [ -n "$PAGES_PORT" ]; then
+      BACKEND_PORT_LINE="${BACKEND_PORT_LINE}
+      - \"${ip}:${PAGES_PORT}:8081\""
+    fi
     # Docker only publishes a port if the IP is on an interface at the moment
     # the container starts. A Tailscale, VPN or DHCP address can come up after
     # Docker does (a reboot, a Docker restart), and then the container runs
@@ -683,7 +800,8 @@ ${GITSYNC_VOLUMES}      - ./git-sync/sync.sh:/sync.sh:ro
 ${MCP_SERVICE}
 volumes:
   mdnest-secrets:
-${MARP_THEMES_NAMED_VOLUME}
+${MARP_THEMES_NAMED_VOLUME}${PAGES_NAMED_VOLUME:+
+$PAGES_NAMED_VOLUME}
 ${EXTRA_VOLUMES}
 ${CADDY_VOLUMES}
 EOF

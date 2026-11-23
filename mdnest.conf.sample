@@ -137,6 +137,38 @@ GIT_AUTHOR_EMAIL=you@example.com
 # never loads the (large) Excalidraw chunk.
 # ENABLE_EXCALIDRAW=false
 
+# HTML pages (Optional, off by default, works in single and multi mode)
+# Publish view-only HTML pages (reports, dashboards) into a namespace with
+# `mdnest page publish` or the MCP publish_page tool, and view them from a
+# "Pages" section under the notes. Pages are kept apart from notes: they never
+# show in the notes tree or notes search. Anyone with write access to a
+# namespace can publish its pages; read access lets you see them. A grant on a
+# subfolder does not give access to pages. Publishing again replaces a page.
+# When off, no route is registered and the frontend loads no pages code.
+# ENABLE_PAGES=false
+#
+# Where page files are kept on the host. Empty means a Docker named volume
+# (mdnest-pages). Either way it is separate from your notes.
+# PAGES_DIR=
+#
+# Limits checked when a page is published: total size and number of files.
+# PAGES_MAX_MB=20
+# PAGES_MAX_FILES=500
+#
+# Script mode (Optional, Needs team setup). Without PAGES_ORIGIN, pages show
+# with their scripts turned off. Set it to a second address that serves page
+# files and nothing else, and page scripts run there, in a sandbox that cannot
+# reach your mdnest login:
+#   - a second port:     PAGES_ORIGIN=http://localhost:3237
+#   - a second hostname: PAGES_ORIGIN=https://pages.example.com (with
+#     CADDY_DOMAIN set, or your own proxy routing it to the backend's port 8081)
+# It must differ from FRONTEND_ORIGIN. See "HTML pages" in docs/setup.md.
+# PAGES_ORIGIN=
+#
+# What a page's scripts may load in script mode: strict (default) allows only
+# the page's own files; open also allows outside scripts and fetches (https).
+# PAGES_NETWORK=strict
+
 # Default theme (optional, works in both single and multi mode)
 # The theme a user sees before they have chosen one for themselves:
 #   auto  — follow the operating system's light/dark setting (default)

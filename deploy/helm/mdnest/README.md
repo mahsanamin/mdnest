@@ -342,6 +342,13 @@ All traffic goes to the frontend Service, which proxies `/api` and `/api/ws` (We
 | mcp.service | object | `{"port":3000,"type":"ClusterIP"}` | MCP Service type/port. |
 | mcp.tolerations | list | `[]` | Tolerations for the MCP server. |
 | nameOverride | string | `""` | Override the chart name portion of generated resource names. |
+| pages | object | `{"enabled":false,"maxFiles":500,"maxMB":20,"network":"strict","origin":"","port":8081}` | --------------------------------------------------------------------------- |
+| pages.enabled | bool | `false` | Enable HTML pages (`ENABLE_PAGES`). Off by default; when off no route is registered and the frontend never loads the pages chunk. |
+| pages.maxFiles | int | `500` | Most files in one page (`PAGES_MAX_FILES`), checked at publish time. |
+| pages.maxMB | int | `20` | Largest total size of one page, in MB (`PAGES_MAX_MB`), checked at publish time. |
+| pages.network | string | `"strict"` | What a page's scripts may load in script mode (`PAGES_NETWORK`): `strict` (only the page's own files) or `open` (outside scripts and fetches, https). |
+| pages.origin | string | `""` | Script mode (`PAGES_ORIGIN`, needs team setup): a second hostname that serves page files and nothing else, e.g. `https://pages.example.com`. Empty means static mode: pages show with their scripts turned off. Must differ from `backend.frontendOrigin`. With `ingress.enabled`, a rule for this hostname is added that goes to the backend's pages port. |
+| pages.port | int | `8081` | Container and Service port of the pages listener (`PAGES_LISTEN_PORT`), used only in script mode. |
 | persistence | object | `{"notes":{"accessMode":"ReadWriteOnce","annotations":{},"enabled":true,"existingClaim":"","size":"5Gi","storageClass":""},"pvcRetentionPolicy":{},"secrets":{"accessMode":"ReadWriteOnce","annotations":{},"enabled":true,"existingClaim":"","size":"256Mi","storageClass":""}}` | --------------------------------------------------------------------------- |
 | persistence.notes.accessMode | string | `"ReadWriteOnce"` | Access mode for the per-pod volumeClaimTemplate. ReadWriteOnce is fine (each pod owns its volume). Sharing across pods uses existingClaim instead. |
 | persistence.notes.annotations | object | `{}` | Annotations for the notes PVC. |

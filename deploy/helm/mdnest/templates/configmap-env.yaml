@@ -49,6 +49,17 @@ data:
   ENABLE_MARP_THEMES: {{ .Values.marp.themes.enabled | ternary "true" "false" | quote }}
   ENABLE_EXCALIDRAW: {{ .Values.excalidraw.enabled | ternary "true" "false" | quote }}
   EXCALIDRAW_LIBRARIES: {{ .Values.excalidraw.libraries | default list | join "," | quote }}
+  {{- if .Values.pages.enabled }}
+  ENABLE_PAGES: "true"
+  PAGES_DIR: "/data/notes/.mdnest-pages"
+  PAGES_MAX_MB: {{ .Values.pages.maxMB | quote }}
+  PAGES_MAX_FILES: {{ .Values.pages.maxFiles | quote }}
+  PAGES_NETWORK: {{ .Values.pages.network | quote }}
+  {{- if .Values.pages.origin }}
+  PAGES_ORIGIN: {{ .Values.pages.origin | quote }}
+  PAGES_LISTEN_PORT: {{ .Values.pages.port | quote }}
+  {{- end }}
+  {{- end }}
   DOWNLOAD_MAX_FILES: {{ .Values.download.maxFiles | quote }}
   DOWNLOAD_MAX_MB: {{ .Values.download.maxMB | quote }}
   DOWNLOAD_MAX_CONCURRENT: {{ .Values.download.maxConcurrent | quote }}

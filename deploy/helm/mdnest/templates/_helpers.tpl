@@ -185,12 +185,37 @@ install-time error naming what is missing.
 
 Delete a guard in the same change that lands the capability behind it.
 */}}
+{{/*
+The hostname of pages.origin (scheme, port and path removed), for the ingress
+rule that sends it to the backend's pages listener.
+*/}}
+{{- define "mdnest.pagesHost" -}}
+{{- (urlParse .Values.pages.origin).host | splitList ":" | first -}}
+{{- end -}}
+
 {{- define "mdnest.validateSupported" -}}
 {{- if not (has .Values.storage.backend (list "local" "git")) -}}
   {{- fail (printf "mdnest: storage.backend=%q is not a supported backend. Use `local` (notes on the PVC) or `git` (in-process git history; add REDIS_URL for the git-native HA topology)." .Values.storage.backend) -}}
 {{- end -}}
 {{- if not (has .Values.ui.defaultTheme (list "auto" "dark" "light")) -}}
   {{- fail (printf "mdnest: ui.defaultTheme=%q is not valid. Use `auto` (follow the viewer's OS setting), `dark` or `light`." .Values.ui.defaultTheme) -}}
+{{- end -}}
+{{- if .Values.pages.enabled -}}
+  {{- if eq (include "mdnest.gitNativeHA" .) "true" -}}
+    {{- fail "mdnest: pages.enabled is not available with the git-native HA topology (storage.backend=git with more than one replica): page files live on one volume, and the app replicas have none. Use a single replica, or storage.backend=local." -}}
+  {{- end -}}
+  {{- if not (has .Values.pages.network (list "strict" "open")) -}}
+    {{- fail (printf "mdnest: pages.network=%q is not valid. Use `strict` (a page loads only its own files) or `open` (outside scripts and fetches allowed)." .Values.pages.network) -}}
+  {{- end -}}
+  {{- if .Values.pages.origin -}}
+    {{- $p := urlParse .Values.pages.origin -}}
+    {{- if or (not (has $p.scheme (list "http" "https"))) (not $p.host) (and $p.path (ne $p.path "/")) -}}
+      {{- fail (printf "mdnest: pages.origin=%q must be a bare origin such as https://pages.example.com." .Values.pages.origin) -}}
+    {{- end -}}
+    {{- if eq (trimSuffix "/" .Values.pages.origin) (trimSuffix "/" .Values.backend.frontendOrigin) -}}
+      {{- fail "mdnest: pages.origin must differ from backend.frontendOrigin (another hostname or port). On the same origin a page's script could act as the person viewing it." -}}
+    {{- end -}}
+  {{- end -}}
 {{- end -}}
 {{- if and (eq .Values.storage.backend "git") .Values.gitSync.enabled -}}
   {{- fail "mdnest: storage.backend=git maintains git history in-process, and gitSync.enabled runs a sidecar that also commits — the two would fight over the same working tree. Pick one: storage.backend=git (mdnest owns commits) or storage.backend=local + gitSync.enabled (the sidecar owns commits/push)." -}}
