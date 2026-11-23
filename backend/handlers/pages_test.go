@@ -259,6 +259,7 @@ func TestPages_SingleHTMLFileAndRepublishReplaces(t *testing.T) {
 	if w := publish(h, "alpha", "rep", "application/x-tar", page); w.Code != http.StatusOK {
 		t.Fatal(w.Body.String())
 	}
+	first := idOf(t, pagesDir, "alpha", "rep")
 	if w := publish(h, "alpha", "rep", "text/html; charset=utf-8", []byte("<title>Two</title><p>two</p>")); w.Code != http.StatusOK {
 		t.Fatal(w.Body.String())
 	}
@@ -270,8 +271,12 @@ func TestPages_SingleHTMLFileAndRepublishReplaces(t *testing.T) {
 	if string(b) != "<title>Two</title><p>two</p>" {
 		t.Fatalf("index = %q", b)
 	}
-	if again := idOf(t, pagesDir, "alpha", "rep"); again != id {
-		t.Fatalf("republishing changed the id: %s -> %s", id, again)
+	// Every publish is a new id; the old page goes once nothing names it.
+	if id == first {
+		t.Fatal("republishing kept the id")
+	}
+	if _, err := os.Stat(filepath.Join(pagesDir, "alpha", first)); !os.IsNotExist(err) {
+		t.Fatal("the old page was kept although no handle names it")
 	}
 	// No temp or old folders left behind.
 	entries, _ := os.ReadDir(filepath.Join(pagesDir, "alpha"))
@@ -443,6 +448,38 @@ func TestPages_DeleteHookAndUnlinked(t *testing.T) {
 	h.HandleUnlinked(w, httptest.NewRequest(http.MethodDelete, "/api/pages/unlinked?ns=alpha&id="+idOf(t, pagesDir, "alpha", "live"), nil))
 	if w.Code != http.StatusConflict {
 		t.Fatalf("delete a linked page as unlinked: %d", w.Code)
+	}
+}
+
+func TestPages_RepublishRotatesTheID(t *testing.T) {
+	h, pagesDir := pagesFixture(t)
+	notes := notesOf(pagesDir)
+	publish(h, "alpha", "A/page", "text/html", []byte("<p>v1</p>"))
+	id1 := idOf(t, pagesDir, "alpha", "A/page")
+	oldPass := passURL(t, h, "alpha", "A/page")
+	b, _ := os.ReadFile(filepath.Join(notes, "alpha", "A", "page.page.md"))
+	os.MkdirAll(filepath.Join(notes, "alpha", "B"), 0o755)
+	os.WriteFile(filepath.Join(notes, "alpha", "B", "copy.page.md"), b, 0o644)
+
+	// Single mode writes everywhere: both handles move to the new id and the
+	// old page goes, with every pass made for it.
+	publish(h, "alpha", "A/page", "text/html", []byte("<p>v2</p>"))
+	id2 := idOf(t, pagesDir, "alpha", "A/page")
+	if id2 == id1 || idOf(t, pagesDir, "alpha", "B/copy") != id2 {
+		t.Fatalf("ids: first %s, then %s, copy %s", id1, id2, idOf(t, pagesDir, "alpha", "B/copy"))
+	}
+	if _, err := os.Stat(filepath.Join(pagesDir, "alpha", id1)); !os.IsNotExist(err) {
+		t.Fatal("the old page was kept although no handle names it")
+	}
+	if w := view(h, oldPass); w.Code != http.StatusForbidden {
+		t.Fatalf("a pass for the old version: %d", w.Code)
+	}
+	if w := view(h, passURL(t, h, "alpha", "B/copy")); w.Body.String() != "<p>v2</p>" {
+		t.Fatalf("the rewritten copy shows %q", w.Body.String())
+	}
+	// The rewritten handle keeps everything else it had.
+	if nb, _ := os.ReadFile(filepath.Join(notes, "alpha", "B", "copy.page.md")); !strings.Contains(string(nb), "HTML page, open it in mdnest.") {
+		t.Fatalf("rewritten copy: %q", nb)
 	}
 }
 

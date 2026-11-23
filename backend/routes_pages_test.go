@@ -102,7 +102,7 @@ func TestRoutes_PageAccessFollowsTheHandleFolder(t *testing.T) {
 	}
 
 	// A subfolder writer publishes in that folder, and nowhere else.
-	if code, body := publish(pat, "Shared/pats.page.md", "<p>PAT</p>"); code != 200 {
+	if code, body := publish(pat, "Shared/patsfirst.page.md", "<p>PAT</p>"); code != 200 {
 		t.Fatalf("folder writer publish in the folder: %d %s", code, body)
 	}
 	for name, tok := range map[string]string{"pat(folder write)": pat, "gus(folder read)": gus, "rita(read)": rita, "adele": adele, "superadmin": super} {
@@ -119,26 +119,66 @@ func TestRoutes_PageAccessFollowsTheHandleFolder(t *testing.T) {
 		}
 	}
 
-	// A handle is readable, so its page id is no secret from readers. A
-	// writer of one folder who copies (or writes) a handle naming another
-	// folder's page must not be able to publish over that page.
-	_, privHandle := ts.get(owen, "/api/note?ns=alpha&path="+q("Private/boss.page.md"))
-	if code, b := ts.do(pat, http.MethodPost, "/api/note?ns=alpha&path="+q("Shared/forged.page.md"), strings.NewReader(privHandle), ""); code >= 300 {
-		t.Fatalf("pat writes a handle in Shared: %d %s", code, b)
+	// Republishing makes a new id and only moves the handles the publisher
+	// can write. A handle is readable, so its id is no secret from readers:
+	// Wes (read everywhere, write Private) copies Pat's handle into Private.
+	const uidWes = 6
+	ts.grants.mu.Lock()
+	ts.grants.grants = append(ts.grants.grants,
+		store.Grant{UserID: uidWes, Namespace: "alpha", Path: "/", Permission: "read"},
+		store.Grant{UserID: uidWes, Namespace: "alpha", Path: "/Private", Permission: "write"})
+	ts.grants.mu.Unlock()
+	wes := jwtFor(t, uidWes, "collaborator", nil)
+	viewOf := func(tok, p string) string {
+		code, body := pass(tok, p)
+		if code != 200 {
+			return "pass " + body
+		}
+		var pr passResp
+		json.Unmarshal([]byte(body), &pr)
+		_, b := ts.get("", pr.URL)
+		return b
 	}
-	if code, b := publish(pat, "Shared/forged.page.md", "<p>DEFACED</p>"); code != http.StatusForbidden {
-		t.Fatalf("publish over another folder's page through a forged handle: %d %s", code, b)
+	if code, b := publish(pat, "Shared/pats.page.md", "<p>PAT-V1</p>"); code != 200 {
+		t.Fatalf("pat publish v1: %d %s", code, b)
 	}
-	if _, b := ts.get(owen, "/api/pages/text?ns=alpha&path="+q("Private/boss.page.md")); !strings.Contains(b, "PRIVATE-BODY") || strings.Contains(b, "DEFACED") {
-		t.Fatalf("the Private page changed: %s", b)
+	_, patHandle := ts.get(pat, "/api/note?ns=alpha&path="+q("Shared/pats.page.md"))
+	for _, p := range []string{"Private/forged.page.md"} {
+		if code, b := ts.do(wes, http.MethodPost, "/api/note?ns=alpha&path="+q(p), strings.NewReader(patHandle), ""); code >= 300 {
+			t.Fatalf("wes writes %s: %d %s", p, code, b)
+		}
 	}
-	ts.do(pat, http.MethodDelete, "/api/note?ns=alpha&path="+q("Shared/forged.page.md"), nil, "")
-	if _, b := ts.get(owen, "/api/pages/text?ns=alpha&path="+q("Private/boss.page.md")); !strings.Contains(b, "PRIVATE-BODY") {
-		t.Fatalf("deleting the forged handle deleted the Private page: %s", b)
+	// A forged publish only moves the forger's own handle: Pat's page is
+	// byte-identical afterwards.
+	if code, b := publish(wes, "Private/forged.page.md", "<p>DEFACED</p>"); code != 200 {
+		t.Fatalf("wes publishes through the forged handle: %d %s", code, b)
 	}
-	// A writer of every handle may republish (Owen writes the whole namespace).
-	if code, b := publish(owen, "Private/boss.page.md", "<title>Boss</title><p>PRIVATE-BODY v2</p>"); code != 200 {
-		t.Fatalf("owner republish: %d %s", code, b)
+	if got := viewOf(pat, "Shared/pats.page.md"); got != "<p>PAT-V1</p>" {
+		t.Fatalf("Pat's page after the forged publish: %q", got)
+	}
+	// Wes saves a copy of Pat's handle (v1) in a folder Pat cannot write.
+	if code, b := ts.do(wes, http.MethodPost, "/api/note?ns=alpha&path="+q("Private/saved.page.md"), strings.NewReader(patHandle), ""); code >= 300 {
+		t.Fatalf("wes saves a copy: %d %s", code, b)
+	}
+	// The forged handle does not block Pat: Pat republishes, and Pat's handle
+	// moves to v2. Wes's saved copy (Pat cannot write Private) keeps showing
+	// the v1 snapshot, never v2.
+	if code, b := publish(pat, "Shared/pats.page.md", "<p>PAT-V2</p>"); code != 200 {
+		t.Fatalf("pat republishes with a forged handle around: %d %s", code, b)
+	}
+	if got := viewOf(gus, "Shared/pats.page.md"); got != "<p>PAT-V2</p>" {
+		t.Fatalf("Pat's page after republish: %q", got)
+	}
+	if got := viewOf(wes, "Private/saved.page.md"); got != "<p>PAT-V1</p>" {
+		t.Fatalf("a saved old id shows %q, want only the old snapshot", got)
+	}
+	// The v1 snapshot goes once no handle names it.
+	if code, _ := ts.do(wes, http.MethodDelete, "/api/note?ns=alpha&path="+q("Private/saved.page.md"), nil, ""); code != 200 {
+		t.Fatalf("delete the saved copy: %d", code)
+	}
+	ts.do(wes, http.MethodDelete, "/api/note?ns=alpha&path="+q("Private/forged.page.md"), nil, "")
+	if _, b := ts.get(owen, "/api/pages?ns=alpha"); strings.Contains(b, "PAT-V1") || strings.Contains(b, `"unlinked":[{`) {
+		t.Fatalf("old snapshot or forged page left behind: %s", b)
 	}
 
 	// Viewing follows the folder: a subfolder-only reader sees the page in
@@ -198,7 +238,7 @@ func TestRoutes_PageAccessFollowsTheHandleFolder(t *testing.T) {
 	// Deleting the handle through the normal note route deletes the page;
 	// a handle removed behind mdnest's back leaves it unlinked, listed only
 	// for namespace-root writers.
-	if code, _ := ts.do(owen, http.MethodDelete, "/api/note?ns=alpha&path="+q("Shared/pats.page.md"), nil, ""); code != 200 {
+	if code, _ := ts.do(owen, http.MethodDelete, "/api/note?ns=alpha&path="+q("Shared/patsfirst.page.md"), nil, ""); code != 200 {
 		t.Fatalf("delete handle: %d", code)
 	}
 	os.Remove(filepath.Join(ts.root, "alpha", "Private", "boss.page.md"))

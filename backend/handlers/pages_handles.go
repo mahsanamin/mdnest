@@ -430,9 +430,10 @@ func (s *statusWriter) WriteHeader(code int) {
 	s.ResponseWriter.WriteHeader(code)
 }
 
-// handlePublish serves PUT /api/pages?ns=&path=<name>.page.md. An existing
-// handle keeps its id and its page is replaced; otherwise a new id and handle
-// are made. A .page.md that is not a handle is never overwritten (409).
+// handlePublish serves PUT /api/pages?ns=&path=<name>.page.md: stores the page
+// under a new id and writes the handle (new, or updated to the new id). It
+// needs write on that handle only. A .page.md that is not a handle is never
+// overwritten (409).
 func (h *PagesHandler) handlePublish(w http.ResponseWriter, r *http.Request) {
 	ns, rel, ok := h.requireHandlePath(w, r)
 	if !ok {
@@ -443,7 +444,12 @@ func (h *PagesHandler) handlePublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	id := ""
+	// Every publish stores the content under a NEW id, then points the
+	// handles the publisher can write at it (see rotateHandles). A page is
+	// never replaced in place: a handle is readable, so its id is no secret
+	// from readers, and replacing by id would let anyone who can write one
+	// handle change what every other handle naming that id shows.
+	oldID := ""
 	if data, err := h.store.ReadFile(ctx, ns, rel); err == nil {
 		existing, isHandle := ParsePageHandle(string(data))
 		if !isHandle {
@@ -451,28 +457,13 @@ func (h *PagesHandler) handlePublish(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if ValidPageID(existing) {
-			id = existing
+			oldID = existing
 		}
 	} else if !errors.Is(err, storage.ErrNotExist) {
 		pagesError(w, http.StatusInternalServerError, "failed to read the handle")
 		return
 	}
-	if id != "" && h.pageStored(ns, id) {
-		// Replacing a page changes what every one of its handles shows. A
-		// handle is readable, so its id is not a secret from readers: without
-		// this, someone who can write one folder could write a handle naming
-		// another folder's page and publish over it. Replacing needs write on
-		// every handle in the namespace that names the page.
-		for _, ref := range h.handlesIn(ctx, ns, "") {
-			if ref.id == id && ref.path != rel && !h.canWritePath(r, ns, ref.path) {
-				pagesError(w, http.StatusForbidden, "this page also has a handle in a folder you cannot write; publish under a new name instead")
-				return
-			}
-		}
-	}
-	if id == "" {
-		id = newPageID()
-	}
+	id := newPageID()
 
 	nsDir := h.nsDir(ns)
 	if nsDir == "" {
@@ -532,50 +523,73 @@ func (h *PagesHandler) handlePublish(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	dest, metaFile := h.pageDir(ns, id), h.metaPath(ns, id)
 	if dest == "" || metaFile == "" {
+		h.mu.Unlock()
 		pagesError(w, http.StatusBadRequest, "invalid page")
 		return
 	}
-	// Swap the new folder in: move the old one aside, rename, then drop it.
-	var old string
-	if _, err := os.Stat(dest); err == nil {
-		old = filepath.Join(nsDir, ".old-"+randHex(8))
-		if err := os.Rename(dest, old); err != nil {
-			pagesError(w, http.StatusInternalServerError, "failed to replace page")
-			return
-		}
-	}
 	if err := os.Rename(tmp, dest); err != nil {
-		if old != "" {
-			os.Rename(old, dest)
-		}
+		h.mu.Unlock()
 		pagesError(w, http.StatusInternalServerError, "failed to store page")
 		return
-	}
-	if old != "" {
-		os.RemoveAll(old)
 	}
 	mb, _ := json.Marshal(pageMetaFile{PageMeta: meta, Version: meta.Version})
 	tmpMeta := metaFile + ".tmp-" + randHex(4)
 	if err := os.WriteFile(tmpMeta, mb, 0644); err != nil || os.Rename(tmpMeta, metaFile) != nil {
 		os.Remove(tmpMeta)
+		os.RemoveAll(dest)
+		h.mu.Unlock()
 		pagesError(w, http.StatusInternalServerError, "failed to store page details")
 		return
 	}
+	h.mu.Unlock()
 	// The handle last: it is what makes the page visible.
 	unlock := lockNote(ns, rel)
 	err = h.store.WriteFile(ctx, ns, rel, []byte(pageHandleContent(id, meta)))
 	unlock()
 	if err != nil {
 		log.Printf("pages: write handle %s/%s: %v", ns, rel, err)
+		h.mu.Lock()
+		h.removeStored(ns, id)
+		h.mu.Unlock()
 		pagesError(w, http.StatusInternalServerError, "failed to write the page handle")
 		return
+	}
+	if oldID != "" && oldID != id {
+		h.rotateHandles(r, ns, rel, oldID, id)
+		h.collectIfUnreferenced(ctx, ns, []string{oldID})
 	}
 	meta.Text = ""
 	meta.Path = rel
 	pagesJSON(w, http.StatusOK, meta)
+}
+
+// rotateHandles points every other handle in the namespace that names oldID,
+// and that the publisher can write, at newID. Handles the publisher cannot
+// write keep oldID, and with it the old page, which stays stored for as long
+// as any handle names it. So a publish never changes what a handle the
+// publisher cannot write shows, and an id someone saved only ever opens the
+// version they could already read.
+func (h *PagesHandler) rotateHandles(r *http.Request, ns, published, oldID, newID string) {
+	ctx := r.Context()
+	for _, ref := range h.handlesIn(ctx, ns, "") {
+		if ref.id != oldID || ref.path == published || !h.canWritePath(r, ns, ref.path) {
+			continue
+		}
+		unlock := lockNote(ns, ref.path)
+		data, err := h.store.ReadFile(ctx, ns, ref.path)
+		if err == nil {
+			if id, ok := ParsePageHandle(string(data)); ok && id == oldID {
+				if rewritten, ok := rewriteHandleID(string(data), newID); ok {
+					if err := h.store.WriteFile(ctx, ns, ref.path, []byte(rewritten)); err != nil {
+						log.Printf("pages: point %s/%s at the new page: %v", ns, ref.path, err)
+					}
+				}
+			}
+		}
+		unlock()
+	}
 }
 
 // handleDelete serves DELETE /api/pages?ns=&path=: removes the handle and,
