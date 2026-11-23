@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 
-function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePassword, onManageUsers, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh, wsStatus, commentCount, onToggleComments, onToggleStickies, stickiesOpen, onSetBoardActive, boardActive, onSetChatsActive, chatsActive, chatsBackLabel, marpLocked, liveLockReason, basicLockReason, mobileView, onMobileViewChange, drawingDoc, drawingSource, onDrawingSourceChange, theme, onToggleTheme, presence, approvalCount = 0, onShowApprovals }) {
+function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePassword, onManageUsers, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh, wsStatus, commentCount, onToggleComments, onToggleStickies, stickiesOpen, onSetBoardActive, boardActive, onSetChatsActive, chatsActive, chatsBackLabel, marpLocked, liveLockReason, basicLockReason, mobileView, onMobileViewChange, drawingDoc, drawingSource, onDrawingSourceChange, theme, onToggleTheme, presence, approvalCount = 0, onShowApprovals, pageActive = false }) {
   const [refreshing, setRefreshing] = useState(false);
   // Phone overflow menu. On a phone the bar keeps only what is used per note
   // (sidebar, filename, comments, the mode switch); every other control lives
@@ -48,7 +48,7 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
   const mobilePreview = !!onMobileViewChange && mobileView === 'preview';
 
   return (
-    <div className={`toolbar${boardActive || chatsActive ? ' toolbar--view' : ''}${chatsActive ? ' toolbar--chats' : ''}`}>
+    <div className={`toolbar${boardActive || chatsActive || pageActive ? ' toolbar--view' : ''}${chatsActive ? ' toolbar--chats' : ''}`}>
       {/* Groups, not a flat row. Every control used to sit the same 0.5rem
           from its neighbour, so "Rename / Delete" read as no more related to
           each other than to the file path beside them, and the trailing icons
@@ -187,8 +187,8 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
       )}
       {/* Phone only (CSS): on the board or the chats view the bar names that
           view instead of the note underneath it, which it is not showing. */}
-      {(boardActive || chatsActive) && (
-        <span className="toolbar-view-title">{boardActive ? 'Task board' : 'Chats'}</span>
+      {(boardActive || chatsActive || pageActive) && (
+        <span className="toolbar-view-title">{boardActive ? 'Task board' : chatsActive ? 'Chats' : 'Page'}</span>
       )}
       {/* Path display splits dir + basename so the filename never gets
           ellipsized away on narrow screens. .toolbar-path-dir shrinks
@@ -199,7 +199,7 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
         {/* "No file selected" is guidance for an empty editor. On the board
             there is nothing to select a file for, so the prompt is just noise
             — the board is showing the whole workspace. */}
-        {!currentPath && !boardActive && 'No file selected'}
+        {!currentPath && !boardActive && !pageActive && 'No file selected'}
         {currentPath && (() => {
           const idx = currentPath.lastIndexOf('/');
           const dir = idx >= 0 ? currentPath.substring(0, idx + 1) : '';

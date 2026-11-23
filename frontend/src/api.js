@@ -474,6 +474,23 @@ export async function searchNotes(ns, query) {
   return res.json();
 }
 
+// --- HTML pages (server: ENABLE_PAGES) ---
+
+// The pages of a namespace: [{ slug, title, author, publishedAt, files, bytes }].
+export async function listPages(ns) {
+  const res = await request(`/pages?ns=${encodeURIComponent(ns)}`);
+  if (!res.ok) throw new Error('Failed to load pages');
+  return (await res.json()).pages || [];
+}
+
+// A frame URL for one page: { url, scripts, expiresAt }. Asked for again each
+// time a page is opened, since the pass in it expires.
+export async function getPagePass(ns, slug) {
+  const res = await request(`/pages/pass?ns=${encodeURIComponent(ns)}&slug=${encodeURIComponent(slug)}`, { method: 'POST' });
+  if (!res.ok) throw new Error(res.status === 404 ? 'This page no longer exists.' : 'Failed to open the page');
+  return res.json();
+}
+
 // --- Tasks & kanban board (namespace-scoped) ---
 
 // Aggregate every markdown task-list item in the namespace plus the board

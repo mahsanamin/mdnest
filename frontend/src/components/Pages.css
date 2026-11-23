@@ -1,0 +1,191 @@
+/* HTML pages: the sidebar list and the framed viewer. Loaded with the pages
+   chunk only. Colours come from theme.css tokens. */
+
+.pages-section {
+  border-top: 1px solid var(--border-subtle);
+  padding: 0.25rem 0;
+  max-height: 40%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.pages-section-header {
+  display: flex;
+  align-items: center;
+  padding: 0 0.5rem;
+}
+
+.pages-section-toggle {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.35rem 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.pages-section-toggle .tree-arrow {
+  display: inline-block;
+  transition: transform 0.15s;
+}
+
+.pages-section-toggle .tree-arrow.expanded {
+  transform: rotate(90deg);
+}
+
+.pages-count {
+  color: var(--text-faint);
+  font-weight: 400;
+}
+
+.pages-refresh {
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0.2rem 0.35rem;
+  border-radius: var(--radius-sm);
+}
+
+.pages-refresh:hover {
+  color: var(--text);
+  background: var(--surface-tint);
+}
+
+.pages-list {
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.pages-empty {
+  padding: 0.35rem 1rem;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.pages-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 0.85rem;
+  padding: 0.3rem 1rem;
+  cursor: pointer;
+  text-align: left;
+}
+
+.pages-row:hover {
+  background: var(--surface-tint);
+}
+
+.pages-row.active {
+  background: var(--accent-wash);
+  color: var(--accent);
+}
+
+.pages-row-icon {
+  flex: none;
+  width: 12px;
+  height: 14px;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+  opacity: 0.7;
+}
+
+.pages-row-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.page-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.page-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.45rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 0.85rem;
+  min-width: 0;
+}
+
+.page-badge {
+  flex: none;
+  padding: 0.05rem 0.45rem;
+  border-radius: var(--radius-sm);
+  background: var(--orange-wash);
+  color: var(--orange);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.page-bar-title {
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.page-bar-meta {
+  flex: 1;
+  color: var(--text-muted);
+  min-width: 0;
+}
+
+.page-bar-close {
+  flex: none;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.3rem;
+}
+
+.page-bar-close:hover {
+  color: var(--text);
+}
+
+.page-error {
+  padding: 1rem;
+  color: var(--danger);
+}
+
+/* The page's own background shows inside the frame; white is what a plain
+   HTML document expects, so pages written without a background stay legible
+   in the dark theme. */
+.page-frame {
+  flex: 1;
+  width: 100%;
+  border: none;
+  background: var(--page-frame-bg);
+  min-height: 0;
+}

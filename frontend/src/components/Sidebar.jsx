@@ -106,6 +106,9 @@ function Sidebar({
   updateAvailableVersion,
   onShowReleaseNotes,
   revealNonce,
+  // The HTML pages list (a lazy chunk), shown under the notes tree only when
+  // the server has pages on. Null otherwise.
+  pagesSection,
 }) {
   const [syncing, setSyncing] = useState(false);
   const [showVersionInfo, setShowVersionInfo] = useState(false);
@@ -625,6 +628,7 @@ function Sidebar({
             <div className="sidebar-tree-refreshing" aria-hidden="true" />
           )}
         </div>
+        {pagesSection}
         {(userInfo || onLogout) && (
           <UserFooter userInfo={userInfo} onLogout={onLogout} onAdminPanel={onAdminPanel} />
         )}

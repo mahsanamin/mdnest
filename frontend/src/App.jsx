@@ -30,6 +30,10 @@ const ExcalidrawEditor = lazy(() => loadWithRetry(() => import('./components/Exc
 // Lazy chats view, off by default (ENABLE_CHAT): notes-only installs never
 // download it.
 const ChatView = lazy(() => loadWithRetry(() => import('./components/ChatView.jsx')));
+// HTML pages (server: ENABLE_PAGES): the sidebar list and the framed viewer,
+// one chunk, never loaded when the server has pages off.
+const PagesList = lazy(() => loadWithRetry(() => import('./components/Pages.jsx')).then((m) => ({ default: m.PagesList })));
+const PageView = lazy(() => loadWithRetry(() => import('./components/Pages.jsx')).then((m) => ({ default: m.PageView })));
 // The two buttons that move a chat between full screen and the side panel.
 // Defined here, not in ChatView, so the chat chunk stays free of App's
 // layout decisions: ChatView just renders whatever action it is handed.
@@ -437,6 +441,9 @@ function App() {
   // the conversation shown in it ({ns, path} | null) — chats span namespaces,
   // so it is independent of the note open underneath.
   const [chatsOpen, setChatsOpen] = useState(false);
+  // The HTML page shown in the main area ({ ns, slug, title, author,
+  // publishedAt }), or null. Opening a note, chats or the board closes it.
+  const [openPage, setOpenPage] = useState(null);
   const [openChat, setOpenChat] = useState(null);
   // Chat mode is a place you visit and come back from. chatsReturnTo is the
   // view you came from ('editor' | 'board'), so the one Back button lands you
@@ -513,6 +520,7 @@ function App() {
   // not registered at all, so the button must not be offered.
   const taskBoardEnabled = !!appConfig?.taskBoard;
   const chatEnabled = !!appConfig?.chat;
+  const pagesEnabled = !!appConfig?.pages?.enabled;
 
   // "Basic" on a drawing shows the file's markdown source rather than the
   // canvas. Per-note and not persisted: a drawing should open as a drawing, so
@@ -1945,6 +1953,21 @@ function App() {
     setOpenChat(chat || null);
     setChatsOpen(true);
   }, [showTaskBoard, selectedNs, flushPendingSave]);
+  const openPageView = useCallback(async (page) => {
+    // Write out the note being left first, as any navigation does.
+    await flushPendingSave();
+    setChatsOpen(false);
+    setShowTaskBoard(false);
+    setOpenPage(page);
+    if (isMobile) setSidebarVisible(false);
+  }, [flushPendingSave, isMobile]);
+  useEffect(() => {
+    if (chatsOpen || showTaskBoard) setOpenPage(null);
+  }, [chatsOpen, showTaskBoard]);
+  useEffect(() => {
+    setOpenPage((p) => (p && p.ns !== selectedNs ? null : p));
+  }, [selectedNs]);
+
   const leaveChats = useCallback(() => {
     setChatsOpen(false);
     if (chatsReturnTo === 'board') setShowTaskBoard(true);
@@ -2905,8 +2928,8 @@ function App() {
         // Opening a file hands the create-target back to that file's folder,
         // so it tracks where you actually are rather than the last folder
         // you happened to expand.
-        onSelect={(p) => { setPickedFolder(null); setChatsOpen(false); chatRedirectFor.current = `${selectedNs}/${p}`; chatRedirectDock.current = chatDocked || chatMode === 'pinned'; chatRedirectFrom.current = currentPath ? { ns: selectedNs, path: currentPath } : null; openNote(p); }}
-        currentPath={currentPath}
+        onSelect={(p) => { setPickedFolder(null); setChatsOpen(false); setOpenPage(null); chatRedirectFor.current = `${selectedNs}/${p}`; chatRedirectDock.current = chatDocked || chatMode === 'pinned'; chatRedirectFrom.current = currentPath ? { ns: selectedNs, path: currentPath } : null; openNote(p); }}
+        currentPath={openPage && pagesEnabled ? null : currentPath}
         namespaces={namespaces}
         selectedNs={selectedNs}
         onSelectNs={handleSelectNs}
@@ -2941,6 +2964,13 @@ function App() {
         revealNonce={revealNonce}
         width={sidebarWidth}
         onResize={setSidebarWidth}
+        pagesSection={pagesEnabled && selectedNs ? (
+          <ChunkErrorBoundary label="pages" resetKey={selectedNs}>
+            <Suspense fallback={null}>
+              <PagesList ns={selectedNs} activeSlug={openPage?.slug} onOpen={openPageView} />
+            </Suspense>
+          </ChunkErrorBoundary>
+        ) : null}
       />
       <div
         className="main"
@@ -2953,7 +2983,10 @@ function App() {
         }
       >
         <Toolbar
-          currentPath={currentPath}
+          // A page has its own bar (title, author, date): the toolbar stops
+          // naming the note underneath it and offers nothing that acts on it.
+          pageActive={!!(openPage && pagesEnabled)}
+          currentPath={openPage && pagesEnabled ? null : currentPath}
           onManageUsers={isAdmin && isMulti ? () => setShowAdminPanel(true) : null}
           theme={resolvedTheme}
           onToggleTheme={toggleTheme}
@@ -2963,7 +2996,7 @@ function App() {
           onRename={canWriteCurrent ? handleToolbarRename : null}
           onDelete={canWriteCurrent ? handleToolbarDelete : null}
           viewMode={viewMode}
-          onViewModeChange={(mode) => {
+          onViewModeChange={openPage && pagesEnabled ? null : (mode) => {
             chooseViewMode(mode);
             // Restore editor mode from user preference when switching to editor-only
             if (mode === 'editor') {
@@ -2993,7 +3026,7 @@ function App() {
           drawingSource={drawingSource}
           onDrawingSourceChange={setDrawingSource}
           boardActive={showTaskBoard}
-          onEditorModeChange={(mode) => {
+          onEditorModeChange={openPage && pagesEnabled ? null : (mode) => {
             // Marp decks are locked to Basic — ignore attempts to switch to the
             // Live editor, which would reformat and break the slides.
             if ((marpActive || chatNoteActive) && mode === 'live') return;
@@ -3096,10 +3129,21 @@ function App() {
           </div>
         )}
         <div className="split-view" ref={splitViewRef}>
-          {currentPath && !chatsOpen && !showTaskBoard && (
+          {currentPath && !chatsOpen && !showTaskBoard && !openPage && (
             <HeadingLinks rootRef={splitViewRef} ns={selectedNs} path={currentPath} />
           )}
-          {chatsOpen && chatEnabled ? (
+          {openPage && pagesEnabled ? (
+            <ChunkErrorBoundary
+              label="the page"
+              resetKey={`${openPage.ns}/${openPage.slug}`}
+              onDismiss={() => setOpenPage(null)}
+              dismissLabel="Close page"
+            >
+            <Suspense fallback={<div className="editor-loading">Loading page...</div>}>
+              <PageView page={openPage} onClose={() => setOpenPage(null)} />
+            </Suspense>
+            </ChunkErrorBoundary>
+          ) : chatsOpen && chatEnabled ? (
             <ChunkErrorBoundary
               label="chats"
               resetKey="chats"
