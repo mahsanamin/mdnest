@@ -43,7 +43,7 @@ const LOCATE_ICON = (
 // namespace the user can read. No live previews on purpose: opening this
 // view never runs a page's scripts. Writers of the namespace root also get an
 // Unlinked tab, for pages whose handle was removed outside mdnest.
-export function PagesView({ ns, onOpen, onReveal, initialTab = 'pages' }) {
+export function PagesView({ ns, onOpen, onReveal, initialTab = 'pages', onClose, backLabel }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
@@ -83,6 +83,11 @@ export function PagesView({ ns, onOpen, onReveal, initialTab = 'pages' }) {
   return (
     <div className="pages-view" data-testid="pages-view">
       <div className="pages-view-head">
+        {onClose && (
+          <button type="button" className="pages-view-back" onClick={onClose} title={`Back to ${backLabel || 'the editor'}`} data-testid="pages-view-back">
+            <span aria-hidden="true">&#8592;</span> <span className="pages-view-back-label">Back to {backLabel || 'the editor'}</span>
+          </button>
+        )}
         <div className="pages-view-tabs" role="tablist">
           <button type="button" role="tab" aria-selected={!showUnlinked} className={!showUnlinked ? 'active' : ''} onClick={() => setTab('pages')}>
             Pages{data ? ` (${pages.length})` : ''}

@@ -107,7 +107,17 @@ async function login(page) {
 // The toolbar's Pages button opens the Pages view (cards); a card's Open
 // shows the HTML page in the viewer.
 async function openPagesView(page) {
-  await page.locator('[data-testid=toolbar-pages]').click();
+  // The toolbar's Pages button opens the side panel's Pages tab where it
+  // fits; the full view is the panel's ⤢ (or the button itself where it
+  // does not fit).
+  // The button toggles: when the panel already shows Pages, clicking it
+  // would close the panel, so go straight to its ⤢ then.
+  const onPagesTab = await page.locator('[data-testid=side-panel-tab-pages][aria-selected=true]').isVisible().catch(() => false);
+  if (!onPagesTab) await page.locator('[data-testid=toolbar-pages]').click();
+  // Either the panel (with its ⤢) or the full view comes up; wait for one.
+  const expand = page.locator('[data-testid=side-panel-expand]');
+  await expect(expand.or(page.locator('[data-testid=pages-view]')).first()).toBeVisible({ timeout: 15_000 });
+  if (await expand.isVisible()) await expand.click();
   await expect(page.locator('[data-testid=pages-view]')).toBeVisible({ timeout: 15_000 });
 }
 async function openFromPagesView(page, path) {
@@ -420,10 +430,10 @@ test('the Pages tab in the side panel: open two pages in a row, reveal one, pane
   await put(`${DIR}/panel/nested/second.page.md`, `<title>Second ${run}</title><p id="b">SECOND-${run}</p>`);
   await login(page);
   const panel = page.locator('[data-testid=side-panel]');
-  await page.locator('.toolbar-stickies').first().click();
+  await page.locator('[data-testid=toolbar-pages]').click();
   await expect(panel).toBeVisible();
-  await page.getByTestId('side-panel-tab-pages').click();
   await expect(page.getByTestId('side-panel-tab-pages')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('[data-testid=toolbar-pages]')).toHaveAttribute('aria-pressed', 'true');
   const rowOf = (p) => panel.locator(`[data-testid="pages-panel-row-${p}"]`);
   const first = rowOf(`${DIR}/panel/first.page.md`);
   const second = rowOf(`${DIR}/panel/nested/second.page.md`);
@@ -454,9 +464,9 @@ test('the Pages tab in the side panel: open two pages in a row, reveal one, pane
   await expect(treeRow).toHaveClass(/reveal-flash/);
   await expect(frameText()).toHaveText(`SECOND-${run}`);
 
-  // The full view from the toolbar does not close the panel, and a row clicked
+  // The full view (the panel's ⤢) does not close the panel, and a row clicked
   // while it shows opens the page, like Open on a card.
-  await page.locator('[data-testid=toolbar-pages]').click();
+  await panel.getByTestId('side-panel-expand').click();
   await expect(page.locator('[data-testid=pages-view]')).toBeVisible();
   await expect(panel).toBeVisible();
   await first.locator('.pages-panel-open').click();
@@ -467,3 +477,53 @@ test('the Pages tab in the side panel: open two pages in a row, reveal one, pane
   await panel.getByTestId('pages-panel-full').click();
   await expect(page.locator('[data-testid=pages-view]')).toBeVisible();
 });
+
+// The Chats | Pages | Stickies group at phone, tablet and small-laptop sizes,
+// in both themes: all three visible in that order, nothing colliding or
+// scrolling sideways, Pages opening the right surface (the full view where
+// the panel cannot fit, the side panel's tab where it can), and a way back.
+for (const scheme of ['dark', 'light']) {
+  for (const [w, h] of [[375, 812], [768, 1024], [1024, 768]]) {
+    test(`toolbar group at ${w}x${h}, ${scheme}: order, no overlap, Pages opens and closes`, async ({ page }) => {
+      test.skip(MODE !== 'static', 'the same in both modes');
+      await page.emulateMedia({ colorScheme: scheme });
+      await page.setViewportSize({ width: w, height: h });
+      await login(page);
+      await page.goto(`/#${NS}/${OTHER}`);
+      const ids = await page.locator('.toolbar-panel-group .toolbar-panel-btn').evaluateAll((bs) => bs.map((b) => b.dataset.testid));
+      expect(ids.filter((i) => i !== 'toolbar-chats')).toEqual(['toolbar-pages', 'toolbar-stickies']);
+      if (ids.includes('toolbar-chats')) expect(ids[0]).toBe('toolbar-chats');
+      const collisions = await page.evaluate(() => {
+        const els = [...document.querySelectorAll('.toolbar button, .toolbar .toolbar-path-base')].filter((e) => e.getBoundingClientRect().width);
+        const hit = [];
+        for (let i = 0; i < els.length; i++) for (let j = i + 1; j < els.length; j++) {
+          const x = els[i], y = els[j];
+          if (x.contains(y) || y.contains(x)) continue;
+          const a = x.getBoundingClientRect(), b = y.getBoundingClientRect();
+          if (a.right > b.left + 1 && b.right > a.left + 1 && a.bottom > b.top + 1 && b.bottom > a.top + 1) hit.push(`${x.className} ∩ ${y.className}`);
+        }
+        return hit;
+      });
+      expect(collisions).toEqual([]);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      for (const b of await page.locator('.toolbar-panel-btn').all()) await expect(b).toBeVisible();
+      await expect(page.locator('.toolbar-more-btn')).toBeVisible();
+
+      const pages = page.getByTestId('toolbar-pages');
+      await pages.click();
+      await expect(pages).toHaveAttribute('aria-pressed', 'true');
+      if (w <= 768) {
+        // A phone or tablet has no side panel: the full Pages view, with a way back.
+        await expect(page.getByTestId('pages-view')).toBeVisible({ timeout: 10_000 });
+        await expect(page.getByTestId('side-panel')).toHaveCount(0);
+        await page.getByTestId('pages-view-back').click();
+      } else {
+        await expect(page.getByTestId('pages-panel')).toBeVisible({ timeout: 10_000 });
+        await pages.click();
+      }
+      await expect(page.getByTestId('pages-view')).toHaveCount(0);
+      await expect(page.getByTestId('pages-panel')).toHaveCount(0);
+      await expect(pages).toHaveAttribute('aria-pressed', 'false');
+    });
+  }
+}

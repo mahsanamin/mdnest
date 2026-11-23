@@ -387,7 +387,7 @@ Every note carries an invisible `<!-- mdnest:<uuid> -->` marker at its bottom th
 
 ## Stickies *(v4.5.0+)*
 
-A private scratch pad that follows you rather than the note you have open. Click the sticky-note icon in the toolbar (next to the theme toggle) and a board slides in from the right.
+A private scratch pad that follows you rather than the note you have open. Click **Stickies** on the right of the toolbar (with **Chats** and **Pages**) and a board slides in from the right; on a phone it opens full screen.
 
 - **+ New sticky** adds an empty card at the top and puts the cursor in its title. The title shares the top row with the card's controls, so an untitled sticky costs no space.
 - Below the title is free text for whatever the note is, and **+ to-do** adds a checklist. A sticky is usually a small list rather than one yes/no thing, so ticking happens per item: Enter opens the next line, Backspace on an empty line removes it, and the card header shows progress like `2/5`. A card whose whole checklist is done fades and strikes its title — it stays where it is rather than jumping to the bottom.
@@ -512,8 +512,11 @@ See **[Task Model](tasks.md)** for the exact markdown a task compiles to, and th
 
 ## Chats
 
-**Chats** in the toolbar lists the chats in the current workspace (a picker
-switches workspace). Chat is on by default; `ENABLE_CHAT=false` turns it off. A chat is just a note tagged `mdnest-chat: true`, and each
+**Chats**, on the right of the toolbar next to **Pages** and **Stickies**, lists
+the chats in the current workspace (a picker switches workspace). Where there
+is room it opens in the side panel's **Chat** tab, and the panel's ⤢ button
+opens the full chats view; on a phone or a narrow window it opens full screen
+directly. Chat is on by default; `ENABLE_CHAT=false` turns it off. A chat is just a note tagged `mdnest-chat: true`, and each
 message is appended to it, so people here and agents using `mdnest chat`
 talk in the same file. Create one with **+ New**, or right-click a folder →
 **New chat**. **Connect an agent** gives a ready-to-paste prompt for
@@ -521,12 +524,14 @@ Claude Code, Codex or any agent with a shell. Type `@` to mention someone. Detai
 
 ### A chat next to your note *(v4.8.8+)*
 
-To keep a note on screen while you chat, open the chat in **Chats** and click
-**Pin to side panel** (the button with a panel icon in the chat's header). You
-go back to the note or board you came from, with the chat docked on the right
-in the side panel's **Chat** tab. The side panel is the same one that holds
-your stickies: its **Chat** and **Stickies** tabs switch between them, and the
-sticky-note icon in the toolbar opens it.
+To keep a note on screen while you chat, open the chat in the full chats view
+and click **Pin to side panel** (the button with a panel icon in the chat's
+header). You go back to the note or board you came from, with the chat docked
+on the right in the side panel's **Chat** tab. The side panel is the same one
+that holds your stickies (and, with HTML pages on, the **Pages** list): its tabs
+switch between them, and the **Chats**, **Pages** and **Stickies** buttons on
+the right of the toolbar open it on that tab. The button for the tab that is
+showing looks pressed; clicking it again closes the panel.
 
 - **Expand** in the docked chat opens it full screen. Back returns to your
   note with the chat still docked.

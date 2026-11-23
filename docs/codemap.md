@@ -157,7 +157,7 @@ frontend/
       LoginSSO.jsx           # Corporate SSO sign-in button (USER_PROVIDER=sso)
       Sidebar.jsx            # Namespace picker, tree area, expand/collapse
       TreeNode.jsx           # Recursive tree node (drag-drop, context menu, long-press)
-      Toolbar.jsx            # Top bar: hamburger, +Note, +Folder, path display
+      Toolbar.jsx            # Top bar: hamburger, +Note, +Folder, path display The right-hand group Chats | Pages | Stickies (panelButtons, built in App.jsx) is the one entry point for the three: each opens its side-panel tab, or its full view where the panel cannot fit (canDockChat / canDockPages, and always on a phone, where Stickies opens the full board), shows pressed (aria-pressed) while its surface shows, and closes it on a second click. The left keeps note controls only. Labels collapse at the 1120px toolbar container step; below 560px of toolbar (desktop) the editor/split/preview switch moves into the more menu (more-view items). Specs reach the full chats and Pages views through the panel's expand button (side-panel-expand); toolbar-panel.spec.js pins the group at several sizes.
       Editor.jsx             # Basic mode: textarea with tab/paste/drop support
       EditorToolbar.jsx      # Markdown formatting buttons (basic mode)
       LiveEditorCrepe.jsx    # Live mode: @milkdown/crepe-based rich editor (v3.10.0+) Front matter never goes into the editor (it would write `---` back as `***` + a setext underline): without shared editing it is shown and edited in the `.live-frontmatter` box above the body; with it, it stays hidden in fmRef.

@@ -6090,20 +6090,37 @@ pre:hover .code-copy-btn {
    panels. App.jsx enforces that only one is open at a time.
    --------------------------------------------------------------------------- */
 
-.toolbar-stickies {
-  background: transparent !important;
-  border: none !important;
-  color: var(--text-muted) !important;
-  padding: 0.2rem 0.4rem !important;
-  cursor: pointer;
-  position: relative;
+/* Chats | Pages | Stickies, the toolbar's right-hand group (Toolbar.jsx
+   panelButtons). Icon and label, pressed (aria-pressed) for what is showing.
+   The labels go first as the bar narrows (see the toolbar container rules),
+   the buttons never. */
+.toolbar-panel-group {
   display: flex;
   align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
 }
-
-.toolbar-stickies:hover,
-.toolbar-stickies.active {
-  color: var(--text) !important;
+.toolbar .toolbar-panel-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 30px;
+  padding: 4px 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  cursor: pointer;
+  position: relative;
+  white-space: nowrap;
+}
+.toolbar .toolbar-panel-btn svg { flex-shrink: 0; }
+.toolbar .toolbar-panel-btn:hover { background: var(--surface-2); color: var(--text); }
+.toolbar .toolbar-panel-btn.active {
+  background: var(--accent-wash);
+  border-color: var(--border-strong);
+  color: var(--text);
 }
 
 /* The one coloured icon in the toolbar. Everything else is a currentColor
@@ -6136,8 +6153,8 @@ pre:hover .code-copy-btn {
 
 /* The ink lines are the only part not tied to currentColor, so they need to
    keep up on hover or they stay faint against a darkened outline. */
-.toolbar-stickies:hover .sticky-icon-ink,
-.toolbar-stickies.active .sticky-icon-ink {
+.toolbar-panel-stickies:hover .sticky-icon-ink,
+.toolbar-panel-stickies.active .sticky-icon-ink {
   stroke: var(--text);
 }
 
@@ -6785,9 +6802,7 @@ pre:hover .code-copy-btn {
 
   /* Moved into the ⋯ menu. */
   .toolbar .toolbar-view-btn.toolbar-view-board,
-  .toolbar .toolbar-view-btn.toolbar-view-chats,
   .toolbar-utility .ws-status,
-  .toolbar-utility .toolbar-stickies,
   .toolbar-path .toolbar-inline-reveal,
   .toolbar-path .toolbar-inline-refresh,
   .toolbar-path-actions { display: none; }
@@ -6795,13 +6810,15 @@ pre:hover .code-copy-btn {
   /* One look for every icon button left on the bar: same square, no box. */
   /* Prefixed with .toolbar: the generic `.toolbar button` rule near the top
      of this file outranks a bare class and boxed the sidebar and ⋯ buttons. */
+  /* 40px: the smallest comfortable touch target. */
   .toolbar .toolbar-hamburger,
   .toolbar .toolbar-view-btn,
   .toolbar .toolbar-comments,
+  .toolbar .toolbar-panel-btn,
   .toolbar .toolbar-more-btn {
-    width: 36px;
-    height: 36px;
-    min-width: 36px;
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
     padding: 0;
     display: inline-flex;
     align-items: center;
@@ -6812,6 +6829,9 @@ pre:hover .code-copy-btn {
     color: var(--text-secondary);
     position: relative;
   }
+  .toolbar .toolbar-panel-btn .toolbar-panel-label { display: none; }
+  .toolbar .toolbar-panel-btn.active { background: var(--accent-wash); border: 1px solid var(--border-strong); }
+  .toolbar-panel-group { gap: 0; }
   .toolbar .toolbar-hamburger:active,
   .toolbar .toolbar-comments:active,
   .toolbar .toolbar-more-btn:active,
@@ -6874,9 +6894,11 @@ pre:hover .code-copy-btn {
    Shed words, never controls, in order of how little they say. */
 .toolbar { container: toolbar / inline-size; }
 @container toolbar (max-width: 1120px) {
-  /* Board / Chats keep their icons; the name is in the tooltip. */
+  /* Board keeps its icon; the name is in the tooltip. */
   .toolbar-view-btn > span { display: none; }
   .toolbar-view-btn { padding: 4px 8px; }
+  /* Chats / Pages / Stickies: icons only, named by title and aria-label. */
+  .toolbar-panel-btn > .toolbar-panel-label { display: none; }
 }
 @container toolbar (max-width: 980px) {
   .toolbar-utility .ws-status-text { display: none; }
@@ -6910,6 +6932,21 @@ pre:hover .code-copy-btn {
   }
 }
 
+
+/* The view-mode items in the ⋯ menu exist only for the narrowest toolbar. */
+.toolbar-more-menu .more-view { display: none; }
+.toolbar-more-menu > button.more-view.active { color: var(--accent); }
+.more-view-glyph { width: 15px; text-align: center; color: var(--text-secondary); }
+/* The narrowest desktop toolbar (a small laptop with the side panel open):
+   the editor / split / preview switch moves into the ⋯
+   menu, so Chats, Pages, Stickies and ⋯ keep one row with the note. */
+@media (min-width: 769px) {
+  @container toolbar (max-width: 560px) {
+    .toolbar > .toolbar-view-toggle { display: none; }
+    .toolbar-more-menu .more-view { display: flex; }
+    .toolbar-more-menu .toolbar-more-sep.more-view { display: block; }
+  }
+}
 
 /* The formatting bars stay one row and scroll sideways instead of wrapping
    to two, which cost a second row of screen above every note on a phone or

@@ -363,3 +363,33 @@
 .pages-panel-link:hover {
   text-decoration: underline;
 }
+
+/* The full Pages view's way back to the note. */
+.pages-view-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  padding: 0.2rem 0.6rem;
+  cursor: pointer;
+  max-width: 100%;
+  min-width: 0;
+}
+.pages-view-back:hover { color: var(--text); background: var(--surface-tint); }
+.pages-view-back-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 16rem;
+}
+@media (max-width: 768px) {
+  .pages-view { padding: 0.75rem; }
+  .pages-view-back { min-height: 40px; }
+  .pages-view-tools { width: 100%; }
+  .pages-view-search { flex: 1; width: auto; }
+}

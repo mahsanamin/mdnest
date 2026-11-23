@@ -67,8 +67,8 @@ async function openPanel(page) {
     return;
   }
   // On the desktop bar Stickies is an icon; on a phone it is in the ⋯ menu.
-  if (await page.locator('.toolbar-stickies').isVisible()) {
-    await page.locator('.toolbar-stickies').click();
+  if (await page.locator('[data-testid=toolbar-stickies]').isVisible()) {
+    await page.locator('[data-testid=toolbar-stickies]').click();
   } else {
     await page.locator('.toolbar-more-btn').click();
     await page.locator('.toolbar-more-menu button', { hasText: 'Stickies' }).click();
@@ -88,6 +88,12 @@ async function openBoard(page) {
     return;
   }
   if (await page.locator('.stickies-board').count()) {
+    await expect(page.locator('.stickies-board')).toBeVisible();
+    return;
+  }
+  // A phone has no side panel: the Stickies button opens the board itself.
+  if ((page.viewportSize()?.width || 1280) <= 768) {
+    await page.locator('[data-testid=toolbar-stickies]').click();
     await expect(page.locator('.stickies-board')).toBeVisible();
     return;
   }
@@ -171,7 +177,7 @@ test.describe('stickies', () => {
     // are about the person, and an empty editor is exactly when someone jots
     // one down — so the button must be there before anything is selected.
     await signIn(page);
-    await expect(page.locator('.toolbar-stickies')).toBeVisible();
+    await expect(page.locator('[data-testid=toolbar-stickies]')).toBeVisible();
     await openPanel(page);
     await expect(page.locator('.stickies-panel')).toBeVisible();
   });
@@ -220,7 +226,7 @@ test.describe('stickies', () => {
     await page.locator('.stickies-add').click();
     await page.locator('.sticky-add-item').click();
     await page.locator('.sticky-items textarea').fill('something to do');
-    await expect(page.locator('.toolbar-stickies .comment-badge')).toHaveCount(0);
+    await expect(page.locator('[data-testid=toolbar-stickies] .comment-badge')).toHaveCount(0);
   });
 
   test('a dragged sticky keeps its position across a reload', async ({ page }) => {
@@ -666,7 +672,7 @@ test.describe('stickies', () => {
     // 150ms — measured immediately, the toolbar still reads as full width and
     // the assertion fails against perfectly correct layout.
     await expect.poll(async () => {
-      const btn = await page.locator('.toolbar-stickies').boundingBox();
+      const btn = await page.locator('[data-testid=toolbar-stickies]').boundingBox();
       return btn.x + btn.width;
     }, { timeout: 5_000 }).toBeLessThanOrEqual(panel.x + 1);
   });

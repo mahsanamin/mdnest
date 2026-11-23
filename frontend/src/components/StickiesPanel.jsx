@@ -30,6 +30,10 @@ function StickiesPanel({
   stickies, onChange, onClose, onExpand, saveState, loadState, onRetry,
   width, minWidth = 260, maxWidth = 760, onWidthChange,
   tab = 'stickies', onTab, chat, pages, tabs: offered,
+  // The ⤢ button on the Chat and Pages tabs: their full-screen views. On the
+  // Chat tab it is offered only while the chat list shows (an open chat
+  // carries its own expand button).
+  onExpandTab, expandChatInPanel = true,
 }) {
   const focusIdRef = useRef(null); // card to focus after the next render
   const tabRefs = useRef({});
@@ -154,6 +158,20 @@ function StickiesPanel({
           </div>
         ) : (
           <h3>Stickies</h3>
+        )}
+        {onExpandTab && ((showChat && expandChatInPanel) || showPages) && (
+          <button
+            className="stickies-expand"
+            onClick={() => onExpandTab(tab)}
+            title={showPages ? 'Open the full Pages view' : 'Open chats full screen'}
+            aria-label={showPages ? 'Open the full Pages view' : 'Open chats full screen'}
+            data-testid="side-panel-expand"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" />
+              <line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" />
+            </svg>
+          </button>
         )}
         {showStickies && <>
           {/* The save state is shown, not hidden behind a silent autosave. The

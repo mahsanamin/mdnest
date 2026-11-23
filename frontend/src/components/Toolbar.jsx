@@ -1,6 +1,34 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 
-function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePassword, onManageUsers, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh, wsStatus, commentCount, onToggleComments, onToggleStickies, stickiesOpen, onSetBoardActive, boardActive, onSetChatsActive, chatsActive, chatsBackLabel, marpLocked, liveLockReason, basicLockReason, mobileView, onMobileViewChange, drawingDoc, drawingSource, onDrawingSourceChange, theme, onToggleTheme, presence, approvalCount = 0, onShowApprovals, pageActive = false, onSetPagesActive, pagesActive = false }) {
+// The three panel buttons' icons, 16px, in the toolbar's stroke style. Chats
+// keeps its two round bubbles and Stickies its yellow note (theme tokens), so
+// people who know them still do; Pages is a browser window holding </>.
+const PANEL_ICONS = {
+  chats: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <defs><mask id="panel-chats-dots"><rect width="24" height="24" fill="#fff"/><circle cx="6.3" cy="14" r="1.2" fill="#000"/><circle cx="9.6" cy="14" r="1.2" fill="#000"/><circle cx="12.9" cy="14" r="1.2" fill="#000"/></mask></defs>
+      <path d="M9.2 5.6A7 7 0 0 1 21.3 12.9l.9 3.6-3.6-.9a7 7 0 0 1-1.8.9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M9.6 7.4a6.6 6.6 0 1 1-3.4 12.3L2.3 20.8l1.1-3.7A6.6 6.6 0 0 1 9.6 7.4z" fill="currentColor" mask="url(#panel-chats-dots)"/>
+    </svg>
+  ),
+  pages: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="2.5" y="4" width="19" height="16" rx="2"/>
+      <line x1="2.5" y1="8.5" x2="21.5" y2="8.5"/>
+      <polyline points="9.5 11.5 7 14.25 9.5 17"/>
+      <polyline points="14.5 11.5 17 14.25 14.5 17"/>
+    </svg>
+  ),
+  stickies: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4.5 3h15A1.5 1.5 0 0 1 21 4.5V15l-6 6H4.5A1.5 1.5 0 0 1 3 19.5v-15A1.5 1.5 0 0 1 4.5 3z" className="sticky-icon-front" />
+      <path d="M21 15h-4.5A1.5 1.5 0 0 0 15 16.5V21z" className="sticky-icon-fold" />
+      <path d="M7 8.5h10M7 12.5h6.5" className="sticky-icon-ink" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  ),
+};
+
+function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePassword, onManageUsers, onRename, onDelete, viewMode, onViewModeChange, editorMode, onEditorModeChange, onRefresh, wsStatus, commentCount, onToggleComments, onSetBoardActive, boardActive, onSetChatsActive, chatsActive, chatsBackLabel, marpLocked, liveLockReason, basicLockReason, mobileView, onMobileViewChange, drawingDoc, drawingSource, onDrawingSourceChange, theme, onToggleTheme, presence, approvalCount = 0, onShowApprovals, pageActive = false, pagesActive = false, panelButtons }) {
   const [refreshing, setRefreshing] = useState(false);
   // Phone overflow menu. On a phone the bar keeps only what is used per note
   // (sidebar, filename, comments, the mode switch); every other control lives
@@ -100,39 +128,6 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
         >
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
           <span>Board</span>
-        </button>
-      )}
-      {/* Chats sits beside Board and follows the same rule: the button names
-          where it takes you. In chat mode it is replaced by "← Back to …". */}
-      {onSetChatsActive && !chatsActive && (
-        <button
-          className="toolbar-view-btn toolbar-view-chats"
-          onClick={() => onSetChatsActive(true)}
-          title="All chats"
-        >
-          {/* A conversation: a solid bubble in front of an outlined one,
-              both ROUND. Comments use a square bubble with text lines and
-              Stickies a yellow note, so the three side-by-side toolbar
-              icons differ in shape, not just in detail. */}
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <defs><mask id="chats-icon-dots"><rect width="24" height="24" fill="#fff"/><circle cx="6.3" cy="14" r="1.2" fill="#000"/><circle cx="9.6" cy="14" r="1.2" fill="#000"/><circle cx="12.9" cy="14" r="1.2" fill="#000"/></mask></defs>
-            <path d="M9.2 5.6A7 7 0 0 1 21.3 12.9l.9 3.6-3.6-.9a7 7 0 0 1-1.8.9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-            <path d="M9.6 7.4a6.6 6.6 0 1 1-3.4 12.3L2.3 20.8l1.1-3.7A6.6 6.6 0 0 1 9.6 7.4z" fill="currentColor" mask="url(#chats-icon-dots)"/>
-          </svg>
-          <span>Chats</span>
-        </button>
-      )}
-      {/* Pages (server: ENABLE_PAGES) sits beside Chats: every HTML page in
-          this workspace, as cards. In the Pages view it becomes the way back. */}
-      {onSetPagesActive && !chatsActive && (
-        <button
-          className={`toolbar-view-btn toolbar-view-pages${pagesActive ? ' active' : ''}`}
-          onClick={() => onSetPagesActive(!pagesActive)}
-          title={pagesActive ? 'Back to the editor' : 'HTML pages in this workspace'}
-          data-testid="toolbar-pages"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="8" x2="21" y2="8"/><line x1="7" y1="13" x2="17" y2="13"/><line x1="7" y1="17" x2="13" y2="17"/></svg>
-          <span>{pagesActive ? 'Editor' : 'Pages'}</span>
         </button>
       )}
       {/* Agent approvals belong with chats: most requests arrive in a chat,
@@ -307,26 +302,30 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
           {commentCount > 0 && <span className="comment-badge">{commentCount}</span>}
         </button>
       )}
-      {/* Not gated on currentPath, unlike Comments. Comments are about the
-          open file; stickies are about the person, so the board has to be
-          reachable from an empty editor and from the task board too — those
-          are exactly the moments someone jots one down. */}
-      {onToggleStickies && (
-        <button
-          className={`toolbar-stickies${stickiesOpen ? ' active' : ''}`}
-          onClick={onToggleStickies}
-          title="Stickies — your private notes on this server"
-          aria-label="Stickies"
-        >
-          {/* One bright note with a peeled corner, in its own icon tokens
-              (--sticky-icon-*), not the muted card fills: at 16px those read
-              as a grey smudge. Yellow + dark ink in both themes. */}
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" strokeLinejoin="round" aria-hidden="true">
-            <path d="M4.5 3h15A1.5 1.5 0 0 1 21 4.5V15l-6 6H4.5A1.5 1.5 0 0 1 3 19.5v-15A1.5 1.5 0 0 1 4.5 3z" className="sticky-icon-front" />
-            <path d="M21 15h-4.5A1.5 1.5 0 0 0 15 16.5V21z" className="sticky-icon-fold" />
-            <path d="M7 8.5h10M7 12.5h6.5" className="sticky-icon-ink" strokeWidth="1.6" strokeLinecap="round" />
-          </svg>
-        </button>
+      {/* Chats, Pages and Stickies: one group, one place, on the right. Each
+          opens the side panel on its tab (or, where the panel cannot fit, the
+          view full screen); the button for what is showing is pressed, and
+          clicking it again closes it. Not gated on currentPath: they are about
+          the person and the workspace, not the open note. App builds the list
+          (panelButtons), so a button appears only when its feature is on. */}
+      {panelButtons && panelButtons.length > 0 && (
+        <div className="toolbar-panel-group" role="group" aria-label="Chats, pages and stickies">
+          {panelButtons.map((b) => (
+            <button
+              key={b.id}
+              type="button"
+              className={`toolbar-panel-btn toolbar-panel-${b.id}${b.active ? ' active' : ''}`}
+              aria-pressed={!!b.active}
+              aria-label={b.label}
+              title={b.title}
+              onClick={b.onClick}
+              data-testid={`toolbar-${b.id}`}
+            >
+              {PANEL_ICONS[b.id]}
+              <span className="toolbar-panel-label">{b.label}</span>
+            </button>
+          ))}
+        </div>
       )}
       {/* Theme, Settings and Manage users live in the ⋯ menu on every
           screen size: rarely used, and the menu pins one control to the
@@ -365,16 +364,6 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
                 {chatsActive ? 'Close chats' : 'Chats'}
               </button>
             )}
-            {onToggleStickies && (
-              <button role="menuitem" className="more-phone" onClick={runMore(onToggleStickies)}>
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M4.5 3h15A1.5 1.5 0 0 1 21 4.5V15l-6 6H4.5A1.5 1.5 0 0 1 3 19.5v-15A1.5 1.5 0 0 1 4.5 3z" className="sticky-icon-front" />
-                  <path d="M21 15h-4.5A1.5 1.5 0 0 0 15 16.5V21z" className="sticky-icon-fold" />
-                  <path d="M7 8.5h10M7 12.5h6.5" className="sticky-icon-ink" strokeWidth="1.6" strokeLinecap="round" />
-                </svg>
-                Stickies
-              </button>
-            )}
             {/* In chat mode the note underneath is not on screen, so its file
                 actions are not offered: Delete would act on a note you cannot
                 see. */}
@@ -402,6 +391,20 @@ function Toolbar({ currentPath, onToggleSidebar, onRevealInTree, onChangePasswor
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>
                 Delete
               </button>
+            )}
+            {/* The editor / split / preview switch, for a toolbar too narrow
+                to show it (the side panel open on a small laptop): CSS shows
+                these only then. */}
+            {onViewModeChange && (
+              <>
+                <div className="toolbar-more-sep more-view" />
+                {[['editor', 'Editor only', '\u270E'], ['split', 'Split view', '\u23D5'], ['preview', 'Preview only', '\u25C9']].map(([mode, label, glyph]) => (
+                  <button key={mode} role="menuitemradio" aria-checked={viewMode === mode} className={`more-view${viewMode === mode ? ' active' : ''}`} onClick={runMore(() => onViewModeChange(mode))}>
+                    <span className="more-view-glyph" aria-hidden="true">{glyph}</span>
+                    {label}
+                  </button>
+                ))}
+              </>
             )}
             <div className="toolbar-more-sep more-phone" />
             {onToggleTheme && (

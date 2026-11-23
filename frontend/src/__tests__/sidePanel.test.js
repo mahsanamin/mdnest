@@ -59,3 +59,13 @@ describe('chat scroll memory', () => {
     expect(recallScroll('other', 'Chats/a.md')).toBe(null);
   });
 });
+
+describe('canDockPages', () => {
+  it('docks when the editor keeps its minimum next to the narrowest list', async () => {
+    const { canDockPages, EDITOR_MIN_WIDTH, STICKIES_PANEL_MIN } = await import('../sidePanel.js');
+    expect(canDockPages(260 + EDITOR_MIN_WIDTH + STICKIES_PANEL_MIN, 260)).toBe(true);
+    expect(canDockPages(260 + EDITOR_MIN_WIDTH + STICKIES_PANEL_MIN - 1, 260)).toBe(false);
+    expect(canDockPages(1280, 260)).toBe(true);
+    expect(canDockPages(800, 260)).toBe(false);
+  });
+});

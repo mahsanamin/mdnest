@@ -625,19 +625,21 @@ nothing, as before.
 Publishing to the same handle again replaces the page; there is no version
 history.
 
-**Finding pages.** The **Pages** button in the top toolbar, next to Chats,
-opens the Pages view: a card for every HTML page in the workspace you can
+**Finding pages.** The **Pages** button on the right of the toolbar (with
+Chats and Stickies) opens the side panel's **Pages** tab. Its ⤢ button, or
+"Open full view", opens the Pages view; on a phone or a narrow window the
+button opens the Pages view directly. The Pages view has a card for every HTML
+page in the workspace you can
 read, with its title, folder, author, date, file count and, when the page has
 a `<meta name="description">`, that description. Search covers the pages'
 text, titles and descriptions; sort by newest, title or folder. **Open** shows
 the page; the target button shows its handle in the tree without opening it.
 The cards are never live previews, so opening the view runs no page scripts.
 
-To work beside your notes, the right side panel also has a **Pages** tab, next
-to Chat and Stickies: a short searchable list where a click opens the HTML page
-in the main area and the panel stays open, so you can flip through several. Its
-target button shows a page in the tree, and "Open full view" goes to the Pages
-view.
+The side panel's **Pages** tab is a short searchable list for working beside
+your notes: a click opens the HTML page in the main area and the panel stays
+open, so you can flip through several. Its target button shows a page in the
+tree.
 
 **Who can do what.** A page uses the permissions of the folder its handle is
 in, exactly like the notes next to it: read access on the handle lets you

@@ -30,6 +30,13 @@ export function canDockChat(viewport, sidebar) {
   return room(viewport, sidebar) >= CHAT_PANEL_MIN;
 }
 
+// Whether the Pages list can dock: the editor keeps its minimum width next to
+// the narrowest stickies-sized panel. Otherwise the toolbar's Pages button
+// opens the full Pages view instead. Phones never dock (checked by the caller).
+export function canDockPages(viewport, sidebar) {
+  return room(viewport, sidebar) >= STICKIES_PANEL_MIN;
+}
+
 export function chatPanelBounds(viewport, sidebar) {
   const max = Math.min(CHAT_PANEL_MAX, room(viewport, sidebar));
   return { min: CHAT_PANEL_MIN, max: Math.max(CHAT_PANEL_MIN, max) };

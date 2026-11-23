@@ -58,7 +58,7 @@ import HeadingLinks from './components/HeadingLinks.jsx';
 import { findHeading } from './headingLink.js';
 import CommentSidebar from './components/CommentSidebar.jsx';
 import StickiesPanel from './components/StickiesPanel.jsx';
-import { canDockChat, chatPanelBounds, stickiesPanelBounds, defaultChatPanelWidth, clampWidth } from './sidePanel.js';
+import { canDockChat, canDockPages, chatPanelBounds, stickiesPanelBounds, defaultChatPanelWidth, clampWidth } from './sidePanel.js';
 import StickiesBoard from './components/StickiesBoard.jsx';
 import ShareDialog from './components/ShareDialog.jsx';
 import HistoryModal from './components/HistoryModal.jsx';
@@ -2043,6 +2043,51 @@ function App() {
   const pagesDocked = sidePanel === 'pages' && pagesEnabled && !!selectedNs;
   const panelShown = sidePanel === 'stickies' || chatDocked || sidePanel === 'pages';
   const panelTabs = [chatCanDock && !chatsOpen && 'chat', 'stickies', pagesEnabled && selectedNs && 'pages'].filter(Boolean);
+  // Where the narrow Pages list fits beside the note (never on a phone).
+  const pagesCanDock = !isMobile && canDockPages(viewportWidth, sidebarWidth);
+
+  // The toolbar's Chats | Pages | Stickies group. Each opens the side panel on
+  // its tab; where the panel cannot fit (a phone, a narrow window) it opens the
+  // view full screen instead. The button for what is showing is pressed, and
+  // clicking it again closes that. Opening any of them closes the comments,
+  // which own the same edge.
+  const panelButtons = [
+    chatEnabled && {
+      id: 'chats',
+      label: 'Chats',
+      title: chatsOpen ? 'Close chats' : chatCanDock ? 'Chats, in the side panel' : 'All chats',
+      active: chatsOpen || chatDocked,
+      onClick: () => {
+        if (chatsOpen) { setChatsActive(false); return; }
+        if (chatDocked) { setSidePanel('closed'); return; }
+        if (!chatCanDock) { setChatsActive(true); return; }
+        openSidePanel('chat');
+      },
+    },
+    pagesEnabled && selectedNs && {
+      id: 'pages',
+      label: 'Pages',
+      title: pagesViewShown ? 'Close the Pages view' : pagesCanDock ? 'HTML pages, in the side panel' : 'HTML pages in this workspace',
+      active: pagesViewShown || pagesDocked,
+      onClick: () => {
+        if (pagesViewShown) { setPagesActive(false); return; }
+        if (pagesDocked) { setSidePanel('closed'); return; }
+        if (!pagesCanDock) { setPagesActive(true); return; }
+        openSidePanel('pages');
+      },
+    },
+    {
+      id: 'stickies',
+      label: 'Stickies',
+      title: 'Stickies, your private notes on this server',
+      active: sidePanel === 'stickies' || sidePanel === 'board',
+      onClick: () => {
+        if (sidePanel === 'stickies' || sidePanel === 'board') { setSidePanel('closed'); return; }
+        // A phone has no side panel: the stickies open full screen.
+        openSidePanel(isMobile ? 'board' : 'stickies');
+      },
+    },
+  ].filter(Boolean);
   const chatBounds = chatPanelBounds(viewportWidth, sidebarWidth);
   const chatWidth = clampWidth(chatPanelWidth ?? defaultChatPanelWidth(viewportWidth), chatBounds);
   const stickiesBounds = stickiesPanelBounds(viewportWidth, sidebarWidth);
@@ -3030,7 +3075,6 @@ function App() {
           // naming the note underneath it and offers nothing that acts on it.
           pageActive={pageHandleActive}
           pagesActive={pagesViewShown}
-          onSetPagesActive={pagesEnabled && selectedNs ? setPagesActive : null}
           currentPath={pagesViewShown ? null : currentPath}
           onManageUsers={isAdmin && isMulti ? () => setShowAdminPanel(true) : null}
           theme={resolvedTheme}
@@ -3088,21 +3132,7 @@ function App() {
           }}
           onRefresh={handleRefresh}
           commentCount={commentsEnabled ? comments.filter(c => !c.parentId && !c.resolved).length : 0}
-          stickiesOpen={sidePanel === 'stickies' || sidePanel === 'board'}
-          onToggleStickies={() => {
-            // Two drawers, one strip of screen. Opening either closes the
-            // other rather than stacking them — the comment panel already
-            // owns this edge, and two overlapping fixed panels is not a
-            // layout, it is a bug report.
-            setSidePanel((v) => {
-              if (v === 'stickies' || v === 'board') return 'closed';
-              // Closed, or on the Chat tab: show the stickies. The button
-              // closes whichever sticky view is open and reopens at the
-              // drawer — one toggle, not a cycle through the states.
-              setShowComments(false);
-              return 'stickies';
-            });
-          }}
+          panelButtons={panelButtons}
           onToggleComments={!commentsEnabled ? null : () => {
             // A plain toggle: the panel is usable in any view mode (including
             // preview-only, e.g. reviewing Marp slides). Selection-anchored
@@ -3184,6 +3214,8 @@ function App() {
                 key={`${selectedNs}:${pagesViewTab}`}
                 ns={selectedNs}
                 initialTab={pagesViewTab}
+                onClose={() => setPagesViewOpen(false)}
+                backLabel={currentPath ? currentPath.split('/').pop() : 'the editor'}
                 onOpen={(p) => { setPagesViewOpen(false); setPickedFolder(null); openNote(p); }}
                 onReveal={(p) => revealInTree(p)}
               />
@@ -3592,6 +3624,12 @@ function App() {
           tab={chatDocked ? 'chat' : pagesDocked ? 'pages' : 'stickies'}
           tabs={panelTabs}
           onTab={panelTabs.length > 1 ? setSidePanel : null}
+          onExpandTab={(t) => {
+            if (t === 'pages') setPagesActive(true);
+            else if (dockedChat) expandChat(dockedChat);
+            else setChatsActive(true);
+          }}
+          expandChatInPanel={!dockedChat}
           pages={pagesDocked && (
             <ChunkErrorBoundary label="pages" resetKey={`panel-${selectedNs}`} onDismiss={() => setSidePanel('stickies')} dismissLabel="Show stickies">
             <Suspense fallback={<div className="editor-loading">Loading pages...</div>}>
@@ -3655,7 +3693,7 @@ function App() {
         <StickiesBoard
           stickies={stickies}
           onChange={updateStickies}
-          onCollapse={() => setSidePanel('stickies')}
+          onCollapse={() => setSidePanel(isMobile ? 'closed' : 'stickies')}
           onClose={() => setSidePanel('closed')}
           saveState={stickySaveState}
           loadState={stickiesLoad}
