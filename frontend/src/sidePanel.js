@@ -1,5 +1,7 @@
-// Pure rules for the right-edge side panel (Chat and Stickies tabs): how wide
-// each tab may be, and whether a chat can dock at all. No React here, so the
+// Pure rules for the right-edge side panel (Chat, Stickies and Pages tabs; the
+// Pages tab only with HTML pages on): how wide each tab may be, and whether a
+// chat can dock at all. The Pages tab is a narrow list like the stickies, so it
+// takes the stickies bounds and shares their remembered width. No React here, so the
 // numbers are unit-tested on their own (__tests__/sidePanel.test.js).
 
 // The narrowest the editor column may get while the panel is open. Below

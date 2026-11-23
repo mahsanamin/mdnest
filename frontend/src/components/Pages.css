@@ -243,3 +243,123 @@
 .page-card-delete:hover {
   background: var(--danger-wash) !important;
 }
+
+/* The Pages tab of the right side panel: a compact list. */
+.pages-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+.pages-panel-search {
+  margin: 0.5rem 0.75rem;
+  width: auto;
+}
+
+.pages-panel-list {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 0 0.25rem;
+}
+
+.pages-panel-list .pages-view-empty {
+  padding: 0.5rem 0.75rem;
+}
+
+.pages-panel-row {
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+  min-width: 0;
+}
+
+.pages-panel-row:hover {
+  background: var(--surface-tint);
+}
+
+.pages-panel-row.active {
+  background: var(--accent-wash);
+}
+
+.pages-panel-open {
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  background: none;
+  border: none;
+  color: var(--text);
+  text-align: left;
+  padding: 0.35rem 0.5rem;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.pages-panel-row.active .pages-panel-title {
+  color: var(--accent);
+}
+
+.pages-panel-open .tree-icon-svg {
+  flex: none;
+  margin-top: 0.15rem;
+}
+
+.pages-panel-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.pages-panel-title {
+  font-size: 0.85rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pages-panel-folder {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pages-panel-locate {
+  flex: none;
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  padding: 0.3rem 0.45rem;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+}
+
+.pages-panel-locate:hover {
+  color: var(--text);
+  background: var(--surface-tint);
+}
+
+.pages-panel-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  border-top: 1px solid var(--border-subtle);
+  padding: 0.45rem 0.75rem;
+}
+
+.pages-panel-link {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 0.8rem;
+  cursor: pointer;
+  padding: 0;
+}
+
+.pages-panel-link:hover {
+  text-decoration: underline;
+}

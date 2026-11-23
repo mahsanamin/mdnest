@@ -633,6 +633,12 @@ text, titles and descriptions; sort by newest, title or folder. **Open** shows
 the page; the target button shows its handle in the tree without opening it.
 The cards are never live previews, so opening the view runs no page scripts.
 
+To work beside your notes, the right side panel also has a **Pages** tab, next
+to Chat and Stickies: a short searchable list where a click opens the HTML page
+in the main area and the panel stays open, so you can flip through several. Its
+target button shows a page in the tree, and "Open full view" goes to the Pages
+view.
+
 **Who can do what.** A page uses the permissions of the folder its handle is
 in, exactly like the notes next to it: read access on the handle lets you
 view the page, write access lets you publish over it or delete it. A grant on

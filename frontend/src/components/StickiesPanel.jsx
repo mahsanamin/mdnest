@@ -12,26 +12,32 @@ import {
 
 const RESIZE_STEP = 16; // px per arrow key on the resize handle
 
+const TAB_LABELS = { chat: 'Chat', stickies: 'Stickies', pages: 'Pages' };
+
 // The right-edge side panel. Its first job was the sticky board as a drawer,
 // the quick way in for jotting one down without leaving the note you are
 // reading; the full-screen corkboard (StickiesBoard) is the same cards laid
 // out spatially, and the Expand button swaps between them. When chat can dock
-// here, the panel also has a Chat tab (onTab is set and `chat` is what it
-// shows). One panel with tabs rather than a second drawer: two panels on one
-// edge would have to fight over the same strip of screen.
+// here, the panel also has a Chat tab (`chat` is what it shows), and with HTML
+// pages on a Pages tab (`pages`). `tabs` lists the tabs offered, in order;
+// with one tab there is no tab bar. One panel with tabs rather than a second
+// drawer: two panels on one edge would have to fight over the same strip of
+// screen.
 //
 // width / minWidth / maxWidth come from App per tab, already clamped to what
 // leaves the editor usable, so the drag and the arrow keys only clamp again.
 function StickiesPanel({
   stickies, onChange, onClose, onExpand, saveState, loadState, onRetry,
   width, minWidth = 260, maxWidth = 760, onWidthChange,
-  tab = 'stickies', onTab, chat,
+  tab = 'stickies', onTab, chat, pages, tabs: offered,
 }) {
   const focusIdRef = useRef(null); // card to focus after the next render
   const tabRefs = useRef({});
   const clampWidth = (w) => Math.min(maxWidth, Math.max(minWidth, w));
-  const tabs = onTab ? ['chat', 'stickies'] : null;
-  const showChat = tab === 'chat' && !!onTab;
+  const tabs = onTab && offered && offered.length > 1 ? offered : null;
+  const showChat = tab === 'chat' && !!tabs && tabs.includes('chat');
+  const showPages = tab === 'pages' && !!tabs && tabs.includes('pages');
+  const showStickies = !showChat && !showPages;
 
   const full = isBoardFull(stickies);
 
@@ -76,7 +82,7 @@ function StickiesPanel({
 
   return (
     <div
-      className={`stickies-panel${showChat ? ' side-panel-chat' : ''}`}
+      className={`stickies-panel${showChat ? ' side-panel-chat' : ''}${showPages ? ' side-panel-pages' : ''}`}
       style={width ? { width } : undefined}
       onKeyDown={onKeyDown}
       data-testid="side-panel"
@@ -142,14 +148,14 @@ function StickiesPanel({
                 onKeyDown={onTabKey}
                 data-testid={`side-panel-tab-${t}`}
               >
-                {t === 'chat' ? 'Chat' : 'Stickies'}
+                {TAB_LABELS[t]}
               </button>
             ))}
           </div>
         ) : (
           <h3>Stickies</h3>
         )}
-        {!showChat && <>
+        {showStickies && <>
           {/* The save state is shown, not hidden behind a silent autosave. The
               board is the one place in mdnest holding content that exists
               nowhere else — no namespace, no git remote — so "did that land?"
@@ -174,7 +180,7 @@ function StickiesPanel({
           className="stickies-close"
           onClick={onClose}
           aria-label={tabs ? 'Close the side panel' : 'Close stickies'}
-          title={tabs ? 'Close the side panel (Esc). The chat and its draft are kept.' : 'Close stickies'}
+          title={tabs ? (showChat ? 'Close the side panel (Esc). The chat and its draft are kept.' : 'Close the side panel (Esc)') : 'Close stickies'}
         >&times;</button>
       </div>
 
@@ -184,7 +190,7 @@ function StickiesPanel({
         role={tabs ? 'tabpanel' : undefined}
         aria-labelledby={tabs ? `side-panel-tab-${tab}` : undefined}
       >
-        {showChat ? chat : <>
+        {showChat ? chat : showPages ? pages : <>
           <div className="stickies-add-row">
             <button
               className="stickies-add"

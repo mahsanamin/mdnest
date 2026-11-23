@@ -408,3 +408,62 @@ test('the Pages view: cards, description, search, sort, reveal in tree, and noth
   await expect(page.locator('[data-testid=pages-view]')).toHaveCount(0);
   await expect(page.locator('.page-bar')).toContainText(`Zulu ${run}`, { timeout: 10_000 });
 });
+
+test('the Pages tab in the side panel: open two pages in a row, reveal one, panel stays open', async ({ page, request }) => {
+  test.skip(MODE !== 'static', 'the same in both modes');
+  const auth = { Authorization: `Bearer ${token}` };
+  const put = async (path, html) => {
+    const r = await request.put(`/api/pages?ns=${NS}&path=${encodeURIComponent(path)}`, { headers: { ...auth, 'Content-Type': 'text/html' }, data: html });
+    expect(r.status(), await r.text()).toBe(200);
+  };
+  await put(`${DIR}/panel/first.page.md`, `<title>First ${run}</title><p id="b">FIRST-${run}</p>`);
+  await put(`${DIR}/panel/nested/second.page.md`, `<title>Second ${run}</title><p id="b">SECOND-${run}</p>`);
+  await login(page);
+  const panel = page.locator('[data-testid=side-panel]');
+  await page.locator('.toolbar-stickies').first().click();
+  await expect(panel).toBeVisible();
+  await page.getByTestId('side-panel-tab-pages').click();
+  await expect(page.getByTestId('side-panel-tab-pages')).toHaveAttribute('aria-selected', 'true');
+  const rowOf = (p) => panel.locator(`[data-testid="pages-panel-row-${p}"]`);
+  const first = rowOf(`${DIR}/panel/first.page.md`);
+  const second = rowOf(`${DIR}/panel/nested/second.page.md`);
+  await expect(second.locator('.pages-panel-folder')).toHaveText(`${DIR}/panel/nested/`);
+
+  // Search narrows the list.
+  await panel.getByTestId('pages-panel-search').fill(`SECOND-${run}`);
+  await expect(first).toHaveCount(0, { timeout: 10_000 });
+  await expect(second).toBeVisible();
+  await panel.getByTestId('pages-panel-search').fill(run);
+  await expect(first).toBeVisible({ timeout: 10_000 });
+
+  // Open one, then the other: the viewer follows, the panel stays, the row is highlighted.
+  const frameText = () => page.frameLocator('[data-testid=page-frame]').locator('#b');
+  await first.locator('.pages-panel-open').click();
+  await expect(frameText()).toHaveText(`FIRST-${run}`, { timeout: 15_000 });
+  await expect(first).toHaveClass(/active/);
+  await second.locator('.pages-panel-open').click();
+  await expect(frameText()).toHaveText(`SECOND-${run}`, { timeout: 15_000 });
+  await expect(second).toHaveClass(/active/);
+  await expect(first).not.toHaveClass(/active/);
+  await expect(panel).toBeVisible();
+
+  // Reveal the first in the tree without opening it.
+  await first.locator('.pages-panel-locate').click();
+  const treeRow = page.locator(`.tree-row[data-path="${DIR}/panel/first.page.md"]`);
+  await expect(treeRow).toBeVisible({ timeout: 10_000 });
+  await expect(treeRow).toHaveClass(/reveal-flash/);
+  await expect(frameText()).toHaveText(`SECOND-${run}`);
+
+  // The full view from the toolbar does not close the panel, and a row clicked
+  // while it shows opens the page, like Open on a card.
+  await page.locator('[data-testid=toolbar-pages]').click();
+  await expect(page.locator('[data-testid=pages-view]')).toBeVisible();
+  await expect(panel).toBeVisible();
+  await first.locator('.pages-panel-open').click();
+  await expect(page.locator('[data-testid=pages-view]')).toHaveCount(0);
+  await expect(frameText()).toHaveText(`FIRST-${run}`, { timeout: 15_000 });
+  await expect(panel).toBeVisible();
+  // "Open full view" in the panel goes to the toolbar's view.
+  await panel.getByTestId('pages-panel-full').click();
+  await expect(page.locator('[data-testid=pages-view]')).toBeVisible();
+});

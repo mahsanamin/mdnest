@@ -43,12 +43,12 @@ const LOCATE_ICON = (
 // namespace the user can read. No live previews on purpose: opening this
 // view never runs a page's scripts. Writers of the namespace root also get an
 // Unlinked tab, for pages whose handle was removed outside mdnest.
-export function PagesView({ ns, onOpen, onReveal }) {
+export function PagesView({ ns, onOpen, onReveal, initialTab = 'pages' }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState('newest');
-  const [tab, setTab] = useState('pages');
+  const [tab, setTab] = useState(initialTab);
 
   const load = useCallback((q) => {
     if (!ns) return;
@@ -146,6 +146,62 @@ export function PagesView({ ns, onOpen, onReveal }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// The Pages tab of the right side panel: a compact list for working beside
+// notes. Clicking a row opens the HTML page in the main area and leaves the
+// panel open, so pages can be flipped through quickly. No delete here; the
+// unlinked pages are only a link into the full view (root writers only).
+export function PagesPanel({ ns, currentPath, refreshKey, onOpen, onReveal, onFullView }) {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState('');
+  const [query, setQuery] = useState('');
+
+  const load = useCallback((q) => {
+    if (!ns) return;
+    setError('');
+    listPages(ns, q)
+      .then(setData)
+      .catch((e) => { setData({ pages: [] }); setError(e.message || 'Failed to load pages'); });
+  }, [ns]);
+
+  useEffect(() => {
+    const q = query.trim();
+    if (!q) { load(''); return undefined; }
+    const t = setTimeout(() => load(q), 250);
+    return () => clearTimeout(t);
+  }, [load, query, refreshKey]);
+
+  const pages = [...(data?.pages || [])].sort(SORTS.newest);
+  const unlinked = data?.unlinked;
+  return (
+    <div className="pages-panel" data-testid="pages-panel">
+      <input type="search" className="pages-view-search pages-panel-search" placeholder="Search pages" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Search pages" data-testid="pages-panel-search" />
+      <div className="pages-panel-list">
+        {data === null && <div className="pages-view-empty">Loading...</div>}
+        {error && <div className="pages-view-empty">{error}</div>}
+        {data && !error && pages.length === 0 && <div className="pages-view-empty">{query ? 'No pages match.' : 'No pages yet.'}</div>}
+        {pages.map((p) => (
+          <div key={p.path} className={`pages-panel-row${p.path === currentPath ? ' active' : ''}`} data-testid={`pages-panel-row-${p.path}`}>
+            <button type="button" className="pages-panel-open" onClick={() => onOpen(p.path)} title={`${p.title || handleName(p.path)}\n${p.path}`}>
+              <span className="tree-icon-svg page" aria-hidden="true" />
+              <span className="pages-panel-text">
+                <span className="pages-panel-title">{p.title || handleName(p.path)}</span>
+                <span className="pages-panel-folder">{folderOf(p.path) || '/'}</span>
+              </span>
+            </button>
+            <button type="button" className="pages-panel-locate" onClick={() => onReveal(p.path)} title="Show in tree" aria-label={`Show ${p.path} in the tree`}>{LOCATE_ICON}</button>
+          </div>
+        ))}
+      </div>
+      <div className="pages-panel-foot">
+        <button type="button" className="pages-panel-link" onClick={() => onFullView('pages')} data-testid="pages-panel-full">Open full view</button>
+        {Array.isArray(unlinked) && unlinked.length > 0 && (
+          <button type="button" className="pages-panel-link" onClick={() => onFullView('unlinked')} data-testid="pages-panel-unlinked">Unlinked ({unlinked.length})</button>
+        )}
+      </div>
     </div>
   );
 }
