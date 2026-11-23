@@ -46,6 +46,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/mdnest/mdnest/backend/middleware"
@@ -320,9 +321,8 @@ func (h *PagesHandler) handleList(w http.ResponseWriter, r *http.Request) {
 		// slug, title, author, publishedAt, files, bytes. Tabs and line
 		// breaks inside a field become spaces.
 		w.Header().Set("Content-Type", "text/tab-separated-values; charset=utf-8")
-		clean := strings.NewReplacer("\t", " ", "\n", " ", "\r", " ")
 		for _, p := range pages {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%d\n", p.Slug, clean.Replace(p.Title), clean.Replace(p.Author), p.PublishedAt, p.Files, p.Bytes)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%d\n", plainField(p.Slug), plainField(p.Title), plainField(p.Author), plainField(p.PublishedAt), p.Files, p.Bytes)
 		}
 		return
 	}
@@ -711,7 +711,7 @@ func ExtractPageText(doc []byte) (string, string) {
 		tt := z.Next()
 		switch tt {
 		case html.ErrorToken:
-			return collapseSpace(title.String()), truncateText(collapseSpace(text.String()))
+			return collapseSpace(plainField(title.String())), truncateText(collapseSpace(plainField(text.String())))
 		case html.StartTagToken, html.EndTagToken:
 			name, _ := z.TagName()
 			a := atom.Lookup(name)
@@ -756,6 +756,19 @@ func isBlockAtom(a atom.Atom) bool {
 }
 
 func collapseSpace(s string) string { return strings.Join(strings.Fields(s), " ") }
+
+// plainField makes a value safe to print in a terminal or a TSV line: every
+// control character (tabs, line breaks, ESC and the rest of C0/C1, DEL) and
+// the Unicode line and paragraph separators become a space. A page title is
+// written by whoever publishes the page, and the CLI prints it.
+func plainField(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' {
+			return ' '
+		}
+		return r
+	}, s)
+}
 
 func truncateText(s string) string {
 	if len(s) <= maxPageText {

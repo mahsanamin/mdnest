@@ -557,6 +557,28 @@ func TestExtractPageText(t *testing.T) {
 	}
 }
 
+func TestPages_ControlCharactersNeverReachTheTerminal(t *testing.T) {
+	h, _ := pagesFixture(t)
+	// An ESC sequence in the title (written as a character reference, which
+	// the tokenizer decodes) and a raw one in the body.
+	publish(h, "alpha", "esc", "text/html", []byte("<title>A&#27;[2Jcleared&#x85;x\u2028y</title><p>b\x1b]0;pwned\x07c</p>"))
+	w := httptest.NewRecorder()
+	h.Handle(w, httptest.NewRequest(http.MethodGet, "/api/pages?ns=alpha&format=tsv", nil))
+	line := strings.TrimSuffix(w.Body.String(), "\n")
+	for _, r := range line {
+		if r != '\t' && (r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0) || r == 0x2028 || r == 0x2029) {
+			t.Fatalf("control character %U in the TSV: %q", r, line)
+		}
+	}
+	tw := httptest.NewRecorder()
+	h.HandleText(tw, httptest.NewRequest(http.MethodGet, "/api/pages/text?ns=alpha&slug=esc", nil))
+	var m PageMeta
+	json.Unmarshal(tw.Body.Bytes(), &m)
+	if strings.ContainsAny(m.Title+m.Text, "\x1b\x07") {
+		t.Fatalf("control characters kept: %q %q", m.Title, m.Text)
+	}
+}
+
 func TestPagesEnabled(t *testing.T) {
 	for _, c := range []struct {
 		set, role string
