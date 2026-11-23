@@ -1,5 +1,5 @@
 import { useRef, useCallback, useState, useEffect, useMemo } from 'react';
-import TreeNode from './TreeNode.jsx';
+import TreeNode, { isFileDrag } from './TreeNode.jsx';
 import { searchNotes, adminSyncNamespace, adminSyncStatus } from '../api.js';
 import { onTabMessage } from '../tab-sync.js';
 
@@ -109,6 +109,10 @@ function Sidebar({
   // The HTML pages list (a lazy chunk), shown under the notes tree only when
   // the server has pages on. Null otherwise.
   pagesSection,
+  // Pages on: handle files get a page icon, and desktop files dropped on a
+  // folder go to onDropFiles(folder, dataTransfer). Both off otherwise.
+  pageHandles,
+  onDropFiles,
 }) {
   const [syncing, setSyncing] = useState(false);
   const [showVersionInfo, setShowVersionInfo] = useState(false);
@@ -547,6 +551,7 @@ function Sidebar({
           onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
           onDrop={(e) => {
             e.preventDefault();
+            if (onDropFiles && isFileDrag(e)) { onDropFiles('', e.dataTransfer); return; }
             try {
               const data = JSON.parse(e.dataTransfer.getData('text/plain'));
               if (data.path && onDrop) onDrop(data.path, '');
@@ -572,6 +577,7 @@ function Sidebar({
               e.preventDefault();
               e.stopPropagation();
               setRootDragOver(false);
+              if (onDropFiles && isFileDrag(e)) { onDropFiles('', e.dataTransfer); return; }
               try {
                 const data = JSON.parse(e.dataTransfer.getData('text/plain'));
                 // Already at the root? Nothing to do.
@@ -601,6 +607,8 @@ function Sidebar({
               forceExpand={!!searchQuery.trim()}
               pickedFolder={pickedFolder}
               onPickFolder={onPickFolder}
+              pageHandles={pageHandles}
+              onDropFiles={onDropFiles}
             />
           ))}
           {searchQuery.trim() && filteredTree.length === 0 && !showContentResults && !searching && (

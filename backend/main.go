@@ -1006,7 +1006,7 @@ func main() {
 		pagesHandler = handlers.NewPagesHandler(pagesCfg, stg, perms)
 		routes.pages = pagesHandler
 		transferHandler.SetPages(pagesHandler)
-		configHandler.SetPages(true, pagesHandler.ScriptMode())
+		configHandler.SetPages(true, pagesHandler.ScriptMode(), int(pagesCfg.MaxBytes>>20), pagesCfg.MaxFiles)
 	}
 	registerContentRoutes(mux, routes)
 

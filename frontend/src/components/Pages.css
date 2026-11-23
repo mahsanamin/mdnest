@@ -96,15 +96,6 @@
   color: var(--accent);
 }
 
-.pages-row-icon {
-  flex: none;
-  width: 12px;
-  height: 14px;
-  border: 1.5px solid currentColor;
-  border-radius: 2px;
-  opacity: 0.7;
-}
-
 .pages-row-title {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -159,20 +150,6 @@
   min-width: 0;
 }
 
-.page-bar-close {
-  flex: none;
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  font-size: 1.2rem;
-  line-height: 1;
-  cursor: pointer;
-  padding: 0 0.3rem;
-}
-
-.page-bar-close:hover {
-  color: var(--text);
-}
 
 .page-error {
   padding: 1rem;
@@ -188,4 +165,59 @@
   border: none;
   background: var(--page-frame-bg);
   min-height: 0;
+}
+
+/* Page handles in the notes tree (TreeNode adds .page when pages are on) and
+   in the Pages list: a document with a globe-like grid, so a page reads as
+   something different from a note. */
+.tree-icon-svg.page {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fab387' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='18' height='18' rx='2'/%3E%3Cline x1='3' y1='8' x2='21' y2='8'/%3E%3Ccircle cx='6' cy='5.5' r='0.6'/%3E%3Ccircle cx='8.5' cy='5.5' r='0.6'/%3E%3Cline x1='7' y1='13' x2='17' y2='13'/%3E%3Cline x1='7' y1='17' x2='13' y2='17'/%3E%3C/svg%3E");
+}
+
+.pages-row.missing .pages-row-title {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+
+.pages-unlinked {
+  margin-top: 0.25rem;
+  border-top: 1px dashed var(--border-subtle);
+  padding-top: 0.25rem;
+}
+
+.pages-unlinked-label {
+  padding: 0.2rem 1rem;
+  color: var(--text-faint);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.pages-unlinked-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.2rem 0.5rem 0.2rem 1rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  min-width: 0;
+}
+
+.pages-unlinked-row .pages-row-title {
+  flex: 1;
+}
+
+.pages-unlinked-delete {
+  flex: none;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--danger);
+  font-size: 0.75rem;
+  padding: 0.05rem 0.4rem;
+  cursor: pointer;
+}
+
+.pages-unlinked-delete:hover {
+  background: var(--danger-wash);
 }

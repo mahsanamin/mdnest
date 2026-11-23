@@ -2,7 +2,13 @@ import { useState, useRef, useCallback } from 'react';
 
 const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 
-function TreeNode({ node, onSelect, currentPath, depth, onContextMenu, onDrop, expandedPaths, onToggleExpand, forceExpand, pickedFolder, onPickFolder }) {
+// isFileDrag: the drag carries files from outside the browser (the
+// desktop), not a tree row being moved.
+export function isFileDrag(e) {
+  return Array.from(e.dataTransfer?.types || []).includes('Files');
+}
+
+function TreeNode({ node, onSelect, currentPath, depth, onContextMenu, onDrop, expandedPaths, onToggleExpand, forceExpand, pickedFolder, onPickFolder, pageHandles, onDropFiles }) {
   const isFolder = node.type === 'folder' || node.type === 'directory';
   const isActive = currentPath === node.path;
   const longPressTimer = useRef(null);
@@ -90,7 +96,17 @@ function TreeNode({ node, onSelect, currentPath, depth, onContextMenu, onDrop, e
     // reaches that folder's children container and means "put it in here", which
     // is what the gesture looks like. Swallowing it here made such a drop a
     // silent no-op.
-    if (!isFolder || !onDrop) return;
+    if (!isFolder) return;
+    // Files from the desktop (pages on): handed to the app, which publishes
+    // HTML as a page in this folder and leaves anything else alone.
+    if (onDropFiles && isFileDrag(e)) {
+      e.preventDefault();
+      e.stopPropagation();
+      setDragOver(false);
+      onDropFiles(node.path, e.dataTransfer);
+      return;
+    }
+    if (!onDrop) return;
     e.preventDefault();
     e.stopPropagation();
     setDragOver(false);
@@ -106,7 +122,7 @@ function TreeNode({ node, onSelect, currentPath, depth, onContextMenu, onDrop, e
         onDrop(data.path, node.path);
       }
     } catch (err) { /* ignore */ }
-  }, [isFolder, node, onDrop]);
+  }, [isFolder, node, onDrop, onDropFiles]);
 
   // An expanded folder's contents are part of that folder as far as a drag is
   // concerned: dropping onto the space below its rows, or onto a file inside
@@ -125,6 +141,10 @@ function TreeNode({ node, onSelect, currentPath, depth, onContextMenu, onDrop, e
     e.preventDefault();
     e.stopPropagation();
     setDragOver(false);
+    if (onDropFiles && isFileDrag(e)) {
+      onDropFiles(node.path, e.dataTransfer);
+      return;
+    }
     if (!onDrop) return;
     try {
       const data = JSON.parse(e.dataTransfer.getData('text/plain'));
@@ -134,7 +154,7 @@ function TreeNode({ node, onSelect, currentPath, depth, onContextMenu, onDrop, e
       if (node.path === fromParent) return;
       onDrop(data.path, node.path);
     } catch (err) { /* ignore */ }
-  }, [node, onDrop]);
+  }, [node, onDrop, onDropFiles]);
 
   const name = node.name || node.path.split('/').filter(Boolean).pop() || node.path;
 
@@ -167,7 +187,7 @@ function TreeNode({ node, onSelect, currentPath, depth, onContextMenu, onDrop, e
         ) : (
           <span className="tree-arrow-spacer" />
         )}
-        <span className={`tree-icon-svg ${isFolder ? (expanded ? 'folder-open' : (hasChildren ? 'folder-full' : 'folder-empty')) : 'file'}`} />
+        <span className={`tree-icon-svg ${isFolder ? (expanded ? 'folder-open' : (hasChildren ? 'folder-full' : 'folder-empty')) : (pageHandles && name.endsWith('.page.md') ? 'page' : 'file')}`} />
         <span className={`tree-label${isFolder && !hasChildren ? ' empty-folder' : ''}`}>{name}</span>
       </div>
       {isFolder && expanded && node.children && (
@@ -191,6 +211,8 @@ function TreeNode({ node, onSelect, currentPath, depth, onContextMenu, onDrop, e
               forceExpand={forceExpand}
               pickedFolder={pickedFolder}
               onPickFolder={onPickFolder}
+              pageHandles={pageHandles}
+              onDropFiles={onDropFiles}
             />
           ))}
         </div>
