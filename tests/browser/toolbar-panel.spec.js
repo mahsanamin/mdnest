@@ -77,9 +77,15 @@ test('each button opens its tab, shows pressed, and closes the panel when clicke
   await expect(panel(page)).toBeVisible();
   await expect(btn(page, 'stickies')).toHaveAttribute('aria-pressed', 'true');
   await expect(panel(page).locator('.stickies-add')).toBeVisible();
+  // No second switcher inside the panel: the toolbar group is the only one.
+  await expect(panel(page).locator('[role=tab], .side-panel-tabs')).toHaveCount(0);
+  await expect(page.getByTestId('side-panel-title')).toHaveText('Stickies');
+  const stickiesWidth = Math.round((await panel(page).boundingBox()).width);
   if (await btn(page, 'chats').count()) {
     await btn(page, 'chats').click();
-    await expect(page.getByTestId('side-panel-tab-chat')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByTestId('side-panel-title')).toHaveText('Chat');
+    // One width for every view: switching never makes the panel jump.
+    expect(Math.round((await panel(page).boundingBox()).width)).toBe(stickiesWidth);
     await expect(btn(page, 'chats')).toHaveAttribute('aria-pressed', 'true');
     await expect(btn(page, 'stickies')).toHaveAttribute('aria-pressed', 'false');
     // The full chats view is one ⤢ away, and comes back to the panel.
@@ -160,7 +166,7 @@ for (const scheme of ['dark', 'light']) {
 }
 
 test('with the side panel open on a small laptop the toolbar stays one row; the view switch moves into ⋯', async ({ page }) => {
-  await page.addInitScript(() => { try { localStorage.setItem('mdnest_comment_width', '2000'); } catch { /* private mode */ } });
+  await page.addInitScript(() => { try { localStorage.setItem('mdnest_chat_panel_width', '2000'); } catch { /* private mode */ } });
   await page.setViewportSize({ width: 1024, height: 768 });
   await signIn(page);
   await btn(page, 'stickies').click();

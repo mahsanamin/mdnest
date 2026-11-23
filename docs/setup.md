@@ -626,7 +626,7 @@ Publishing to the same handle again replaces the page; there is no version
 history.
 
 **Finding pages.** The **Pages** button on the right of the toolbar (with
-Chats and Stickies) opens the side panel's **Pages** tab. Its ⤢ button, or
+Chats and Stickies) opens the Pages list in the side panel. Its ⤢ button, or
 "Open full view", opens the Pages view; on a phone or a narrow window the
 button opens the Pages view directly. The Pages view has a card for every HTML
 page in the workspace you can
@@ -636,7 +636,7 @@ text, titles and descriptions; sort by newest, title or folder. **Open** shows
 the page; the target button shows its handle in the tree without opening it.
 The cards are never live previews, so opening the view runs no page scripts.
 
-The side panel's **Pages** tab is a short searchable list for working beside
+The side panel's Pages list is a short searchable list for working beside
 your notes: a click opens the HTML page in the main area and the panel stays
 open, so you can flip through several. Its target button shows a page in the
 tree.

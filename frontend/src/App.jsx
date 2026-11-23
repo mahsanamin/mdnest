@@ -58,7 +58,7 @@ import HeadingLinks from './components/HeadingLinks.jsx';
 import { findHeading } from './headingLink.js';
 import CommentSidebar from './components/CommentSidebar.jsx';
 import StickiesPanel from './components/StickiesPanel.jsx';
-import { canDockChat, canDockPages, chatPanelBounds, stickiesPanelBounds, defaultChatPanelWidth, clampWidth } from './sidePanel.js';
+import { canDockChat, canDockPages, sidePanelBounds, sidePanelWidth } from './sidePanel.js';
 import StickiesBoard from './components/StickiesBoard.jsx';
 import ShareDialog from './components/ShareDialog.jsx';
 import HistoryModal from './components/HistoryModal.jsx';
@@ -2088,10 +2088,13 @@ function App() {
       },
     },
   ].filter(Boolean);
-  const chatBounds = chatPanelBounds(viewportWidth, sidebarWidth);
-  const chatWidth = clampWidth(chatPanelWidth ?? defaultChatPanelWidth(viewportWidth), chatBounds);
-  const stickiesBounds = stickiesPanelBounds(viewportWidth, sidebarWidth);
-  const stickiesWidth = clampWidth(commentWidth, stickiesBounds);
+  // One remembered width for the side panel whatever it shows (Chat, Stickies
+  // or Pages), so switching views keeps the size the user picked. Only a chat
+  // has a higher minimum (sidePanel.js). Stored under the key older versions
+  // used for the docked chat.
+  const panelView = chatDocked ? 'chat' : sidePanel === 'pages' ? 'pages' : 'stickies';
+  const panelBounds = sidePanelBounds(viewportWidth, sidebarWidth, panelView);
+  const panelWidth = sidePanelWidth(chatPanelWidth, viewportWidth, sidebarWidth, panelView);
   const openSidePanel = useCallback((tab) => {
     setShowComments(false); // comments own the same edge
     setSidePanel(tab);
@@ -3065,8 +3068,7 @@ function App() {
         style={
           isMobile ? undefined
             : commentsEnabled && showComments && currentPath ? { marginRight: commentWidth }
-            : chatDocked ? { marginRight: chatWidth }
-            : panelShown ? { marginRight: stickiesWidth }
+            : panelShown ? { marginRight: panelWidth }
             : undefined
         }
       >
@@ -3645,16 +3647,11 @@ function App() {
             </Suspense>
             </ChunkErrorBoundary>
           )}
-          {...(isMobile ? {} : chatDocked ? {
-            width: chatWidth,
-            minWidth: chatBounds.min,
-            maxWidth: chatBounds.max,
+          {...(isMobile ? {} : {
+            width: panelWidth,
+            minWidth: panelBounds.min,
+            maxWidth: panelBounds.max,
             onWidthChange: (w) => { setChatPanelWidth(w); localStorage.setItem('mdnest_chat_panel_width', String(w)); },
-          } : {
-            width: stickiesWidth,
-            minWidth: stickiesBounds.min,
-            maxWidth: stickiesBounds.max,
-            onWidthChange: (w) => { setCommentWidth(w); localStorage.setItem('mdnest_comment_width', String(w)); },
           })}
           chat={chatDocked && (
             <ChunkErrorBoundary

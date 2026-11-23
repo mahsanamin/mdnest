@@ -31,10 +31,10 @@ test('pages off: no section, no chunk, no route', async ({ page, request }) => {
 
   await expect(page.locator('[data-testid=pages-section]')).toHaveCount(0);
   await expect(page.locator('[data-testid=toolbar-pages]')).toHaveCount(0);
-  // The side panel has no Pages tab.
+  // The side panel never shows Pages.
   await page.locator('[data-testid=toolbar-stickies]').first().click();
   await expect(page.locator('[data-testid=side-panel]')).toBeVisible();
-  await expect(page.locator('[data-testid=side-panel-tab-pages]')).toHaveCount(0);
+  await expect(page.getByTestId('side-panel-title')).toHaveText('Stickies');
   await expect(page.locator('[data-testid=pages-panel]')).toHaveCount(0);
   await page.locator('[data-testid=toolbar-stickies]').first().click();
   await expect(page.getByText('Pages', { exact: true })).toHaveCount(0);

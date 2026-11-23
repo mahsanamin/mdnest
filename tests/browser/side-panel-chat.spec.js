@@ -134,19 +134,15 @@ test('switching tabs, Expand and Pin keep the unsent draft', async ({ page }) =>
     await dock(page, s);
     await dockedDraft(page).fill('half a thought');
 
-    // Stickies tab and back.
-    await page.getByTestId('side-panel-tab-stickies').click();
+    // Stickies and back, through the toolbar buttons.
+    await page.getByTestId('toolbar-stickies').click();
     await expect(panel(page).locator('.stickies-add')).toBeVisible();
     await expect(page.locator('.chat-draft')).toHaveCount(0); // hidden tab is unmounted, so it does not poll
-    await page.getByTestId('side-panel-tab-chat').click();
+    await page.getByTestId('toolbar-chats').click();
     await expect(dockedDraft(page)).toHaveValue('half a thought');
-
-    // Tabs are real tabs: arrow keys move between them.
-    await page.getByTestId('side-panel-tab-chat').focus();
-    await page.keyboard.press('ArrowRight');
-    await expect(page.getByTestId('side-panel-tab-stickies')).toHaveAttribute('aria-selected', 'true');
-    await page.keyboard.press('ArrowLeft');
-    await expect(page.getByTestId('side-panel-tab-chat')).toHaveAttribute('aria-selected', 'true');
+    // The panel has no tabs of its own; its header names what shows.
+    await expect(page.getByTestId('side-panel-title')).toHaveText('Chat');
+    await expect(panel(page).locator('[role=tab]')).toHaveCount(0);
 
     // Expand: the same chat, full screen, same draft; the panel steps aside.
     await page.getByTestId('chat-expand').click();
@@ -184,7 +180,7 @@ test('a chat opened from the tree uses the last picked mode, pinned or full scre
     expect(page.url()).toContain(`#${NS}/${s.plain}`);
 
     // Pinned, with the panel closed and after a reload: still opens pinned.
-    await page.getByTestId('side-panel-tab-chat').focus();
+    await panel(page).locator('.stickies-close').focus();
     await page.keyboard.press('Escape');
     await expect(panel(page)).toHaveCount(0);
     await page.reload();
@@ -214,7 +210,7 @@ test('a chat opened from the tree uses the last picked mode, pinned or full scre
     await expect(panel(page)).toHaveCount(0);
     await page.locator('.toolbar-chats-back').click();
     await expect(page.locator('.toolbar-path')).toContainText(s.plain, { timeout: 15_000 });
-    await page.getByTestId('side-panel-tab-chat').focus();
+    await panel(page).locator('.stickies-close').focus();
     await page.keyboard.press('Escape');
     await expect(panel(page)).toHaveCount(0);
     await treeRow(other).click({ timeout: 20_000 });
@@ -239,9 +235,9 @@ test('a chat docked from the panel Chat tab, not Pin, stays docked on a tree cli
     await page.evaluate(() => localStorage.setItem('mdnest_chat_mode', 'full'));
     await page.reload();
     await expect(page.locator('.toolbar-path')).toContainText(s.plain, { timeout: 20_000 });
-    // Dock through the side panel: Stickies button, Chat tab, pick the chat.
+    // Dock through the side panel: Stickies button, then Chats, pick the chat.
     await page.locator('[data-testid=toolbar-stickies]').first().click();
-    await page.getByTestId('side-panel-tab-chat').click();
+    await page.getByTestId('toolbar-chats').click();
     await panel(page).locator('.chat-list-item', { hasText: s.title }).first().click();
     await expect(panel(page).locator('.chat-room-title h2')).toHaveText(s.title, { timeout: 15_000 });
     // A tree click on another chat swaps the docked chat; nothing goes full screen.
@@ -335,11 +331,11 @@ test('no Pin where a chat cannot dock: full-screen chats work as before', async 
     await page.reload();
     await expect(page.locator('.chat-room-title h2')).toHaveText(s.title, { timeout: 20_000 });
     await expect(page.getByTestId('chat-pin-side')).toHaveCount(0);
-    // And the side panel offers no Chat tab.
+    // And the side panel never shows Chat.
     await page.locator('.toolbar-chats-back').click();
     await page.locator('[data-testid=toolbar-stickies]').click();
     await expect(page.locator('.stickies-panel')).toBeVisible();
-    await expect(page.getByTestId('side-panel-tab-chat')).toHaveCount(0);
+    await expect(page.getByTestId('side-panel-title')).toHaveText('Stickies');
   } finally {
     await cleanup(page, s.plain, s.chat);
   }

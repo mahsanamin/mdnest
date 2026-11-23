@@ -43,25 +43,23 @@ async function renderPanel(props = {}) {
 }
 const row = (p) => host.querySelector(`[data-testid="pages-panel-row-${p}"]`);
 
-describe('side panel tabs', () => {
+describe('side panel views', () => {
   const base = { stickies: [], onChange: () => {}, onClose: () => {}, onExpand: () => {}, saveState: 'saved', loadState: 'ready', onRetry: () => {} };
-  it('has no Pages tab with pages off', async () => {
-    await act(async () => { root.render(<StickiesPanel {...base} tab="stickies" tabs={['chat', 'stickies']} onTab={() => {}} chat={<div />} />); });
-    expect(host.querySelector('[data-testid=side-panel-tab-pages]')).toBeNull();
-    expect(host.querySelector('[data-testid=side-panel-tab-chat]')).not.toBeNull();
-  });
-  it('offers Chat | Stickies | Pages, in that order, and shows the pages content on its tab', async () => {
-    const onTab = vi.fn();
-    await act(async () => { root.render(<StickiesPanel {...base} tab="pages" tabs={['chat', 'stickies', 'pages']} onTab={onTab} chat={<div />} pages={<div data-testid="pages-content" />} />); });
-    expect([...host.querySelectorAll('[role=tab]')].map((t) => t.textContent)).toEqual(['Chat', 'Stickies', 'Pages']);
+  const title = () => host.querySelector('[data-testid=side-panel-title]');
+  it('has no tab bar: the toolbar switches it, the header names what shows', async () => {
+    await act(async () => { root.render(<StickiesPanel {...base} tab="pages" tabs={['chat', 'stickies', 'pages']} onTab={() => {}} chat={<div />} pages={<div data-testid="pages-content" />} />); });
+    expect(host.querySelectorAll('[role=tab], [role=tablist]').length).toBe(0);
+    expect(title().textContent).toBe('Pages');
     expect(host.querySelector('[data-testid=pages-content]')).not.toBeNull();
     expect(host.querySelector('.stickies-add')).toBeNull();
-    await act(async () => { host.querySelector('[data-testid=side-panel-tab-stickies]').click(); });
-    expect(onTab).toHaveBeenCalledWith('stickies');
   });
-  it('without chat docking, still offers Stickies | Pages', async () => {
-    await act(async () => { root.render(<StickiesPanel {...base} tab="stickies" tabs={['stickies', 'pages']} onTab={() => {}} pages={<div />} />); });
-    expect([...host.querySelectorAll('[role=tab]')].map((t) => t.textContent)).toEqual(['Stickies', 'Pages']);
+  it('shows Chat on the chat view and Stickies otherwise', async () => {
+    await act(async () => { root.render(<StickiesPanel {...base} tab="chat" tabs={['chat', 'stickies']} onTab={() => {}} chat={<div data-testid="chat-content" />} />); });
+    expect(title().textContent).toBe('Chat');
+    expect(host.querySelector('[data-testid=chat-content]')).not.toBeNull();
+    await act(async () => { root.render(<StickiesPanel {...base} tab="pages" tabs={['chat', 'stickies']} onTab={() => {}} chat={<div />} />); });
+    expect(title().textContent).toBe('Stickies'); // pages off: never the Pages view
+    expect(host.querySelector('.stickies-add')).not.toBeNull();
   });
 });
 

@@ -6187,6 +6187,10 @@ pre:hover .code-copy-btn {
   right: 0;
   bottom: 0;
   width: 320px;
+  /* Matches .main's margin-right easing, so when the width changes (a chat
+     that needs more room than the width you picked, a window resize) the
+     panel and the editor move together instead of jumping. */
+  transition: width 0.15s ease;
   background: var(--surface);
   border-left: 1px solid var(--border);
   border-top: 1px solid var(--border);
@@ -6227,36 +6231,6 @@ pre:hover .code-copy-btn {
   flex-direction: column;
 }
 
-/* Chat and Stickies tabs, in the header where the "Stickies" title was. */
-.side-panel-tabs {
-  display: flex;
-  gap: var(--space-1);
-  margin-right: auto;
-}
-
-.side-panel-tab {
-  background: none;
-  border: none;
-  border-radius: var(--radius-sm);
-  padding: 4px 10px;
-  font: inherit;
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: var(--text-muted);
-  cursor: pointer;
-}
-
-.side-panel-tab:hover {
-  color: var(--text);
-  background: var(--surface-2);
-}
-
-.side-panel-tab.active {
-  color: var(--text);
-  background: var(--accent-wash);
-}
-
-.side-panel-tab:focus-visible,
 .stickies-close:focus-visible,
 .stickies-expand:focus-visible {
   outline: 2px solid var(--accent);
@@ -7368,4 +7342,17 @@ pre:hover .code-copy-btn {
   padding: 0 3px;
   border-radius: 3px 3px 3px 0;
   user-select: none;
+}
+
+/* Side panel resize: a drag follows the pointer with no easing, and reduced
+   motion turns the easing off entirely. */
+body.side-panel-resizing .stickies-panel,
+body.side-panel-resizing .main {
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .stickies-panel,
+  .main {
+    transition: none;
+  }
 }

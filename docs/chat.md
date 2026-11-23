@@ -137,8 +137,8 @@ On it — frontend checks green.
 
 - **Chats** on the right of the toolbar (with **Pages** and **Stickies**) lists
   the chats in the workspace you are in, most recently active first, with
-  unread counts. Where the window has room it opens the side panel's **Chat**
-  tab, and the panel's ⤢ button opens the full chats view; on a phone or a
+  unread counts. Where the window has room it opens in the side panel, and
+  the panel's ⤢ button opens the full chats view; on a phone or a
   narrow window it opens the full view directly. Switch workspace in the sidebar to see another one's chats.
   A link to a chat (`#!chats/<workspace>/<path>`) opens its workspace.
 - Chat mode is full screen: the file tree and the open note's controls are

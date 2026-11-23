@@ -398,7 +398,7 @@ A private scratch pad that follows you rather than the note you have open. Click
 - The toolbar icon carries a badge counting **unfinished to-dos** across every sticky — things left to do, not notes containing something. A blank line does not count until you write in it.
 - The board is available even with no file open, and while the task board is showing — those are exactly the moments you want to jot something down.
 
-Stickies and comments share the right-hand panel, so opening one closes the other. Drag the panel's left edge to resize it; the width is shared with the comments panel and remembered. When chat is on and the window is wide enough, the panel also has a **Chat** tab (see [A chat next to your note](#a-chat-next-to-your-note-v488)).
+Stickies and comments share the right-hand panel, so opening one closes the other. Drag the panel's left edge to resize it; the width is remembered. When chat is on and the window is wide enough, the panel can also show a chat (see [A chat next to your note](#a-chat-next-to-your-note-v488)).
 
 ### The full board
 
@@ -514,7 +514,7 @@ See **[Task Model](tasks.md)** for the exact markdown a task compiles to, and th
 
 **Chats**, on the right of the toolbar next to **Pages** and **Stickies**, lists
 the chats in the current workspace (a picker switches workspace). Where there
-is room it opens in the side panel's **Chat** tab, and the panel's ⤢ button
+is room it opens in the side panel, and the panel's ⤢ button
 opens the full chats view; on a phone or a narrow window it opens full screen
 directly. Chat is on by default; `ENABLE_CHAT=false` turns it off. A chat is just a note tagged `mdnest-chat: true`, and each
 message is appended to it, so people here and agents using `mdnest chat`
@@ -527,20 +527,22 @@ Claude Code, Codex or any agent with a shell. Type `@` to mention someone. Detai
 To keep a note on screen while you chat, open the chat in the full chats view
 and click **Pin to side panel** (the button with a panel icon in the chat's
 header). You go back to the note or board you came from, with the chat docked
-on the right in the side panel's **Chat** tab. The side panel is the same one
-that holds your stickies (and, with HTML pages on, the **Pages** list): its tabs
-switch between them, and the **Chats**, **Pages** and **Stickies** buttons on
-the right of the toolbar open it on that tab. The button for the tab that is
-showing looks pressed; clicking it again closes the panel.
+on the right in the side panel. The side panel is the same one that holds
+your stickies (and, with HTML pages on, the **Pages** list). The **Chats**,
+**Pages** and **Stickies** buttons on the right of the toolbar switch it
+between them; the panel's header names what is showing. The button for what
+is showing looks pressed; clicking it again closes the panel.
 
 - **Expand** in the docked chat opens it full screen. Back returns to your
   note with the chat still docked.
 - The unsent message and the spot you were reading are kept when you switch
-  tabs, expand, pin or close the panel.
+  to Stickies or Pages, expand, pin or close the panel.
 - Drag the panel's left edge to resize it, or focus the edge and use the
-  arrow keys. The chat tab has its own width (at least 520px), separate from
-  stickies and comments, and the panel never leaves the editor narrower than
-  400px. The width, the open tab and the docked chat are remembered in this
+  arrow keys. The width you pick is kept whether the panel shows Chat,
+  Stickies or Pages. Stickies and Pages can be as narrow as 260px; a chat
+  needs at least 520px, so a narrower panel widens while a chat shows and goes
+  back to your width after. The panel never leaves the editor narrower than
+  400px. The width, what it shows and the docked chat are remembered in this
   browser. If the chat is deleted, or you lose access to it, the panel shows
   the chat list instead.
 - A chat docks only when there is room for it next to the editor. On smaller

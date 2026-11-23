@@ -112,7 +112,7 @@ async function openPagesView(page) {
   // does not fit).
   // The button toggles: when the panel already shows Pages, clicking it
   // would close the panel, so go straight to its ⤢ then.
-  const onPagesTab = await page.locator('[data-testid=side-panel-tab-pages][aria-selected=true]').isVisible().catch(() => false);
+  const onPagesTab = await page.locator('[data-testid=side-panel-title][data-tab=pages]').isVisible().catch(() => false);
   if (!onPagesTab) await page.locator('[data-testid=toolbar-pages]').click();
   // Either the panel (with its ⤢) or the full view comes up; wait for one.
   const expand = page.locator('[data-testid=side-panel-expand]');
@@ -432,7 +432,15 @@ test('the Pages tab in the side panel: open two pages in a row, reveal one, pane
   const panel = page.locator('[data-testid=side-panel]');
   await page.locator('[data-testid=toolbar-pages]').click();
   await expect(panel).toBeVisible();
-  await expect(page.getByTestId('side-panel-tab-pages')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('side-panel-title')).toHaveText('Pages');
+  await expect(panel.locator('[role=tab]')).toHaveCount(0); // the toolbar switches the panel, not tabs in it
+  // Same width as Stickies: switching views never makes the panel jump.
+  const pagesWidth = Math.round((await panel.boundingBox()).width);
+  await page.locator('[data-testid=toolbar-stickies]').click();
+  await expect(page.getByTestId('side-panel-title')).toHaveText('Stickies');
+  expect(Math.round((await panel.boundingBox()).width)).toBe(pagesWidth);
+  await page.locator('[data-testid=toolbar-pages]').click();
+  await expect(page.getByTestId('side-panel-title')).toHaveText('Pages');
   await expect(page.locator('[data-testid=toolbar-pages]')).toHaveAttribute('aria-pressed', 'true');
   const rowOf = (p) => panel.locator(`[data-testid="pages-panel-row-${p}"]`);
   const first = rowOf(`${DIR}/panel/first.page.md`);

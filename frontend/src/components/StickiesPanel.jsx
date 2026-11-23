@@ -18,11 +18,12 @@ const TAB_LABELS = { chat: 'Chat', stickies: 'Stickies', pages: 'Pages' };
 // the quick way in for jotting one down without leaving the note you are
 // reading; the full-screen corkboard (StickiesBoard) is the same cards laid
 // out spatially, and the Expand button swaps between them. When chat can dock
-// here, the panel also has a Chat tab (`chat` is what it shows), and with HTML
-// pages on a Pages tab (`pages`). `tabs` lists the tabs offered, in order;
-// with one tab there is no tab bar. One panel with tabs rather than a second
-// drawer: two panels on one edge would have to fight over the same strip of
-// screen.
+// here, the panel can also show Chat (`chat` is what it shows), and with HTML
+// pages on, Pages (`pages`). `tabs` lists what it can show; `tab` picks one.
+// The panel has no tab bar of its own: the toolbar's Chats | Pages | Stickies
+// buttons switch it, so the header only names what is showing. One panel
+// rather than a second drawer: two panels on one edge would have to fight over
+// the same strip of screen.
 //
 // width / minWidth / maxWidth come from App per tab, already clamped to what
 // leaves the editor usable, so the drag and the arrow keys only clamp again.
@@ -36,7 +37,6 @@ function StickiesPanel({
   onExpandTab, expandChatInPanel = true,
 }) {
   const focusIdRef = useRef(null); // card to focus after the next render
-  const tabRefs = useRef({});
   const clampWidth = (w) => Math.min(maxWidth, Math.max(minWidth, w));
   const tabs = onTab && offered && offered.length > 1 ? offered : null;
   const showChat = tab === 'chat' && !!tabs && tabs.includes('chat');
@@ -68,20 +68,6 @@ function StickiesPanel({
     if (document.querySelector('.context-menu, .chat-dialog-backdrop')) return;
     e.stopPropagation();
     onClose();
-  };
-
-  // Real tabs: arrow keys move between them and select (the WAI-ARIA tabs
-  // pattern with automatic activation).
-  const onTabKey = (e) => {
-    const i = tabs.indexOf(tab);
-    let next = null;
-    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') next = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
-    else if (e.key === 'Home') next = tabs[0];
-    else if (e.key === 'End') next = tabs[tabs.length - 1];
-    if (!next) return;
-    e.preventDefault();
-    onTab(next);
-    tabRefs.current[next]?.focus();
   };
 
   return (
@@ -126,9 +112,12 @@ function StickiesPanel({
               document.removeEventListener('mouseup', onUp);
               document.body.style.cursor = '';
               document.body.style.userSelect = '';
+              document.body.classList.remove('side-panel-resizing');
             };
             document.body.style.cursor = 'col-resize';
             document.body.style.userSelect = 'none';
+            // A drag follows the pointer exactly: no easing while it lasts.
+            document.body.classList.add('side-panel-resizing');
             document.addEventListener('mousemove', onMove);
             document.addEventListener('mouseup', onUp);
           }}
@@ -136,29 +125,9 @@ function StickiesPanel({
       )}
 
       <div className="stickies-header">
-        {tabs ? (
-          <div className="side-panel-tabs" role="tablist" aria-label="Side panel">
-            {tabs.map((t) => (
-              <button
-                key={t}
-                ref={(el) => { tabRefs.current[t] = el; }}
-                id={`side-panel-tab-${t}`}
-                role="tab"
-                className={`side-panel-tab${tab === t ? ' active' : ''}`}
-                aria-selected={tab === t}
-                aria-controls="side-panel-body"
-                tabIndex={tab === t ? 0 : -1}
-                onClick={() => onTab(t)}
-                onKeyDown={onTabKey}
-                data-testid={`side-panel-tab-${t}`}
-              >
-                {TAB_LABELS[t]}
-              </button>
-            ))}
-          </div>
-        ) : (
-          <h3>Stickies</h3>
-        )}
+        <h3 data-testid="side-panel-title" data-tab={showChat ? 'chat' : showPages ? 'pages' : 'stickies'}>
+          {TAB_LABELS[showChat ? 'chat' : showPages ? 'pages' : 'stickies']}
+        </h3>
         {onExpandTab && ((showChat && expandChatInPanel) || showPages) && (
           <button
             className="stickies-expand"
@@ -205,8 +174,6 @@ function StickiesPanel({
       <div
         className="side-panel-body"
         id="side-panel-body"
-        role={tabs ? 'tabpanel' : undefined}
-        aria-labelledby={tabs ? `side-panel-tab-${tab}` : undefined}
       >
         {showChat ? chat : showPages ? pages : <>
           <div className="stickies-add-row">

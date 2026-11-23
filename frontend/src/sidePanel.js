@@ -1,8 +1,8 @@
-// Pure rules for the right-edge side panel (Chat, Stickies and Pages tabs; the
-// Pages tab only with HTML pages on): how wide each tab may be, and whether a
-// chat can dock at all. The Pages tab is a narrow list like the stickies, so it
-// takes the stickies bounds and shares their remembered width. No React here, so the
-// numbers are unit-tested on their own (__tests__/sidePanel.test.js).
+// Pure rules for the right-edge side panel (Chat, Stickies and Pages; Pages
+// only with HTML pages on): how wide it may be, and whether a chat can dock at
+// all. The panel keeps ONE width whichever of the three it shows, so switching
+// with the toolbar buttons never makes it jump. No React here, so the numbers
+// are unit-tested on their own (__tests__/sidePanel.test.js).
 
 // The narrowest the editor column may get while the panel is open. Below
 // this a note is not usable, so the panel stops growing instead.
@@ -50,6 +50,24 @@ export function stickiesPanelBounds(viewport, sidebar) {
 // A chat panel nobody has resized yet starts at 40% of the window, capped.
 export function defaultChatPanelWidth(viewport) {
   return Math.min(Math.round(viewport * 0.4), CHAT_PANEL_MAX);
+}
+
+// The range for the view showing. Every view shares one remembered width and
+// one maximum (as wide as a chat may get, if the window has room), so a width
+// picked on one view carries to the others. Only the minimum differs: Stickies
+// and Pages can be as narrow as a sticky strip, a chat needs CHAT_PANEL_MIN.
+export function sidePanelBounds(viewport, sidebar, view) {
+  if (view === 'chat') return chatPanelBounds(viewport, sidebar);
+  const max = Math.min(CHAT_PANEL_MAX, room(viewport, sidebar));
+  return { min: STICKIES_PANEL_MIN, max: Math.max(STICKIES_PANEL_MIN, max) };
+}
+
+// The panel's width for the view showing: the remembered one (null when never
+// resized) or the default, clamped to that view's range. The remembered value
+// is not changed by the clamp, so a panel narrowed below a chat's minimum
+// widens for a chat and goes back to the chosen width for Stickies or Pages.
+export function sidePanelWidth(saved, viewport, sidebar, view) {
+  return clampWidth(saved ?? defaultChatPanelWidth(viewport), sidePanelBounds(viewport, sidebar, view));
 }
 
 export function clampWidth(width, { min, max }) {
