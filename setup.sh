@@ -80,6 +80,7 @@ PAGES_ORIGIN=""
 PAGES_NETWORK=""
 PAGES_MAX_MB=""
 PAGES_MAX_FILES=""
+PAGES_PORT=""
 declare -a MOUNT_NAMES=()
 declare -a MOUNT_PATHS=()
 
@@ -123,6 +124,7 @@ while IFS= read -r line; do
     PAGES_NETWORK) PAGES_NETWORK="$value" ;;
     PAGES_MAX_MB) PAGES_MAX_MB="$value" ;;
     PAGES_MAX_FILES) PAGES_MAX_FILES="$value" ;;
+    PAGES_PORT) PAGES_PORT="$value" ;;
     DEFAULT_THEME) DEFAULT_THEME="$value" ;;
     EXCALIDRAW_LIBRARIES) EXCALIDRAW_LIBRARIES="$value" ;;
     REQUIRE_2FA) REQUIRE_2FA="$value" ;;
@@ -282,15 +284,16 @@ esac
 
 # HTML pages (optional, off by default). Nothing below changes the generated
 # files unless ENABLE_PAGES=true; the second port or hostname is added only in
-# script mode (PAGES_ORIGIN set).
-PAGES_PORT=""
+# script mode (PAGES_ORIGIN set). PAGES_PORT is the host port for the pages
+# listener; it defaults to the port in PAGES_ORIGIN and is needed only when the
+# public address has none (your own proxy in front).
 case "${ENABLE_PAGES:-false}" in
   true)
     case "${PAGES_NETWORK:-strict}" in
       strict|open) ;;
       *) echo "Error: PAGES_NETWORK must be strict or open (got '${PAGES_NETWORK}')."; exit 1 ;;
     esac
-    for v in PAGES_MAX_MB PAGES_MAX_FILES; do
+    for v in PAGES_MAX_MB PAGES_MAX_FILES PAGES_PORT; do
       val="${!v}"
       if [ -n "$val" ] && ! [[ "$val" =~ ^[1-9][0-9]*$ ]]; then
         echo "Error: $v must be a whole number above 0 (got '$val')."
@@ -313,11 +316,11 @@ case "${ENABLE_PAGES:-false}" in
         exit 1
       fi
       pages_hostport="${PAGES_ORIGIN#*://}"
-      if [[ "$pages_hostport" == *:* ]]; then PAGES_PORT="${pages_hostport##*:}"; fi
+      if [ -z "$PAGES_PORT" ] && [[ "$pages_hostport" == *:* ]]; then PAGES_PORT="${pages_hostport##*:}"; fi
       if [ -z "$CADDY_DOMAIN" ] && [ -z "$PAGES_PORT" ]; then
-        echo "Error: PAGES_ORIGIN=${PAGES_ORIGIN} has no port. Without CADDY_DOMAIN, pages are served"
-        echo "       on a second port: use e.g. http://localhost:3237. For a second hostname, set"
-        echo "       CADDY_DOMAIN, or route that hostname to the backend's port 8081 yourself."
+        echo "Error: PAGES_ORIGIN=${PAGES_ORIGIN} has no port. Without CADDY_DOMAIN, either use a"
+        echo "       second port (PAGES_ORIGIN=http://localhost:3237), or keep the hostname and set"
+        echo "       PAGES_PORT=3237 for your own proxy to send that hostname to."
         exit 1
       fi
       echo "HTML pages: on, script mode (pages served from ${PAGES_ORIGIN}, network ${PAGES_NETWORK:-strict})."

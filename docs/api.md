@@ -1442,6 +1442,105 @@ curl -OJ "http://localhost:8286/api/download?ns=personal&path=Project" \
 
 ---
 
+## HTML pages (optional, `ENABLE_PAGES`)
+
+View-only HTML pages published into a namespace. These routes exist only when
+the server has `ENABLE_PAGES=true`; otherwise each answers 404. `GET
+/api/config` reports `"pages": {"enabled": true, "scripts": <bool>}` when they
+are on (`scripts` is true in script mode, with `PAGES_ORIGIN` set).
+
+Every route takes `ns` (an existing namespace) and, where it names one page,
+`slug`: 1 to 64 lowercase letters, digits or hyphens. Access is checked on the
+namespace root: reading needs read on `/`, publishing and deleting need write
+on `/`. A grant on a subfolder does not give access to pages.
+
+### GET /api/pages
+
+List a namespace's pages, newest first.
+
+| Param | Required | Description |
+|-------|----------|-------------|
+| `ns` | yes | Namespace name |
+| `q` | no | Only pages whose title, name or text contains every word (case-insensitive) |
+| `format` | no | `tsv`: one line per page, `slug`, `title`, `author`, `publishedAt`, `files`, `bytes`, tab-separated (used by the CLI) |
+
+```json
+{"pages": [{"slug": "q3-report", "title": "Q3 report", "author": "ana", "publishedAt": "2026-11-20T10:00:00Z", "bytes": 48213, "files": 4}]}
+```
+
+### PUT /api/pages
+
+Publish a page. Publishing to a `slug` that exists replaces that page; there is
+no version history. `POST` is accepted too.
+
+| Param | Required | Description |
+|-------|----------|-------------|
+| `ns` | yes | Namespace name |
+| `slug` | yes | Page name |
+
+The body is either one HTML file (`Content-Type: text/html`, stored as
+`index.html`) or a tar of the page's folder (`application/x-tar`, may be
+gzipped; `application/gzip` also accepted). The folder needs an `index.html` at
+its top level. Hidden files (`.DS_Store`) are skipped. The title comes from
+`<title>`, and the visible text of `index.html` is stored for search.
+
+**Response:** the page's details, as in the list.
+
+**Error responses:**
+
+| Status | Cause |
+|--------|-------|
+| 400 | Invalid `slug`; a path with `..`, an absolute path or `.git`; a symlink, hard link, device or FIFO; the same file twice; no `index.html`; a broken tar or gzip |
+| 403 | No write access on the namespace root |
+| 404 | The namespace does not exist |
+| 413 | Over `PAGES_MAX_MB` (counted on the unpacked bytes) or `PAGES_MAX_FILES`; the message names the setting |
+| 415 | A body type other than the ones above |
+
+```bash
+tar -C ./report -czf - . | curl -X PUT "http://localhost:8286/api/pages?ns=engineering&slug=q3-report" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/gzip" --data-binary @-
+```
+
+### DELETE /api/pages
+
+Delete a page (`ns`, `slug`). Needs write on the namespace root. 404 when there
+is no such page.
+
+### GET /api/pages/text
+
+A page's details plus `text`: the visible text pulled out of `index.html` at
+publish time, without HTML, scripts or styles. Never the raw HTML. Needs read.
+
+### GET /api/pages/archive
+
+The page's files as a tar (`ns`, `slug`), for `mdnest page pull`. Needs read.
+
+### POST /api/pages/pass
+
+A frame URL for one page (`ns`, `slug`), after a read check. The browser app
+asks for a new one each time a page is opened.
+
+```json
+{"url": "/api/pages/view/<pass>/", "scripts": false, "expiresAt": "2026-11-20T10:30:00Z"}
+```
+
+In script mode `url` is on `PAGES_ORIGIN` (`https://pages.example.com/<pass>/`)
+and `scripts` is true. The pass is valid for 30 minutes, for this page only, and
+only for the version of the page that existed when it was made. It is never
+accepted as a login.
+
+### GET /api/pages/view/\<pass\>/\<file\>
+
+Static mode only (not registered in script mode). Serves a page's files to
+whoever presents a valid pass; no other login is needed. `<file>` defaults to
+`index.html`. Responses carry a script-less sandbox CSP, `nosniff`,
+`Referrer-Policy: no-referrer` and `Cache-Control: private, no-store`. An
+invalid or expired pass gets 403. In script mode the same paths
+(`/<pass>/<file>`) are served by the pages listener on `PAGES_ORIGIN`, with
+`sandbox allow-scripts`; see [security.md](security.md#html-pages).
+
+---
+
 ## Access Groups *(v4.2.0+)*
 
 Superadmin-managed named sets whose members are mdnest users and/or IdP (OIDC)

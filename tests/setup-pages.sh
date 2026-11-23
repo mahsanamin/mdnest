@@ -105,6 +105,11 @@ has "script: PAGES_NETWORK reaches .env" "$sb/.env" "PAGES_NETWORK=open"
 has "script: second port published on the first address" "$sb/docker-compose.yml" '"127.0.0.1:3237:8081"'
 has "script: second port published on the second address" "$sb/docker-compose.yml" '"0.0.0.0:3237:8081"'
 
+# 4b) Script mode behind your own proxy: public hostname, PAGES_PORT on the host.
+sb="$(generate "$REPO_ROOT/setup.sh" ENABLE_PAGES=true PAGES_ORIGIN=https://pages.example.com PAGES_PORT=3237)"
+has "own proxy: PAGES_PORT is published to the pages listener" "$sb/docker-compose.yml" '"127.0.0.1:3237:8081"'
+has "own proxy: the public address is what the backend gets" "$sb/.env" "PAGES_ORIGIN=https://pages.example.com"
+
 # 5) Script mode through Caddy: a second hostname, then a second port.
 sb="$(generate "$REPO_ROOT/setup.sh" ENABLE_PAGES=true CADDY_DOMAIN=notes.example.com FRONTEND_ORIGIN=https://notes.example.com PAGES_ORIGIN=https://pages.example.com)"
 has "caddy: a site for the pages hostname" "$sb/Caddyfile" "https://pages.example.com {"
@@ -129,13 +134,14 @@ refused "a typo in PAGES_NETWORK is refused" "PAGES_NETWORK must be strict or op
 refused "a non-number PAGES_MAX_MB is refused" "PAGES_MAX_MB must be a whole number" ENABLE_PAGES=true PAGES_MAX_MB=lots
 refused "a pages origin with a path is refused" "bare origin" ENABLE_PAGES=true PAGES_ORIGIN=http://localhost:3237/pages
 refused "no port and no Caddy is refused" "has no port" ENABLE_PAGES=true PAGES_ORIGIN=https://pages.example.com
+refused "a non-number PAGES_PORT is refused" "PAGES_PORT must be a whole number" ENABLE_PAGES=true PAGES_ORIGIN=https://pages.example.com PAGES_PORT=x
 refused "PAGES_ORIGIN equal to FRONTEND_ORIGIN is refused" "must differ from FRONTEND_ORIGIN" ENABLE_PAGES=true FRONTEND_ORIGIN=http://localhost:3236 PAGES_ORIGIN=http://localhost:3236
 
 # 7) Every key is read by the backend and documented.
 for k in ENABLE_PAGES PAGES_DIR PAGES_ORIGIN PAGES_NETWORK PAGES_MAX_MB PAGES_MAX_FILES PAGES_LISTEN_PORT; do
   if grep -q "\"$k\"" "$REPO_ROOT/backend/main.go"; then ok "backend reads $k"; else bad "backend reads $k" "no env(\"$k\") in backend/main.go"; fi
 done
-for k in ENABLE_PAGES PAGES_DIR PAGES_ORIGIN PAGES_NETWORK PAGES_MAX_MB PAGES_MAX_FILES; do
+for k in ENABLE_PAGES PAGES_DIR PAGES_ORIGIN PAGES_NETWORK PAGES_MAX_MB PAGES_MAX_FILES PAGES_PORT; do
   if grep -q "^#* *$k=" "$REPO_ROOT/mdnest.conf.sample"; then ok "mdnest.conf.sample documents $k"; else bad "mdnest.conf.sample documents $k" "no $k= line"; fi
 done
 

@@ -212,6 +212,11 @@ override: `MDNEST_SKIP_E2E=1`.
 - `tests/setup-download-limits.sh` — `DOWNLOAD_MAX_*` reach `.env`, defaults
   are written, a non-number is refused at setup, a shell export cannot leak
   in (it did, before the reset at the top of `setup.sh`).
+- `tests/setup-pages.sh`: HTML pages. with `ENABLE_PAGES` off the generated
+  `.env`, `docker-compose.yml` and `Caddyfile` are byte-identical to what
+  `origin/develop`'s `setup.sh` writes, every `PAGES_*` setting reaches `.env`
+  and the backend reads it, script mode adds only the second port or Caddy
+  site, and mistakes are refused at setup time.
 - **A test that destroys user data must refuse to run against a real account.**
   `tests/browser/stickies.spec.js` wipes the sticky board of whatever account
   it signs in as, and a sticky exists nowhere else — no namespace, no git

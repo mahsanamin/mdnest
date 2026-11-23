@@ -355,6 +355,26 @@ mdnest download @work/engineering/notes/meeting.md ./meeting.md
 
 A file downloads as itself and a folder as a zip. Without an output file, the server's name is used in the current folder. A download never overwrites an existing local file, and a failed one leaves nothing behind. Folders over the server's limits are refused with the actual counts.
 
+### HTML pages *(server `ENABLE_PAGES=true`)*
+
+```bash
+mdnest page publish @work/engineering/q3-report ./report-folder   # folder with index.html
+mdnest page publish @work/engineering/q3-report ./report.html     # or one .html file
+mdnest page list    @work/engineering                             # all pages
+mdnest page list    @work/engineering revenue                     # pages whose text has "revenue"
+mdnest page list    --json @work/engineering                      # raw API JSON
+mdnest page pull    @work/engineering/q3-report ./q3-copy         # into a new or empty folder
+mdnest page delete  @work/engineering/q3-report
+```
+
+A page is a view-only HTML report or dashboard, shown in the "Pages" section of
+the web app. It is kept apart from notes. A folder is sent as a gzipped tar
+made by the system `tar`; publishing to the same name replaces the page. Page
+names are 1 to 64 lowercase letters, digits or hyphens. Publishing and deleting
+need write access to the whole namespace; listing and pulling need read
+access. A server with pages off answers "this server has pages turned off".
+See "HTML pages" in [setup.md](setup.md#html-pages-optional).
+
 ### Search
 
 ```bash

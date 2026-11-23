@@ -334,7 +334,7 @@ PAGE_SLUG="clitest-$$-${RANDOM}"
 PAGE_REF="${BASE}/${PAGE_SLUG}"
 page_err=$(m page list "$BASE" 2>&1 >/dev/null) || true
 case "$page_err" in
-  *"pages turned off"*) echo "  SKIP — this server has pages off (ENABLE_PAGES)" ;;
+  *"pages turned off"*) echo "  SKIP: this server has pages off (ENABLE_PAGES)" ;;
   *)
     PG_DIR=$(mktemp -d)
     mkdir -p "$PG_DIR/site/css"

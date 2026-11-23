@@ -192,6 +192,13 @@ On first run, `setup.sh` copies `mdnest.conf.sample` to `mdnest.conf` and exits,
 | `ENABLE_AGENT_APPROVALS` *(v4.8.5+, experimental)* | `false` | Answer an agent's (Claude Code or Codex) permission prompt from mdnest: the question shows as a card, you press Allow or Deny in the browser, and the agent continues. Each machine also has to opt in, see `docs/chat.md`. Decisions are accepted only from a browser login. Requests live in memory and are not available on `MDNEST_ROLE=app`. Read the added risk in `docs/security.md` before turning it on. |
 | `ENABLE_EXCALIDRAW` *(v4.2.0+)* | `false` | Open `.excalidraw.md` notes on an Excalidraw canvas and allow read-only drawing embeds in any note. The (large) editor bundle is code-split and only loads when a drawing is opened. See `docs/excalidraw.md`. |
 | `EXCALIDRAW_LIBRARIES` *(v4.2.0+)* | *(none)* | Requires `ENABLE_EXCALIDRAW`. Comma-separated URLs to `.excalidrawlib` files, preloaded into every drawing so an organisation can ship a shared shape set. Fetched by the **browser**, not the backend, so the URLs must be reachable by clients (and CORS-enabled). |
+| `ENABLE_PAGES` | `false` | Optional. View-only HTML pages (reports, dashboards) published into a namespace from the CLI or MCP, shown in a "Pages" section under the notes. Off by default: no route is registered and the frontend loads no pages code. See [HTML pages](#html-pages-optional). |
+| `PAGES_DIR` | *(named volume `mdnest-pages`)* | Requires `ENABLE_PAGES`. Host folder for page files, kept apart from the notes. |
+| `PAGES_MAX_MB` | `20` | Requires `ENABLE_PAGES`. Largest total size of one page, checked when it is published. The web server in front of mdnest takes uploads up to 32 MB, so keep it at 30 or less. |
+| `PAGES_MAX_FILES` | `500` | Requires `ENABLE_PAGES`. Most files in one page, checked when it is published. |
+| `PAGES_ORIGIN` | *(none: static mode)* | Optional, needs team setup. A second address (another port or hostname) that serves page files and nothing else. With it, page scripts run there in a sandbox; without it, pages show with scripts off. Must differ from `FRONTEND_ORIGIN`. |
+| `PAGES_PORT` | *(the port in `PAGES_ORIGIN`)* | Script mode, `setup.sh` only. Host port for the pages listener, when `PAGES_ORIGIN` has no port because your own proxy is in front. |
+| `PAGES_NETWORK` | `strict` | Requires `PAGES_ORIGIN`. `strict`: a page loads only its own files. `open`: it may also load outside scripts and call outside sites (https). |
 | `OIDC_GROUPS_CLAIM` *(v4.2.0+)* | *(none)* | Requires `USER_PROVIDER=sso`. Name of the ID-token claim holding the user's IdP group IDs (e.g. `groups` on Entra ID). Enables OIDC-group membership in access Groups. Empty disables OIDC-group resolution entirely. **Membership is snapshotted at login** — see `docs/security.md`. In multi mode each SSO login also records the person's IdP groups *(v4.8.15+)*, so the assignee and chat member pickers list the IdP-group members of access groups, for 30 days after that login (or `API_TOKEN_GROUPS_MAX_AGE` when longer). |
 | `API_TOKEN_GROUPS_MAX_AGE` *(v4.8.14+)* | `0` | Requires `OIDC_GROUPS_CLAIM` and multi mode. Go duration (e.g. `168h`): API tokens use the IdP groups of their owner's last SSO login for that long after the login, so OIDC-group members of access Groups reach the same notes from the CLI and agents as in the browser. `0` = tokens use direct grants and user memberships only. Group changes reach tokens at the next login or when the age is reached — see `docs/security.md`. |
 | `STORAGE_BACKEND` *(v4.0.0+)* | `local` | `local` (filesystem; git history via the optional git-sync sidecar) or `git` (in-process git with idle-debounced commits, which also enables comment-marker recovery across a delete+recreate). Only these two values are accepted; anything else fails at startup. |
@@ -584,6 +591,65 @@ But it won't pull from the remote. You'll need to run `git pull` on the host mac
 
 ---
 
+## HTML pages (optional)
+
+People and agents can publish HTML pages (a report, a dashboard) to a
+namespace, and everyone who can read that namespace can view them. Pages are
+view only: there is no HTML editor. They are kept apart from notes, so they
+never show in the notes tree, notes search, tasks or chat.
+
+A page is a folder with an `index.html` (and any CSS, scripts, images or data
+it links to with relative paths), or a single `.html` file. Publish it with the
+CLI or the MCP `publish_page` tool:
+
+```bash
+mdnest page publish @myserver/engineering/q3-report ./report-folder
+mdnest page list @myserver/engineering
+```
+
+Publishing to the same name again replaces the page. There is no version
+history. Page names are 1 to 64 lowercase letters, digits or hyphens.
+
+**Who can do what.** Pages use the namespace's own permissions, checked on the
+whole namespace: write access lets you publish and delete, read access lets
+you list and view. A grant on a subfolder does not give access to pages.
+Pages never create a namespace.
+
+**Turning it on.** Set `ENABLE_PAGES=true` in `mdnest.conf` and run
+`./mdnest-server rebuild`. Page files are kept in the named volume
+`mdnest-pages`, or in the host folder `PAGES_DIR` names. Back that up along
+with your notes. On the Helm chart, set `pages.enabled: true`; page files are
+kept on the notes volume in a hidden folder. Pages are not available on the
+multi-replica app role (`MDNEST_ROLE=app`, the git-native HA topology).
+
+### Static mode (the default)
+
+Without `PAGES_ORIGIN`, pages are served from mdnest's own address with their
+scripts turned off. Text, tables, CSS and images show; anything a script would
+have drawn (a chart, a filter) does not. No extra setup is needed.
+
+### Script mode (needs team setup)
+
+A page's script runs in the viewer's browser. On mdnest's own address it could
+act as the viewer, so scripts only run when pages come from a second address
+that serves page files and nothing else. Set `PAGES_ORIGIN` to that address:
+
+| Setup | `mdnest.conf` | What `setup.sh` does |
+|---|---|---|
+| A second port | `PAGES_ORIGIN=http://localhost:3237` | Publishes that port to the backend's pages listener |
+| A second hostname, with Caddy | `CADDY_DOMAIN=notes.example.com`, `PAGES_ORIGIN=https://pages.example.com` | Adds a Caddy site for that hostname. Point its DNS at the server |
+| A second hostname, your own proxy | `PAGES_ORIGIN=https://pages.example.com`, `PAGES_PORT=3237` | Publishes host port 3237 to the pages listener. Send that hostname to it from your proxy |
+
+`PAGES_ORIGIN` must differ from `FRONTEND_ORIGIN`. `setup.sh` refuses the same
+address, and the backend logs an error and stays in static mode if it is given
+one. On Helm, set `pages.origin`; with `ingress.enabled` the chart adds a rule
+for that hostname.
+
+`PAGES_NETWORK` decides what a page's scripts may load: `strict` (the default)
+allows only the page's own files, `open` also allows outside scripts and calls
+to outside sites over https. The security details are in
+[security.md](security.md#html-pages).
+
 ## Remote Access
 
 By default, mdnest binds to `127.0.0.1` and is only accessible from the host machine. To access it from other devices, choose one of the following approaches.
@@ -678,6 +744,8 @@ These environment variables are set in the generated `.env` file and consumed by
 | `POSTGRES_DB` | PostgreSQL database (multi mode only) |
 | `POSTGRES_USER` | PostgreSQL user (multi mode only) |
 | `POSTGRES_PASSWORD` | PostgreSQL password (multi mode only) |
+| `ENABLE_PAGES`, `PAGES_DIR`, `PAGES_MAX_MB`, `PAGES_MAX_FILES`, `PAGES_NETWORK` | HTML pages, written only when `ENABLE_PAGES=true`. `PAGES_DIR` is the container path (`/data/pages`) |
+| `PAGES_ORIGIN`, `PAGES_LISTEN_PORT` | Script mode only: the pages address, and the backend's internal port for it (`8081`) |
 
 ---
 
