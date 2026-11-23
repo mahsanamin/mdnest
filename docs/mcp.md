@@ -20,7 +20,8 @@ transports**:
 > `search_tasks`, `save_milestone`, `delete_milestone`, `create_excalidraw`, `draw_excalidraw`, `read_excalidraw`,
 > `edit_excalidraw_node`, `edit_excalidraw_edge`, `delete_excalidraw_element`,
 > `list_marp_themes`, `create_marp`, `add_marp_slide`, `list_marp_slides`, `read_marp_slide`,
-> `edit_marp_slide`, `delete_marp_slide`, `move_marp_slide`.
+> `edit_marp_slide`, `delete_marp_slide`, `move_marp_slide`, `publish_page`,
+> `list_pages`, `read_page`.
 >
 > The `*_task` tools drive the [task board](tasks.md): `list_tasks` returns the
 > board columns and every task (with the `path`/`line`/`raw` needed to mutate
@@ -371,6 +372,18 @@ these tools scaffold a valid file that the app then renders.
 | `edit_marp_slide` | Replace one slide's markdown by index (frontmatter + other slides untouched). | `namespace`, `path`, `index`, `content` |
 | `delete_marp_slide` | Delete one slide by index. | `namespace`, `path`, `index` |
 | `move_marp_slide` | Reorder: move the slide at `from` to `to`. | `namespace`, `path`, `from`, `to` |
+
+### HTML pages (optional, server: `ENABLE_PAGES`)
+
+These tools appear only when the server has pages on. A page is a view-only
+HTML report or dashboard published into a namespace; it never shows in the
+notes tree or notes search. See [HTML pages](setup.md#html-pages-optional).
+
+| Tool | Purpose | Key inputs |
+|------|---------|------------|
+| `publish_page` | Publish a page. Publishing to a name that exists replaces that page. The files are sent inline: `html` becomes `index.html`, and `files` holds anything it links to with a relative path (`encoding: "base64"` for images). The tool never reads a path on the MCP host's disk. | `namespace`, `slug` (1 to 64 of `a-z`, `0-9`, `-`), `html`, `files?` (`[{ path, content, encoding? }]`) |
+| `list_pages` | List a namespace's pages (title, author, date, size). With `query`, only pages whose text has every word. | `namespace`, `query?` |
+| `read_page` | A page's details and the visible text pulled out of its `index.html` at publish time. Never the raw HTML. | `namespace`, `slug` |
 
 **Slides are CRUD.** A Marp deck is a note whose subject is a list of slides, so
 the deck is editable both as a whole (the note tools) and per slide: `list_/
