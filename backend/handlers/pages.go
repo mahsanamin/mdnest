@@ -7,13 +7,19 @@ package handlers
 //
 // Layout on disk:
 //
-//	PAGES_DIR/<ns>/<slug>/...                 the page's files (index.html first)
-//	PAGES_DIR/<ns>/.pages-meta/<slug>.json    title, author, date, size, text
+//	PAGES_DIR/<ns>/<id>/...                   the page's files (index.html first)
+//	PAGES_DIR/<ns>/.pages-meta/<id>.json      title, author, date, size, text
+//
+// A page shows in the notes tree as a handle file, <name>.page.md, holding
+// only front matter (`page: <id>`, title, author, published). The handle is
+// an ordinary note: it moves, copies and is read-checked like one, and the
+// page goes wherever it goes. Storage is keyed by the random id, never by the
+// handle's path (pages_handles.go).
 //
 // A page is viewed through a short-lived pass (a JWT with purpose "page",
-// signed with the server secret, naming one namespace and one slug). The pass
+// signed with the server secret, naming one namespace and one page id). The pass
 // sits in the URL path, /<pass>/<file>, so the relative links inside a page
-// carry it without a cookie or a header. The namespace and slug come from the
+// carry it without a cookie or a header. The namespace and id come from the
 // pass alone, so a page cannot even name another page.
 //
 // Two serving modes:
@@ -29,12 +35,12 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/rand"
+	"encoding/base32"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"mime"
 	"net/http"
 	"net/url"
@@ -42,7 +48,6 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -136,7 +141,8 @@ func ResolvePagesOrigin(pagesOrigin, frontendOrigin string) (string, string) {
 
 // PageMeta is what mdnest stores about a page besides its files.
 type PageMeta struct {
-	Slug        string `json:"slug"`
+	ID          string `json:"id,omitempty"`
+	Path        string `json:"path,omitempty"` // the handle, in list and publish responses
 	Title       string `json:"title"`
 	Author      string `json:"author,omitempty"`
 	PublishedAt string `json:"publishedAt"`
@@ -146,6 +152,42 @@ type PageMeta struct {
 	// Version is a random id set on every publish. A pass carries it, so a
 	// pass made before a republish or a delete never opens what replaced it.
 	Version string `json:"-"`
+	// Missing marks a handle whose page is not stored in this namespace
+	// (moved here by hand or by git-sync, or hand-edited).
+	Missing bool `json:"missing,omitempty"`
+}
+
+// writePageTar streams a page's regular files as a tar. Links and special
+// files are never stored, and are skipped here too.
+func writePageTar(w io.Writer, dir string) error {
+	tw := tar.NewWriter(w)
+	err := filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+		if err != nil || !d.Type().IsRegular() {
+			return nil
+		}
+		rel, err := filepath.Rel(dir, p)
+		if err != nil {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		f, err := os.Open(p)
+		if err != nil {
+			return nil
+		}
+		defer f.Close()
+		if err := tw.WriteHeader(&tar.Header{Name: filepath.ToSlash(rel), Mode: 0644, Size: info.Size(), ModTime: info.ModTime(), Typeflag: tar.TypeReg}); err != nil {
+			return err
+		}
+		_, err = io.Copy(tw, f)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	return tw.Close()
 }
 
 // pageMetaFile is PageMeta as stored, with the version, which no API
@@ -175,11 +217,20 @@ func NewPagesHandler(cfg PagesConfig, stg storage.Storage, perms *middleware.Per
 // ScriptMode reports whether pages run with scripts on (PAGES_ORIGIN set).
 func (h *PagesHandler) ScriptMode() bool { return h.cfg.Origin != "" }
 
-var pageSlugRe = regexp.MustCompile(`^[a-z0-9-]{1,64}$`)
+var pageIDRe = regexp.MustCompile(`^[a-z2-7]{26,64}$`)
 
-// ValidPageSlug: lowercase letters, digits and hyphens, 1 to 64 characters.
-// It can therefore never be a dotfile (".pages-meta") or a traversal.
-func ValidPageSlug(s string) bool { return pageSlugRe.MatchString(s) }
+// ValidPageID: a page id as newPageID makes it (lowercase base32, 26 to 64
+// characters). It can never be a dotfile (".pages-meta") or a traversal.
+func ValidPageID(s string) bool { return pageIDRe.MatchString(s) }
+
+// newPageID returns 160 random bits as 32 lowercase base32 characters. The id
+// is the page's storage key and the only thing a handle file holds, so it
+// must not be guessable.
+func newPageID() string {
+	b := make([]byte, 20)
+	rand.Read(b)
+	return strings.ToLower(base32.StdEncoding.EncodeToString(b))
+}
 
 func pagesJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -196,65 +247,23 @@ func (h *PagesHandler) nsDir(ns string) string {
 	return SafePath(h.cfg.Dir, ns)
 }
 
-// pageDir returns PAGES_DIR/<ns>/<slug>, validated with SafePath.
-func (h *PagesHandler) pageDir(ns, slug string) string {
-	if !ValidNamespaceName(ns) || !ValidPageSlug(slug) {
+// pageDir returns PAGES_DIR/<ns>/<id>, validated with SafePath.
+func (h *PagesHandler) pageDir(ns, id string) string {
+	if !ValidNamespaceName(ns) || !ValidPageID(id) {
 		return ""
 	}
-	return SafePath(h.cfg.Dir, path.Join(ns, slug))
+	return SafePath(h.cfg.Dir, path.Join(ns, id))
 }
 
-func (h *PagesHandler) metaPath(ns, slug string) string {
-	if !ValidNamespaceName(ns) || !ValidPageSlug(slug) {
+func (h *PagesHandler) metaPath(ns, id string) string {
+	if !ValidNamespaceName(ns) || !ValidPageID(id) {
 		return ""
 	}
-	return SafePath(h.cfg.Dir, path.Join(ns, pagesMetaDir, slug+".json"))
+	return SafePath(h.cfg.Dir, path.Join(ns, pagesMetaDir, id+".json"))
 }
 
-// The page permission is the namespace's own, checked on its root: a grant on
-// a subfolder does not give access to pages.
-func (h *PagesHandler) canRead(r *http.Request, ns string) bool {
-	return h.perms == nil || h.perms.CheckRead(r, ns, "/")
-}
-
-func (h *PagesHandler) canWrite(r *http.Request, ns string) bool {
-	return h.perms == nil || h.perms.CheckWrite(r, ns, "/")
-}
-
-// namespaceAndSlug resolves ?ns= (must exist in the notes storage) and, when
-// needSlug, ?slug=. It writes the error itself and returns ok=false.
-func (h *PagesHandler) namespaceAndSlug(w http.ResponseWriter, r *http.Request, needSlug bool) (string, string, bool) {
-	ns := RequireNamespaceStore(r.Context(), h.store, w, r)
-	if ns == "" {
-		return "", "", false
-	}
-	if !needSlug {
-		return ns, "", true
-	}
-	slug := r.URL.Query().Get("slug")
-	if !ValidPageSlug(slug) {
-		pagesError(w, http.StatusBadRequest, "invalid page name: use 1 to 64 lowercase letters, digits or hyphens")
-		return "", "", false
-	}
-	return ns, slug, true
-}
-
-// Handle serves /api/pages: GET lists, PUT publishes, DELETE removes.
-func (h *PagesHandler) Handle(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
-		h.handleList(w, r)
-	case http.MethodPut, http.MethodPost:
-		h.handlePublish(w, r)
-	case http.MethodDelete:
-		h.handleDelete(w, r)
-	default:
-		pagesError(w, http.StatusMethodNotAllowed, "method not allowed")
-	}
-}
-
-func (h *PagesHandler) readMeta(ns, slug string) (*PageMeta, error) {
-	p := h.metaPath(ns, slug)
+func (h *PagesHandler) readMeta(ns, id string) (*PageMeta, error) {
+	p := h.metaPath(ns, id)
 	if p == "" {
 		return nil, os.ErrNotExist
 	}
@@ -267,173 +276,9 @@ func (h *PagesHandler) readMeta(ns, slug string) (*PageMeta, error) {
 		return nil, err
 	}
 	m := f.PageMeta
-	m.Slug = slug
+	m.ID = id
 	m.Version = f.Version
 	return &m, nil
-}
-
-func (h *PagesHandler) handleList(w http.ResponseWriter, r *http.Request) {
-	ns, _, ok := h.namespaceAndSlug(w, r, false)
-	if !ok {
-		return
-	}
-	if !h.canRead(r, ns) {
-		middleware.DenyJSON(w)
-		return
-	}
-	terms := strings.Fields(strings.ToLower(r.URL.Query().Get("q")))
-	pages := []PageMeta{}
-	dir := h.nsDir(ns)
-	entries, _ := os.ReadDir(filepath.Join(dir, pagesMetaDir))
-	for _, e := range entries {
-		slug, isJSON := strings.CutSuffix(e.Name(), ".json")
-		if !isJSON || !e.Type().IsRegular() || !ValidPageSlug(slug) {
-			continue
-		}
-		m, err := h.readMeta(ns, slug)
-		if err != nil {
-			continue
-		}
-		if len(terms) > 0 {
-			hay := strings.ToLower(m.Title + " " + m.Slug + " " + m.Text)
-			match := true
-			for _, t := range terms {
-				if !strings.Contains(hay, t) {
-					match = false
-					break
-				}
-			}
-			if !match {
-				continue
-			}
-		}
-		m.Text = ""
-		pages = append(pages, *m)
-	}
-	sort.Slice(pages, func(i, j int) bool {
-		if pages[i].PublishedAt != pages[j].PublishedAt {
-			return pages[i].PublishedAt > pages[j].PublishedAt
-		}
-		return pages[i].Slug < pages[j].Slug
-	})
-	if r.URL.Query().Get("format") == "tsv" {
-		// One page per line for the CLI, which renders it in awk:
-		// slug, title, author, publishedAt, files, bytes. Tabs and line
-		// breaks inside a field become spaces.
-		w.Header().Set("Content-Type", "text/tab-separated-values; charset=utf-8")
-		for _, p := range pages {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%d\n", plainField(p.Slug), plainField(p.Title), plainField(p.Author), plainField(p.PublishedAt), p.Files, p.Bytes)
-		}
-		return
-	}
-	pagesJSON(w, http.StatusOK, map[string]any{"pages": pages})
-}
-
-// HandleText serves GET /api/pages/text: the page's details and the plain
-// text pulled out of index.html at publish time (never the raw HTML).
-func (h *PagesHandler) HandleText(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		pagesError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
-	ns, slug, ok := h.namespaceAndSlug(w, r, true)
-	if !ok {
-		return
-	}
-	if !h.canRead(r, ns) {
-		middleware.DenyJSON(w)
-		return
-	}
-	m, err := h.readMeta(ns, slug)
-	if err != nil {
-		pagesError(w, http.StatusNotFound, "page not found")
-		return
-	}
-	pagesJSON(w, http.StatusOK, m)
-}
-
-// HandleArchive serves GET /api/pages/archive: the page's files as a tar, for
-// `mdnest page pull`.
-func (h *PagesHandler) HandleArchive(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		pagesError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
-	ns, slug, ok := h.namespaceAndSlug(w, r, true)
-	if !ok {
-		return
-	}
-	if !h.canRead(r, ns) {
-		middleware.DenyJSON(w)
-		return
-	}
-	dir := h.pageDir(ns, slug)
-	if st, err := os.Stat(dir); dir == "" || err != nil || !st.IsDir() {
-		pagesError(w, http.StatusNotFound, "page not found")
-		return
-	}
-	w.Header().Set("Content-Type", "application/x-tar")
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.tar"`, slug))
-	tw := tar.NewWriter(w)
-	filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
-		if err != nil || !d.Type().IsRegular() {
-			return nil // links and specials are never stored; skip anything odd
-		}
-		rel, err := filepath.Rel(dir, p)
-		if err != nil {
-			return nil
-		}
-		info, err := d.Info()
-		if err != nil {
-			return nil
-		}
-		f, err := os.Open(p)
-		if err != nil {
-			return nil
-		}
-		defer f.Close()
-		tw.WriteHeader(&tar.Header{
-			Name:     filepath.ToSlash(rel),
-			Mode:     0644,
-			Size:     info.Size(),
-			ModTime:  info.ModTime(),
-			Typeflag: tar.TypeReg,
-		})
-		io.Copy(tw, f)
-		return nil
-	})
-	tw.Close()
-}
-
-func (h *PagesHandler) handleDelete(w http.ResponseWriter, r *http.Request) {
-	ns, slug, ok := h.namespaceAndSlug(w, r, true)
-	if !ok {
-		return
-	}
-	if !h.canWrite(r, ns) {
-		middleware.DenyJSON(w)
-		return
-	}
-	dir := h.pageDir(ns, slug)
-	meta := h.metaPath(ns, slug)
-	if dir == "" || meta == "" {
-		pagesError(w, http.StatusBadRequest, "invalid page")
-		return
-	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	_, dirErr := os.Stat(dir)
-	_, metaErr := os.Stat(meta)
-	if dirErr != nil && metaErr != nil {
-		pagesError(w, http.StatusNotFound, "page not found")
-		return
-	}
-	os.Remove(meta)
-	if err := os.RemoveAll(dir); err != nil {
-		pagesError(w, http.StatusInternalServerError, "failed to delete page")
-		return
-	}
-	pagesJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
 // errPageInput is a client mistake in a published page; its message is shown.
@@ -452,111 +297,6 @@ func randHex(n int) string {
 	b := make([]byte, n)
 	rand.Read(b)
 	return hex.EncodeToString(b)
-}
-
-func (h *PagesHandler) handlePublish(w http.ResponseWriter, r *http.Request) {
-	ns, slug, ok := h.namespaceAndSlug(w, r, true)
-	if !ok {
-		return
-	}
-	if !h.canWrite(r, ns) {
-		middleware.DenyJSON(w)
-		return
-	}
-	nsDir := h.nsDir(ns)
-	if nsDir == "" {
-		pagesError(w, http.StatusBadRequest, "invalid namespace")
-		return
-	}
-	if err := os.MkdirAll(filepath.Join(nsDir, pagesMetaDir), 0755); err != nil {
-		log.Printf("pages: cannot create %s: %v", nsDir, err)
-		pagesError(w, http.StatusInternalServerError, "failed to store page")
-		return
-	}
-
-	// The body may be a little larger than the files it carries (tar headers
-	// and padding); the real limit is counted on the files themselves.
-	overhead := int64(h.cfg.MaxFiles)*1024 + (1 << 20)
-	r.Body = http.MaxBytesReader(w, r.Body, h.cfg.MaxBytes+overhead)
-
-	tmp := filepath.Join(nsDir, ".tmp-"+randHex(8))
-	if err := os.Mkdir(tmp, 0755); err != nil {
-		pagesError(w, http.StatusInternalServerError, "failed to store page")
-		return
-	}
-	defer os.RemoveAll(tmp) // gone after a successful rename; cleans up on error
-
-	total, files, err := h.extractPage(r, tmp)
-	if err != nil {
-		var pe *errPageInput
-		var mbe *http.MaxBytesError
-		switch {
-		case errors.As(err, &pe):
-			pagesError(w, pe.status, pe.msg)
-		case errors.As(err, &mbe):
-			pagesError(w, http.StatusRequestEntityTooLarge, h.tooBigMsg())
-		default:
-			log.Printf("pages: publish %s/%s: %v", ns, slug, err)
-			pagesError(w, http.StatusBadRequest, "could not read the uploaded page")
-		}
-		return
-	}
-	indexBytes, err := os.ReadFile(filepath.Join(tmp, "index.html"))
-	if err != nil {
-		pagesError(w, http.StatusBadRequest, "a page needs an index.html at its top level")
-		return
-	}
-	title, text := ExtractPageText(indexBytes)
-	if title == "" {
-		title = slug
-	}
-	meta := PageMeta{
-		Slug:        slug,
-		Title:       title,
-		Author:      h.author(r),
-		PublishedAt: time.Now().UTC().Format(time.RFC3339),
-		Bytes:       total,
-		Files:       files,
-		Text:        text,
-		Version:     randHex(12),
-	}
-
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	dest := h.pageDir(ns, slug)
-	metaFile := h.metaPath(ns, slug)
-	if dest == "" || metaFile == "" {
-		pagesError(w, http.StatusBadRequest, "invalid page")
-		return
-	}
-	// Swap the new folder in: move the old one aside, rename, then drop it.
-	var old string
-	if _, err := os.Stat(dest); err == nil {
-		old = filepath.Join(nsDir, ".old-"+randHex(8))
-		if err := os.Rename(dest, old); err != nil {
-			pagesError(w, http.StatusInternalServerError, "failed to replace page")
-			return
-		}
-	}
-	if err := os.Rename(tmp, dest); err != nil {
-		if old != "" {
-			os.Rename(old, dest)
-		}
-		pagesError(w, http.StatusInternalServerError, "failed to store page")
-		return
-	}
-	if old != "" {
-		os.RemoveAll(old)
-	}
-	mb, _ := json.Marshal(pageMetaFile{PageMeta: meta, Version: meta.Version})
-	tmpMeta := metaFile + ".tmp-" + randHex(4)
-	if err := os.WriteFile(tmpMeta, mb, 0644); err != nil || os.Rename(tmpMeta, metaFile) != nil {
-		os.Remove(tmpMeta)
-		pagesError(w, http.StatusInternalServerError, "failed to store page details")
-		return
-	}
-	meta.Text = ""
-	pagesJSON(w, http.StatusOK, meta)
 }
 
 func (h *PagesHandler) tooBigMsg() string {
@@ -792,17 +532,17 @@ func truncateText(s string) string {
 type pageClaims struct {
 	Purpose   string `json:"purpose"`
 	Namespace string `json:"ns"`
-	Slug      string `json:"slug"`
+	ID        string `json:"id"`
 	Version   string `json:"v"`
 	jwt.RegisteredClaims
 }
 
-func (h *PagesHandler) mintPass(ns, slug, version string) (string, time.Time, error) {
+func (h *PagesHandler) mintPass(ns, id, version string) (string, time.Time, error) {
 	exp := time.Now().Add(h.cfg.PassTTL)
 	c := pageClaims{
 		Purpose:   pagePassPurpose,
 		Namespace: ns,
-		Slug:      slug,
+		ID:        id,
 		Version:   version,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(exp),
@@ -813,7 +553,7 @@ func (h *PagesHandler) mintPass(ns, slug, version string) (string, time.Time, er
 	return s, exp, err
 }
 
-// parsePass returns the namespace and slug a pass is good for, or ok=false
+// parsePass returns the namespace and page id a pass is good for, or ok=false
 // when it is malformed, not a page pass, tampered with, expired, or made for
 // a version of the page that has since been replaced or deleted.
 func (h *PagesHandler) parsePass(s string) (string, string, bool) {
@@ -827,51 +567,14 @@ func (h *PagesHandler) parsePass(s string) (string, string, bool) {
 	if err != nil || !tok.Valid || c.Purpose != pagePassPurpose {
 		return "", "", false
 	}
-	if !ValidNamespaceName(c.Namespace) || !ValidPageSlug(c.Slug) || c.Version == "" {
+	if !ValidNamespaceName(c.Namespace) || !ValidPageID(c.ID) || c.Version == "" {
 		return "", "", false
 	}
-	m, err := h.readMeta(c.Namespace, c.Slug)
+	m, err := h.readMeta(c.Namespace, c.ID)
 	if err != nil || m.Version != c.Version {
 		return "", "", false
 	}
-	return c.Namespace, c.Slug, true
-}
-
-// HandlePass serves POST /api/pages/pass: a frame URL for one page, after the
-// same read check as the list. The frontend asks for a fresh one each time a
-// page is opened.
-func (h *PagesHandler) HandlePass(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		pagesError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
-	ns, slug, ok := h.namespaceAndSlug(w, r, true)
-	if !ok {
-		return
-	}
-	if !h.canRead(r, ns) {
-		middleware.DenyJSON(w)
-		return
-	}
-	m, err := h.readMeta(ns, slug)
-	if err != nil {
-		pagesError(w, http.StatusNotFound, "page not found")
-		return
-	}
-	pass, exp, err := h.mintPass(ns, slug, m.Version)
-	if err != nil {
-		pagesError(w, http.StatusInternalServerError, "failed to create page pass")
-		return
-	}
-	base := "/api/pages/view"
-	if h.ScriptMode() {
-		base = strings.TrimRight(h.cfg.Origin, "/")
-	}
-	pagesJSON(w, http.StatusOK, map[string]any{
-		"url":       base + "/" + pass + "/",
-		"scripts":   h.ScriptMode(),
-		"expiresAt": exp.UTC().Format(time.RFC3339),
-	})
+	return c.Namespace, c.ID, true
 }
 
 // ---- serving ----
@@ -942,7 +645,7 @@ func (h *PagesHandler) serveFromPass(w http.ResponseWriter, r *http.Request, res
 		return
 	}
 	pass, file, hasSlash := strings.Cut(rest, "/")
-	ns, slug, ok := h.parsePass(pass)
+	ns, id, ok := h.parsePass(pass)
 	if !ok {
 		http.Error(w, "this page link is invalid or has expired; open the page again from mdnest", http.StatusForbidden)
 		return
@@ -952,7 +655,7 @@ func (h *PagesHandler) serveFromPass(w http.ResponseWriter, r *http.Request, res
 		http.Redirect(w, r, prefix+pass+"/", http.StatusFound)
 		return
 	}
-	dir := h.pageDir(ns, slug)
+	dir := h.pageDir(ns, id)
 	if dir == "" {
 		http.NotFound(w, r)
 		return

@@ -4,10 +4,12 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,17 +76,26 @@ func pagesFixture(t *testing.T, mutate ...func(*PagesConfig)) (*PagesHandler, st
 	return NewPagesHandler(cfg, localStore(t, notes), nil), pagesDir
 }
 
-func publish(h *PagesHandler, ns, slug, ct string, body []byte) *httptest.ResponseRecorder {
-	r := httptest.NewRequest(http.MethodPut, "/api/pages?ns="+ns+"&slug="+slug, bytes.NewReader(body))
+// handlePath turns a short test name into a handle path ("rep" becomes
+// "rep.page.md"); a name that already ends in .page.md is used as it is.
+func handlePath(name string) string {
+	if strings.HasSuffix(name, PageHandleSuffix) {
+		return name
+	}
+	return name + PageHandleSuffix
+}
+
+func publish(h *PagesHandler, ns, name, ct string, body []byte) *httptest.ResponseRecorder {
+	r := httptest.NewRequest(http.MethodPut, "/api/pages?ns="+ns+"&path="+url.QueryEscape(handlePath(name)), bytes.NewReader(body))
 	r.Header.Set("Content-Type", ct)
 	w := httptest.NewRecorder()
 	h.Handle(w, r)
 	return w
 }
 
-func passURL(t *testing.T, h *PagesHandler, ns, slug string) string {
+func passURL(t *testing.T, h *PagesHandler, ns, name string) string {
 	t.Helper()
-	r := httptest.NewRequest(http.MethodPost, "/api/pages/pass?ns="+ns+"&slug="+slug, nil)
+	r := httptest.NewRequest(http.MethodPost, "/api/pages/pass?ns="+ns+"&path="+url.QueryEscape(handlePath(name)), nil)
 	w := httptest.NewRecorder()
 	h.HandlePass(w, r)
 	if w.Code != http.StatusOK {
@@ -98,6 +109,23 @@ func passURL(t *testing.T, h *PagesHandler, ns, slug string) string {
 	return resp.URL
 }
 
+// notesOf is the notes root of a pagesFixture.
+func notesOf(pagesDir string) string { return filepath.Join(filepath.Dir(pagesDir), "notes") }
+
+// idOf reads the page id from a handle on disk.
+func idOf(t *testing.T, pagesDir, ns, name string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(notesOf(pagesDir), ns, handlePath(name)))
+	if err != nil {
+		t.Fatalf("handle %s: %v", name, err)
+	}
+	id, ok := ParsePageHandle(string(b))
+	if !ok || !ValidPageID(id) {
+		t.Fatalf("handle %s holds no valid id: %q", name, b)
+	}
+	return id
+}
+
 func view(h *PagesHandler, url string) *httptest.ResponseRecorder {
 	r := httptest.NewRequest(http.MethodGet, url, nil)
 	w := httptest.NewRecorder()
@@ -106,7 +134,7 @@ func view(h *PagesHandler, url string) *httptest.ResponseRecorder {
 }
 
 func TestPages_PublishListViewText(t *testing.T) {
-	h, _ := pagesFixture(t)
+	h, pagesDir := pagesFixture(t)
 	page := makeTar(t,
 		tarEntry{name: "./", typeflag: tar.TypeDir},
 		tarEntry{name: "./index.html", body: `<html><head><title>Q3 report</title><style>.x{}</style></head><body><h1>Revenue</h1><p>grew by 12%</p><script>var secretCode=1</script><img src="img/chart.png"></body></html>`},
@@ -114,8 +142,23 @@ func TestPages_PublishListViewText(t *testing.T) {
 		tarEntry{name: "./img/chart.png", body: "PNGDATA"},
 		tarEntry{name: "./.DS_Store", body: "junk"},
 	)
-	if w := publish(h, "alpha", "q3-report", "application/x-tar", page); w.Code != http.StatusOK {
+	if w := publish(h, "alpha", "ProjA/q3-report", "application/x-tar", page); w.Code != http.StatusOK {
 		t.Fatalf("publish: %d %s", w.Code, w.Body.String())
+	}
+	// The handle is a small note in the tree: front matter only, the page
+	// files are not.
+	hb, _ := os.ReadFile(filepath.Join(notesOf(pagesDir), "alpha", "ProjA", "q3-report.page.md"))
+	for _, want := range []string{"---\npage: ", "\ntitle: \"Q3 report\"\n", "\nauthor: \"admin\"\n", "\npublished: ", "HTML page, open it in mdnest."} {
+		if !strings.Contains(string(hb), want) {
+			t.Fatalf("handle lacks %q:\n%s", want, hb)
+		}
+	}
+	id := idOf(t, pagesDir, "alpha", "ProjA/q3-report")
+	if len(id) < 26 {
+		t.Fatalf("id %q is too short to be unguessable", id)
+	}
+	if entries, _ := os.ReadDir(filepath.Join(notesOf(pagesDir), "alpha", "ProjA")); len(entries) != 1 {
+		t.Fatalf("only the handle belongs in the notes tree, found %d entries", len(entries))
 	}
 
 	// List: one row, title from <title>, author from MDNEST_USER in single mode.
@@ -123,7 +166,7 @@ func TestPages_PublishListViewText(t *testing.T) {
 	h.Handle(w, httptest.NewRequest(http.MethodGet, "/api/pages?ns=alpha", nil))
 	var list struct{ Pages []PageMeta }
 	json.Unmarshal(w.Body.Bytes(), &list)
-	if len(list.Pages) != 1 || list.Pages[0].Title != "Q3 report" || list.Pages[0].Author != "admin" || list.Pages[0].Files != 2 {
+	if len(list.Pages) != 1 || list.Pages[0].Title != "Q3 report" || list.Pages[0].Author != "admin" || list.Pages[0].Files != 2 || list.Pages[0].Path != "ProjA/q3-report.page.md" {
 		t.Fatalf("list = %+v", list.Pages)
 	}
 	if list.Pages[0].Text != "" {
@@ -144,13 +187,13 @@ func TestPages_PublishListViewText(t *testing.T) {
 	// TSV for the CLI: one line per page, no tabs inside fields.
 	w = httptest.NewRecorder()
 	h.Handle(w, httptest.NewRequest(http.MethodGet, "/api/pages?ns=alpha&format=tsv", nil))
-	if lines := strings.Split(strings.TrimSpace(w.Body.String()), "\n"); len(lines) != 1 || len(strings.Split(lines[0], "\t")) != 6 || !strings.HasPrefix(lines[0], "q3-report\tQ3 report\tadmin\t") {
+	if lines := strings.Split(strings.TrimSpace(w.Body.String()), "\n"); len(lines) != 1 || len(strings.Split(lines[0], "\t")) != 6 || !strings.HasPrefix(lines[0], "ProjA/q3-report.page.md\tQ3 report\tadmin\t") {
 		t.Fatalf("tsv = %q", w.Body.String())
 	}
 
 	// Text: extracted once, without HTML or script.
 	w = httptest.NewRecorder()
-	h.HandleText(w, httptest.NewRequest(http.MethodGet, "/api/pages/text?ns=alpha&slug=q3-report", nil))
+	h.HandleText(w, httptest.NewRequest(http.MethodGet, "/api/pages/text?ns=alpha&path=ProjA/q3-report.page.md", nil))
 	var m PageMeta
 	json.Unmarshal(w.Body.Bytes(), &m)
 	if m.Text != "Revenue grew by 12%" {
@@ -158,7 +201,7 @@ func TestPages_PublishListViewText(t *testing.T) {
 	}
 
 	// View through a pass: index, then a file in a subfolder.
-	u := passURL(t, h, "alpha", "q3-report")
+	u := passURL(t, h, "alpha", "ProjA/q3-report")
 	if !strings.HasPrefix(u, "/api/pages/view/") || !strings.HasSuffix(u, "/") {
 		t.Fatalf("static pass url = %q", u)
 	}
@@ -219,56 +262,200 @@ func TestPages_SingleHTMLFileAndRepublishReplaces(t *testing.T) {
 	if w := publish(h, "alpha", "rep", "text/html; charset=utf-8", []byte("<title>Two</title><p>two</p>")); w.Code != http.StatusOK {
 		t.Fatal(w.Body.String())
 	}
-	if _, err := os.Stat(filepath.Join(pagesDir, "alpha", "rep", "old.css")); !os.IsNotExist(err) {
+	id := idOf(t, pagesDir, "alpha", "rep")
+	if _, err := os.Stat(filepath.Join(pagesDir, "alpha", id, "old.css")); !os.IsNotExist(err) {
 		t.Fatal("republishing must replace the page, not merge into it")
 	}
-	b, _ := os.ReadFile(filepath.Join(pagesDir, "alpha", "rep", "index.html"))
+	b, _ := os.ReadFile(filepath.Join(pagesDir, "alpha", id, "index.html"))
 	if string(b) != "<title>Two</title><p>two</p>" {
 		t.Fatalf("index = %q", b)
+	}
+	if again := idOf(t, pagesDir, "alpha", "rep"); again != id {
+		t.Fatalf("republishing changed the id: %s -> %s", id, again)
 	}
 	// No temp or old folders left behind.
 	entries, _ := os.ReadDir(filepath.Join(pagesDir, "alpha"))
 	for _, e := range entries {
-		if e.Name() != "rep" && e.Name() != pagesMetaDir {
+		if e.Name() != id && e.Name() != pagesMetaDir {
 			t.Errorf("left behind: %s", e.Name())
 		}
 	}
 	// Delete removes files and details.
 	w := httptest.NewRecorder()
-	h.Handle(w, httptest.NewRequest(http.MethodDelete, "/api/pages?ns=alpha&slug=rep", nil))
+	h.Handle(w, httptest.NewRequest(http.MethodDelete, "/api/pages?ns=alpha&path=rep.page.md", nil))
 	if w.Code != http.StatusOK {
 		t.Fatal(w.Body.String())
 	}
-	if _, err := os.Stat(filepath.Join(pagesDir, "alpha", "rep")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(pagesDir, "alpha", id)); !os.IsNotExist(err) {
 		t.Fatal("page folder still there")
 	}
-	if _, err := os.Stat(filepath.Join(pagesDir, "alpha", pagesMetaDir, "rep.json")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(notesOf(pagesDir), "alpha", "rep.page.md")); !os.IsNotExist(err) {
+		t.Fatal("handle still there")
+	}
+	if _, err := os.Stat(filepath.Join(pagesDir, "alpha", pagesMetaDir, id+".json")); !os.IsNotExist(err) {
 		t.Fatal("page details still there")
 	}
 }
 
-func TestPages_SlugRules(t *testing.T) {
+func TestPages_HandlePathRules(t *testing.T) {
 	h, pagesDir := pagesFixture(t)
-	bad := []string{"", ".pages-meta", ".hidden", "Upper", "a_b", "a.b", "..", "a/b", "%2e%2e", strings.Repeat("a", 65), "ünicode"}
-	for _, s := range bad {
-		if ValidPageSlug(s) {
-			t.Errorf("ValidPageSlug(%q) = true", s)
-		}
-		if w := publish(h, "alpha", s, "text/html", []byte("<p>x</p>")); w.Code != http.StatusBadRequest {
-			t.Errorf("publish slug %q: %d", s, w.Code)
+	put := func(raw string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodPut, "/api/pages?ns=alpha&path="+url.QueryEscape(raw), strings.NewReader("<p>x</p>"))
+		r.Header.Set("Content-Type", "text/html")
+		w := httptest.NewRecorder()
+		h.Handle(w, r)
+		return w
+	}
+	for _, raw := range []string{"", "x.md", "x.html", ".page.md", "dir/.page.md", "../x.page.md", "/x.page.md", ".hidden/x.page.md", "a/.git/x.page.md", ".mdnest/x.page.md"} {
+		if w := put(raw); w.Code != http.StatusBadRequest {
+			t.Errorf("publish to %q: %d %s", raw, w.Code, w.Body.String())
 		}
 	}
-	for _, s := range []string{"a", "q3-report", strings.Repeat("a", 64), "0-9"} {
-		if !ValidPageSlug(s) {
-			t.Errorf("ValidPageSlug(%q) = false", s)
-		}
+	// A note that happens to end in .page.md but is not a handle is never
+	// overwritten.
+	note := filepath.Join(notesOf(pagesDir), "alpha", "mine.page.md")
+	os.WriteFile(note, []byte("# My own note\n"), 0o644)
+	if w := put("mine.page.md"); w.Code != http.StatusConflict {
+		t.Fatalf("publish over a plain note: %d %s", w.Code, w.Body.String())
 	}
-	// Nothing was written for any refused slug.
+	if b, _ := os.ReadFile(note); string(b) != "# My own note\n" {
+		t.Fatalf("the plain note was changed: %q", b)
+	}
+	// Nothing was stored for any refused publish.
 	entries, _ := os.ReadDir(filepath.Join(pagesDir, "alpha"))
 	for _, e := range entries {
 		if e.Name() != pagesMetaDir {
-			t.Errorf("refused slug left %s", e.Name())
+			t.Errorf("refused publish left %s", e.Name())
 		}
+	}
+	for _, id := range []string{"", "short", "UPPERCASEUPPERCASEUPPERCASE1", "../aaaaaaaaaaaaaaaaaaaaaaaaaa", ".aaaaaaaaaaaaaaaaaaaaaaaaaa", strings.Repeat("a", 65)} {
+		if ValidPageID(id) {
+			t.Errorf("ValidPageID(%q) = true", id)
+		}
+	}
+	if id := newPageID(); !ValidPageID(id) || len(id) != 32 || id == newPageID() {
+		t.Errorf("newPageID = %q", id)
+	}
+}
+
+func TestPages_HandleWithMissingPage(t *testing.T) {
+	h, pagesDir := pagesFixture(t)
+	notes := notesOf(pagesDir)
+	call := func(f func(http.ResponseWriter, *http.Request), method, p string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		f(w, httptest.NewRequest(method, p, nil))
+		return w
+	}
+	// A hand-edited handle naming an id nobody published: 404, files missing.
+	os.WriteFile(filepath.Join(notes, "alpha", "ghost.page.md"), []byte("---\npage: "+newPageID()+"\n---\n"), 0o644)
+	for _, w := range []*httptest.ResponseRecorder{
+		call(h.HandlePass, http.MethodPost, "/api/pages/pass?ns=alpha&path=ghost.page.md"),
+		call(h.HandleText, http.MethodGet, "/api/pages/text?ns=alpha&path=ghost.page.md"),
+		call(h.HandleArchive, http.MethodGet, "/api/pages/archive?ns=alpha&path=ghost.page.md"),
+	} {
+		if w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), errPageFilesMissing) {
+			t.Fatalf("ghost handle: %d %s", w.Code, w.Body.String())
+		}
+	}
+	// A handle copied by hand from another namespace: the id exists there,
+	// not here, and the message says so. Nothing crosses the boundary.
+	os.MkdirAll(filepath.Join(notes, "beta"), 0o755)
+	publish(h, "beta", "theirs", "text/html", []byte("<p>BETA-ONLY</p>"))
+	b, _ := os.ReadFile(filepath.Join(notes, "beta", "theirs.page.md"))
+	os.WriteFile(filepath.Join(notes, "alpha", "copied.page.md"), b, 0o644)
+	w := call(h.HandlePass, http.MethodPost, "/api/pages/pass?ns=alpha&path=copied.page.md")
+	if w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), errPageOtherNamespace) {
+		t.Fatalf("copied handle: %d %s", w.Code, w.Body.String())
+	}
+	// Listed, marked missing, so it can be found and fixed.
+	w = call(h.Handle, http.MethodGet, "/api/pages?ns=alpha")
+	if !strings.Contains(w.Body.String(), `"path":"copied.page.md"`) || !strings.Contains(w.Body.String(), `"missing":true`) {
+		t.Fatalf("list: %s", w.Body.String())
+	}
+	// A plain note is not a handle.
+	os.WriteFile(filepath.Join(notes, "alpha", "plain.page.md"), []byte("# hi\n"), 0o644)
+	if w := call(h.HandlePass, http.MethodPost, "/api/pages/pass?ns=alpha&path=plain.page.md"); w.Code != http.StatusBadRequest {
+		t.Fatalf("plain note as a handle: %d", w.Code)
+	}
+}
+
+func TestPages_DeleteHookAndUnlinked(t *testing.T) {
+	h, pagesDir := pagesFixture(t)
+	notes := notesOf(pagesDir)
+	noteDel := h.DeleteHook(http.HandlerFunc(NewNoteHandler(h.store).Handle))
+	del := func(p string) int {
+		w := httptest.NewRecorder()
+		noteDel.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/api/note?ns=alpha&path="+url.QueryEscape(p), nil))
+		return w.Code
+	}
+	stored := func(id string) bool { _, err := os.Stat(filepath.Join(pagesDir, "alpha", id)); return err == nil }
+
+	// Two handles naming one page: deleting one keeps the page, deleting the
+	// last one deletes it.
+	publish(h, "alpha", "A/shared", "text/html", []byte("<p>S</p>"))
+	id := idOf(t, pagesDir, "alpha", "A/shared")
+	b, _ := os.ReadFile(filepath.Join(notes, "alpha", "A", "shared.page.md"))
+	os.MkdirAll(filepath.Join(notes, "alpha", "B"), 0o755)
+	os.WriteFile(filepath.Join(notes, "alpha", "B", "copy.page.md"), b, 0o644)
+	if del("A/shared.page.md") != http.StatusOK || !stored(id) {
+		t.Fatal("deleting one of two handles deleted the page")
+	}
+	if del("B/copy.page.md") != http.StatusOK || stored(id) {
+		t.Fatal("deleting the last handle kept the page")
+	}
+
+	// A folder of handles: their pages go with it.
+	publish(h, "alpha", "F/one", "text/html", []byte("<p>1</p>"))
+	publish(h, "alpha", "F/sub/two", "text/html", []byte("<p>2</p>"))
+	id1, id2 := idOf(t, pagesDir, "alpha", "F/one"), idOf(t, pagesDir, "alpha", "F/sub/two")
+	if del("F") != http.StatusOK || stored(id1) || stored(id2) {
+		t.Fatal("deleting a folder kept its pages")
+	}
+
+	// A failed delete deletes nothing.
+	publish(h, "alpha", "keep", "text/html", []byte("<p>K</p>"))
+	kid := idOf(t, pagesDir, "alpha", "keep")
+	if del("nope.page.md") != http.StatusNotFound || !stored(kid) {
+		t.Fatal("a failed delete touched a page")
+	}
+
+	// A handle removed behind mdnest's back (git-sync) leaves the page
+	// unlinked: listed for root writers, never deleted on its own.
+	os.Remove(filepath.Join(notes, "alpha", "keep.page.md"))
+	w := httptest.NewRecorder()
+	h.Handle(w, httptest.NewRequest(http.MethodGet, "/api/pages?ns=alpha", nil))
+	var list struct {
+		Pages    []PageMeta
+		Unlinked []PageMeta
+	}
+	json.Unmarshal(w.Body.Bytes(), &list)
+	if len(list.Unlinked) != 1 || list.Unlinked[0].ID != kid || !stored(kid) {
+		t.Fatalf("unlinked = %+v", list.Unlinked)
+	}
+	w = httptest.NewRecorder()
+	h.HandleUnlinked(w, httptest.NewRequest(http.MethodDelete, "/api/pages/unlinked?ns=alpha&id="+kid, nil))
+	if w.Code != http.StatusOK || stored(kid) {
+		t.Fatalf("delete unlinked: %d %s", w.Code, w.Body.String())
+	}
+	// An unlinked delete refuses a page a handle still names.
+	publish(h, "alpha", "live", "text/html", []byte("<p>L</p>"))
+	w = httptest.NewRecorder()
+	h.HandleUnlinked(w, httptest.NewRequest(http.MethodDelete, "/api/pages/unlinked?ns=alpha&id="+idOf(t, pagesDir, "alpha", "live"), nil))
+	if w.Code != http.StatusConflict {
+		t.Fatalf("delete a linked page as unlinked: %d", w.Code)
+	}
+}
+
+func TestPages_MovingAHandleKeepsThePage(t *testing.T) {
+	h, pagesDir := pagesFixture(t)
+	publish(h, "alpha", "old/place", "text/html", []byte("<p>MOVED-OK</p>"))
+	notes := notesOf(pagesDir)
+	os.MkdirAll(filepath.Join(notes, "alpha", "new"), 0o755)
+	if err := h.store.Rename(context.Background(), "alpha", "old/place.page.md", "new/renamed.page.md"); err != nil {
+		t.Fatal(err)
+	}
+	if w := view(h, passURL(t, h, "alpha", "new/renamed")); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "MOVED-OK") {
+		t.Fatalf("moved handle: %d %s", w.Code, w.Body.String())
 	}
 }
 
@@ -308,8 +495,11 @@ func TestPages_TarIsPlainFilesOnly(t *testing.T) {
 			if w.Code != http.StatusBadRequest {
 				t.Fatalf("want 400, got %d %s", w.Code, w.Body.String())
 			}
-			if _, err := os.Stat(filepath.Join(pagesDir, "alpha", "p-"+name)); !os.IsNotExist(err) {
-				t.Fatal("a refused page was stored")
+			if _, err := os.Stat(filepath.Join(notesOf(pagesDir), "alpha", "p-"+name+PageHandleSuffix)); !os.IsNotExist(err) {
+				t.Fatal("a refused page left a handle")
+			}
+			if entries, _ := os.ReadDir(filepath.Join(pagesDir, "alpha")); len(entries) > 1 {
+				t.Fatalf("a refused page was stored: %d entries", len(entries))
 			}
 		})
 	}
@@ -365,8 +555,8 @@ func TestPages_Limits(t *testing.T) {
 		t.Fatal("gzip bomb took too long: limit not applied while inflating")
 	}
 	// Same bomb with an honest header but a small limit: stops while copying.
-	if _, err := os.Stat(filepath.Join(pagesDir, "alpha", "bomb")); !os.IsNotExist(err) {
-		t.Fatal("bomb stored")
+	if _, err := os.Stat(filepath.Join(notesOf(pagesDir), "alpha", "bomb.page.md")); !os.IsNotExist(err) {
+		t.Fatal("bomb left a handle")
 	}
 
 	// An unknown content type is refused.
@@ -376,7 +566,7 @@ func TestPages_Limits(t *testing.T) {
 }
 
 func TestPages_PassRules(t *testing.T) {
-	h, _ := pagesFixture(t)
+	h, pagesDir := pagesFixture(t)
 	publish(h, "alpha", "one", "text/html", []byte("<p>ONE</p>"))
 	publish(h, "alpha", "two", "text/html", []byte("<p>TWO</p>"))
 	u := passURL(t, h, "alpha", "one")
@@ -388,7 +578,7 @@ func TestPages_PassRules(t *testing.T) {
 	}
 	// A session token is never a pass.
 	session, _ := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"sub": "admin", "ns": "alpha", "slug": "one", "exp": time.Now().Add(time.Hour).Unix(),
+		"sub": "admin", "ns": "alpha", "id": idOf(t, pagesDir, "alpha", "one"), "exp": time.Now().Add(time.Hour).Unix(),
 	}).SignedString([]byte(pagesTestSecret))
 	if w := view(h, "/api/pages/view/"+session+"/"); w.Code != http.StatusForbidden {
 		t.Fatalf("session token as pass: %d", w.Code)
@@ -408,7 +598,7 @@ func TestPages_PassRules(t *testing.T) {
 		s, _ := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(secret))
 		return s
 	}
-	base := jwt.MapClaims{"purpose": "page", "ns": "alpha", "slug": "one", "v": c0.Version}
+	base := jwt.MapClaims{"purpose": "page", "ns": "alpha", "id": c0.ID, "v": c0.Version}
 	with := func(k string, v any) jwt.MapClaims {
 		c := jwt.MapClaims{}
 		for a, b := range base {
@@ -431,7 +621,8 @@ func TestPages_PassRules(t *testing.T) {
 		"expired":       mint(with("exp", time.Now().Add(-time.Minute).Unix()), pagesTestSecret),
 		"no-expiry":     mint(base, pagesTestSecret),
 		"wrong-secret":  mint(with("exp", time.Now().Add(time.Hour).Unix()), "other"),
-		"bad-slug":      mint(with("slug", "../alpha"), pagesTestSecret),
+		"bad-id":        mint(withExp("id", "../alpha"), pagesTestSecret),
+		"other-ns":      mint(withExp("ns", "beta"), pagesTestSecret),
 		"no-version":    mint(withExp("v", ""), pagesTestSecret),
 		"wrong-version": mint(withExp("v", "0000"), pagesTestSecret),
 		"tampered":      pass[:len(pass)-2] + "xx",
@@ -460,7 +651,7 @@ func TestPages_PassRules(t *testing.T) {
 	// ...and after a delete and a new page with the same name.
 	u2 := passURL(t, h, "alpha", "two")
 	dw := httptest.NewRecorder()
-	h.Handle(dw, httptest.NewRequest(http.MethodDelete, "/api/pages?ns=alpha&slug=two", nil))
+	h.Handle(dw, httptest.NewRequest(http.MethodDelete, "/api/pages?ns=alpha&path=two.page.md", nil))
 	publish(h, "alpha", "two", "text/html", []byte("<p>NEW TWO</p>"))
 	if w := view(h, u2); w.Code != http.StatusForbidden {
 		t.Fatalf("old pass after delete and recreate: %d", w.Code)
@@ -593,7 +784,7 @@ func TestPages_ControlCharactersNeverReachTheTerminal(t *testing.T) {
 		}
 	}
 	tw := httptest.NewRecorder()
-	h.HandleText(tw, httptest.NewRequest(http.MethodGet, "/api/pages/text?ns=alpha&slug=esc", nil))
+	h.HandleText(tw, httptest.NewRequest(http.MethodGet, "/api/pages/text?ns=alpha&path=esc.page.md", nil))
 	var m PageMeta
 	json.Unmarshal(tw.Body.Bytes(), &m)
 	if strings.ContainsAny(m.Title+m.Text, "\x1b\x07") {

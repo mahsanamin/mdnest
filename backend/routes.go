@@ -48,6 +48,13 @@ func registerContentRoutes(mux *http.ServeMux, c contentRoutes) {
 		auth = func(next http.Handler) http.Handler { return c.auth(perms.Attach(next)) }
 	}
 
+	// Deleting a page handle (or a folder of them) also deletes the page,
+	// unless another handle still names it (handlers/pages_handles.go).
+	var noteHandler http.Handler = http.HandlerFunc(c.note.Handle)
+	if c.pages != nil {
+		noteHandler = c.pages.DeleteHook(noteHandler)
+	}
+
 	// Apply permission checks in multi mode, passthrough in single mode
 	// Restarting the server is a system-wide action: superadmin-only in
 	// multi mode. In single mode the one user already owns the server.
@@ -62,7 +69,7 @@ func registerContentRoutes(mux *http.ServeMux, c contentRoutes) {
 	if perms != nil {
 		mux.Handle("/api/namespaces", auth(http.HandlerFunc(c.ns.ListNamespaces)))
 		mux.Handle("/api/tree", auth(perms.RequireNsAccess(http.HandlerFunc(c.tree.GetTree))))
-		mux.Handle("/api/note", auth(perms.ReadWriteRouter(invalidateSearch(http.HandlerFunc(c.note.Handle)))))
+		mux.Handle("/api/note", auth(perms.ReadWriteRouter(invalidateSearch(noteHandler))))
 		// History, attribution and comments all concern ONE note, so each
 		// needs read access to that note's path — not just some grant in the
 		// namespace (grants can be path-scoped). note/at returns the note's
@@ -139,7 +146,7 @@ func registerContentRoutes(mux *http.ServeMux, c contentRoutes) {
 	} else {
 		mux.Handle("/api/namespaces", auth(http.HandlerFunc(c.ns.ListNamespaces)))
 		mux.Handle("/api/tree", auth(http.HandlerFunc(c.tree.GetTree)))
-		mux.Handle("/api/note", auth(invalidateSearch(http.HandlerFunc(c.note.Handle))))
+		mux.Handle("/api/note", auth(invalidateSearch(noteHandler)))
 		// History endpoints work in single mode too — git-sync runs
 		// orthogonally to AUTH_MODE.
 		mux.Handle("/api/note/history", auth(http.HandlerFunc(c.history.HandleHistory)))
@@ -183,13 +190,17 @@ func registerContentRoutes(mux *http.ServeMux, c contentRoutes) {
 		mux.Handle("/api/approvals/", auth(http.HandlerFunc(c.approvals.Handle)))
 	}
 
-	// HTML pages. The handler checks read or write on the namespace root
-	// itself (a page belongs to the whole namespace), in both modes.
+	// HTML pages. Each handler checks read or write on the page's HANDLE
+	// path itself (a <name>.page.md note), in both modes; the unlinked list
+	// and its delete need write on the namespace root.
 	if c.pages != nil {
-		mux.Handle("/api/pages", auth(http.HandlerFunc(c.pages.Handle)))
+		// Publishing and deleting write a handle note: same cache and
+		// tree-changed path as any other note write.
+		mux.Handle("/api/pages", auth(invalidateSearch(http.HandlerFunc(c.pages.Handle))))
 		mux.Handle("/api/pages/text", auth(http.HandlerFunc(c.pages.HandleText)))
 		mux.Handle("/api/pages/archive", auth(http.HandlerFunc(c.pages.HandleArchive)))
 		mux.Handle("/api/pages/pass", auth(http.HandlerFunc(c.pages.HandlePass)))
+		mux.Handle("/api/pages/unlinked", auth(http.HandlerFunc(c.pages.HandleUnlinked)))
 		// Page files on mdnest's own origin only in static mode (scripts
 		// off). In script mode they are served by the pages listener alone.
 		// No session auth: the pass in the path is the credential.
