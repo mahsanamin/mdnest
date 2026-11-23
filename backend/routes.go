@@ -34,6 +34,7 @@ type contentRoutes struct {
 	ws          *handlers.WSHandler // nil unless live collab is on
 	restart     *handlers.RestartHandler
 	approvals   *handlers.ApprovalHandler // nil unless ENABLE_AGENT_APPROVALS
+	pages       *handlers.PagesHandler    // nil unless ENABLE_PAGES
 }
 
 func registerContentRoutes(mux *http.ServeMux, c contentRoutes) {
@@ -180,6 +181,21 @@ func registerContentRoutes(mux *http.ServeMux, c contentRoutes) {
 	if c.approvals != nil {
 		mux.Handle("/api/approvals", auth(http.HandlerFunc(c.approvals.Handle)))
 		mux.Handle("/api/approvals/", auth(http.HandlerFunc(c.approvals.Handle)))
+	}
+
+	// HTML pages. The handler checks read or write on the namespace root
+	// itself (a page belongs to the whole namespace), in both modes.
+	if c.pages != nil {
+		mux.Handle("/api/pages", auth(http.HandlerFunc(c.pages.Handle)))
+		mux.Handle("/api/pages/text", auth(http.HandlerFunc(c.pages.HandleText)))
+		mux.Handle("/api/pages/archive", auth(http.HandlerFunc(c.pages.HandleArchive)))
+		mux.Handle("/api/pages/pass", auth(http.HandlerFunc(c.pages.HandlePass)))
+		// Page files on mdnest's own origin only in static mode (scripts
+		// off). In script mode they are served by the pages listener alone.
+		// No session auth: the pass in the path is the credential.
+		if !c.pages.ScriptMode() {
+			mux.HandleFunc("/api/pages/view/", c.pages.HandleStaticView)
+		}
 	}
 
 	// Git sync endpoints (admin-only in multi mode, always allowed in single)

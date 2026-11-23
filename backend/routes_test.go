@@ -251,7 +251,11 @@ func buildFixture(t *testing.T) string {
 	return root
 }
 
-func newTestServer(t *testing.T, multi bool) *testServer {
+// testServerOption changes the route set before it is registered (a feature
+// flag a test turns on).
+type testServerOption func(r *contentRoutes, stg storage.Storage, perms *middleware.PermissionChecker)
+
+func newTestServer(t *testing.T, multi bool, opts ...testServerOption) *testServer {
 	t.Helper()
 	root := buildFixture(t)
 	stg, err := storage.NewLocalStorage(root)
@@ -329,6 +333,9 @@ func newTestServer(t *testing.T, multi bool) *testServer {
 		routes.attribution = handlers.NewAttributionHandler(stg, memActivity{})
 		routes.comments = handlers.NewCommentsHandler(stg)
 		routes.ws = handlers.NewWSHandler(hub, testSecret, perms)
+	}
+	for _, o := range opts {
+		o(&routes, stg, perms)
 	}
 	mux := http.NewServeMux()
 	registerContentRoutes(mux, routes)

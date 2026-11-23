@@ -47,6 +47,8 @@ type ConfigHandler struct {
 	marpThemes      bool                   // ENABLE_MARP_THEMES is on — the centralized theme catalog + admin editor are available
 	excalidraw      bool                   // ENABLE_EXCALIDRAW is on — the frontend may open .excalidraw.md files in the drawing editor (loads its chunk)
 	excalidrawLibs  []string               // EXCALIDRAW_LIBRARIES — operator-provided .excalidrawlib URLs preloaded into every drawing
+	pages           bool                   // ENABLE_PAGES is on: the frontend shows the Pages section (loads its chunk)
+	pageScripts     bool                   // pages run with scripts on, from PAGES_ORIGIN (script mode)
 	defaultTheme    string                 // DEFAULT_THEME — the theme a user sees before they pick one ("auto" | "dark" | "light")
 	updateChecker   *updates.Checker       // optional — polls GitHub releases so the frontend can hint when a newer mdnest is available
 }
@@ -105,6 +107,13 @@ func (h *ConfigHandler) SetGrantMaxDepth(depth int) {
 // operator who just wants notes from carrying the board's UI chunk.
 func (h *ConfigHandler) SetTaskBoard(enabled bool) {
 	h.taskBoard = enabled
+}
+
+// SetPages turns the Pages section on; scripts says whether pages run in
+// script mode (from PAGES_ORIGIN) or static mode.
+func (h *ConfigHandler) SetPages(enabled, scripts bool) {
+	h.pages = enabled
+	h.pageScripts = enabled && scripts
 }
 
 // SetAgentApprovals tells the frontend the /api/approvals routes exist.
@@ -209,6 +218,9 @@ func (h *ConfigHandler) HandleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.chat {
 		resp["chat"] = true
+	}
+	if h.pages {
+		resp["pages"] = map[string]bool{"enabled": true, "scripts": h.pageScripts}
 	}
 	if h.marp {
 		resp["marp"] = true
