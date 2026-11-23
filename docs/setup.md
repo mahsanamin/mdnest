@@ -192,7 +192,7 @@ On first run, `setup.sh` copies `mdnest.conf.sample` to `mdnest.conf` and exits,
 | `ENABLE_AGENT_APPROVALS` *(v4.8.5+, experimental)* | `false` | Answer an agent's (Claude Code or Codex) permission prompt from mdnest: the question shows as a card, you press Allow or Deny in the browser, and the agent continues. Each machine also has to opt in, see `docs/chat.md`. Decisions are accepted only from a browser login. Requests live in memory and are not available on `MDNEST_ROLE=app`. Read the added risk in `docs/security.md` before turning it on. |
 | `ENABLE_EXCALIDRAW` *(v4.2.0+)* | `false` | Open `.excalidraw.md` notes on an Excalidraw canvas and allow read-only drawing embeds in any note. The (large) editor bundle is code-split and only loads when a drawing is opened. See `docs/excalidraw.md`. |
 | `EXCALIDRAW_LIBRARIES` *(v4.2.0+)* | *(none)* | Requires `ENABLE_EXCALIDRAW`. Comma-separated URLs to `.excalidrawlib` files, preloaded into every drawing so an organisation can ship a shared shape set. Fetched by the **browser**, not the backend, so the URLs must be reachable by clients (and CORS-enabled). |
-| `ENABLE_PAGES` | `false` | Optional. View-only HTML pages (reports, dashboards) published into a namespace from the CLI or MCP, shown in a "Pages" section under the notes. Off by default: no route is registered and the frontend loads no pages code. See [HTML pages](#html-pages-optional). |
+| `ENABLE_PAGES` | `false` | Optional. View-only HTML pages (reports, dashboards) published into any folder from the CLI, MCP or a desktop drop; each shows in the tree as a small `<name>.page.md` handle and opens in a viewer. Off by default: no route is registered and the frontend loads no pages code. See [HTML pages](#html-pages-optional). |
 | `PAGES_DIR` | *(named volume `mdnest-pages`)* | Requires `ENABLE_PAGES`. Host folder for page files, kept apart from the notes. |
 | `PAGES_MAX_MB` | `20` | Requires `ENABLE_PAGES`. Largest total size of one page, checked when it is published. The web server in front of mdnest takes uploads up to 32 MB, so keep it at 30 or less. |
 | `PAGES_MAX_FILES` | `500` | Requires `ENABLE_PAGES`. Most files in one page, checked when it is published. |
@@ -593,27 +593,55 @@ But it won't pull from the remote. You'll need to run `git pull` on the host mac
 
 ## HTML pages (optional)
 
-People and agents can publish HTML pages (a report, a dashboard) to a
-namespace, and everyone who can read that namespace can view them. Pages are
-view only: there is no HTML editor. They are kept apart from notes, so they
-never show in the notes tree, notes search, tasks or chat.
+People and agents can publish HTML pages (a report, a dashboard) into a
+project folder, and the people who can read that folder can view them. Pages
+are view only: there is no HTML editor.
 
-A page is a folder with an `index.html` (and any CSS, scripts, images or data
-it links to with relative paths), or a single `.html` file. Publish it with the
-CLI or the MCP `publish_page` tool:
+**A page lives in the notes tree as one small file**, `<name>.page.md`, in any
+folder, next to the notes it belongs with. That file is the page's handle: it
+holds only front matter (`page: <id>`, title, author, published date) and a
+line saying it is an HTML page. The page's own files (HTML, CSS, scripts,
+images, data) are stored apart from the notes and never show in the tree or
+in notes search. With pages on, the handle shows with a page icon and opens
+the page in a viewer; with pages off it is just a small note.
+
+A page is a folder with an `index.html` (and any files it links to with
+relative paths), or a single `.html` file. Publish it with the CLI or the MCP
+`publish_page` tool:
 
 ```bash
-mdnest page publish @myserver/engineering/q3-report ./report-folder
+mdnest page publish @myserver/engineering/Reports/q3-report ./report-folder
 mdnest page list @myserver/engineering
+mdnest read @myserver/engineering/Reports/q3-report.page.md   # the handle, then the page's text
 ```
 
-Publishing to the same name again replaces the page. There is no version
-history. Page names are 1 to 64 lowercase letters, digits or hyphens.
+Or drag it from your desktop onto a folder in the tree: one `.html` file, a
+folder with an `index.html`, or a page your browser saved with "Save page as,
+Webpage complete" (the `.html` file together with its `_files` folder). The
+size and file count are checked before it uploads, and a page that already
+exists asks before it is replaced. Dropping anything that is not HTML does
+nothing, as before.
 
-**Who can do what.** Pages use the namespace's own permissions, checked on the
-whole namespace: write access lets you publish and delete, read access lets
-you list and view. A grant on a subfolder does not give access to pages.
-Pages never create a namespace.
+Publishing to the same handle again replaces the page; there is no version
+history.
+
+**Who can do what.** A page uses the permissions of the folder its handle is
+in, exactly like the notes next to it: read access on the handle lets you
+view the page, write access lets you publish over it or delete it. A grant on
+a subfolder works for the pages in that subfolder.
+
+**Moving, copying, deleting.** Move or rename the handle like any note and
+the page goes with it. Moving or copying it to another namespace takes the
+page along. Copying a handle within a namespace gives the readers of the new
+folder that page too, the same as copying a note they could read. Deleting
+the handle deletes the page, unless another handle still points to it.
+
+A page belongs to the namespace it was published in. A handle that reaches
+another namespace some other way (copied by hand, or by git sync) shows
+"this page was published in another namespace: publish it again here". A
+handle removed outside mdnest (by git sync, for example) leaves its page
+"unlinked": writers of the whole namespace see unlinked pages at the bottom
+of the Pages section and can delete them. They are never deleted on their own.
 
 **Turning it on.** Set `ENABLE_PAGES=true` in `mdnest.conf` and run
 `./mdnest-server rebuild`. Page files are kept in the named volume

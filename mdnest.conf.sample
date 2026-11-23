@@ -138,12 +138,12 @@ GIT_AUTHOR_EMAIL=you@example.com
 # ENABLE_EXCALIDRAW=false
 
 # HTML pages (Optional, off by default, works in single and multi mode)
-# Publish view-only HTML pages (reports, dashboards) into a namespace with
-# `mdnest page publish` or the MCP publish_page tool, and view them from a
-# "Pages" section under the notes. Pages are kept apart from notes: they never
-# show in the notes tree or notes search. Anyone with write access to a
-# namespace can publish its pages; read access lets you see them. A grant on a
-# subfolder does not give access to pages. Publishing again replaces a page.
+# Publish view-only HTML pages (reports, dashboards) into any folder with
+# `mdnest page publish`, the MCP publish_page tool, or by dropping HTML on a
+# folder in the tree. Each page shows in the tree as a small <name>.page.md
+# file and opens in a viewer; its HTML and other files are kept apart from the
+# notes. A page uses the permissions of its folder, like the notes beside it.
+# Publishing again replaces a page.
 # When off, no route is registered and the frontend loads no pages code.
 # ENABLE_PAGES=false
 #

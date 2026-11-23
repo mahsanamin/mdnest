@@ -3623,14 +3623,16 @@ A chat is a note that people and agents post to. It is on by default
 ## Publish an HTML page
 
 When the server has pages on (`ENABLE_PAGES`), you can publish an HTML report
-or dashboard for people to view in mdnest. A page is not a note: use it only
-when a person asks for a page, a report in HTML, or a dashboard.
+or dashboard for people to view in mdnest. Use it only when a person asks for
+a page, a report in HTML, or a dashboard.
 
-- `mdnest page publish @alias/namespace/page-name ./folder` publishes a folder
-  with an `index.html` (CSS, scripts, images and data beside it, linked with
-  relative paths). A single `.html` file works too. Publishing to the same
-  name replaces the page.
-- Page names are 1 to 64 lowercase letters, digits or hyphens.
+- `mdnest page publish @alias/namespace/folder/name ./folder` publishes a
+  folder with an `index.html` (CSS, scripts, images and data beside it,
+  linked with relative paths). A single `.html` file works too. The page
+  shows in the notes tree as `folder/name.page.md`, so put it in the project
+  folder it belongs to. Publishing to the same path replaces the page.
+- `mdnest read` on a `*.page.md` file prints the file, then the page's text.
+  Read that to learn what a page says.
 - `mdnest page list @alias/namespace` lists pages; add a word to search them.
 - Scripts in a page run only on servers set up for it (script mode). Without
   that, the page shows with scripts off, so put the important numbers in the

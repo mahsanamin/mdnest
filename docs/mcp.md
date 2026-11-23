@@ -376,14 +376,19 @@ these tools scaffold a valid file that the app then renders.
 ### HTML pages (optional, server: `ENABLE_PAGES`)
 
 These tools appear only when the server has pages on. A page is a view-only
-HTML report or dashboard published into a namespace; it never shows in the
-notes tree or notes search. See [HTML pages](setup.md#html-pages-optional).
+HTML report or dashboard. It shows in the notes tree as a small handle file,
+`<path>.page.md`, in any folder; its HTML and other files are kept apart from
+the notes. See [HTML pages](setup.md#html-pages-optional).
 
 | Tool | Purpose | Key inputs |
 |------|---------|------------|
-| `publish_page` | Publish a page. Publishing to a name that exists replaces that page. The files are sent inline: `html` becomes `index.html`, and `files` holds anything it links to with a relative path (`encoding: "base64"` for images). The tool never reads a path on the MCP host's disk. | `namespace`, `slug` (1 to 64 of `a-z`, `0-9`, `-`), `html`, `files?` (`[{ path, content, encoding? }]`) |
-| `list_pages` | List a namespace's pages (title, author, date, size). With `query`, only pages whose text has every word. | `namespace`, `query?` |
-| `read_page` | A page's details and the visible text pulled out of its `index.html` at publish time. Never the raw HTML. | `namespace`, `slug` |
+| `publish_page` | Publish a page at a handle path. Publishing to a path that already has a page replaces it. The files are sent inline: `html` becomes `index.html`, and `files` holds anything it links to with a relative path (`encoding: "base64"` for images). The tool never reads a path on the MCP host's disk. | `namespace`, `path` (e.g. `Reports/q3-report`; `.page.md` is added), `html`, `files?` (`[{ path, content, encoding? }]`) |
+| `list_pages` | The pages you can read in a namespace (handle path, title, author, date, size). With `query`, only pages whose text has every word. | `namespace`, `query?` |
+| `read_page` | A page's details and the visible text pulled out of its `index.html` at publish time. Never the raw HTML. | `namespace`, `path` |
+
+`read_note` on a `*.page.md` returns the handle as it is on disk, then a line
+`----- page text (extracted from the published HTML) -----` and the page's
+text (or the reason the page is not in that namespace).
 
 **Slides are CRUD.** A Marp deck is a note whose subject is a list of slides, so
 the deck is editable both as a whole (the note tools) and per slide: `list_/

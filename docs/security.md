@@ -502,7 +502,7 @@ The standalone Marp export inlines images as data URIs, fetching each with the u
 ### HTML pages
 
 `ENABLE_PAGES` (optional, off by default) lets people and agents publish
-HTML pages to a namespace. A page is someone else's HTML and script, shown in
+HTML pages into the notes tree. A page is someone else's HTML and script, shown in
 the viewer's browser, so the main risk is a page's script acting as the
 viewer: mdnest keeps the login token in `localStorage`, and a script on
 mdnest's own origin could read it and call the API as that person. The design
@@ -514,19 +514,72 @@ one pass over `index.html` at publish time to pull out its title and visible
 text for search, and control characters are removed from both, so a title
 cannot carry terminal escape codes into `mdnest page list`.
 
-**Publishing.** Only someone with write access to the namespace root can
-publish or delete a page; read access on the root lets you list and view. A
-grant on a subfolder does not give access to pages. Every path in an uploaded
-folder goes through `SafeRelPath` and `SafePath`: `..`, absolute paths and
-`.git` are refused, and only plain files and folders are accepted (symlinks,
-hard links, devices and FIFOs are refused, and so is the same file twice).
-`PAGES_MAX_MB` and `PAGES_MAX_FILES` are counted on the unpacked bytes as they
-are written, so a small gzip that unpacks to gigabytes stops at the limit.
-Page names are 1 to 64 of `a-z`, `0-9` and `-`, so a name can never be a
-dotfile or a path.
+**A page's permission is its handle's.** A page shows in the notes tree as a
+handle file, `<name>.page.md`, holding only front matter with `page: <id>`.
+The page's files are stored apart from the notes, under that id: 160 random
+bits, so an id cannot be guessed. Every pages route checks the notes' own
+permission on the handle's path: read on the handle to view the page or read
+its text, write on the handle to publish over it or delete it. So a page is
+exactly as visible as the notes beside it, and a grant on a subfolder works
+for the pages in it.
+
+**Copying a handle gives that folder's readers the page.** A handle is a note,
+and copying it is the same as copying a note they could already read. The id
+cannot be guessed, but it can be read: anyone who can read a handle knows its
+id. Two rules keep that from becoming more:
+
+- **Every publish makes a new id.** Publishing through a handle needs write on
+  that handle only. The content is stored under a new id, and every other
+  handle in the namespace that named the old id *and that the publisher can
+  write* is pointed at the new one. Handles the publisher cannot write keep
+  the old id, and the old page stays for as long as any handle names it, then
+  goes. So a publish never changes what a handle the publisher cannot write
+  shows: someone who writes a handle naming another folder's page id can only
+  ever move their own handle to their own new page, and the other folder's
+  page stays byte for byte as it was. A copy of a handle in a folder the
+  publisher cannot write is a snapshot, like a copied note, until someone who
+  can write there republishes it.
+- **A saved id is a snapshot, not a subscription.** Someone who once read a
+  handle and keeps write access somewhere in the namespace can write a handle
+  naming that id and keep viewing that version after their read access is
+  removed. That is the same as having downloaded it. They never see a later
+  version: a republish makes a new id, and the old version goes once no
+  handle names it.
+
+**Known limit.** Deleting a handle deletes its page when no other handle in
+the namespace names the same id. Someone who can write a folder can write a
+handle naming any id they know, and delete it. If that id belongs to an
+*unlinked* page (its real handles already removed outside mdnest, normally
+deletable only by writers of the whole namespace), its files go with it. A
+page that still has a handle anywhere is never removed this way.
+
+**A page belongs to the namespace it was published in.** Moving or copying a
+handle to another namespace through mdnest (`/api/transfer`: a drag in the
+tree, `mdnest move` or copy) carries the page along, with transfer's own
+checks: read on the source, write on the destination. If the destination
+already has a page under that id, the copy gets a new one. A page that cannot
+be carried fails the whole transfer, and nothing is left half done. A handle
+that reaches another namespace any other way (copied by hand, git sync) does
+not open there: it gets "this page was published in another namespace:
+publish it again here". Nothing is ever served across a namespace boundary.
+
+**Deleting.** Deleting a handle (a note delete, or a folder holding handles)
+deletes each page no other handle in the namespace names. A handle removed
+outside mdnest leaves its page unlinked: listed for writers of the namespace
+root, never deleted on its own.
+
+**Uploads.** Every path in an uploaded folder goes through `SafeRelPath` and
+`SafePath`: `..`, absolute paths and `.git` are refused, and only plain files
+and folders are accepted (symlinks, hard links, devices and FIFOs are
+refused, and so is the same file twice). `PAGES_MAX_MB` and `PAGES_MAX_FILES`
+are counted on the unpacked bytes as they are written, so a small gzip that
+unpacks to gigabytes stops at the limit. Publishing never overwrites a
+`.page.md` that is not a handle (409). A drop from the desktop is checked
+against the same limits in the browser before it uploads, and again by the
+server.
 
 **Viewing goes through a pass.** Opening a page asks the API for a frame URL.
-The server checks read access, then signs a pass with the server's JWT secret
+The server checks read access on the handle, then signs a pass with the server's JWT secret
 that names one namespace, one page and the page's current version, and
 expires after 30 minutes. The pass sits in the URL path, so the page's own
 relative links carry it, and the page is served to whoever presents it, with
@@ -535,8 +588,8 @@ no other login. Consequences:
 - A pass is never a login. It carries `purpose: page`, which the session
   check refuses everywhere else, and a session token is refused as a pass.
 - A pass opens one page. The namespace and page come only from the pass, so
-  a page cannot name another page, and a pass made before the page was
-  republished, or deleted and recreated, is refused.
+  a page cannot name another page, and a pass made for a version that has
+  since been replaced or deleted is refused.
 - Anyone holding a frame URL can view that page until the pass expires,
   including someone whose access was removed after it was made: a revoked
   user can still open a page for up to 30 minutes. The pages address has no

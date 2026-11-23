@@ -358,22 +358,33 @@ A file downloads as itself and a folder as a zip. Without an output file, the se
 ### HTML pages *(server `ENABLE_PAGES=true`)*
 
 ```bash
-mdnest page publish @work/engineering/q3-report ./report-folder   # folder with index.html
-mdnest page publish @work/engineering/q3-report ./report.html     # or one .html file
-mdnest page list    @work/engineering                             # all pages
-mdnest page list    @work/engineering revenue                     # pages whose text has "revenue"
-mdnest page list    --json @work/engineering                      # raw API JSON
-mdnest page pull    @work/engineering/q3-report ./q3-copy         # into a new or empty folder
-mdnest page delete  @work/engineering/q3-report
+mdnest page publish @work/engineering/Reports/q3-report ./report-folder   # folder with index.html
+mdnest page publish @work/engineering/Reports/q3-report ./report.html     # or one .html file
+mdnest page list    @work/engineering                                     # every page you can read
+mdnest page list    @work/engineering revenue                             # pages whose text has "revenue"
+mdnest page list    --json @work/engineering                              # raw API JSON
+mdnest page pull    @work/engineering/Reports/q3-report ./q3-copy         # into a new or empty folder
+mdnest page delete  @work/engineering/Reports/q3-report
+mdnest read         @work/engineering/Reports/q3-report.page.md           # the handle, then the page text
 ```
 
-A page is a view-only HTML report or dashboard, shown in the "Pages" section of
-the web app. It is kept apart from notes. A folder is sent as a gzipped tar
-made by the system `tar`; publishing to the same name replaces the page. Page
-names are 1 to 64 lowercase letters, digits or hyphens. Publishing and deleting
-need write access to the whole namespace; listing and pulling need read
-access. A server with pages off answers "this server has pages turned off".
-See "HTML pages" in [setup.md](setup.md#html-pages-optional).
+A page is a view-only HTML report or dashboard. It shows in the notes tree as
+a small handle file, here `Reports/q3-report.page.md` (the `.page.md` is added
+when you leave it out); its HTML and other files are kept apart from the
+notes. A folder is sent as a gzipped tar made by the system `tar`; publishing
+to the same handle replaces the page. Publishing and deleting need write
+access on the handle's folder, listing and reading need read access, as for
+the notes beside it.
+
+`mdnest read` on a `*.page.md` prints the file as it is on disk, then a line
+`----- page text (extracted from the published HTML) -----` and the page's
+visible text. If the page is not in that namespace it prints the reason
+instead. With pages off it prints the file only.
+
+Move, rename, copy or delete the handle with the normal commands: the page
+goes with it, also to another namespace. A server with pages off answers
+"this server has pages turned off". See "HTML pages" in
+[setup.md](setup.md#html-pages-optional).
 
 ### Search
 
