@@ -80,11 +80,14 @@ boot() {
     extra=(-e "PAGES_ORIGIN=$PAGES_ORIGIN" -e PAGES_LISTEN_PORT=8081 -p "127.0.0.1:$pages_port:8081")
   fi
   docker network create "$NET" >/dev/null
+  # As the host user, so the spec can remove a handle file behind mdnest's
+  # back, the way git sync would.
   docker run -d --name "$BE" --network "$NET" --network-alias backend \
+    --user "$(id -u):$(id -g)" -e HOME=/tmp \
     -e AUTH_MODE=single -e MDNEST_USER=e2e -e MDNEST_PASSWORD=e2epass123 \
     -e MDNEST_JWT_SECRET="$SECRET" -e NOTES_DIR=/notes \
     -e FRONTEND_ORIGIN="$BASE_URL" -e DISABLE_UPDATE_CHECK=true \
-    -e ENABLE_PAGES=true -e PAGES_DIR=/tmp/pages \
+    -e ENABLE_PAGES=true -e PAGES_DIR=/tmp/pages -e PAGES_MAX_MB=1 -e PAGES_MAX_FILES=50 \
     "${extra[@]}" \
     -v "$NOTES_DIR:/notes" "$BE_IMAGE" >/dev/null
   docker run -d --name "$FE" --network "$NET" -p "127.0.0.1:$app_port:80" "$FE_IMAGE" >/dev/null
@@ -110,6 +113,7 @@ for mode in static script; do
   if ( cd tests/browser && \
        MDNEST_BASE_URL="$BASE_URL" MDNEST_USER=e2e MDNEST_PASSWORD=e2epass123 \
        MDNEST_PAGES_MODE="$mode" MDNEST_PAGES_ORIGIN="$PAGES_ORIGIN" MDNEST_JWT_SECRET="$SECRET" \
+       MDNEST_NOTES_DIR="$NOTES_DIR" \
        npx playwright test pages.spec.js --output="../browser-results/pages-$mode" ${MDNEST_E2E_ARGS:-} ); then
     pass "$mode mode: pages.spec.js passed"
   else

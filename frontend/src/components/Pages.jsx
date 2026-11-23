@@ -97,9 +97,10 @@ export function PagesList({ ns, currentPath, onOpen, refreshKey }) {
 }
 
 // The page a handle names, full size, under a bar that says what it is.
-// Keyed on the handle path: after a move the app passes the new path and the
-// view asks for a fresh frame URL.
-export function PageView({ ns, path }) {
+// Asks for a fresh frame URL when the handle path changes (a move) and when
+// the handle names another page id (a republish, which always makes a new id;
+// pageId comes from the open handle's text).
+export function PageView({ ns, path, pageId }) {
   const [frame, setFrame] = useState(null);
   const [error, setError] = useState('');
 
@@ -111,7 +112,7 @@ export function PageView({ ns, path }) {
       .then((f) => { if (!cancelled) setFrame(f); })
       .catch((e) => { if (!cancelled) setError(e.message || 'Failed to open the page'); });
     return () => { cancelled = true; };
-  }, [ns, path]);
+  }, [ns, path, pageId]);
 
   const published = formatDate(frame?.publishedAt);
   return (

@@ -36,11 +36,35 @@ test('pages off: no section, no chunk, no route', async ({ page, request }) => {
   const token = await page.evaluate(() => localStorage.getItem('mdnest_token'));
   for (const [method, path] of [
     ['GET', '/api/pages?ns=testing_workspace'],
-    ['GET', '/api/pages/text?ns=testing_workspace&slug=x'],
-    ['POST', '/api/pages/pass?ns=testing_workspace&slug=x'],
+    ['GET', '/api/pages/text?ns=testing_workspace&path=x.page.md'],
+    ['POST', '/api/pages/pass?ns=testing_workspace&path=x.page.md'],
     ['GET', '/api/pages/view/x/'],
   ]) {
     const res = await request.fetch(path, { method, headers: { Authorization: `Bearer ${token}` } });
     expect(res.status(), `${method} ${path}`).toBe(404);
+  }
+});
+
+test('pages off: a .page.md is an ordinary note', async ({ page, request }) => {
+  const login = await request.post('/api/auth/login', { data: { username: USER, password: PASS } });
+  const token = (await login.json()).token;
+  const name = `off-${Date.now()}.page.md`;
+  const body = '---\npage: abcdefghijklmnopqrstuvwxyz234567\ntitle: "Off"\n---\n\nHTML page, open it in mdnest.\n';
+  const r = await request.post(`/api/note?ns=testing_workspace&path=${name}`, { headers: { Authorization: `Bearer ${token}` }, data: body });
+  expect(r.status()).toBeLessThan(300);
+  try {
+    await page.goto('/');
+    await page.fill('input[name=username]', USER);
+    await page.fill('input[name=password]', PASS);
+    await page.click('button:has-text("Sign in")');
+    const row = page.locator('.tree-label', { hasText: name });
+    await expect(row).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('.tree-row', { hasText: name }).locator('.tree-icon-svg.file')).toBeVisible();
+    await row.click();
+    await expect(page.locator('.toolbar-path')).toContainText(name, { timeout: 20_000 });
+    await expect(page.getByText('HTML page, open it in mdnest.').first()).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('[data-testid=page-view]')).toHaveCount(0);
+  } finally {
+    await request.delete(`/api/note?ns=testing_workspace&path=${name}`, { headers: { Authorization: `Bearer ${token}` } });
   }
 });

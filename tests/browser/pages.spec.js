@@ -17,10 +17,15 @@ const NS = 'testing_workspace';
 test.skip(!MODE, 'needs a stack with pages on (tests/e2e-pages.sh)');
 
 const run = `${process.pid}${Date.now() % 100000}`;
-const PROBE = `probe-${run}`;
-const OTHER = `other-${run}`;
+const DIR = `pages-e2e-${run}`;
+const PROBE = `${DIR}/probe.page.md`;
+const OTHER = `${DIR}/other.page.md`;
 const OTHER_SECRET = `OTHER-SECRET-${run}`;
+const NOTES_DIR = process.env.MDNEST_NOTES_DIR || '';
+let otherId = '';
 
+// The probe knows the other page's id: a handle is readable, so a hostile
+// page author may well know it. It still cannot load that page.
 function probeHtml(main) {
   return `<!doctype html><html><head><title>Probe ${run}</title><link rel="stylesheet" href="style.css"></head>
 <body><p id="status">Scripts did not run.</p><img id="img" src="img/dot.svg" width="20">
@@ -33,7 +38,7 @@ function probeHtml(main) {
   try { out.cookie = document.cookie; } catch (e) { out.cookie = 'blocked:' + e.name; }
   try { const r = await fetch('data.json'); out.own = r.status + ':' + (await r.text()); } catch (e) { out.own = 'blocked:' + e.name; }
   try { const r = await fetch(${JSON.stringify(main)} + '/api/namespaces', { credentials: 'include' }); out.api = r.status + ':' + (await r.text()).slice(0, 200); } catch (e) { out.api = 'blocked:' + e.name; }
-  for (const [k, u] of [['other1', '../${OTHER}/index.html'], ['other2', location.origin + '/${OTHER}/index.html'], ['other3', location.pathname + '%2e%2e/${OTHER}/index.html']]) {
+  for (const [k, u] of [['other1', '../' + ${JSON.stringify(otherId)} + '/index.html'], ['other2', location.origin + '/' + ${JSON.stringify(otherId)} + '/index.html'], ['other3', location.pathname + '%2e%2e/' + ${JSON.stringify(otherId)} + '/index.html']]) {
     try { const r = await fetch(u); out[k] = r.status + ':' + (await r.text()).slice(0, 200); } catch (e) { out[k] = 'blocked:' + e.name; }
   }
   parent.postMessage(out, '*');
@@ -70,38 +75,44 @@ test.beforeAll(async ({ request, baseURL }) => {
   const login = await request.post('/api/auth/login', { data: { username: USER, password: PASS } });
   token = (await login.json()).token;
   const auth = { Authorization: `Bearer ${token}` };
-  const put = async (slug, body, ct) => {
-    const r = await request.put(`/api/pages?ns=${NS}&slug=${slug}`, { headers: { ...auth, 'Content-Type': ct }, data: body });
+  const put = async (path, body, ct) => {
+    const r = await request.put(`/api/pages?ns=${NS}&path=${encodeURIComponent(path)}`, { headers: { ...auth, 'Content-Type': ct }, data: body });
     expect(r.status(), await r.text()).toBe(200);
+    return (await r.json()).id;
   };
+  otherId = await put(OTHER, `<title>Other</title><p>${OTHER_SECRET}</p>`, 'text/html');
   await put(PROBE, tar({
     'index.html': probeHtml(mainOrigin),
     'style.css': 'body{background:rgb(1, 2, 3)}',
     'img/dot.svg': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><circle cx="5" cy="5" r="5"/></svg>',
     'data.json': '{"own":"OWN-DATA"}',
   }), 'application/x-tar');
-  await put(OTHER, `<title>Other</title><p>${OTHER_SECRET}</p>`, 'text/html');
 });
 
+// Deleting the folder deletes the handles in it, and with them their pages.
 test.afterAll(async ({ request }) => {
-  for (const slug of [PROBE, OTHER]) {
-    await request.delete(`/api/pages?ns=${NS}&slug=${slug}`, { headers: { Authorization: `Bearer ${token}` } });
+  for (const d of [DIR, `${DIR}-drop`]) {
+    await request.delete(`/api/note?ns=${NS}&path=${encodeURIComponent(d)}`, { headers: { Authorization: `Bearer ${token}` } });
   }
 });
 
-async function openProbe(page) {
+async function login(page) {
   await page.goto('/');
   await page.fill('input[name=username]', USER);
   await page.fill('input[name=password]', PASS);
   await page.click('button:has-text("Sign in")');
   await expect(page.locator('.ns-label, .ns-select')).toBeVisible({ timeout: 20_000 });
+}
+
+async function openProbe(page) {
+  await login(page);
   // The token this browser holds is the one the probe must never see.
   token = await page.evaluate(() => localStorage.getItem('mdnest_token')) || token;
   await page.evaluate(() => {
     window.__reports = [];
     window.addEventListener('message', (e) => { if (e.data && e.data.probe) window.__reports.push(e.data); });
   });
-  await page.locator(`[data-testid=page-row-${PROBE}]`).click();
+  await page.locator(`[data-testid="page-row-${PROBE}"]`).click();
   const frameEl = page.locator('[data-testid=page-frame]');
   await expect(frameEl).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('.page-bar')).toContainText(`Probe ${run}`);
@@ -172,7 +183,7 @@ function sign(payload) {
 test('an expired pass is rejected, and a pass opens only its own page', async ({ request }) => {
   test.skip(!SECRET, 'needs MDNEST_JWT_SECRET to mint a pass');
   const auth = { Authorization: `Bearer ${token}` };
-  const res = await request.post(`/api/pages/pass?ns=${NS}&slug=${PROBE}`, { headers: auth });
+  const res = await request.post(`/api/pages/pass?ns=${NS}&path=${encodeURIComponent(PROBE)}`, { headers: auth });
   const { url } = await res.json();
   const base = MODE === 'script' ? PAGES_ORIGIN : mainOrigin;
   const prefix = MODE === 'script' ? '/' : '/api/pages/view/';
@@ -188,10 +199,134 @@ test('an expired pass is rejected, and a pass opens only its own page', async ({
   const e = await request.get(`${base}${prefix}${expired}/`);
   expect(e.status()).toBe(403);
   // The pass for one page never serves another, whatever the path says.
-  for (const path of [`../${OTHER}/index.html`, `%2e%2e/${OTHER}/index.html`, `..%2f${OTHER}%2findex.html`]) {
+  for (const path of [`../${otherId}/index.html`, `%2e%2e/${otherId}/index.html`, `..%2f${otherId}%2findex.html`]) {
     const r = await request.get(`${base}${prefix}${pass}/${path}`, { maxRedirects: 0 });
     expect(await r.text(), path).not.toContain(OTHER_SECRET);
   }
   // A pass is not a login.
   expect((await request.get('/api/pages?ns=' + NS, { headers: { Authorization: `Bearer ${pass}` } })).status()).toBe(401);
+});
+
+// ---- the page as a handle in the tree, and publishing by drag and drop ----
+
+// dropOnFolder fires a drop of desktop files on a tree folder row. The entries
+// stand in for what Chrome's webkitGetAsEntry hands out for a dropped folder,
+// with real File objects, so the app reads folders exactly as it would.
+async function dropOnFolder(page, folderName, spec) {
+  await page.evaluate(({ folderName, spec }) => {
+    const fileEntry = (name, body, type) => {
+      const f = new File([body], name, { type: type || '' });
+      return { name, isFile: true, isDirectory: false, file: (ok) => ok(f) };
+    };
+    const dirEntry = (name, children) => ({
+      name, isFile: false, isDirectory: true,
+      createReader() {
+        let done = false;
+        return { readEntries(ok) { const b = done ? [] : children; done = true; setTimeout(() => ok(b), 0); } };
+      },
+    });
+    const build = (n) => (n.children ? dirEntry(n.name, n.children.map(build)) : fileEntry(n.name, n.body, n.type));
+    const entries = spec.map(build);
+    const dt = { types: ['Files'], items: entries.map((e) => ({ kind: 'file', webkitGetAsEntry: () => e })), files: [] };
+    const row = Array.from(document.querySelectorAll('.tree-row')).find((r) => r.querySelector('.tree-label')?.textContent === folderName);
+    if (!row) throw new Error('no folder row ' + folderName);
+    const ev = new Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(ev, 'dataTransfer', { value: dt });
+    row.dispatchEvent(ev);
+  }, { folderName, spec });
+}
+
+async function makeFolder(request, path) {
+  const r = await request.post(`/api/folder?ns=${NS}&path=${encodeURIComponent(path)}`, { headers: { Authorization: `Bearer ${token}` } });
+  expect(r.status()).toBeLessThan(300);
+}
+
+const notice = (page) => page.locator('[data-testid=notice-bar]');
+
+test('a "Webpage, complete" save dropped on a folder becomes one page that keeps its _files', async ({ page, request }) => {
+  test.skip(MODE !== 'static', 'the drop is the same in both modes');
+  const dropDir = `${DIR}-drop`;
+  await makeFolder(request, dropDir);
+  await login(page);
+  await expect(page.locator('.tree-label', { hasText: dropDir })).toBeVisible({ timeout: 15_000 });
+  await dropOnFolder(page, dropDir, [
+    { name: 'Q3 Sales Report.html', body: '<html><head><title>Saved Q3</title><link rel="stylesheet" href="Q3 Sales Report_files/style.css"></head><body><h1 id="h">SAVED-PAGE</h1><img id="img" src="Q3 Sales Report_files/dot.svg"></body></html>' },
+    { name: 'Q3 Sales Report_files', children: [
+      { name: 'style.css', body: 'body{background:rgb(4, 5, 6)}' },
+      { name: 'dot.svg', body: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><circle cx="5" cy="5" r="5"/></svg>' },
+    ] },
+  ]);
+  await expect(notice(page)).toContainText('Published q3-sales-report', { timeout: 15_000 });
+  // The app opens the new handle in the viewer, with its own files working.
+  await expect(page.locator('.toolbar-path')).toContainText('q3-sales-report.page.md', { timeout: 15_000 });
+  const frame = page.frameLocator('[data-testid=page-frame]');
+  await expect(frame.locator('#h')).toHaveText('SAVED-PAGE');
+  await expect.poll(() => frame.locator('body').evaluate((b) => getComputedStyle(b).backgroundColor)).toBe('rgb(4, 5, 6)');
+  await expect.poll(() => frame.locator('#img').evaluate((i) => i.naturalWidth)).toBeGreaterThan(0);
+  // One page in the tree, not the assets.
+  const res = await request.get(`/api/tree?ns=${NS}`, { headers: { Authorization: `Bearer ${token}` } });
+  const tree = JSON.stringify(await res.json());
+  expect(tree).toContain('q3-sales-report.page.md');
+  expect(tree).not.toContain('style.css');
+  await expect(page.locator('.tree-row', { hasText: 'q3-sales-report.page.md' }).locator('.tree-icon-svg.page')).toBeVisible();
+
+  // Dropping it again asks first; saying no changes nothing.
+  let asked = '';
+  page.once('dialog', (d) => { asked = d.message(); d.dismiss(); });
+  await dropOnFolder(page, dropDir, [{ name: 'Q3 Sales Report.html', body: '<p>SECOND</p>' }]);
+  await expect.poll(() => asked).toBe('Replace page q3-sales-report?');
+  await expect(frame.locator('#h')).toHaveText('SAVED-PAGE');
+  // Saying yes replaces it.
+  page.once('dialog', (d) => d.accept());
+  await dropOnFolder(page, dropDir, [{ name: 'Q3 Sales Report.html', body: '<p id="h">SECOND</p>' }]);
+  await expect(notice(page)).toContainText('Published q3-sales-report', { timeout: 15_000 });
+  await expect(page.frameLocator('[data-testid=page-frame]').locator('#h')).toHaveText('SECOND', { timeout: 15_000 });
+
+  // Over the size limit (the harness sets PAGES_MAX_MB=1): refused before
+  // uploading, with the limit named.
+  await dropOnFolder(page, dropDir, [{ name: 'huge.html', body: 'x'.repeat(1536 * 1024) }]);
+  await expect(notice(page)).toContainText('at most 1 MB (PAGES_MAX_MB)', { timeout: 15_000 });
+  // Not HTML: nothing happens, as before.
+  await dropOnFolder(page, dropDir, [{ name: 'photo.png', body: 'PNG' }]);
+  await page.waitForTimeout(500);
+  const after = JSON.stringify(await (await request.get(`/api/tree?ns=${NS}`, { headers: { Authorization: `Bearer ${token}` } })).json());
+  expect(after).not.toContain('photo');
+  expect(after).not.toContain('huge');
+});
+
+test('dragging a handle to another folder keeps the page open', async ({ page, request }) => {
+  test.skip(MODE !== 'static', 'the same in both modes');
+  await makeFolder(request, `${DIR}/moved-to`);
+  await login(page);
+  await page.locator(`[data-testid="page-row-${OTHER}"]`).click();
+  await expect(page.frameLocator('[data-testid=page-frame]').locator('p')).toHaveText(OTHER_SECRET, { timeout: 15_000 });
+  const handleRow = page.locator('.tree-row', { hasText: 'other.page.md' });
+  const target = page.locator('.tree-row', { hasText: 'moved-to' });
+  await expect(target).toBeVisible();
+  await handleRow.dragTo(target);
+  await expect(page.locator('.toolbar-path')).toContainText('moved-to/other.page.md', { timeout: 15_000 });
+  await expect(page.frameLocator('[data-testid=page-frame]').locator('p')).toHaveText(OTHER_SECRET, { timeout: 15_000 });
+  await expect(page.locator('[data-testid=page-error]')).toHaveCount(0);
+});
+
+test('a page whose handle was removed outside mdnest is listed as unlinked for a root writer', async ({ page, request }) => {
+  test.skip(MODE !== 'static' || !NOTES_DIR, 'needs the notes folder (MDNEST_NOTES_DIR)');
+  const { unlinkSync, writeFileSync } = await import('node:fs');
+  const auth = { Authorization: `Bearer ${token}` };
+  const r = await request.put(`/api/pages?ns=${NS}&path=${encodeURIComponent(`${DIR}/orphan.page.md`)}`, { headers: { ...auth, 'Content-Type': 'text/html' }, data: `<title>Orphan ${run}</title><p>o</p>` });
+  expect(r.status()).toBe(200);
+  // What git sync would do: the file goes away behind mdnest's back.
+  unlinkSync(`${NOTES_DIR}/${NS}/${DIR}/orphan.page.md`);
+  await login(page);
+  const row = page.locator('[data-testid=pages-unlinked]').getByText(`Orphan ${run}`);
+  await expect(row).toBeVisible({ timeout: 15_000 });
+  page.once('dialog', (d) => d.accept());
+  await page.locator('[data-testid=pages-unlinked] .pages-unlinked-row', { hasText: `Orphan ${run}` }).getByRole('button', { name: /Delete/ }).click();
+  await expect(row).toHaveCount(0, { timeout: 15_000 });
+  // A hand-written handle naming an id that does not exist: a clear 404 in the viewer.
+  writeFileSync(`${NOTES_DIR}/${NS}/${DIR}/ghost.page.md`, '---\npage: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n---\n');
+  await page.reload();
+  await expect(page.locator('.ns-label, .ns-select')).toBeVisible({ timeout: 20_000 });
+  await page.locator(`[data-testid="page-row-${DIR}/ghost.page.md"]`).click();
+  await expect(page.locator('[data-testid=page-error]')).toContainText('publish it again here', { timeout: 15_000 });
 });

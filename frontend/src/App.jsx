@@ -3163,7 +3163,7 @@ function App() {
           {pageHandleActive ? (
             <ChunkErrorBoundary label="the page" resetKey={`${selectedNs}/${currentPath}`}>
             <Suspense fallback={<div className="editor-loading">Loading page...</div>}>
-              <PageView ns={selectedNs} path={currentPath} />
+              <PageView ns={selectedNs} path={currentPath} pageId={(/^page:\s*(\S+)/m.exec(content || '') || [])[1] || ''} />
             </Suspense>
             </ChunkErrorBoundary>
           ) : chatsOpen && chatEnabled ? (
