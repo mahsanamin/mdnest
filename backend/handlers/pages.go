@@ -362,6 +362,22 @@ func (h *PagesHandler) extractTar(body io.Reader, dir string) (int64, int, error
 	var total int64
 	files := 0
 	seen := map[string]bool{}
+	// Folders are capped too, at the same number as files. Every folder the
+	// archive would create is counted, whether it comes from a folder entry
+	// or from a file's path (a/b/c/x.css makes three), and the count is
+	// checked before anything is created. Without this, a small gzipped tar
+	// of empty folder entries, or one deeply nested file, could create
+	// millions of folders and use up the disk's inodes.
+	dirs := map[string]bool{}
+	addDirs := func(rel string) error {
+		for d := rel; d != "." && d != "" && !dirs[d]; d = path.Dir(d) {
+			dirs[d] = true
+			if len(dirs) > h.cfg.MaxFiles {
+				return pageInputErr(http.StatusRequestEntityTooLarge, "page has more than %d folders (PAGES_MAX_FILES)", h.cfg.MaxFiles)
+			}
+		}
+		return nil
+	}
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -400,6 +416,9 @@ func (h *PagesHandler) extractTar(body io.Reader, dir string) (int64, int, error
 			if target == "" {
 				return total, files, pageInputErr(http.StatusBadRequest, "path %q is not allowed in a page", hdr.Name)
 			}
+			if err := addDirs(rel); err != nil {
+				return total, files, err
+			}
 			if err := os.MkdirAll(target, 0755); err != nil {
 				return total, files, err
 			}
@@ -424,6 +443,9 @@ func (h *PagesHandler) extractTar(body io.Reader, dir string) (int64, int, error
 		target := SafePath(dir, rel)
 		if target == "" {
 			return total, files, pageInputErr(http.StatusBadRequest, "path %q is not allowed in a page", hdr.Name)
+		}
+		if err := addDirs(path.Dir(rel)); err != nil {
+			return total, files, err
 		}
 		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 			return total, files, err

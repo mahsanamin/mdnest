@@ -151,7 +151,8 @@ GIT_AUTHOR_EMAIL=you@example.com
 # (mdnest-pages). Either way it is separate from your notes.
 # PAGES_DIR=
 #
-# Limits checked when a page is published: total size and number of files.
+# Limits checked when a page is published: total size and number of files
+# (PAGES_MAX_FILES also caps the number of folders).
 # PAGES_MAX_MB=20
 # PAGES_MAX_FILES=500
 #

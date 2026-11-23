@@ -1522,7 +1522,7 @@ it.
 | 403 | No write access on the handle path |
 | 404 | The namespace does not exist |
 | 409 | `path` is a note that is not a handle (no `page:` in its front matter); it is never overwritten |
-| 413 | Over `PAGES_MAX_MB` (counted on the unpacked bytes) or `PAGES_MAX_FILES`; the message names the setting |
+| 413 | Over `PAGES_MAX_MB` (counted on the unpacked bytes) or `PAGES_MAX_FILES` (files, and separately folders); the message names the setting |
 | 415 | A body type other than the ones above |
 
 ```bash

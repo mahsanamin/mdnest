@@ -573,7 +573,10 @@ root, never deleted on its own.
 and folders are accepted (symlinks, hard links, devices and FIFOs are
 refused, and so is the same file twice). `PAGES_MAX_MB` and `PAGES_MAX_FILES`
 are counted on the unpacked bytes as they are written, so a small gzip that
-unpacks to gigabytes stops at the limit. Publishing never overwrites a
+unpacks to gigabytes stops at the limit. Folders count too: a page may
+create at most `PAGES_MAX_FILES` folders (from folder entries and from the
+paths of its files), checked before any is created, so a tar of empty
+folders cannot use up the disk's inodes. Publishing never overwrites a
 `.page.md` that is not a handle (409). A drop from the desktop is checked
 against the same limits in the browser before it uploads, and again by the
 server.

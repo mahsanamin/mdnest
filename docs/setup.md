@@ -195,7 +195,7 @@ On first run, `setup.sh` copies `mdnest.conf.sample` to `mdnest.conf` and exits,
 | `ENABLE_PAGES` | `false` | Optional. View-only HTML pages (reports, dashboards) published into any folder from the CLI, MCP or a desktop drop; each shows in the tree as a small `<name>.page.md` handle and opens in a viewer. Off by default: no route is registered and the frontend loads no pages code. See [HTML pages](#html-pages-optional). |
 | `PAGES_DIR` | *(named volume `mdnest-pages`)* | Requires `ENABLE_PAGES`. Host folder for page files, kept apart from the notes. |
 | `PAGES_MAX_MB` | `20` | Requires `ENABLE_PAGES`. Largest total size of one page, checked when it is published. The web server in front of mdnest takes uploads up to 32 MB, so keep it at 30 or less. |
-| `PAGES_MAX_FILES` | `500` | Requires `ENABLE_PAGES`. Most files in one page, checked when it is published. |
+| `PAGES_MAX_FILES` | `500` | Requires `ENABLE_PAGES`. Most files in one page, and also most folders, checked when it is published. |
 | `PAGES_ORIGIN` | *(none: static mode)* | Optional, needs team setup. A second address (another port or hostname) that serves page files and nothing else. With it, page scripts run there in a sandbox; without it, pages show with scripts off. Must differ from `FRONTEND_ORIGIN`. |
 | `PAGES_PORT` | *(the port in `PAGES_ORIGIN`)* | Script mode, `setup.sh` only. Host port for the pages listener, when `PAGES_ORIGIN` has no port because your own proxy is in front. |
 | `PAGES_NETWORK` | `strict` | Requires `PAGES_ORIGIN`. `strict`: a page loads only its own files. `open`: it may also load outside scripts and call outside sites (https). |

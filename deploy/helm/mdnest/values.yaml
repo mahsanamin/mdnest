@@ -336,7 +336,7 @@ pages:
   enabled: false
   # -- Largest total size of one page, in MB (`PAGES_MAX_MB`), checked at publish time.
   maxMB: 20
-  # -- Most files in one page (`PAGES_MAX_FILES`), checked at publish time.
+  # -- Most files in one page, and most folders (`PAGES_MAX_FILES`), checked at publish time.
   maxFiles: 500
   # -- Script mode (`PAGES_ORIGIN`, needs team setup): a second hostname that serves page files and nothing else, e.g. `https://pages.example.com`. Empty means static mode: pages show with their scripts turned off. Must differ from `backend.frontendOrigin`. With `ingress.enabled`, a rule for this hostname is added that goes to the backend's pages port.
   origin: ""

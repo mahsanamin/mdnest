@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -609,6 +610,39 @@ func TestPages_Limits(t *testing.T) {
 	// An unknown content type is refused.
 	if w := publish(h, "alpha", "zip", "application/zip", []byte("PK")); w.Code != http.StatusUnsupportedMediaType {
 		t.Fatalf("zip: %d", w.Code)
+	}
+}
+
+// Folders count against PAGES_MAX_FILES too (finding F2): a tar of empty
+// folder entries, or one deeply nested file, must not create folders
+// without limit.
+func TestPages_FolderCap(t *testing.T) {
+	h, pagesDir := pagesFixture(t) // MaxFiles 5
+	index := tarEntry{name: "index.html", body: "<p>x</p>"}
+
+	dirsOnly := []tarEntry{index}
+	for i := 0; i < 6; i++ {
+		dirsOnly = append(dirsOnly, tarEntry{name: fmt.Sprintf("d%d/", i), typeflag: tar.TypeDir})
+	}
+	if w := publish(h, "alpha", "dirs", "application/x-tar", makeTar(t, dirsOnly...)); w.Code != http.StatusRequestEntityTooLarge || !strings.Contains(w.Body.String(), "folders") {
+		t.Fatalf("6 folder entries with a cap of 5: %d %s", w.Code, w.Body.String())
+	}
+	deep := makeTar(t, index, tarEntry{name: "a/b/c/d/e/f/x.css", body: "p{}"})
+	if w := publish(h, "alpha", "deep", "application/x-tar", deep); w.Code != http.StatusRequestEntityTooLarge || !strings.Contains(w.Body.String(), "folders") {
+		t.Fatalf("one file six folders deep with a cap of 5: %d %s", w.Code, w.Body.String())
+	}
+	for _, name := range []string{"dirs", "deep"} {
+		if _, err := os.Stat(filepath.Join(notesOf(pagesDir), "alpha", handlePath(name))); !os.IsNotExist(err) {
+			t.Fatalf("%s: a refused upload left a handle", name)
+		}
+	}
+
+	// Within the cap: folders named by entries and by file paths, shared
+	// parents counted once.
+	ok := makeTar(t, index, tarEntry{name: "css/", typeflag: tar.TypeDir}, tarEntry{name: "css/a.css", body: "p{}"},
+		tarEntry{name: "img/icons/x.svg", body: "<svg/>"}, tarEntry{name: "img/y.svg", body: "<svg/>"})
+	if w := publish(h, "alpha", "ok", "application/x-tar", ok); w.Code != http.StatusOK {
+		t.Fatalf("three folders with a cap of 5: %d %s", w.Code, w.Body.String())
 	}
 }
 
