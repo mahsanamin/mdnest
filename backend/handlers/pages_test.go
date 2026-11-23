@@ -183,6 +183,14 @@ func TestPages_PublishListViewText(t *testing.T) {
 			t.Errorf("%s = %q, want %q", k, got, v)
 		}
 	}
+	// mdnest's own origin never allows cross-origin reads of page files:
+	// that header belongs to the pages listener alone.
+	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("static view sends Access-Control-Allow-Origin %q on the main origin", got)
+	}
+	if got := w.Header().Get("Access-Control-Allow-Credentials"); got != "" {
+		t.Fatalf("static view sends Access-Control-Allow-Credentials %q", got)
+	}
 	if w = view(h, u+"img/chart.png"); w.Code != http.StatusOK || w.Body.String() != "PNGDATA" {
 		t.Fatalf("image: %d %q", w.Code, w.Body.String())
 	}
