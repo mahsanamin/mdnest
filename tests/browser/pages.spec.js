@@ -104,6 +104,17 @@ async function login(page) {
   await expect(page.locator('.ns-label, .ns-select')).toBeVisible({ timeout: 20_000 });
 }
 
+// The toolbar's Pages button opens the Pages view (cards); a card's Open
+// shows the HTML page in the viewer.
+async function openPagesView(page) {
+  await page.locator('[data-testid=toolbar-pages]').click();
+  await expect(page.locator('[data-testid=pages-view]')).toBeVisible({ timeout: 15_000 });
+}
+async function openFromPagesView(page, path) {
+  await openPagesView(page);
+  await page.locator(`[data-testid="page-card-${path}"] .page-card-open`).click();
+}
+
 async function openProbe(page) {
   await login(page);
   // The token this browser holds is the one the probe must never see.
@@ -112,7 +123,7 @@ async function openProbe(page) {
     window.__reports = [];
     window.addEventListener('message', (e) => { if (e.data && e.data.probe) window.__reports.push(e.data); });
   });
-  await page.locator(`[data-testid="page-row-${PROBE}"]`).click();
+  await openFromPagesView(page, PROBE);
   const frameEl = page.locator('[data-testid=page-frame]');
   await expect(frameEl).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('.page-bar')).toContainText(`Probe ${run}`);
@@ -298,7 +309,7 @@ test('dragging a handle to another folder keeps the page open', async ({ page, r
   test.skip(MODE !== 'static', 'the same in both modes');
   await makeFolder(request, `${DIR}/moved-to`);
   await login(page);
-  await page.locator(`[data-testid="page-row-${OTHER}"]`).click();
+  await openFromPagesView(page, OTHER);
   await expect(page.frameLocator('[data-testid=page-frame]').locator('p')).toHaveText(OTHER_SECRET, { timeout: 15_000 });
   const handleRow = page.locator('.tree-row', { hasText: 'other.page.md' });
   const target = page.locator('.tree-row', { hasText: 'moved-to' });
@@ -318,15 +329,82 @@ test('a page whose handle was removed outside mdnest is listed as unlinked for a
   // What git sync would do: the file goes away behind mdnest's back.
   unlinkSync(`${NOTES_DIR}/${NS}/${DIR}/orphan.page.md`);
   await login(page);
-  const row = page.locator('[data-testid=pages-unlinked]').getByText(`Orphan ${run}`);
-  await expect(row).toBeVisible({ timeout: 15_000 });
-  page.once('dialog', (d) => d.accept());
-  await page.locator('[data-testid=pages-unlinked] .pages-unlinked-row', { hasText: `Orphan ${run}` }).getByRole('button', { name: /Delete/ }).click();
-  await expect(row).toHaveCount(0, { timeout: 15_000 });
+  await openPagesView(page);
+  await page.locator('[data-testid=pages-unlinked-tab]').click();
+  const card = page.locator('[data-testid=pages-unlinked] .page-card', { hasText: `Orphan ${run}` });
+  await expect(card).toBeVisible({ timeout: 15_000 });
+  let asked = '';
+  page.once('dialog', (d) => { asked = d.message(); d.accept(); });
+  await card.getByRole('button', { name: /Delete/ }).click();
+  await expect(card).toHaveCount(0, { timeout: 15_000 });
+  expect(asked).toContain('cannot be undone');
   // A hand-written handle naming an id that does not exist: a clear 404 in the viewer.
   writeFileSync(`${NOTES_DIR}/${NS}/${DIR}/ghost.page.md`, '---\npage: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n---\n');
   await page.reload();
   await expect(page.locator('.ns-label, .ns-select')).toBeVisible({ timeout: 20_000 });
-  await page.locator(`[data-testid="page-row-${DIR}/ghost.page.md"]`).click();
+  await openFromPagesView(page, `${DIR}/ghost.page.md`);
   await expect(page.locator('[data-testid=page-error]')).toContainText('publish it again here', { timeout: 15_000 });
+});
+
+test('the Pages view: cards, description, search, sort, reveal in tree, and nothing in the left pane', async ({ page, request }) => {
+  test.skip(MODE !== 'static', 'the same in both modes');
+  const auth = { Authorization: `Bearer ${token}` };
+  const put = async (path, html) => {
+    const r = await request.put(`/api/pages?ns=${NS}&path=${encodeURIComponent(path)}`, { headers: { ...auth, 'Content-Type': 'text/html' }, data: html });
+    expect(r.status(), await r.text()).toBe(200);
+  };
+  await put(`${DIR}/cards/aardvark.page.md`, `<title>Aardvark ${run}</title><meta name="description" content="About aardvarks ${run}"><p>zebracrossing${run}</p>`);
+  // Published times have one-second resolution: make Zulu the newer one.
+  await new Promise((r) => setTimeout(r, 1100));
+  await put(`${DIR}/cards/deep/zulu.page.md`, `<title>Zulu ${run}</title><p>plain</p>`);
+  await login(page);
+  // Nothing of pages in the left pane any more.
+  await expect(page.locator('.sidebar [data-testid=pages-section], .sidebar .pages-list')).toHaveCount(0);
+  await openPagesView(page);
+  await expect(page.locator('.toolbar-path')).not.toContainText('.md');
+
+  const aard = page.locator(`[data-testid="page-card-${DIR}/cards/aardvark.page.md"]`);
+  const zulu = page.locator(`[data-testid="page-card-${DIR}/cards/deep/zulu.page.md"]`);
+  await expect(aard).toContainText(`Aardvark ${run}`);
+  await expect(aard.locator('.page-card-folder')).toHaveText(`${DIR}/cards/`);
+  await expect(aard.locator('[data-testid=page-card-desc]')).toHaveText(`About aardvarks ${run}`);
+  await expect(aard.locator('.page-card-meta')).toContainText('1 file');
+  await expect(zulu.locator('[data-testid=page-card-desc]')).toHaveCount(0);
+  await expect(page.locator('[data-testid=pages-view] iframe')).toHaveCount(0);
+
+  // Search runs over the stored text and the description.
+  await page.locator('[data-testid=pages-search]').fill(`zebracrossing${run}`);
+  await expect(zulu).toHaveCount(0, { timeout: 10_000 });
+  await expect(aard).toBeVisible();
+  await page.locator('[data-testid=pages-search]').fill(`about aardvarks ${run}`);
+  await expect(aard).toBeVisible({ timeout: 10_000 });
+  await page.locator('[data-testid=pages-search]').fill(run);
+  await expect(zulu).toBeVisible({ timeout: 10_000 });
+
+  // Sort by title: Aardvark before Zulu; newest first by default: Zulu first.
+  const titles = () => page.locator('.page-card-title').allTextContents();
+  const idx = async (t) => (await titles()).findIndex((x) => x.includes(t));
+  expect(await idx(`Zulu ${run}`)).toBeLessThan(await idx(`Aardvark ${run}`));
+  await page.locator('[data-testid=pages-sort]').selectOption('title');
+  expect(await idx(`Aardvark ${run}`)).toBeLessThan(await idx(`Zulu ${run}`));
+
+  // The target button reveals the handle in the tree, expanded and
+  // highlighted, without opening the page.
+  await zulu.locator('.page-card-locate').click();
+  const row = page.locator(`.tree-row[data-path="${DIR}/cards/deep/zulu.page.md"]`);
+  await expect(row).toBeVisible({ timeout: 10_000 });
+  await expect(row).toHaveClass(/reveal-flash/);
+  await expect(page.locator('[data-testid=pages-view]')).toBeVisible();
+  await expect(page.locator('[data-testid=page-view]')).toHaveCount(0);
+
+  // Open shows the viewer and leaves the Pages view.
+  await aard.locator('.page-card-open').click();
+  await expect(page.locator('[data-testid=pages-view]')).toHaveCount(0);
+  await expect(page.locator('.page-bar')).toContainText(`Aardvark ${run}`, { timeout: 10_000 });
+  await expect(page.frameLocator('[data-testid=page-frame]').locator('p')).toHaveText(`zebracrossing${run}`);
+  // Back to the Pages view, then opening a note from the tree closes it.
+  await openPagesView(page);
+  await page.locator(`.tree-row[data-path="${DIR}/cards/deep/zulu.page.md"]`).click();
+  await expect(page.locator('[data-testid=pages-view]')).toHaveCount(0);
+  await expect(page.locator('.page-bar')).toContainText(`Zulu ${run}`, { timeout: 10_000 });
 });

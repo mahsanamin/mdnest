@@ -30,6 +30,7 @@ test('pages off: no section, no chunk, no route', async ({ page, request }) => {
   await page.waitForTimeout(1500);
 
   await expect(page.locator('[data-testid=pages-section]')).toHaveCount(0);
+  await expect(page.locator('[data-testid=toolbar-pages]')).toHaveCount(0);
   await expect(page.getByText('Pages', { exact: true })).toHaveCount(0);
   expect(chunks, 'the pages chunk was requested with pages off').toEqual([]);
 

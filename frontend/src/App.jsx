@@ -12,7 +12,6 @@ import Editor from './components/Editor.jsx';
 import EditorErrorBoundary from './components/EditorErrorBoundary.jsx';
 import ChunkErrorBoundary from './components/ChunkErrorBoundary.jsx';
 import { loadWithRetry } from './lazyWithRetry.js';
-import { publishPage } from './api.js';
 import { createPresenceHold } from './presence-hold.js';
 // Live (rich) editor — Crepe-based since v3.10.0. Lazy-loaded so the
 // ~217 KB-gzipped chunk only downloads when the user actually opens
@@ -33,7 +32,7 @@ const ExcalidrawEditor = lazy(() => loadWithRetry(() => import('./components/Exc
 const ChatView = lazy(() => loadWithRetry(() => import('./components/ChatView.jsx')));
 // HTML pages (server: ENABLE_PAGES): the sidebar list and the framed viewer,
 // one chunk, never loaded when the server has pages off.
-const PagesList = lazy(() => loadWithRetry(() => import('./components/Pages.jsx')).then((m) => ({ default: m.PagesList })));
+const PagesView = lazy(() => loadWithRetry(() => import('./components/Pages.jsx')).then((m) => ({ default: m.PagesView })));
 const PageView = lazy(() => loadWithRetry(() => import('./components/Pages.jsx')).then((m) => ({ default: m.PageView })));
 // The two buttons that move a chat between full screen and the side panel.
 // Defined here, not in ChatView, so the chat chunk stays free of App's
@@ -314,7 +313,10 @@ function App() {
   // Bumped by the toolbar "reveal in tree" button; Sidebar watches it to expand
   // ancestors, scroll the active row into view, and flash it.
   const [revealNonce, setRevealNonce] = useState(0);
-  const revealInTree = useCallback(() => {
+  // What a reveal shows: a path from the Pages view, or the open note (null).
+  const [revealPath, setRevealPath] = useState(null);
+  const revealInTree = useCallback((path) => {
+    setRevealPath(typeof path === 'string' ? path : null);
     setSidebarVisible(true); // ensure the tree is on-screen (mobile overlay)
     setRevealNonce((n) => n + 1);
   }, []);
@@ -442,6 +444,10 @@ function App() {
   // the conversation shown in it ({ns, path} | null) — chats span namespaces,
   // so it is independent of the note open underneath.
   const [chatsOpen, setChatsOpen] = useState(false);
+  // The Pages view (toolbar "Pages", server: ENABLE_PAGES): every HTML page in
+  // the workspace as cards. A view like chats and the board: opening a note
+  // closes it.
+  const [pagesViewOpen, setPagesViewOpen] = useState(false);
   const [openChat, setOpenChat] = useState(null);
   // Chat mode is a place you visit and come back from. chatsReturnTo is the
   // view you came from ('editor' | 'board'), so the one Back button lands you
@@ -522,7 +528,8 @@ function App() {
   // HTML pages live in the tree as handle files (<name>.page.md). With pages
   // on, opening one shows the page in the sandboxed viewer instead of the
   // editor; with pages off it is an ordinary small note.
-  const pageHandleActive = pagesEnabled && !!currentPath && currentPath.endsWith('.page.md') && !chatsOpen && !showTaskBoard;
+  const pageHandleActive = pagesEnabled && !!currentPath && currentPath.endsWith('.page.md') && !chatsOpen && !showTaskBoard && !pagesViewOpen;
+  const pagesViewShown = pagesEnabled && pagesViewOpen && !!selectedNs;
 
   // "Basic" on a drawing shows the file's markdown source rather than the
   // canvas. Per-note and not persisted: a drawing should open as a drawing, so
@@ -1969,25 +1976,34 @@ function App() {
     }
     const dropped = { entries, files: Array.from(dt?.files || []) };
     const ns = selectedNs;
-    (async () => {
-      try {
-        const mod = await loadWithRetry(() => import('./pagesDrop.js'));
-        const plan = await mod.planDrop(dropped, { maxMB: appConfig?.pages?.maxMB || 20, maxFiles: appConfig?.pages?.maxFiles || 500 });
-        if (plan.kind === 'none') return;
-        if (plan.kind === 'error') { setNotice({ kind: 'error', text: plan.message }); return; }
-        const handle = (folder ? folder + '/' : '') + plan.name + '.page.md';
-        if (mod.treeHas(tree, handle) && !window.confirm(`Replace page ${plan.name}?`)) return;
-        const { body, contentType } = mod.pageBody(plan);
-        setNotice({ kind: 'running', text: `Publishing ${plan.name}...` });
-        await publishPage(ns, handle, body, contentType, (f) => setNotice({ kind: 'running', text: `Publishing ${plan.name}... ${Math.round(f * 100)}%` }));
-        setNotice({ kind: 'ok', text: `Published ${plan.name}` });
+    loadWithRetry(() => import('./pagesDrop.js'))
+      .then((mod) => mod.publishDrop({ ns, folder, dropped, tree, notice: setNotice, limits: { maxMB: appConfig?.pages?.maxMB || 20, maxFiles: appConfig?.pages?.maxFiles || 500 } }))
+      .then(async (handle) => {
+        if (!handle) return;
         await refreshTree(undefined, { broadcast: true });
         if (ns === selectedNs) openNote(handle);
-      } catch (e) {
-        setNotice({ kind: 'error', text: e.message || 'Publishing failed' });
-      }
-    })();
+      })
+      .catch((e) => setNotice({ kind: 'error', text: e.message || 'Publishing failed' }));
   }, [pagesEnabled, selectedNs, appConfig, tree, refreshTree, openNote]);
+
+  const setPagesActive = useCallback((on) => {
+    if (on) {
+      flushPendingSave(); // the editor is swapped out, as for chats and the board
+      setChatsOpen(false);
+      setShowTaskBoard(false);
+    }
+    setPagesViewOpen(on);
+  }, [flushPendingSave]);
+  useEffect(() => {
+    if (chatsOpen || showTaskBoard) setPagesViewOpen(false);
+  }, [chatsOpen, showTaskBoard]);
+  // Opening a note by any route (tree, link, search, history) leaves the view.
+  useEffect(() => { setPagesViewOpen(false); }, [currentPath]);
+  // With pages on, load the pages chunk up front: its stylesheet also holds
+  // the tree's page icon. With pages off it is never requested.
+  useEffect(() => {
+    if (pagesEnabled) loadWithRetry(() => import('./components/Pages.jsx')).catch(() => {});
+  }, [pagesEnabled]);
 
   const leaveChats = useCallback(() => {
     setChatsOpen(false);
@@ -2949,7 +2965,7 @@ function App() {
         // Opening a file hands the create-target back to that file's folder,
         // so it tracks where you actually are rather than the last folder
         // you happened to expand.
-        onSelect={(p) => { setPickedFolder(null); setChatsOpen(false); chatRedirectFor.current = `${selectedNs}/${p}`; chatRedirectDock.current = chatDocked || chatMode === 'pinned'; chatRedirectFrom.current = currentPath ? { ns: selectedNs, path: currentPath } : null; openNote(p); }}
+        onSelect={(p) => { setPickedFolder(null); setChatsOpen(false); setPagesViewOpen(false); chatRedirectFor.current = `${selectedNs}/${p}`; chatRedirectDock.current = chatDocked || chatMode === 'pinned'; chatRedirectFrom.current = currentPath ? { ns: selectedNs, path: currentPath } : null; openNote(p); }}
         currentPath={currentPath}
         namespaces={namespaces}
         selectedNs={selectedNs}
@@ -2983,22 +2999,11 @@ function App() {
         }
         onShowReleaseNotes={() => setShowReleaseNotes(true)}
         revealNonce={revealNonce}
+        revealPath={revealPath}
         width={sidebarWidth}
         onResize={setSidebarWidth}
         pageHandles={pagesEnabled}
         onDropFiles={pagesEnabled ? handleDropFiles : null}
-        pagesSection={pagesEnabled && selectedNs ? (
-          <ChunkErrorBoundary label="pages" resetKey={selectedNs}>
-            <Suspense fallback={null}>
-              <PagesList
-                ns={selectedNs}
-                currentPath={currentPath}
-                refreshKey={tree}
-                onOpen={(p) => { setPickedFolder(null); setChatsOpen(false); setShowTaskBoard(false); openNote(p); }}
-              />
-            </Suspense>
-          </ChunkErrorBoundary>
-        ) : null}
       />
       <div
         className="main"
@@ -3014,17 +3019,19 @@ function App() {
           // A page has its own bar (title, author, date): the toolbar stops
           // naming the note underneath it and offers nothing that acts on it.
           pageActive={pageHandleActive}
-          currentPath={currentPath}
+          pagesActive={pagesViewShown}
+          onSetPagesActive={pagesEnabled && selectedNs ? setPagesActive : null}
+          currentPath={pagesViewShown ? null : currentPath}
           onManageUsers={isAdmin && isMulti ? () => setShowAdminPanel(true) : null}
           theme={resolvedTheme}
           onToggleTheme={toggleTheme}
           onToggleSidebar={() => setSidebarVisible((v) => !v)}
           onRevealInTree={revealInTree}
           onChangePassword={() => setShowChangePassword(true)}
-          onRename={canWriteCurrent ? handleToolbarRename : null}
-          onDelete={canWriteCurrent ? handleToolbarDelete : null}
+          onRename={canWriteCurrent && !pagesViewShown ? handleToolbarRename : null}
+          onDelete={canWriteCurrent && !pagesViewShown ? handleToolbarDelete : null}
           viewMode={viewMode}
-          onViewModeChange={pageHandleActive ? null : (mode) => {
+          onViewModeChange={pageHandleActive || pagesViewShown ? null : (mode) => {
             chooseViewMode(mode);
             // Restore editor mode from user preference when switching to editor-only
             if (mode === 'editor') {
@@ -3054,7 +3061,7 @@ function App() {
           drawingSource={drawingSource}
           onDrawingSourceChange={setDrawingSource}
           boardActive={showTaskBoard}
-          onEditorModeChange={pageHandleActive ? null : (mode) => {
+          onEditorModeChange={pageHandleActive || pagesViewShown ? null : (mode) => {
             // Marp decks are locked to Basic — ignore attempts to switch to the
             // Live editor, which would reformat and break the slides.
             if ((marpActive || chatNoteActive) && mode === 'live') return;
@@ -3157,10 +3164,21 @@ function App() {
           </div>
         )}
         <div className="split-view" ref={splitViewRef}>
-          {currentPath && !chatsOpen && !showTaskBoard && !pageHandleActive && (
+          {currentPath && !chatsOpen && !showTaskBoard && !pageHandleActive && !pagesViewShown && (
             <HeadingLinks rootRef={splitViewRef} ns={selectedNs} path={currentPath} />
           )}
-          {pageHandleActive ? (
+          {pagesViewShown ? (
+            <ChunkErrorBoundary label="pages" resetKey={selectedNs} onDismiss={() => setPagesViewOpen(false)} dismissLabel="Close pages">
+            <Suspense fallback={<div className="editor-loading">Loading pages...</div>}>
+              <PagesView
+                key={selectedNs}
+                ns={selectedNs}
+                onOpen={(p) => { setPagesViewOpen(false); setPickedFolder(null); openNote(p); }}
+                onReveal={(p) => revealInTree(p)}
+              />
+            </Suspense>
+            </ChunkErrorBoundary>
+          ) : pageHandleActive ? (
             <ChunkErrorBoundary label="the page" resetKey={`${selectedNs}/${currentPath}`}>
             <Suspense fallback={<div className="editor-loading">Loading page...</div>}>
               <PageView ns={selectedNs} path={currentPath} pageId={(/^page:\s*(\S+)/m.exec(content || '') || [])[1] || ''} />

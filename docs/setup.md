@@ -625,6 +625,14 @@ nothing, as before.
 Publishing to the same handle again replaces the page; there is no version
 history.
 
+**Finding pages.** The **Pages** button in the top toolbar, next to Chats,
+opens the Pages view: a card for every HTML page in the workspace you can
+read, with its title, folder, author, date, file count and, when the page has
+a `<meta name="description">`, that description. Search covers the pages'
+text, titles and descriptions; sort by newest, title or folder. **Open** shows
+the page; the target button shows its handle in the tree without opening it.
+The cards are never live previews, so opening the view runs no page scripts.
+
 **Who can do what.** A page uses the permissions of the folder its handle is
 in, exactly like the notes next to it: read access on the handle lets you
 view the page, write access lets you publish over it or delete it. A grant on
@@ -640,8 +648,8 @@ A page belongs to the namespace it was published in. A handle that reaches
 another namespace some other way (copied by hand, or by git sync) shows
 "this page was published in another namespace: publish it again here". A
 handle removed outside mdnest (by git sync, for example) leaves its page
-"unlinked": writers of the whole namespace see unlinked pages at the bottom
-of the Pages section and can delete them. They are never deleted on their own.
+"unlinked": writers of the whole namespace see them on the Unlinked tab of the
+Pages view and can delete them. They are never deleted on their own.
 
 **Turning it on.** Set `ENABLE_PAGES=true` in `mdnest.conf` and run
 `./mdnest-server rebuild`. Page files are kept in the named volume

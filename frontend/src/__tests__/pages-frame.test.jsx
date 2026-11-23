@@ -11,13 +11,13 @@ import { createRoot } from 'react-dom/client';
 
 const pass = vi.hoisted(() => ({ value: null }));
 const list = vi.hoisted(() => ({ value: { pages: [] } }));
-vi.mock('../api.js', () => ({
+vi.mock('../pagesApi.js', () => ({
   listPages: vi.fn(() => Promise.resolve(list.value)),
   getPagePass: vi.fn(() => Promise.resolve(pass.value)),
   deleteUnlinkedPage: vi.fn(() => Promise.resolve()),
 }));
 
-const { PageView, PagesList } = await import('../components/Pages.jsx');
+const { PageView, PagesView } = await import('../components/Pages.jsx');
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 let host, root;
@@ -60,24 +60,68 @@ describe('PageView frame', () => {
   });
 });
 
-describe('PagesList', () => {
-  it('lists titles as text, never as HTML, and opens the handle path', async () => {
-    list.value = { pages: [{ path: 'Proj/q3.page.md', title: 'Q3 <b>report</b>', author: 'ana', publishedAt: '2026-11-20T10:00:00Z' }] };
-    const onOpen = vi.fn();
-    await act(async () => { root.render(<PagesList ns="alpha" onOpen={onOpen} />); });
-    const row = host.querySelector('[data-testid="page-row-Proj/q3.page.md"]');
-    expect(row.textContent).toBe('Q3 <b>report</b>');
-    expect(row.querySelector('b')).toBeNull();
-    await act(async () => { row.click(); });
-    expect(onOpen).toHaveBeenCalledWith('Proj/q3.page.md');
-    expect(host.querySelector('[data-testid=pages-unlinked]')).toBeNull();
+describe('PagesView', () => {
+  const page = (o) => ({ title: 'T', author: 'ana', publishedAt: '2026-11-20T10:00:00Z', files: 2, ...o });
+
+  it('one card per page: title as text, folder, author, date, file count, description only when there is one', async () => {
+    list.value = { pages: [
+      page({ path: 'MyTestProject/q3.page.md', title: 'Q3 <b>report</b>', description: 'Revenue by region' }),
+      page({ path: 'top.page.md', title: 'Top', description: '' }),
+    ] };
+    await act(async () => { root.render(<PagesView ns="alpha" onOpen={() => {}} onReveal={() => {}} />); });
+    const q3 = host.querySelector('[data-testid="page-card-MyTestProject/q3.page.md"]');
+    expect(q3.querySelector('.page-card-title').textContent).toBe('Q3 <b>report</b>');
+    expect(q3.querySelector('b')).toBeNull();
+    expect(q3.querySelector('.page-card-folder').textContent).toBe('MyTestProject/');
+    expect(q3.querySelector('[data-testid=page-card-desc]').textContent).toBe('Revenue by region');
+    expect(q3.querySelector('.page-card-meta').textContent).toContain('by ana');
+    expect(q3.querySelector('.page-card-meta').textContent).toContain('2 files');
+    const top = host.querySelector('[data-testid="page-card-top.page.md"]');
+    expect(top.querySelector('[data-testid=page-card-desc]')).toBeNull();
+    // No live previews: a card never holds a frame.
+    expect(host.querySelector('.pages-view iframe')).toBeNull();
   });
 
-  it('shows the unlinked list only when the server sends it (namespace-root writers)', async () => {
-    list.value = { pages: [], unlinked: [{ id: 'abcdefghijklmnopqrstuvwxyz234567', title: 'Orphan', publishedAt: '2026-11-20T10:00:00Z' }] };
-    await act(async () => { root.render(<PagesList ns="alpha" onOpen={() => {}} />); });
+  it('Open opens the handle; the target button reveals it without opening', async () => {
+    list.value = { pages: [page({ path: 'P/a.page.md' })] };
+    const onOpen = vi.fn();
+    const onReveal = vi.fn();
+    await act(async () => { root.render(<PagesView ns="alpha" onOpen={onOpen} onReveal={onReveal} />); });
+    await act(async () => { host.querySelector('.page-card-locate').click(); });
+    expect(onReveal).toHaveBeenCalledWith('P/a.page.md');
+    expect(onOpen).not.toHaveBeenCalled();
+    await act(async () => { host.querySelector('.page-card-open').click(); });
+    expect(onOpen).toHaveBeenCalledWith('P/a.page.md');
+  });
+
+  it('sorts by newest, title or folder', async () => {
+    list.value = { pages: [
+      page({ path: 'b/x.page.md', title: 'Alpha', publishedAt: '2026-01-01T00:00:00Z' }),
+      page({ path: 'a/y.page.md', title: 'Charlie', publishedAt: '2026-03-01T00:00:00Z' }),
+      page({ path: 'c/z.page.md', title: 'bravo', publishedAt: '2026-02-01T00:00:00Z' }),
+    ] };
+    await act(async () => { root.render(<PagesView ns="alpha" onOpen={() => {}} onReveal={() => {}} />); });
+    const order = () => [...host.querySelectorAll('.page-card-title')].map((e) => e.textContent);
+    expect(order()).toEqual(['Charlie', 'bravo', 'Alpha']);
+    const sel = host.querySelector('[data-testid=pages-sort]');
+    const pick = async (v) => { await act(async () => { sel.value = v; sel.dispatchEvent(new Event('change', { bubbles: true })); }); };
+    await pick('title');
+    expect(order()).toEqual(['Alpha', 'bravo', 'Charlie']);
+    await pick('folder');
+    expect(order()).toEqual(['Charlie', 'Alpha', 'bravo']);
+  });
+
+  it('the Unlinked tab shows only when the server sends the list (namespace-root writers)', async () => {
+    list.value = { pages: [] };
+    await act(async () => { root.render(<PagesView ns="alpha" onOpen={() => {}} onReveal={() => {}} />); });
+    expect(host.querySelector('[data-testid=pages-unlinked-tab]')).toBeNull();
+    await act(async () => { root.unmount(); });
+    root = createRoot(host);
+    list.value = { pages: [], unlinked: [{ id: 'abcdefghijklmnopqrstuvwxyz234567', title: 'Orphan', files: 1, publishedAt: '2026-11-20T10:00:00Z' }] };
+    await act(async () => { root.render(<PagesView ns="alpha" onOpen={() => {}} onReveal={() => {}} />); });
+    await act(async () => { host.querySelector('[data-testid=pages-unlinked-tab]').click(); });
     const u = host.querySelector('[data-testid=pages-unlinked]');
     expect(u.textContent).toContain('Orphan');
-    expect(u.querySelector('button').textContent).toBe('Delete');
+    expect(u.querySelector('.page-card-delete').textContent).toBe('Delete');
   });
 });

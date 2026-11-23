@@ -106,9 +106,9 @@ function Sidebar({
   updateAvailableVersion,
   onShowReleaseNotes,
   revealNonce,
-  // The HTML pages list (a lazy chunk), shown under the notes tree only when
-  // the server has pages on. Null otherwise.
-  pagesSection,
+  // What a reveal shows: this path, or the open note when null (the Pages
+  // view reveals a page's handle without opening it).
+  revealPath,
   // Pages on: handle files get a page icon, and desktop files dropped on a
   // folder go to onDropFiles(folder, dataTransfer). Both off otherwise.
   pageHandles,
@@ -252,12 +252,15 @@ function Sidebar({
   }, [currentPath]);
 
   // Reveal-in-tree: the toolbar's "locate" button bumps `revealNonce`. Expand
-  // the open file's ancestor folders (in case they were collapsed), then scroll
+  // the target's ancestor folders (in case they were collapsed), then scroll
   // its row into view and briefly flash it — so the user can jump straight to
-  // the current file when the tree is scrolled away or out of sync.
+  // the current file when the tree is scrolled away or out of sync. The
+  // target is revealPath when set (a page's handle, from the Pages view),
+  // otherwise the open note.
   useEffect(() => {
-    if (!revealNonce || !currentPath) return;
-    const parts = currentPath.split('/');
+    const target = revealPath || currentPath;
+    if (!revealNonce || !target) return;
+    const parts = target.split('/');
     if (parts.length >= 2) {
       const ancestors = [];
       for (let i = 1; i < parts.length; i++) ancestors.push(parts.slice(0, i).join('/'));
@@ -270,7 +273,8 @@ function Sidebar({
     }
     // Let the (possibly newly-expanded) rows render before scrolling to the active one.
     const t = setTimeout(() => {
-      const el = treeAreaRef.current?.querySelector('.tree-row.active');
+      const rows = treeAreaRef.current?.querySelectorAll('.tree-row[data-path]') || [];
+      const el = Array.from(rows).find((r) => r.dataset.path === target);
       if (!el) return;
       el.scrollIntoView({ block: 'center', behavior: 'smooth' });
       el.classList.add('reveal-flash');
@@ -636,7 +640,6 @@ function Sidebar({
             <div className="sidebar-tree-refreshing" aria-hidden="true" />
           )}
         </div>
-        {pagesSection}
         {(userInfo || onLogout) && (
           <UserFooter userInfo={userInfo} onLogout={onLogout} onAdminPanel={onAdminPanel} />
         )}

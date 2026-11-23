@@ -168,6 +168,7 @@ function TreeNode({ node, onSelect, currentPath, depth, onContextMenu, onDrop, e
         // per breakpoint (desktop: 0.75rem/level, mobile: 0.4rem/level).
         // See .tree-row in App.css.
         style={{ '--tree-depth': depth }}
+        data-path={node.path}
         onClick={handleClick}
         onContextMenu={handleRightClick}
         onTouchStart={handleTouchStart}

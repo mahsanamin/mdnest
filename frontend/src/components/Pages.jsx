@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { listPages, getPagePass, deleteUnlinkedPage } from '../api.js';
+import { listPages, getPagePass, deleteUnlinkedPage } from '../pagesApi.js';
 import './Pages.css';
 
 // HTML pages (server: ENABLE_PAGES), loaded as its own chunk only when the
@@ -20,83 +20,136 @@ function formatDate(iso) {
 
 const handleName = (p) => p.split('/').pop().replace(/\.page\.md$/, '');
 
-// The "Pages" section under the notes tree: every page handle in the
-// namespace the user can read, and, for writers of the namespace root, the
-// pages no handle points to any more.
-export function PagesList({ ns, currentPath, onOpen, refreshKey }) {
+const folderOf = (p) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/') + 1) : '');
+
+const SORTS = {
+  newest: (a, b) => (b.publishedAt || '').localeCompare(a.publishedAt || '') || a.path.localeCompare(b.path),
+  title: (a, b) => (a.title || handleName(a.path)).localeCompare(b.title || handleName(b.path), undefined, { sensitivity: 'base' }),
+  folder: (a, b) => folderOf(a.path).localeCompare(folderOf(b.path), undefined, { sensitivity: 'base' }) || (a.title || '').localeCompare(b.title || ''),
+};
+
+const LOCATE_ICON = (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <circle cx="12" cy="12" r="7" />
+    <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" />
+    <line x1="12" y1="2" x2="12" y2="5" />
+    <line x1="12" y1="19" x2="12" y2="22" />
+    <line x1="2" y1="12" x2="5" y2="12" />
+    <line x1="19" y1="12" x2="22" y2="12" />
+  </svg>
+);
+
+// The Pages view (toolbar "Pages" button): a card for every page in the
+// namespace the user can read. No live previews on purpose: opening this
+// view never runs a page's scripts. Writers of the namespace root also get an
+// Unlinked tab, for pages whose handle was removed outside mdnest.
+export function PagesView({ ns, onOpen, onReveal }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
-  const [open, setOpen] = useState(true);
+  const [query, setQuery] = useState('');
+  const [sort, setSort] = useState('newest');
+  const [tab, setTab] = useState('pages');
 
-  const load = useCallback(() => {
+  const load = useCallback((q) => {
     if (!ns) return;
     setError('');
-    listPages(ns)
+    listPages(ns, q)
       .then(setData)
-      .catch((e) => { setData({ pages: [] }); setError(e.status === 403 ? '' : (e.message || 'Failed to load pages')); });
+      .catch((e) => { setData({ pages: [] }); setError(e.message || 'Failed to load pages'); });
   }, [ns]);
 
-  useEffect(() => { load(); }, [load, refreshKey]);
+  // The search runs on the server, over the stored text, title and
+  // description; a short pause keeps it from running on every key.
+  useEffect(() => {
+    const q = query.trim();
+    if (!q) { load(''); return undefined; }
+    const t = setTimeout(() => load(q), 250);
+    return () => clearTimeout(t);
+  }, [load, query]);
 
   const removeUnlinked = async (p) => {
     if (!window.confirm(`Delete the unlinked page "${p.title || p.id}"? No handle points to it, and this cannot be undone.`)) return;
     try {
       await deleteUnlinkedPage(ns, p.id);
-      load();
+      load(query.trim());
     } catch (e) {
       window.alert(e.message);
     }
   };
 
-  if (!ns) return null;
-  const pages = data?.pages || [];
-  const unlinked = data?.unlinked || [];
+  const pages = [...(data?.pages || [])].sort(SORTS[sort]);
+  const unlinked = data?.unlinked;
+  const showUnlinked = tab === 'unlinked' && Array.isArray(unlinked);
   return (
-    <div className="pages-section" data-testid="pages-section">
-      <div className="pages-section-header">
-        <button type="button" className="pages-section-toggle" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
-          <span className={`tree-arrow${open ? ' expanded' : ''}`} aria-hidden="true">▸</span>
-          Pages
-          {pages.length > 0 && <span className="pages-count">{pages.length}</span>}
-        </button>
-        <button type="button" className="pages-refresh" onClick={load} title="Refresh pages" aria-label="Refresh pages">↻</button>
-      </div>
-      {open && (
-        <div className="pages-list">
-          {data === null && <div className="pages-empty">Loading…</div>}
-          {error && <div className="pages-empty">{error}</div>}
-          {data && !error && pages.length === 0 && <div className="pages-empty">No pages yet</div>}
-          {pages.map((p) => (
-            <button
-              type="button"
-              key={p.path}
-              className={`pages-row${p.path === currentPath ? ' active' : ''}${p.missing ? ' missing' : ''}`}
-              onClick={() => onOpen(p.path)}
-              title={`${p.title || handleName(p.path)}\n${p.path}${p.author ? `\nby ${p.author}` : ''}`}
-              data-testid={`page-row-${p.path}`}
-            >
-              <span className="tree-icon-svg page" aria-hidden="true" />
-              <span className="pages-row-title">{p.title || handleName(p.path)}</span>
+    <div className="pages-view" data-testid="pages-view">
+      <div className="pages-view-head">
+        <div className="pages-view-tabs" role="tablist">
+          <button type="button" role="tab" aria-selected={!showUnlinked} className={!showUnlinked ? 'active' : ''} onClick={() => setTab('pages')}>
+            Pages{data ? ` (${pages.length})` : ''}
+          </button>
+          {Array.isArray(unlinked) && (
+            <button type="button" role="tab" aria-selected={showUnlinked} className={showUnlinked ? 'active' : ''} onClick={() => setTab('unlinked')} data-testid="pages-unlinked-tab"
+              title="Pages whose handle file was removed outside mdnest (for example by git sync). Only writers of the whole namespace see this.">
+              Unlinked ({unlinked.length})
             </button>
-          ))}
-          {unlinked.length > 0 && (
-            <div className="pages-unlinked" data-testid="pages-unlinked">
-              <div className="pages-unlinked-label" title="Pages whose handle file was removed outside mdnest (for example by git sync). Only writers of the whole namespace see this list.">Unlinked</div>
-              {unlinked.map((p) => (
-                <div key={p.id} className="pages-unlinked-row" data-testid={`unlinked-${p.id}`}>
-                  <span className="pages-row-title" title={`${p.title}${p.author ? ` by ${p.author}` : ''}, ${formatDate(p.publishedAt)}`}>{p.title || p.id}</span>
-                  <button type="button" className="pages-unlinked-delete" onClick={() => removeUnlinked(p)} aria-label={`Delete unlinked page ${p.title || p.id}`}>Delete</button>
-                </div>
-              ))}
-            </div>
           )}
+        </div>
+        {!showUnlinked && (
+          <div className="pages-view-tools">
+            <input type="search" className="pages-view-search" placeholder="Search pages" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Search pages" data-testid="pages-search" />
+            <select className="pages-view-sort" value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort pages" data-testid="pages-sort">
+              <option value="newest">Newest</option>
+              <option value="title">Title</option>
+              <option value="folder">Folder</option>
+            </select>
+          </div>
+        )}
+      </div>
+      {error && <div className="pages-view-empty">{error}</div>}
+      {data === null && <div className="pages-view-empty">Loading...</div>}
+      {!showUnlinked && data && !error && pages.length === 0 && (
+        <div className="pages-view-empty">{query ? 'No pages match.' : 'No pages yet. Drop an .html file on a folder, or use mdnest page publish.'}</div>
+      )}
+      {!showUnlinked && (
+        <div className="pages-grid">
+          {pages.map((p) => (
+            <div key={p.path} className={`page-card${p.missing ? ' missing' : ''}`} data-testid={`page-card-${p.path}`}>
+              <div className="page-card-title">
+                <span className="tree-icon-svg page" aria-hidden="true" />
+                <span>{p.title || handleName(p.path)}</span>
+              </div>
+              <div className="page-card-folder" title={p.path}>{folderOf(p.path) || '/'}</div>
+              {p.description && <div className="page-card-desc" data-testid="page-card-desc">{p.description}</div>}
+              <div className="page-card-meta">
+                {p.missing ? 'Not in this namespace' : [p.author && `by ${p.author}`, formatDate(p.publishedAt), `${p.files} file${p.files === 1 ? '' : 's'}`].filter(Boolean).join(' · ')}
+              </div>
+              <div className="page-card-actions">
+                <button type="button" className="page-card-open" onClick={() => onOpen(p.path)}>Open</button>
+                <button type="button" className="page-card-locate" onClick={() => onReveal(p.path)} title="Show in tree" aria-label={`Show ${p.path} in the tree`}>{LOCATE_ICON}</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {showUnlinked && (
+        <div className="pages-grid" data-testid="pages-unlinked">
+          {unlinked.length === 0 && <div className="pages-view-empty">No unlinked pages.</div>}
+          {unlinked.map((p) => (
+            <div key={p.id} className="page-card unlinked" data-testid={`unlinked-${p.id}`}>
+              <div className="page-card-title"><span>{p.title || p.id}</span></div>
+              {p.description && <div className="page-card-desc">{p.description}</div>}
+              <div className="page-card-meta">{[p.author && `by ${p.author}`, formatDate(p.publishedAt), `${p.files} file${p.files === 1 ? '' : 's'}`].filter(Boolean).join(' · ')}</div>
+              <div className="page-card-actions">
+                <button type="button" className="page-card-delete" onClick={() => removeUnlinked(p)} aria-label={`Delete unlinked page ${p.title || p.id}`}>Delete</button>
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>
   );
 }
 
-// The page a handle names, full size, under a bar that says what it is.
 // Asks for a fresh frame URL when the handle path changes (a move) and when
 // the handle names another page id (a republish, which always makes a new id;
 // pageId comes from the open handle's text).

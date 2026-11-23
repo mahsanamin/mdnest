@@ -1,107 +1,5 @@
-/* HTML pages: the sidebar list and the framed viewer. Loaded with the pages
+/* HTML pages: the Pages view (cards) and the framed viewer. Loaded with the pages
    chunk only. Colours come from theme.css tokens. */
-
-.pages-section {
-  border-top: 1px solid var(--border-subtle);
-  padding: 0.25rem 0;
-  max-height: 40%;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.pages-section-header {
-  display: flex;
-  align-items: center;
-  padding: 0 0.5rem;
-}
-
-.pages-section-toggle {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  background: none;
-  border: none;
-  color: var(--text-secondary);
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: 0.35rem 0;
-  cursor: pointer;
-  text-align: left;
-}
-
-.pages-section-toggle .tree-arrow {
-  display: inline-block;
-  transition: transform 0.15s;
-}
-
-.pages-section-toggle .tree-arrow.expanded {
-  transform: rotate(90deg);
-}
-
-.pages-count {
-  color: var(--text-faint);
-  font-weight: 400;
-}
-
-.pages-refresh {
-  background: none;
-  border: none;
-  color: var(--text-faint);
-  cursor: pointer;
-  font-size: 0.85rem;
-  padding: 0.2rem 0.35rem;
-  border-radius: var(--radius-sm);
-}
-
-.pages-refresh:hover {
-  color: var(--text);
-  background: var(--surface-tint);
-}
-
-.pages-list {
-  overflow-y: auto;
-  min-height: 0;
-}
-
-.pages-empty {
-  padding: 0.35rem 1rem;
-  color: var(--text-muted);
-  font-size: 0.8rem;
-}
-
-.pages-row {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  width: 100%;
-  background: none;
-  border: none;
-  color: var(--text);
-  font-size: 0.85rem;
-  padding: 0.3rem 1rem;
-  cursor: pointer;
-  text-align: left;
-}
-
-.pages-row:hover {
-  background: var(--surface-tint);
-}
-
-.pages-row.active {
-  background: var(--accent-wash);
-  color: var(--accent);
-}
-
-.pages-row-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-}
 
 .page-view {
   flex: 1;
@@ -174,50 +72,174 @@
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fab387' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='18' height='18' rx='2'/%3E%3Cline x1='3' y1='8' x2='21' y2='8'/%3E%3Ccircle cx='6' cy='5.5' r='0.6'/%3E%3Ccircle cx='8.5' cy='5.5' r='0.6'/%3E%3Cline x1='7' y1='13' x2='17' y2='13'/%3E%3Cline x1='7' y1='17' x2='13' y2='17'/%3E%3C/svg%3E");
 }
 
-.pages-row.missing .pages-row-title {
-  text-decoration: line-through;
-  color: var(--text-muted);
+
+
+
+
+
+
+
+/* The Pages view: a grid of cards, no live previews. */
+.pages-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 1rem 1.25rem;
+  gap: 0.75rem;
 }
 
-.pages-unlinked {
-  margin-top: 0.25rem;
-  border-top: 1px dashed var(--border-subtle);
-  padding-top: 0.25rem;
-}
-
-.pages-unlinked-label {
-  padding: 0.2rem 1rem;
-  color: var(--text-faint);
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.pages-unlinked-row {
+.pages-view-head {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
   gap: 0.5rem;
-  padding: 0.2rem 0.5rem 0.2rem 1rem;
-  font-size: 0.8rem;
-  color: var(--text-muted);
-  min-width: 0;
 }
 
-.pages-unlinked-row .pages-row-title {
-  flex: 1;
+.pages-view-tabs {
+  display: flex;
+  gap: 0.25rem;
 }
 
-.pages-unlinked-delete {
-  flex: none;
+.pages-view-tabs button {
   background: none;
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  color: var(--danger);
-  font-size: 0.75rem;
-  padding: 0.05rem 0.4rem;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  font-weight: 600;
+  padding: 0.3rem 0.6rem;
   cursor: pointer;
 }
 
-.pages-unlinked-delete:hover {
-  background: var(--danger-wash);
+.pages-view-tabs button.active {
+  border-color: var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.pages-view-tools {
+  display: flex;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.pages-view-search,
+.pages-view-sort {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 0.85rem;
+  padding: 0.3rem 0.5rem;
+  min-width: 0;
+}
+
+.pages-view-search {
+  width: 16rem;
+  max-width: 100%;
+}
+
+.pages-view-empty {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  padding: 1rem 0;
+}
+
+.pages-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: 0.75rem;
+}
+
+.page-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 0.75rem;
+  min-width: 0;
+}
+
+.page-card.missing,
+.page-card.unlinked {
+  border-style: dashed;
+}
+
+.page-card-title {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 600;
+  color: var(--text);
+  min-width: 0;
+}
+
+.page-card-title span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.page-card-folder {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.page-card-desc {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.page-card-meta {
+  color: var(--text-faint);
+  font-size: 0.75rem;
+}
+
+.page-card-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: auto;
+  padding-top: 0.25rem;
+}
+
+.page-card-actions button {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 0.8rem;
+  padding: 0.2rem 0.6rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+}
+
+.page-card-actions button:hover {
+  background: var(--surface-tint);
+}
+
+.page-card-open {
+  border-color: var(--accent) !important;
+  color: var(--accent) !important;
+}
+
+.page-card-delete {
+  color: var(--danger) !important;
+}
+
+.page-card-delete:hover {
+  background: var(--danger-wash) !important;
 }

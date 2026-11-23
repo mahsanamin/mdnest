@@ -1,3 +1,5 @@
+import { publishPage } from './pagesApi.js';
+
 // Drop HTML from the desktop onto a tree folder to publish it as a page
 // (server: ENABLE_PAGES). Loaded on the first such drop, never otherwise.
 //
@@ -200,4 +202,26 @@ export function treeHas(tree, path) {
 export function pageBody(plan) {
   if (plan.files.length === 1) return { body: plan.files[0].file, contentType: 'text/html' };
   return { body: buildTar(plan.files), contentType: 'application/x-tar' };
+}
+
+// publishDrop runs a drop from start to end: plan it, ask before replacing an
+// existing page, upload with progress. notice({ kind, text }) reports to the
+// app's notice bar. Returns the new handle's path, or null when nothing was
+// published (not HTML, refused, or the user said no).
+export async function publishDrop({ ns, folder, dropped, limits, tree, notice }) {
+  const plan = await planDrop(dropped, limits);
+  if (plan.kind === 'none') return null;
+  if (plan.kind === 'error') { notice({ kind: 'error', text: plan.message }); return null; }
+  const handle = (folder ? folder + '/' : '') + plan.name + '.page.md';
+  if (treeHas(tree, handle) && !window.confirm(`Replace page ${plan.name}?`)) return null;
+  const { body, contentType } = pageBody(plan);
+  notice({ kind: 'running', text: `Publishing ${plan.name}...` });
+  try {
+    await publishPage(ns, handle, body, contentType, (f) => notice({ kind: 'running', text: `Publishing ${plan.name}... ${Math.round(f * 100)}%` }));
+  } catch (e) {
+    notice({ kind: 'error', text: e.message || 'Publishing failed' });
+    return null;
+  }
+  notice({ kind: 'ok', text: `Published ${plan.name}` });
+  return handle;
 }
