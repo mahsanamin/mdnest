@@ -515,6 +515,14 @@ func TestPages_ScriptModeHeaders(t *testing.T) {
 			if resp.Header.Get("Referrer-Policy") != "no-referrer" || resp.Header.Get("X-Content-Type-Options") != "nosniff" {
 				t.Error("missing safety headers")
 			}
+			// The page's own fetch() comes from an opaque origin: without this
+			// a dashboard cannot load its own data file.
+			if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "*" {
+				t.Errorf("Access-Control-Allow-Origin = %q, want *", got)
+			}
+			if resp.Header.Get("Access-Control-Allow-Credentials") != "" {
+				t.Error("pages must never allow credentials")
+			}
 			// The pages origin serves pages and nothing else.
 			for _, p := range []string{"/api/pages?ns=alpha", "/api/config", "/"} {
 				resp, _ := http.Get(srv.URL + p)

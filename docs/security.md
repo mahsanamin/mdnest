@@ -566,6 +566,10 @@ serve page files in this mode. Each response carries:
   `allow-forms`. The page cannot read mdnest's `localStorage`, cannot call the
   API as the viewer (it has no token, and auth is a header, not a cookie),
   and cannot navigate the window around it.
+- `Access-Control-Allow-Origin: *`, without credentials. A sandboxed page has
+  an opaque origin, so even its own `fetch('data.json')` is cross-origin and
+  would be blocked. This exposes nothing extra: no cookie or login is
+  involved, and the pass in the URL is the only key.
 
 The backend refuses a `PAGES_ORIGIN` with the same scheme, host and port as
 `FRONTEND_ORIGIN`: it logs an error and stays in static mode, and `setup.sh`

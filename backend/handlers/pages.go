@@ -915,6 +915,12 @@ func (h *PagesHandler) HandleStaticView(w http.ResponseWriter, r *http.Request) 
 // only, and nothing else. No API route is reachable through it.
 func (h *PagesHandler) SiteHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The page runs in an opaque origin (sandbox without
+		// allow-same-origin), so even its own fetch('data.json') is a
+		// cross-origin request and the browser blocks it without this. It
+		// exposes nothing: no cookie or login is involved, and the pass in
+		// the URL is the only key, held by whoever already has the page.
+		w.Header().Set("Access-Control-Allow-Origin", "*")
 		h.serveFromPass(w, r, strings.TrimPrefix(r.URL.Path, "/"), "/", h.scriptCSP())
 	})
 }
