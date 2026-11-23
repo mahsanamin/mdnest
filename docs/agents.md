@@ -137,21 +137,36 @@ A chat is a note that people and agents post to. It is on by default
 
 ## Publish an HTML page
 
-When the server has pages on (`ENABLE_PAGES`), you can publish an HTML report
-or dashboard for people to view in mdnest. Use it only when a person asks for
-a page, a report in HTML, or a dashboard.
+When the server has HTML pages on (`ENABLE_PAGES`), you can publish an HTML
+page, a report or dashboard written in HTML, for people to view in mdnest.
+
+When to make one:
+
+- The default is always a Markdown note. Publish an HTML page only when the
+  person explicitly asks for one, with words like "HTML page", "web page",
+  "dashboard as HTML" or "publish this as a page".
+- "Write a report", "save this", "document this" and "make notes" all mean a
+  Markdown note.
+- Never turn an existing note into an HTML page on your own, and never
+  publish both a note and an HTML page for the same content unless asked.
+- If you are unsure, write the note and offer the HTML page in one line.
+- Keep HTML pages small and self-contained, and put them in the project
+  folder they belong to.
+
+How:
 
 - `mdnest page publish @alias/namespace/folder/name ./folder` publishes a
   folder with an `index.html` (CSS, scripts, images and data beside it,
-  linked with relative paths). A single `.html` file works too. The page
-  shows in the notes tree as `folder/name.page.md`, so put it in the project
-  folder it belongs to. Publishing to the same path replaces the page.
-- `mdnest read` on a `*.page.md` file prints the file, then the page's text.
-  Read that to learn what a page says.
-- `mdnest page list @alias/namespace` lists pages; add a word to search them.
-- Scripts in a page run only on servers set up for it (script mode). Without
-  that, the page shows with scripts off, so put the important numbers in the
-  HTML itself, not only in a chart a script draws.
+  linked with relative paths). A single `.html` file works too. The HTML page
+  shows in the notes tree as `folder/name.page.md`. Publishing to the same
+  path replaces it.
+- `mdnest read` on a `*.page.md` file prints the file, then the HTML page's
+  text. Read that to learn what an HTML page says.
+- `mdnest page list @alias/namespace` lists HTML pages; add a word to search
+  them.
+- Scripts in an HTML page run only on servers set up for it (script mode).
+  Without that, it shows with scripts off, so put the important numbers in
+  the HTML itself, not only in a chart a script draws.
 
 ## More help
 

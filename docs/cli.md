@@ -368,10 +368,12 @@ mdnest page delete  @work/engineering/Reports/q3-report
 mdnest read         @work/engineering/Reports/q3-report.page.md           # the handle, then the page text
 ```
 
-A page is a view-only HTML report or dashboard. It shows in the notes tree as
-a small handle file, here `Reports/q3-report.page.md` (the `.page.md` is added
-when you leave it out); its HTML and other files are kept apart from the
-notes. A folder is sent as a gzipped tar made by the system `tar`; publishing
+An HTML page is a view-only report or dashboard written in HTML. It shows in
+the notes tree as a small handle file, here `Reports/q3-report.page.md` (the
+`.page.md` is added when you leave it out); its HTML and other files are kept
+apart from the notes. A Markdown note stays the default for everything else:
+AI agents publish an HTML page only when someone explicitly asks for one (see
+`mdnest docs agents`). A folder is sent as a gzipped tar made by the system `tar`; publishing
 to the same handle replaces the page. Publishing and deleting need write
 access on the handle's folder, listing and reading need read access, as for
 the notes beside it.

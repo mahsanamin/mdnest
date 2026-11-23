@@ -794,7 +794,7 @@ server.tool(
 
 server.tool(
   "read_note",
-  "Read a note's content. On long notes prefer outline:true first (headings with line numbers), then section or offset/limit to load only the part you need.",
+  "Read a note's content. On long notes prefer outline:true first (headings with line numbers), then section or offset/limit to load only the part you need. A *.page.md file is the handle of an HTML page: reading it returns the handle, then the HTML page's text under a marker line.",
   {
     namespace: z.string().describe("Namespace name"),
     path: z.string().describe("Path to the note within the namespace"),
@@ -1561,7 +1561,7 @@ async function pageTextSuffix(namespace, path) {
 
 if (features.pages) server.tool(
   "publish_page",
-  "Publish an HTML page (a report or dashboard) for people to view in mdnest. It shows in the notes tree as <path>.page.md, in any folder; publishing to a path that already has a page replaces it. Pages are view only. Scripts run only when the server has a pages origin set up; otherwise the page shows without scripts.",
+  "Publish an HTML page (a report or dashboard in HTML) for people to view in mdnest. Only when the person explicitly asks for an HTML page; the default is always a Markdown note (write_note/create_note), and never publish both for the same content unless asked. It shows in the notes tree as <path>.page.md, in any folder; publishing to a path that already has an HTML page replaces it. Scripts run only when the server has a pages origin set up; otherwise it shows without scripts.",
   {
     namespace: z.string().describe("Namespace name"),
     path: handlePathSchema,
@@ -1597,7 +1597,7 @@ if (features.pages) server.tool(
 
 if (features.pages) server.tool(
   "list_pages",
-  "List the HTML pages in a namespace that you can read: each one's handle path, title, author and date. With query, only pages whose text contains every word.",
+  "List the HTML pages in a namespace that you can read: each one's handle path, title, author and date. With query, only HTML pages whose text contains every word.",
   {
     namespace: z.string().describe("Namespace name"),
     query: z.string().optional().describe("Search the pages' text"),
@@ -1618,7 +1618,7 @@ if (features.pages) server.tool(
 
 if (features.pages) server.tool(
   "read_page",
-  "Read an HTML page's details and its visible text (pulled out when it was published), by its handle path. Does not return the raw HTML. read_note on the handle gives the same text after the handle.",
+  "Read an HTML page's details and its visible text (pulled out when it was published), by its handle path (*.page.md). Does not return the raw HTML. read_note on the handle gives the same text after the handle.",
   {
     namespace: z.string().describe("Namespace name"),
     path: handlePathSchema,

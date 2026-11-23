@@ -375,16 +375,23 @@ these tools scaffold a valid file that the app then renders.
 
 ### HTML pages (optional, server: `ENABLE_PAGES`)
 
-These tools appear only when the server has pages on. A page is a view-only
-HTML report or dashboard. It shows in the notes tree as a small handle file,
-`<path>.page.md`, in any folder; its HTML and other files are kept apart from
-the notes. See [HTML pages](setup.md#html-pages-optional).
+These tools appear only when the server has HTML pages on. An HTML page is a
+view-only report or dashboard written in HTML. It shows in the notes tree as a
+small handle file, `<path>.page.md`, in any folder; its HTML and other files
+are kept apart from the notes. See [HTML pages](setup.md#html-pages-optional).
+
+The default is always a Markdown note: an agent should call `publish_page` only
+when the person explicitly asks for an HTML page ("HTML page", "web page",
+"dashboard as HTML", "publish this as a page"). "Write a report", "save this"
+or "make notes" mean a Markdown note. It never turns an existing note into an
+HTML page on its own, and never publishes both for the same content unless
+asked.
 
 | Tool | Purpose | Key inputs |
 |------|---------|------------|
-| `publish_page` | Publish a page at a handle path. Publishing to a path that already has a page replaces it. The files are sent inline: `html` becomes `index.html`, and `files` holds anything it links to with a relative path (`encoding: "base64"` for images). The tool never reads a path on the MCP host's disk. | `namespace`, `path` (e.g. `Reports/q3-report`; `.page.md` is added), `html`, `files?` (`[{ path, content, encoding? }]`) |
-| `list_pages` | The pages you can read in a namespace (handle path, title, author, date, size). With `query`, only pages whose text has every word. | `namespace`, `query?` |
-| `read_page` | A page's details and the visible text pulled out of its `index.html` at publish time. Never the raw HTML. | `namespace`, `path` |
+| `publish_page` | Publish an HTML page at a handle path, only on an explicit request. Publishing to a path that already has one replaces it. The files are sent inline: `html` becomes `index.html`, and `files` holds anything it links to with a relative path (`encoding: "base64"` for images). The tool never reads a path on the MCP host's disk. | `namespace`, `path` (e.g. `Reports/q3-report`; `.page.md` is added), `html`, `files?` (`[{ path, content, encoding? }]`) |
+| `list_pages` | The HTML pages you can read in a namespace (handle path, title, author, date, size). With `query`, only pages whose text has every word. | `namespace`, `query?` |
+| `read_page` | An HTML page's details and the visible text pulled out of its `index.html` at publish time. Never the raw HTML. | `namespace`, `path` |
 
 `read_note` on a `*.page.md` returns the handle as it is on disk, then a line
 `----- page text (extracted from the published HTML) -----` and the page's
