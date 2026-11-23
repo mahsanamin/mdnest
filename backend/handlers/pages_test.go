@@ -184,7 +184,13 @@ func TestPages_PublishListViewText(t *testing.T) {
 		}
 	}
 	// mdnest's own origin never allows cross-origin reads of page files:
-	// that header belongs to the pages listener alone.
+	// that header belongs to the pages listener alone. Served through the
+	// main server's CORS middleware, as in main.go.
+	mw := httptest.NewRecorder()
+	middleware.NewCORSMiddleware("https://notes.example.com").Wrap(http.HandlerFunc(h.HandleStaticView)).ServeHTTP(mw, httptest.NewRequest(http.MethodGet, u, nil))
+	if mw.Code != http.StatusOK || mw.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("static view through the CORS middleware: %d, Access-Control-Allow-Origin %q", mw.Code, mw.Header().Get("Access-Control-Allow-Origin"))
+	}
 	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "" {
 		t.Fatalf("static view sends Access-Control-Allow-Origin %q on the main origin", got)
 	}

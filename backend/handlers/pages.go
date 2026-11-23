@@ -908,6 +908,11 @@ func (h *PagesHandler) frameAncestors() string {
 // HandleStaticView serves GET /api/pages/view/<pass>/<file> on mdnest's own
 // origin (static mode only: the route is not registered in script mode).
 func (h *PagesHandler) HandleStaticView(w http.ResponseWriter, r *http.Request) {
+	// The main server's CORS middleware allows FRONTEND_ORIGIN on every
+	// response. Page files need no cross-origin reads at all on this origin.
+	for _, k := range []string{"Access-Control-Allow-Origin", "Access-Control-Allow-Methods", "Access-Control-Allow-Headers", "Access-Control-Max-Age"} {
+		w.Header().Del(k)
+	}
 	h.serveFromPass(w, r, strings.TrimPrefix(r.URL.Path, "/api/pages/view/"), "/api/pages/view/", h.staticCSP())
 }
 
