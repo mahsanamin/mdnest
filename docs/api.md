@@ -1506,11 +1506,10 @@ gzipped; `application/gzip` also accepted). The folder needs an `index.html` at
 its top level. Hidden files (`.DS_Store`) are skipped. The title comes from
 `<title>`, and the visible text of `index.html` is stored for search.
 
-Every publish stores the page under a new id and writes the handle. If the
-handle already named a page, every other handle in the namespace naming that
-old id that the caller can write is pointed at the new id too; handles the
-caller cannot write keep the old page, which is removed once no handle names
-it.
+Every publish stores the page under a new id and writes that one handle. No
+other handle is changed: a handle that named the old id (a copy, for
+example) keeps showing the old version, which is removed once no handle
+names it.
 
 **Response:** the page's details, as in the list.
 

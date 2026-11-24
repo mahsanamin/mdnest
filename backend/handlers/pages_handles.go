@@ -444,11 +444,15 @@ func (h *PagesHandler) handlePublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	// Every publish stores the content under a NEW id, then points the
-	// handles the publisher can write at it (see rotateHandles). A page is
-	// never replaced in place: a handle is readable, so its id is no secret
-	// from readers, and replacing by id would let anyone who can write one
-	// handle change what every other handle naming that id shows.
+	// Every publish stores the content under a NEW id and points only the
+	// handle being published at it. A page is never replaced in place, and
+	// no other handle is rewritten: a handle is readable, so its id is no
+	// secret from readers. Replacing by id would let anyone who can write one
+	// handle change what every other handle naming that id shows, and
+	// rewriting the other handles the publisher can write would carry every
+	// later version to a handle someone planted in a folder with other
+	// readers. Other handles keep the version they name, which stays stored
+	// until no handle names it.
 	oldID := ""
 	if data, err := h.store.ReadFile(ctx, ns, rel); err == nil {
 		existing, isHandle := ParsePageHandle(string(data))
@@ -558,39 +562,11 @@ func (h *PagesHandler) handlePublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if oldID != "" && oldID != id {
-		h.rotateHandles(r, ns, rel, oldID, id)
 		h.collectIfUnreferenced(ctx, ns, []string{oldID})
 	}
 	meta.Text = ""
 	meta.Path = rel
 	pagesJSON(w, http.StatusOK, meta)
-}
-
-// rotateHandles points every other handle in the namespace that names oldID,
-// and that the publisher can write, at newID. Handles the publisher cannot
-// write keep oldID, and with it the old page, which stays stored for as long
-// as any handle names it. So a publish never changes what a handle the
-// publisher cannot write shows, and an id someone saved only ever opens the
-// version they could already read.
-func (h *PagesHandler) rotateHandles(r *http.Request, ns, published, oldID, newID string) {
-	ctx := r.Context()
-	for _, ref := range h.handlesIn(ctx, ns, "") {
-		if ref.id != oldID || ref.path == published || !h.canWritePath(r, ns, ref.path) {
-			continue
-		}
-		unlock := lockNote(ns, ref.path)
-		data, err := h.store.ReadFile(ctx, ns, ref.path)
-		if err == nil {
-			if id, ok := ParsePageHandle(string(data)); ok && id == oldID {
-				if rewritten, ok := rewriteHandleID(string(data), newID); ok {
-					if err := h.store.WriteFile(ctx, ns, ref.path, []byte(rewritten)); err != nil {
-						log.Printf("pages: point %s/%s at the new page: %v", ns, ref.path, err)
-					}
-				}
-			}
-		}
-		unlock()
-	}
 }
 
 // handleDelete serves DELETE /api/pages?ns=&path=: removes the handle and,

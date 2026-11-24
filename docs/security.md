@@ -528,17 +528,17 @@ and copying it is the same as copying a note they could already read. The id
 cannot be guessed, but it can be read: anyone who can read a handle knows its
 id. Two rules keep that from becoming more:
 
-- **Every publish makes a new id.** Publishing through a handle needs write on
-  that handle only. The content is stored under a new id, and every other
-  handle in the namespace that named the old id *and that the publisher can
-  write* is pointed at the new one. Handles the publisher cannot write keep
-  the old id, and the old page stays for as long as any handle names it, then
-  goes. So a publish never changes what a handle the publisher cannot write
-  shows: someone who writes a handle naming another folder's page id can only
-  ever move their own handle to their own new page, and the other folder's
-  page stays byte for byte as it was. A copy of a handle in a folder the
-  publisher cannot write is a snapshot, like a copied note, until someone who
-  can write there republishes it.
+- **Every publish makes a new id, and moves only the handle published
+  through.** Publishing through a handle needs write on that handle only. The
+  content is stored under a new id and that one handle is pointed at it. No
+  other handle is rewritten, even one the publisher could write: every other
+  handle that named the old id keeps it, and the old page stays for as long
+  as any handle names it, then goes. So a publish never changes what another
+  handle shows. Someone who writes a handle naming another folder's page id
+  can only ever move their own handle to their own new page, and a handle
+  someone planted in a folder with other readers never receives the page's
+  later versions. A copy of a handle is a snapshot, like a copied note, until
+  someone republishes through it.
 - **A saved id is a snapshot, not a subscription.** Someone who once read a
   handle and keeps write access somewhere in the namespace can write a handle
   naming that id and keep viewing that version after their read access is

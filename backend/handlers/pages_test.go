@@ -464,20 +464,16 @@ func TestPages_DeleteHookAndUnlinked(t *testing.T) {
 
 func TestPages_RepublishRotatesTheID(t *testing.T) {
 	h, pagesDir := pagesFixture(t)
-	notes := notesOf(pagesDir)
 	publish(h, "alpha", "A/page", "text/html", []byte("<p>v1</p>"))
 	id1 := idOf(t, pagesDir, "alpha", "A/page")
 	oldPass := passURL(t, h, "alpha", "A/page")
-	b, _ := os.ReadFile(filepath.Join(notes, "alpha", "A", "page.page.md"))
-	os.MkdirAll(filepath.Join(notes, "alpha", "B"), 0o755)
-	os.WriteFile(filepath.Join(notes, "alpha", "B", "copy.page.md"), b, 0o644)
 
-	// Single mode writes everywhere: both handles move to the new id and the
-	// old page goes, with every pass made for it.
+	// With no other handle naming it, the old page goes, with every pass
+	// made for it.
 	publish(h, "alpha", "A/page", "text/html", []byte("<p>v2</p>"))
 	id2 := idOf(t, pagesDir, "alpha", "A/page")
-	if id2 == id1 || idOf(t, pagesDir, "alpha", "B/copy") != id2 {
-		t.Fatalf("ids: first %s, then %s, copy %s", id1, id2, idOf(t, pagesDir, "alpha", "B/copy"))
+	if id2 == id1 {
+		t.Fatalf("republish kept the id %s", id1)
 	}
 	if _, err := os.Stat(filepath.Join(pagesDir, "alpha", id1)); !os.IsNotExist(err) {
 		t.Fatal("the old page was kept although no handle names it")
@@ -485,12 +481,39 @@ func TestPages_RepublishRotatesTheID(t *testing.T) {
 	if w := view(h, oldPass); w.Code != http.StatusForbidden {
 		t.Fatalf("a pass for the old version: %d", w.Code)
 	}
-	if w := view(h, passURL(t, h, "alpha", "B/copy")); w.Body.String() != "<p>v2</p>" {
-		t.Fatalf("the rewritten copy shows %q", w.Body.String())
+}
+
+// F1: a republish moves only the handle being published. Bob, who once read
+// Secret/r.page.md, plants Public/x.page.md naming its id. Alice republishes
+// Secret/r and can write Public/ (single mode writes everywhere), but Bob's
+// handle must stay on the version it named, so later versions never reach
+// Public/'s readers. Once the planted handle is deleted, that version goes.
+func TestPages_RepublishLeavesOtherHandles(t *testing.T) {
+	h, pagesDir := pagesFixture(t)
+	notes := notesOf(pagesDir)
+	publish(h, "alpha", "Secret/r", "text/html", []byte("<p>v1</p>"))
+	id1 := idOf(t, pagesDir, "alpha", "Secret/r")
+	os.MkdirAll(filepath.Join(notes, "alpha", "Public"), 0o755)
+	os.WriteFile(filepath.Join(notes, "alpha", "Public", "x.page.md"), []byte("---\npage: "+id1+"\n---\n"), 0o644)
+
+	publish(h, "alpha", "Secret/r", "text/html", []byte("<p>v2</p>"))
+	if got := idOf(t, pagesDir, "alpha", "Public/x"); got != id1 {
+		t.Fatalf("the planted handle was moved to %s, want it kept on %s", got, id1)
 	}
-	// The rewritten handle keeps everything else it had.
-	if nb, _ := os.ReadFile(filepath.Join(notes, "alpha", "B", "copy.page.md")); !strings.Contains(string(nb), "HTML page, open it in mdnest.") {
-		t.Fatalf("rewritten copy: %q", nb)
+	if w := view(h, passURL(t, h, "alpha", "Public/x")); w.Body.String() != "<p>v1</p>" {
+		t.Fatalf("the planted handle shows %q, want the version it named", w.Body.String())
+	}
+	if w := view(h, passURL(t, h, "alpha", "Secret/r")); w.Body.String() != "<p>v2</p>" {
+		t.Fatalf("the published handle shows %q", w.Body.String())
+	}
+	// The planted handle keeps v1 stored only while it names it.
+	w := httptest.NewRecorder()
+	h.Handle(w, httptest.NewRequest(http.MethodDelete, "/api/pages?ns=alpha&path=Public/x.page.md", nil))
+	if w.Code != http.StatusOK && w.Code != http.StatusNoContent {
+		t.Fatalf("delete the planted handle: %d %s", w.Code, w.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(pagesDir, "alpha", id1)); !os.IsNotExist(err) {
+		t.Fatal("v1 was kept after its last handle was deleted")
 	}
 }
 
