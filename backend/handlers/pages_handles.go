@@ -132,15 +132,10 @@ func (h *PagesHandler) handleAt(ctx context.Context, w http.ResponseWriter, ns, 
 // storedInOtherNamespace reports whether another namespace holds this id. It
 // only says which error to show; it never serves anything across namespaces.
 func (h *PagesHandler) storedInOtherNamespace(ns, id string) bool {
-	entries, _ := os.ReadDir(h.cfg.Dir)
-	for _, e := range entries {
-		if !e.IsDir() || e.Name() == ns || !ValidNamespaceName(e.Name()) {
-			continue
-		}
-		if p := h.metaPath(e.Name(), id); p != "" {
-			if _, err := os.Stat(p); err == nil {
-				return true
-			}
+	names, _ := h.store.ListNamespaces(context.Background())
+	for _, name := range names {
+		if name != ns && h.pageStored(name, id) {
+			return true
 		}
 	}
 	return false
@@ -294,18 +289,13 @@ func (h *PagesHandler) handleList(w http.ResponseWriter, r *http.Request) {
 // unlinked lists the stored pages of a namespace that no handle names.
 func (h *PagesHandler) unlinked(ns string, linked map[string]bool) []PageMeta {
 	out := []PageMeta{}
-	dir := h.nsDir(ns)
-	if dir == "" {
-		return out
-	}
-	entries, _ := os.ReadDir(dir)
-	for _, e := range entries {
-		if !e.IsDir() || !ValidPageID(e.Name()) || linked[e.Name()] {
+	for _, id := range h.storedIDs(ns) {
+		if linked[id] {
 			continue
 		}
-		m, err := h.readMeta(ns, e.Name())
+		m, err := h.readMeta(ns, id)
 		if err != nil {
-			m = &PageMeta{ID: e.Name(), Title: e.Name()}
+			m = &PageMeta{ID: id, Title: id}
 		}
 		m.Text = ""
 		out = append(out, *m)
@@ -352,15 +342,22 @@ func (h *PagesHandler) HandleUnlinked(w http.ResponseWriter, r *http.Request) {
 // removeStored deletes a page's files and details. Reports whether there was
 // anything to delete. The caller holds h.mu.
 func (h *PagesHandler) removeStored(ns, id string) bool {
-	dir, meta := h.pageDir(ns, id), h.metaPath(ns, id)
-	if dir == "" || meta == "" {
+	if !ValidNamespaceName(ns) || !ValidPageID(id) {
 		return false
 	}
-	_, dErr := os.Stat(dir)
-	_, mErr := os.Stat(meta)
-	os.Remove(meta)
-	os.RemoveAll(dir)
-	return dErr == nil || mErr == nil
+	found := h.removeHidden(ns, id)
+	root := h.externalRoot(ns)
+	dir, meta := pageStorePath(root, id), pageStorePath(root, path.Join(pagesMetaDir, id+".json"))
+	for _, p := range []string{dir, meta} {
+		if p == "" {
+			continue
+		}
+		if _, err := os.Stat(p); err == nil {
+			found = true
+		}
+		_ = os.RemoveAll(p)
+	}
+	return found
 }
 
 // collectIfUnreferenced deletes each page that no handle in the namespace
@@ -435,6 +432,10 @@ func (s *statusWriter) WriteHeader(code int) {
 // needs write on that handle only. A .page.md that is not a handle is never
 // overwritten (409).
 func (h *PagesHandler) handlePublish(w http.ResponseWriter, r *http.Request) {
+	h.publishPage(w, r, nil)
+}
+
+func (h *PagesHandler) publishPage(w http.ResponseWriter, r *http.Request, restored *pageBackupEntry) {
 	ns, rel, ok := h.requireHandlePath(w, r)
 	if !ok {
 		return
@@ -453,20 +454,6 @@ func (h *PagesHandler) handlePublish(w http.ResponseWriter, r *http.Request) {
 	// later version to a handle someone planted in a folder with other
 	// readers. Other handles keep the version they name, which stays stored
 	// until no handle names it.
-	oldID := ""
-	if data, err := h.store.ReadFile(ctx, ns, rel); err == nil {
-		existing, isHandle := ParsePageHandle(string(data))
-		if !isHandle {
-			pagesError(w, http.StatusConflict, rel+" exists and is not a page handle; choose another name")
-			return
-		}
-		if ValidPageID(existing) {
-			oldID = existing
-		}
-	} else if !errors.Is(err, storage.ErrNotExist) {
-		pagesError(w, http.StatusInternalServerError, "failed to read the handle")
-		return
-	}
 	id := newPageID()
 
 	nsDir := h.nsDir(ns)
@@ -512,6 +499,10 @@ func (h *PagesHandler) handlePublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	title, description, text := ExtractPageText(indexBytes)
+	if restored != nil {
+		title = collapseSpace(plainField(restored.Title))
+		description = truncateRunes(collapseSpace(plainField(restored.Description)), maxPageDescription)
+	}
 	if title == "" {
 		title = strings.TrimSuffix(path.Base(rel), PageHandleSuffix)
 	}
@@ -527,8 +518,27 @@ func (h *PagesHandler) handlePublish(w http.ResponseWriter, r *http.Request) {
 		Version:     randHex(12),
 	}
 
+	// Read the body before taking the note lock. A slow upload must not block
+	// readers. Then keep the handle check and write under the same lock, so a
+	// concurrently created ordinary note cannot be overwritten.
+	unlock := lockNote(ns, rel)
+	defer unlock()
+	oldID := ""
+	if data, err := h.store.ReadFile(ctx, ns, rel); err == nil {
+		existing, isHandle := ParsePageHandle(string(data))
+		if !isHandle {
+			pagesError(w, http.StatusConflict, rel+" exists and is not a page handle; choose another name")
+			return
+		}
+		if ValidPageID(existing) {
+			oldID = existing
+		}
+	} else if !errors.Is(err, storage.ErrNotExist) {
+		pagesError(w, http.StatusInternalServerError, "failed to read the handle")
+		return
+	}
 	h.mu.Lock()
-	dest, metaFile := h.pageDir(ns, id), h.metaPath(ns, id)
+	dest, metaFile := h.writePageDir(ns, id), h.writeMetaPath(ns, id)
 	if dest == "" || metaFile == "" {
 		h.mu.Unlock()
 		pagesError(w, http.StatusBadRequest, "invalid page")
@@ -550,9 +560,7 @@ func (h *PagesHandler) handlePublish(w http.ResponseWriter, r *http.Request) {
 	}
 	h.mu.Unlock()
 	// The handle last: it is what makes the page visible.
-	unlock := lockNote(ns, rel)
 	err = h.store.WriteFile(ctx, ns, rel, []byte(pageHandleContent(id, meta)))
-	unlock()
 	if err != nil {
 		log.Printf("pages: write handle %s/%s: %v", ns, rel, err)
 		h.mu.Lock()
@@ -793,6 +801,10 @@ func (h *PagesHandler) CarryPage(fromNS, id, toNS string) (destID string, carrie
 	if err := os.MkdirAll(filepath.Join(nsDir, pagesMetaDir), 0755); err != nil {
 		return "", false, err
 	}
+	dest, metaFile := h.writePageDir(toNS, destID), h.writeMetaPath(toNS, destID)
+	if dest == "" || metaFile == "" {
+		return "", false, fmt.Errorf("invalid page storage path")
+	}
 	tmp := filepath.Join(nsDir, ".tmp-"+randHex(8))
 	defer os.RemoveAll(tmp)
 	if err := copyPageFiles(h.pageDir(fromNS, id), tmp); err != nil {
@@ -804,18 +816,18 @@ func (h *PagesHandler) CarryPage(fromNS, id, toNS string) (destID string, carrie
 	}
 	m.ID = destID
 	mb, _ := json.Marshal(pageMetaFile{PageMeta: *m, Version: randHex(12)})
-	tmpMeta := h.metaPath(toNS, destID) + ".tmp-" + randHex(4)
+	tmpMeta := metaFile + ".tmp-" + randHex(4)
 	if err := os.WriteFile(tmpMeta, mb, 0644); err != nil {
 		os.Remove(tmpMeta)
 		return "", false, err
 	}
-	if err := os.Rename(tmp, h.pageDir(toNS, destID)); err != nil {
+	if err := os.Rename(tmp, dest); err != nil {
 		os.Remove(tmpMeta)
 		return "", false, err
 	}
-	if err := os.Rename(tmpMeta, h.metaPath(toNS, destID)); err != nil {
+	if err := os.Rename(tmpMeta, metaFile); err != nil {
 		os.Remove(tmpMeta)
-		os.RemoveAll(h.pageDir(toNS, destID))
+		os.RemoveAll(dest)
 		return "", false, err
 	}
 	return destID, true, nil

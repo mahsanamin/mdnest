@@ -46,6 +46,13 @@ resolve_conflicts() {
   echo "git-sync [$name]: conflict detected, saving both versions..."
 
   git diff --name-only --diff-filter=U | while IFS= read -r file; do
+    case "$file" in
+      .mdnest/*|*/.mdnest/*)
+        # Private app data is never a note to resolve in the editor. Keep a
+        # complete remote file, without markers or extra .sync-conflict files.
+        git checkout --theirs -- "$file" 2>/dev/null || git rm -f -- "$file"
+        continue ;;
+    esac
     if [ -f "$file" ]; then
       CONFLICT_COPY="${file}.sync-conflict-${CONFLICT_TAG}"
       if ! git show :2:"$file" > "$CONFLICT_COPY" 2>/dev/null; then

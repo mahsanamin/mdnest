@@ -199,6 +199,8 @@ func registerContentRoutes(mux *http.ServeMux, c contentRoutes) {
 		mux.Handle("/api/pages", auth(invalidateSearch(http.HandlerFunc(c.pages.Handle))))
 		mux.Handle("/api/pages/text", auth(http.HandlerFunc(c.pages.HandleText)))
 		mux.Handle("/api/pages/archive", auth(http.HandlerFunc(c.pages.HandleArchive)))
+		mux.Handle("/api/pages/export", auth(http.HandlerFunc(c.pages.HandleExport)))
+		mux.Handle("/api/pages/import", auth(invalidateSearch(http.HandlerFunc(c.pages.HandleImport))))
 		mux.Handle("/api/pages/pass", auth(http.HandlerFunc(c.pages.HandlePass)))
 		mux.Handle("/api/pages/unlinked", auth(http.HandlerFunc(c.pages.HandleUnlinked)))
 		// Page files on mdnest's own origin only in static mode (scripts

@@ -51,6 +51,7 @@ data:
   EXCALIDRAW_LIBRARIES: {{ .Values.excalidraw.libraries | default list | join "," | quote }}
   {{- if .Values.pages.enabled }}
   ENABLE_PAGES: "true"
+  PAGES_IN_GIT: {{ .Values.pages.inGit | ternary "true" "false" | quote }}
   PAGES_DIR: "/data/notes/.mdnest-pages"
   PAGES_MAX_MB: {{ .Values.pages.maxMB | quote }}
   PAGES_MAX_FILES: {{ .Values.pages.maxFiles | quote }}

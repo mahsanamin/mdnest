@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { listPages, getPagePass, deleteUnlinkedPage } from '../pagesApi.js';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { listPages, getPagePass, deleteUnlinkedPage, exportPages, importPages } from '../pagesApi.js';
 import './Pages.css';
 
 // HTML pages (server: ENABLE_PAGES), loaded as its own chunk only when the
@@ -19,6 +19,7 @@ function formatDate(iso) {
 }
 
 const handleName = (p) => p.split('/').pop().replace(/\.page\.md$/, '');
+const pageCount = (n) => `${n} page${n === 1 ? '' : 's'}`;
 
 const folderOf = (p) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/') + 1) : '');
 
@@ -43,12 +44,71 @@ const LOCATE_ICON = (
 // apart from the notes (PAGES_DIR), so git sync and a copy of the notes folder
 // do not carry them.
 const STORAGE_NOTE = 'Pages are for casual sharing. Their HTML, scripts and images are kept apart from your notes, so git sync does not save them and they do not move with your notes to another server. Keep your own copy of any page you need.';
+const GIT_STORAGE_NOTE = 'New pages are saved with your notes in git. Older pages stay in their separate pages folder until you publish them again.';
+
+// Kept in the pages chunk so an install with pages off loads none of this.
+export function PagesSettings({ ns, inGit, canManage, onRestored }) {
+  const picker = useRef(null);
+  const [busy, setBusy] = useState('');
+  const [result, setResult] = useState('');
+  const [failed, setFailed] = useState(false);
+  const available = !!ns && canManage;
+  const download = async () => {
+    setBusy('download'); setResult(''); setFailed(false);
+    try {
+      const { blob, exported, skipped } = await exportPages(ns);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `${ns}-pages.tgz`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setResult(`Downloaded ${pageCount(exported)}${skipped ? `, ${skipped} skipped: files missing or unreadable (listed in manifest.json)` : ''}.`);
+    } catch (e) { setFailed(true); setResult(e.message || 'Could not download pages'); }
+    finally { setBusy(''); }
+  };
+  const restore = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!window.confirm(`Restore pages in ${ns}? Existing pages at the same paths will be replaced. Ordinary notes will be kept.`)) return;
+    setBusy('restore'); setResult(''); setFailed(false);
+    try {
+      if (file.size > 272 * 1024 * 1024) throw new Error('Pages backup is larger than 272 MB.');
+      const data = await importPages(ns, file);
+      const reasons = [...new Set((data.results || []).filter((r) => r.status === 'skipped').map((r) => (
+        r.reason?.includes('exists and is not a page handle') ? 'ordinary notes already exist' : r.reason
+      )))].filter(Boolean);
+      setResult(`Restored ${pageCount(data.restored)}${data.skipped ? `, ${data.skipped} skipped${reasons.length ? `: ${reasons.join('; ')}` : ''}` : ''}.`);
+      // Closing Settings clears this ref. Do not refresh an old namespace
+      // after the person has left the dialog and selected another one.
+      if (picker.current) onRestored?.();
+    } catch (e) { setFailed(true); setResult(e.message || 'Could not restore pages'); }
+    finally { setBusy(''); }
+  };
+  return (
+    <div className="settings-content" data-testid="settings-pages" aria-busy={!!busy}>
+      <p className="settings-description" data-testid="settings-pages-storage">
+        {inGit
+          ? `New pages in ${ns || 'this namespace'} are saved with your notes in git; older pages stay where they were published.`
+          : `New pages in ${ns || 'this namespace'} are kept apart from your notes, so git sync does not save them.`}
+      </p>
+      <div className="pages-settings-actions">
+        <button type="button" className="modal-btn" disabled={!available || !!busy} onClick={download}>{busy === 'download' ? 'Downloading...' : 'Download all pages'}</button>
+        <button type="button" className="modal-btn-primary" disabled={!available || !!busy} onClick={() => picker.current?.click()}>{busy === 'restore' ? 'Restoring...' : 'Restore pages'}</button>
+        <input ref={picker} type="file" accept=".tgz,.tar.gz,application/gzip" aria-label="Pages backup" hidden onChange={restore} />
+      </div>
+      <p className={failed ? 'modal-error' : 'settings-description'} role={failed ? 'alert' : 'status'} data-testid="settings-pages-result">
+        {result || (!ns ? 'Choose a namespace first.' : !canManage ? 'Write access to the whole namespace is required.' : '')}
+      </p>
+    </div>
+  );
+}
 
 // The Pages view (toolbar "Pages" button): a card for every page in the
 // namespace the user can read. No live previews on purpose: opening this
 // view never runs a page's scripts. Writers of the namespace root also get an
 // Unlinked tab, for pages whose handle was removed outside mdnest.
-export function PagesView({ ns, onOpen, onReveal, initialTab = 'pages', onClose, backLabel }) {
+export function PagesView({ ns, inGit = false, refreshKey, onOpen, onReveal, initialTab = 'pages', onClose, backLabel }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
@@ -70,7 +130,7 @@ export function PagesView({ ns, onOpen, onReveal, initialTab = 'pages', onClose,
     if (!q) { load(''); return undefined; }
     const t = setTimeout(() => load(q), 250);
     return () => clearTimeout(t);
-  }, [load, query]);
+  }, [load, query, refreshKey]);
 
   const removeUnlinked = async (p) => {
     if (!window.confirm(`Delete the unlinked page "${p.title || p.id}"? No handle points to it, and this cannot be undone.`)) return;
@@ -115,7 +175,7 @@ export function PagesView({ ns, onOpen, onReveal, initialTab = 'pages', onClose,
           </div>
         )}
       </div>
-      <p className="pages-view-note" data-testid="pages-storage-note">{STORAGE_NOTE}</p>
+      <p className="pages-view-note" data-testid="pages-storage-note">{inGit ? GIT_STORAGE_NOTE : STORAGE_NOTE}</p>
       {error && <div className="pages-view-empty">{error}</div>}
       {data === null && <div className="pages-view-empty">Loading...</div>}
       {!showUnlinked && data && !error && pages.length === 0 && (
@@ -165,7 +225,7 @@ export function PagesView({ ns, onOpen, onReveal, initialTab = 'pages', onClose,
 // notes. Clicking a row opens the HTML page in the main area and leaves the
 // panel open, so pages can be flipped through quickly. No delete here; the
 // unlinked pages are only a link into the full view (root writers only).
-export function PagesPanel({ ns, currentPath, refreshKey, onOpen, onReveal, onFullView }) {
+export function PagesPanel({ ns, inGit = false, currentPath, refreshKey, onOpen, onReveal, onFullView }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
@@ -207,7 +267,7 @@ export function PagesPanel({ ns, currentPath, refreshKey, onOpen, onReveal, onFu
           </div>
         ))}
       </div>
-      <p className="pages-view-note pages-panel-note" data-testid="pages-panel-storage-note">{STORAGE_NOTE}</p>
+      <p className="pages-view-note pages-panel-note" data-testid="pages-panel-storage-note">{inGit ? GIT_STORAGE_NOTE : STORAGE_NOTE}</p>
       <div className="pages-panel-foot">
         <button type="button" className="pages-panel-link" onClick={() => onFullView('pages')} data-testid="pages-panel-full">Open full view</button>
         {Array.isArray(unlinked) && unlinked.length > 0 && (

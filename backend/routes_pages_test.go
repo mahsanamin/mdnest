@@ -42,12 +42,12 @@ func TestRoutes_PagesOffRegistersNothing(t *testing.T) {
 	for _, multi := range []bool{false, true} {
 		ts := newTestServer(t, multi)
 		tok := jwtFor(t, uidOwen, "collaborator", nil)
-		for _, p := range []string{"/api/pages?ns=alpha", "/api/pages/text?ns=alpha&path=x.page.md", "/api/pages/archive?ns=alpha&path=x.page.md", "/api/pages/view/x/"} {
+		for _, p := range []string{"/api/pages?ns=alpha", "/api/pages/text?ns=alpha&path=x.page.md", "/api/pages/archive?ns=alpha&path=x.page.md", "/api/pages/view/x/", "/api/pages/export?ns=alpha"} {
 			if code, _ := ts.get(tok, p); code != http.StatusNotFound {
 				t.Errorf("multi=%v: %s answered %d with pages off", multi, p, code)
 			}
 		}
-		for _, p := range []string{"/api/pages/pass?ns=alpha&path=x.page.md"} {
+		for _, p := range []string{"/api/pages/pass?ns=alpha&path=x.page.md", "/api/pages/import?ns=alpha"} {
 			if code, _ := ts.do(tok, http.MethodPost, p, nil, ""); code != http.StatusNotFound {
 				t.Errorf("multi=%v: %s answered %d with pages off", multi, p, code)
 			}

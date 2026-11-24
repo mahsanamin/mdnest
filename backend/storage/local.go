@@ -114,6 +114,13 @@ func reachesSafely(nsDir, target string) bool {
 			return false
 		}
 	}
+	// Internal callers access .mdnest directly. Public aliases into private
+	// page files are refused, using the resolution already done above rather
+	// than adding filesystem work to every ordinary note read.
+	requested, err := filepath.Rel(nsDir, target)
+	if err != nil || (!relpath.HasReservedSegment(requested) && strings.Contains("/"+strings.ToLower(filepath.ToSlash(rel))+"/", "/.mdnest/pages/")) {
+		return false
+	}
 	return true
 }
 

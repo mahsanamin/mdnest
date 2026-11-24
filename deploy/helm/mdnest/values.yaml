@@ -332,6 +332,8 @@ excalidraw:
 # (storage.backend=git with more than one replica).
 # -----------------------------------------------------------------------------
 pages:
+  # -- Store new publishes in each namespace's .mdnest/pages (`PAGES_IN_GIT`). Git sync saves them with the notes. Existing pages stay where they are; both stores are read.
+  inGit: false
   # -- Enable HTML pages (`ENABLE_PAGES`). Off by default; when off no route is registered and the frontend never loads the pages chunk.
   enabled: false
   # -- Largest total size of one page, in MB (`PAGES_MAX_MB`), checked at publish time.

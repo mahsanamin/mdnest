@@ -83,6 +83,7 @@ fi
 sb="$(generate "$REPO_ROOT/setup.sh" ENABLE_PAGES=true PAGES_MAX_MB=10)"
 has "static: ENABLE_PAGES reaches .env" "$sb/.env" "ENABLE_PAGES=true"
 has "static: PAGES_DIR is the container path" "$sb/.env" "PAGES_DIR=/data/pages"
+has "static: PAGES_IN_GIT defaults off" "$sb/.env" "PAGES_IN_GIT=false"
 has "static: PAGES_MAX_MB reaches .env" "$sb/.env" "PAGES_MAX_MB=10"
 has "static: PAGES_MAX_FILES defaults to 500" "$sb/.env" "PAGES_MAX_FILES=500"
 has "static: PAGES_NETWORK defaults to strict" "$sb/.env" "PAGES_NETWORK=strict"
@@ -90,6 +91,10 @@ hasnt "static: no PAGES_ORIGIN" "$sb/.env" "PAGES_ORIGIN="
 has "static: page files on a named volume" "$sb/docker-compose.yml" "- mdnest-pages:/data/pages"
 has "static: the named volume is declared" "$sb/docker-compose.yml" "  mdnest-pages:"
 hasnt "static: no pages port" "$sb/docker-compose.yml" ":8081"
+
+sb="$(generate "$REPO_ROOT/setup.sh" ENABLE_PAGES=true PAGES_IN_GIT=true)"
+has "git pages: flag reaches .env" "$sb/.env" "PAGES_IN_GIT=true"
+has "git pages: old external volume is still mounted" "$sb/docker-compose.yml" "- mdnest-pages:/data/pages"
 
 # 3) Static mode, host folder.
 sb="$(generate "$REPO_ROOT/setup.sh" ENABLE_PAGES=true "PAGES_DIR=$REPO_ROOT/.pages-test-unused")"
@@ -142,6 +147,7 @@ refused() {
   fi
 }
 refused "a typo in ENABLE_PAGES is refused" "ENABLE_PAGES must be true or false" ENABLE_PAGES=yes
+refused "a typo in PAGES_IN_GIT is refused" "PAGES_IN_GIT must be true or false" ENABLE_PAGES=true PAGES_IN_GIT=yes
 refused "a typo in PAGES_NETWORK is refused" "PAGES_NETWORK must be strict or open" ENABLE_PAGES=true PAGES_NETWORK=loose
 refused "a non-number PAGES_MAX_MB is refused" "PAGES_MAX_MB must be a whole number" ENABLE_PAGES=true PAGES_MAX_MB=lots
 refused "a pages origin with a path is refused" "bare origin" ENABLE_PAGES=true PAGES_ORIGIN=http://localhost:3237/pages
@@ -149,11 +155,49 @@ refused "no port and no Caddy is refused" "has no port" ENABLE_PAGES=true PAGES_
 refused "a non-number PAGES_PORT is refused" "PAGES_PORT must be a whole number" ENABLE_PAGES=true PAGES_ORIGIN=https://pages.example.com PAGES_PORT=x
 refused "PAGES_ORIGIN equal to FRONTEND_ORIGIN is refused" "must differ from FRONTEND_ORIGIN" ENABLE_PAGES=true FRONTEND_ORIGIN=http://localhost:3236 PAGES_ORIGIN=http://localhost:3236
 
+# Private page assets and JSON must never receive note conflict markers or
+# extra .sync-conflict files. Run both copies of the real resolver on a merge.
+for script in git-sync/sync.sh deploy/helm/mdnest/files/sync.sh; do
+  work="$(mktemp -d)"; SANDBOXES+=("$work")
+  awk '/^resolve_conflicts\(\)/ { copy=1 } copy { print } copy && /^}/ { exit }' "$REPO_ROOT/$script" > "$work/resolve.sh"
+  if (
+    cd "$work" || exit 1
+    git init -q -b local
+    git config user.name test
+    git config user.email test@example.com
+    git config core.hooksPath /dev/null
+    mkdir -p .mdnest/pages/id .mdnest/pages/.pages-meta
+    printf 'base\n' > .mdnest/pages/id/index.html
+    printf '{"title":"base"}\n' > .mdnest/pages/.pages-meta/id.json
+    printf 'base\n' > note.md
+    git add .mdnest note.md; git commit -qm base
+    git checkout -qb remote
+    printf 'remote\n' > .mdnest/pages/id/index.html
+    printf '{"title":"remote"}\n' > .mdnest/pages/.pages-meta/id.json
+    printf 'remote\n' > note.md
+    git add .mdnest note.md; git commit -qm remote
+    git checkout -q local
+    printf 'local\n' > .mdnest/pages/id/index.html
+    printf '{"title":"local"}\n' > .mdnest/pages/.pages-meta/id.json
+    printf 'local\n' > note.md
+    git add .mdnest note.md; git commit -qm local
+    git merge remote >/dev/null 2>&1 || true
+    # shellcheck disable=SC1091
+    source ./resolve.sh
+    resolve_conflicts test >/dev/null 2>&1
+    [ "$(cat .mdnest/pages/id/index.html)" = remote ] &&
+      [ "$(cat .mdnest/pages/.pages-meta/id.json)" = '{"title":"remote"}' ] &&
+      [ -z "$(find .mdnest -name '*.sync-conflict-*' -print)" ] &&
+      [ -n "$(find . -maxdepth 1 -name 'note.md.sync-conflict-*' -print)" ]
+  ); then ok "$script keeps complete private page files in a conflict"
+  else bad "$script keeps complete private page files in a conflict" "resolver changed or copied private files"; fi
+done
+
 # 7) Every key is read by the backend and documented.
-for k in ENABLE_PAGES PAGES_DIR PAGES_ORIGIN PAGES_NETWORK PAGES_MAX_MB PAGES_MAX_FILES PAGES_LISTEN_PORT; do
+for k in ENABLE_PAGES PAGES_IN_GIT PAGES_DIR PAGES_ORIGIN PAGES_NETWORK PAGES_MAX_MB PAGES_MAX_FILES PAGES_LISTEN_PORT; do
   if grep -q "\"$k\"" "$REPO_ROOT/backend/main.go"; then ok "backend reads $k"; else bad "backend reads $k" "no env(\"$k\") in backend/main.go"; fi
 done
-for k in ENABLE_PAGES PAGES_DIR PAGES_ORIGIN PAGES_NETWORK PAGES_MAX_MB PAGES_MAX_FILES PAGES_PORT; do
+for k in ENABLE_PAGES PAGES_IN_GIT PAGES_DIR PAGES_ORIGIN PAGES_NETWORK PAGES_MAX_MB PAGES_MAX_FILES PAGES_PORT; do
   if grep -q "^#* *$k=" "$REPO_ROOT/mdnest.conf.sample"; then ok "mdnest.conf.sample documents $k"; else bad "mdnest.conf.sample documents $k" "no $k= line"; fi
 done
 

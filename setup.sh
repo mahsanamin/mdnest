@@ -75,6 +75,7 @@ DOWNLOAD_MAX_FILES=""
 DOWNLOAD_MAX_MB=""
 DOWNLOAD_MAX_CONCURRENT=""
 ENABLE_PAGES=""
+PAGES_IN_GIT=""
 PAGES_DIR=""
 PAGES_ORIGIN=""
 PAGES_NETWORK=""
@@ -119,6 +120,7 @@ while IFS= read -r line; do
     ENABLE_CHAT) ENABLE_CHAT="$value" ;;
     ENABLE_AGENT_APPROVALS) ENABLE_AGENT_APPROVALS="$value" ;;
     ENABLE_PAGES) ENABLE_PAGES="$value" ;;
+    PAGES_IN_GIT) PAGES_IN_GIT="$value" ;;
     PAGES_DIR) PAGES_DIR="$value" ;;
     PAGES_ORIGIN) PAGES_ORIGIN="$value" ;;
     PAGES_NETWORK) PAGES_NETWORK="$value" ;;
@@ -289,6 +291,10 @@ esac
 # public address has none (your own proxy in front).
 case "${ENABLE_PAGES:-false}" in
   true)
+    case "${PAGES_IN_GIT:-false}" in
+      true|false) ;;
+      *) echo "Error: PAGES_IN_GIT must be true or false (got '${PAGES_IN_GIT}')."; exit 1 ;;
+    esac
     case "${PAGES_NETWORK:-strict}" in
       strict|open) ;;
       *) echo "Error: PAGES_NETWORK must be strict or open (got '${PAGES_NETWORK}')."; exit 1 ;;
@@ -456,6 +462,7 @@ fi
 if [ "$ENABLE_PAGES" = "true" ]; then
   cat >> .env <<EOF
 ENABLE_PAGES=true
+PAGES_IN_GIT=${PAGES_IN_GIT:-false}
 PAGES_DIR=/data/pages
 PAGES_NETWORK=${PAGES_NETWORK:-strict}
 PAGES_MAX_MB=${PAGES_MAX_MB:-20}

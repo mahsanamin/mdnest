@@ -1,9 +1,9 @@
 package handlers
 
 // HTML pages (ENABLE_PAGES, off by default): view-only HTML reports and
-// dashboards published into a namespace. Pages live in their own folder
-// (PAGES_DIR), never in the notes tree, and are never rendered by the server:
-// it only stores and serves files.
+// dashboards published into a namespace. New pages live in PAGES_DIR by default,
+// or in <namespace>/.mdnest/pages with PAGES_IN_GIT. Both stores are always read.
+// Page files never appear as notes. The server only stores and serves files.
 //
 // Layout on disk:
 //
@@ -86,6 +86,8 @@ func PagesEnabled(setting, role string) bool {
 
 // PagesConfig is everything the pages feature reads from the environment.
 type PagesConfig struct {
+	NotesDir string // NOTES_DIR, used only for the namespace's private page store
+	InGit    bool   // PAGES_IN_GIT: new publishes go with the notes
 	Dir      string // PAGES_DIR, absolute
 	MaxBytes int64  // PAGES_MAX_MB, in bytes: total size of a page's files
 	MaxFiles int    // PAGES_MAX_FILES
@@ -125,7 +127,9 @@ func originOf(raw string) string {
 // become a readable note (its HTML shown and searched as a note, synced to
 // git), and the notes would hold folders mdnest never created. Symlinks are
 // resolved first, on the part of each path that exists, so a link cannot
-// hide the overlap. Called at startup, before PAGES_DIR is created.
+// hide the overlap. The chart's exact direct child NOTES_DIR/.mdnest-pages
+// is allowed: it is a hidden app store, never a namespace. Nothing else
+// inside NOTES_DIR is allowed. Called before PAGES_DIR is created.
 func CheckPagesDir(pagesDir, notesDir string) error {
 	p, err := realPath(pagesDir)
 	if err != nil {
@@ -134,6 +138,14 @@ func CheckPagesDir(pagesDir, notesDir string) error {
 	n, err := realPath(notesDir)
 	if err != nil {
 		return err
+	}
+	if p == filepath.Join(n, ".mdnest-pages") {
+		// EvalSymlinks cannot resolve a missing target. Refuse a dangling or
+		// looping link here rather than treating its spelling as the exception.
+		info, err := os.Lstat(p)
+		if os.IsNotExist(err) || (err == nil && info.IsDir()) {
+			return nil
+		}
 	}
 	if p == n || within(p, n) || within(n, p) {
 		return fmt.Errorf("PAGES_DIR %s overlaps NOTES_DIR %s; pages must be stored outside the notes (and the notes outside the pages)", pagesDir, notesDir)
@@ -247,10 +259,11 @@ type pageMetaFile struct {
 }
 
 type PagesHandler struct {
-	cfg   PagesConfig
-	store storage.Storage               // only for NamespaceExists
-	perms *middleware.PermissionChecker // nil in single mode
-	mu    sync.Mutex                    // serialises publish/delete swaps
+	cfg         PagesConfig
+	store       storage.Storage               // only for NamespaceExists
+	perms       *middleware.PermissionChecker // nil in single mode
+	mu          sync.Mutex                    // serialises publish/delete swaps
+	backupSlots *downloadSlots                // bounded disk use for namespace backups
 }
 
 func NewPagesHandler(cfg PagesConfig, stg storage.Storage, perms *middleware.PermissionChecker) *PagesHandler {
@@ -260,7 +273,7 @@ func NewPagesHandler(cfg PagesConfig, stg storage.Storage, perms *middleware.Per
 	if cfg.Network != "open" {
 		cfg.Network = "strict"
 	}
-	return &PagesHandler{cfg: cfg, store: stg, perms: perms}
+	return &PagesHandler{cfg: cfg, store: stg, perms: perms, backupSlots: newDownloadSlots(2)}
 }
 
 // ScriptMode reports whether pages run with scripts on (PAGES_ORIGIN set).
@@ -291,24 +304,34 @@ func pagesError(w http.ResponseWriter, status int, msg string) {
 	pagesJSON(w, status, map[string]string{"error": msg})
 }
 
-// nsDir returns PAGES_DIR/<ns>, validated with SafePath.
+// nsDir is the store selected for new publishes. Reads use readRoot instead.
 func (h *PagesHandler) nsDir(ns string) string {
-	return SafePath(h.cfg.Dir, ns)
+	if h.cfg.InGit {
+		return h.hiddenRoot(ns)
+	}
+	return h.externalRoot(ns)
 }
 
-// pageDir returns PAGES_DIR/<ns>/<id>, validated with SafePath.
 func (h *PagesHandler) pageDir(ns, id string) string {
-	if !ValidNamespaceName(ns) || !ValidPageID(id) {
-		return ""
-	}
-	return SafePath(h.cfg.Dir, path.Join(ns, id))
+	return pageStorePath(h.readRoot(ns, id), id)
 }
 
 func (h *PagesHandler) metaPath(ns, id string) string {
-	if !ValidNamespaceName(ns) || !ValidPageID(id) {
+	return pageStorePath(h.readRoot(ns, id), path.Join(pagesMetaDir, id+".json"))
+}
+
+func (h *PagesHandler) writePageDir(ns, id string) string {
+	if !ValidPageID(id) {
 		return ""
 	}
-	return SafePath(h.cfg.Dir, path.Join(ns, pagesMetaDir, id+".json"))
+	return pageStorePath(h.nsDir(ns), id)
+}
+
+func (h *PagesHandler) writeMetaPath(ns, id string) string {
+	if !ValidPageID(id) {
+		return ""
+	}
+	return pageStorePath(h.nsDir(ns), path.Join(pagesMetaDir, id+".json"))
 }
 
 func (h *PagesHandler) readMeta(ns, id string) (*PageMeta, error) {

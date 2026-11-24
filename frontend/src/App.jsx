@@ -775,6 +775,12 @@ function App() {
   }, [isMulti, userInfo, selectedNs]);
 
   const canWriteCurrent = canWrite(currentPath);
+  // Namespace backups follow the server's root-write check. Global management
+  // alone gives a superadmin no note-content access.
+  const canManagePages = !isMulti || (!!selectedNs && (
+    (userInfo?.role === 'admin' && (userInfo.admin_namespaces || []).includes(selectedNs))
+    || (userInfo?.grants || []).some((g) => g.namespace === selectedNs && g.path === '/' && g.permission === 'write')
+  ));
 
   // Fetch app config on mount (before auth). If the server is in Firebase
   // mode, the embedded firebaseWebConfig lets us init the Firebase SDK
@@ -3215,6 +3221,8 @@ function App() {
               <PagesView
                 key={`${selectedNs}:${pagesViewTab}`}
                 ns={selectedNs}
+                inGit={!!appConfig?.pages?.inGit}
+                refreshKey={tree}
                 initialTab={pagesViewTab}
                 onClose={() => setPagesViewOpen(false)}
                 backLabel={currentPath ? currentPath.split('/').pop() : 'the editor'}
@@ -3465,6 +3473,10 @@ function App() {
           serverDefaultTheme={appConfig?.defaultTheme}
           serverVersion={appConfig?.version}
           canRestart={isSuperAdmin}
+          pages={appConfig?.pages}
+          namespace={selectedNs}
+          canManagePages={canManagePages}
+          onPagesRestored={refreshTree}
         />
       )}
       {shareTarget && (
@@ -3638,6 +3650,7 @@ function App() {
               <PagesPanel
                 key={selectedNs}
                 ns={selectedNs}
+                inGit={!!appConfig?.pages?.inGit}
                 currentPath={pageHandleActive ? currentPath : null}
                 refreshKey={tree}
                 onOpen={(p) => { setPagesViewOpen(false); setPickedFolder(null); openNote(p); }}

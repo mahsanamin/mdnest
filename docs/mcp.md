@@ -378,7 +378,10 @@ these tools scaffold a valid file that the app then renders.
 These tools appear only when the server has HTML pages on. `server_features` (always available) says whether they are on, and whether a page's scripts run, so an agent can check before it offers one. An HTML page is a
 view-only report or dashboard written in HTML. It shows in the notes tree as a
 small handle file, `<path>.page.md`, in any folder; its HTML and other files
-are kept apart from the notes. See [HTML pages](setup.md#html-pages-optional).
+are kept apart from the notes by default. `server_features` also reports
+`pages_in_git`: when true, new publishes are saved with the namespace's notes
+in git. Existing pages stay where they were published, and both stores remain
+readable. See [HTML pages](setup.md#html-pages-optional).
 
 The default is always a Markdown note: an agent should call `publish_page` only
 when the person explicitly asks for an HTML page ("HTML page", "web page",

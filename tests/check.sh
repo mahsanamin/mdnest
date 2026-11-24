@@ -253,7 +253,7 @@ hook_tier() {
 
 # Shell lint (shellcheck), the same files and severity as CI.
 SC_FILES=(setup.sh mdnest-server mdnest git-sync/sync.sh install-cli.sh .githooks/pre-push
-  tests/release-gate.sh tests/check.sh tests/lib/e2e-images.sh)
+  tests/release-gate.sh tests/check.sh tests/helm-pages.sh tests/lib/e2e-images.sh)
 shellcheck_suite() {
   if have shellcheck; then shellcheck -S error "${SC_FILES[@]}"; else
     docker run --rm -v "$REPO_ROOT:/mnt" -w /mnt koalaman/shellcheck:stable -S error "${SC_FILES[@]}"
@@ -272,7 +272,7 @@ browser_lane() {
   # file it watches.
   suite "$COLLAB_PAT" e2e-collab-multi.sh "live collaboration and shared editing, multi mode" MDNEST_E2E_BUDGET=skip
   suite '^backend/handlers/chat|^backend/routes|^mdnest$|^mcp-server/|^frontend/src/(chat|components/Chat)|^tests/(e2e-agentic-multi\.sh|agentic-multi\.mjs)$' e2e-agentic-multi.sh "real two-namespace agent coordination" KEEP=0
-  suite "^backend/handlers/pages|^backend/routes\.go$|^backend/main\.go$|^frontend/src/(App\.jsx|api\.js|components/(Pages|Sidebar|Toolbar))|^tests/browser/pages|^tests/e2e-pages\.sh$|$LIB" e2e-pages.sh "HTML pages, static and script mode"
+  suite "^backend/handlers/pages|^backend/routes\.go$|^backend/main\.go$|^frontend/src/(App\.jsx|api\.js|pagesApi\.js|components/(Pages|Settings|Sidebar|Toolbar))|^tests/browser/pages|^tests/e2e-pages\.sh$|$LIB" e2e-pages.sh "HTML pages, static and script mode"
 }
 other_lane() {
   run "pre-push hook, $([ "$LEVEL" = ship ] && echo release || echo fast) tier (builds, unit, CLI, audits)" hook.log hook_tier
@@ -282,6 +282,7 @@ other_lane() {
   suite "^mdnest$|^backend/|^tests/e2e-docker\.sh$|^tests/cli-smoke-test\.sh$|$LIB" e2e-docker.sh "CLI against the backend, host and bare alpine"
   suite "^backend/(middleware|handlers|store|relpath|storage|collab)/|^backend/main\.go$|^tests/e2e-sec-multi\.sh$|$LIB" e2e-sec-multi.sh "multi-mode access"
   suite "^backend/Dockerfile$|^backend/gitproc/|^tests/backend-image-init\.sh$|$LIB" backend-image-init.sh "tini reaps orphans"
+  suite "^deploy/helm/|^backend/handlers/pages|^tests/helm-pages\.sh$|$LIB" helm-pages.sh "HTML pages chart storage"
   suite "^backend/storage/|^deploy/helm/|^backend/main\.go$|^tests/e2e-ha-durability\.sh$|$LIB" e2e-ha-durability.sh "HA writer, queue, leader"
   suite "chat_members|^backend/middleware/permission|^backend/store/chat|^tests/e2e-private-chats-multi\.sh$|$LIB" e2e-private-chats-multi.sh "private chats"
   suite "^backend/handlers/(transfer|download|treecopy)|^tests/e2e-transfer-multi\.sh$|$LIB" e2e-transfer-multi.sh "move, copy, download"

@@ -48,6 +48,7 @@ type ConfigHandler struct {
 	excalidraw      bool                   // ENABLE_EXCALIDRAW is on — the frontend may open .excalidraw.md files in the drawing editor (loads its chunk)
 	excalidrawLibs  []string               // EXCALIDRAW_LIBRARIES — operator-provided .excalidrawlib URLs preloaded into every drawing
 	pages           bool                   // ENABLE_PAGES is on: the frontend shows the Pages section (loads its chunk)
+	pageInGit       bool                   // new pages are stored with the namespace's notes
 	pageScripts     bool                   // pages run with scripts on, from PAGES_ORIGIN (script mode)
 	pageMaxMB       int                    // PAGES_MAX_MB, so a desktop drop can be refused before it uploads
 	pageMaxFiles    int                    // PAGES_MAX_FILES, likewise
@@ -113,7 +114,8 @@ func (h *ConfigHandler) SetTaskBoard(enabled bool) {
 
 // SetPages turns the Pages section on; scripts says whether pages run in
 // script mode (from PAGES_ORIGIN) or static mode.
-func (h *ConfigHandler) SetPages(enabled, scripts bool, maxMB, maxFiles int) {
+func (h *ConfigHandler) SetPages(enabled, scripts bool, maxMB, maxFiles int, inGit bool) {
+	h.pageInGit = enabled && inGit
 	h.pages = enabled
 	h.pageScripts = enabled && scripts
 	h.pageMaxMB, h.pageMaxFiles = maxMB, maxFiles
@@ -223,7 +225,7 @@ func (h *ConfigHandler) HandleConfig(w http.ResponseWriter, r *http.Request) {
 		resp["chat"] = true
 	}
 	if h.pages {
-		resp["pages"] = map[string]any{"enabled": true, "scripts": h.pageScripts, "maxMB": h.pageMaxMB, "maxFiles": h.pageMaxFiles}
+		resp["pages"] = map[string]any{"enabled": true, "scripts": h.pageScripts, "inGit": h.pageInGit, "maxMB": h.pageMaxMB, "maxFiles": h.pageMaxFiles}
 	}
 	if h.marp {
 		resp["marp"] = true

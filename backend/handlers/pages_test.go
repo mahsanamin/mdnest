@@ -64,6 +64,7 @@ func pagesFixture(t *testing.T, mutate ...func(*PagesConfig)) (*PagesHandler, st
 	pagesDir := filepath.Join(root, "pages")
 	os.MkdirAll(pagesDir, 0o755)
 	cfg := PagesConfig{
+		NotesDir:       notes,
 		Dir:            pagesDir,
 		MaxBytes:       64 << 10,
 		MaxFiles:       5,
@@ -875,6 +876,9 @@ func TestCheckPagesDir(t *testing.T) {
 		filepath.Join(notes, "pages"),
 		filepath.Join(notes, "alpha", "pages", "not-yet"),
 		filepath.Join(link, "pages"),
+		filepath.Join(notes, ".other-pages"),
+		filepath.Join(notes, ".mdnest-pages", "deeper"),
+		filepath.Join(notes, "alpha", ".mdnest-pages"),
 		root, // the notes inside the pages
 	}
 	for _, p := range refused {
@@ -884,12 +888,41 @@ func TestCheckPagesDir(t *testing.T) {
 	}
 	allowed := []string{
 		filepath.Join(root, "pages"),
-		filepath.Join(root, "notes-pages"), // a shared prefix is not "inside"
+		filepath.Join(root, "notes-pages"),    // a shared prefix is not "inside"
+		filepath.Join(notes, ".mdnest-pages"), // the chart's private, non-namespace store
+		filepath.Join(link, ".mdnest-pages"),  // same direct child after resolving the parent
 	}
 	for _, p := range allowed {
 		if err := CheckPagesDir(p, notes); err != nil {
 			t.Errorf("PAGES_DIR %s refused: %v", p, err)
 		}
+	}
+}
+
+func TestCheckPagesDir_ChartExceptionCannotFollowOtherChildren(t *testing.T) {
+	root := t.TempDir()
+	notes := filepath.Join(root, "notes")
+	os.MkdirAll(filepath.Join(notes, "other"), 0755)
+	hidden := filepath.Join(notes, ".mdnest-pages")
+	for _, target := range []string{filepath.Join(notes, "other"), filepath.Join(notes, "other", "not-yet"), hidden} {
+		if err := os.Symlink(target, hidden); err != nil {
+			t.Fatal(err)
+		}
+		if err := CheckPagesDir(hidden, notes); err == nil {
+			t.Fatalf("chart path followed link to %s", target)
+		}
+		os.Remove(hidden)
+	}
+	alias := filepath.Join(root, "alias-to-other")
+	if err := os.Symlink(filepath.Join(notes, "other"), alias); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckPagesDir(alias, notes); err == nil {
+		t.Fatal("alias into another child accepted")
+	}
+	os.Mkdir(hidden, 0755)
+	if err := CheckPagesDir(hidden, notes); err != nil {
+		t.Fatalf("existing chart store refused: %v", err)
 	}
 }
 

@@ -147,6 +147,10 @@ GIT_AUTHOR_EMAIL=you@example.com
 # When off, no route is registered and the frontend loads no pages code.
 # ENABLE_PAGES=false
 #
+# Save new publishes with the notes in .mdnest/pages (so git sync saves them).
+# No existing pages are moved. Both stores remain readable after a switch.
+# PAGES_IN_GIT=false
+#
 # Where page files are kept on the host. Empty means a Docker named volume
 # (mdnest-pages). Either way it is separate from your notes.
 # PAGES_DIR=

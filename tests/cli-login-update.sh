@@ -82,7 +82,7 @@ class H(BaseHTTPRequestHandler):
             alias = read("alias")
             extra = ',"serverAlias":"%s"' % alias if alias else ""
             if read("pages") == "on":
-                extra += ',"chat":true,"taskBoard":true,"pages":{"enabled":true,"scripts":false}'
+                extra += ',"chat":true,"taskBoard":true,"pages":{"enabled":true,"scripts":false,"inGit":%s}' % ('true' if read("in-git") == "on" else 'false')
             return self.send(200, '{"version":"4.8.5-dev"%s}' % extra, "application/json")
         if p == "/api/namespaces":
             if self.headers.get("Authorization") == "Bearer mdnest_good":
@@ -342,12 +342,15 @@ echo
 H="$(new_home)"; HOME="$H" "$CLI" login @feat "$URL" mdnest_good >/dev/null 2>&1
 echo "off" > "$WORK/pages"
 out="$(HOME="$H" "$CLI" features @feat --json 2>&1)"
-eq "features --json: pages off when the server does not have them" '{"pages": false, "pages_scripts": false, "chat": false, "task_board": false, "excalidraw": false, "marp": false, "live_collab": false}' "$out"
+eq "features --json: pages off when the server does not have them" '{"pages": false, "pages_scripts": false, "pages_in_git": false, "chat": false, "task_board": false, "excalidraw": false, "marp": false, "live_collab": false}' "$out"
 echo "on" > "$WORK/pages"
 out="$(HOME="$H" "$CLI" features @feat --json 2>&1)"
-eq "features --json: pages on, scripts off" '{"pages": true, "pages_scripts": false, "chat": true, "task_board": true, "excalidraw": false, "marp": false, "live_collab": false}' "$out"
+eq "features --json: pages on, scripts off" '{"pages": true, "pages_scripts": false, "pages_in_git": false, "chat": true, "task_board": true, "excalidraw": false, "marp": false, "live_collab": false}' "$out"
 out="$(HOME="$H" "$CLI" features @feat 2>&1)"
 case "$out" in *"pages        on"*"scripts off"*) ok "features: plain list says pages on, scripts off" ;; *) bad "features: plain list says pages on, scripts off" "$out" ;; esac
+echo on > "$WORK/in-git"
+out="$(HOME="$H" "$CLI" features @feat --json 2>&1)"
+contains "features reports pages in git" "$out" '"pages_in_git": true'
 echo "off" > "$WORK/pages"
 
 echo "=== $((PASS+FAIL)) checks: $PASS passed, $FAIL failed ==="
