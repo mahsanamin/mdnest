@@ -97,6 +97,18 @@ rmdir "$REPO_ROOT/.pages-test-unused" 2>/dev/null
 has "PAGES_DIR: bound from the host folder" "$sb/docker-compose.yml" "- $REPO_ROOT/.pages-test-unused:/data/pages"
 hasnt "PAGES_DIR: no named volume" "$sb/docker-compose.yml" "mdnest-pages"
 
+# F5: a PAGES_DIR inside a namespace folder (or holding one) is refused.
+for inside in "notes/pages" "notes" "."; do
+  sb="$(generate "$REPO_ROOT/setup.sh" ENABLE_PAGES=true "PAGES_DIR=$inside")"
+  if [ "$(cat "$sb/rc")" != 0 ] && grep -q "overlaps the folder of namespace" "$sb/setup.out"; then
+    ok "PAGES_DIR=$inside overlapping the notes is refused"
+  else
+    bad "PAGES_DIR=$inside overlapping the notes is refused" "rc=$(cat "$sb/rc"): $(tail -2 "$sb/setup.out")"
+  fi
+done
+sb="$(generate "$REPO_ROOT/setup.sh" ENABLE_PAGES=true "PAGES_DIR=notes-pages")"
+if [ "$(cat "$sb/rc")" = 0 ]; then ok "PAGES_DIR=notes-pages beside the notes is accepted"; else bad "PAGES_DIR=notes-pages beside the notes is accepted" "$(tail -3 "$sb/setup.out")"; fi
+
 # 4) Script mode on a second port, two bind addresses.
 sb="$(generate "$REPO_ROOT/setup.sh" ENABLE_PAGES=true PAGES_ORIGIN=http://localhost:3237 PAGES_NETWORK=open BIND_ADDRESS=127.0.0.1,0.0.0.0)"
 has "script: PAGES_ORIGIN reaches .env" "$sb/.env" "PAGES_ORIGIN=http://localhost:3237"

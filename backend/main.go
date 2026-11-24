@@ -452,6 +452,9 @@ func main() {
 		if err != nil {
 			log.Fatalf("PAGES_DIR: %v", err)
 		}
+		if err := handlers.CheckPagesDir(pagesDir, absNotesDir); err != nil {
+			log.Fatalf("%v", err)
+		}
 		if err := os.MkdirAll(pagesDir, 0755); err != nil {
 			log.Fatalf("PAGES_DIR %s: %v", pagesDir, err)
 		}

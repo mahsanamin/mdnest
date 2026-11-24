@@ -821,6 +821,39 @@ func TestPages_ScriptModeHeaders(t *testing.T) {
 	}
 }
 
+// F5: a PAGES_DIR inside NOTES_DIR would turn page files into readable
+// notes, so startup refuses any overlap, also through a symlink.
+func TestCheckPagesDir(t *testing.T) {
+	root := t.TempDir()
+	notes := filepath.Join(root, "notes")
+	os.MkdirAll(notes, 0o755)
+	link := filepath.Join(root, "link-to-notes")
+	if err := os.Symlink(notes, link); err != nil {
+		t.Fatal(err)
+	}
+	refused := []string{
+		notes,
+		filepath.Join(notes, "pages"),
+		filepath.Join(notes, "alpha", "pages", "not-yet"),
+		filepath.Join(link, "pages"),
+		root, // the notes inside the pages
+	}
+	for _, p := range refused {
+		if err := CheckPagesDir(p, notes); err == nil {
+			t.Errorf("PAGES_DIR %s with NOTES_DIR %s was accepted", p, notes)
+		}
+	}
+	allowed := []string{
+		filepath.Join(root, "pages"),
+		filepath.Join(root, "notes-pages"), // a shared prefix is not "inside"
+	}
+	for _, p := range allowed {
+		if err := CheckPagesDir(p, notes); err != nil {
+			t.Errorf("PAGES_DIR %s refused: %v", p, err)
+		}
+	}
+}
+
 func TestResolvePagesOrigin(t *testing.T) {
 	cases := []struct {
 		pages, front, want string

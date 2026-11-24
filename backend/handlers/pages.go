@@ -118,6 +118,52 @@ func originOf(raw string) string {
 	return u.Scheme + "://" + host + ":" + port
 }
 
+// CheckPagesDir refuses a PAGES_DIR that overlaps NOTES_DIR (the same
+// folder, one inside the other). Inside the notes, every page file would
+// become a readable note (its HTML shown and searched as a note, synced to
+// git), and the notes would hold folders mdnest never created. Symlinks are
+// resolved first, on the part of each path that exists, so a link cannot
+// hide the overlap. Called at startup, before PAGES_DIR is created.
+func CheckPagesDir(pagesDir, notesDir string) error {
+	p, err := realPath(pagesDir)
+	if err != nil {
+		return err
+	}
+	n, err := realPath(notesDir)
+	if err != nil {
+		return err
+	}
+	if p == n || within(p, n) || within(n, p) {
+		return fmt.Errorf("PAGES_DIR %s overlaps NOTES_DIR %s; pages must be stored outside the notes (and the notes outside the pages)", pagesDir, notesDir)
+	}
+	return nil
+}
+
+// within reports whether child is strictly inside parent.
+func within(child, parent string) bool {
+	rel, err := filepath.Rel(parent, child)
+	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// realPath is the absolute, symlink-free form of p. The part of p that does
+// not exist yet is kept as written below its deepest existing folder.
+func realPath(p string) (string, error) {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return "", err
+	}
+	rest := ""
+	for cur := abs; ; cur = filepath.Dir(cur) {
+		if resolved, err := filepath.EvalSymlinks(cur); err == nil {
+			return filepath.Join(resolved, rest), nil
+		}
+		if filepath.Dir(cur) == cur {
+			return abs, nil
+		}
+		rest = filepath.Join(filepath.Base(cur), rest)
+	}
+}
+
 // ResolvePagesOrigin validates PAGES_ORIGIN against FRONTEND_ORIGIN. It
 // returns the origin to serve scripted pages from, or "" for static mode,
 // plus a message to log when the setting was refused. A pages origin equal to

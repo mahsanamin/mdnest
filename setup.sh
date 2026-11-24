@@ -361,6 +361,34 @@ for i in "${!MOUNT_NAMES[@]}"; do
   fi
 done
 
+# HTML pages: the page files must live outside every namespace folder, and
+# no namespace may live inside them. A page folder inside the notes would
+# make every page file a readable note (shown, searched, synced to git).
+# Symlinks are resolved on the part of each path that exists (portable: no
+# realpath -m on macOS).
+_real_path() {
+  local p="$1" rest=""
+  case "$p" in /*) ;; *) p="$PWD/$p" ;; esac
+  while [ ! -d "$p" ] && [ "$p" != "/" ]; do
+    rest="/$(basename "$p")$rest"
+    p="$(dirname "$p")"
+  done
+  printf '%s%s' "$(cd "$p" && pwd -P)" "$rest"
+}
+if [ "$ENABLE_PAGES" = "true" ] && [ -n "$PAGES_DIR" ]; then
+  _pages_real="$(_real_path "$PAGES_DIR")"
+  for i in "${!MOUNT_NAMES[@]}"; do
+    _mount_real="$(_real_path "${MOUNT_PATHS[$i]}")"
+    case "$_pages_real/" in "$_mount_real"/*) _overlap=1 ;; *) _overlap=0 ;; esac
+    case "$_mount_real/" in "$_pages_real"/*) _overlap=1 ;; esac
+    if [ "$_overlap" = 1 ]; then
+      echo "Error: PAGES_DIR ($PAGES_DIR) overlaps the folder of namespace ${MOUNT_NAMES[$i]} (${MOUNT_PATHS[$i]})."
+      echo "  Page files must be stored outside every namespace folder. Pick another PAGES_DIR."
+      exit 1
+    fi
+  done
+fi
+
 case "${DEFAULT_THEME:-auto}" in
   auto|dark|light) ;;
   *)
