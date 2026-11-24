@@ -8,6 +8,15 @@ All notable changes to mdnest are documented here.
 
 ### Added
 
+- **HTML pages** *(Optional: set `ENABLE_PAGES=true`)*. Publish a report or
+  dashboard as an HTML page into any folder, from the CLI (`mdnest page
+  publish`), from an AI tool over MCP, or by dropping an HTML file on a folder.
+  It shows in the tree as a small `<name>.page.md` file and opens in a viewer.
+  Pages run with scripts off; to let their scripts run, give them a second
+  address with `PAGES_ORIGIN`. Republishing updates the page you published
+  through; other copies keep the version they show. `FRONTEND_ORIGIN` must be
+  the address people open, or a page cannot be shown. See "HTML pages" in the
+  setup guide.
 - **Local agent crews in a chat** *(Optional: needs Node 22 or newer on the
   machine that runs them)*. `mdnest chat crew "goal" --note <new note> --agent
   'name:role:command'` starts a chat where local agents take turns: each

@@ -666,6 +666,13 @@ with your notes. On the Helm chart, set `pages.enabled: true`; page files are
 kept on the notes volume in a hidden folder. Pages are not available on the
 multi-replica app role (`MDNEST_ROLE=app`, the git-native HA topology).
 
+**Set `FRONTEND_ORIGIN` to the address people open.** A page may only be shown
+inside the address in `FRONTEND_ORIGIN`. Behind your own domain or reverse
+proxy, set it to that public URL (for example
+`FRONTEND_ORIGIN=https://notes.example.com`), not the internal
+`http://localhost:<port>`. Otherwise every page shows the browser's "refused
+to connect" instead of its content.
+
 ### Static mode (the default)
 
 Without `PAGES_ORIGIN`, pages are served from mdnest's own address with their
