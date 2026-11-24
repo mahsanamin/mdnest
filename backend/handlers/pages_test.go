@@ -671,12 +671,12 @@ func TestPages_PassRules(t *testing.T) {
 	}
 
 	var c0 pageClaims
-	jwt.ParseWithClaims(pass, &c0, func(*jwt.Token) (any, error) { return []byte(pagesTestSecret), nil })
+	jwt.ParseWithClaims(pass, &c0, func(*jwt.Token) (any, error) { return pagePassKey([]byte(pagesTestSecret)), nil })
 	if c0.Version == "" {
 		t.Fatal("pass carries no version")
 	}
 	mint := func(claims jwt.MapClaims, secret string) string {
-		s, _ := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(secret))
+		s, _ := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(pagePassKey([]byte(secret)))
 		return s
 	}
 	base := jwt.MapClaims{"purpose": "page", "ns": "alpha", "id": c0.ID, "v": c0.Version}
@@ -697,6 +697,16 @@ func TestPages_PassRules(t *testing.T) {
 	// fails for its own reason only.
 	if w := view(h, "/api/pages/view/"+mint(withExp("v", c0.Version), pagesTestSecret)+"/"); w.Code != http.StatusOK {
 		t.Fatalf("control pass: %d", w.Code)
+	}
+	// F6: passes are signed with a key derived from the JWT secret, never
+	// the secret itself. A pass with correct claims signed with the raw
+	// secret is refused, and a real pass does not verify with the raw secret.
+	raw, _ := jwt.NewWithClaims(jwt.SigningMethodHS256, withExp("v", c0.Version)).SignedString([]byte(pagesTestSecret))
+	if w := view(h, "/api/pages/view/"+raw+"/"); w.Code != http.StatusForbidden {
+		t.Fatalf("pass signed with the raw JWT secret: %d", w.Code)
+	}
+	if _, err := jwt.Parse(pass, func(*jwt.Token) (any, error) { return []byte(pagesTestSecret), nil }); err == nil {
+		t.Fatal("a page pass verifies with the login signing key")
 	}
 	cases := map[string]string{
 		"expired":       mint(with("exp", time.Now().Add(-time.Minute).Unix()), pagesTestSecret),
@@ -746,7 +756,7 @@ func TestPages_PassRules(t *testing.T) {
 
 	// A fresh pass lasts 30 minutes by default.
 	var c pageClaims
-	jwt.ParseWithClaims(pass, &c, func(*jwt.Token) (any, error) { return []byte(pagesTestSecret), nil })
+	jwt.ParseWithClaims(pass, &c, func(*jwt.Token) (any, error) { return pagePassKey([]byte(pagesTestSecret)), nil })
 	if left := time.Until(c.ExpiresAt.Time); left < 29*time.Minute || left > 31*time.Minute {
 		t.Fatalf("pass lifetime %v, want 30m", left)
 	}

@@ -34,7 +34,9 @@ import (
 	"bufio"
 	"bytes"
 	"compress/gzip"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base32"
 	"encoding/hex"
 	"encoding/json"
@@ -652,8 +654,20 @@ func (h *PagesHandler) mintPass(ns, id, version string) (string, time.Time, erro
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
 	}
-	s, err := jwt.NewWithClaims(jwt.SigningMethodHS256, c).SignedString(h.cfg.Secret)
+	s, err := jwt.NewWithClaims(jwt.SigningMethodHS256, c).SignedString(pagePassKey(h.cfg.Secret))
 	return s, exp, err
+}
+
+// pagePassKey is the key page passes are signed with: HMAC-SHA256 of the
+// server's JWT secret over a fixed label. Passes and login tokens therefore
+// never share a key. A pass appears in page URLs, which can end up in logs
+// and browser history, so even if a bug let a token's purpose claim be
+// ignored, a pass still could not be checked against the login key, and a
+// login token could not pass as a page pass.
+func pagePassKey(secret []byte) []byte {
+	m := hmac.New(sha256.New, secret)
+	m.Write([]byte("mdnest-pages"))
+	return m.Sum(nil)
 }
 
 // parsePass returns the namespace and page id a pass is good for, or ok=false
@@ -665,7 +679,7 @@ func (h *PagesHandler) parsePass(s string) (string, string, bool) {
 		if t.Method != jwt.SigningMethodHS256 {
 			return nil, jwt.ErrSignatureInvalid
 		}
-		return h.cfg.Secret, nil
+		return pagePassKey(h.cfg.Secret), nil
 	}, jwt.WithExpirationRequired())
 	if err != nil || !tok.Valid || c.Purpose != pagePassPurpose {
 		return "", "", false

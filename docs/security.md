@@ -582,9 +582,11 @@ against the same limits in the browser before it uploads, and again by the
 server.
 
 **Viewing goes through a pass.** Opening a page asks the API for a frame URL.
-The server checks read access on the handle, then signs a pass with the server's JWT secret
-that names one namespace, one page and the page's current version, and
-expires after 30 minutes. The pass sits in the URL path, so the page's own
+The server checks read access on the handle, then signs a pass that names
+one namespace, one page and the page's current version, and expires after 30
+minutes. The pass is signed with its own key, derived from the server's JWT
+secret (HMAC-SHA256 of the secret over a fixed label), never with the secret
+itself, so a pass and a login token are never checked against the same key. The pass sits in the URL path, so the page's own
 relative links carry it, and the page is served to whoever presents it, with
 no other login. Consequences:
 
