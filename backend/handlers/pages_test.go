@@ -986,3 +986,25 @@ func TestPagesEnabled(t *testing.T) {
 		}
 	}
 }
+
+// An image's alt text, and the label of an element marked role="img", are part
+// of a page's text: they are what remains when the image file is lost, and what
+// an agent reads to redraw the picture.
+func TestExtractPageTextKeepsImageDescriptions(t *testing.T) {
+	_, _, text := ExtractPageText([]byte(`<h1>Report</h1>
+<img src="a.png" alt="Bar chart: July 3, August 5">
+<img src="deco.png" alt="">
+<svg role="img" aria-label="Progress: 3 of 5 steps"><text>3/5</text></svg>
+<div aria-label="not a picture">x</div>
+<script>var s = '<img alt="from a script">';</script>`))
+	for _, want := range []string{"[Image: Bar chart: July 3, August 5]", "[Image: Progress: 3 of 5 steps]", "3/5"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("text %q lacks %q", text, want)
+		}
+	}
+	for _, not := range []string{"not a picture", "from a script", "[Image: ]"} {
+		if strings.Contains(text, not) {
+			t.Errorf("text %q should not contain %q", text, not)
+		}
+	}
+}

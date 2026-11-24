@@ -552,6 +552,36 @@ func ExtractPageText(doc []byte) (title, description, text string) {
 				}
 				continue
 			}
+			// A picture's alt text (or the aria-label of an element marked
+			// role="img", like an inline SVG) is part of what the page says:
+			// it is what a reader, search and an agent get when the image file
+			// is missing, and what lets an agent redraw it.
+			if isStart && hasAttr && skip == 0 {
+				var alt, label, role string
+				for {
+					k, v, more := z.TagAttr()
+					switch strings.ToLower(string(k)) {
+					case "alt":
+						alt = string(v)
+					case "aria-label":
+						label = string(v)
+					case "role":
+						role = strings.ToLower(strings.TrimSpace(string(v)))
+					}
+					if !more {
+						break
+					}
+				}
+				pic := ""
+				if a == atom.Img || a == atom.Area {
+					pic = alt
+				} else if role == "img" {
+					pic = label
+				}
+				if pic = strings.TrimSpace(pic); pic != "" && xb.Len() < maxPageText*2 {
+					xb.WriteString(" [Image: " + pic + "] ")
+				}
+			}
 			switch a {
 			case atom.Script, atom.Style, atom.Noscript, atom.Template:
 				if isStart {
