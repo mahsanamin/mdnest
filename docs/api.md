@@ -1446,8 +1446,11 @@ curl -OJ "http://localhost:8286/api/download?ns=personal&path=Project" \
 
 View-only HTML pages. These routes exist only when the server has
 `ENABLE_PAGES=true`; otherwise each answers 404. `GET /api/config` reports
-`"pages": {"enabled": true, "scripts": <bool>, "maxMB": 20, "maxFiles": 500}`
+`"pages": {"enabled": true, "scripts": <bool>, "inGit": false, "maxMB": 20, "maxFiles": 500}`
 when they are on (`scripts` is true in script mode, with `PAGES_ORIGIN` set).
+`inGit` reports `PAGES_IN_GIT`: new publishes go in the namespace's hidden
+`.mdnest/pages/` folder when true, or `PAGES_DIR` when false. Reads always look
+in both stores, hidden first. The flag never moves existing pages.
 
 A page lives in the notes tree as a handle file, `<name>.page.md`, in any
 folder. The handle is an ordinary note holding front matter:
@@ -1552,6 +1555,51 @@ or `"this page's files are missing: publish it again here"`.
 
 The page's files as a tar (`ns`, `path`), for `mdnest page pull`. Needs read
 on the handle.
+
+### GET /api/pages/export
+
+Download the pages of one namespace as `<namespace>-pages.tgz`. Takes `ns` and
+needs write access to the whole namespace, the same rule as Unlinked.
+
+The archive contains `manifest.json` and `pages/<key>/` for each exported
+handle. Both page stores are read. Unlinked pages are left out. Handles with
+missing or unreadable files are skipped and listed in the manifest, including
+pages deleted while the backup is being copied. A skipped page never leaves
+half its files in the archive. Response headers `X-Mdnest-Pages-Exported` and
+`X-Mdnest-Pages-Skipped` give the counts.
+
+```json
+{"version":1,"namespace":"engineering","pages":[{"key":"000000","path":"Reports/q3.page.md","title":"Q3 report","description":"Revenue by region"}],"skipped":[{"path":"Reports/old.page.md","status":"skipped","reason":"files missing"}]}
+```
+
+`key` names that page's folder inside the archive. Handle paths are relative
+to the namespace, never absolute paths. The current limits are 1,000 handles,
+10,000 files and 256 MB of page files, counted before compression. A busy
+backup worker returns 429; a namespace above these limits returns 413.
+
+### POST /api/pages/import
+
+Restore a downloaded `.tar.gz` backup into the namespace named by `ns`. Send
+the file as the body (`Content-Type: application/gzip`). Needs write access to
+the whole namespace. Every page is published with a new id at its manifest
+handle path, using the store selected by `PAGES_IN_GIT`.
+
+The whole archive is checked before any page is published. Bad or duplicate
+paths, hidden paths, symlinks, hard links, special files, broken gzip/tar data,
+a missing `index.html`, unlisted files or an invalid manifest return 400.
+Each page must fit `PAGES_MAX_MB` and `PAGES_MAX_FILES` (files and folders).
+The namespace limits above also apply, with at most 272 MB for compressed
+uploads or expanded tar data, and 2 MB for the manifest. Over a limit returns
+413. If another proxy is in front of mdnest, allow 272 MB for this route there
+too; the bundled frontend already does.
+
+A path that already holds a page handle is republished. An ordinary note is
+never overwritten: that entry is skipped, and other entries continue. The
+response reports each result, plus the missing-file entries from the export:
+
+```json
+{"restored":1,"skipped":1,"results":[{"path":"Reports/q3.page.md","status":"restored"},{"path":"Reports/old.page.md","status":"skipped","reason":"files missing"}]}
+```
 
 ### POST /api/pages/pass
 

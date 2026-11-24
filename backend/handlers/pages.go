@@ -249,10 +249,11 @@ type pageMetaFile struct {
 }
 
 type PagesHandler struct {
-	cfg   PagesConfig
-	store storage.Storage               // only for NamespaceExists
-	perms *middleware.PermissionChecker // nil in single mode
-	mu    sync.Mutex                    // serialises publish/delete swaps
+	cfg         PagesConfig
+	store       storage.Storage               // only for NamespaceExists
+	perms       *middleware.PermissionChecker // nil in single mode
+	mu          sync.Mutex                    // serialises publish/delete swaps
+	backupSlots *downloadSlots                // bounded disk use for namespace backups
 }
 
 func NewPagesHandler(cfg PagesConfig, stg storage.Storage, perms *middleware.PermissionChecker) *PagesHandler {
@@ -262,7 +263,7 @@ func NewPagesHandler(cfg PagesConfig, stg storage.Storage, perms *middleware.Per
 	if cfg.Network != "open" {
 		cfg.Network = "strict"
 	}
-	return &PagesHandler{cfg: cfg, store: stg, perms: perms}
+	return &PagesHandler{cfg: cfg, store: stg, perms: perms, backupSlots: newDownloadSlots(2)}
 }
 
 // ScriptMode reports whether pages run with scripts on (PAGES_ORIGIN set).

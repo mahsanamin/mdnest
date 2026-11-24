@@ -432,6 +432,10 @@ func (s *statusWriter) WriteHeader(code int) {
 // needs write on that handle only. A .page.md that is not a handle is never
 // overwritten (409).
 func (h *PagesHandler) handlePublish(w http.ResponseWriter, r *http.Request) {
+	h.publishPage(w, r, nil)
+}
+
+func (h *PagesHandler) publishPage(w http.ResponseWriter, r *http.Request, restored *pageBackupEntry) {
 	ns, rel, ok := h.requireHandlePath(w, r)
 	if !ok {
 		return
@@ -450,20 +454,6 @@ func (h *PagesHandler) handlePublish(w http.ResponseWriter, r *http.Request) {
 	// later version to a handle someone planted in a folder with other
 	// readers. Other handles keep the version they name, which stays stored
 	// until no handle names it.
-	oldID := ""
-	if data, err := h.store.ReadFile(ctx, ns, rel); err == nil {
-		existing, isHandle := ParsePageHandle(string(data))
-		if !isHandle {
-			pagesError(w, http.StatusConflict, rel+" exists and is not a page handle; choose another name")
-			return
-		}
-		if ValidPageID(existing) {
-			oldID = existing
-		}
-	} else if !errors.Is(err, storage.ErrNotExist) {
-		pagesError(w, http.StatusInternalServerError, "failed to read the handle")
-		return
-	}
 	id := newPageID()
 
 	nsDir := h.nsDir(ns)
@@ -509,6 +499,10 @@ func (h *PagesHandler) handlePublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	title, description, text := ExtractPageText(indexBytes)
+	if restored != nil {
+		title = collapseSpace(plainField(restored.Title))
+		description = truncateRunes(collapseSpace(plainField(restored.Description)), maxPageDescription)
+	}
 	if title == "" {
 		title = strings.TrimSuffix(path.Base(rel), PageHandleSuffix)
 	}
@@ -524,6 +518,25 @@ func (h *PagesHandler) handlePublish(w http.ResponseWriter, r *http.Request) {
 		Version:     randHex(12),
 	}
 
+	// Read the body before taking the note lock. A slow upload must not block
+	// readers. Then keep the handle check and write under the same lock, so a
+	// concurrently created ordinary note cannot be overwritten.
+	unlock := lockNote(ns, rel)
+	defer unlock()
+	oldID := ""
+	if data, err := h.store.ReadFile(ctx, ns, rel); err == nil {
+		existing, isHandle := ParsePageHandle(string(data))
+		if !isHandle {
+			pagesError(w, http.StatusConflict, rel+" exists and is not a page handle; choose another name")
+			return
+		}
+		if ValidPageID(existing) {
+			oldID = existing
+		}
+	} else if !errors.Is(err, storage.ErrNotExist) {
+		pagesError(w, http.StatusInternalServerError, "failed to read the handle")
+		return
+	}
 	h.mu.Lock()
 	dest, metaFile := h.writePageDir(ns, id), h.writeMetaPath(ns, id)
 	if dest == "" || metaFile == "" {
@@ -547,9 +560,7 @@ func (h *PagesHandler) handlePublish(w http.ResponseWriter, r *http.Request) {
 	}
 	h.mu.Unlock()
 	// The handle last: it is what makes the page visible.
-	unlock := lockNote(ns, rel)
 	err = h.store.WriteFile(ctx, ns, rel, []byte(pageHandleContent(id, meta)))
-	unlock()
 	if err != nil {
 		log.Printf("pages: write handle %s/%s: %v", ns, rel, err)
 		h.mu.Lock()
