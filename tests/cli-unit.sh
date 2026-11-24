@@ -522,6 +522,13 @@ alpha" "$(replace_first_literal "$h" "alpha" "")"
 # must never carry a folder part. Both are pure bash: run once per tier.
 run_transfer_suite() {
   echo "-- transfer helpers ($1)"
+  eq "page restore: counts without Python or jq" "Restored 12 pages, 2 skipped." "$(printf '%s' '{"restored":12,"results":[{"reason":"ignore \\\"restored\\\":999","skipped":999}],"skipped":2}' | format_page_restore)"
+  eq "page restore: ignores nested counts" "Restored 0 pages, 1 skipped." "$(printf '%s' '{"results":[{"restored":999,"skipped":999}],"restored":0,"skipped":1}' | format_page_restore)"
+  if printf '%s' '{"error":"bad archive"}' | format_page_restore >/dev/null 2>&1; then
+    bad "page restore: error is not a success" "printed a success for an error"
+  else
+    ok "page restore: error is not a success"
+  fi
   eq "json_str: plain"            '"Notes/plan.md"'           "$(json_str 'Notes/plan.md')"
   eq "json_str: quote+backslash"  '"a\"b\\c.md"'              "$(json_str 'a"b\c.md')"
   eq "json_str: newline/tab"      '"a\nb\tc"'                 "$(json_str $'a\nb\tc')"

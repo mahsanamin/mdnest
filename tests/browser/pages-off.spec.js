@@ -38,6 +38,9 @@ test('pages off: no section, no chunk, no route', async ({ page, request }) => {
   await expect(page.locator('[data-testid=pages-panel]')).toHaveCount(0);
   await page.locator('[data-testid=toolbar-stickies]').first().click();
   await expect(page.getByText('Pages', { exact: true })).toHaveCount(0);
+  await page.click('.toolbar-more-btn');
+  await page.click('.toolbar-more-settings');
+  await expect(page.locator('.settings-tabs').getByRole('button', { name: 'Pages', exact: true })).toHaveCount(0);
   expect(chunks, 'the pages chunk was requested with pages off').toEqual([]);
 
   const token = await page.evaluate(() => localStorage.getItem('mdnest_token'));
@@ -46,6 +49,8 @@ test('pages off: no section, no chunk, no route', async ({ page, request }) => {
     ['GET', '/api/pages/text?ns=testing_workspace&path=x.page.md'],
     ['POST', '/api/pages/pass?ns=testing_workspace&path=x.page.md'],
     ['GET', '/api/pages/view/x/'],
+    ['GET', '/api/pages/export?ns=testing_workspace'],
+    ['POST', '/api/pages/import?ns=testing_workspace'],
   ]) {
     const res = await request.fetch(path, { method, headers: { Authorization: `Bearer ${token}` } });
     expect(res.status(), `${method} ${path}`).toBe(404);

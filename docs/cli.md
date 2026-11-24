@@ -377,13 +377,16 @@ mdnest page list    @work/engineering revenue                             # page
 mdnest page list    --json @work/engineering                              # raw API JSON
 mdnest page pull    @work/engineering/Reports/q3-report ./q3-copy         # into a new or empty folder
 mdnest page delete  @work/engineering/Reports/q3-report
+mdnest page export  @work/engineering pages.tgz                           # namespace backup
+mdnest page import  @work/engineering pages.tgz                           # restore handles with new ids
 mdnest read         @work/engineering/Reports/q3-report.page.md           # the handle, then the page text
 ```
 
 An HTML page is a view-only report or dashboard written in HTML. It shows in
 the notes tree as a small handle file, here `Reports/q3-report.page.md` (the
-`.page.md` is added when you leave it out); its HTML and other files are kept
-apart from the notes. A Markdown note stays the default for everything else:
+`.page.md` is added when you leave it out). Its HTML and other files are kept
+apart from the notes by default. With `PAGES_IN_GIT=true`, new publishes go in
+the namespace's hidden `.mdnest/pages/` folder so git sync saves them too. A Markdown note stays the default for everything else:
 AI agents publish an HTML page only when someone explicitly asks for one (see
 `mdnest docs agents`). A folder is sent as a gzipped tar made by the system `tar`; publishing
 to the same handle replaces the page. Publishing and deleting need write
@@ -399,6 +402,16 @@ Move, rename, copy or delete the handle with the normal commands: the page
 goes with it, also to another namespace. A server with pages off answers
 "this server has pages turned off". See "HTML pages" in
 [setup.md](setup.md#html-pages-optional).
+
+`page export` and `page import` need write access to the whole namespace.
+Export never overwrites an existing local file. The `.tar.gz` contains the
+page files, handle paths, titles and descriptions from both stores, but no
+unlinked pages. Missing files are skipped and listed in `manifest.json`; the
+CLI prints the counts. Import validates the whole archive first, then restores
+pages with new ids at their original handle paths. Existing page handles are
+republished, ordinary notes are skipped and kept. Add `--json` after the file
+name for per-entry restore results. Limits are 256 MB of page files, 10,000
+files and 1,000 handles, plus each page's configured size and file limits.
 
 ### Search
 

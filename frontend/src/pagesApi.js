@@ -16,6 +16,29 @@ export async function listPages(ns, query) {
   return res.json();
 }
 
+// Namespace backups need write access to the whole namespace.
+export async function exportPages(ns) {
+  const res = await request(`/pages/export?ns=${encodeURIComponent(ns)}`);
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'Could not download pages');
+  }
+  return {
+    blob: await res.blob(),
+    exported: Number(res.headers.get('X-Mdnest-Pages-Exported') || 0),
+    skipped: Number(res.headers.get('X-Mdnest-Pages-Skipped') || 0),
+  };
+}
+
+export async function importPages(ns, file) {
+  const res = await request(`/pages/import?ns=${encodeURIComponent(ns)}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/gzip' }, body: file,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Could not restore pages');
+  return data;
+}
+
 // A frame URL for the page a handle (<name>.page.md) names:
 // { url, scripts, expiresAt, title, author, publishedAt }. Asked for again
 // each time a page is opened, since the pass in it expires.

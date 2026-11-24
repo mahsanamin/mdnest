@@ -160,7 +160,7 @@ When to make one:
 - Give every image, chart and diagram a full `alt` text that says what it
   shows, with its key numbers or steps (for example `alt="Bar chart: Q3
   revenue 1.2M, up 14% from Q2"`, not `alt="chart"`). A page's files are not
-  kept in git, so if they are lost the page still says what each picture
+  kept in git by default, so if they are lost the page still says what each picture
   showed, and you or another agent can redraw it from that text.
 
 How:
@@ -174,6 +174,15 @@ How:
   text. Read that to learn what an HTML page says.
 - `mdnest page list @alias/namespace` lists HTML pages; add a word to search
   them.
+- `mdnest features --json` and MCP `server_features` report `pages_in_git`.
+  When true, new publishes are saved with the notes in git. Existing pages
+  never move automatically; both storage locations are always read.
+- Writers of the whole namespace can back up its pages with
+  `mdnest page export @alias/namespace pages.tgz`, then restore them with
+  `mdnest page import @alias/namespace pages.tgz`. Missing pages are skipped
+  and listed in `manifest.json`; unlinked pages are left out. Restore uses
+  new ids at the original handle paths, replaces existing page handles, and
+  skips ordinary notes. Add `--json` for per-entry restore results.
 - Scripts in an HTML page run only when `mdnest features` says
   `scripts on`. Otherwise it shows with scripts off, so put the important numbers in
   the HTML itself, not only in a chart a script draws.

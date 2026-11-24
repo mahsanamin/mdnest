@@ -759,7 +759,7 @@ function createServer() {
 // instead of from a failed call. Same fields as `mdnest features --json`.
 server.tool(
   "server_features",
-  "Which optional features this mdnest server has on: pages (HTML pages, and pages_scripts if their scripts run), chat, task_board, excalidraw, marp, live_collab. Check it before offering or using one of them; when pages is off, write a Markdown note instead.",
+  "Which optional features this mdnest server has on: pages (HTML pages), pages_scripts (scripts run), pages_in_git (new publishes saved with the notes in git), chat, task_board, excalidraw, marp, live_collab. Check it before offering or using one of them; when pages is off, write a Markdown note instead.",
   {},
   async () => {
     try {
@@ -1591,7 +1591,7 @@ async function pageTextSuffix(namespace, path) {
 
 if (features.pages) server.tool(
   "publish_page",
-  "Publish an HTML page (a report or dashboard in HTML) for people to view in mdnest. Only when the person explicitly asks for an HTML page; the default is always a Markdown note (write_note/create_note), and never publish both for the same content unless asked. It shows in the notes tree as <path>.page.md, in any folder; publishing to a path that already has an HTML page replaces it. Scripts run only when the server has a pages origin set up; otherwise it shows without scripts. Give every image, chart and diagram a full alt text that says what it shows, with its key numbers or steps: page files are not kept in git, so if they are lost the alt text is what remains.",
+  "Publish an HTML page (a report or dashboard in HTML) for people to view in mdnest. Only when the person explicitly asks for an HTML page; the default is always a Markdown note (write_note/create_note), and never publish both for the same content unless asked. It shows in the notes tree as <path>.page.md, in any folder; publishing to a path that already has an HTML page replaces it. Scripts run only when the server has a pages origin set up; otherwise it shows without scripts. Give every image, chart and diagram a full alt text that says what it shows, with its key numbers or steps: page files are not kept in git by default, so if they are lost the alt text is what remains.",
   {
     namespace: z.string().describe("Namespace name"),
     path: handlePathSchema,

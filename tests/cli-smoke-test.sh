@@ -353,6 +353,28 @@ case "$page_err" in
     assert_eq "  …index.html comes back byte-exact" "$(od -c < "$PG_DIR/site/index.html")" "$(od -c < "$PG_DIR/pulled/index.html" 2>/dev/null)"
     assert_eq "  …and the subfolder file too" "p{color:red}" "$(cat "$PG_DIR/pulled/css/s.css" 2>/dev/null)"
     assert_fails "page pull refuses a non-empty folder" -- m page pull "$PAGE_REF" "$PG_DIR/pulled"
+    # Whole-namespace restore replaces every handle. Only a harness that owns
+    # the entire disposable namespace may opt in, never a normal smoke run.
+    if [ "${MDNEST_TEST_PAGES_BACKUP:-0}" = 1 ]; then
+      assert_succeeds "page export saves a namespace backup" -- m page export "$BASE" "$PG_DIR/pages.tgz"
+      assert_fails "page export never overwrites a local backup" -- m page export "$BASE" "$PG_DIR/pages.tgz"
+      assert_fails "page export refuses a folder target" -- m page export "$ROOT" "$PG_DIR/invalid.tgz"
+      assert_fails "page import refuses a missing local file" -- m page import "$BASE" "$PG_DIR/missing.tgz"
+      printf 'not gzip' > "$PG_DIR/bad.tgz"
+      assert_fails "page import refuses an invalid archive" -- m page import "$BASE" "$PG_DIR/bad.tgz"
+      before_id="$(m read "$PAGE_REF.page.md" 2>/dev/null | grep '^page:')"
+      assert_succeeds "page import restores the namespace" -- m page import "$BASE" "$PG_DIR/pages.tgz"
+      after_id="$(m read "$PAGE_REF.page.md" 2>/dev/null | grep '^page:')"
+      if [ "$before_id" != "$after_id" ]; then ok "page import creates new ids"; else bad "page import creates new ids" "$after_id"; fi
+      assert_contains "page import preserves the page text" "pagetoken$$" "$(m read "$PAGE_REF.page.md" 2>&1)"
+      # A normal note at the handle path is kept, while other pages continue.
+      m write "$PAGE_REF.page.md" "ORDINARY NOTE" >/dev/null 2>&1
+      summary="$(m page import "$BASE" "$PG_DIR/pages.tgz" --json 2>&1)"
+      assert_contains "page import reports a note conflict" '"status":"skipped"' "$summary"
+      assert_eq "page import never overwrites an ordinary note" "ORDINARY NOTE" "$(m read "$PAGE_REF.page.md" 2>/dev/null)"
+      m delete "$PAGE_REF.page.md" >/dev/null 2>&1
+      m page import "$BASE" "$PG_DIR/pages.tgz" >/dev/null 2>&1
+    fi
     printf '<title>One file</title><p>single</p>' > "$PG_DIR/one.html"
     assert_succeeds "page publish (one .html file) replaces the page" -- m page publish "$PAGE_REF.page.md" "$PG_DIR/one.html"
     assert_contains "  …list shows the new title" "One file" "$(m page list "$BASE" 2>&1)"

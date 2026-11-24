@@ -64,7 +64,7 @@ e2e_playwright_ready "$LOGDIR" || { fail "Playwright setup failed (see $LOGDIR/p
 pass "Playwright ready"
 
 NOTES_DIR="$(e2e_notes_dir "$REPO_ROOT")"
-mkdir -p "$NOTES_DIR/testing_workspace"
+mkdir -p "$NOTES_DIR/testing_workspace" "$NOTES_DIR/zz_pages_settings"
 printf '# Pages e2e\n\nA note, so the namespace is not empty.\n' > "$NOTES_DIR/testing_workspace/pages-e2e.md"
 
 # boot MODE: start the stack in static or script mode. Sets BASE_URL and
@@ -74,6 +74,8 @@ boot() {
   app_port="$(free_port)"
   BASE_URL="http://127.0.0.1:$app_port"
   PAGES_ORIGIN=""
+  # Exercise git-backed pages and legacy separate storage in the two modes.
+  if [ "$mode" = static ]; then extra=(-e PAGES_IN_GIT=true); fi
   if [ "$mode" = script ]; then
     pages_port="$(free_port)"
     PAGES_ORIGIN="http://localhost:$pages_port"
@@ -110,11 +112,21 @@ for mode in static script; do
   else
     fail "/api/config reports scripts=$scripts in $mode mode"; rc=1
   fi
+  cli_home="$LOGDIR/cli-$mode"
+  mkdir -p "$cli_home"
+  cli_token="$(curl -fsS -H 'Content-Type: application/json' --data-raw '{"username":"e2e","password":"e2epass123"}' "$BASE_URL/api/auth/login" | node -p 'JSON.parse(require("fs").readFileSync(0,"utf8")).token')" || cli_token=""
+  if HOME="$cli_home" MDNEST_AGENT_SKILLS=0 ./mdnest login @pages "$BASE_URL" "$cli_token" >"$LOGDIR/cli-login-$mode.log" 2>&1 && \
+     HOME="$cli_home" MDNEST_TEST_ALIAS=pages MDNEST_TEST_NS=zz_pages_settings MDNEST_TEST_NS2=testing_workspace MDNEST_TEST_PAGES_BACKUP=1 \
+     bash tests/cli-smoke-test.sh >"$LOGDIR/cli-$mode.log" 2>&1; then
+    pass "$mode mode: CLI smoke including namespace page backups"
+  else
+    fail "$mode mode: CLI smoke failed (see $LOGDIR/cli-$mode.log)"; rc=1; KEEP=1
+  fi
   if ( cd tests/browser && \
        MDNEST_BASE_URL="$BASE_URL" MDNEST_USER=e2e MDNEST_PASSWORD=e2epass123 \
        MDNEST_PAGES_MODE="$mode" MDNEST_PAGES_ORIGIN="$PAGES_ORIGIN" MDNEST_JWT_SECRET="$SECRET" \
        MDNEST_NOTES_DIR="$NOTES_DIR" \
-       npx playwright test pages.spec.js --output="../browser-results/pages-$mode" ${MDNEST_E2E_ARGS:-} ); then
+       npx playwright test pages.spec.js pages-settings.spec.js --output="../browser-results/pages-$mode" ${MDNEST_E2E_ARGS:-} ); then
     pass "$mode mode: pages.spec.js passed"
   else
     fail "$mode mode: pages.spec.js failed"; rc=1

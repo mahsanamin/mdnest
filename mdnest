@@ -2914,6 +2914,8 @@ Usage:
   mdnest page list    @alias/namespace [query] [--json]
   mdnest page pull    @alias/namespace/folder/name <new-folder>
   mdnest page delete  @alias/namespace/folder/name
+  mdnest page export  @alias/namespace pages.tgz
+  mdnest page import  @alias/namespace pages.tgz [--json]
 A page shows in the notes tree as folder/name.page.md (the suffix is added
 when you leave it out). mdnest read on that file prints the page's text.
 USAGE
@@ -2968,6 +2970,8 @@ cmd_page() {
     list)    page_list "$@" ;;
     pull)    page_pull "$@" ;;
     delete)  page_delete "$@" ;;
+    export)  page_export "$@" ;;
+    import)  page_import "$@" ;;
     *)       page_usage; exit 1 ;;
   esac
 }
@@ -3066,6 +3070,90 @@ page_pull() {
   rm -f "$tmp"
   c_ok "Saved @${CURRENT_ALIAS}/${PAGE_NS}/${PAGE_PATH} to $dir"
   return 0
+}
+
+# These commands target one whole namespace, never a folder of handles.
+page_backup_target() {
+  page_target "${1:-}" 0
+  if [ -n "$PAGE_PATH" ]; then
+    echo "Error: use a namespace, not a page or folder: mdnest page export @myserver/notes pages.tgz" >&2
+    exit 1
+  fi
+}
+
+page_export() {
+  page_backup_target "${1:-}"
+  local out="${2:-}" tmp headers dir
+  if [ -z "$out" ]; then page_usage; exit 1; fi
+  case "$out" in /*|./*|../*) ;; *) out="./$out" ;; esac
+  if [ -e "$out" ] || [ -L "$out" ]; then
+    echo "Error: $out already exists; choose another output file." >&2; exit 1
+  fi
+  dir=$(dirname "$out") || dir="."
+  tmp=$(mktemp "$dir/.mdnest-pages.XXXXXX") || { echo "Error: cannot write to $dir" >&2; exit 1; }
+  headers=$(mktemp) || { rm -f "$tmp"; exit 1; }
+  if ! page_curl GET "/pages/export?ns=$(urlencode "$PAGE_NS")" "$tmp" -D "$headers" >/dev/null; then
+    rm -f "$tmp" "$headers"; exit 1
+  fi
+  # Link in the same folder: atomic and refuses a file created while the
+  # request ran. Unlike mv, it cannot overwrite that concurrent file.
+  if [ -d "$out" ] || ! ln "$tmp" "$out" 2>/dev/null; then
+    rm -f "$tmp" "$headers"; echo "Error: cannot save $out (it may already exist)." >&2; exit 1
+  fi
+  rm -f "$tmp"
+  MDN_OUT="$out" awk '
+    tolower($1)=="x-mdnest-pages-exported:" { exported=$2+0 }
+    tolower($1)=="x-mdnest-pages-skipped:" { skipped=$2+0 }
+    END { printf "Saved %s (%d pages, %d skipped%s).\n", ENVIRON["MDN_OUT"], exported, skipped, skipped ? ": files missing or unreadable, see manifest.json" : "" }
+  ' "$headers"
+  rm -f "$headers"
+  return 0
+}
+
+# Human output stays identical on the no-python3/no-jq tier. Only top-level
+# numbers count; a skipped entry's reason may contain JSON-looking text.
+format_page_restore() {
+  awk "$_AWK_JSON_LIB"'
+    { buf=buf $0 }
+    END {
+      depth=0; i=1
+      while (i<=length(buf)) {
+        c=substr(buf,i,1)
+        if(c=="{") {depth++;i++;continue}
+        if(c=="}") {depth--;i++;continue}
+        if(c=="\"") {
+          i=jstr(buf,i); key=JSTR
+          j=i; while(substr(buf,j,1)~/[ \t\r\n]/)j++
+          if(depth==1 && (key=="restored"||key=="skipped") && substr(buf,j,1)==":") {
+            j++;while(substr(buf,j,1)~/[ \t\r\n]/)j++
+            value=substr(buf,j);if(match(value,/^[0-9]+/)) { values[key]=substr(value,1,RLENGTH)+0;found[key]=1 }
+          }
+          continue
+        }
+        i++
+      }
+      if(!found["restored"]||!found["skipped"]) {print "Error: could not read the restore result" > "/dev/stderr";exit 1}
+      printf "Restored %d pages, %d skipped.\n",values["restored"],values["skipped"]
+    }'
+}
+
+page_import() {
+  page_backup_target "${1:-}"
+  local src="${2:-}" tmp rc=0
+  if [ -z "$src" ]; then page_usage; exit 1; fi
+  case "$src" in /*|./*|../*) ;; *) src="./$src" ;; esac
+  if [ ! -f "$src" ]; then echo "Error: $src is not a pages backup file." >&2; exit 1; fi
+  tmp=$(mktemp) || { echo "Error: cannot create a temp file" >&2; exit 1; }
+  if ! page_curl POST "/pages/import?ns=$(urlencode "$PAGE_NS")" "$tmp" -H "Content-Type: application/gzip" --data-binary "@$src" >/dev/null; then
+    rm -f "$tmp"; exit 1
+  fi
+  if [ "${3:-}" = --json ] || [ "${MDNEST_JSON:-0}" = 1 ]; then
+    cat "$tmp"; printf '\n'
+  else
+    format_page_restore < "$tmp" || rc=$?
+  fi
+  rm -f "$tmp"
+  return "$rc"
 }
 
 page_delete() {
@@ -3696,7 +3784,7 @@ When to make one:
 - Give every image, chart and diagram a full `alt` text that says what it
   shows, with its key numbers or steps (for example `alt="Bar chart: Q3
   revenue 1.2M, up 14% from Q2"`, not `alt="chart"`). A page's files are not
-  kept in git, so if they are lost the page still says what each picture
+  kept in git by default, so if they are lost the page still says what each picture
   showed, and you or another agent can redraw it from that text.
 
 How:
@@ -3710,6 +3798,15 @@ How:
   text. Read that to learn what an HTML page says.
 - `mdnest page list @alias/namespace` lists HTML pages; add a word to search
   them.
+- `mdnest features --json` and MCP `server_features` report `pages_in_git`.
+  When true, new publishes are saved with the notes in git. Existing pages
+  never move automatically; both storage locations are always read.
+- Writers of the whole namespace can back up its pages with
+  `mdnest page export @alias/namespace pages.tgz`, then restore them with
+  `mdnest page import @alias/namespace pages.tgz`. Missing pages are skipped
+  and listed in `manifest.json`; unlinked pages are left out. Restore uses
+  new ids at the original handle paths, replaces existing page handles, and
+  skips ordinary notes. Add `--json` for per-entry restore results.
 - Scripts in an HTML page run only when `mdnest features` says
   `scripts on`. Otherwise it shows with scripts off, so put the important numbers in
   the HTML itself, not only in a chart a script draws.
@@ -4154,7 +4251,7 @@ NOTE OPERATIONS
            [--json]               ...as the raw API JSON instead (for scripts)
   search   <ns-path> "query"      Search note contents
   features [@alias] [--json]         Which optional features this server has on (pages, chat, ...)
-  page     publish|list|pull|delete  HTML pages, view only (server: ENABLE_PAGES)
+  page     publish|list|pull|delete|export|import  HTML pages (server: ENABLE_PAGES)
            publish <@alias/ns/folder/name> <folder-or-file.html>   (shows as name.page.md; again replaces it)
            list <@alias/ns> [query]   pull <@alias/ns/folder/name> <new-folder>   delete <@alias/ns/folder/name>
   chat     list|new|post|status|read|wait  File-based chat in a note (server: ENABLE_CHAT)
@@ -4233,6 +4330,8 @@ EXAMPLES
   mdnest download @work/engineering/notes/meeting.md ./meeting.md
   mdnest page publish @work/engineering/Reports/q3-report ./report-folder
   mdnest page list @work/engineering revenue
+  mdnest page export @work/engineering pages.tgz
+  mdnest page import @work/engineering pages.tgz
 
   # Chat — two agents (or an agent and you) talking through one note
   mdnest chat new  @work/engineering/Chats/release.md "Release"

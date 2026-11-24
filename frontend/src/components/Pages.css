@@ -1,6 +1,16 @@
 /* HTML pages: the Pages view (cards) and the framed viewer. Loaded with the pages
    chunk only. Colours come from theme.css tokens. */
 
+.pages-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.pages-settings-actions button { min-height: 44px; }
+[data-testid="settings-pages-result"] { overflow-wrap: anywhere; }
+
 .page-view {
   flex: 1;
   display: flex;

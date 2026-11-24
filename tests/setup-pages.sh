@@ -155,6 +155,44 @@ refused "no port and no Caddy is refused" "has no port" ENABLE_PAGES=true PAGES_
 refused "a non-number PAGES_PORT is refused" "PAGES_PORT must be a whole number" ENABLE_PAGES=true PAGES_ORIGIN=https://pages.example.com PAGES_PORT=x
 refused "PAGES_ORIGIN equal to FRONTEND_ORIGIN is refused" "must differ from FRONTEND_ORIGIN" ENABLE_PAGES=true FRONTEND_ORIGIN=http://localhost:3236 PAGES_ORIGIN=http://localhost:3236
 
+# Private page assets and JSON must never receive note conflict markers or
+# extra .sync-conflict files. Run both copies of the real resolver on a merge.
+for script in git-sync/sync.sh deploy/helm/mdnest/files/sync.sh; do
+  work="$(mktemp -d)"; SANDBOXES+=("$work")
+  awk '/^resolve_conflicts\(\)/ { copy=1 } copy { print } copy && /^}/ { exit }' "$REPO_ROOT/$script" > "$work/resolve.sh"
+  if (
+    cd "$work" || exit 1
+    git init -q -b local
+    git config user.name test
+    git config user.email test@example.com
+    git config core.hooksPath /dev/null
+    mkdir -p .mdnest/pages/id .mdnest/pages/.pages-meta
+    printf 'base\n' > .mdnest/pages/id/index.html
+    printf '{"title":"base"}\n' > .mdnest/pages/.pages-meta/id.json
+    printf 'base\n' > note.md
+    git add .mdnest note.md; git commit -qm base
+    git checkout -qb remote
+    printf 'remote\n' > .mdnest/pages/id/index.html
+    printf '{"title":"remote"}\n' > .mdnest/pages/.pages-meta/id.json
+    printf 'remote\n' > note.md
+    git add .mdnest note.md; git commit -qm remote
+    git checkout -q local
+    printf 'local\n' > .mdnest/pages/id/index.html
+    printf '{"title":"local"}\n' > .mdnest/pages/.pages-meta/id.json
+    printf 'local\n' > note.md
+    git add .mdnest note.md; git commit -qm local
+    git merge remote >/dev/null 2>&1 || true
+    # shellcheck disable=SC1091
+    source ./resolve.sh
+    resolve_conflicts test >/dev/null 2>&1
+    [ "$(cat .mdnest/pages/id/index.html)" = remote ] &&
+      [ "$(cat .mdnest/pages/.pages-meta/id.json)" = '{"title":"remote"}' ] &&
+      [ -z "$(find .mdnest -name '*.sync-conflict-*' -print)" ] &&
+      [ -n "$(find . -maxdepth 1 -name 'note.md.sync-conflict-*' -print)" ]
+  ); then ok "$script keeps complete private page files in a conflict"
+  else bad "$script keeps complete private page files in a conflict" "resolver changed or copied private files"; fi
+done
+
 # 7) Every key is read by the backend and documented.
 for k in ENABLE_PAGES PAGES_IN_GIT PAGES_DIR PAGES_ORIGIN PAGES_NETWORK PAGES_MAX_MB PAGES_MAX_FILES PAGES_LISTEN_PORT; do
   if grep -q "\"$k\"" "$REPO_ROOT/backend/main.go"; then ok "backend reads $k"; else bad "backend reads $k" "no env(\"$k\") in backend/main.go"; fi

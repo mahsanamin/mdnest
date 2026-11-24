@@ -1,4 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
+import { lazy, Suspense, useState, useEffect, useCallback } from 'react';
+import ChunkErrorBoundary from './ChunkErrorBoundary.jsx';
+import { loadWithRetry } from '../lazyWithRetry.js';
+
+const PagesSettings = lazy(() => loadWithRetry(() => import('./Pages.jsx')).then((m) => ({ default: m.PagesSettings })));
 import { changePassword, listTokens, createToken, revokeToken, restartServer, readBootId, waitForRestart, getWorkspaceStatus, getMyGitBackup, saveMyGitBackup, turnOffMyGitBackup } from '../api.js';
 import { SyncState, RepoFields, repoPayload } from './AdminGit.jsx';
 
@@ -52,7 +56,7 @@ function CodeBlock({ code, label }) {
   );
 }
 
-function Settings({ onClose, userProvider, themePreference, resolvedTheme, onChangeTheme, serverDefaultTheme, serverVersion, canRestart }) {
+function Settings({ onClose, userProvider, themePreference, resolvedTheme, onChangeTheme, serverDefaultTheme, serverVersion, canRestart, pages, namespace, canManagePages, onPagesRestored }) {
   const [tab, setTab] = useState('tokens');
   // Hide Credentials + 2FA in any federated mode — identity lives with the
   // external provider (Firebase Auth / corporate SSO IdP), not in mdnest's
@@ -89,6 +93,9 @@ function Settings({ onClose, userProvider, themePreference, resolvedTheme, onCha
           {personalTab && (
             <button className={tab === 'personal' ? 'active' : ''} onClick={() => setTab('personal')}>Personal namespace</button>
           )}
+          {pages?.enabled && (
+            <button className={tab === 'pages' ? 'active' : ''} onClick={() => setTab('pages')}>Pages</button>
+          )}
           {canRestart && (
             <button className={tab === 'server' ? 'active' : ''} onClick={() => setTab('server')}>Server</button>
           )}
@@ -108,6 +115,13 @@ function Settings({ onClose, userProvider, themePreference, resolvedTheme, onCha
         {tab === 'password' && passwordEnabled && <PasswordTab />}
         {tab === 'personal' && personalTab && <PersonalNamespaceTab canSetUp={!!gitStatus?.encryption} />}
         {tab === 'server' && canRestart && <ServerTab />}
+        {tab === 'pages' && pages?.enabled && (
+          <ChunkErrorBoundary label="pages settings" resetKey={namespace}>
+            <Suspense fallback={<p className="settings-description">Loading...</p>}>
+              <PagesSettings key={namespace} ns={namespace} inGit={!!pages.inGit} canManage={!!canManagePages} onRestored={onPagesRestored} />
+            </Suspense>
+          </ChunkErrorBoundary>
+        )}
       </div>
     </div>
   );

@@ -686,12 +686,28 @@ never moved: mdnest reads both locations, hidden first, with either flag
 setting. Republish an old page to save its next copy with the notes. Keep the
 old pages volume mounted for any pages you have not republished.
 
-**Pages are for casual sharing, not kept in git.** A page's HTML, scripts and
-images are stored apart from your notes (in `PAGES_DIR` or the `mdnest-pages`
-volume). Git sync saves only the small `<name>.page.md` file, so a server
-rebuilt from the git repository alone shows every page as missing. Back up the
-pages store with your notes, and copy it along when you move to another
-server. The Pages view in the app says the same.
+**Download and restore.** Writers of the whole namespace can open
+**Settings > Pages** to download a `.tar.gz` of its pages, or restore one. The
+same actions are `mdnest page export @myserver/engineering pages.tgz` and
+`mdnest page import @myserver/engineering pages.tgz`. The archive includes
+files from both stores, original handle paths, titles and descriptions.
+Unlinked pages are left out. Missing files, including a page deleted during
+the download, are listed as skipped in `manifest.json` and in the result line.
+
+Restore checks the whole archive before publishing. It writes new ids at the
+original handle paths: existing page handles are replaced, and ordinary notes
+are kept and reported as skipped. Pages go to the store selected by the flag.
+Limits are 256 MB of page files, 10,000 files, 1,000 handles and the configured
+limits for each page. If your own proxy or ingress sits in front of mdnest,
+allow 272 MB uploads on `/api/pages/import`; the bundled frontend has that
+limit already. This download is useful for moving to a server without the
+pages volume, and also works when pages are saved with git.
+
+**Separate page files still need a backup.** With the default
+`PAGES_IN_GIT=false`, git sync saves only the small `<name>.page.md` handle.
+A server rebuilt from git alone will be missing any page still in the separate
+store. Download the pages, or back up `PAGES_DIR` (the `mdnest-pages` volume)
+and copy it along with the notes when moving to another server.
 
 **Set `FRONTEND_ORIGIN` to the address people open.** A page may only be shown
 inside the address in `FRONTEND_ORIGIN`. Behind your own domain or reverse
