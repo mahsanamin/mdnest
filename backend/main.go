@@ -442,7 +442,7 @@ func main() {
 	enableApprovals := handlers.ApprovalsEnabled(env("ENABLE_AGENT_APPROVALS", ""), env("MDNEST_ROLE", "single"))
 
 	// HTML pages (optional, off by default): view-only pages published into a
-	// namespace, stored under PAGES_DIR, never in the notes. Off on the
+	// namespace, stored in PAGES_DIR or the namespace's private folder. Off on the
 	// multi-replica app role (the files live on one box). With the flag off
 	// no route is registered and the frontend loads no pages chunk.
 	enablePages := handlers.PagesEnabled(env("ENABLE_PAGES", ""), env("MDNEST_ROLE", "single"))
@@ -476,6 +476,8 @@ func main() {
 			network = "strict"
 		}
 		pagesCfg = handlers.PagesConfig{
+			NotesDir:       absNotesDir,
+			InGit:          env("PAGES_IN_GIT", "false") == "true",
 			Dir:            pagesDir,
 			MaxBytes:       int64(maxMB) << 20,
 			MaxFiles:       maxFiles,
@@ -1009,7 +1011,7 @@ func main() {
 		pagesHandler = handlers.NewPagesHandler(pagesCfg, stg, perms)
 		routes.pages = pagesHandler
 		transferHandler.SetPages(pagesHandler)
-		configHandler.SetPages(true, pagesHandler.ScriptMode(), int(pagesCfg.MaxBytes>>20), pagesCfg.MaxFiles)
+		configHandler.SetPages(true, pagesHandler.ScriptMode(), int(pagesCfg.MaxBytes>>20), pagesCfg.MaxFiles, pagesCfg.InGit)
 	}
 	registerContentRoutes(mux, routes)
 

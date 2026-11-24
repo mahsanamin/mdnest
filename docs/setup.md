@@ -192,8 +192,9 @@ On first run, `setup.sh` copies `mdnest.conf.sample` to `mdnest.conf` and exits,
 | `ENABLE_AGENT_APPROVALS` *(v4.8.5+, experimental)* | `false` | Answer an agent's (Claude Code or Codex) permission prompt from mdnest: the question shows as a card, you press Allow or Deny in the browser, and the agent continues. Each machine also has to opt in, see `docs/chat.md`. Decisions are accepted only from a browser login. Requests live in memory and are not available on `MDNEST_ROLE=app`. Read the added risk in `docs/security.md` before turning it on. |
 | `ENABLE_EXCALIDRAW` *(v4.2.0+)* | `false` | Open `.excalidraw.md` notes on an Excalidraw canvas and allow read-only drawing embeds in any note. The (large) editor bundle is code-split and only loads when a drawing is opened. See `docs/excalidraw.md`. |
 | `EXCALIDRAW_LIBRARIES` *(v4.2.0+)* | *(none)* | Requires `ENABLE_EXCALIDRAW`. Comma-separated URLs to `.excalidrawlib` files, preloaded into every drawing so an organisation can ship a shared shape set. Fetched by the **browser**, not the backend, so the URLs must be reachable by clients (and CORS-enabled). |
-| `ENABLE_PAGES` | `false` | Optional. View-only HTML pages (reports, dashboards) published into any folder from the CLI, MCP or a desktop drop; each shows in the tree as a small `<name>.page.md` handle and opens in a viewer. Off by default: no route is registered and the frontend loads no pages code. **Pages are for casual sharing:** their files are kept apart from the notes, so git sync does not save them and they do not move with the notes to another server. Back up `PAGES_DIR` (or the `mdnest-pages` volume) yourself. See [HTML pages](#html-pages-optional). |
+| `ENABLE_PAGES` | `false` | Optional. View-only HTML pages (reports, dashboards) published into any folder from the CLI, MCP or a desktop drop; each shows in the tree as a small `<name>.page.md` handle and opens in a viewer. Off by default: no route is registered and the frontend loads no pages code. By default their files are kept apart from the notes: back up `PAGES_DIR` (or the `mdnest-pages` volume). Set `PAGES_IN_GIT=true` to save new publishes with the notes. See [HTML pages](#html-pages-optional). |
 | `PAGES_DIR` | *(named volume `mdnest-pages`)* | Requires `ENABLE_PAGES`. Host folder for page files, kept apart from the notes. Not in git: back it up with the notes, and copy it along when you move to another server. Must not be inside a notes folder. |
+| `PAGES_IN_GIT` | `false` | Requires `ENABLE_PAGES`. Save new publishes inside each namespace's hidden `.mdnest/pages/` folder, so git sync and a copy of the notes carry them. No existing pages are moved. Both stores are always read, even after switching the flag off. |
 | `PAGES_MAX_MB` | `20` | Requires `ENABLE_PAGES`. Largest total size of one page, checked when it is published. The web server in front of mdnest takes uploads up to 32 MB, so keep it at 30 or less. |
 | `PAGES_MAX_FILES` | `500` | Requires `ENABLE_PAGES`. Most files in one page, and also most folders, checked when it is published. |
 | `PAGES_ORIGIN` | *(none: static mode)* | Optional, needs team setup. A second address (another port or hostname) that serves page files and nothing else. With it, page scripts run there in a sandbox; without it, pages show with scripts off. Must differ from `FRONTEND_ORIGIN`. |
@@ -611,8 +612,9 @@ are view only: there is no HTML editor.
 folder, next to the notes it belongs with. That file is the page's handle: it
 holds only front matter (`page: <id>`, title, author, published date) and a
 line saying it is an HTML page. The page's own files (HTML, CSS, scripts,
-images, data) are stored apart from the notes and never show in the tree or
-in notes search. With pages on, the handle shows with a page icon and opens
+images, data) never show in the tree or in notes search. By default they are
+stored apart from the notes; `PAGES_IN_GIT=true` stores new publishes inside
+the namespace's hidden `.mdnest/pages/` folder. With pages on, the handle shows with a page icon and opens
 the page in a viewer; with pages off it is just a small note.
 
 A page is a folder with an `index.html` (and any files it links to with
@@ -675,6 +677,14 @@ Pages view and can delete them. They are never deleted on their own.
 with your notes. On the Helm chart, set `pages.enabled: true`; page files are
 kept on the notes volume in a hidden folder. Pages are not available on the
 multi-replica app role (`MDNEST_ROLE=app`, the git-native HA topology).
+
+**Saving pages with git (optional).** Set `PAGES_IN_GIT=true`, or `pages.inGit: true`
+in Helm, to store new publishes in `<namespace>/.mdnest/pages/<id>/`. Git sync
+then saves their HTML, scripts, images and metadata with the notes. The folder
+is private app data, not readable or editable as notes. Existing pages are
+never moved: mdnest reads both locations, hidden first, with either flag
+setting. Republish an old page to save its next copy with the notes. Keep the
+old pages volume mounted for any pages you have not republished.
 
 **Pages are for casual sharing, not kept in git.** A page's HTML, scripts and
 images are stored apart from your notes (in `PAGES_DIR` or the `mdnest-pages`

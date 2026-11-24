@@ -71,6 +71,14 @@ func (l *LocalStorage) abs(ns, relPath string) string {
 	if !reachesSafely(nsDir, target) {
 		return ""
 	}
+	// Internal callers may access .mdnest directly. A public name that is a
+	// link into it must never turn private page files into readable notes.
+	if !relpath.HasReservedSegment(relPath) {
+		real, err := l.ResolveLinks(context.Background(), ns, relPath)
+		if err != nil || strings.Contains("/"+strings.ToLower(filepath.ToSlash(real))+"/", "/.mdnest/pages/") {
+			return ""
+		}
+	}
 	return target
 }
 

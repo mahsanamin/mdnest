@@ -770,6 +770,7 @@ server.tool(
       const f = {
         pages: pagesOn,
         pages_scripts: pagesOn && !!c.pages?.scripts,
+        pages_in_git: pagesOn && !!c.pages?.inGit,
         chat: !!c.chat,
         task_board: !!c.taskBoard,
         excalidraw: !!c.excalidraw,

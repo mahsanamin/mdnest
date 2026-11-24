@@ -64,6 +64,7 @@ func pagesFixture(t *testing.T, mutate ...func(*PagesConfig)) (*PagesHandler, st
 	pagesDir := filepath.Join(root, "pages")
 	os.MkdirAll(pagesDir, 0o755)
 	cfg := PagesConfig{
+		NotesDir:       notes,
 		Dir:            pagesDir,
 		MaxBytes:       64 << 10,
 		MaxFiles:       5,

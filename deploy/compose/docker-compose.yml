@@ -59,6 +59,7 @@ services:
       # ENABLE_MARP: "true"           # Marp slide decks
       # ENABLE_PAGES: "true"          # View-only HTML pages; also add the pages volume below
       # PAGES_DIR: /data/pages        # where page files are kept (with ENABLE_PAGES)
+      # PAGES_IN_GIT: "true"          # new pages in each namespace's .mdnest/pages; old pages stay put
       # DEFAULT_THEME: auto           # auto | dark | light
 
       # Optional: folder download (zip) and cross-namespace move/copy limits.

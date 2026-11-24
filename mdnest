@@ -2876,6 +2876,7 @@ p = c.get("pages") or {}
 f = {
   "pages": bool(p.get("enabled")),
   "pages_scripts": bool(p.get("enabled") and p.get("scripts")),
+  "pages_in_git": bool(p.get("enabled") and p.get("inGit")),
   "chat": bool(c.get("chat")),
   "task_board": bool(c.get("taskBoard")),
   "excalidraw": bool(c.get("excalidraw")),
@@ -2886,6 +2887,7 @@ if sys.argv[1] == "1":
   print(json.dumps(f)); sys.exit(0)
 rows = [
   ("pages", f["pages"], "HTML pages: mdnest page publish (scripts " + ("on" if f["pages_scripts"] else "off") + ")" if f["pages"] else "HTML pages: off, write a Markdown note instead"),
+  ("pages_in_git", f["pages_in_git"], "new pages saved with notes in git" if f["pages_in_git"] else "page files kept apart from notes"),
   ("chat", f["chat"], "chats: mdnest chat"),
   ("task_board", f["task_board"], "task board"),
   ("excalidraw", f["excalidraw"], "Excalidraw drawings"),
