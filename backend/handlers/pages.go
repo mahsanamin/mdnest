@@ -565,6 +565,36 @@ func ExtractPageText(doc []byte) (title, description, text string) {
 				}
 				continue
 			}
+			// A picture's alt text (or the aria-label of an element marked
+			// role="img", like an inline SVG) is part of what the page says:
+			// it is what a reader, search and an agent get when the image file
+			// is missing, and what lets an agent redraw it.
+			if isStart && hasAttr && skip == 0 {
+				var alt, label, role string
+				for {
+					k, v, more := z.TagAttr()
+					switch strings.ToLower(string(k)) {
+					case "alt":
+						alt = string(v)
+					case "aria-label":
+						label = string(v)
+					case "role":
+						role = strings.ToLower(strings.TrimSpace(string(v)))
+					}
+					if !more {
+						break
+					}
+				}
+				pic := ""
+				if a == atom.Img || a == atom.Area {
+					pic = alt
+				} else if role == "img" {
+					pic = label
+				}
+				if pic = strings.TrimSpace(pic); pic != "" && xb.Len() < maxPageText*2 {
+					xb.WriteString(" [Image: " + pic + "] ")
+				}
+			}
 			switch a {
 			case atom.Script, atom.Style, atom.Noscript, atom.Template:
 				if isStart {
@@ -713,7 +743,7 @@ func (h *PagesHandler) parsePass(s string) (string, string, bool) {
 // may show only its own images, styles and fonts.
 func (h *PagesHandler) staticCSP() string {
 	return "default-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; media-src 'self'; " +
-		"base-uri 'none'; form-action 'none'" + h.frameAncestors() + "; sandbox"
+		"base-uri 'none'; form-action 'none'" + h.staticFrameAncestors() + "; sandbox"
 }
 
 // scriptCSP: scripts run, but in an opaque origin (no allow-same-origin), and
@@ -728,6 +758,20 @@ func (h *PagesHandler) scriptCSP() string {
 			"img-src " + o + " data: blob:; font-src " + o + " data:; media-src " + o + " data: blob:; connect-src " + o
 	}
 	return src + "; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'" + h.frameAncestors() + "; sandbox allow-scripts"
+}
+
+// staticFrameAncestors: in static mode a page is served from mdnest's own
+// address, so mdnest's own pages may frame it ('self') as well as
+// FRONTEND_ORIGIN. Without 'self', an install opened at a public address while
+// FRONTEND_ORIGIN still names its internal one (http://localhost:<port>)
+// showed every page as "refused to connect". 'self' adds no other framer: the
+// page is still refused inside any other site.
+func (h *PagesHandler) staticFrameAncestors() string {
+	if fa := originOf(h.cfg.FrameAncestors); fa != "" {
+		u, _ := url.Parse(strings.TrimSpace(h.cfg.FrameAncestors))
+		return "; frame-ancestors 'self' " + u.Scheme + "://" + u.Host
+	}
+	return "; frame-ancestors 'self'"
 }
 
 func (h *PagesHandler) frameAncestors() string {

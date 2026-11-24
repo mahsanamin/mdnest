@@ -14,8 +14,8 @@ All notable changes to mdnest are documented here.
   It shows in the tree as a small `<name>.page.md` file and opens in a viewer.
   Pages run with scripts off; to let their scripts run, give them a second
   address with `PAGES_ORIGIN`. Republishing updates the page you published
-  through; other copies keep the version they show. `FRONTEND_ORIGIN` must be
-  the address people open, or a page cannot be shown. Pages are for casual
+  through; other copies keep the version they show. With script mode,
+  `FRONTEND_ORIGIN` must be the address people open, or a page cannot be shown. Pages are for casual
   sharing: their files are kept apart from the notes, so git sync does not save
   them, and the Pages view says so. Back up the pages store yourself. See
   "HTML pages" in the setup guide.

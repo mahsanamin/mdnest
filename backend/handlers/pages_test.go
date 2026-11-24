@@ -225,8 +225,11 @@ func TestPages_PublishListViewText(t *testing.T) {
 	if !strings.HasSuffix(csp, "; sandbox") || strings.Contains(csp, "allow-scripts") || strings.Contains(csp, "script-src") {
 		t.Fatalf("static CSP must turn scripts off: %q", csp)
 	}
-	if !strings.Contains(csp, "frame-ancestors https://notes.example.com") {
-		t.Fatalf("static CSP must name the frontend as the only framer: %q", csp)
+	// mdnest's own address and FRONTEND_ORIGIN may frame a static page, and
+	// nothing else: 'self' keeps pages working when FRONTEND_ORIGIN still names
+	// the internal address while people open mdnest at a public one.
+	if !strings.Contains(csp, "frame-ancestors 'self' https://notes.example.com;") {
+		t.Fatalf("static CSP must let only mdnest itself and the frontend frame a page: %q", csp)
 	}
 	for k, v := range map[string]string{
 		"X-Content-Type-Options": "nosniff",
@@ -821,6 +824,9 @@ func TestPages_ScriptModeHeaders(t *testing.T) {
 			if !strings.HasSuffix(csp, "; sandbox allow-scripts") || strings.Contains(csp, "allow-same-origin") {
 				t.Fatalf("csp = %q", csp)
 			}
+			if strings.Contains(csp, "frame-ancestors 'self'") {
+				t.Errorf("script mode must not let the pages origin frame itself: %q", csp)
+			}
 			for _, must := range []string{"frame-ancestors https://notes.example.com", "base-uri 'none'", "form-action 'none'", "object-src 'none'"} {
 				if !strings.Contains(csp, must) {
 					t.Errorf("csp missing %q: %q", must, csp)
@@ -984,6 +990,28 @@ func TestPagesEnabled(t *testing.T) {
 	}{{"", "single", false}, {"true", "single", true}, {"true", "app", false}, {"false", "writer", false}, {"on", "writer", true}} {
 		if got := PagesEnabled(c.set, c.role); got != c.want {
 			t.Errorf("PagesEnabled(%q,%q) = %v", c.set, c.role, got)
+		}
+	}
+}
+
+// An image's alt text, and the label of an element marked role="img", are part
+// of a page's text: they are what remains when the image file is lost, and what
+// an agent reads to redraw the picture.
+func TestExtractPageTextKeepsImageDescriptions(t *testing.T) {
+	_, _, text := ExtractPageText([]byte(`<h1>Report</h1>
+<img src="a.png" alt="Bar chart: July 3, August 5">
+<img src="deco.png" alt="">
+<svg role="img" aria-label="Progress: 3 of 5 steps"><text>3/5</text></svg>
+<div aria-label="not a picture">x</div>
+<script>var s = '<img alt="from a script">';</script>`))
+	for _, want := range []string{"[Image: Bar chart: July 3, August 5]", "[Image: Progress: 3 of 5 steps]", "3/5"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("text %q lacks %q", text, want)
+		}
+	}
+	for _, not := range []string{"not a picture", "from a script", "[Image: ]"} {
+		if strings.Contains(text, not) {
+			t.Errorf("text %q should not contain %q", text, not)
 		}
 	}
 }

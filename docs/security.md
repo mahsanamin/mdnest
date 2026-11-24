@@ -611,6 +611,9 @@ tab (`Sec-Fetch-Dest: document`) is refused, so someone else's HTML never
 fills a tab on mdnest's own address. Browsers send that header only over
 https and to localhost; on a plain-http address it is missing, and such an
 open is still served (still without scripts or forms).
+`frame-ancestors` is `'self'` plus `FRONTEND_ORIGIN`, so only mdnest itself
+can show the page in a frame, even when `FRONTEND_ORIGIN` still names an
+internal address; no other site can.
 
 **Script mode (`PAGES_ORIGIN` set).** Page files are served only from the
 second address, by a separate listener that serves page files and nothing
