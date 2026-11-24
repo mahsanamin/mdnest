@@ -864,6 +864,34 @@ func TestCheckPagesDir(t *testing.T) {
 	}
 }
 
+// F3: in static mode a page is served only into a frame. A whole-tab open
+// (Sec-Fetch-Dest: document) is refused, so someone else's HTML never fills
+// a tab on mdnest's own address. Frames, the page's own files, and clients
+// that send no Sec-Fetch-Dest (plain http) are still served.
+func TestPages_StaticViewOnlyInFrame(t *testing.T) {
+	h, _ := pagesFixture(t)
+	publish(h, "alpha", "one", "text/html", []byte("<p>ONE</p>"))
+	u := passURL(t, h, "alpha", "one")
+	for dest, want := range map[string]int{
+		"document": http.StatusForbidden,
+		"iframe":   http.StatusOK,
+		"":         http.StatusOK,
+	} {
+		r := httptest.NewRequest(http.MethodGet, u, nil)
+		if dest != "" {
+			r.Header.Set("Sec-Fetch-Dest", dest)
+		}
+		w := httptest.NewRecorder()
+		h.HandleStaticView(w, r)
+		if w.Code != want {
+			t.Errorf("Sec-Fetch-Dest %q: %d, want %d", dest, w.Code, want)
+		}
+		if want == http.StatusForbidden && strings.Contains(w.Body.String(), "ONE") {
+			t.Errorf("refused response still carries the page")
+		}
+	}
+}
+
 func TestResolvePagesOrigin(t *testing.T) {
 	cases := []struct {
 		pages, front, want string

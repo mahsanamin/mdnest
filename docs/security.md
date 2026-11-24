@@ -606,7 +606,11 @@ address under `/api/pages/view/`, with the same kind of script-less sandbox
 as other uploaded HTML: `Content-Security-Policy: default-src 'none'`, with
 images, styles and fonts allowed only from the page itself, and `sandbox`
 without `allow-scripts`. The frame in the app is also `sandbox=""`. Scripts do
-not run, and the page sits in a unique origin.
+not run, and the page sits in a unique origin. A page URL opened as a whole
+tab (`Sec-Fetch-Dest: document`) is refused, so someone else's HTML never
+fills a tab on mdnest's own address. Browsers send that header only over
+https and to localhost; on a plain-http address it is missing, and such an
+open is still served (still without scripts or forms).
 
 **Script mode (`PAGES_ORIGIN` set).** Page files are served only from the
 second address, by a separate listener that serves page files and nothing

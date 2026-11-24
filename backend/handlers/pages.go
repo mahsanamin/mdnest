@@ -733,6 +733,19 @@ func (h *PagesHandler) HandleStaticView(w http.ResponseWriter, r *http.Request) 
 	for _, k := range []string{"Access-Control-Allow-Origin", "Access-Control-Allow-Methods", "Access-Control-Allow-Headers", "Access-Control-Max-Age"} {
 		w.Header().Del(k)
 	}
+	// A page is shown only inside the app's frame. Opened as a whole tab,
+	// someone else's HTML would sit on mdnest's own address (no scripts or
+	// forms, but enough to imitate a mdnest screen). Browsers mark a tab
+	// load with Sec-Fetch-Dest: document, so that is refused. The header is
+	// only sent over https and to localhost, so on a plain-http address it
+	// is missing and the page is still served: blocking on a missing header
+	// would break every page there.
+	if r.Header.Get("Sec-Fetch-Dest") == "document" {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Cache-Control", "private, no-store")
+		http.Error(w, "This page opens inside mdnest, not on its own.", http.StatusForbidden)
+		return
+	}
 	h.serveFromPass(w, r, strings.TrimPrefix(r.URL.Path, "/api/pages/view/"), "/api/pages/view/", h.staticCSP())
 }
 
