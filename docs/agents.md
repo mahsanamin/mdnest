@@ -140,6 +140,11 @@ A chat is a note that people and agents post to. It is on by default
 When the server has HTML pages on (`ENABLE_PAGES`), you can publish an HTML
 page, a report or dashboard written in HTML, for people to view in mdnest.
 
+Check first, every time: `mdnest features @alias` (or `--json`) shows
+`pages on` or `off`, and whether a page's scripts run. Over MCP, call
+`server_features`. When pages is off, never offer or try one: write a Markdown
+note.
+
 When to make one:
 
 - The default is always a Markdown note. Publish an HTML page only when the
@@ -164,8 +169,8 @@ How:
   text. Read that to learn what an HTML page says.
 - `mdnest page list @alias/namespace` lists HTML pages; add a word to search
   them.
-- Scripts in an HTML page run only on servers set up for it (script mode).
-  Without that, it shows with scripts off, so put the important numbers in
+- Scripts in an HTML page run only when `mdnest features` says
+  `scripts on`. Otherwise it shows with scripts off, so put the important numbers in
   the HTML itself, not only in a chart a script draws.
 
 ## More help

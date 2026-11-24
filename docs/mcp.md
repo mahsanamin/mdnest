@@ -13,7 +13,7 @@ transports**:
 | **stdio** (default) | `MCP_TRANSPORT=stdio` | A single desktop client on the same machine (Claude Desktop, Cursor). The client launches the process and talks over stdin/stdout. |
 | **streamable-HTTP** | `MCP_TRANSPORT=http` | A shared/hosted endpoint that many clients (or a team) reach over the network. Runs as a long-lived service and exposes `POST /mcp`. |
 
-> **Available tools:** `list_namespaces`, `list_tree`, `read_note`,
+> **Available tools:** `server_features`, `list_namespaces`, `list_tree`, `read_note`,
 > `write_note`, `edit_note`, `append_note`, `prepend_note`, `create_note`, `create_folder`,
 > `delete_item`, `move_item` (optionally into another namespace), `copy_item`, `search_notes`, `list_tasks`, `create_task`,
 > `move_task`, `edit_task`, `set_task_field`, `toggle_task`, `delete_task`,
@@ -375,7 +375,7 @@ these tools scaffold a valid file that the app then renders.
 
 ### HTML pages (optional, server: `ENABLE_PAGES`)
 
-These tools appear only when the server has HTML pages on. An HTML page is a
+These tools appear only when the server has HTML pages on. `server_features` (always available) says whether they are on, and whether a page's scripts run, so an agent can check before it offers one. An HTML page is a
 view-only report or dashboard written in HTML. It shows in the notes tree as a
 small handle file, `<path>.page.md`, in any folder; its HTML and other files
 are kept apart from the notes. See [HTML pages](setup.md#html-pages-optional).

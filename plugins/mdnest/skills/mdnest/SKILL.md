@@ -16,7 +16,8 @@ it always matches the version you are using. Do not rely on what you remember
 from an older guide.
 
 The default is always a Markdown note: make an HTML page only when the person
-explicitly asks for one.
+explicitly asks for one, and only after `mdnest features @alias` (or the MCP
+tool `server_features`) shows pages on. When pages is off, write a note.
 
 If the `mdnest` command is not found, tell the user to install the CLI:
 `curl -fsSL https://mdnest.dev/install.sh | bash`. If `mdnest docs agents`

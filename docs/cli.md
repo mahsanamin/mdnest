@@ -355,6 +355,18 @@ mdnest download @work/engineering/notes/meeting.md ./meeting.md
 
 A file downloads as itself and a folder as a zip. Without an output file, the server's name is used in the current folder. A download never overwrites an existing local file, and a failed one leaves nothing behind. Folders over the server's limits are refused with the actual counts.
 
+### Which features a server has on
+
+```bash
+mdnest features @work           # pages, chat, task board, drawings, slides: on or off
+mdnest features @work --json    # the same, for scripts and agents
+```
+
+Reads the server's public settings, so it needs no login. It also says whether
+an HTML page's scripts run on that server. AI agents check it before they offer
+or use an optional feature; over MCP the same answer comes from the
+`server_features` tool.
+
 ### HTML pages *(server `ENABLE_PAGES=true`)*
 
 ```bash

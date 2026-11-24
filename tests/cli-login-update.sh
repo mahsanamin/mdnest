@@ -81,6 +81,8 @@ class H(BaseHTTPRequestHandler):
         if p == "/api/config":
             alias = read("alias")
             extra = ',"serverAlias":"%s"' % alias if alias else ""
+            if read("pages") == "on":
+                extra += ',"chat":true,"taskBoard":true,"pages":{"enabled":true,"scripts":false}'
             return self.send(200, '{"version":"4.8.5-dev"%s}' % extra, "application/json")
         if p == "/api/namespaces":
             if self.headers.get("Authorization") == "Bearer mdnest_good":
@@ -336,5 +338,17 @@ case "$out" in *"$Q"*) bad "update: never asks" "$out" ;; *) ok "update: never a
 contains "update: keeps the hint" "$out" "Run 'mdnest agent install'"
 
 echo
+# ── features: what an agent checks before it offers an HTML page ────────────
+H="$(new_home)"; HOME="$H" "$CLI" login @feat "$URL" mdnest_good >/dev/null 2>&1
+echo "off" > "$WORK/pages"
+out="$(HOME="$H" "$CLI" features @feat --json 2>&1)"
+eq "features --json: pages off when the server does not have them" '{"pages": false, "pages_scripts": false, "chat": false, "task_board": false, "excalidraw": false, "marp": false, "live_collab": false}' "$out"
+echo "on" > "$WORK/pages"
+out="$(HOME="$H" "$CLI" features @feat --json 2>&1)"
+eq "features --json: pages on, scripts off" '{"pages": true, "pages_scripts": false, "chat": true, "task_board": true, "excalidraw": false, "marp": false, "live_collab": false}' "$out"
+out="$(HOME="$H" "$CLI" features @feat 2>&1)"
+case "$out" in *"pages        on"*"scripts off"*) ok "features: plain list says pages on, scripts off" ;; *) bad "features: plain list says pages on, scripts off" "$out" ;; esac
+echo "off" > "$WORK/pages"
+
 echo "=== $((PASS+FAIL)) checks: $PASS passed, $FAIL failed ==="
 [ "$FAIL" -eq 0 ]

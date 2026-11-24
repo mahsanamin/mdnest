@@ -63,6 +63,19 @@ async function run() {
   ok("chat tools hidden (chat off)", !names.some((n) => n.endsWith("_chat") || n === "list_chats"), names.filter((n) => n.includes("chat")).join(",") || "none");
   ok("pages tools hidden (pages off)", !has("publish_page") && !has("list_pages") && !has("read_page"));
   ok("marp tools hidden (marp off)", !has("create_marp") && !has("add_marp_slide") && !has("list_marp_themes"), names.filter((n) => n.includes("marp")).join(",") || "none");
+  // server_features is always on and reports the backend's settings, so an
+  // agent can decide (for example: pages off, so write a Markdown note).
+  ok("server_features present", has("server_features"));
+  const call = await fetch(`${MCP_BASE}/mcp`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream", Authorization: `Bearer ${TOKEN}` },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "server_features", arguments: {} } }),
+  });
+  const ct = await call.text();
+  const body = ct.includes("data:") ? ct.slice(ct.indexOf("{"), ct.lastIndexOf("}") + 1) : ct;
+  let f = null;
+  try { f = JSON.parse(JSON.parse(body).result.content[0].text); } catch {}
+  ok("server_features reports the config", f && f.pages === false && f.pages_scripts === false && f.task_board === true && f.excalidraw === true && f.marp === false && f.chat === false, JSON.stringify(f));
 }
 
 // --- orchestrate ----------------------------------------------------------

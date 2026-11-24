@@ -754,6 +754,35 @@ function createServer() {
 // Tools
 // ---------------------------------------------------------------------------
 
+// Which optional features the server has on, read live so an agent decides from
+// the setting (for example: write a Markdown note when HTML pages are off)
+// instead of from a failed call. Same fields as `mdnest features --json`.
+server.tool(
+  "server_features",
+  "Which optional features this mdnest server has on: pages (HTML pages, and pages_scripts if their scripts run), chat, task_board, excalidraw, marp, live_collab. Check it before offering or using one of them; when pages is off, write a Markdown note instead.",
+  {},
+  async () => {
+    try {
+      const res = await fetch(`${BASE_URL}/api/config`);
+      if (!res.ok) throw new Error(`status ${res.status}`);
+      const c = await res.json();
+      const pagesOn = !!c.pages?.enabled;
+      const f = {
+        pages: pagesOn,
+        pages_scripts: pagesOn && !!c.pages?.scripts,
+        chat: !!c.chat,
+        task_board: !!c.taskBoard,
+        excalidraw: !!c.excalidraw,
+        marp: !!c.marp,
+        live_collab: !!c.liveCollab,
+      };
+      return { content: [{ type: "text", text: JSON.stringify(f, null, 2) }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: could not read the server's settings (${err.message}). Do not assume an optional feature is on.` }], isError: true };
+    }
+  }
+);
+
 server.tool(
   "list_namespaces",
   "List all available namespaces",
