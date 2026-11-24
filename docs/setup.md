@@ -691,7 +691,9 @@ for that hostname.
 
 `PAGES_NETWORK` decides what a page's scripts may load: `strict` (the default)
 allows only the page's own files, `open` also allows outside scripts and calls
-to outside sites over https. The security details are in
+to outside sites over https. `strict` does not stop a page from sending what
+it shows to an outside site (a script can move its own frame to any address),
+so do not rely on it to keep a page's content in. The security details are in
 [security.md](security.md#html-pages).
 
 ## Remote Access

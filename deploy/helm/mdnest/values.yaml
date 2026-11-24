@@ -340,7 +340,7 @@ pages:
   maxFiles: 500
   # -- Script mode (`PAGES_ORIGIN`, needs team setup): a second hostname that serves page files and nothing else, e.g. `https://pages.example.com`. Empty means static mode: pages show with their scripts turned off. Must differ from `backend.frontendOrigin`. With `ingress.enabled`, a rule for this hostname is added that goes to the backend's pages port.
   origin: ""
-  # -- What a page's scripts may load in script mode (`PAGES_NETWORK`): `strict` (only the page's own files) or `open` (outside scripts and fetches, https).
+  # -- What a page's scripts may load in script mode (`PAGES_NETWORK`): `strict` (only the page's own files) or `open` (outside scripts and fetches, https). Neither stops a page from sending what it shows to an outside site.
   network: strict
   # -- Container and Service port of the pages listener (`PAGES_LISTEN_PORT`), used only in script mode.
   port: 8081

