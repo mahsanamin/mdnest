@@ -395,6 +395,8 @@ test('the Pages view: cards, description, search, sort, reveal in tree, and noth
   // Nothing of pages in the left pane any more.
   await expect(page.locator('.sidebar [data-testid=pages-section], .sidebar .pages-list')).toHaveCount(0);
   await openPagesView(page);
+  // Pages are not saved by git sync: the view says so plainly.
+  await expect(page.getByTestId('pages-storage-note')).toContainText('git sync does not save them');
   await expect(page.locator('.toolbar-path')).not.toContainText('.md');
 
   const aard = page.locator(`[data-testid="page-card-${DIR}/cards/aardvark.page.md"]`);
@@ -516,6 +518,7 @@ test('the Pages tab in the side panel: open two pages in a row, reveal one, pane
   await expect(second.locator('.pages-panel-folder')).toHaveText(`${DIR}/panel/nested/`);
 
   // Search narrows the list.
+  await expect(panel.getByTestId('pages-panel-storage-note')).toContainText('git sync does not save them');
   await panel.getByTestId('pages-panel-search').fill(`SECOND-${run}`);
   await expect(first).toHaveCount(0, { timeout: 10_000 });
   await expect(second).toBeVisible();

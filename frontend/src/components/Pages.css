@@ -143,6 +143,15 @@
   max-width: 100%;
 }
 
+.pages-view-note {
+  margin: 0.5rem 0 0;
+  padding: 0.5rem 0.75rem;
+  border-left: 3px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
 .pages-view-empty {
   color: var(--text-muted);
   font-size: 0.9rem;
@@ -262,6 +271,10 @@
   overflow-y: auto;
   min-height: 0;
   padding: 0 0.25rem;
+}
+
+.pages-panel-note {
+  margin: 0.5rem 0.75rem;
 }
 
 .pages-panel-list .pages-view-empty {

@@ -39,6 +39,11 @@ const LOCATE_ICON = (
   </svg>
 );
 
+// Shown in the Pages view and the side panel's Pages tab. Page files are kept
+// apart from the notes (PAGES_DIR), so git sync and a copy of the notes folder
+// do not carry them.
+const STORAGE_NOTE = 'Pages are for casual sharing. Their HTML, scripts and images are kept apart from your notes, so git sync does not save them and they do not move with your notes to another server. Keep your own copy of any page you need.';
+
 // The Pages view (toolbar "Pages" button): a card for every page in the
 // namespace the user can read. No live previews on purpose: opening this
 // view never runs a page's scripts. Writers of the namespace root also get an
@@ -110,6 +115,7 @@ export function PagesView({ ns, onOpen, onReveal, initialTab = 'pages', onClose,
           </div>
         )}
       </div>
+      <p className="pages-view-note" data-testid="pages-storage-note">{STORAGE_NOTE}</p>
       {error && <div className="pages-view-empty">{error}</div>}
       {data === null && <div className="pages-view-empty">Loading...</div>}
       {!showUnlinked && data && !error && pages.length === 0 && (
@@ -201,6 +207,7 @@ export function PagesPanel({ ns, currentPath, refreshKey, onOpen, onReveal, onFu
           </div>
         ))}
       </div>
+      <p className="pages-view-note pages-panel-note" data-testid="pages-panel-storage-note">{STORAGE_NOTE}</p>
       <div className="pages-panel-foot">
         <button type="button" className="pages-panel-link" onClick={() => onFullView('pages')} data-testid="pages-panel-full">Open full view</button>
         {Array.isArray(unlinked) && unlinked.length > 0 && (

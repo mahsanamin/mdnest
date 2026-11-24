@@ -15,8 +15,10 @@ All notable changes to mdnest are documented here.
   Pages run with scripts off; to let their scripts run, give them a second
   address with `PAGES_ORIGIN`. Republishing updates the page you published
   through; other copies keep the version they show. `FRONTEND_ORIGIN` must be
-  the address people open, or a page cannot be shown. See "HTML pages" in the
-  setup guide.
+  the address people open, or a page cannot be shown. Pages are for casual
+  sharing: their files are kept apart from the notes, so git sync does not save
+  them, and the Pages view says so. Back up the pages store yourself. See
+  "HTML pages" in the setup guide.
 - **Local agent crews in a chat** *(Optional: needs Node 22 or newer on the
   machine that runs them)*. `mdnest chat crew "goal" --note <new note> --agent
   'name:role:command'` starts a chat where local agents take turns: each

@@ -159,7 +159,7 @@ On first run, `setup.sh` copies `mdnest.conf.sample` to `mdnest.conf` and exits,
 | `MDNEST_USER` | `admin` | Username for the login screen |
 | `MDNEST_PASSWORD` | `changeme` | Password for the login screen. Change this. |
 | `MDNEST_JWT_SECRET` | `changeme` | Secret key used to sign JWT tokens. Use a long random string. |
-| `FRONTEND_ORIGIN` | `http://localhost:<FRONTEND_PORT>` | The full URL where the frontend is served. Used for CORS. Update this if you use a custom domain or reverse proxy. |
+| `FRONTEND_ORIGIN` | `http://localhost:<FRONTEND_PORT>` | The full URL people open mdnest at. Used for CORS, the SSO return address, and the only address allowed to show HTML pages. Behind a custom domain or reverse proxy, set it to that public URL: with the default, HTML pages show "refused to connect". |
 | `BACKEND_PORT` | `8286` | Host port mapped to the backend container (port 8080 internally) |
 | `FRONTEND_PORT` | `3236` | Host port mapped to the frontend container (port 80 internally) |
 | `BIND_ADDRESS` | `127.0.0.1` | Host IP(s) to bind the published ports to. To reach mdnest over Tailscale, a VPN or the LAN, keep `127.0.0.1` and put a reverse proxy in front (Caddy, nginx, or `tailscale serve`). A comma-separated list (e.g. `127.0.0.1,100.73.118.115`) also works, but Docker only publishes a port if that IP exists when the container starts, so an address that comes up after Docker (a reboot, a Docker restart) leaves mdnest running with no port published, or, if the address is missing at the moment Docker starts the container, not started at all (Docker does not retry it). `setup.sh` warns about such an address, and `./mdnest-server status` reports both cases. |
@@ -192,8 +192,8 @@ On first run, `setup.sh` copies `mdnest.conf.sample` to `mdnest.conf` and exits,
 | `ENABLE_AGENT_APPROVALS` *(v4.8.5+, experimental)* | `false` | Answer an agent's (Claude Code or Codex) permission prompt from mdnest: the question shows as a card, you press Allow or Deny in the browser, and the agent continues. Each machine also has to opt in, see `docs/chat.md`. Decisions are accepted only from a browser login. Requests live in memory and are not available on `MDNEST_ROLE=app`. Read the added risk in `docs/security.md` before turning it on. |
 | `ENABLE_EXCALIDRAW` *(v4.2.0+)* | `false` | Open `.excalidraw.md` notes on an Excalidraw canvas and allow read-only drawing embeds in any note. The (large) editor bundle is code-split and only loads when a drawing is opened. See `docs/excalidraw.md`. |
 | `EXCALIDRAW_LIBRARIES` *(v4.2.0+)* | *(none)* | Requires `ENABLE_EXCALIDRAW`. Comma-separated URLs to `.excalidrawlib` files, preloaded into every drawing so an organisation can ship a shared shape set. Fetched by the **browser**, not the backend, so the URLs must be reachable by clients (and CORS-enabled). |
-| `ENABLE_PAGES` | `false` | Optional. View-only HTML pages (reports, dashboards) published into any folder from the CLI, MCP or a desktop drop; each shows in the tree as a small `<name>.page.md` handle and opens in a viewer. Off by default: no route is registered and the frontend loads no pages code. See [HTML pages](#html-pages-optional). |
-| `PAGES_DIR` | *(named volume `mdnest-pages`)* | Requires `ENABLE_PAGES`. Host folder for page files, kept apart from the notes. |
+| `ENABLE_PAGES` | `false` | Optional. View-only HTML pages (reports, dashboards) published into any folder from the CLI, MCP or a desktop drop; each shows in the tree as a small `<name>.page.md` handle and opens in a viewer. Off by default: no route is registered and the frontend loads no pages code. **Pages are for casual sharing:** their files are kept apart from the notes, so git sync does not save them and they do not move with the notes to another server. Back up `PAGES_DIR` (or the `mdnest-pages` volume) yourself. See [HTML pages](#html-pages-optional). |
+| `PAGES_DIR` | *(named volume `mdnest-pages`)* | Requires `ENABLE_PAGES`. Host folder for page files, kept apart from the notes. Not in git: back it up with the notes, and copy it along when you move to another server. Must not be inside a notes folder. |
 | `PAGES_MAX_MB` | `20` | Requires `ENABLE_PAGES`. Largest total size of one page, checked when it is published. The web server in front of mdnest takes uploads up to 32 MB, so keep it at 30 or less. |
 | `PAGES_MAX_FILES` | `500` | Requires `ENABLE_PAGES`. Most files in one page, and also most folders, checked when it is published. |
 | `PAGES_ORIGIN` | *(none: static mode)* | Optional, needs team setup. A second address (another port or hostname) that serves page files and nothing else. With it, page scripts run there in a sandbox; without it, pages show with scripts off. Must differ from `FRONTEND_ORIGIN`. |
@@ -204,6 +204,16 @@ On first run, `setup.sh` copies `mdnest.conf.sample` to `mdnest.conf` and exits,
 | `STORAGE_BACKEND` *(v4.0.0+)* | `local` | `local` (filesystem; git history via the optional git-sync sidecar) or `git` (in-process git with idle-debounced commits, which also enables comment-marker recovery across a delete+recreate). Only these two values are accepted; anything else fails at startup. |
 | `GRANT_MAX_DEPTH` | `3` | Cap on how deep into a namespace tree a grant's path can go (`/` = depth 0). New grants beyond this depth return 400. Existing rows are grandfathered. Set `0` for no limit. |
 | `INSECURE_DEV_LOGIN` | `false` | **Dev-only.** Enables `POST /api/auth/dev-login` which mints a session for any existing user by email — bypassing the IdP. Loud red warning pill renders on every authenticated page while this is on. NEVER enable on a non-localhost deployment. |
+| `ENABLE_CHAT` | `true` | Chat rooms stored as notes, for people and AI agents. `false` turns it off: the `/api/chat*` routes are not registered and the browser never loads the chat code. See [chat.md](chat.md). |
+| `SEARCH_MAX_RESULTS` | `30` | Most results one search returns. |
+| `SEARCH_MAX_FILE_SIZE` | `1048576` | Files larger than this many bytes (1 MB) are skipped by search. |
+| `SEARCH_WORKERS` | `8` | How many files search reads at once. Raise it for a large repository (5,000+ notes). |
+| `SEARCH_CACHE_TTL` | `30` | Seconds the list of files search looks at is kept before it is read again. |
+| `DOWNLOAD_MAX_FILES` | `500` | Most files one folder download (zip) or move/copy between namespaces may hold. A bigger folder is refused up front with the real count. |
+| `DOWNLOAD_MAX_MB` | `100` | Most megabytes one folder download or move/copy between namespaces may hold. |
+| `DOWNLOAD_MAX_CONCURRENT` | `2` | Zip downloads running at once, for the whole server (one per user). |
+| `MCP_TOKEN`, `MCP_HTTP_PORT` | *(none)*, `3000` | Optional MCP server container. `MCP_TOKEN` is the one mdnest API token it uses for every call (service mode); `MCP_HTTP_PORT` is the host port of its `/mcp` endpoint. See [mcp.md](mcp.md). |
+| `MCP_AUTH_MODE`, `MCP_PUBLIC_URL`, `MCP_OAUTH_SECRET`, `MCP_SSO_AUTHORIZE_URL`, `MCP_ALLOWED_REDIRECT_ORIGINS` | *(service mode)* | `MCP_AUTH_MODE=oauth` makes each MCP client sign in as its own user through your SSO, instead of sharing one token. Needs the next three; `MCP_ALLOWED_REDIRECT_ORIGINS` lists extra client addresses allowed to finish that sign-in. See [mcp.md](mcp.md). |
 | `COMPOSE_PROJECT_NAME` | *(unset = directory basename)* | Override the docker compose project name. Useful when running parallel installs from differently-named (or similarly-named) directories so their containers don't collide. |
 | `SSH_KEY_PATH` | *(none)* | Path to SSH private key on the host. Mounted into the backend for git pull via sync button. Must be passphrase-free. |
 | `CADDY_DOMAIN` | *(none)* | Domain name for automatic HTTPS via Caddy. When set, adds a Caddy container and makes backend/frontend ports internal-only. Requires a DNS A record pointing to the server. |
@@ -665,6 +675,13 @@ Pages view and can delete them. They are never deleted on their own.
 with your notes. On the Helm chart, set `pages.enabled: true`; page files are
 kept on the notes volume in a hidden folder. Pages are not available on the
 multi-replica app role (`MDNEST_ROLE=app`, the git-native HA topology).
+
+**Pages are for casual sharing, not kept in git.** A page's HTML, scripts and
+images are stored apart from your notes (in `PAGES_DIR` or the `mdnest-pages`
+volume). Git sync saves only the small `<name>.page.md` file, so a server
+rebuilt from the git repository alone shows every page as missing. Back up the
+pages store with your notes, and copy it along when you move to another
+server. The Pages view in the app says the same.
 
 **Set `FRONTEND_ORIGIN` to the address people open.** A page may only be shown
 inside the address in `FRONTEND_ORIGIN`. Behind your own domain or reverse
