@@ -159,7 +159,7 @@ On first run, `setup.sh` copies `mdnest.conf.sample` to `mdnest.conf` and exits,
 | `MDNEST_USER` | `admin` | Username for the login screen |
 | `MDNEST_PASSWORD` | `changeme` | Password for the login screen. Change this. |
 | `MDNEST_JWT_SECRET` | `changeme` | Secret key used to sign JWT tokens. Use a long random string. |
-| `FRONTEND_ORIGIN` | `http://localhost:<FRONTEND_PORT>` | The full URL people open mdnest at. Used for CORS, the SSO return address, and the only address allowed to show HTML pages. Behind a custom domain or reverse proxy, set it to that public URL: with the default, HTML pages show "refused to connect". |
+| `FRONTEND_ORIGIN` | `http://localhost:<FRONTEND_PORT>` | The full URL people open mdnest at. Used for CORS, the SSO return address, and, with script mode (`PAGES_ORIGIN`), the only address allowed to show HTML pages. Behind a custom domain or reverse proxy, set it to that public URL. |
 | `BACKEND_PORT` | `8286` | Host port mapped to the backend container (port 8080 internally) |
 | `FRONTEND_PORT` | `3236` | Host port mapped to the frontend container (port 80 internally) |
 | `BIND_ADDRESS` | `127.0.0.1` | Host IP(s) to bind the published ports to. To reach mdnest over Tailscale, a VPN or the LAN, keep `127.0.0.1` and put a reverse proxy in front (Caddy, nginx, or `tailscale serve`). A comma-separated list (e.g. `127.0.0.1,100.73.118.115`) also works, but Docker only publishes a port if that IP exists when the container starts, so an address that comes up after Docker (a reboot, a Docker restart) leaves mdnest running with no port published, or, if the address is missing at the moment Docker starts the container, not started at all (Docker does not retry it). `setup.sh` warns about such an address, and `./mdnest-server status` reports both cases. |
@@ -683,12 +683,12 @@ rebuilt from the git repository alone shows every page as missing. Back up the
 pages store with your notes, and copy it along when you move to another
 server. The Pages view in the app says the same.
 
-**Set `FRONTEND_ORIGIN` to the address people open.** A page may only be shown
-inside the address in `FRONTEND_ORIGIN`. Behind your own domain or reverse
-proxy, set it to that public URL (for example
+**Set `FRONTEND_ORIGIN` to the address people open.** Pages with scripts off
+show at mdnest's own address whatever it says. With script mode
+(`PAGES_ORIGIN`), only the address in `FRONTEND_ORIGIN` may show a page, so
+behind your own domain or reverse proxy set it to that public URL (for example
 `FRONTEND_ORIGIN=https://notes.example.com`), not the internal
-`http://localhost:<port>`. Otherwise every page shows the browser's "refused
-to connect" instead of its content.
+`http://localhost:<port>`, or pages show the browser's "refused to connect".
 
 ### Static mode (the default)
 

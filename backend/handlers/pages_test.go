@@ -224,8 +224,11 @@ func TestPages_PublishListViewText(t *testing.T) {
 	if !strings.HasSuffix(csp, "; sandbox") || strings.Contains(csp, "allow-scripts") || strings.Contains(csp, "script-src") {
 		t.Fatalf("static CSP must turn scripts off: %q", csp)
 	}
-	if !strings.Contains(csp, "frame-ancestors https://notes.example.com") {
-		t.Fatalf("static CSP must name the frontend as the only framer: %q", csp)
+	// mdnest's own address and FRONTEND_ORIGIN may frame a static page, and
+	// nothing else: 'self' keeps pages working when FRONTEND_ORIGIN still names
+	// the internal address while people open mdnest at a public one.
+	if !strings.Contains(csp, "frame-ancestors 'self' https://notes.example.com;") {
+		t.Fatalf("static CSP must let only mdnest itself and the frontend frame a page: %q", csp)
 	}
 	for k, v := range map[string]string{
 		"X-Content-Type-Options": "nosniff",
@@ -819,6 +822,9 @@ func TestPages_ScriptModeHeaders(t *testing.T) {
 			csp := resp.Header.Get("Content-Security-Policy")
 			if !strings.HasSuffix(csp, "; sandbox allow-scripts") || strings.Contains(csp, "allow-same-origin") {
 				t.Fatalf("csp = %q", csp)
+			}
+			if strings.Contains(csp, "frame-ancestors 'self'") {
+				t.Errorf("script mode must not let the pages origin frame itself: %q", csp)
 			}
 			for _, must := range []string{"frame-ancestors https://notes.example.com", "base-uri 'none'", "form-action 'none'", "object-src 'none'"} {
 				if !strings.Contains(csp, must) {

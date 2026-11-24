@@ -730,7 +730,7 @@ func (h *PagesHandler) parsePass(s string) (string, string, bool) {
 // may show only its own images, styles and fonts.
 func (h *PagesHandler) staticCSP() string {
 	return "default-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; media-src 'self'; " +
-		"base-uri 'none'; form-action 'none'" + h.frameAncestors() + "; sandbox"
+		"base-uri 'none'; form-action 'none'" + h.staticFrameAncestors() + "; sandbox"
 }
 
 // scriptCSP: scripts run, but in an opaque origin (no allow-same-origin), and
@@ -745,6 +745,20 @@ func (h *PagesHandler) scriptCSP() string {
 			"img-src " + o + " data: blob:; font-src " + o + " data:; media-src " + o + " data: blob:; connect-src " + o
 	}
 	return src + "; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'" + h.frameAncestors() + "; sandbox allow-scripts"
+}
+
+// staticFrameAncestors: in static mode a page is served from mdnest's own
+// address, so mdnest's own pages may frame it ('self') as well as
+// FRONTEND_ORIGIN. Without 'self', an install opened at a public address while
+// FRONTEND_ORIGIN still names its internal one (http://localhost:<port>)
+// showed every page as "refused to connect". 'self' adds no other framer: the
+// page is still refused inside any other site.
+func (h *PagesHandler) staticFrameAncestors() string {
+	if fa := originOf(h.cfg.FrameAncestors); fa != "" {
+		u, _ := url.Parse(strings.TrimSpace(h.cfg.FrameAncestors))
+		return "; frame-ancestors 'self' " + u.Scheme + "://" + u.Host
+	}
+	return "; frame-ancestors 'self'"
 }
 
 func (h *PagesHandler) frameAncestors() string {
