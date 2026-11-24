@@ -207,7 +207,7 @@ test('Live: the front matter is shown, and editing it saves a valid --- block', 
 test('Live: a chat still opens as a chat after typing in another note', async ({ page }) => {
   test.setTimeout(90_000);
   await signIn(page);
-  const chatsOn = await page.locator('.toolbar-view-chats').waitFor({ state: 'visible', timeout: 10_000 }).then(() => true).catch(() => false);
+  const chatsOn = await page.locator('[data-testid=toolbar-chats]').waitFor({ state: 'visible', timeout: 10_000 }).then(() => true).catch(() => false);
   if (!chatsOn) test.skip(true, 'chat disabled (ENABLE_CHAT)');
   const id = Date.now();
   const file = `default-fm-other-${id}.md`;

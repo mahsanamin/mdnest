@@ -324,6 +324,28 @@ excalidraw:
   libraries: []
 
 # -----------------------------------------------------------------------------
+# HTML pages (optional). View-only HTML pages (reports, dashboards) published
+# into a namespace with `mdnest page publish` or the MCP publish_page tool.
+# Page files are kept on the notes volume in a hidden folder
+# (/data/notes/.mdnest-pages), never in a namespace, so they never show in the
+# notes tree or search. Not available with the git-native HA topology
+# (storage.backend=git with more than one replica).
+# -----------------------------------------------------------------------------
+pages:
+  # -- Enable HTML pages (`ENABLE_PAGES`). Off by default; when off no route is registered and the frontend never loads the pages chunk.
+  enabled: false
+  # -- Largest total size of one page, in MB (`PAGES_MAX_MB`), checked at publish time.
+  maxMB: 20
+  # -- Most files in one page, and most folders (`PAGES_MAX_FILES`), checked at publish time.
+  maxFiles: 500
+  # -- Script mode (`PAGES_ORIGIN`, needs team setup): a second hostname that serves page files and nothing else, e.g. `https://pages.example.com`. Empty means static mode: pages show with their scripts turned off. Must differ from `backend.frontendOrigin`. With `ingress.enabled`, a rule for this hostname is added that goes to the backend's pages port.
+  origin: ""
+  # -- What a page's scripts may load in script mode (`PAGES_NETWORK`): `strict` (only the page's own files) or `open` (outside scripts and fetches, https). Neither stops a page from sending what it shows to an outside site.
+  network: strict
+  # -- Container and Service port of the pages listener (`PAGES_LISTEN_PORT`), used only in script mode.
+  port: 8081
+
+# -----------------------------------------------------------------------------
 # Folder download (zip) and move/copy between namespaces.
 # -----------------------------------------------------------------------------
 download:

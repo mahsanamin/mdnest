@@ -82,12 +82,12 @@ async function authenticate() {
 // ---------------------------------------------------------------------------
 // Feature flags (mirror the backend so the tool surface matches the app)
 // ---------------------------------------------------------------------------
-// The gated features (task board, Marp, Excalidraw) are read from the backend's
+// The gated features (task board, Marp, Excalidraw, chat, pages) are read from the backend's
 // unauthenticated GET /api/config once at startup. Their tools are only
 // registered when the backend has them enabled — an operator running notes-only
 // mdnest sees no task/drawing/slide tools. If /api/config can't be read we stay
 // permissive (expose everything) rather than hide a working feature.
-const features = { taskBoard: true, marp: true, excalidraw: true, chat: true };
+const features = { taskBoard: true, marp: true, excalidraw: true, chat: true, pages: true };
 async function loadFeatures() {
   try {
     const res = await fetch(`${BASE_URL}/api/config`);
@@ -97,9 +97,10 @@ async function loadFeatures() {
     features.marp = !!cfg.marp;
     features.excalidraw = !!cfg.excalidraw;
     features.chat = !!cfg.chat;
+    features.pages = !!cfg.pages?.enabled;
   } catch (err) {
     console.error(`Could not read /api/config (${err.message}); exposing all tools.`);
-    features.taskBoard = features.marp = features.excalidraw = features.chat = true;
+    features.taskBoard = features.marp = features.excalidraw = features.chat = features.pages = true;
   }
 }
 
@@ -793,7 +794,7 @@ server.tool(
 
 server.tool(
   "read_note",
-  "Read a note's content. On long notes prefer outline:true first (headings with line numbers), then section or offset/limit to load only the part you need.",
+  "Read a note's content. On long notes prefer outline:true first (headings with line numbers), then section or offset/limit to load only the part you need. A *.page.md file is the handle of an HTML page: reading it returns the handle, then the HTML page's text under a marker line.",
   {
     namespace: z.string().describe("Namespace name"),
     path: z.string().describe("Path to the note within the namespace"),
@@ -828,6 +829,9 @@ server.tool(
           return { content: [{ type: "text", text: `Error: offset ${offset} is past the end of the note (${noteLines(text).length} lines)` }], isError: true };
         }
         return { content: [{ type: "text", text: `[lines ${r.from}-${r.to} of ${r.total}]\n${r.text}` }] };
+      }
+      if (features.pages && path.endsWith(".page.md")) {
+        return { content: [{ type: "text", text: text + (await pageTextSuffix(namespace, path)) }] };
       }
       return { content: [{ type: "text", text }] };
     } catch (err) {
@@ -1475,6 +1479,156 @@ server.tool(
         return { content: [{ type: "text", text: "No matches found." }] };
       }
       return { content: [{ type: "text", text: JSON.stringify(results, null, 2) }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// HTML pages (server: ENABLE_PAGES). View-only pages published into a
+// namespace. publish_page takes the files inline (never a path on the MCP
+// host's disk, which over HTTP would be the server's own files) and sends them
+// as a tar; the backend checks every path, the size and the file count.
+// read_page returns the text pulled out at publish time, not the raw HTML.
+// ---------------------------------------------------------------------------
+
+// tarOf builds a ustar archive from [{path, data: Buffer}]. Names over 100
+// bytes use the ustar prefix field; the backend refuses anything unsafe.
+function tarOf(files) {
+  const blocks = [];
+  const field = (buf, off, len, str) => { buf.write(str, off, Math.min(len, Buffer.byteLength(str)), "utf8"); };
+  const octal = (n, len) => n.toString(8).padStart(len - 1, "0");
+  for (const f of files) {
+    const h = Buffer.alloc(512);
+    let name = f.path, prefix = "";
+    if (Buffer.byteLength(name) > 100) {
+      const cut = name.lastIndexOf("/", 155);
+      if (cut <= 0 || Buffer.byteLength(name.slice(cut + 1)) > 100 || Buffer.byteLength(name.slice(0, cut)) > 155) {
+        throw new Error(`file path too long for a page: ${f.path}`);
+      }
+      prefix = name.slice(0, cut);
+      name = name.slice(cut + 1);
+    }
+    field(h, 0, 100, name);
+    field(h, 100, 8, octal(0o644, 8));
+    field(h, 108, 8, octal(0, 8));
+    field(h, 116, 8, octal(0, 8));
+    field(h, 124, 12, octal(f.data.length, 12));
+    field(h, 136, 12, octal(Math.floor(Date.now() / 1000), 12));
+    h.fill(0x20, 148, 156); // checksum is computed with this field as spaces
+    h[156] = 0x30; // '0' regular file
+    field(h, 257, 6, "ustar");
+    field(h, 263, 2, "00");
+    field(h, 345, 155, prefix);
+    let sum = 0;
+    for (const b of h) sum += b;
+    field(h, 148, 8, octal(sum, 7) + "\0");
+    blocks.push(h, f.data);
+    const pad = (512 - (f.data.length % 512)) % 512;
+    if (pad) blocks.push(Buffer.alloc(pad));
+  }
+  blocks.push(Buffer.alloc(1024));
+  return Buffer.concat(blocks);
+}
+
+async function pageError(res) {
+  const text = await res.text().catch(() => "");
+  if (res.status === 404 && text.startsWith("404 page not found")) {
+    return { content: [{ type: "text", text: "This mdnest server has pages turned off (ENABLE_PAGES)." }], isError: true };
+  }
+  return { content: [{ type: "text", text: `Error ${res.status}: ${text}` }], isError: true };
+}
+
+const handlePathSchema = z.string().describe("Path of the page's handle in the namespace, e.g. Reports/q3-report (\".page.md\" is added when missing). The page shows in the notes tree as that file.");
+const asHandle = (p) => (p.endsWith(".page.md") ? p : `${p}.page.md`);
+
+// pageTextSuffix: what read_note adds after a page handle. The text pulled out
+// of the published page, under a marker line, or the server's reason when the
+// page is not here (for example "this page was published in another
+// namespace: publish it again here"). Empty when the file is not a handle.
+async function pageTextSuffix(namespace, path) {
+  try {
+    const res = await api(`/api/pages/text?ns=${encodeURIComponent(namespace)}&path=${encodeURIComponent(path)}&format=text`);
+    if (res.ok) return `\n----- page text (extracted from the published HTML) -----\n${await res.text()}`;
+    if (res.status === 404) {
+      const data = await res.json().catch(() => null);
+      if (data && data.error) return `\n----- page text -----\n${data.error}\n`;
+    }
+  } catch { /* the handle alone */ }
+  return "";
+}
+
+if (features.pages) server.tool(
+  "publish_page",
+  "Publish an HTML page (a report or dashboard in HTML) for people to view in mdnest. Only when the person explicitly asks for an HTML page; the default is always a Markdown note (write_note/create_note), and never publish both for the same content unless asked. It shows in the notes tree as <path>.page.md, in any folder; publishing to a path that already has an HTML page replaces it. Scripts run only when the server has a pages origin set up; otherwise it shows without scripts.",
+  {
+    namespace: z.string().describe("Namespace name"),
+    path: handlePathSchema,
+    html: z.string().describe("The page's index.html"),
+    files: z.array(z.object({
+      path: z.string().describe("Path inside the page, e.g. css/style.css or data/q3.json"),
+      content: z.string(),
+      encoding: z.enum(["utf8", "base64"]).optional().describe("base64 for images and other binary files"),
+    })).optional().describe("Other files the page links to with relative paths"),
+  },
+  async ({ namespace, path, html, files }) => {
+    try {
+      const q = `ns=${encodeURIComponent(namespace)}&path=${encodeURIComponent(asHandle(path))}`;
+      let res;
+      if (!files || files.length === 0) {
+        res = await api(`/api/pages?${q}`, { method: "PUT", headers: { "Content-Type": "text/html; charset=utf-8" }, body: html });
+      } else {
+        const all = [{ path: "index.html", data: Buffer.from(html, "utf8") }];
+        for (const f of files) {
+          if (f.path === "index.html") throw new Error("pass index.html as html, not in files");
+          all.push({ path: f.path, data: Buffer.from(f.content, f.encoding === "base64" ? "base64" : "utf8") });
+        }
+        res = await api(`/api/pages?${q}`, { method: "PUT", headers: { "Content-Type": "application/x-tar" }, body: tarOf(all) });
+      }
+      if (!res.ok) return pageError(res);
+      const data = await res.json();
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+if (features.pages) server.tool(
+  "list_pages",
+  "List the HTML pages in a namespace that you can read: each one's handle path, title, author and date. With query, only HTML pages whose text contains every word.",
+  {
+    namespace: z.string().describe("Namespace name"),
+    query: z.string().optional().describe("Search the pages' text"),
+  },
+  async ({ namespace, query }) => {
+    try {
+      let p = `/api/pages?ns=${encodeURIComponent(namespace)}`;
+      if (query) p += `&q=${encodeURIComponent(query)}`;
+      const res = await api(p);
+      if (!res.ok) return pageError(res);
+      const data = await res.json();
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+    } catch (err) {
+      return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+    }
+  }
+);
+
+if (features.pages) server.tool(
+  "read_page",
+  "Read an HTML page's details and its visible text (pulled out when it was published), by its handle path (*.page.md). Does not return the raw HTML. read_note on the handle gives the same text after the handle.",
+  {
+    namespace: z.string().describe("Namespace name"),
+    path: handlePathSchema,
+  },
+  async ({ namespace, path }) => {
+    try {
+      const res = await api(`/api/pages/text?ns=${encodeURIComponent(namespace)}&path=${encodeURIComponent(asHandle(path))}`);
+      if (!res.ok) return pageError(res);
+      const data = await res.json();
+      return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
     } catch (err) {
       return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
     }

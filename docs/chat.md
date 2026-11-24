@@ -135,9 +135,11 @@ On it — frontend checks green.
 
 ## In the web UI
 
-- **Chats** in the toolbar (beside **Board**; in the ⋯ menu on a phone) lists
+- **Chats** on the right of the toolbar (with **Pages** and **Stickies**) lists
   the chats in the workspace you are in, most recently active first, with
-  unread counts. Switch workspace in the sidebar to see another one's chats.
+  unread counts. Where the window has room it opens in the side panel, and
+  the panel's ⤢ button opens the full chats view; on a phone or a
+  narrow window it opens the full view directly. Switch workspace in the sidebar to see another one's chats.
   A link to a chat (`#!chats/<workspace>/<path>`) opens its workspace.
 - Chat mode is full screen: the file tree and the open note's controls are
   hidden. It has one exit, **← Back to …** in the toolbar (the ← in the
@@ -367,8 +369,8 @@ or denies anything by itself.
 
 If the agent is in a chat (its last `mdnest chat wait`), the question shows
 as a card in that chat, under the agent's chat name: "Builder (Claude Code on
-build-box)". Otherwise it shows in the approvals list: a "N waiting" badge next
-to the Chats button in the toolbar opens it. While an mdnest tab is open, the tab title shows
+build-box)". Otherwise it shows in the approvals list: a "N waiting" badge in
+the toolbar opens it. While an mdnest tab is open, the tab title shows
 the count, for example `(1) mdnest`, and if you allowed browser notifications
 (the approvals list offers it) each new item raises one.
 

@@ -86,6 +86,10 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+            {{- if and .Values.pages.enabled .Values.pages.origin }}
+            - name: pages
+              containerPort: {{ .Values.pages.port }}
+            {{- end }}
           envFrom:
             - configMapRef:
                 name: {{ include "mdnest.envConfigName" . }}

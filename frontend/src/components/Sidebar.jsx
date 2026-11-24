@@ -1,5 +1,5 @@
 import { useRef, useCallback, useState, useEffect, useMemo } from 'react';
-import TreeNode from './TreeNode.jsx';
+import TreeNode, { isFileDrag } from './TreeNode.jsx';
 import { searchNotes, adminSyncNamespace, adminSyncStatus } from '../api.js';
 import { onTabMessage } from '../tab-sync.js';
 
@@ -106,6 +106,13 @@ function Sidebar({
   updateAvailableVersion,
   onShowReleaseNotes,
   revealNonce,
+  // What a reveal shows: this path, or the open note when null (the Pages
+  // view reveals a page's handle without opening it).
+  revealPath,
+  // Pages on: handle files get a page icon, and desktop files dropped on a
+  // folder go to onDropFiles(folder, dataTransfer). Both off otherwise.
+  pageHandles,
+  onDropFiles,
 }) {
   const [syncing, setSyncing] = useState(false);
   const [showVersionInfo, setShowVersionInfo] = useState(false);
@@ -245,12 +252,15 @@ function Sidebar({
   }, [currentPath]);
 
   // Reveal-in-tree: the toolbar's "locate" button bumps `revealNonce`. Expand
-  // the open file's ancestor folders (in case they were collapsed), then scroll
+  // the target's ancestor folders (in case they were collapsed), then scroll
   // its row into view and briefly flash it — so the user can jump straight to
-  // the current file when the tree is scrolled away or out of sync.
+  // the current file when the tree is scrolled away or out of sync. The
+  // target is revealPath when set (a page's handle, from the Pages view),
+  // otherwise the open note.
   useEffect(() => {
-    if (!revealNonce || !currentPath) return;
-    const parts = currentPath.split('/');
+    const target = revealPath || currentPath;
+    if (!revealNonce || !target) return;
+    const parts = target.split('/');
     if (parts.length >= 2) {
       const ancestors = [];
       for (let i = 1; i < parts.length; i++) ancestors.push(parts.slice(0, i).join('/'));
@@ -263,7 +273,8 @@ function Sidebar({
     }
     // Let the (possibly newly-expanded) rows render before scrolling to the active one.
     const t = setTimeout(() => {
-      const el = treeAreaRef.current?.querySelector('.tree-row.active');
+      const rows = treeAreaRef.current?.querySelectorAll('.tree-row[data-path]') || [];
+      const el = Array.from(rows).find((r) => r.dataset.path === target);
       if (!el) return;
       el.scrollIntoView({ block: 'center', behavior: 'smooth' });
       el.classList.add('reveal-flash');
@@ -544,6 +555,7 @@ function Sidebar({
           onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
           onDrop={(e) => {
             e.preventDefault();
+            if (onDropFiles && isFileDrag(e)) { onDropFiles('', e.dataTransfer); return; }
             try {
               const data = JSON.parse(e.dataTransfer.getData('text/plain'));
               if (data.path && onDrop) onDrop(data.path, '');
@@ -569,6 +581,7 @@ function Sidebar({
               e.preventDefault();
               e.stopPropagation();
               setRootDragOver(false);
+              if (onDropFiles && isFileDrag(e)) { onDropFiles('', e.dataTransfer); return; }
               try {
                 const data = JSON.parse(e.dataTransfer.getData('text/plain'));
                 // Already at the root? Nothing to do.
@@ -598,6 +611,8 @@ function Sidebar({
               forceExpand={!!searchQuery.trim()}
               pickedFolder={pickedFolder}
               onPickFolder={onPickFolder}
+              pageHandles={pageHandles}
+              onDropFiles={onDropFiles}
             />
           ))}
           {searchQuery.trim() && filteredTree.length === 0 && !showContentResults && !searching && (

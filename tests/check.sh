@@ -272,6 +272,7 @@ browser_lane() {
   # file it watches.
   suite "$COLLAB_PAT" e2e-collab-multi.sh "live collaboration and shared editing, multi mode" MDNEST_E2E_BUDGET=skip
   suite '^backend/handlers/chat|^backend/routes|^mdnest$|^mcp-server/|^frontend/src/(chat|components/Chat)|^tests/(e2e-agentic-multi\.sh|agentic-multi\.mjs)$' e2e-agentic-multi.sh "real two-namespace agent coordination" KEEP=0
+  suite "^backend/handlers/pages|^backend/routes\.go$|^backend/main\.go$|^frontend/src/(App\.jsx|api\.js|components/(Pages|Sidebar|Toolbar))|^tests/browser/pages|^tests/e2e-pages\.sh$|$LIB" e2e-pages.sh "HTML pages, static and script mode"
 }
 other_lane() {
   run "pre-push hook, $([ "$LEVEL" = ship ] && echo release || echo fast) tier (builds, unit, CLI, audits)" hook.log hook_tier

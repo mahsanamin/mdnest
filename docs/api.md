@@ -1442,6 +1442,145 @@ curl -OJ "http://localhost:8286/api/download?ns=personal&path=Project" \
 
 ---
 
+## HTML pages (optional, `ENABLE_PAGES`)
+
+View-only HTML pages. These routes exist only when the server has
+`ENABLE_PAGES=true`; otherwise each answers 404. `GET /api/config` reports
+`"pages": {"enabled": true, "scripts": <bool>, "maxMB": 20, "maxFiles": 500}`
+when they are on (`scripts` is true in script mode, with `PAGES_ORIGIN` set).
+
+A page lives in the notes tree as a handle file, `<name>.page.md`, in any
+folder. The handle is an ordinary note holding front matter:
+
+```markdown
+---
+page: 7n3d5yq2kq4w6r3zv6x5bq2m4d7c2f3h
+title: "Q3 report"
+author: "ana"
+published: 2026-11-20T10:00:00Z
+---
+
+HTML page, open it in mdnest.
+```
+
+`page` is a random id (160 bits, lowercase base32) naming the stored page. The
+note routes read, move, copy and delete handles like any note; deleting a
+handle with `DELETE /api/note` (or a folder holding handles) also deletes each
+page no other handle in the namespace names, and `/api/transfer` to another
+namespace carries the page along. Every route below that takes `path` names a
+handle (it must end in `.page.md`) and checks the notes' own permission on
+that path: read to view, write to publish or delete.
+
+### GET /api/pages
+
+The page handles in a namespace the caller can read, newest first.
+
+| Param | Required | Description |
+|-------|----------|-------------|
+| `ns` | yes | Namespace name |
+| `q` | no | Only pages whose title, path or text contains every word (case-insensitive) |
+| `format` | no | `tsv`: one line per page, `path`, `title`, `author`, `publishedAt`, `files`, `bytes`, tab-separated (used by the CLI) |
+
+```json
+{"pages": [{"id": "7n3d...", "path": "Reports/q3-report.page.md", "title": "Q3 report", "author": "ana", "publishedAt": "2026-11-20T10:00:00Z", "bytes": 48213, "files": 4}],
+ "unlinked": [{"id": "k2...", "title": "Old dashboard", "author": "bo", "publishedAt": "2026-10-01T09:00:00Z", "bytes": 1200, "files": 1}]}
+```
+
+A handle whose page is not stored in this namespace is listed with
+`"missing": true`. `unlinked` (stored pages no handle names) is present only
+for callers with write access on the namespace root.
+
+### PUT /api/pages
+
+Publish a page at a handle path. `POST` is accepted too. Needs write access on
+the handle path.
+
+| Param | Required | Description |
+|-------|----------|-------------|
+| `ns` | yes | Namespace name |
+| `path` | yes | The handle, e.g. `Reports/q3-report.page.md` |
+
+The body is either one HTML file (`Content-Type: text/html`, stored as
+`index.html`) or a tar of the page's folder (`application/x-tar`, may be
+gzipped; `application/gzip` also accepted). The folder needs an `index.html` at
+its top level. Hidden files (`.DS_Store`) are skipped. The title comes from
+`<title>`, and the visible text of `index.html` is stored for search.
+
+Every publish stores the page under a new id and writes that one handle. No
+other handle is changed: a handle that named the old id (a copy, for
+example) keeps showing the old version, which is removed once no handle
+names it.
+
+**Response:** the page's details, as in the list.
+
+**Error responses:**
+
+| Status | Cause |
+|--------|-------|
+| 400 | `path` does not end in `.page.md` or has a hidden segment; a path in the upload with `..`, an absolute path or `.git`; a symlink, hard link, device or FIFO; the same file twice; no `index.html`; a broken tar or gzip |
+| 403 | No write access on the handle path |
+| 404 | The namespace does not exist |
+| 409 | `path` is a note that is not a handle (no `page:` in its front matter); it is never overwritten |
+| 413 | Over `PAGES_MAX_MB` (counted on the unpacked bytes) or `PAGES_MAX_FILES` (files, and separately folders); the message names the setting |
+| 415 | A body type other than the ones above |
+
+```bash
+tar -C ./report -czf - . | curl -X PUT "http://localhost:8286/api/pages?ns=engineering&path=Reports%2Fq3-report.page.md" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/gzip" --data-binary @-
+```
+
+### DELETE /api/pages
+
+Delete a handle (`ns`, `path`) and its page, unless another handle in the
+namespace names the same page. Needs write on the handle path.
+
+### DELETE /api/pages/unlinked
+
+Delete a stored page no handle names (`ns`, `id`). Needs write on the namespace
+root. 409 if a handle names it.
+
+### GET /api/pages/text
+
+A page's details plus `text`: the visible text pulled out of `index.html` at
+publish time, without HTML, scripts or styles. Never the raw HTML. `ns`,
+`path`; needs read on the handle. With `format=text`, the text alone as
+`text/plain` (used by `mdnest read`). 404 when the handle's page is not here,
+with `"this page was published in another namespace: publish it again here"`
+or `"this page's files are missing: publish it again here"`.
+
+### GET /api/pages/archive
+
+The page's files as a tar (`ns`, `path`), for `mdnest page pull`. Needs read
+on the handle.
+
+### POST /api/pages/pass
+
+A frame URL for the page a handle names (`ns`, `path`), after a read check on
+the handle. The browser app asks for a new one each time a page is opened.
+
+```json
+{"url": "/api/pages/view/<pass>/", "scripts": false, "expiresAt": "2026-11-20T10:30:00Z",
+ "title": "Q3 report", "author": "ana", "publishedAt": "2026-11-20T10:00:00Z"}
+```
+
+In script mode `url` is on `PAGES_ORIGIN` (`https://pages.example.com/<pass>/`)
+and `scripts` is true. The pass is valid for 30 minutes, for this page only, and
+only for the version of the page that existed when it was made. It is never
+accepted as a login.
+
+### GET /api/pages/view/\<pass\>/\<file\>
+
+Static mode only (not registered in script mode). Serves a page's files to
+whoever presents a valid pass; no other login is needed. `<file>` defaults to
+`index.html`. Responses carry a script-less sandbox CSP, `nosniff`,
+`Referrer-Policy: no-referrer` and `Cache-Control: private, no-store`, and no
+CORS headers. An invalid or expired pass gets 403. In script mode the same
+paths (`/<pass>/<file>`) are served by the pages listener on `PAGES_ORIGIN`,
+with `sandbox allow-scripts` and `Access-Control-Allow-Origin: *`; see
+[security.md](security.md#html-pages).
+
+---
+
 ## Access Groups *(v4.2.0+)*
 
 Superadmin-managed named sets whose members are mdnest users and/or IdP (OIDC)

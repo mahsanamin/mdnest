@@ -441,6 +441,57 @@ func main() {
 	// multi-replica app role (requests live in this process's memory).
 	enableApprovals := handlers.ApprovalsEnabled(env("ENABLE_AGENT_APPROVALS", ""), env("MDNEST_ROLE", "single"))
 
+	// HTML pages (optional, off by default): view-only pages published into a
+	// namespace, stored under PAGES_DIR, never in the notes. Off on the
+	// multi-replica app role (the files live on one box). With the flag off
+	// no route is registered and the frontend loads no pages chunk.
+	enablePages := handlers.PagesEnabled(env("ENABLE_PAGES", ""), env("MDNEST_ROLE", "single"))
+	var pagesCfg handlers.PagesConfig
+	if enablePages {
+		pagesDir, err := filepath.Abs(env("PAGES_DIR", filepath.Join(filepath.Dir(absNotesDir), "pages")))
+		if err != nil {
+			log.Fatalf("PAGES_DIR: %v", err)
+		}
+		if err := handlers.CheckPagesDir(pagesDir, absNotesDir); err != nil {
+			log.Fatalf("%v", err)
+		}
+		if err := os.MkdirAll(pagesDir, 0755); err != nil {
+			log.Fatalf("PAGES_DIR %s: %v", pagesDir, err)
+		}
+		maxMB := envInt("PAGES_MAX_MB", 20)
+		if maxMB < 1 {
+			maxMB = 20
+		}
+		maxFiles := envInt("PAGES_MAX_FILES", 500)
+		if maxFiles < 1 {
+			maxFiles = 500
+		}
+		origin, refused := handlers.ResolvePagesOrigin(env("PAGES_ORIGIN", ""), frontendOrigin)
+		if refused != "" {
+			log.Printf("ERROR: %s", refused)
+		}
+		network := strings.ToLower(strings.TrimSpace(env("PAGES_NETWORK", "strict")))
+		if network != "strict" && network != "open" {
+			log.Printf("WARNING: PAGES_NETWORK=%q is not strict or open; using strict", network)
+			network = "strict"
+		}
+		pagesCfg = handlers.PagesConfig{
+			Dir:            pagesDir,
+			MaxBytes:       int64(maxMB) << 20,
+			MaxFiles:       maxFiles,
+			Origin:         origin,
+			Network:        network,
+			FrameAncestors: frontendOrigin,
+			Secret:         []byte(jwtSecret),
+			SingleUser:     user,
+		}
+		if origin != "" {
+			log.Printf("pages: on, script mode (PAGES_ORIGIN=%s, PAGES_NETWORK=%s, PAGES_DIR=%s)", origin, network, pagesDir)
+		} else {
+			log.Printf("pages: on, static mode, scripts off (PAGES_DIR=%s)", pagesDir)
+		}
+	}
+
 	// Live collaboration hub (optional, multi mode only)
 	enableCollab := multiMode && env("ENABLE_LIVE_COLLAB", "false") == "true"
 	var collabHub *collab.Hub
@@ -953,6 +1004,13 @@ func main() {
 		}
 		log.Printf("agent approvals: on (experimental)")
 	}
+	var pagesHandler *handlers.PagesHandler
+	if enablePages {
+		pagesHandler = handlers.NewPagesHandler(pagesCfg, stg, perms)
+		routes.pages = pagesHandler
+		transferHandler.SetPages(pagesHandler)
+		configHandler.SetPages(true, pagesHandler.ScriptMode(), int(pagesCfg.MaxBytes>>20), pagesCfg.MaxFiles)
+	}
 	registerContentRoutes(mux, routes)
 
 	// Trust all mounted directories for git operations
@@ -967,6 +1025,19 @@ func main() {
 		}
 	}()
 	log.Printf("mdnest backend listening on :%s (NOTES_DIR=%s)", port, absNotesDir)
+	// Script mode: page files are served by their own listener, on another
+	// origin, and by nothing else. No API route, no CORS, read only.
+	var pagesSrv *http.Server
+	if pagesHandler != nil && pagesHandler.ScriptMode() {
+		pagesPort := env("PAGES_LISTEN_PORT", "8081")
+		pagesSrv = &http.Server{Addr: ":" + pagesPort, Handler: pagesHandler.SiteHandler(), ReadHeaderTimeout: 10 * time.Second}
+		go func() {
+			if err := pagesSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("pages server error: %v", err)
+			}
+		}()
+		log.Printf("pages listener on :%s (served as %s)", pagesPort, pagesCfg.Origin)
+	}
 	logNamespacesAtStartup(appCtx, stg, absNotesDir)
 
 	restart := false
@@ -981,6 +1052,9 @@ func main() {
 	defer cancel()
 	if err := srv.Shutdown(shutCtx); err != nil {
 		log.Printf("graceful shutdown error: %v", err)
+	}
+	if pagesSrv != nil {
+		pagesSrv.Shutdown(shutCtx)
 	}
 	if restart {
 		stopSignals() // cancels appCtx: background work stops as on SIGTERM

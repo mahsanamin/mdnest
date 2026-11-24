@@ -23,7 +23,7 @@ class PermissionError extends Error {
   }
 }
 
-async function request(path, options = {}) {
+export async function request(path, options = {}) {
   const token = getToken();
   const headers = { ...options.headers };
   if (token) {
@@ -473,6 +473,11 @@ export async function searchNotes(ns, query) {
   if (!res.ok) throw new Error('Failed to search');
   return res.json();
 }
+
+// --- HTML pages (server: ENABLE_PAGES) ---
+// The page calls live in pagesApi.js, which only the lazy pages chunks
+// import, so an install with pages off downloads none of them. They go
+// through request() and the token helpers below, exported for it.
 
 // --- Tasks & kanban board (namespace-scoped) ---
 

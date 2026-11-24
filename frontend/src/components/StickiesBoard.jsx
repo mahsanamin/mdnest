@@ -201,7 +201,8 @@ function StickiesBoard({ stickies, onChange, onCollapse, onClose, saveState, loa
             Tidy up
           </button>
         )}
-        <button
+        {/* A phone has no side panel to collapse into: only the close button. */}
+        {!isMobile && (<button
           className="stickies-collapse"
           onClick={onCollapse}
           title="Back to the side panel"
@@ -211,7 +212,7 @@ function StickiesBoard({ stickies, onChange, onCollapse, onClose, saveState, loa
             <polyline points="4 14 10 14 10 20" /><polyline points="20 10 14 10 14 4" />
             <line x1="14" y1="10" x2="21" y2="3" /><line x1="3" y1="21" x2="10" y2="14" />
           </svg>
-        </button>
+        </button>)}
         <button className="stickies-close" onClick={onClose} aria-label="Close stickies">&times;</button>
       </div>
 

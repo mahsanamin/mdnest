@@ -31,7 +31,7 @@ test('the Live editor, the Basic editor and the chat box opt out of grammar exte
   await expect(basic).toBeVisible({ timeout: 10_000 });
   expect(await optedOut(basic)).toBe(true);
 
-  const chats = page.locator('.toolbar-view-chats');
+  const chats = page.locator('[data-testid=toolbar-chats]');
   if (await chats.count()) {
     const chat = `__grammar-${Date.now()}.md`;
     await page.evaluate(async ([ns, p]) => {

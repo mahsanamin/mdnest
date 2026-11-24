@@ -1576,6 +1576,27 @@ cmd_read() {
   require_server
   [ -z "$PARSED_NS" ] || [ -z "$PARSED_PATH" ] && { echo "Usage: mdnest read @alias/namespace/path.md" >&2; exit 1; }
   print_note "$PARSED_NS" "$PARSED_PATH"
+  case "$PARSED_PATH" in *.page.md) print_page_text "$PARSED_NS" "$PARSED_PATH" ;; esac
+  return 0
+}
+
+# print_page_text <ns> <handle>: after a page handle, the text pulled out of
+# the published page, under a marker line, so an agent reading the handle
+# gets the content too. Prints nothing when the server has pages off or the
+# file is not a handle; a page that is not here prints the server's reason.
+print_page_text() {
+  local tmp code curl_rc=0
+  tmp=$(mktemp) || return 0
+  code=$(curl -s -o "$tmp" -w "%{http_code}" --connect-timeout "${MDNEST_TIMEOUT:-10}" -H "Authorization: Bearer $MDNEST_TOKEN" "${MDNEST_URL}/api/pages/text?ns=$(urlencode "$1")&path=$(urlencode "$2")&format=text") || curl_rc=$?
+  if [ "$curl_rc" = "0" ] && [ "$code" = "200" ]; then
+    printf '\n----- page text (extracted from the published HTML) -----\n'
+    cat "$tmp"
+  elif [ "$curl_rc" = "0" ] && [ "$code" = "404" ] && grep -q '"error"' "$tmp" 2>/dev/null; then
+    printf '\n----- page text -----\n'
+    sed -n 's/.*"error":"\([^"]*\)".*/\1/p' "$tmp"
+  fi
+  rm -f "$tmp"
+  return 0
 }
 
 # print_note <ns> <path> — print a note's body byte-for-byte, adding a final
@@ -2827,6 +2848,188 @@ cmd_search() {
   api GET "/search?ns=$(urlencode "$PARSED_NS")&q=$(urlencode "$query")"
 }
 
+# ─── HTML pages (server: ENABLE_PAGES) ──────────────────────────────────────
+# A page is a folder with an index.html, or one .html file. It lives in the
+# notes tree as a handle file, <name>.page.md, which the server writes; the
+# page's files are stored apart from the notes. Publishing sends a gzipped tar
+# of the folder (made by the system tar) or the file as text/html; publishing
+# again replaces the page. The server checks every path, the size and the file
+# count, so the CLI only checks there is an index.html to send.
+
+page_usage() {
+  cat >&2 <<'USAGE'
+Usage:
+  mdnest page publish @alias/namespace/folder/name <folder-or-file.html>
+  mdnest page list    @alias/namespace [query] [--json]
+  mdnest page pull    @alias/namespace/folder/name <new-folder>
+  mdnest page delete  @alias/namespace/folder/name
+A page shows in the notes tree as folder/name.page.md (the suffix is added
+when you leave it out). mdnest read on that file prints the page's text.
+USAGE
+}
+
+# page_target <ref> <need-path>: sets PAGE_NS and PAGE_PATH (the handle,
+# ending in .page.md), or prints usage.
+page_target() {
+  parse_path "${1:-}"
+  require_server
+  PAGE_NS="$PARSED_NS"
+  PAGE_PATH="${PARSED_PATH%/}"
+  if [ -z "$PAGE_NS" ] || { [ "$2" = 1 ] && [ -z "$PAGE_PATH" ]; }; then
+    page_usage
+    exit 1
+  fi
+  if [ -n "$PAGE_PATH" ]; then
+    case "$PAGE_PATH" in *.page.md) ;; *) PAGE_PATH="${PAGE_PATH}.page.md" ;; esac
+  fi
+  return 0
+}
+
+# page_curl <method> <query-path> <out-file> [curl args...]: prints the HTTP
+# status; the body goes to <out-file>. Exits with a clear message when the
+# server cannot be reached.
+page_curl() {
+  local method="$1" path="$2" out="$3" code curl_rc=0
+  shift 3
+  # Guarded on the same line: see api() for why an unguarded assignment from a
+  # command substitution kills the script under set -e.
+  code=$(curl -s -o "$out" -w "%{http_code}" --connect-timeout "${MDNEST_TIMEOUT:-10}" -H "Authorization: Bearer $MDNEST_TOKEN" -X "$method" "$@" "${MDNEST_URL}/api${path}") || curl_rc=$?
+  if [ "$curl_rc" != "0" ]; then
+    echo "Error: couldn't reach ${MDNEST_URL}: $(curl_reason "$curl_rc")." >&2
+    return 1
+  fi
+  if [ "$code" = "404" ] && grep -q '404 page not found' "$out" 2>/dev/null; then
+    echo "Error: this server has pages turned off (ENABLE_PAGES)." >&2
+    return 1
+  fi
+  if [ "$code" -ge 400 ] 2>/dev/null; then
+    echo "Error ($code): $(cat "$out")" >&2
+    return 1
+  fi
+  return 0
+}
+
+cmd_page() {
+  local sub="${1:-}"
+  [ $# -gt 0 ] && shift
+  case "$sub" in
+    publish) page_publish "$@" ;;
+    list)    page_list "$@" ;;
+    pull)    page_pull "$@" ;;
+    delete)  page_delete "$@" ;;
+    *)       page_usage; exit 1 ;;
+  esac
+}
+
+page_publish() {
+  page_target "${1:-}" 1
+  local src="${2:-}" tmp body ct q
+  if [ -z "$src" ]; then page_usage; exit 1; fi
+  q="ns=$(urlencode "$PAGE_NS")&path=$(urlencode "$PAGE_PATH")"
+  tmp=$(mktemp) || { echo "Error: cannot create a temp file" >&2; exit 1; }
+  if [ -d "$src" ]; then
+    if [ ! -f "$src/index.html" ]; then
+      rm -f "$tmp"
+      echo "Error: $src has no index.html at its top level." >&2
+      exit 1
+    fi
+    body=$(mktemp) || { rm -f "$tmp"; echo "Error: cannot create a temp file" >&2; exit 1; }
+    if ! tar -C "$src" -czf "$body" . 2>/dev/null; then
+      rm -f "$tmp" "$body"
+      echo "Error: could not pack $src with tar." >&2
+      exit 1
+    fi
+    ct="application/gzip"
+  elif [ -f "$src" ]; then
+    case "$src" in
+      *.html|*.htm|*.HTML|*.HTM) ;;
+      *) rm -f "$tmp"; echo "Error: $src is not an .html file; pass a folder with an index.html, or one .html file." >&2; exit 1 ;;
+    esac
+    body="$src"
+    ct="text/html"
+  else
+    rm -f "$tmp"
+    echo "Error: $src does not exist." >&2
+    exit 1
+  fi
+  local rc=0
+  page_curl PUT "/pages?$q" "$tmp" -H "Content-Type: $ct" --data-binary "@$body" >/dev/null || rc=$?
+  if [ "$body" != "$src" ]; then rm -f "$body"; fi
+  if [ "$rc" != 0 ]; then rm -f "$tmp"; exit 1; fi
+  local title
+  title=$(json_top_string title < "$tmp") || title=""
+  rm -f "$tmp"
+  c_ok "Published @${CURRENT_ALIAS}/${PAGE_NS}/${PAGE_PATH}${title:+ ($title)}"
+  return 0
+}
+
+page_list() {
+  local as_json="${MDNEST_JSON:-0}" ref="" query=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --json) as_json=1 ;;
+      *) if [ -z "$ref" ]; then ref="$1"; else query="$1"; fi ;;
+    esac
+    shift
+  done
+  page_target "$ref" 0
+  local q="ns=$(urlencode "$PAGE_NS")" tmp
+  [ -n "$query" ] && q+="&q=$(urlencode "$query")"
+  [ "$as_json" = 1 ] || q+="&format=tsv"
+  tmp=$(mktemp) || { echo "Error: cannot create a temp file" >&2; exit 1; }
+  if ! page_curl GET "/pages?$q" "$tmp" >/dev/null; then rm -f "$tmp"; exit 1; fi
+  if [ "$as_json" = 1 ]; then
+    cat "$tmp"; echo
+  elif [ ! -s "$tmp" ]; then
+    echo "No pages${query:+ match \"$query\"} in ${PAGE_NS}."
+  else
+    awk -F '\t' '{
+      date = substr($4, 1, 10)
+      who = ($3 == "") ? "" : " by " $3
+      printf "%s\n    %s  (%s%s, %s files)\n", $1, $2, date, who, $5
+    }' "$tmp"
+  fi
+  rm -f "$tmp"
+  return 0
+}
+
+page_pull() {
+  page_target "${1:-}" 1
+  local dir="${2:-}" tmp
+  if [ -z "$dir" ]; then page_usage; exit 1; fi
+  if [ -e "$dir" ] && [ -n "$(ls -A "$dir" 2>/dev/null || true)" ]; then
+    echo "Error: $dir already exists and is not empty; choose a new folder." >&2
+    exit 1
+  fi
+  tmp=$(mktemp) || { echo "Error: cannot create a temp file" >&2; exit 1; }
+  if ! page_curl GET "/pages/archive?ns=$(urlencode "$PAGE_NS")&path=$(urlencode "$PAGE_PATH")" "$tmp" >/dev/null; then
+    rm -f "$tmp"
+    exit 1
+  fi
+  mkdir -p "$dir"
+  if ! tar -xf "$tmp" -C "$dir" 2>/dev/null; then
+    rm -f "$tmp"
+    echo "Error: the page archive could not be unpacked into $dir." >&2
+    exit 1
+  fi
+  rm -f "$tmp"
+  c_ok "Saved @${CURRENT_ALIAS}/${PAGE_NS}/${PAGE_PATH} to $dir"
+  return 0
+}
+
+page_delete() {
+  page_target "${1:-}" 1
+  local tmp
+  tmp=$(mktemp) || { echo "Error: cannot create a temp file" >&2; exit 1; }
+  if ! page_curl DELETE "/pages?ns=$(urlencode "$PAGE_NS")&path=$(urlencode "$PAGE_PATH")" "$tmp" >/dev/null; then
+    rm -f "$tmp"
+    exit 1
+  fi
+  rm -f "$tmp"
+  c_ok "Deleted @${CURRENT_ALIAS}/${PAGE_NS}/${PAGE_PATH}"
+  return 0
+}
+
 # ─── Legacy compat: mdnest note <subcmd> <ns> <path> ───────────────────────
 
 # ─── Agent approvals (experimental; server: ENABLE_AGENT_APPROVALS) ─────────
@@ -3417,6 +3620,39 @@ A chat is a note that people and agents post to. It is on by default
 
 `mdnest chat help` prints every chat option.
 
+## Publish an HTML page
+
+When the server has HTML pages on (`ENABLE_PAGES`), you can publish an HTML
+page, a report or dashboard written in HTML, for people to view in mdnest.
+
+When to make one:
+
+- The default is always a Markdown note. Publish an HTML page only when the
+  person explicitly asks for one, with words like "HTML page", "web page",
+  "dashboard as HTML" or "publish this as a page".
+- "Write a report", "save this", "document this" and "make notes" all mean a
+  Markdown note.
+- Never turn an existing note into an HTML page on your own, and never
+  publish both a note and an HTML page for the same content unless asked.
+- If you are unsure, write the note and offer the HTML page in one line.
+- Keep HTML pages small and self-contained, and put them in the project
+  folder they belong to.
+
+How:
+
+- `mdnest page publish @alias/namespace/folder/name ./folder` publishes a
+  folder with an `index.html` (CSS, scripts, images and data beside it,
+  linked with relative paths). A single `.html` file works too. The HTML page
+  shows in the notes tree as `folder/name.page.md`. Publishing to the same
+  path replaces it.
+- `mdnest read` on a `*.page.md` file prints the file, then the HTML page's
+  text. Read that to learn what an HTML page says.
+- `mdnest page list @alias/namespace` lists HTML pages; add a word to search
+  them.
+- Scripts in an HTML page run only on servers set up for it (script mode).
+  Without that, it shows with scripts off, so put the important numbers in
+  the HTML itself, not only in a chart a script draws.
+
 ## More help
 
 - `mdnest help` lists every command.
@@ -3432,7 +3668,7 @@ agent_skill_text() {
   cat <<'AGENT_SKILL'
 ---
 name: mdnest
-description: Use for any work with mdnest notes through the mdnest CLI. That covers reading, creating, writing, editing, appending, moving, listing or searching notes on an mdnest server, opening an mdnest:// link or an @alias/namespace/path.md path, and reading or posting in mdnest chats and crews. Use it whenever the user mentions mdnest or their mdnest notes, pastes an mdnest link, or asks to save something to their notes when mdnest is the notes tool.
+description: Use for any work with mdnest notes through the mdnest CLI. That covers reading, creating, writing, editing, appending, moving, listing or searching notes on an mdnest server, opening an mdnest:// link or an @alias/namespace/path.md path, reading or posting in mdnest chats and crews, and publishing or reading mdnest HTML pages (*.page.md). Use it whenever the user mentions mdnest or their mdnest notes, pastes an mdnest link, or asks to save something to their notes when mdnest is the notes tool.
 ---
 
 # mdnest
@@ -3446,6 +3682,9 @@ mdnest docs agents
 Read what it prints and follow it. The guide ships with the installed CLI, so
 it always matches the version you are using. Do not rely on what you remember
 from an older guide.
+
+The default is always a Markdown note: make an HTML page only when the person
+explicitly asks for one.
 
 If the `mdnest` command is not found, tell the user to install the CLI:
 `curl -fsSL https://mdnest.dev/install.sh | bash`. If `mdnest docs agents`
@@ -3852,6 +4091,9 @@ NOTE OPERATIONS
   list     [@alias/namespace]     List namespaces, or a namespace/folder as a tree
            [--json]               ...as the raw API JSON instead (for scripts)
   search   <ns-path> "query"      Search note contents
+  page     publish|list|pull|delete  HTML pages, view only (server: ENABLE_PAGES)
+           publish <@alias/ns/folder/name> <folder-or-file.html>   (shows as name.page.md; again replaces it)
+           list <@alias/ns> [query]   pull <@alias/ns/folder/name> <new-folder>   delete <@alias/ns/folder/name>
   chat     list|new|post|status|read|wait  File-based chat in a note (server: ENABLE_CHAT)
            post <path> <text|-> --as NAME   read <path> --as NAME
            wait <path> --as NAME [--mentions] [--timeout S]   new <path> ["Title"]
@@ -3926,6 +4168,8 @@ EXAMPLES
   # Download a note, or a whole folder as a zip
   mdnest download @work/engineering/Architecture
   mdnest download @work/engineering/notes/meeting.md ./meeting.md
+  mdnest page publish @work/engineering/Reports/q3-report ./report-folder
+  mdnest page list @work/engineering revenue
 
   # Chat — two agents (or an agent and you) talking through one note
   mdnest chat new  @work/engineering/Chats/release.md "Release"
@@ -3988,6 +4232,7 @@ case "$CMD" in
   copy)     load_default; warn_if_default_alias; cmd_copy "$@" ;;
   download) load_default; warn_if_default_alias; cmd_download "$@" ;;
   search)   load_default; warn_if_default_alias; cmd_search "$@" ;;
+  page)     load_default; warn_if_default_alias; cmd_page "$@" ;;
   chat)
     if [ "${1:-}" = "keepalive" ]; then cmd_chat_keepalive; else load_default; warn_if_default_alias; cmd_chat "$@"; fi ;;
   approval) cmd_approval "$@" ;;
