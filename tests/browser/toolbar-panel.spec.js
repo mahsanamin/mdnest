@@ -11,6 +11,19 @@ const PASS = process.env.MDNEST_PASSWORD || 'e2epass123';
 const FILE = process.env.MDNEST_SEED_FILE || 'e2e-seed.md';
 const NS = process.env.MDNEST_TEST_NS || 'testing_workspace';
 
+// The toolbar's panel buttons the server's config promises, in order. Chats
+// and Pages render only once the app has loaded /api/config, so a read right
+// after page load can miss them; wait for each before reading the group.
+async function panelButtonsReady(page) {
+  const cfg = await page.evaluate(async () => (await fetch('/api/config')).json());
+  const want = [
+    ...(cfg.chat ? ['toolbar-chats'] : []),
+    ...(cfg.pages && cfg.pages.enabled ? ['toolbar-pages'] : []),
+    'toolbar-stickies',
+  ];
+  for (const id of want) await expect(page.getByTestId(id)).toBeVisible({ timeout: 15_000 });
+  return want;
+}
 async function signIn(page) {
   await page.goto('/');
   await page.fill('input[name=username]', USER);
@@ -19,6 +32,8 @@ async function signIn(page) {
   await expect(page.locator('.ns-label, .ns-select')).toBeVisible({ timeout: 20_000 });
   await page.goto(`/#${NS}/${FILE}`);
   await expect(page.locator('.toolbar-path')).toContainText(FILE, { timeout: 20_000 });
+  // Every test here reads the panel buttons; wait until all of them are in.
+  await panelButtonsReady(page);
 }
 
 const btn = (page, id) => page.getByTestId(`toolbar-${id}`);
@@ -45,9 +60,9 @@ const noSidewaysScroll = (page) => page.evaluate(() => document.documentElement.
 test('one group on the right: Chats then Stickies, icons and labels, nothing on the left', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await signIn(page);
+  const want = await panelButtonsReady(page);
   const ids = await page.locator('.toolbar-panel-group .toolbar-panel-btn').evaluateAll((bs) => bs.map((b) => b.dataset.testid));
-  const chatOn = ids.includes('toolbar-chats');
-  expect(ids).toEqual([...(chatOn ? ['toolbar-chats'] : []), 'toolbar-stickies']);
+  expect(ids).toEqual(want);
   for (const id of ids) {
     const b = page.getByTestId(id);
     await expect(b.locator('svg')).toBeVisible();

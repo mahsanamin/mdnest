@@ -125,6 +125,19 @@ async function openPagesView(page) {
   if (await expand.isVisible()) await expand.click();
   await expect(page.locator('[data-testid=pages-view]')).toBeVisible({ timeout: 15_000 });
 }
+// The toolbar's panel buttons the server's config promises, in order. Chats
+// and Pages render only once the app has loaded /api/config, so a read right
+// after page load can miss them; wait for each before reading the group.
+async function panelButtonsReady(page) {
+  const cfg = await page.evaluate(async () => (await fetch('/api/config')).json());
+  const want = [
+    ...(cfg.chat ? ['toolbar-chats'] : []),
+    ...(cfg.pages && cfg.pages.enabled ? ['toolbar-pages'] : []),
+    'toolbar-stickies',
+  ];
+  for (const id of want) await expect(page.getByTestId(id)).toBeVisible({ timeout: 15_000 });
+  return want;
+}
 async function openFromPagesView(page, path) {
   await openPagesView(page);
   await page.locator(`[data-testid="page-card-${path}"] .page-card-open`).click();
@@ -553,9 +566,10 @@ for (const scheme of ['dark', 'light']) {
       await page.setViewportSize({ width: w, height: h });
       await login(page);
       await page.goto(`/#${NS}/${OTHER}`);
+      const want = await panelButtonsReady(page);
+      expect(want).toContain('toolbar-pages');
       const ids = await page.locator('.toolbar-panel-group .toolbar-panel-btn').evaluateAll((bs) => bs.map((b) => b.dataset.testid));
-      expect(ids.filter((i) => i !== 'toolbar-chats')).toEqual(['toolbar-pages', 'toolbar-stickies']);
-      if (ids.includes('toolbar-chats')) expect(ids[0]).toBe('toolbar-chats');
+      expect(ids).toEqual(want);
       const collisions = await page.evaluate(() => {
         const els = [...document.querySelectorAll('.toolbar button, .toolbar .toolbar-path-base')].filter((e) => e.getBoundingClientRect().width);
         const hit = [];
