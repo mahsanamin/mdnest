@@ -110,10 +110,15 @@ async function openPagesView(page) {
   // The toolbar's Pages button opens the side panel's Pages tab where it
   // fits; the full view is the panel's ⤢ (or the button itself where it
   // does not fit).
-  // The button toggles: when the panel already shows Pages, clicking it
-  // would close the panel, so go straight to its ⤢ then.
-  const onPagesTab = await page.locator('[data-testid=side-panel-title][data-tab=pages]').isVisible().catch(() => false);
-  if (!onPagesTab) await page.locator('[data-testid=toolbar-pages]').click();
+  // The button toggles: when Pages is already showing (the full view, or the
+  // side panel on its Pages tab, which a reload restores from localStorage),
+  // clicking it would close it. Its aria-pressed says which, from the first
+  // render; the panel's own title can appear a moment later, so checking
+  // that instead raced a reload and closed the restored panel.
+  const button = page.locator('[data-testid=toolbar-pages]');
+  await expect(button).toBeVisible({ timeout: 15_000 });
+  if (await page.locator('[data-testid=pages-view]').isVisible()) return;
+  if ((await button.getAttribute('aria-pressed')) !== 'true') await button.click();
   // Either the panel (with its ⤢) or the full view comes up; wait for one.
   const expand = page.locator('[data-testid=side-panel-expand]');
   await expect(expand.or(page.locator('[data-testid=pages-view]')).first()).toBeVisible({ timeout: 15_000 });
