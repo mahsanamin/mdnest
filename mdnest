@@ -3691,6 +3691,11 @@ When to make one:
 - If you are unsure, write the note and offer the HTML page in one line.
 - Keep HTML pages small and self-contained, and put them in the project
   folder they belong to.
+- Give every image, chart and diagram a full `alt` text that says what it
+  shows, with its key numbers or steps (for example `alt="Bar chart: Q3
+  revenue 1.2M, up 14% from Q2"`, not `alt="chart"`). A page's files are not
+  kept in git, so if they are lost the page still says what each picture
+  showed, and you or another agent can redraw it from that text.
 
 How:
 
