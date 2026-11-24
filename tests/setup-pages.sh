@@ -32,7 +32,7 @@ has() { if grep -qF -- "$3" "$2" 2>/dev/null; then ok "$1"; else bad "$1" "[$3] 
 hasnt() { if grep -qF -- "$3" "$2" 2>/dev/null; then bad "$1" "[$3] found in $(basename "$2")"; else ok "$1"; fi; }
 
 SANDBOXES=()
-cleanup() { local d; for d in "${SANDBOXES[@]}"; do rm -rf "$d"; done; return 0; }
+cleanup() { local d; for d in ${SANDBOXES[@]+"${SANDBOXES[@]}"}; do rm -rf "$d"; done; return 0; }
 trap cleanup EXIT
 
 # generate <setup.sh source> <conf lines...>: prints the sandbox; setup's exit

@@ -88,7 +88,7 @@ boot() {
     -e MDNEST_JWT_SECRET="$SECRET" -e NOTES_DIR=/notes \
     -e FRONTEND_ORIGIN="$BASE_URL" -e DISABLE_UPDATE_CHECK=true \
     -e ENABLE_PAGES=true -e PAGES_DIR=/tmp/pages -e PAGES_MAX_MB=1 -e PAGES_MAX_FILES=50 \
-    "${extra[@]}" \
+    ${extra[@]+"${extra[@]}"} \
     -v "$NOTES_DIR:/notes" "$BE_IMAGE" >/dev/null
   docker run -d --name "$FE" --network "$NET" -p "127.0.0.1:$app_port:80" "$FE_IMAGE" >/dev/null
   local _
