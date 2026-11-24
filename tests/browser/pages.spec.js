@@ -194,10 +194,13 @@ test('script mode: the script runs, but cannot reach the viewer or other pages',
 });
 
 function b64url(buf) { return Buffer.from(buf).toString('base64url'); }
-function sign(payload) {
+// Passes are signed with a key derived from the JWT secret, never the secret
+// itself (pagePassKey in backend/handlers/pages.go).
+function passKey() { return createHmac('sha256', SECRET).update('mdnest-pages').digest(); }
+function sign(payload, key = passKey()) {
   const head = b64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
   const body = b64url(JSON.stringify(payload));
-  const sig = createHmac('sha256', SECRET).update(`${head}.${body}`).digest('base64url');
+  const sig = createHmac('sha256', key).update(`${head}.${body}`).digest('base64url');
   return `${head}.${body}.${sig}`;
 }
 
@@ -215,6 +218,9 @@ test('an expired pass is rejected, and a pass opens only its own page', async ({
   // Control: the same claims, signed again with a future expiry, open the page.
   const fresh = sign({ ...claims, exp: Math.floor(Date.now() / 1000) + 600 });
   expect((await request.get(`${base}${prefix}${fresh}/`)).status()).toBe(200);
+  // The same claims signed with the raw JWT secret (the login key) are refused.
+  const raw = sign({ ...claims, exp: Math.floor(Date.now() / 1000) + 600 }, SECRET);
+  expect((await request.get(`${base}${prefix}${raw}/`)).status()).toBe(403);
   // Expired.
   const expired = sign({ ...claims, exp: Math.floor(Date.now() / 1000) - 60 });
   const e = await request.get(`${base}${prefix}${expired}/`);
