@@ -89,7 +89,7 @@ test('Settings shows an archive refusal and works at phone width', async ({ page
   page.on('dialog', (dialog) => dialog.accept());
   const tab = page.getByTestId('settings-pages');
   await tab.locator('input[type=file]').setInputFiles({ name: 'bad.tgz', mimeType: 'application/gzip', buffer: Buffer.from('not an archive') });
-  await expect(tab.getByRole('alert')).toContainText('valid pages .tar.gz backup');
+  await expect(tab.getByRole('alert')).toContainText('That file is not a pages backup (.tar.gz).');
   await expect(tab.getByRole('button', { name: 'Restore pages' })).toBeEnabled();
   const rect = await tab.boundingBox();
   expect(rect.x).toBeGreaterThanOrEqual(0);

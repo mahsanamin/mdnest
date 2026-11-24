@@ -801,6 +801,10 @@ func (h *PagesHandler) CarryPage(fromNS, id, toNS string) (destID string, carrie
 	if err := os.MkdirAll(filepath.Join(nsDir, pagesMetaDir), 0755); err != nil {
 		return "", false, err
 	}
+	dest, metaFile := h.writePageDir(toNS, destID), h.writeMetaPath(toNS, destID)
+	if dest == "" || metaFile == "" {
+		return "", false, fmt.Errorf("invalid page storage path")
+	}
 	tmp := filepath.Join(nsDir, ".tmp-"+randHex(8))
 	defer os.RemoveAll(tmp)
 	if err := copyPageFiles(h.pageDir(fromNS, id), tmp); err != nil {
@@ -812,18 +816,18 @@ func (h *PagesHandler) CarryPage(fromNS, id, toNS string) (destID string, carrie
 	}
 	m.ID = destID
 	mb, _ := json.Marshal(pageMetaFile{PageMeta: *m, Version: randHex(12)})
-	tmpMeta := h.writeMetaPath(toNS, destID) + ".tmp-" + randHex(4)
+	tmpMeta := metaFile + ".tmp-" + randHex(4)
 	if err := os.WriteFile(tmpMeta, mb, 0644); err != nil {
 		os.Remove(tmpMeta)
 		return "", false, err
 	}
-	if err := os.Rename(tmp, h.writePageDir(toNS, destID)); err != nil {
+	if err := os.Rename(tmp, dest); err != nil {
 		os.Remove(tmpMeta)
 		return "", false, err
 	}
-	if err := os.Rename(tmpMeta, h.writeMetaPath(toNS, destID)); err != nil {
+	if err := os.Rename(tmpMeta, metaFile); err != nil {
 		os.Remove(tmpMeta)
-		os.RemoveAll(h.writePageDir(toNS, destID))
+		os.RemoveAll(dest)
 		return "", false, err
 	}
 	return destID, true, nil

@@ -81,6 +81,33 @@ func TestPagesGit_CarryAcrossStores(t *testing.T) {
 	}
 }
 
+func TestPagesGit_CarryChecksMetadataPathBeforeCopying(t *testing.T) {
+	for _, inGit := range []bool{false, true} {
+		h, external := pagesFixture(t, func(c *PagesConfig) { c.InGit = inGit })
+		os.MkdirAll(filepath.Join(notesOf(external), "beta"), 0755)
+		if w := publish(h, "alpha", "carry", "text/html", []byte("<p>carry</p>")); w.Code != 200 {
+			t.Fatal(w.Body.String())
+		}
+		id := idOf(t, external, "alpha", "carry")
+		root := h.nsDir("beta")
+		os.MkdirAll(root, 0755)
+		if err := os.Symlink(t.TempDir(), filepath.Join(root, pagesMetaDir)); err != nil {
+			t.Fatal(err)
+		}
+		original := copyPageFiles
+		copied := false
+		copyPageFiles = func(string, string) error { copied = true; return os.ErrPermission }
+		_, ok, err := h.CarryPage("alpha", id, "beta")
+		copyPageFiles = original
+		if err == nil || ok {
+			t.Fatal("unsafe metadata folder was accepted")
+		}
+		if copied {
+			t.Fatal("carry started copying before checking its metadata path")
+		}
+	}
+}
+
 func TestPagesGit_RejectHiddenSymlinks(t *testing.T) {
 	for _, segment := range []string{".mdnest", ".mdnest/pages"} {
 		t.Run(strings.ReplaceAll(segment, "/", "-"), func(t *testing.T) {

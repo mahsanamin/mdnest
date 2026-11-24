@@ -3,9 +3,9 @@ import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 
-const api = vi.hoisted(() => ({ export: vi.fn(), import: vi.fn() }));
+const api = vi.hoisted(() => ({ list: vi.fn(), export: vi.fn(), import: vi.fn() }));
 vi.mock('../pagesApi.js', () => ({
-  listPages: vi.fn(async () => ({ pages: [] })), getPagePass: vi.fn(), deleteUnlinkedPage: vi.fn(),
+  listPages: api.list, getPagePass: vi.fn(), deleteUnlinkedPage: vi.fn(),
   exportPages: api.export, importPages: api.import,
 }));
 vi.mock('../api.js', () => ({
@@ -21,7 +21,7 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 let host, root;
 beforeEach(() => {
   host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host);
-  api.export.mockReset(); api.import.mockReset();
+  api.export.mockReset(); api.import.mockReset(); api.list.mockReset().mockResolvedValue({ pages: [] });
   vi.spyOn(window, 'confirm').mockReturnValue(true);
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); vi.restoreAllMocks(); });
@@ -100,6 +100,15 @@ describe('Pages settings', () => {
     await act(async () => { root.render(<div />); });
     await act(async () => { finish({ restored: 1, skipped: 0 }); });
     expect(refreshed).not.toHaveBeenCalled();
+  });
+  it('reloads an open Pages view when restore refreshes the tree', async () => {
+    const props = { ns: 'alpha', onOpen: () => {}, onReveal: () => {} };
+    await act(async () => { root.render(<PagesView {...props} refreshKey={1} />); });
+    expect(api.list).toHaveBeenCalledTimes(1);
+    api.list.mockResolvedValue({ pages: [{ path: 'restored.page.md', title: 'Recovered report', files: 1 }] });
+    await act(async () => { root.render(<PagesView {...props} refreshKey={2} />); });
+    expect(api.list).toHaveBeenCalledTimes(2);
+    expect(host.textContent).toContain('Recovered report');
   });
   it('uses the git storage note in the full view and side panel', async () => {
     await act(async () => { root.render(<PagesView ns="alpha" inGit onOpen={() => {}} onReveal={() => {}} />); });

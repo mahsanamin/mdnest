@@ -2956,7 +2956,10 @@ page_curl() {
     return 1
   fi
   if [ "$code" -ge 400 ] 2>/dev/null; then
-    echo "Error ($code): $(cat "$out")" >&2
+    local message
+    message=$(json_top_string error < "$out") || message=""
+    if [ -z "$message" ]; then message="The server refused the request."; fi
+    echo "Error ($code): $message" >&2
     return 1
   fi
   return 0
@@ -3076,7 +3079,7 @@ page_pull() {
 page_backup_target() {
   page_target "${1:-}" 0
   if [ -n "$PAGE_PATH" ]; then
-    echo "Error: use a namespace, not a page or folder: mdnest page export @myserver/notes pages.tgz" >&2
+    echo "Error: Choose a whole namespace, such as @myserver/notes, not a page or folder." >&2
     exit 1
   fi
 }
@@ -3132,7 +3135,7 @@ format_page_restore() {
         }
         i++
       }
-      if(!found["restored"]||!found["skipped"]) {print "Error: could not read the restore result" > "/dev/stderr";exit 1}
+      if(!found["restored"]||!found["skipped"]) {print "Error: The server did not return a restore result." > "/dev/stderr";exit 1}
       printf "Restored %d pages, %d skipped.\n",values["restored"],values["skipped"]
     }'
 }

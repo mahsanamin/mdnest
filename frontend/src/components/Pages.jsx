@@ -108,7 +108,7 @@ export function PagesSettings({ ns, inGit, canManage, onRestored }) {
 // namespace the user can read. No live previews on purpose: opening this
 // view never runs a page's scripts. Writers of the namespace root also get an
 // Unlinked tab, for pages whose handle was removed outside mdnest.
-export function PagesView({ ns, inGit = false, onOpen, onReveal, initialTab = 'pages', onClose, backLabel }) {
+export function PagesView({ ns, inGit = false, refreshKey, onOpen, onReveal, initialTab = 'pages', onClose, backLabel }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
@@ -130,7 +130,7 @@ export function PagesView({ ns, inGit = false, onOpen, onReveal, initialTab = 'p
     if (!q) { load(''); return undefined; }
     const t = setTimeout(() => load(q), 250);
     return () => clearTimeout(t);
-  }, [load, query]);
+  }, [load, query, refreshKey]);
 
   const removeUnlinked = async (p) => {
     if (!window.confirm(`Delete the unlinked page "${p.title || p.id}"? No handle points to it, and this cannot be undone.`)) return;

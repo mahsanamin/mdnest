@@ -71,14 +71,6 @@ func (l *LocalStorage) abs(ns, relPath string) string {
 	if !reachesSafely(nsDir, target) {
 		return ""
 	}
-	// Internal callers may access .mdnest directly. A public name that is a
-	// link into it must never turn private page files into readable notes.
-	if !relpath.HasReservedSegment(relPath) {
-		real, err := l.ResolveLinks(context.Background(), ns, relPath)
-		if err != nil || strings.Contains("/"+strings.ToLower(filepath.ToSlash(real))+"/", "/.mdnest/pages/") {
-			return ""
-		}
-	}
 	return target
 }
 
@@ -121,6 +113,13 @@ func reachesSafely(nsDir, target string) bool {
 		if relpath.IsGitSegment(seg) {
 			return false
 		}
+	}
+	// Internal callers access .mdnest directly. Public aliases into private
+	// page files are refused, using the resolution already done above rather
+	// than adding filesystem work to every ordinary note read.
+	requested, err := filepath.Rel(nsDir, target)
+	if err != nil || (!relpath.HasReservedSegment(requested) && strings.Contains("/"+strings.ToLower(filepath.ToSlash(rel))+"/", "/.mdnest/pages/")) {
+		return false
 	}
 	return true
 }

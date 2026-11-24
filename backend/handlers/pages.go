@@ -127,7 +127,9 @@ func originOf(raw string) string {
 // become a readable note (its HTML shown and searched as a note, synced to
 // git), and the notes would hold folders mdnest never created. Symlinks are
 // resolved first, on the part of each path that exists, so a link cannot
-// hide the overlap. Called at startup, before PAGES_DIR is created.
+// hide the overlap. The chart's exact direct child NOTES_DIR/.mdnest-pages
+// is allowed: it is a hidden app store, never a namespace. Nothing else
+// inside NOTES_DIR is allowed. Called before PAGES_DIR is created.
 func CheckPagesDir(pagesDir, notesDir string) error {
 	p, err := realPath(pagesDir)
 	if err != nil {
@@ -136,6 +138,14 @@ func CheckPagesDir(pagesDir, notesDir string) error {
 	n, err := realPath(notesDir)
 	if err != nil {
 		return err
+	}
+	if p == filepath.Join(n, ".mdnest-pages") {
+		// EvalSymlinks cannot resolve a missing target. Refuse a dangling or
+		// looping link here rather than treating its spelling as the exception.
+		info, err := os.Lstat(p)
+		if os.IsNotExist(err) || (err == nil && info.IsDir()) {
+			return nil
+		}
 	}
 	if p == n || within(p, n) || within(n, p) {
 		return fmt.Errorf("PAGES_DIR %s overlaps NOTES_DIR %s; pages must be stored outside the notes (and the notes outside the pages)", pagesDir, notesDir)

@@ -324,6 +324,22 @@ func TestPagesBackup_SlowPublishDoesNotLockOrOverwriteNewNote(t *testing.T) {
 	}
 }
 
+func TestPagesBackup_ExportManifestUsesImportLimit(t *testing.T) {
+	h, _ := pagesFixture(t)
+	// Every page and handle fits its own limit, but together their titles
+	// exceed the importer's manifest cap. Never download an unrestorable file.
+	html := "<title>" + strings.Repeat("x", maxHandleSize-1024) + "</title><p>small body</p>"
+	for i := 0; i < 34; i++ {
+		name := "large-title-" + strings.Repeat("a", i+1)
+		if w := publish(h, "alpha", name, "text/html", []byte(html)); w.Code != 200 {
+			t.Fatalf("publish: %d", w.Code)
+		}
+	}
+	if w := exportPages(h); w.Code != 413 {
+		t.Fatalf("export produced a backup its importer would refuse: %d", w.Code)
+	}
+}
+
 func TestPagesBackup_RejectsTotalSizeAndBrokenGzip(t *testing.T) {
 	h, _ := pagesFixture(t)
 	// A huge declared file is rejected before decompressing or allocating it.

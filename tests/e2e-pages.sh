@@ -87,11 +87,11 @@ boot() {
   docker run -d --name "$BE" --network "$NET" --network-alias backend \
     --user "$(id -u):$(id -g)" -e HOME=/tmp \
     -e AUTH_MODE=single -e MDNEST_USER=e2e -e MDNEST_PASSWORD=e2epass123 \
-    -e MDNEST_JWT_SECRET="$SECRET" -e NOTES_DIR=/notes \
+    -e MDNEST_JWT_SECRET="$SECRET" -e NOTES_DIR=/data/notes \
     -e FRONTEND_ORIGIN="$BASE_URL" -e DISABLE_UPDATE_CHECK=true \
-    -e ENABLE_PAGES=true -e PAGES_DIR=/tmp/pages -e PAGES_MAX_MB=1 -e PAGES_MAX_FILES=50 \
+    -e ENABLE_PAGES=true -e PAGES_DIR=/data/notes/.mdnest-pages -e PAGES_MAX_MB=1 -e PAGES_MAX_FILES=50 \
     ${extra[@]+"${extra[@]}"} \
-    -v "$NOTES_DIR:/notes" "$BE_IMAGE" >/dev/null
+    -v "$NOTES_DIR:/data/notes" "$BE_IMAGE" >/dev/null
   docker run -d --name "$FE" --network "$NET" -p "127.0.0.1:$app_port:80" "$FE_IMAGE" >/dev/null
   local _
   for _ in $(seq 1 40); do

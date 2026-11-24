@@ -3222,6 +3222,7 @@ function App() {
                 key={`${selectedNs}:${pagesViewTab}`}
                 ns={selectedNs}
                 inGit={!!appConfig?.pages?.inGit}
+                refreshKey={tree}
                 initialTab={pagesViewTab}
                 onClose={() => setPagesViewOpen(false)}
                 backLabel={currentPath ? currentPath.split('/').pop() : 'the editor'}

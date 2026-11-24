@@ -1574,8 +1574,9 @@ half its files in the archive. Response headers `X-Mdnest-Pages-Exported` and
 
 `key` names that page's folder inside the archive. Handle paths are relative
 to the namespace, never absolute paths. The current limits are 1,000 handles,
-10,000 files and 256 MB of page files, counted before compression. A busy
-backup worker returns 429; a namespace above these limits returns 413.
+10,000 files and 256 MB of page files, counted before compression. The
+manifest is limited to 2 MB, the same as on restore. A busy backup worker
+returns 429; a namespace above these limits returns 413.
 
 ### POST /api/pages/import
 

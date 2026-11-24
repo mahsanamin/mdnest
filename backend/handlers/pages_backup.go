@@ -61,13 +61,13 @@ func (h *PagesHandler) requireBackup(w http.ResponseWriter, r *http.Request, met
 		return "", nil
 	}
 	if !h.canWritePath(r, ns, "") {
-		pagesError(w, 403, "write access to the whole namespace is required")
+		pagesError(w, 403, "Write access to the whole namespace is required.")
 		return "", nil
 	}
 	release, err := h.backupSlots.acquire(slotKey(r))
 	if err != nil {
 		w.Header().Set("Retry-After", zipRetryAfter)
-		pagesError(w, 429, "a pages backup is already running; try again shortly")
+		pagesError(w, 429, "A pages backup is already running. Try again shortly.")
 		return "", nil
 	}
 	return ns, release
@@ -107,7 +107,7 @@ func pageFiles(dir string) ([]pageBackupFile, int64, int, error) {
 		}
 		total += fi.Size()
 		if total > maxPagesBackupBytes || len(out) >= maxPagesBackupFiles {
-			return pageInputErr(413, "pages backup exceeds 256 MB or 10,000 files")
+			return pageInputErr(413, "This backup is larger than 256 MB or contains more than 10,000 files.")
 		}
 		out = append(out, pageBackupFile{rel, fi.Size()})
 		return nil
@@ -194,7 +194,7 @@ func (h *PagesHandler) HandleExport(w http.ResponseWriter, r *http.Request) {
 	// deleted during its snapshot is skipped, without half a page in the tar.
 	tmp, err := os.MkdirTemp("", "mdnest-pages-export-")
 	if err != nil {
-		pagesError(w, 500, "could not stage pages backup")
+		pagesError(w, 500, "The server could not prepare the pages backup.")
 		return
 	}
 	defer os.RemoveAll(tmp)
@@ -208,7 +208,7 @@ func (h *PagesHandler) HandleExport(w http.ResponseWriter, r *http.Request) {
 	count := 0
 	refs := h.handlesIn(r.Context(), ns, "")
 	if len(refs) > maxPagesBackupEntries {
-		pagesError(w, 413, "pages backup exceeds 1,000 handles")
+		pagesError(w, 413, "This namespace has more than 1,000 page handles.")
 		return
 	}
 	for _, ref := range refs {
@@ -229,13 +229,13 @@ func (h *PagesHandler) HandleExport(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if total+size > maxPagesBackupBytes || count+len(files) > maxPagesBackupFiles {
-			pagesError(w, 413, "pages backup exceeds 256 MB or 10,000 files")
+			pagesError(w, 413, "This backup is larger than 256 MB or contains more than 10,000 files.")
 			return
 		}
 		key := fmt.Sprintf("%06d", len(sources))
 		snapshot := filepath.Join(tmp, key)
 		if err := os.Mkdir(snapshot, 0700); err != nil {
-			pagesError(w, 500, "could not stage pages backup")
+			pagesError(w, 500, "The server could not prepare the pages backup.")
 			return
 		}
 		if err := snapshotPageFiles(r.Context(), dir, snapshot, files); err != nil {
@@ -248,9 +248,14 @@ func (h *PagesHandler) HandleExport(w http.ResponseWriter, r *http.Request) {
 		manifest.Pages = append(manifest.Pages, pageBackupEntry{key, ref.path, m.Title, m.Description})
 		sources = append(sources, source{snapshot, files})
 	}
+	data, _ := json.Marshal(manifest)
+	if len(data) > maxPagesManifestBytes {
+		pagesError(w, 413, "The page paths, titles and descriptions make this backup's manifest larger than 2 MB.")
+		return
+	}
 	f, err := os.CreateTemp(tmp, "backup-*.tgz")
 	if err != nil {
-		pagesError(w, 500, "could not build pages backup")
+		pagesError(w, 500, "The server could not build the pages backup.")
 		return
 	}
 	defer os.Remove(f.Name())
@@ -264,7 +269,6 @@ func (h *PagesHandler) HandleExport(w http.ResponseWriter, r *http.Request) {
 		_, err := io.CopyN(tw, body, size)
 		return err
 	}
-	data, _ := json.Marshal(manifest)
 	err = write("manifest.json", int64(len(data)), bytes.NewReader(data))
 	for i, src := range sources {
 		for _, file := range src.files {
@@ -288,12 +292,12 @@ func (h *PagesHandler) HandleExport(w http.ResponseWriter, r *http.Request) {
 		err = closeErr
 	}
 	if err != nil {
-		pagesError(w, 500, "could not build pages backup; try again")
+		pagesError(w, 500, "The server could not build the pages backup. Try again.")
 		return
 	}
 	fi, err := f.Stat()
 	if err != nil {
-		pagesError(w, 500, "could not build pages backup")
+		pagesError(w, 500, "The server could not build the pages backup.")
 		return
 	}
 	w.Header().Set("Content-Type", "application/gzip")
@@ -311,7 +315,7 @@ func (h *PagesHandler) readBackup(w http.ResponseWriter, r *http.Request, tmp st
 	r.Body = http.MaxBytesReader(w, r.Body, maxPagesBackupTarBytes)
 	gz, err := gzip.NewReader(r.Body)
 	if err != nil {
-		return nil, pageInputErr(400, "send a valid pages .tar.gz backup")
+		return nil, pageInputErr(400, "That file is not a pages backup (.tar.gz).")
 	}
 	defer gz.Close()
 	expanded := &io.LimitedReader{R: gz, N: maxPagesBackupTarBytes + 1}
@@ -326,27 +330,27 @@ func (h *PagesHandler) readBackup(w http.ResponseWriter, r *http.Request, tmp st
 			break
 		}
 		if err != nil {
-			return nil, pageInputErr(400, "the pages archive is not valid")
+			return nil, pageInputErr(400, "The pages backup could not be read. It may be damaged.")
 		}
 		name := strings.TrimSuffix(strings.TrimPrefix(hdr.Name, "./"), "/")
 		if name == "" || name == "." {
 			if hdr.Typeflag == tar.TypeDir {
 				continue
 			}
-			return nil, pageInputErr(400, "invalid archive path")
+			return nil, pageInputErr(400, "The backup contains a path that cannot be restored.")
 		}
 		if !validBackupPath(name) {
-			return nil, pageInputErr(400, "invalid archive path %q", hdr.Name)
+			return nil, pageInputErr(400, "The backup contains an invalid path: %q.", hdr.Name)
 		}
 		if hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeDir {
-			return nil, pageInputErr(400, "a pages backup may contain only regular files and folders")
+			return nil, pageInputErr(400, "A pages backup can contain only plain files and folders, not links or special files.")
 		}
 		if seen[name] {
-			return nil, pageInputErr(400, "duplicate archive path %q", name)
+			return nil, pageInputErr(400, "The backup lists %q more than once.", name)
 		}
 		seen[name] = true
 		if name != "manifest.json" && name != "pages" && !strings.HasPrefix(name, "pages/") {
-			return nil, pageInputErr(400, "unexpected archive path %q", name)
+			return nil, pageInputErr(400, "The backup contains an unexpected file or folder: %q.", name)
 		}
 		dir := path.Dir(name)
 		if hdr.Typeflag == tar.TypeDir {
@@ -355,16 +359,16 @@ func (h *PagesHandler) readBackup(w http.ResponseWriter, r *http.Request, tmp st
 		for ; dir != "." && !dirs[dir]; dir = path.Dir(dir) {
 			dirs[dir] = true
 			if len(dirs) > maxPagesBackupFiles+maxPagesBackupEntries+1 {
-				return nil, pageInputErr(413, "too many folders in pages backup")
+				return nil, pageInputErr(413, "This backup contains too many folders.")
 			}
 		}
 		target := SafePath(tmp, name)
 		if target == "" {
-			return nil, pageInputErr(400, "invalid archive path")
+			return nil, pageInputErr(400, "The backup contains a path that cannot be restored.")
 		}
 		if hdr.Typeflag == tar.TypeDir {
 			if name == "manifest.json" {
-				return nil, pageInputErr(400, "manifest.json must be a file")
+				return nil, pageInputErr(400, "manifest.json must be a file, not a folder.")
 			}
 			if err := os.MkdirAll(target, 0755); err != nil {
 				return nil, err
@@ -373,14 +377,14 @@ func (h *PagesHandler) readBackup(w http.ResponseWriter, r *http.Request, tmp st
 		}
 		files++
 		if files > maxPagesBackupFiles+1 {
-			return nil, pageInputErr(413, "pages backup exceeds 10,000 files")
+			return nil, pageInputErr(413, "This backup contains more than 10,000 files.")
 		}
 		limit := maxPagesBackupBytes - total
 		if name == "manifest.json" {
 			limit = maxPagesManifestBytes
 		}
 		if hdr.Size > limit {
-			return nil, pageInputErr(413, "pages backup exceeds its size limit (256 MB total, 2 MB manifest)")
+			return nil, pageInputErr(413, "The backup is too large (256 MB of page files or 2 MB for manifest.json).")
 		}
 		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 			return nil, err
@@ -398,7 +402,7 @@ func (h *PagesHandler) readBackup(w http.ResponseWriter, r *http.Request, tmp st
 			return nil, closeErr
 		}
 		if n > limit {
-			return nil, pageInputErr(413, "pages backup exceeds 256 MB")
+			return nil, pageInputErr(413, "This backup contains more than 256 MB of page files.")
 		}
 		if name != "manifest.json" {
 			total += n
@@ -406,23 +410,23 @@ func (h *PagesHandler) readBackup(w http.ResponseWriter, r *http.Request, tmp st
 	}
 	// Read through the gzip trailer, checking its checksum and the expanded cap.
 	if _, err := io.Copy(io.Discard, expanded); err != nil {
-		return nil, pageInputErr(400, "the gzip data is not valid")
+		return nil, pageInputErr(400, "The backup's gzip data is damaged.")
 	}
 	if expanded.N <= 0 {
-		return nil, pageInputErr(413, "expanded pages backup is too large")
+		return nil, pageInputErr(413, "The unpacked backup is larger than 272 MB.")
 	}
 	data, err := os.ReadFile(filepath.Join(tmp, "manifest.json"))
 	var m pagesManifest
 	if err != nil || json.Unmarshal(data, &m) != nil || m.Version != 1 {
-		return nil, pageInputErr(400, "invalid pages backup manifest (version 1 required)")
+		return nil, pageInputErr(400, "This file does not contain a valid pages backup manifest (version 1).")
 	}
 	if len(m.Pages)+len(m.Skipped) > maxPagesBackupEntries {
-		return nil, pageInputErr(413, "pages backup exceeds 1,000 entries")
+		return nil, pageInputErr(413, "This backup lists more than 1,000 pages.")
 	}
 	for i := range m.Skipped {
 		skipped := &m.Skipped[i]
 		if !validBackupPath(skipped.Path) || !IsPageHandlePath(skipped.Path) {
-			return nil, pageInputErr(400, "invalid skipped handle in manifest")
+			return nil, pageInputErr(400, "The backup lists a skipped page with an invalid path.")
 		}
 		skipped.Status = "skipped"
 		skipped.Reason = truncateRunes(collapseSpace(plainField(skipped.Reason)), 500)
@@ -430,20 +434,20 @@ func (h *PagesHandler) readBackup(w http.ResponseWriter, r *http.Request, tmp st
 	keys, paths := map[string]bool{}, map[string]bool{}
 	for _, entry := range m.Pages {
 		if !backupKey(entry.Key) || !validBackupPath(entry.Path) || !IsPageHandlePath(entry.Path) || keys[entry.Key] || paths[entry.Path] {
-			return nil, pageInputErr(400, "invalid or duplicate page handle in manifest")
+			return nil, pageInputErr(400, "The backup lists an invalid or repeated page handle.")
 		}
 		keys[entry.Key] = true
 		paths[entry.Path] = true
 		dir := SafePath(tmp, path.Join("pages", entry.Key))
 		fs, size, folders, err := pageFiles(dir)
 		if err != nil {
-			return nil, pageInputErr(400, "page files are missing or invalid for %s", entry.Path)
+			return nil, pageInputErr(400, "Files for %s are missing or cannot be restored.", entry.Path)
 		}
 		if size > h.cfg.MaxBytes || len(fs) > h.cfg.MaxFiles || folders > h.cfg.MaxFiles {
-			return nil, pageInputErr(413, "page %s exceeds PAGES_MAX_MB or PAGES_MAX_FILES", entry.Path)
+			return nil, pageInputErr(413, "The page %s exceeds this server's size or file limit (PAGES_MAX_MB or PAGES_MAX_FILES).", entry.Path)
 		}
 		if fi, err := os.Stat(filepath.Join(dir, "index.html")); err != nil || !fi.Mode().IsRegular() {
-			return nil, pageInputErr(400, "page %s needs index.html", entry.Path)
+			return nil, pageInputErr(400, "The page %s is missing index.html.", entry.Path)
 		}
 	}
 	for name := range seen {
@@ -452,7 +456,7 @@ func (h *PagesHandler) readBackup(w http.ResponseWriter, r *http.Request, tmp st
 		}
 		parts := strings.Split(name, "/")
 		if len(parts) < 2 || !keys[parts[1]] {
-			return nil, pageInputErr(400, "archive contains files not listed in manifest")
+			return nil, pageInputErr(400, "The backup contains page files that are not listed in manifest.json.")
 		}
 	}
 	return &m, nil
@@ -477,7 +481,7 @@ func (h *PagesHandler) HandleImport(w http.ResponseWriter, r *http.Request) {
 	defer release()
 	tmp, err := os.MkdirTemp("", "mdnest-pages-import-")
 	if err != nil {
-		pagesError(w, 500, "could not stage pages backup")
+		pagesError(w, 500, "The server could not prepare the pages backup.")
 		return
 	}
 	defer os.RemoveAll(tmp)
@@ -488,9 +492,9 @@ func (h *PagesHandler) HandleImport(w http.ResponseWriter, r *http.Request) {
 		if errors.As(err, &pe) {
 			pagesError(w, pe.status, pe.msg)
 		} else if errors.As(err, &mbe) {
-			pagesError(w, 413, "pages backup is too large")
+			pagesError(w, 413, "The backup upload is larger than 272 MB.")
 		} else {
-			pagesError(w, 400, "could not read pages backup")
+			pagesError(w, 400, "The server could not read the pages backup.")
 		}
 		return
 	}
@@ -504,7 +508,7 @@ func (h *PagesHandler) HandleImport(w http.ResponseWriter, r *http.Request) {
 		// One staged page at a time, so a large namespace is never held in memory.
 		body, err := os.CreateTemp(tmp, ".publish-")
 		if err != nil {
-			pagesError(w, 500, "could not restore pages")
+			pagesError(w, 500, "The server could not restore the pages.")
 			return
 		}
 		err = writePageTar(body, filepath.Join(tmp, "pages", entry.Key))
@@ -513,7 +517,7 @@ func (h *PagesHandler) HandleImport(w http.ResponseWriter, r *http.Request) {
 		}
 		if err != nil {
 			body.Close()
-			pagesError(w, 500, "could not restore pages")
+			pagesError(w, 500, "The server could not restore the pages.")
 			return
 		}
 		req := r.Clone(r.Context())
