@@ -21,6 +21,11 @@
 # Exit:   0 if every check passes, 1 otherwise.
 
 set -uo pipefail
+# The pre-push hook runs this with GIT_DIR (and friends) pointing at the real
+# repository. Without this, the scratch repo below (git init, commits, branch
+# switches) would be made in the real checkout instead of a temp folder, as
+# happened once: it committed test files onto develop.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_PREFIX GIT_OBJECT_DIRECTORY
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 PASS=0; FAIL=0
