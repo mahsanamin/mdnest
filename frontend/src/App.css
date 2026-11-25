@@ -585,7 +585,10 @@
 .sidebar-resize-handle {
   position: absolute;
   top: 0;
-  right: -3px;
+  /* Fully inside the sidebar: it used to stick out 3px (right: -3px), but
+     the sidebar clips its overflow and an open HTML page's frame covered that
+     strip, so beside a page only about 2px of the edge could be grabbed. */
+  right: 0;
   bottom: 0;
   width: 6px;
   cursor: col-resize;
@@ -7353,7 +7356,8 @@ body.side-panel-resizing .stickies-panel,
 body.side-panel-resizing .main {
   transition: none;
 }
-body.side-panel-resizing iframe {
+body.side-panel-resizing iframe,
+body.sidebar-resizing iframe {
   pointer-events: none;
 }
 @media (prefers-reduced-motion: reduce) {

@@ -692,20 +692,30 @@ function Sidebar({
               e.preventDefault();
               const startX = e.clientX;
               const startWidth = width || 260;
+              // While dragging, iframes (an open HTML page) must not take the
+              // pointer: over one, the page stopped getting mousemove and the
+              // mouseup, so the edge stalled and kept following the mouse.
+              // A move with no button held, or the window losing focus, also
+              // ends the drag, in case the release happened elsewhere.
               const onMove = (ev) => {
+                if (ev.buttons === 0) { onUp(); return; }
                 const newWidth = Math.min(600, Math.max(180, startWidth + ev.clientX - startX));
                 onResize(newWidth);
               };
               const onUp = () => {
                 document.removeEventListener('mousemove', onMove);
                 document.removeEventListener('mouseup', onUp);
+                window.removeEventListener('blur', onUp);
+                document.body.classList.remove('sidebar-resizing');
                 document.body.style.cursor = '';
                 document.body.style.userSelect = '';
               };
+              document.body.classList.add('sidebar-resizing');
               document.body.style.cursor = 'col-resize';
               document.body.style.userSelect = 'none';
               document.addEventListener('mousemove', onMove);
               document.addEventListener('mouseup', onUp);
+              window.addEventListener('blur', onUp);
             }}
           />
         )}

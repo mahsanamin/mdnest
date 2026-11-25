@@ -82,6 +82,9 @@ All notable changes to mdnest are documented here.
 
 ### Fixed
 
+- **The file tree can be resized beside an HTML page.** With a page open, its
+  edge could hardly be grabbed and a drag over the page stalled. The edge now
+  sits fully inside the tree, and a drag ignores the page until you let go.
 - **A chat opened from the file tree keeps the mode you picked.** After you
   pinned a chat to the side, clicking another chat in the tree opened it full
   screen again. It now opens pinned too, also when the chat was docked from the

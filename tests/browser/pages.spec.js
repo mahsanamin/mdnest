@@ -489,6 +489,47 @@ test('the side panel resizes smoothly both ways while an HTML page is open besid
   expect(await page.locator('[data-testid=page-frame]').evaluate((f) => getComputedStyle(f).pointerEvents)).not.toBe('none');
 });
 
+test('the left tree resizes over an open HTML page, and stops at release', async ({ page, request }) => {
+  test.skip(MODE !== 'static', 'the same in both modes');
+  // Beside an HTML page the tree's edge could hardly be grabbed (the frame
+  // covered the part that stuck out past the tree, which clips it anyway), and
+  // a drag over the frame lost the mouse: the edge stalled, and a release over
+  // the page was never seen. A Markdown note was fine.
+  const path = `${DIR}/drag/tree.page.md`;
+  const r = await request.put(`/api/pages?ns=${NS}&path=${encodeURIComponent(path)}`, {
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'text/html' },
+    data: `<title>Tree ${run}</title><body style="margin:0"><p id="b" style="height:2000px">TREE-${run}</p></body>`,
+  });
+  expect(r.status(), await r.text()).toBe(200);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await login(page);
+  await page.goto(`/#${NS}/${path}`);
+  await expect(page.frameLocator('[data-testid=page-frame]').locator('#b')).toHaveText(`TREE-${run}`, { timeout: 15_000 });
+  const sidebar = page.locator('.sidebar').first();
+  const width = async () => Math.round((await sidebar.boundingBox()).width);
+  const w0 = await width();
+  const h = await page.locator('.sidebar-resize-handle').boundingBox();
+  const x = h.x + h.width / 2, y = h.y + 300;
+  expect(await page.evaluate(([px, py]) => document.elementFromPoint(px, py)?.className, [x, y]), 'the middle of the edge is the edge, not the page').toContain('sidebar-resize-handle');
+  // Right (wider), across the page frame, released over it.
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + 150, y, { steps: 15 });
+  await page.mouse.up();
+  expect(Math.abs((await width()) - (w0 + 150)), 'dragging right over the page widens the tree').toBeLessThanOrEqual(3);
+  await page.mouse.move(x + 300, y, { steps: 10 });
+  await page.waitForTimeout(100);
+  expect(Math.abs((await width()) - (w0 + 150)), 'the tree stops following the mouse after release').toBeLessThanOrEqual(3);
+  // Back left, then the page is clickable again (the guard is lifted).
+  const h2 = await page.locator('.sidebar-resize-handle').boundingBox();
+  await page.mouse.move(h2.x + h2.width / 2, y);
+  await page.mouse.down();
+  await page.mouse.move(h2.x + h2.width / 2 - 100, y, { steps: 10 });
+  await page.mouse.up();
+  expect(Math.abs((await width()) - (w0 + 50)), 'dragging left narrows it').toBeLessThanOrEqual(3);
+  expect(await page.locator('[data-testid=page-frame]').evaluate((f) => getComputedStyle(f).pointerEvents)).not.toBe('none');
+});
+
 test('the Pages tab in the side panel: open two pages in a row, reveal one, panel stays open', async ({ page, request }) => {
   test.skip(MODE !== 'static', 'the same in both modes');
   const auth = { Authorization: `Bearer ${token}` };
