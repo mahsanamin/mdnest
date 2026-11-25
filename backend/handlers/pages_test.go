@@ -1047,3 +1047,22 @@ func TestExtractPageTextKeepsImageDescriptions(t *testing.T) {
 		}
 	}
 }
+
+// Reported: an accessible inline SVG's <title> was appended to the page title
+// ("Mountain WeekendAn illustrated mountain valley"). Only the document's own
+// <title> names the page; an SVG title stays in the text as its label.
+func TestExtractPageTextTitleIgnoresSVGTitle(t *testing.T) {
+	title, _, text := ExtractPageText([]byte(`<!doctype html><html><head><title>Mountain Weekend</title></head>
+<body><svg viewBox="0 0 100 100" role="img" aria-labelledby="t"><title id="t">An illustrated mountain valley</title><circle r="3"/></svg>
+<svg><title>Second picture</title></svg><p>After</p></body></html>`))
+	if title != "Mountain Weekend" {
+		t.Fatalf("title = %q", title)
+	}
+	if !strings.Contains(text, "After") {
+		t.Errorf("text lost the body after the SVG: %q", text)
+	}
+	// A page with no document title but an SVG title gets no title from it.
+	if title, _, _ := ExtractPageText([]byte(`<svg><title>Only a picture</title></svg>`)); title != "" {
+		t.Errorf("title from an SVG = %q", title)
+	}
+}

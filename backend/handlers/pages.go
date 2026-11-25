@@ -546,6 +546,7 @@ func ExtractPageText(doc []byte) (title, description, text string) {
 	skip := 0 // depth inside script/style/noscript/template
 	inTitle := false
 	haveDesc := false
+	svg := 0 // depth inside <svg>: its <title> labels the picture, not the page
 	for {
 		tt := z.Next()
 		switch tt {
@@ -612,8 +613,14 @@ func ExtractPageText(doc []byte) (title, description, text string) {
 				} else if skip > 0 {
 					skip--
 				}
+			case atom.Svg:
+				if tt == html.StartTagToken {
+					svg++
+				} else if tt == html.EndTagToken && svg > 0 {
+					svg--
+				}
 			case atom.Title:
-				inTitle = isStart
+				inTitle = isStart && svg == 0
 			}
 			if isBlockAtom(a) {
 				xb.WriteByte(' ')
