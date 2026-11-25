@@ -131,3 +131,21 @@ test('Settings > Server restarts the backend and the page comes back', async ({ 
   expect(after).toBeTruthy();
   expect(after).not.toBe(before);
 });
+
+// Reported: a hard refresh showed "No namespaces found" for a moment before
+// the list arrived. Until /api/namespaces answers, the page must not claim
+// there are none.
+test('a slow namespace list does not flash the no-namespaces page', async ({ page }) => {
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  await page.route('**/api/namespaces', async (route) => { await gate; await route.continue(); });
+  await page.goto('/');
+  await page.fill('input[name=username]', USER);
+  await page.fill('input[name=password]', PASS);
+  await page.click('button:has-text("Sign in")');
+  await page.waitForTimeout(1500);
+  await expect(page.getByTestId('empty-namespaces')).toHaveCount(0);
+  release();
+  await expect(page.locator('.ns-label, .ns-select').first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId('empty-namespaces')).toHaveCount(0);
+});

@@ -237,6 +237,10 @@ function App() {
   const [ssoError, setSsoError] = useState(() => consumeSSOHashOnLoad());
   const [authenticated, setAuthenticated] = useState(!!getToken());
   const [namespaces, setNamespaces] = useState([]);
+  // False until the namespace list has answered once: before that, an empty
+  // list means "not loaded yet", not "there are none", so the no-namespaces
+  // page must not flash on a reload.
+  const [namespacesLoaded, setNamespacesLoaded] = useState(false);
   // Read by the hashchange handler, which is not re-bound on every list change.
   const namespacesRef = useRef(namespaces);
   namespacesRef.current = namespaces;
@@ -1304,6 +1308,7 @@ function App() {
       const { names: data, emptyReason } = await getNamespaceList();
       setNamespaces(data);
       setNamespacesEmptyReason(emptyReason);
+      setNamespacesLoaded(true);
       return data;
     } catch (e) {
       console.error('Failed to load namespaces:', e);
@@ -3450,7 +3455,7 @@ function App() {
             )
           ) : (
             <div className="empty-state">
-              {namespaces.length === 0 ? (
+              {namespaces.length === 0 ? (namespacesLoaded &&
                 <EmptyNamespaces
                   reason={namespacesEmptyReason}
                   isAdmin={isAdmin}

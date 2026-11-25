@@ -82,6 +82,11 @@ All notable changes to mdnest are documented here.
 
 ### Fixed
 
+- **No "No namespaces found" flash on a reload.** The page showed it for a
+  moment before the namespace list arrived. It now waits for the list.
+- **An HTML page's title is the document's own.** An accessible inline SVG's
+  `<title>` was added to the page title ("Mountain WeekendAn illustrated
+  mountain valley"); it now stays the picture's label only.
 - **The file tree can be resized beside an HTML page.** With a page open, its
   edge could hardly be grabbed and a drag over the page stalled. The edge now
   sits fully inside the tree, and a drag ignores the page until you let go.
