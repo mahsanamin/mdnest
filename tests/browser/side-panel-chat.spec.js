@@ -27,12 +27,23 @@ async function api(page, method, url, body) {
   }, [method, url, body]);
 }
 
+// The toolbar's Chats button opens the side panel's Chat tab where a chat can
+// dock (the full view is one ⤢ away), and the full chats view where it cannot.
+async function openChatsFull(page) {
+  await page.locator('[data-testid=toolbar-chats]').click();
+  // Either the panel (with its ⤢) or the full view comes up; wait for one.
+  const expand = page.locator('[data-testid=side-panel-expand]');
+  await expect(expand.or(page.locator('.chat-list')).first()).toBeVisible({ timeout: 15_000 });
+  if (await expand.isVisible()) await expand.click();
+  await page.locator('.chat-list, .chat-room').first().waitFor({ state: 'visible', timeout: 15_000 });
+}
+
 async function signIn(page) {
   await page.goto('/');
   await page.fill('input[name=username]', USER);
   await page.fill('input[name=password]', PASS);
   await page.click('button:has-text("Sign in")');
-  const chats = page.locator('.toolbar-view-chats');
+  const chats = page.locator('[data-testid=toolbar-chats]');
   const ok = await chats.waitFor({ state: 'visible', timeout: 15_000 }).then(() => true).catch(() => false);
   if (!ok) test.skip(true, 'chat disabled (ENABLE_CHAT)');
 }
@@ -76,7 +87,7 @@ async function dock(page, { plain, title }) {
   await page.goto(`/#${NS}/${plain}`);
   await page.reload();
   await expect(page.locator('.toolbar-path')).toContainText(plain, { timeout: 20_000 });
-  await page.locator('.toolbar-view-chats').click();
+  await openChatsFull(page);
   await page.locator('.chat-list-item', { hasText: title }).first().click();
   await expect(page.locator('.chat-room-title h2')).toHaveText(title, { timeout: 15_000 });
   await page.getByTestId('chat-pin-side').click();
@@ -123,19 +134,15 @@ test('switching tabs, Expand and Pin keep the unsent draft', async ({ page }) =>
     await dock(page, s);
     await dockedDraft(page).fill('half a thought');
 
-    // Stickies tab and back.
-    await page.getByTestId('side-panel-tab-stickies').click();
+    // Stickies and back, through the toolbar buttons.
+    await page.getByTestId('toolbar-stickies').click();
     await expect(panel(page).locator('.stickies-add')).toBeVisible();
     await expect(page.locator('.chat-draft')).toHaveCount(0); // hidden tab is unmounted, so it does not poll
-    await page.getByTestId('side-panel-tab-chat').click();
+    await page.getByTestId('toolbar-chats').click();
     await expect(dockedDraft(page)).toHaveValue('half a thought');
-
-    // Tabs are real tabs: arrow keys move between them.
-    await page.getByTestId('side-panel-tab-chat').focus();
-    await page.keyboard.press('ArrowRight');
-    await expect(page.getByTestId('side-panel-tab-stickies')).toHaveAttribute('aria-selected', 'true');
-    await page.keyboard.press('ArrowLeft');
-    await expect(page.getByTestId('side-panel-tab-chat')).toHaveAttribute('aria-selected', 'true');
+    // The panel has no tabs of its own; its header names what shows.
+    await expect(page.getByTestId('side-panel-title')).toHaveText('Chat');
+    await expect(panel(page).locator('[role=tab]')).toHaveCount(0);
 
     // Expand: the same chat, full screen, same draft; the panel steps aside.
     await page.getByTestId('chat-expand').click();
@@ -148,6 +155,98 @@ test('switching tabs, Expand and Pin keep the unsent draft', async ({ page }) =>
     await expect(page.locator('.toolbar-path')).toContainText(s.plain);
   } finally {
     await cleanup(page, s.plain, s.chat);
+  }
+});
+
+// Bug: with a chat pinned, opening another chat from the file tree went full
+// screen, so the pin was lost. The mode the person last picked (Pin or
+// Expand) is remembered, also with the panel closed and across a reload, and
+// a chat opened from the tree uses it.
+test('a chat opened from the tree uses the last picked mode, pinned or full screen', async ({ page }) => {
+  test.setTimeout(120_000);
+  await signIn(page);
+  const s = await seed(page);
+  const other = `__dock-${Date.now()}-${Math.random().toString(36).slice(2, 6)}-room2.md`;
+  const otherTitle = `Dock other ${other.slice(7, 20)}`;
+  expect((await api(page, 'POST', `/api/chat/convert?ns=${NS}&path=${encodeURIComponent(other)}&title=${encodeURIComponent(otherTitle)}`)).status).toBe(201);
+  const treeRow = (file) => page.locator('.sidebar .tree-row', { hasText: file }).first();
+  try {
+    await dock(page, s);
+    // Pinned: the tree click swaps the docked chat and keeps the note.
+    await treeRow(other).click({ timeout: 20_000 });
+    await expect(panel(page).locator('.chat-room-title h2')).toHaveText(otherTitle, { timeout: 15_000 });
+    await expect(page.locator('.toolbar-path')).toContainText(s.plain);
+    await expect(page.locator('.chat-panel:not(.docked)')).toHaveCount(0);
+    expect(page.url()).toContain(`#${NS}/${s.plain}`);
+
+    // Pinned, with the panel closed and after a reload: still opens pinned.
+    await panel(page).locator('.stickies-close').focus();
+    await page.keyboard.press('Escape');
+    await expect(panel(page)).toHaveCount(0);
+    await page.reload();
+    await expect(page.locator('.toolbar-path')).toContainText(s.plain, { timeout: 20_000 });
+    await expect(panel(page)).toHaveCount(0);
+    await treeRow(s.chat).click({ timeout: 20_000 });
+    await expect(panel(page).locator('.chat-room-title h2')).toHaveText(s.title, { timeout: 15_000 });
+    await expect(page.locator('.toolbar-path')).toContainText(s.plain);
+    await expect(page.locator('.chat-panel:not(.docked)')).toHaveCount(0);
+
+    // Expand picks full screen. Back brings the docked chat back, and while
+    // a chat is docked and showing, a tree click keeps it docked (it looks
+    // pinned, so it stays pinned).
+    await page.getByTestId('chat-expand').click();
+    await expect(panel(page)).toHaveCount(0);
+    await page.locator('.toolbar-chats-back').click();
+    await expect(page.locator('.toolbar-path')).toContainText(s.plain, { timeout: 15_000 });
+    await expect(panel(page).locator('.chat-room-title h2')).toHaveText(s.title, { timeout: 15_000 });
+    await treeRow(other).click({ timeout: 20_000 });
+    await expect(panel(page).locator('.chat-room-title h2')).toHaveText(otherTitle, { timeout: 15_000 });
+    await expect(page.locator('.toolbar-path')).toContainText(s.plain);
+    await expect(page.locator('.chat-panel:not(.docked)')).toHaveCount(0);
+
+    // With no chat showing, the remembered mode decides: Expand again, Back,
+    // close the panel, and the next tree click opens full screen.
+    await page.getByTestId('chat-expand').click();
+    await expect(panel(page)).toHaveCount(0);
+    await page.locator('.toolbar-chats-back').click();
+    await expect(page.locator('.toolbar-path')).toContainText(s.plain, { timeout: 15_000 });
+    await panel(page).locator('.stickies-close').focus();
+    await page.keyboard.press('Escape');
+    await expect(panel(page)).toHaveCount(0);
+    await treeRow(other).click({ timeout: 20_000 });
+    await expect(page.locator('.chat-panel:not(.docked) .chat-room-title h2')).toHaveText(otherTitle, { timeout: 15_000 });
+    await expect(panel(page)).toHaveCount(0);
+  } finally {
+    await cleanup(page, s.plain, s.chat, other);
+  }
+});
+
+test('a chat docked from the panel Chat tab, not Pin, stays docked on a tree click', async ({ page }) => {
+  test.setTimeout(120_000);
+  await signIn(page);
+  const s = await seed(page);
+  const other = `__dock-${Date.now()}-${Math.random().toString(36).slice(2, 6)}-room2.md`;
+  const otherTitle = `Dock other ${other.slice(7, 20)}`;
+  expect((await api(page, 'POST', `/api/chat/convert?ns=${NS}&path=${encodeURIComponent(other)}&title=${encodeURIComponent(otherTitle)}`)).status).toBe(201);
+  const treeRow = (file) => page.locator('.sidebar .tree-row', { hasText: file }).first();
+  try {
+    // The remembered mode says full screen (the default before Pin is ever used).
+    await page.goto(`/#${NS}/${s.plain}`);
+    await page.evaluate(() => localStorage.setItem('mdnest_chat_mode', 'full'));
+    await page.reload();
+    await expect(page.locator('.toolbar-path')).toContainText(s.plain, { timeout: 20_000 });
+    // Dock through the side panel: Stickies button, then Chats, pick the chat.
+    await page.locator('[data-testid=toolbar-stickies]').first().click();
+    await page.getByTestId('toolbar-chats').click();
+    await panel(page).locator('.chat-list-item', { hasText: s.title }).first().click();
+    await expect(panel(page).locator('.chat-room-title h2')).toHaveText(s.title, { timeout: 15_000 });
+    // A tree click on another chat swaps the docked chat; nothing goes full screen.
+    await treeRow(other).click({ timeout: 20_000 });
+    await expect(panel(page).locator('.chat-room-title h2')).toHaveText(otherTitle, { timeout: 15_000 });
+    await expect(page.locator('.toolbar-path')).toContainText(s.plain);
+    await expect(page.locator('.chat-panel:not(.docked)')).toHaveCount(0);
+  } finally {
+    await cleanup(page, s.plain, s.chat, other);
   }
 });
 
@@ -232,11 +331,11 @@ test('no Pin where a chat cannot dock: full-screen chats work as before', async 
     await page.reload();
     await expect(page.locator('.chat-room-title h2')).toHaveText(s.title, { timeout: 20_000 });
     await expect(page.getByTestId('chat-pin-side')).toHaveCount(0);
-    // And the side panel offers no Chat tab.
+    // And the side panel never shows Chat.
     await page.locator('.toolbar-chats-back').click();
-    await page.locator('.toolbar-stickies').click();
+    await page.locator('[data-testid=toolbar-stickies]').click();
     await expect(page.locator('.stickies-panel')).toBeVisible();
-    await expect(page.getByTestId('side-panel-tab-chat')).toHaveCount(0);
+    await expect(page.getByTestId('side-panel-title')).toHaveText('Stickies');
   } finally {
     await cleanup(page, s.plain, s.chat);
   }
@@ -327,7 +426,7 @@ test('full-screen chats show the main workspace, with no picker of their own', a
     await page.goto(`/#${NS}/${s.plain}`);
     await page.reload();
     await expect(page.locator('.toolbar-path')).toContainText(s.plain, { timeout: 20_000 });
-    await page.locator('.toolbar-view-chats').click();
+    await openChatsFull(page);
     await expect(page.locator('.chat-list-item', { hasText: s.title }).first()).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('.chat-ns-select')).toHaveCount(0);
     await expect(page.locator('.chat-list-ns')).toHaveText(NS);

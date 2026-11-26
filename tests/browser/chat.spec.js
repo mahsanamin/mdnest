@@ -24,12 +24,23 @@ async function api(page, method, url, body) {
   }, [method, url, body]);
 }
 
+// The toolbar's Chats button opens the side panel's Chat tab where a chat can
+// dock (the full view is one ⤢ away), and the full chats view where it cannot.
+async function openChatsFull(page) {
+  await page.locator('[data-testid=toolbar-chats]').click();
+  // Either the panel (with its ⤢) or the full view comes up; wait for one.
+  const expand = page.locator('[data-testid=side-panel-expand]');
+  await expect(expand.or(page.locator('.chat-list')).first()).toBeVisible({ timeout: 15_000 });
+  if (await expand.isVisible()) await expand.click();
+  await page.locator('.chat-list, .chat-room').first().waitFor({ state: 'visible', timeout: 15_000 });
+}
+
 async function signIn(page) {
   await page.goto('/');
   await page.fill('input[name=username]', USER);
   await page.fill('input[name=password]', PASS);
   await page.click('button:has-text("Sign in")');
-  const chats = page.locator('.toolbar-view-chats');
+  const chats = page.locator('[data-testid=toolbar-chats]');
   const ok = await chats.waitFor({ state: 'visible', timeout: 15_000 }).then(() => true).catch(() => false);
   if (!ok) test.skip(true, 'chat disabled (ENABLE_CHAT)');
 }
@@ -131,7 +142,7 @@ test('leaving chat mode reloads the note underneath, so it is never stale', asyn
     // Live is locked for a chat note: the rich editor would flatten the tag.
     await expect(page.locator('.editor-mode-toggle button', { hasText: 'Live' })).toBeDisabled();
 
-    await page.locator('.toolbar-view-chats').click();
+    await openChatsFull(page);
     await page.locator('.chat-list-item', { hasText: title }).click();
     await page.locator('.chat-draft').fill('posted while the note was underneath');
     await page.keyboard.press('Enter');
@@ -501,6 +512,34 @@ test('copying the prompt saves the agent\'s role, and wait repeats it to that ag
   } finally {
     await cleanup(page, plain, chat);
   }
+});
+
+test('an external CLI role appears in open Agents and its prompt can be edited', async ({ page }) => {
+  test.setTimeout(90_000);
+  await signIn(page);
+  const { plain, chat, title } = await seed(page);
+  const qs = `ns=${NS}&path=${encodeURIComponent(chat)}`;
+  try {
+    await page.goto(`/#!chats/${NS}/${chat}`);
+    await expect(page.locator('.chat-room-title h2')).toHaveText(title, { timeout: 20_000 });
+    await page.locator('.chat-btn', { hasText: /Connect an agent|Agents/ }).first().click();
+    const panel = page.locator('.chat-agent');
+    // This is the same supported /role request issued by the CLI. No agent
+    // process or real provider is started by this regression.
+    expect((await api(page, 'POST', `/api/chat?${qs}&as=builder`, '/role Review the implementation')).status).toBe(200);
+    await expect(panel.getByTestId('chat-agent-saved')).toContainText('builder', { timeout: 10_000 });
+    await panel.getByRole('button', { name: "Edit builder's prompt" }).click();
+    await expect(panel.getByRole('textbox', { name: 'Agent name' })).toHaveValue('builder');
+    const prompt = 'Review "quoted inputs".\nThen check cleanup and permissions.';
+    await panel.getByRole('textbox', { name: 'What this agent should do' }).fill(prompt);
+    await panel.getByRole('button', { name: 'Save prompt', exact: true }).click();
+    await expect(panel.getByRole('button', { name: 'Save prompt', exact: true })).toBeEnabled();
+    const saved = JSON.parse((await api(page, 'GET', `/api/chat?${qs}`)).text);
+    expect(saved.prompts.builder).toBe(prompt);
+    await panel.getByRole('button', { name: "Edit builder's prompt" }).click();
+    await expect(panel.getByRole('textbox', { name: 'What this agent should do' })).toHaveValue(prompt);
+    await page.screenshot({ path: '../browser-results/agent-prompt-edit.png', fullPage: true });
+  } finally { await cleanup(page, plain, chat); }
 });
 
 // @budget: a timing budget, run alone after the shards (tests/lib/e2e-images.sh).

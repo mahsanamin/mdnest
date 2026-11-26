@@ -15,7 +15,37 @@
 # anything. The download and install steps below mirror it; keep them alike.
 set -e
 
-SERVER="${1:-${MDNEST_SERVER:-}}"
+# Colour only for a person at a terminal: never in a pipe, with NO_COLOR
+# (https://no-color.org) or TERM=dumb. MDNEST_COLOR=always or never overrides
+# it. With colour off these print exactly the text they are given.
+C1=0; C2=0
+case "${MDNEST_COLOR:-auto}" in
+  always) C1=1; C2=1 ;;
+  never) ;;
+  *)
+    if [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != dumb ]; then
+      if [ -t 1 ]; then C1=1; fi
+      if [ -t 2 ]; then C2=1; fi
+    fi ;;
+esac
+paint() { if [ "$1" = 1 ]; then printf '\033[%sm%s\033[0m' "$2" "$3"; else printf '%s' "$3"; fi; }
+say_ok()   { if [ "$C1" = 1 ]; then printf '\033[32m\342\234\223\033[0m %s\n' "$*"; else printf '%s\n' "$*"; fi; }
+say_note() { paint "$C1" 33 "$*"; printf '\n'; }
+say_err()  { { paint "$C2" 31 "$*"; printf '\n'; } >&2; }
+say_cmd()  { paint "$C1" 1 "$*"; printf '\n'; }
+
+# The server address, plus the optional --agent-skills (set up the AI agent
+# skill without asking) or --no-agent-skills (never ask), in any order.
+# MDNEST_AGENT_SKILLS=1 or 0 does the same as the flags.
+SERVER="${MDNEST_SERVER:-}"
+AGENT_SKILLS="${MDNEST_AGENT_SKILLS:-}"
+for arg in "$@"; do
+  case "$arg" in
+    --agent-skills) AGENT_SKILLS=1 ;;
+    --no-agent-skills) AGENT_SKILLS=0 ;;
+    *) SERVER="$arg" ;;
+  esac
+done
 SERVER="${SERVER%/}"
 case "$SERVER" in
   http://?*|https://?*) ;;
@@ -47,7 +77,7 @@ echo "Installing the mdnest CLI from ${SERVER}..."
 # can be changed on the way. Say so rather than refuse.
 case "$SERVER" in
   http://localhost*|http://127.*|http://\[::1\]*|https://*) ;;
-  *) echo "Warning: ${SERVER} is plain http, so the CLI it sends could be altered on the way. Prefer https." ;;
+  *) say_note "Warning: ${SERVER} is plain http, so the CLI it sends could be altered on the way. Prefer https." ;;
 esac
 
 TMP="$(mktemp "${TMPDIR:-/tmp}/mdnest.XXXXXX")" || { echo "Error: couldn't create a temp file." >&2; exit 1; }
@@ -81,12 +111,12 @@ $(mdnest_sources)
 SOURCES
 
 if [ -z "$GOT" ]; then
-  echo "Error: couldn't download the mdnest CLI from any source." >&2
+  say_err "Error: couldn't download the mdnest CLI from any source."
   echo "Tried:$WHY" >&2
   exit 1
 fi
 if [ "$GOT" != "${SERVER}/cli/${NAME}" ]; then
-  echo "Note: ${SERVER} did not serve the CLI, so this is the latest release from GitHub."
+  say_note "Note: ${SERVER} did not serve the CLI, so this is the latest release from GitHub."
 fi
 
 SUDO=""
@@ -109,16 +139,25 @@ if [ ! -d "$BIN_DIR" ]; then
 fi
 $SUDO install -m 0755 "$TMP" "$DEST"
 
-echo "Installed: $DEST ($("$DEST" version))"
+say_ok "Installed: $DEST ($("$DEST" version))"
 
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
   *) echo ""
-     echo "Note: $BIN_DIR is not on your PATH. Add this to your shell profile:"
-     echo "  export PATH=\"$BIN_DIR:\$PATH\"" ;;
+     say_note "Note: $BIN_DIR is not on your PATH. Add this to your shell profile:"
+     say_cmd "  export PATH=\"$BIN_DIR:\$PATH\"" ;;
 esac
 
 echo ""
 echo "To connect it to ${SERVER}, run this and paste a token when it asks"
 echo "(create one in Settings, CLI or API Tokens):"
-echo "  mdnest login ${SERVER}"
+say_cmd "  mdnest login ${SERVER}"
+
+# Offer the AI agent skill once. The CLI asks on the terminal (Enter or y
+# installs, n is remembered), only when an AI tool is on this machine and the
+# skill is not there yet; with no terminal it prints a one-line hint instead.
+# --agent-skills installs without asking, --no-agent-skills never asks. A CLI
+# too old to have `agent offer` is skipped. It never fails the install.
+if grep -q '^agent_offer()' "$DEST" 2>/dev/null; then
+  MDNEST_AGENT_SKILLS="$AGENT_SKILLS" "$DEST" agent offer </dev/null || true
+fi

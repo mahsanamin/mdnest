@@ -12,26 +12,36 @@ import {
 
 const RESIZE_STEP = 16; // px per arrow key on the resize handle
 
+const TAB_LABELS = { chat: 'Chat', stickies: 'Stickies', pages: 'Pages' };
+
 // The right-edge side panel. Its first job was the sticky board as a drawer,
 // the quick way in for jotting one down without leaving the note you are
 // reading; the full-screen corkboard (StickiesBoard) is the same cards laid
 // out spatially, and the Expand button swaps between them. When chat can dock
-// here, the panel also has a Chat tab (onTab is set and `chat` is what it
-// shows). One panel with tabs rather than a second drawer: two panels on one
-// edge would have to fight over the same strip of screen.
+// here, the panel can also show Chat (`chat` is what it shows), and with HTML
+// pages on, Pages (`pages`). `tabs` lists what it can show; `tab` picks one.
+// The panel has no tab bar of its own: the toolbar's Chats | Pages | Stickies
+// buttons switch it, so the header only names what is showing. One panel
+// rather than a second drawer: two panels on one edge would have to fight over
+// the same strip of screen.
 //
 // width / minWidth / maxWidth come from App per tab, already clamped to what
 // leaves the editor usable, so the drag and the arrow keys only clamp again.
 function StickiesPanel({
   stickies, onChange, onClose, onExpand, saveState, loadState, onRetry,
   width, minWidth = 260, maxWidth = 760, onWidthChange,
-  tab = 'stickies', onTab, chat,
+  tab = 'stickies', onTab, chat, pages, tabs: offered,
+  // The ⤢ button on the Chat and Pages tabs: their full-screen views. On the
+  // Chat tab it is offered only while the chat list shows (an open chat
+  // carries its own expand button).
+  onExpandTab, expandChatInPanel = true,
 }) {
   const focusIdRef = useRef(null); // card to focus after the next render
-  const tabRefs = useRef({});
   const clampWidth = (w) => Math.min(maxWidth, Math.max(minWidth, w));
-  const tabs = onTab ? ['chat', 'stickies'] : null;
-  const showChat = tab === 'chat' && !!onTab;
+  const tabs = onTab && offered && offered.length > 1 ? offered : null;
+  const showChat = tab === 'chat' && !!tabs && tabs.includes('chat');
+  const showPages = tab === 'pages' && !!tabs && tabs.includes('pages');
+  const showStickies = !showChat && !showPages;
 
   const full = isBoardFull(stickies);
 
@@ -60,23 +70,9 @@ function StickiesPanel({
     onClose();
   };
 
-  // Real tabs: arrow keys move between them and select (the WAI-ARIA tabs
-  // pattern with automatic activation).
-  const onTabKey = (e) => {
-    const i = tabs.indexOf(tab);
-    let next = null;
-    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') next = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
-    else if (e.key === 'Home') next = tabs[0];
-    else if (e.key === 'End') next = tabs[tabs.length - 1];
-    if (!next) return;
-    e.preventDefault();
-    onTab(next);
-    tabRefs.current[next]?.focus();
-  };
-
   return (
     <div
-      className={`stickies-panel${showChat ? ' side-panel-chat' : ''}`}
+      className={`stickies-panel${showChat ? ' side-panel-chat' : ''}${showPages ? ' side-panel-pages' : ''}`}
       style={width ? { width } : undefined}
       onKeyDown={onKeyDown}
       data-testid="side-panel"
@@ -103,53 +99,70 @@ function StickiesPanel({
             e.preventDefault();
             onWidthChange(clampWidth(next));
           }}
-          onMouseDown={(e) => {
+          onPointerDown={(e) => {
+            if (e.button !== 0) return;
             e.preventDefault();
             const startX = e.clientX;
             const startWidth = width || 320;
+            let next = null;
+            let frame = 0;
+            // At most one width change per screen frame: each one re-renders
+            // the app, and a mouse can report several moves per frame.
+            const flush = () => {
+              frame = 0;
+              if (next !== null) onWidthChange(next);
+            };
             const onMove = (ev) => {
+              // Released somewhere we never heard about: end the drag.
+              if (ev.buttons === 0) { onUp(); return; }
               // Anchored to the right edge, so dragging left widens it.
-              onWidthChange(clampWidth(startWidth + startX - ev.clientX));
+              next = clampWidth(startWidth + startX - ev.clientX);
+              if (!frame) frame = requestAnimationFrame(flush);
             };
             const onUp = () => {
-              document.removeEventListener('mousemove', onMove);
-              document.removeEventListener('mouseup', onUp);
+              if (frame) { cancelAnimationFrame(frame); flush(); }
+              document.removeEventListener('pointermove', onMove);
+              document.removeEventListener('pointerup', onUp);
+              document.removeEventListener('pointercancel', onUp);
+              window.removeEventListener('blur', onUp);
               document.body.style.cursor = '';
               document.body.style.userSelect = '';
+              document.body.classList.remove('side-panel-resizing');
             };
             document.body.style.cursor = 'col-resize';
             document.body.style.userSelect = 'none';
-            document.addEventListener('mousemove', onMove);
-            document.addEventListener('mouseup', onUp);
+            // While dragging: no easing (the edge follows the pointer), and
+            // iframes (an HTML page, a preview) ignore the pointer, so moving
+            // over them, or letting go over them, still reaches this handler.
+            // Without that the drag stalls going left and never ends.
+            document.body.classList.add('side-panel-resizing');
+            document.addEventListener('pointermove', onMove);
+            document.addEventListener('pointerup', onUp);
+            document.addEventListener('pointercancel', onUp);
+            window.addEventListener('blur', onUp);
           }}
         />
       )}
 
       <div className="stickies-header">
-        {tabs ? (
-          <div className="side-panel-tabs" role="tablist" aria-label="Side panel">
-            {tabs.map((t) => (
-              <button
-                key={t}
-                ref={(el) => { tabRefs.current[t] = el; }}
-                id={`side-panel-tab-${t}`}
-                role="tab"
-                className={`side-panel-tab${tab === t ? ' active' : ''}`}
-                aria-selected={tab === t}
-                aria-controls="side-panel-body"
-                tabIndex={tab === t ? 0 : -1}
-                onClick={() => onTab(t)}
-                onKeyDown={onTabKey}
-                data-testid={`side-panel-tab-${t}`}
-              >
-                {t === 'chat' ? 'Chat' : 'Stickies'}
-              </button>
-            ))}
-          </div>
-        ) : (
-          <h3>Stickies</h3>
+        <h3 data-testid="side-panel-title" data-tab={showChat ? 'chat' : showPages ? 'pages' : 'stickies'}>
+          {TAB_LABELS[showChat ? 'chat' : showPages ? 'pages' : 'stickies']}
+        </h3>
+        {onExpandTab && ((showChat && expandChatInPanel) || showPages) && (
+          <button
+            className="stickies-expand"
+            onClick={() => onExpandTab(tab)}
+            title={showPages ? 'Open the full Pages view' : 'Open chats full screen'}
+            aria-label={showPages ? 'Open the full Pages view' : 'Open chats full screen'}
+            data-testid="side-panel-expand"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" />
+              <line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" />
+            </svg>
+          </button>
         )}
-        {!showChat && <>
+        {showStickies && <>
           {/* The save state is shown, not hidden behind a silent autosave. The
               board is the one place in mdnest holding content that exists
               nowhere else — no namespace, no git remote — so "did that land?"
@@ -174,17 +187,15 @@ function StickiesPanel({
           className="stickies-close"
           onClick={onClose}
           aria-label={tabs ? 'Close the side panel' : 'Close stickies'}
-          title={tabs ? 'Close the side panel (Esc). The chat and its draft are kept.' : 'Close stickies'}
+          title={tabs ? (showChat ? 'Close the side panel (Esc). The chat and its draft are kept.' : 'Close the side panel (Esc)') : 'Close stickies'}
         >&times;</button>
       </div>
 
       <div
         className="side-panel-body"
         id="side-panel-body"
-        role={tabs ? 'tabpanel' : undefined}
-        aria-labelledby={tabs ? `side-panel-tab-${tab}` : undefined}
       >
-        {showChat ? chat : <>
+        {showChat ? chat : showPages ? pages : <>
           <div className="stickies-add-row">
             <button
               className="stickies-add"

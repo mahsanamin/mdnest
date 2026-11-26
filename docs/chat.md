@@ -17,6 +17,91 @@ app role (`MDNEST_ROLE=app`, the HA Helm setup): posts are serialised inside
 one backend process, which cannot stop two replicas appending at once, so
 chat stays off there unless you set `ENABLE_CHAT=true`.
 
+## Optional local coordination
+
+The [CLI guide](cli.md#optional-local-chat-workers) describes structured messages,
+recent and unseen reads, task leases and local `watch`/`crew` commands. These
+workers are opt-in and need Node only on the machine launching them. HTTP never
+executes a command. MCP local spawning is separately disabled by default.
+
+A post with a type, a reply, metadata, or in a crew's room carries a stable
+message ID in an HTML metadata comment immediately after the existing message
+header. Any other post is written exactly as before, and it, like every older
+message, gets a derived ID when read and is never rewritten. A derived ID
+includes the message's position, so deleting or editing an earlier message
+changes the IDs after it and a watcher can see those messages again; worker
+handlers must be idempotent. Metadata does not change the existing chat
+marker, header or body format. Normal post bodies cannot forge metadata or
+completion comments. Direct file writers remain trusted to edit the note.
+
+An opted-in crew keeps its roster, cursors, claims, turn count and status in the
+note's `mdnest-coordination` frontmatter scalar. Single-line JSON inside a quoted
+YAML value preserves the fields without adding a required YAML dependency.
+Long prompts use `mdnest-agent-prompts`; short roles remain under `agents`.
+
+When the configured number of consecutive agent posts is reached, the accepted
+threshold post is followed by a system pause message. Further agent posts are
+refused. A post by the configured human handle resumes and resets the counter.
+In multi mode it must be from that account without an alternate label and must
+not use an API token. In single mode the human label is a cooperative convention.
+When an agent posts with `--done`, the crew completes: its local runner stops
+and its agents stop answering. The chat itself keeps working. Anyone can post,
+including other agents, and the room limit no longer applies. A done post in a
+chat that has no crew is ignored, so ordinary chats keep their earlier behavior.
+
+`GET /api/chat/stream` sends authenticated SSE change hints even without live
+collaboration. Clients re-read the durable note after a hint, reconnect and catch
+up after missed events, and fall back to polling when streaming is unavailable.
+Claims and streams require a single backend writer; multiple backend processes
+writing the same file are not a supported coordination topology.
+
+### Try a crew
+
+*Optional. Needs Node 22 or newer on the machine that runs the crew, and an AI
+CLI such as Claude Code that can answer a prompt from the command line.*
+
+1. Update the CLI: **Settings → CLI** shows the install command, or run
+   `mdnest update`.
+2. Start a crew in a new note. Each `--agent` is `name:role:command`, and
+   `mdnest chat reply --with '<command>'` is a ready-made command: it sends the
+   chat to your AI CLI and posts the answer as that agent.
+
+   ```bash
+   mdnest chat crew "Plan a small product launch" --note @alias/ns/Chats/launch.md \
+     --agent "writer:Proposes ideas:mdnest chat reply --with 'claude -p'" \
+     --agent "critic:Finds problems with ideas:mdnest chat reply --with 'claude -p'"
+   ```
+
+3. Open the note in the web UI and follow along. The goal is posted as your
+   first message and mentions the first agent.
+
+Crew agents answer only messages that mention them. Write `@writer` to talk to
+one agent, or `@all` to talk to all of them. A message with no mention is
+ignored by the agents, so people can talk among themselves in the same chat.
+An agent hands off by mentioning the next one.
+
+What stops a crew:
+
+- The `--timeout` (15 minutes by default), the turn limit (8 agent turns by
+  default, set with `--max-turns`), or Ctrl+C in the terminal pause the crew,
+  and the `crew` command exits. A post by you (the crew's human handle, your
+  account unless the config sets `human_handle`) resumes the room and resets
+  its turn count. The agents run only while a local command runs
+  for them, so to go on, run a `watch` for each agent, for example
+  `mdnest chat watch @alias/ns/Chats/launch.md --as writer --mentions --exec "mdnest chat reply --with 'claude -p'"`.
+- A post with `--done` completes the crew and stops its agents. The chat itself
+  stays open for anyone to post. `chat reply` never sends `--done`, so a crew
+  ends only when you or a command you wrote chooses to.
+
+`chat reply` runs your AI CLI with your real home folder (the worker's
+temporary home has only the mdnest connection), so the CLI finds your own login
+and settings. That is the point, and it is the same trust as running the CLI
+yourself, with every tool your settings allow. Chat messages are untrusted
+text, and the answer is posted to the room, so in a room where people you do
+not trust can post, turn the CLI's tools off. Everything else the worker gets
+stays the same. See
+[the CLI guide](cli.md#optional-local-chat-workers) for the details.
+
 ## The format
 
 ```markdown
@@ -50,9 +135,11 @@ On it — frontend checks green.
 
 ## In the web UI
 
-- **Chats** in the toolbar (beside **Board**; in the ⋯ menu on a phone) lists
+- **Chats** on the right of the toolbar (with **Pages** and **Stickies**) lists
   the chats in the workspace you are in, most recently active first, with
-  unread counts. Switch workspace in the sidebar to see another one's chats.
+  unread counts. Where the window has room it opens in the side panel, and
+  the panel's ⤢ button opens the full chats view; on a phone or a
+  narrow window it opens the full view directly. Switch workspace in the sidebar to see another one's chats.
   A link to a chat (`#!chats/<workspace>/<path>`) opens its workspace.
 - Chat mode is full screen: the file tree and the open note's controls are
   hidden. It has one exit, **← Back to …** in the toolbar (the ← in the
@@ -171,7 +258,13 @@ Keep to this role unless a human gives you a new one.
 
 Roles are kept in the chat note's front matter, under `agents:`, so they last
 as long as the chat and show in any viewer. A role is one or two lines (cut at
-300 characters). The panel lists the saved roles with a button to remove one.
+300 characters). The panel refreshes saved roles while open, including roles
+saved through the CLI. Select **Edit** to load a saved agent, then **Save
+prompt** to update it without copying. Full prompts preserve quotes and line
+breaks up to 2000 characters in a separate frontmatter value; the existing
+short role remains the wait reminder. A listening participant without a saved
+role is not a saved agent. Saved role names are available for mention completion,
+even before their first post. The panel also has a button to remove a role.
 An agent saves or changes its own with a post that starts with `/role`
 (`mdnest chat post notes/Chats/team.md "/role Test the login page" --as qa-1`),
 which is how a helper started by a lead gets one. Like `/status`, it is not
@@ -276,8 +369,8 @@ or denies anything by itself.
 
 If the agent is in a chat (its last `mdnest chat wait`), the question shows
 as a card in that chat, under the agent's chat name: "Builder (Claude Code on
-build-box)". Otherwise it shows in the approvals list: a "N waiting" badge next
-to the Chats button in the toolbar opens it. While an mdnest tab is open, the tab title shows
+build-box)". Otherwise it shows in the approvals list: a "N waiting" badge in
+the toolbar opens it. While an mdnest tab is open, the tab title shows
 the count, for example `(1) mdnest`, and if you allowed browser notifications
 (the approvals list offers it) each new item raises one.
 

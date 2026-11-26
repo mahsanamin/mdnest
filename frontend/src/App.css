@@ -585,7 +585,10 @@
 .sidebar-resize-handle {
   position: absolute;
   top: 0;
-  right: -3px;
+  /* Fully inside the sidebar: it used to stick out 3px (right: -3px), but
+     the sidebar clips its overflow and an open HTML page's frame covered that
+     strip, so beside a page only about 2px of the edge could be grabbed. */
+  right: 0;
   bottom: 0;
   width: 6px;
   cursor: col-resize;
@@ -3219,6 +3222,26 @@ pre:hover .code-copy-btn {
 
 /* Crepe's root sits inside `.live-editor-pane` (a flex column) below the
    LiveToolbar — make it grow to fill the remaining height. */
+/* The header box above a Live note's body: its front matter, shown and
+   edited as plain text so the editor never rewrites the --- fences. */
+.live-frontmatter {
+  flex: none;
+  margin: 8px 12px 0;
+  padding: 6px 10px;
+  max-height: 12em;
+  resize: vertical;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  background: var(--surface-tint);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+.live-frontmatter:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 .live-editor-crepe-root {
   flex: 1;
   min-height: 0;
@@ -6070,20 +6093,37 @@ pre:hover .code-copy-btn {
    panels. App.jsx enforces that only one is open at a time.
    --------------------------------------------------------------------------- */
 
-.toolbar-stickies {
-  background: transparent !important;
-  border: none !important;
-  color: var(--text-muted) !important;
-  padding: 0.2rem 0.4rem !important;
-  cursor: pointer;
-  position: relative;
+/* Chats | Pages | Stickies, the toolbar's right-hand group (Toolbar.jsx
+   panelButtons). Icon and label, pressed (aria-pressed) for what is showing.
+   The labels go first as the bar narrows (see the toolbar container rules),
+   the buttons never. */
+.toolbar-panel-group {
   display: flex;
   align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
 }
-
-.toolbar-stickies:hover,
-.toolbar-stickies.active {
-  color: var(--text) !important;
+.toolbar .toolbar-panel-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 30px;
+  padding: 4px 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  cursor: pointer;
+  position: relative;
+  white-space: nowrap;
+}
+.toolbar .toolbar-panel-btn svg { flex-shrink: 0; }
+.toolbar .toolbar-panel-btn:hover { background: var(--surface-2); color: var(--text); }
+.toolbar .toolbar-panel-btn.active {
+  background: var(--accent-wash);
+  border-color: var(--border-strong);
+  color: var(--text);
 }
 
 /* The one coloured icon in the toolbar. Everything else is a currentColor
@@ -6116,8 +6156,8 @@ pre:hover .code-copy-btn {
 
 /* The ink lines are the only part not tied to currentColor, so they need to
    keep up on hover or they stay faint against a darkened outline. */
-.toolbar-stickies:hover .sticky-icon-ink,
-.toolbar-stickies.active .sticky-icon-ink {
+.toolbar-panel-stickies:hover .sticky-icon-ink,
+.toolbar-panel-stickies.active .sticky-icon-ink {
   stroke: var(--text);
 }
 
@@ -6150,6 +6190,10 @@ pre:hover .code-copy-btn {
   right: 0;
   bottom: 0;
   width: 320px;
+  /* Matches .main's margin-right easing, so when the width changes (a chat
+     that needs more room than the width you picked, a window resize) the
+     panel and the editor move together instead of jumping. */
+  transition: width 0.15s ease;
   background: var(--surface);
   border-left: 1px solid var(--border);
   border-top: 1px solid var(--border);
@@ -6166,6 +6210,8 @@ pre:hover .code-copy-btn {
   bottom: 0;
   width: 6px;
   cursor: col-resize;
+  /* A touch drag on the edge resizes instead of scrolling the page. */
+  touch-action: none;
   z-index: 10;
 }
 
@@ -6190,36 +6236,6 @@ pre:hover .code-copy-btn {
   flex-direction: column;
 }
 
-/* Chat and Stickies tabs, in the header where the "Stickies" title was. */
-.side-panel-tabs {
-  display: flex;
-  gap: var(--space-1);
-  margin-right: auto;
-}
-
-.side-panel-tab {
-  background: none;
-  border: none;
-  border-radius: var(--radius-sm);
-  padding: 4px 10px;
-  font: inherit;
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: var(--text-muted);
-  cursor: pointer;
-}
-
-.side-panel-tab:hover {
-  color: var(--text);
-  background: var(--surface-2);
-}
-
-.side-panel-tab.active {
-  color: var(--text);
-  background: var(--accent-wash);
-}
-
-.side-panel-tab:focus-visible,
 .stickies-close:focus-visible,
 .stickies-expand:focus-visible {
   outline: 2px solid var(--accent);
@@ -6765,9 +6781,7 @@ pre:hover .code-copy-btn {
 
   /* Moved into the ⋯ menu. */
   .toolbar .toolbar-view-btn.toolbar-view-board,
-  .toolbar .toolbar-view-btn.toolbar-view-chats,
   .toolbar-utility .ws-status,
-  .toolbar-utility .toolbar-stickies,
   .toolbar-path .toolbar-inline-reveal,
   .toolbar-path .toolbar-inline-refresh,
   .toolbar-path-actions { display: none; }
@@ -6775,13 +6789,15 @@ pre:hover .code-copy-btn {
   /* One look for every icon button left on the bar: same square, no box. */
   /* Prefixed with .toolbar: the generic `.toolbar button` rule near the top
      of this file outranks a bare class and boxed the sidebar and ⋯ buttons. */
+  /* 40px: the smallest comfortable touch target. */
   .toolbar .toolbar-hamburger,
   .toolbar .toolbar-view-btn,
   .toolbar .toolbar-comments,
+  .toolbar .toolbar-panel-btn,
   .toolbar .toolbar-more-btn {
-    width: 36px;
-    height: 36px;
-    min-width: 36px;
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
     padding: 0;
     display: inline-flex;
     align-items: center;
@@ -6792,6 +6808,9 @@ pre:hover .code-copy-btn {
     color: var(--text-secondary);
     position: relative;
   }
+  .toolbar .toolbar-panel-btn .toolbar-panel-label { display: none; }
+  .toolbar .toolbar-panel-btn.active { background: var(--accent-wash); border: 1px solid var(--border-strong); }
+  .toolbar-panel-group { gap: 0; }
   .toolbar .toolbar-hamburger:active,
   .toolbar .toolbar-comments:active,
   .toolbar .toolbar-more-btn:active,
@@ -6854,9 +6873,11 @@ pre:hover .code-copy-btn {
    Shed words, never controls, in order of how little they say. */
 .toolbar { container: toolbar / inline-size; }
 @container toolbar (max-width: 1120px) {
-  /* Board / Chats keep their icons; the name is in the tooltip. */
+  /* Board keeps its icon; the name is in the tooltip. */
   .toolbar-view-btn > span { display: none; }
   .toolbar-view-btn { padding: 4px 8px; }
+  /* Chats / Pages / Stickies: icons only, named by title and aria-label. */
+  .toolbar-panel-btn > .toolbar-panel-label { display: none; }
 }
 @container toolbar (max-width: 980px) {
   .toolbar-utility .ws-status-text { display: none; }
@@ -6890,6 +6911,21 @@ pre:hover .code-copy-btn {
   }
 }
 
+
+/* The view-mode items in the ⋯ menu exist only for the narrowest toolbar. */
+.toolbar-more-menu .more-view { display: none; }
+.toolbar-more-menu > button.more-view.active { color: var(--accent); }
+.more-view-glyph { width: 15px; text-align: center; color: var(--text-secondary); }
+/* The narrowest desktop toolbar (a small laptop with the side panel open):
+   the editor / split / preview switch moves into the ⋯
+   menu, so Chats, Pages, Stickies and ⋯ keep one row with the note. */
+@media (min-width: 769px) {
+  @container toolbar (max-width: 560px) {
+    .toolbar > .toolbar-view-toggle { display: none; }
+    .toolbar-more-menu .more-view { display: flex; }
+    .toolbar-more-menu .toolbar-more-sep.more-view { display: block; }
+  }
+}
 
 /* The formatting bars stay one row and scroll sideways instead of wrapping
    to two, which cost a second row of screen above every note on a phone or
@@ -7311,4 +7347,22 @@ pre:hover .code-copy-btn {
   padding: 0 3px;
   border-radius: 3px 3px 3px 0;
   user-select: none;
+}
+
+/* Side panel resize: a drag follows the pointer with no easing, iframes let
+   the pointer through to the drag (StickiesPanel), and reduced motion turns
+   the easing off entirely. */
+body.side-panel-resizing .stickies-panel,
+body.side-panel-resizing .main {
+  transition: none;
+}
+body.side-panel-resizing iframe,
+body.sidebar-resizing iframe {
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .stickies-panel,
+  .main {
+    transition: none;
+  }
 }

@@ -34,6 +34,7 @@ type contentRoutes struct {
 	ws          *handlers.WSHandler // nil unless live collab is on
 	restart     *handlers.RestartHandler
 	approvals   *handlers.ApprovalHandler // nil unless ENABLE_AGENT_APPROVALS
+	pages       *handlers.PagesHandler    // nil unless ENABLE_PAGES
 }
 
 func registerContentRoutes(mux *http.ServeMux, c contentRoutes) {
@@ -45,6 +46,13 @@ func registerContentRoutes(mux *http.ServeMux, c contentRoutes) {
 		// namespace can filter per item (middleware.ReadFilterFor). Without it
 		// a multi-mode listing serves nothing.
 		auth = func(next http.Handler) http.Handler { return c.auth(perms.Attach(next)) }
+	}
+
+	// Deleting a page handle (or a folder of them) also deletes the page,
+	// unless another handle still names it (handlers/pages_handles.go).
+	var noteHandler http.Handler = http.HandlerFunc(c.note.Handle)
+	if c.pages != nil {
+		noteHandler = c.pages.DeleteHook(noteHandler)
 	}
 
 	// Apply permission checks in multi mode, passthrough in single mode
@@ -61,7 +69,7 @@ func registerContentRoutes(mux *http.ServeMux, c contentRoutes) {
 	if perms != nil {
 		mux.Handle("/api/namespaces", auth(http.HandlerFunc(c.ns.ListNamespaces)))
 		mux.Handle("/api/tree", auth(perms.RequireNsAccess(http.HandlerFunc(c.tree.GetTree))))
-		mux.Handle("/api/note", auth(perms.ReadWriteRouter(invalidateSearch(http.HandlerFunc(c.note.Handle)))))
+		mux.Handle("/api/note", auth(perms.ReadWriteRouter(invalidateSearch(noteHandler))))
 		// History, attribution and comments all concern ONE note, so each
 		// needs read access to that note's path — not just some grant in the
 		// namespace (grants can be path-scoped). note/at returns the note's
@@ -116,6 +124,11 @@ func registerContentRoutes(mux *http.ServeMux, c contentRoutes) {
 			// nothing is written, so no search invalidation.
 			mux.Handle("/api/chat/status", auth(perms.RequireWrite(http.HandlerFunc(c.chat.HandleStatus))))
 			mux.Handle("/api/chat/agents", auth(perms.RequireWrite(http.HandlerFunc(c.chat.HandleAgents))))
+			mux.Handle("/api/chat/stream", auth(perms.RequireRead(http.HandlerFunc(c.chat.HandleStream))))
+			mux.Handle("/api/chat/claim", auth(perms.RequireWrite(invalidateSearch(http.HandlerFunc(c.chat.HandleClaim)))))
+			mux.Handle("/api/chat/ack", auth(perms.RequireWrite(invalidateSearch(http.HandlerFunc(c.chat.HandleAck)))))
+			mux.Handle("/api/chat/stop", auth(perms.RequireWrite(invalidateSearch(http.HandlerFunc(c.chat.HandleStop)))))
+			mux.Handle("/api/chat/room", auth(perms.ReadWriteRouter(invalidateSearch(http.HandlerFunc(c.chat.HandleRoom)))))
 			// Cross-namespace: self-filters, like /api/tasks/all.
 			mux.Handle("/api/chats", auth(http.HandlerFunc(c.chat.HandleList)))
 			// The chat image library: any access to the namespace may list it,
@@ -133,7 +146,7 @@ func registerContentRoutes(mux *http.ServeMux, c contentRoutes) {
 	} else {
 		mux.Handle("/api/namespaces", auth(http.HandlerFunc(c.ns.ListNamespaces)))
 		mux.Handle("/api/tree", auth(http.HandlerFunc(c.tree.GetTree)))
-		mux.Handle("/api/note", auth(invalidateSearch(http.HandlerFunc(c.note.Handle))))
+		mux.Handle("/api/note", auth(invalidateSearch(noteHandler)))
 		// History endpoints work in single mode too — git-sync runs
 		// orthogonally to AUTH_MODE.
 		mux.Handle("/api/note/history", auth(http.HandlerFunc(c.history.HandleHistory)))
@@ -157,6 +170,11 @@ func registerContentRoutes(mux *http.ServeMux, c contentRoutes) {
 			mux.Handle("/api/chat/convert", auth(invalidateSearch(http.HandlerFunc(c.chat.HandleConvert))))
 			mux.Handle("/api/chat/status", auth(http.HandlerFunc(c.chat.HandleStatus)))
 			mux.Handle("/api/chat/agents", auth(http.HandlerFunc(c.chat.HandleAgents)))
+			mux.Handle("/api/chat/stream", auth(http.HandlerFunc(c.chat.HandleStream)))
+			mux.Handle("/api/chat/claim", auth(invalidateSearch(http.HandlerFunc(c.chat.HandleClaim))))
+			mux.Handle("/api/chat/ack", auth(invalidateSearch(http.HandlerFunc(c.chat.HandleAck))))
+			mux.Handle("/api/chat/stop", auth(invalidateSearch(http.HandlerFunc(c.chat.HandleStop))))
+			mux.Handle("/api/chat/room", auth(invalidateSearch(http.HandlerFunc(c.chat.HandleRoom))))
 			mux.Handle("/api/chats", auth(http.HandlerFunc(c.chat.HandleList)))
 			mux.Handle("/api/chat/gifs", auth(http.HandlerFunc(c.chat.HandleGifs)))
 			mux.HandleFunc(handlers.BuiltinGifRoute, handlers.HandleBuiltinGif)
@@ -170,6 +188,27 @@ func registerContentRoutes(mux *http.ServeMux, c contentRoutes) {
 	if c.approvals != nil {
 		mux.Handle("/api/approvals", auth(http.HandlerFunc(c.approvals.Handle)))
 		mux.Handle("/api/approvals/", auth(http.HandlerFunc(c.approvals.Handle)))
+	}
+
+	// HTML pages. Each handler checks read or write on the page's HANDLE
+	// path itself (a <name>.page.md note), in both modes; the unlinked list
+	// and its delete need write on the namespace root.
+	if c.pages != nil {
+		// Publishing and deleting write a handle note: same cache and
+		// tree-changed path as any other note write.
+		mux.Handle("/api/pages", auth(invalidateSearch(http.HandlerFunc(c.pages.Handle))))
+		mux.Handle("/api/pages/text", auth(http.HandlerFunc(c.pages.HandleText)))
+		mux.Handle("/api/pages/archive", auth(http.HandlerFunc(c.pages.HandleArchive)))
+		mux.Handle("/api/pages/export", auth(http.HandlerFunc(c.pages.HandleExport)))
+		mux.Handle("/api/pages/import", auth(invalidateSearch(http.HandlerFunc(c.pages.HandleImport))))
+		mux.Handle("/api/pages/pass", auth(http.HandlerFunc(c.pages.HandlePass)))
+		mux.Handle("/api/pages/unlinked", auth(http.HandlerFunc(c.pages.HandleUnlinked)))
+		// Page files on mdnest's own origin only in static mode (scripts
+		// off). In script mode they are served by the pages listener alone.
+		// No session auth: the pass in the path is the credential.
+		if !c.pages.ScriptMode() {
+			mux.HandleFunc("/api/pages/view/", c.pages.HandleStaticView)
+		}
 	}
 
 	// Git sync endpoints (admin-only in multi mode, always allowed in single)

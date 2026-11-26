@@ -4,6 +4,112 @@ All notable changes to mdnest are documented here.
 
 ---
 
+## v4.8.17: HTML pages, local agent crews, and a calmer chat and editor
+
+### Added
+
+- **HTML pages** *(Optional: set `ENABLE_PAGES=true`)*. Publish a report or
+  dashboard as an HTML page into any folder, from the CLI (`mdnest page
+  publish`), from an AI tool over MCP, or by dropping an HTML file on a folder.
+  It shows in the tree as a small `<name>.page.md` file and opens in a viewer.
+  Pages run with scripts off; to let their scripts run, give them a second
+  address with `PAGES_ORIGIN`. Republishing updates the page you published
+  through; other copies keep the version they show. With script mode,
+  `FRONTEND_ORIGIN` must be the address people open, or a page cannot be shown. Pages are for casual
+  sharing: their files are kept apart from the notes, so git sync does not save
+  them, and the Pages view says so. Back up the pages store yourself. See
+  "HTML pages" in the setup guide.
+- **Local agent crews in a chat** *(Optional: needs Node 22 or newer on the
+  machine that runs them)*. `mdnest chat crew "goal" --note <new note> --agent
+  'name:role:command'` starts a chat where local agents take turns: each
+  answers only when mentioned, hands off with `@name`, and the crew pauses at a
+  turn limit, a timeout or Ctrl+C until you post. `mdnest chat watch` runs one
+  agent on an existing chat. Commands run only on your machine, never on the
+  server. Structured messages, task leases and editing an agent's prompt from
+  the chat come with it. `mdnest chat reply --with 'claude -p'` is a
+  ready-made agent command: it runs your AI CLI with your own login and posts
+  its answer, so you do not need to write a wrapper. See "Try a crew" in
+  `docs/chat.md`. A post with a type, a reply or metadata gets a stable
+  message ID that agents can claim and acknowledge; ordinary posts are saved
+  exactly as before. You can edit an agent's saved prompt in the chat's Agents
+  panel. The MCP server gains matching chat tools, and it can start a local
+  crew only when its host sets `MDNEST_MCP_LOCAL_CREW=true` and a trusted
+  config file. Nothing runs unless you start it. Each agent command gets your
+  full mdnest API token for that server, so it can do anything your account
+  can: run only agents you trust. Thanks to
+  [@sanshads](https://github.com/sanshads), #168.
+- **Teach your AI agents to use mdnest** *(Optional)*. `mdnest docs agents`
+  prints a short guide for AI agents: how to find servers and paths, which
+  command to use, how to write content without breaking code blocks, how
+  notes render, and how to use chat. `mdnest agent install` adds a small skill
+  to Claude Code (`~/.claude/skills`) and to Codex, Gemini CLI and other tools
+  that read `~/.agents/skills`. The skill only points at `mdnest docs agents`,
+  so `mdnest update` keeps agents current with no reinstall. `agent status`
+  shows what is installed, and `agent remove` deletes only the files mdnest
+  wrote. Claude Code users can install the same skill as a plugin with
+  `/plugin marketplace add mahsanamin/mdnest` and
+  `/plugin install mdnest@mdnest`. When an AI tool is on your computer, the
+  CLI installers (`mdnest.dev/install.sh` and your server's
+  `/cli/install.sh`) ask once at the end, "Let your AI tools (Claude Code,
+  Codex, ...) use mdnest? [Y/n]", and `mdnest login` asks the same once for
+  people who installed the CLI earlier. Enter installs the skill; no is
+  remembered in `~/.config/mdnest/agent-skills-declined`, so nothing asks
+  again. With no terminal (an agent or a script running the install) nothing
+  is installed and a one-line tip is printed. `--agent-skills` installs
+  without asking and `--no-agent-skills` never asks
+  (`curl ... | bash -s -- --agent-skills`; `MDNEST_AGENT_SKILLS=1` or `0`
+  does the same). `mdnest update` only prints the tip. `mdnest docs`
+  now prints the address of the CLI guide when the guide is not installed
+  next to the CLI, instead of a bare "not found".
+- **Helm chart: annotations for one workload.** `backend.annotations`,
+  `writer.annotations`, `frontend.annotations`, `mcp.annotations` and
+  `gitSync.annotations` annotate that Deployment or StatefulSet only, for
+  example so Stakater Reloader restarts the backend and the writer when the SSO
+  client secret is renewed. Unlike `commonAnnotations`, they never go into the
+  StatefulSets' volume claim templates, which cannot change on an existing
+  install. Thanks to
+  [@ecthelion77](https://github.com/ecthelion77) (Olivier Gintrand), #165, #166.
+- **Clearer CLI setup output.** `mdnest login`, `update`, `version`,
+  `agent` and the install scripts mark finished steps with a green check,
+  notes and warnings in yellow, errors in red, and the command to run next in
+  bold. `mdnest agent status` shows an aligned list. Colour is only used in a
+  terminal: piped output, `NO_COLOR` and commands that print notes or data
+  (including `--json`) stay plain text, exactly as before.
+  `MDNEST_COLOR=always` or `never` overrides it.
+- **Settings > CLI has an AI tools section.** It shows how to check, install
+  and remove the AI tool skills (`mdnest agent status`, `install`, `remove`)
+  and how to add mdnest to Claude Code as a plugin.
+
+### Fixed
+
+- **No "No namespaces found" flash on a reload.** The page showed it for a
+  moment before the namespace list arrived. It now waits for the list.
+- **An HTML page's title is the document's own.** An accessible inline SVG's
+  `<title>` was added to the page title ("Mountain WeekendAn illustrated
+  mountain valley"); it now stays the picture's label only.
+- **The file tree can be resized beside an HTML page.** With a page open, its
+  edge could hardly be grabbed and a drag over the page stalled. The edge now
+  sits fully inside the tree, and a drag ignores the page until you let go.
+- **A chat opened from the file tree keeps the mode you picked.** After you
+  pinned a chat to the side, clicking another chat in the tree opened it full
+  screen again. It now opens pinned too, also when the chat was docked from the
+  side panel's Chat tab or came back docked after a reload.
+- **A chat started from the CLI is no longer turned back into a plain note.**
+  When `mdnest chat new` wrote the chat header into a note that was open in the
+  Live editor, the editor saved its own copy over it a few seconds later.
+- **Typing in a note with front matter keeps its `---` header.** The Live
+  editor turned the header into a horizontal rule and a heading on the next
+  save, which also turned a chat back into a plain note. In single-user mode,
+  Live now shows the header in a small box above the note, where you can edit
+  it.
+- **`mdnest update` replaces an older CLI with the same version label.** Every
+  build between two releases says, for example, `4.8.17-dev`, so an older copy
+  said "up to date" and kept itself. Update now compares the file itself.
+  `mdnest version` also shows a short fingerprint of the file, such as
+  `mdnest CLI v4.8.17-dev (a1b2c3d)`, so two copies can be told apart.
+- **CLI paths print as `~/...` again on bash 5.2 and newer.** `mdnest agent`
+  showed the full home folder path there.
+
 ## v4.8.16: One short guide for AI coding agents, for contributors too
 
 ### Changed

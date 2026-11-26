@@ -343,6 +343,11 @@ func (h *NoteHandler) createNote(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid path"}`, http.StatusBadRequest)
 		return
 	}
+	// Create shares the note lock with posts/configuration/PUT/PATCH. The
+	// absence check and first write must be one operation within this writer,
+	// or concurrent crew/note creation can truncate a newly initialized room.
+	unlock := lockNote(ns, relPath)
+	defer unlock()
 	if info, err := h.store.Stat(ctx, ns, relPath); err == nil {
 		if info.IsDir {
 			http.Error(w, `{"error":"path is an existing directory; provide a filename inside it (e.g. <path>/<filename>.md)"}`, http.StatusConflict)

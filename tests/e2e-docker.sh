@@ -69,6 +69,8 @@ docker run -d --name "$CONTAINER" --network "$NET" \
   -e MDNEST_JWT_SECRET=e2e-test-secret \
   -e NOTES_DIR=/notes \
   -e FRONTEND_ORIGIN=http://localhost \
+  -e ENABLE_PAGES=true \
+  -e PAGES_DIR=/tmp/pages \
   -v "$NOTES_DIR:/notes" \
   -p 127.0.0.1:0:8080 "$IMAGE" >/dev/null
 

@@ -1,6 +1,6 @@
 # Setup and Configuration
 
-This guide covers installing, configuring, and running mdnest.
+This guide is the reference: every way to install mdnest and every setting. For the shortest path to a running server with your agent connected, see the [Quick Start](https://mdnest.dev/docs/quick-start).
 
 > Running mdnest in an existing Kubernetes cluster instead — including active/active with the git-native HA topology — is covered in [kubernetes.md](kubernetes.md). This guide is the Docker Compose install.
 
@@ -31,15 +31,10 @@ mdnest.
 
 ## Plain Docker Compose (or docker run)
 
-No clone, no setup script, nothing to build. Four commands:
-
-```bash
-mkdir mdnest && cd mdnest
-curl -fsSLo docker-compose.yml https://raw.githubusercontent.com/mahsanamin/mdnest/main/deploy/compose/docker-compose.yml
-echo "MDNEST_PASSWORD=$(openssl rand -base64 18)"  > .env
-echo "MDNEST_JWT_SECRET=$(openssl rand -hex 32)"  >> .env
-docker compose up -d
-```
+No clone, no setup script, nothing to build. Follow the
+[basic setup in the Quick Start](https://mdnest.dev/docs/quick-start#1-basic-setup): it downloads
+`docker-compose.yml`, writes two secrets to `.env`, and runs
+`docker compose up -d`.
 
 Open `http://localhost:3236` and sign in as `admin` with the password from
 `.env` (`cat .env`). If you forget a secret, `docker compose up` refuses to
@@ -164,7 +159,7 @@ On first run, `setup.sh` copies `mdnest.conf.sample` to `mdnest.conf` and exits,
 | `MDNEST_USER` | `admin` | Username for the login screen |
 | `MDNEST_PASSWORD` | `changeme` | Password for the login screen. Change this. |
 | `MDNEST_JWT_SECRET` | `changeme` | Secret key used to sign JWT tokens. Use a long random string. |
-| `FRONTEND_ORIGIN` | `http://localhost:<FRONTEND_PORT>` | The full URL where the frontend is served. Used for CORS. Update this if you use a custom domain or reverse proxy. |
+| `FRONTEND_ORIGIN` | `http://localhost:<FRONTEND_PORT>` | The full URL people open mdnest at. Used for CORS, the SSO return address, and, with script mode (`PAGES_ORIGIN`), the only address allowed to show HTML pages. Behind a custom domain or reverse proxy, set it to that public URL. |
 | `BACKEND_PORT` | `8286` | Host port mapped to the backend container (port 8080 internally) |
 | `FRONTEND_PORT` | `3236` | Host port mapped to the frontend container (port 80 internally) |
 | `BIND_ADDRESS` | `127.0.0.1` | Host IP(s) to bind the published ports to. To reach mdnest over Tailscale, a VPN or the LAN, keep `127.0.0.1` and put a reverse proxy in front (Caddy, nginx, or `tailscale serve`). A comma-separated list (e.g. `127.0.0.1,100.73.118.115`) also works, but Docker only publishes a port if that IP exists when the container starts, so an address that comes up after Docker (a reboot, a Docker restart) leaves mdnest running with no port published, or, if the address is missing at the moment Docker starts the container, not started at all (Docker does not retry it). `setup.sh` warns about such an address, and `./mdnest-server status` reports both cases. |
@@ -197,11 +192,29 @@ On first run, `setup.sh` copies `mdnest.conf.sample` to `mdnest.conf` and exits,
 | `ENABLE_AGENT_APPROVALS` *(v4.8.5+, experimental)* | `false` | Answer an agent's (Claude Code or Codex) permission prompt from mdnest: the question shows as a card, you press Allow or Deny in the browser, and the agent continues. Each machine also has to opt in, see `docs/chat.md`. Decisions are accepted only from a browser login. Requests live in memory and are not available on `MDNEST_ROLE=app`. Read the added risk in `docs/security.md` before turning it on. |
 | `ENABLE_EXCALIDRAW` *(v4.2.0+)* | `false` | Open `.excalidraw.md` notes on an Excalidraw canvas and allow read-only drawing embeds in any note. The (large) editor bundle is code-split and only loads when a drawing is opened. See `docs/excalidraw.md`. |
 | `EXCALIDRAW_LIBRARIES` *(v4.2.0+)* | *(none)* | Requires `ENABLE_EXCALIDRAW`. Comma-separated URLs to `.excalidrawlib` files, preloaded into every drawing so an organisation can ship a shared shape set. Fetched by the **browser**, not the backend, so the URLs must be reachable by clients (and CORS-enabled). |
+| `ENABLE_PAGES` | `false` | Optional. View-only HTML pages (reports, dashboards) published into any folder from the CLI, MCP or a desktop drop; each shows in the tree as a small `<name>.page.md` handle and opens in a viewer. Off by default: no route is registered and the frontend loads no pages code. By default their files are kept apart from the notes: back up `PAGES_DIR` (or the `mdnest-pages` volume). Set `PAGES_IN_GIT=true` to save new publishes with the notes. See [HTML pages](#html-pages-optional). |
+| `PAGES_DIR` | *(named volume `mdnest-pages`)* | Requires `ENABLE_PAGES`. Host folder for page files, kept apart from the notes. Not in git: back it up with the notes, and copy it along when you move to another server. Must not be inside a namespace's notes folder. The Helm chart uses the reserved direct child `NOTES_DIR/.mdnest-pages`, which is never a namespace. |
+| `PAGES_IN_GIT` | `false` | Requires `ENABLE_PAGES`. Save new publishes inside each namespace's hidden `.mdnest/pages/` folder, so git sync and a copy of the notes carry them. No existing pages are moved. Both stores are always read, even after switching the flag off. |
+| `PAGES_MAX_MB` | `20` | Requires `ENABLE_PAGES`. Largest total size of one page, checked when it is published. The web server in front of mdnest takes uploads up to 32 MB, so keep it at 30 or less. |
+| `PAGES_MAX_FILES` | `500` | Requires `ENABLE_PAGES`. Most files in one page, and also most folders, checked when it is published. |
+| `PAGES_ORIGIN` | *(none: static mode)* | Optional, needs team setup. A second address (another port or hostname) that serves page files and nothing else. With it, page scripts run there in a sandbox; without it, pages show with scripts off. Must differ from `FRONTEND_ORIGIN`. |
+| `PAGES_PORT` | *(the port in `PAGES_ORIGIN`)* | Script mode, `setup.sh` only. Host port for the pages listener, when `PAGES_ORIGIN` has no port because your own proxy is in front. |
+| `PAGES_NETWORK` | `strict` | Requires `PAGES_ORIGIN`. `strict`: a page loads only its own files. `open`: it may also load outside scripts and call outside sites (https). |
 | `OIDC_GROUPS_CLAIM` *(v4.2.0+)* | *(none)* | Requires `USER_PROVIDER=sso`. Name of the ID-token claim holding the user's IdP group IDs (e.g. `groups` on Entra ID). Enables OIDC-group membership in access Groups. Empty disables OIDC-group resolution entirely. **Membership is snapshotted at login** — see `docs/security.md`. In multi mode each SSO login also records the person's IdP groups *(v4.8.15+)*, so the assignee and chat member pickers list the IdP-group members of access groups, for 30 days after that login (or `API_TOKEN_GROUPS_MAX_AGE` when longer). |
 | `API_TOKEN_GROUPS_MAX_AGE` *(v4.8.14+)* | `0` | Requires `OIDC_GROUPS_CLAIM` and multi mode. Go duration (e.g. `168h`): API tokens use the IdP groups of their owner's last SSO login for that long after the login, so OIDC-group members of access Groups reach the same notes from the CLI and agents as in the browser. `0` = tokens use direct grants and user memberships only. Group changes reach tokens at the next login or when the age is reached — see `docs/security.md`. |
 | `STORAGE_BACKEND` *(v4.0.0+)* | `local` | `local` (filesystem; git history via the optional git-sync sidecar) or `git` (in-process git with idle-debounced commits, which also enables comment-marker recovery across a delete+recreate). Only these two values are accepted; anything else fails at startup. |
 | `GRANT_MAX_DEPTH` | `3` | Cap on how deep into a namespace tree a grant's path can go (`/` = depth 0). New grants beyond this depth return 400. Existing rows are grandfathered. Set `0` for no limit. |
 | `INSECURE_DEV_LOGIN` | `false` | **Dev-only.** Enables `POST /api/auth/dev-login` which mints a session for any existing user by email — bypassing the IdP. Loud red warning pill renders on every authenticated page while this is on. NEVER enable on a non-localhost deployment. |
+| `ENABLE_CHAT` | `true` | Chat rooms stored as notes, for people and AI agents. `false` turns it off: the `/api/chat*` routes are not registered and the browser never loads the chat code. See [chat.md](chat.md). |
+| `SEARCH_MAX_RESULTS` | `30` | Most results one search returns. |
+| `SEARCH_MAX_FILE_SIZE` | `1048576` | Files larger than this many bytes (1 MB) are skipped by search. |
+| `SEARCH_WORKERS` | `8` | How many files search reads at once. Raise it for a large repository (5,000+ notes). |
+| `SEARCH_CACHE_TTL` | `30` | Seconds the list of files search looks at is kept before it is read again. |
+| `DOWNLOAD_MAX_FILES` | `500` | Most files one folder download (zip) or move/copy between namespaces may hold. A bigger folder is refused up front with the real count. |
+| `DOWNLOAD_MAX_MB` | `100` | Most megabytes one folder download or move/copy between namespaces may hold. |
+| `DOWNLOAD_MAX_CONCURRENT` | `2` | Zip downloads running at once, for the whole server (one per user). |
+| `MCP_TOKEN`, `MCP_HTTP_PORT` | *(none)*, `3000` | Optional MCP server container. `MCP_TOKEN` is the one mdnest API token it uses for every call (service mode); `MCP_HTTP_PORT` is the host port of its `/mcp` endpoint. See [mcp.md](mcp.md). |
+| `MCP_AUTH_MODE`, `MCP_PUBLIC_URL`, `MCP_OAUTH_SECRET`, `MCP_SSO_AUTHORIZE_URL`, `MCP_ALLOWED_REDIRECT_ORIGINS` | *(service mode)* | `MCP_AUTH_MODE=oauth` makes each MCP client sign in as its own user through your SSO, instead of sharing one token. Needs the next three; `MCP_ALLOWED_REDIRECT_ORIGINS` lists extra client addresses allowed to finish that sign-in. See [mcp.md](mcp.md). |
 | `COMPOSE_PROJECT_NAME` | *(unset = directory basename)* | Override the docker compose project name. Useful when running parallel installs from differently-named (or similarly-named) directories so their containers don't collide. |
 | `SSH_KEY_PATH` | *(none)* | Path to SSH private key on the host. Mounted into the backend for git pull via sync button. Must be passphrase-free. |
 | `CADDY_DOMAIN` | *(none)* | Domain name for automatic HTTPS via Caddy. When set, adds a Caddy container and makes backend/frontend ports internal-only. Requires a DNS A record pointing to the server. |
@@ -303,6 +316,33 @@ Namespace names (the part after `MOUNT_`) must be simple identifiers:
 By default, mdnest runs in **single-user mode** -- one user, file-based auth, no database needed. This is the simplest setup and works for personal use.
 
 **Multi-user mode** adds PostgreSQL-backed user management with roles and namespace-level access control. When enabled, `setup.sh` automatically adds a Postgres container to `docker-compose.yml`.
+
+### Multi-User Mode with Plain Docker Compose
+
+If you installed with the [plain Docker Compose](#plain-docker-compose-or-docker-run)
+file, the multi-user block is already at the end of `docker-compose.yml`,
+commented out:
+
+1. Follow that block: add the `AUTH_MODE` and `POSTGRES_*` lines to the
+   backend's `environment`, add the `postgres` service, and add
+   `mdnest-pgdata:` under `volumes`.
+2. Add a database password to `.env`:
+
+   ```bash
+   echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)" >> .env
+   ```
+
+3. For comments and presence, also add `ENABLE_LIVE_COLLAB: "true"` to the
+   backend's `environment`.
+4. Restart with `docker compose up -d`.
+
+The `admin` account (`MDNEST_USER`) becomes the first administrator, and your
+notes are not changed. For company sign-in, add the settings from the
+[SSO setup guide](sso-setup.md) to the backend's `environment`: each setting in
+this guide is an environment variable with the same name. To invite people and
+give them access, see [Roles & administration](user-guide.md#roles--administration-multi-user-mode).
+
+The sections below are for the guided setup (`mdnest.conf`).
 
 ### Enabling Multi-User Mode (New Install)
 
@@ -562,6 +602,150 @@ But it won't pull from the remote. You'll need to run `git pull` on the host mac
 
 ---
 
+## HTML pages (optional)
+
+People and agents can publish HTML pages (a report, a dashboard) into a
+project folder, and the people who can read that folder can view them. Pages
+are view only: there is no HTML editor.
+
+**A page lives in the notes tree as one small file**, `<name>.page.md`, in any
+folder, next to the notes it belongs with. That file is the page's handle: it
+holds only front matter (`page: <id>`, title, author, published date) and a
+line saying it is an HTML page. The page's own files (HTML, CSS, scripts,
+images, data) never show in the tree or in notes search. By default they are
+stored apart from the notes; `PAGES_IN_GIT=true` stores new publishes inside
+the namespace's hidden `.mdnest/pages/` folder. With pages on, the handle shows with a page icon and opens
+the page in a viewer; with pages off it is just a small note.
+
+A page is a folder with an `index.html` (and any files it links to with
+relative paths), or a single `.html` file. Publish it with the CLI or the MCP
+`publish_page` tool:
+
+```bash
+mdnest page publish @myserver/engineering/Reports/q3-report ./report-folder
+mdnest page list @myserver/engineering
+mdnest read @myserver/engineering/Reports/q3-report.page.md   # the handle, then the page's text
+```
+
+Or drag it from your desktop onto a folder in the tree: one `.html` file, a
+folder with an `index.html`, or a page your browser saved with "Save page as,
+Webpage complete" (the `.html` file together with its `_files` folder). The
+size and file count are checked before it uploads, and a page that already
+exists asks before it is replaced. Dropping anything that is not HTML does
+nothing, as before.
+
+Publishing to the same handle again replaces the page; there is no version
+history.
+
+**Finding pages.** The **Pages** button on the right of the toolbar (with
+Chats and Stickies) opens the Pages list in the side panel. Its ⤢ button, or
+"Open full view", opens the Pages view; on a phone or a narrow window the
+button opens the Pages view directly. The Pages view has a card for every HTML
+page in the workspace you can
+read, with its title, folder, author, date, file count and, when the page has
+a `<meta name="description">`, that description. Search covers the pages'
+text, titles and descriptions; sort by newest, title or folder. **Open** shows
+the page; the target button shows its handle in the tree without opening it.
+The cards are never live previews, so opening the view runs no page scripts.
+
+The side panel's Pages list is a short searchable list for working beside
+your notes: a click opens the HTML page in the main area and the panel stays
+open, so you can flip through several. Its target button shows a page in the
+tree.
+
+**Who can do what.** A page uses the permissions of the folder its handle is
+in, exactly like the notes next to it: read access on the handle lets you
+view the page, write access lets you publish over it or delete it. A grant on
+a subfolder works for the pages in that subfolder.
+
+**Moving, copying, deleting.** Move or rename the handle like any note and
+the page goes with it. Moving or copying it to another namespace takes the
+page along. Copying a handle within a namespace gives the readers of the new
+folder that page too, the same as copying a note they could read. Deleting
+the handle deletes the page, unless another handle still points to it.
+
+A page belongs to the namespace it was published in. A handle that reaches
+another namespace some other way (copied by hand, or by git sync) shows
+"this page was published in another namespace: publish it again here". A
+handle removed outside mdnest (by git sync, for example) leaves its page
+"unlinked": writers of the whole namespace see them on the Unlinked tab of the
+Pages view and can delete them. They are never deleted on their own.
+
+**Turning it on.** Set `ENABLE_PAGES=true` in `mdnest.conf` and run
+`./mdnest-server rebuild`. Page files are kept in the named volume
+`mdnest-pages`, or in the host folder `PAGES_DIR` names. Back that up along
+with your notes. On the Helm chart, set `pages.enabled: true`; page files are
+kept on the notes volume in a hidden folder. Pages are not available on the
+multi-replica app role (`MDNEST_ROLE=app`, the git-native HA topology).
+
+**Saving pages with git (optional).** Set `PAGES_IN_GIT=true`, or `pages.inGit: true`
+in Helm, to store new publishes in `<namespace>/.mdnest/pages/<id>/`. Git sync
+then saves their HTML, scripts, images and metadata with the notes. The folder
+is private app data, not readable or editable as notes. Existing pages are
+never moved: mdnest reads both locations, hidden first, with either flag
+setting. Republish an old page to save its next copy with the notes. Keep the
+old pages volume mounted for any pages you have not republished.
+
+**Download and restore.** Writers of the whole namespace can open
+**Settings > Pages** to download a `.tar.gz` of its pages, or restore one. The
+same actions are `mdnest page export @myserver/engineering pages.tgz` and
+`mdnest page import @myserver/engineering pages.tgz`. The archive includes
+files from both stores, original handle paths, titles and descriptions.
+Unlinked pages are left out. Missing files, including a page deleted during
+the download, are listed as skipped in `manifest.json` and in the result line.
+
+Restore checks the whole archive before publishing. It writes new ids at the
+original handle paths: existing page handles are replaced, and ordinary notes
+are kept and reported as skipped. Pages go to the store selected by the flag.
+Limits are 256 MB of page files, 10,000 files, 1,000 handles and the configured
+limits for each page. If your own proxy or ingress sits in front of mdnest,
+allow 272 MB uploads on `/api/pages/import`; the bundled frontend has that
+limit already. This download is useful for moving to a server without the
+pages volume, and also works when pages are saved with git.
+
+**Separate page files still need a backup.** With the default
+`PAGES_IN_GIT=false`, git sync saves only the small `<name>.page.md` handle.
+A server rebuilt from git alone will be missing any page still in the separate
+store. Download the pages, or back up `PAGES_DIR` (the `mdnest-pages` volume)
+and copy it along with the notes when moving to another server.
+
+**Set `FRONTEND_ORIGIN` to the address people open.** Pages with scripts off
+show at mdnest's own address whatever it says. With script mode
+(`PAGES_ORIGIN`), only the address in `FRONTEND_ORIGIN` may show a page, so
+behind your own domain or reverse proxy set it to that public URL (for example
+`FRONTEND_ORIGIN=https://notes.example.com`), not the internal
+`http://localhost:<port>`, or pages show the browser's "refused to connect".
+
+### Static mode (the default)
+
+Without `PAGES_ORIGIN`, pages are served from mdnest's own address with their
+scripts turned off. Text, tables, CSS and images show; anything a script would
+have drawn (a chart, a filter) does not. No extra setup is needed.
+
+### Script mode (needs team setup)
+
+A page's script runs in the viewer's browser. On mdnest's own address it could
+act as the viewer, so scripts only run when pages come from a second address
+that serves page files and nothing else. Set `PAGES_ORIGIN` to that address:
+
+| Setup | `mdnest.conf` | What `setup.sh` does |
+|---|---|---|
+| A second port | `PAGES_ORIGIN=http://localhost:3237` | Publishes that port to the backend's pages listener |
+| A second hostname, with Caddy | `CADDY_DOMAIN=notes.example.com`, `PAGES_ORIGIN=https://pages.example.com` | Adds a Caddy site for that hostname. Point its DNS at the server |
+| A second hostname, your own proxy | `PAGES_ORIGIN=https://pages.example.com`, `PAGES_PORT=3237` | Publishes host port 3237 to the pages listener. Send that hostname to it from your proxy |
+
+`PAGES_ORIGIN` must differ from `FRONTEND_ORIGIN`. `setup.sh` refuses the same
+address, and the backend logs an error and stays in static mode if it is given
+one. On Helm, set `pages.origin`; with `ingress.enabled` the chart adds a rule
+for that hostname.
+
+`PAGES_NETWORK` decides what a page's scripts may load: `strict` (the default)
+allows only the page's own files, `open` also allows outside scripts and calls
+to outside sites over https. `strict` does not stop a page from sending what
+it shows to an outside site (a script can move its own frame to any address),
+so do not rely on it to keep a page's content in. The security details are in
+[security.md](security.md#html-pages).
+
 ## Remote Access
 
 By default, mdnest binds to `127.0.0.1` and is only accessible from the host machine. To access it from other devices, choose one of the following approaches.
@@ -595,13 +779,7 @@ Caddy listens on ports 80 and 443. HTTP requests are automatically redirected to
 
 ### Option 2: Tailscale Serve
 
-If you use [Tailscale](https://tailscale.com/), expose the frontend port:
-
-```bash
-tailscale serve --bg 3236
-```
-
-This gives you a `https://your-machine.tailnet-name.ts.net` URL accessible from any device on your Tailscale network. No additional configuration is needed.
+If you use [Tailscale](https://tailscale.com/), one `tailscale serve` command gives mdnest a trusted HTTPS address that only devices on your tailnet can reach, with no firewall ports opened. The [Tailscale guide](https://mdnest.dev/docs/tailscale) has the command and the steps for your phone.
 
 ### Option 3: Nginx Reverse Proxy + Certbot
 
@@ -662,6 +840,8 @@ These environment variables are set in the generated `.env` file and consumed by
 | `POSTGRES_DB` | PostgreSQL database (multi mode only) |
 | `POSTGRES_USER` | PostgreSQL user (multi mode only) |
 | `POSTGRES_PASSWORD` | PostgreSQL password (multi mode only) |
+| `ENABLE_PAGES`, `PAGES_DIR`, `PAGES_MAX_MB`, `PAGES_MAX_FILES`, `PAGES_NETWORK` | HTML pages, written only when `ENABLE_PAGES=true`. `PAGES_DIR` is the container path (`/data/pages`) |
+| `PAGES_ORIGIN`, `PAGES_LISTEN_PORT` | Script mode only: the pages address, and the backend's internal port for it (`8081`) |
 
 ---
 

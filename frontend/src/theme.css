@@ -80,6 +80,9 @@
      and light in light mode — it tracks the accent, not the page. */
   --text-inverse: var(--ctp-base);
   --text-inverse-deep: var(--ctp-crust);
+  /* Behind a published HTML page's frame: white in both themes, since a page
+     written without a background expects the browser's white default. */
+  --page-frame-bg: #ffffff;
 
   /* --- Semantics: hues -------------------------------------------------- */
   --accent: var(--ctp-blue);
@@ -251,6 +254,7 @@
      white-on-pale-blue if the palette had been swapped by value. */
   --text-inverse: #ffffff;
   --text-inverse-deep: #ffffff;
+  --page-frame-bg: #ffffff;
 
   /* Muted text has to move further than a straight primitive swap gives. Latte
      overlay0 (#9ca0b0) on the base reaches only ~2.3:1, under the 4.5:1 AA

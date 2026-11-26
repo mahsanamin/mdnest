@@ -1,0 +1,19 @@
+{
+  "name": "mdnest",
+  "description": "Teaches Claude Code to use the mdnest CLI: read, write and search notes, talk in mdnest chats, and publish or read mdnest HTML pages. The guide comes from the installed CLI, so it stays current without reinstalling.",
+  "author": {
+    "name": "Ahsan Amin",
+    "url": "https://github.com/mahsanamin"
+  },
+  "homepage": "https://mdnest.dev",
+  "repository": "https://github.com/mahsanamin/mdnest",
+  "license": "MIT",
+  "keywords": [
+    "mdnest",
+    "notes",
+    "markdown",
+    "chat",
+    "html",
+    "pages"
+  ]
+}

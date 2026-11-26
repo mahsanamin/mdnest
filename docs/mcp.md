@@ -13,14 +13,15 @@ transports**:
 | **stdio** (default) | `MCP_TRANSPORT=stdio` | A single desktop client on the same machine (Claude Desktop, Cursor). The client launches the process and talks over stdin/stdout. |
 | **streamable-HTTP** | `MCP_TRANSPORT=http` | A shared/hosted endpoint that many clients (or a team) reach over the network. Runs as a long-lived service and exposes `POST /mcp`. |
 
-> **Available tools:** `list_namespaces`, `list_tree`, `read_note`,
+> **Available tools:** `server_features`, `list_namespaces`, `list_tree`, `read_note`,
 > `write_note`, `edit_note`, `append_note`, `prepend_note`, `create_note`, `create_folder`,
 > `delete_item`, `move_item` (optionally into another namespace), `copy_item`, `search_notes`, `list_tasks`, `create_task`,
 > `move_task`, `edit_task`, `set_task_field`, `toggle_task`, `delete_task`,
 > `search_tasks`, `save_milestone`, `delete_milestone`, `create_excalidraw`, `draw_excalidraw`, `read_excalidraw`,
 > `edit_excalidraw_node`, `edit_excalidraw_edge`, `delete_excalidraw_element`,
 > `list_marp_themes`, `create_marp`, `add_marp_slide`, `list_marp_slides`, `read_marp_slide`,
-> `edit_marp_slide`, `delete_marp_slide`, `move_marp_slide`.
+> `edit_marp_slide`, `delete_marp_slide`, `move_marp_slide`, `publish_page`,
+> `list_pages`, `read_page`.
 >
 > The `*_task` tools drive the [task board](tasks.md): `list_tasks` returns the
 > board columns and every task (with the `path`/`line`/`raw` needed to mutate
@@ -49,6 +50,67 @@ transports**:
 > `mdnest edit` (see [cli.md](cli.md)).
 
 ---
+
+## Optional chat coordination
+
+Existing `read_chat` and `post_chat` accept structured read/post options. The
+explicit tools `mdnest_chat_read` and `mdnest_chat_post` return JSON containing
+message IDs, semantic types, reply IDs and metadata. Reads accept `last`,
+`unseen_only`, `type`, `as` and explicit `ack`. Posting accepts `type`,
+`reply_to`, `meta` and `done` and reports the message ID and room turn limits.
+
+Additional tools:
+
+- `mdnest_chat_claim`: acquire a lease using `msg_id`, `as`, optional `worker`
+  and `ttl_seconds`. Renew by supplying the returned `lease_id`.
+- `mdnest_chat_roster`: saved personas, durable cursors and crew status.
+- `mdnest_chat_agent_prompt`: save an existing agent's prompt without posting.
+- `mdnest_chat_crew_spawn`: optional local spawning from trusted host config.
+- `mdnest_chat_crew_status`: inspect a local launch ID for startup/exit status.
+
+The transcript resource is `mdnest://chat/namespace/path.md/transcript`.
+`agent_handoff_protocol` supplies the roster and claim/work/post instructions,
+with shared room text labelled as untrusted context. Resource subscriptions
+send `notifications/resources/updated` on stdio. The HTTP transport remains
+stateless, so it does not offer live subscriptions or local spawning.
+
+### Local spawning, off by default
+
+The host owner must set `MDNEST_MCP_LOCAL_CREW=true` and
+`MDNEST_MCP_CREW_CONFIG` to an absolute private local config path before starting
+stdio MCP. That file maps permitted handles to trusted launch commands:
+
+```json
+{
+  "cli": "/opt/mdnest/mdnest",
+  "cwd": "/workspace/project",
+  "agents": { "reviewer": "my-review-worker" },
+  "max_turns": 8,
+  "timeout": "15m",
+  "pass_env": ["PROVIDER_API_KEY"]
+}
+```
+
+The spawned workers get the MCP server's full mdnest API token for this
+server, so any agent command they run can do anything that account can. Run
+only agents you trust, and give this MCP server a separate account limited to
+the namespaces it needs if its agents are not trusted.
+
+The tool accepts only handles and traits, never `cmd`. Requested budgets are
+clamped to the trusted local limits. Shared-note command strings stay inert.
+Child logs go to stderr, never MCP protocol stdout. Local spawning needs Node
+22 or newer for the CLI runner. It creates a new room rather than overwriting
+one and returns a launch ID; inspect that ID for asynchronous startup errors.
+At most four pending or active crews may run at once. Finished status records
+expire after one minute and do not occupy an active launch slot. Closing stdio
+or sending SIGINT/SIGTERM stops and awaits owned crews and removes their
+temporary connection homes. No hosted agent service is required.
+
+The [CLI worker contract](cli.md#optional-local-chat-workers) describes safe
+environment passing, success-only acknowledgment, temporary home cleanup and
+the limits of cooperative leases. A process launched locally still has the
+launching account's OS permissions. This option grants execution authority to
+the connected stdio client, so enable it only for a client you trust.
 
 ## 1. Get an API token
 
@@ -117,8 +179,9 @@ transport**:
 
 ```bash
 docker build -t mdnest-mcp ./mcp-server
+MDNEST_HOST_URL=http://host.docker.internal:8286 # boundary-ok: standard Docker host alias
 docker run --rm -p 3000:3000 \
-  -e MDNEST_URL=http://host.docker.internal:8286 \
+  -e MDNEST_URL="$MDNEST_HOST_URL" \
   -e MDNEST_TOKEN=mdnest_your_token_here \
   mdnest-mcp
 ```
@@ -309,6 +372,33 @@ these tools scaffold a valid file that the app then renders.
 | `edit_marp_slide` | Replace one slide's markdown by index (frontmatter + other slides untouched). | `namespace`, `path`, `index`, `content` |
 | `delete_marp_slide` | Delete one slide by index. | `namespace`, `path`, `index` |
 | `move_marp_slide` | Reorder: move the slide at `from` to `to`. | `namespace`, `path`, `from`, `to` |
+
+### HTML pages (optional, server: `ENABLE_PAGES`)
+
+These tools appear only when the server has HTML pages on. `server_features` (always available) says whether they are on, and whether a page's scripts run, so an agent can check before it offers one. An HTML page is a
+view-only report or dashboard written in HTML. It shows in the notes tree as a
+small handle file, `<path>.page.md`, in any folder; its HTML and other files
+are kept apart from the notes by default. `server_features` also reports
+`pages_in_git`: when true, new publishes are saved with the namespace's notes
+in git. Existing pages stay where they were published, and both stores remain
+readable. See [HTML pages](setup.md#html-pages-optional).
+
+The default is always a Markdown note: an agent should call `publish_page` only
+when the person explicitly asks for an HTML page ("HTML page", "web page",
+"dashboard as HTML", "publish this as a page"). "Write a report", "save this"
+or "make notes" mean a Markdown note. It never turns an existing note into an
+HTML page on its own, and never publishes both for the same content unless
+asked.
+
+| Tool | Purpose | Key inputs |
+|------|---------|------------|
+| `publish_page` | Publish an HTML page at a handle path, only on an explicit request. Publishing to a path that already has one replaces it. The files are sent inline: `html` becomes `index.html`, and `files` holds anything it links to with a relative path (`encoding: "base64"` for images). The tool never reads a path on the MCP host's disk. | `namespace`, `path` (e.g. `Reports/q3-report`; `.page.md` is added), `html`, `files?` (`[{ path, content, encoding? }]`) |
+| `list_pages` | The HTML pages you can read in a namespace (handle path, title, author, date, size). With `query`, only pages whose text has every word. | `namespace`, `query?` |
+| `read_page` | An HTML page's details and the visible text pulled out of its `index.html` at publish time. Never the raw HTML. | `namespace`, `path` |
+
+`read_note` on a `*.page.md` returns the handle as it is on disk, then a line
+`----- page text (extracted from the published HTML) -----` and the page's
+text (or the reason the page is not in that namespace).
 
 **Slides are CRUD.** A Marp deck is a note whose subject is a list of slides, so
 the deck is editable both as a whole (the note tools) and per slide: `list_/

@@ -34,4 +34,16 @@ spec:
                   number: {{ $port }}
           {{- end }}
     {{- end }}
+    {{- if and .Values.pages.enabled .Values.pages.origin }}
+    - host: {{ include "mdnest.pagesHost" . | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "mdnest.backend.fullname" . }}
+                port:
+                  name: pages
+    {{- end }}
 {{- end }}

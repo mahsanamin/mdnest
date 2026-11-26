@@ -16,6 +16,9 @@
 
 set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# These checks compare exact text. Some run the CLI in a pseudo-terminal,
+# where it would add colour; run_color_suite covers the colour.
+export NO_COLOR=1
 
 PASS=0; FAIL=0
 green() { printf '\033[32m%s\033[0m' "$1"; }
@@ -519,6 +522,30 @@ alpha" "$(replace_first_literal "$h" "alpha" "")"
 # must never carry a folder part. Both are pure bash: run once per tier.
 run_transfer_suite() {
   echo "-- transfer helpers ($1)"
+  local backup_error
+  backup_error="$(
+    MDNEST_URL=http://example.invalid; MDNEST_TOKEN=test
+    response="$(mktemp)" || exit 1
+    curl() {
+      local target=""
+      while [ $# -gt 0 ]; do
+        if [ "$1" = -o ]; then target="$2"; shift; fi
+        shift
+      done
+      printf '%s' '{"error":"That file is not a pages backup (.tar.gz)."}' > "$target"
+      printf '400'
+    }
+    page_curl POST /pages/import "$response" 2>&1
+    rc=$?; rm -f "$response"; exit "$rc"
+  )" || true
+  eq "page import: a readable error, not API JSON" 'Error (400): That file is not a pages backup (.tar.gz).' "$backup_error"
+  eq "page restore: counts without Python or jq" "Restored 12 pages, 2 skipped." "$(printf '%s' '{"restored":12,"results":[{"reason":"ignore \\\"restored\\\":999","skipped":999}],"skipped":2}' | format_page_restore)"
+  eq "page restore: ignores nested counts" "Restored 0 pages, 1 skipped." "$(printf '%s' '{"results":[{"restored":999,"skipped":999}],"restored":0,"skipped":1}' | format_page_restore)"
+  if printf '%s' '{"error":"bad archive"}' | format_page_restore >/dev/null 2>&1; then
+    bad "page restore: error is not a success" "printed a success for an error"
+  else
+    ok "page restore: error is not a success"
+  fi
   eq "json_str: plain"            '"Notes/plan.md"'           "$(json_str 'Notes/plan.md')"
   eq "json_str: quote+backslash"  '"a\"b\\c.md"'              "$(json_str 'a"b\c.md')"
   eq "json_str: newline/tab"      '"a\nb\tc"'                 "$(json_str $'a\nb\tc')"
@@ -575,6 +602,236 @@ PROBE
     *':1: a=$(false)'*) ok "errexit lint: names the offending line" ;;
     *) bad "errexit lint: names the offending line" "got [$(awk "$ERREXIT_LINT" "$probe")]" ;;
   esac
+}
+
+# ── agent kit ───────────────────────────────────────────────────────────────
+# `mdnest docs agents` and the thin skill are embedded in the CLI (a curl
+# install is one file), and each has a readable copy in the repo. These checks
+# fail when a copy drifts, and walk agent install/status/remove through a
+# throwaway HOME: it installs, refuses to clobber a file it did not write,
+# updates its own older file, and removes only its own files.
+run_agent_suite() {
+  echo "── agent kit ──"
+  local h out rc f
+  if [ "$(agents_guide)" = "$(cat "$REPO_ROOT/docs/agents.md")" ]; then
+    ok "docs agents: the embedded guide matches docs/agents.md"
+  else
+    bad "docs agents: the embedded guide matches docs/agents.md" \
+        "edit agents_guide in mdnest and docs/agents.md together: $(diff <(agents_guide) "$REPO_ROOT/docs/agents.md" | head -5)"
+  fi
+  if [ "$(agent_skill_text)" = "$(cat "$REPO_ROOT/plugins/mdnest/skills/mdnest/SKILL.md")" ]; then
+    ok "agent skill: the embedded skill matches the plugin's SKILL.md"
+  else
+    bad "agent skill: the embedded skill matches the plugin's SKILL.md" \
+        "edit agent_skill_text in mdnest and plugins/mdnest/skills/mdnest/SKILL.md together"
+  fi
+  case "$(agents_guide)" in *'| `create <path> -` |'*) ok "docs agents: the guide has the command table" ;;
+    *) bad "docs agents: the guide has the command table" "not found" ;; esac
+  case "$(agent_skill_text)" in *'mdnest docs agents'*) ok "agent skill: points at 'mdnest docs agents'" ;;
+    *) bad "agent skill: points at 'mdnest docs agents'" "the skill must not copy the guide" ;; esac
+
+  # Through the real dispatch, as a user runs it. PATH is cut down so a
+  # claude/codex/gemini on this machine does not count as "found".
+  h=$(mktemp -d "${TMPDIR:-/tmp}/mdnest-agent.XXXXXX")
+  ag() { HOME="$h" PATH=/usr/bin:/bin "$REPO_ROOT/mdnest" "$@" 2>&1; }
+  out=$(ag docs agents); rc=$?
+  eq "docs agents: exit 0" "0" "$rc"
+  eq "docs agents: prints the guide" "$(cat "$REPO_ROOT/docs/agents.md")" "$out"
+
+  out=$(ag agent install); rc=$?
+  eq "agent install: no AI tool found exits 1" "1" "$rc"
+  case "$out" in *"No AI tool found"*) ok "agent install: says no tool was found" ;; *) bad "agent install: says no tool was found" "$out" ;; esac
+  eq "agent install: wrote nothing without a tool" "" "$(find "$h" -name SKILL.md)"
+
+  mkdir -p "$h/.claude"
+  out=$(ag agent install); rc=$?
+  f="$h/.claude/skills/mdnest/SKILL.md"
+  eq "agent install: exit 0 with ~/.claude present" "0" "$rc"
+  [ -f "$f" ] && ok "agent install: wrote ~/.claude/skills/mdnest/SKILL.md" || bad "agent install: wrote ~/.claude/skills/mdnest/SKILL.md" "$out"
+  [ ! -e "$h/.agents/skills/mdnest/SKILL.md" ] && ok "agent install: skipped ~/.agents (no tool found)" || bad "agent install: skipped ~/.agents (no tool found)" "$out"
+  eq "agent install: front matter stays on line 1" "---" "$(head -1 "$f")"
+  eq "agent install: the file is the skill plus one mark line" "$(agent_skill_text)" "$(grep -v '^<!-- mdnest-agent-skill sum=' "$f")"
+  eq "agent install: second run is a no-op" "0" "$(ag agent install >/dev/null; echo $?)"
+  case "$(ag agent status)" in *"claude: ~/.claude/skills/mdnest/SKILL.md: installed, up to date"*) ok "agent status: reports the install" ;;
+    *) bad "agent status: reports the install" "$(ag agent status)" ;; esac
+
+  # A file mdnest did not write: install refuses without --force, remove
+  # never deletes it.
+  mkdir -p "$h/.agents/skills/mdnest"
+  printf 'my own skill\n' > "$h/.agents/skills/mdnest/SKILL.md"
+  out=$(ag agent install --tool codex); rc=$?
+  eq "agent install: refuses to clobber a foreign file" "1" "$rc"
+  eq "agent install: foreign file is untouched" "my own skill" "$(cat "$h/.agents/skills/mdnest/SKILL.md")"
+  ag agent remove --tool agents --force >/dev/null
+  eq "agent remove: never deletes a foreign file, even with --force" "my own skill" "$(cat "$h/.agents/skills/mdnest/SKILL.md")"
+  out=$(ag agent install --tool agents --force); rc=$?
+  eq "agent install --force: replaces a foreign file" "0" "$rc"
+  eq "agent install --force: wrote the skill" "$(agent_skill_text)" "$(grep -v '^<!-- mdnest-agent-skill sum=' "$h/.agents/skills/mdnest/SKILL.md")"
+
+  # An edited file of ours: left alone by install and remove without --force.
+  printf 'my note\n' >> "$f"
+  out=$(ag agent install --tool claude); rc=$?
+  eq "agent install: refuses to overwrite an edited file" "1" "$rc"
+  case "$(cat "$f")" in *"my note"*) ok "agent install: the edit survives" ;; *) bad "agent install: the edit survives" "edit lost" ;; esac
+  out=$(ag agent remove --tool claude); rc=$?
+  eq "agent remove: refuses an edited file" "1" "$rc"
+  [ -f "$f" ] && ok "agent remove: the edited file is still there" || bad "agent remove: the edited file is still there" "$out"
+  ag agent remove --tool claude --force >/dev/null
+  [ ! -e "$f" ] && ok "agent remove --force: deletes an edited file of ours" || bad "agent remove --force: deletes an edited file of ours" "still there"
+
+  # Our own older text (as after a CLI update) is updated without --force.
+  ( agent_skill_text() { printf -- '---\nname: mdnest\ndescription: old\n---\nold body\n'; }
+    HOME="$h"; agent_write "$f" )
+  case "$(ag agent status)" in *"installed, older text"*) ok "agent status: sees our older text" ;; *) bad "agent status: sees our older text" "$(ag agent status)" ;; esac
+  out=$(ag agent install --tool claude); rc=$?
+  eq "agent install: updates our older text" "0" "$rc"
+  case "$out" in *"Updated:"*) ok "agent install: says Updated" ;; *) bad "agent install: says Updated" "$out" ;; esac
+
+  # remove takes only our files and their now-empty folders.
+  out=$(ag agent remove); rc=$?
+  eq "agent remove: exit 0" "0" "$rc"
+  [ ! -e "$h/.claude/skills/mdnest" ] && ok "agent remove: deleted our file and its folder" || bad "agent remove: deleted our file and its folder" "$out"
+  [ ! -e "$h/.agents/skills/mdnest/SKILL.md" ] && ok "agent remove: deleted the --force-written file (it is ours now)" || bad "agent remove: deleted the --force-written file (it is ours now)" "$out"
+
+  # The hint after install/update shows only when nothing is installed.
+  eq "agent hint: shown when nothing is installed" "1" "$(HOME="$h" agent_hint | grep -c 'mdnest agent install')"
+  ag agent install --tool claude >/dev/null
+  eq "agent hint: skipped once installed" "" "$(HOME="$h" agent_hint)"
+  ag agent remove >/dev/null
+  mkdir -p "$h/.claude/plugins"; printf '{"plugins":{"mdnest@mdnest":[]}}' > "$h/.claude/plugins/installed_plugins.json"
+  eq "agent hint: skipped when the Claude Code plugin is installed" "" "$(HOME="$h" agent_hint)"
+  rm -rf "$h"
+}
+
+# ── colour ─────────────────────────────────────────────────────────────────
+# Setup commands colour their output only for a terminal. Plain output (a
+# pipe, NO_COLOR) is the same text as before; every other check here pins it.
+run_color_suite() {
+  echo "── colour ──"
+  local h out esc
+  esc="$(printf '\033')"
+  h="$(mktemp -d "${TMPDIR:-/tmp}/mdnest-color.XXXXXX")"
+  out="$(HOME="$h" MDNEST_COLOR=always "$REPO_ROOT/mdnest" agent install --tool claude 2>&1)"
+  case "$out" in *"${esc}[32m"*"Installed: "*) ok "colour: an ok line has a green mark" ;; *) bad "colour: an ok line has a green mark" "$(printf '%s' "$out" | od -c | head -3)" ;; esac
+  echo "edited" >> "$h/.claude/skills/mdnest/SKILL.md"
+  out="$(HOME="$h" MDNEST_COLOR=always "$REPO_ROOT/mdnest" agent install --tool claude 2>&1)"
+  case "$out" in *"${esc}[33mSkipped: "*) ok "colour: a warning line is yellow" ;; *) bad "colour: a warning line is yellow" "$(printf '%s' "$out" | od -c | head -3)" ;; esac
+  out="$(HOME="$h" MDNEST_COLOR=always NO_COLOR=1 "$REPO_ROOT/mdnest" agent remove --tool claude --force 2>&1)"
+  case "$out" in *"${esc}["*) ok "colour: MDNEST_COLOR=always wins over NO_COLOR" ;; *) bad "colour: MDNEST_COLOR=always wins over NO_COLOR" "$out" ;; esac
+  out="$(HOME="$h" "$REPO_ROOT/mdnest" agent install --tool claude 2>&1)"
+  case "$out" in *"$esc"*) bad "colour: none in a pipe" "$(printf '%s' "$out" | od -c | head -3)" ;; *) ok "colour: none in a pipe" ;; esac
+  case "$(printf '%s\n' "$out" | head -1)" in "Installed: "*"/.claude/skills/mdnest/SKILL.md (Claude Code)") ok "colour: plain ok line is today's text" ;; *) bad "colour: plain ok line is today's text" "$out" ;; esac
+  out="$(HOME="$h" MDNEST_COLOR=never "$REPO_ROOT/mdnest" --version)"
+  case "$out" in *"$esc"*) bad "colour: MDNEST_COLOR=never is plain" "$out" ;; *) ok "colour: MDNEST_COLOR=never is plain" ;; esac
+  rm -rf "$h"
+}
+
+# ── agent skills question ───────────────────────────────────────────────────
+# `mdnest agent offer` is the one question the installers and `mdnest login`
+# ask. Nothing is installed without a yes or --yes; "no" is remembered; with
+# no terminal only the hint is printed. Driven on a pty by tests/pty-drive.py
+# with a throwaway HOME and a PATH without claude/codex/gemini, so the
+# machine's own tools never count. A case that must NOT ask still lists the
+# question as a prompt (answered "y"): if it is asked anyway the case fails
+# on the output instead of hanging on a question nobody answers.
+run_agent_offer_suite() {
+  echo "── agent skills question ──"
+  local h out rc py q="use mdnest? [Y/n] "
+  local skill_rel=".claude/skills/mdnest/SKILL.md"
+  offer() { HOME="$h" PATH=/usr/bin:/bin "$REPO_ROOT/mdnest" agent offer "$@" 2>&1; }
+  offer_pty() {
+    local prompts="$1" answers="$2"; shift 2
+    HOME="$h" PATH=/usr/bin:/bin PTY_PROMPTS="$prompts" PTY_ANSWERS="$answers" \
+      "$py" "$REPO_ROOT/tests/pty-drive.py" -- "$REPO_ROOT/mdnest" agent offer "$@" 2>&1
+  }
+  newh() { h=$(mktemp -d "${TMPDIR:-/tmp}/mdnest-offer.XXXXXX"); mkdir -p "$h/.claude"; }
+  unset MDNEST_AGENT_SKILLS
+
+  # No terminal: the hint only, nothing written.
+  newh
+  out=$(HOME="$h" PATH=/usr/bin:/bin MDNEST_TTY="$h/no-such-tty" "$REPO_ROOT/mdnest" agent offer 2>&1 </dev/null); rc=$?
+  eq "offer: no terminal exits 0" "0" "$rc"
+  case "$out" in *"Run 'mdnest agent install'"*) ok "offer: no terminal prints the hint" ;; *) bad "offer: no terminal prints the hint" "$out" ;; esac
+  case "$out" in *"$q"*) bad "offer: no terminal does not ask" "$out" ;; *) ok "offer: no terminal does not ask" ;; esac
+  [ ! -e "$h/$skill_rel" ] && ok "offer: no terminal installs nothing" || bad "offer: no terminal installs nothing" "skill written"
+
+  # --yes and MDNEST_AGENT_SKILLS=1 install without asking, even with no terminal.
+  out=$(HOME="$h" PATH=/usr/bin:/bin MDNEST_TTY="$h/no-such-tty" "$REPO_ROOT/mdnest" agent offer --yes 2>&1 </dev/null)
+  [ -f "$h/$skill_rel" ] && ok "offer --yes: installs without asking" || bad "offer --yes: installs without asking" "$out"
+  case "$out" in *"mdnest agent remove"*) ok "offer --yes: says how to undo it" ;; *) bad "offer --yes: says how to undo it" "$out" ;; esac
+  rm -rf "$h"; newh
+  out=$(HOME="$h" PATH=/usr/bin:/bin MDNEST_TTY="$h/no-such-tty" MDNEST_AGENT_SKILLS=1 "$REPO_ROOT/mdnest" agent offer 2>&1 </dev/null)
+  [ -f "$h/$skill_rel" ] && ok "offer: MDNEST_AGENT_SKILLS=1 installs" || bad "offer: MDNEST_AGENT_SKILLS=1 installs" "$out"
+  rm -rf "$h"
+
+  # Without a tool on this machine there is nothing to ask about.
+  h=$(mktemp -d "${TMPDIR:-/tmp}/mdnest-offer.XXXXXX")
+  eq "offer --yes: no AI tool is not an error" "0" "$(offer --yes >/dev/null; echo $?)"
+  rm -rf "$h"
+
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "  (python3 not present: skipping the terminal checks)"
+    return 0
+  fi
+  py="$(command -v python3)"
+
+  # Enter means yes.
+  newh
+  out=$(offer_pty "$q" ""); rc=$?
+  eq "offer: Enter exits 0" "0" "$rc"
+  case "$out" in *"Let your AI tools (Claude Code, Codex, ...) use mdnest? [Y/n]"*) ok "offer: asks the question" ;; *) bad "offer: asks the question" "$out" ;; esac
+  [ -f "$h/$skill_rel" ] && ok "offer: Enter installs the skill" || bad "offer: Enter installs the skill" "$out"
+  case "$out" in *"To undo this, run 'mdnest agent remove'"*) ok "offer: says how to undo it" ;; *) bad "offer: says how to undo it" "$out" ;; esac
+  # Already installed: not asked again.
+  out=$(offer_pty "$q" "y")
+  case "$out" in *"$q"*) bad "offer: installed means no question" "$out" ;; *) ok "offer: installed means no question" ;; esac
+  rm -rf "$h"
+
+  # No is remembered, and silences the hint too.
+  newh
+  out=$(offer_pty "$q" "n")
+  [ ! -e "$h/$skill_rel" ] && ok "offer: no installs nothing" || bad "offer: no installs nothing" "$out"
+  [ -f "$h/.config/mdnest/agent-skills-declined" ] && ok "offer: no writes the declined marker" || bad "offer: no writes the declined marker" "$out"
+  out=$(offer_pty "$q" "y")
+  case "$out" in *"$q"*) bad "offer: a declined user is not asked again" "$out" ;; *) ok "offer: a declined user is not asked again" ;; esac
+  [ ! -e "$h/$skill_rel" ] && ok "offer: still nothing installed after no" || bad "offer: still nothing installed after no" "$out"
+  out=$(HOME="$h" PATH=/usr/bin:/bin MDNEST_TTY="$h/no-such-tty" "$REPO_ROOT/mdnest" agent offer 2>&1 </dev/null)
+  case "$out" in *"mdnest agent install"*) bad "agent hint: skipped after no" "$out" ;; *) ok "agent hint: skipped after no" ;; esac
+  # Deleting the marker brings the question back.
+  rm -f "$h/.config/mdnest/agent-skills-declined"
+  out=$(offer_pty "$q" "n")
+  case "$out" in *"$q"*) ok "offer: asked again once the marker is deleted" ;; *) bad "offer: asked again once the marker is deleted" "$out" ;; esac
+  rm -rf "$h"
+
+  # Any other answer: nothing installed, nothing remembered.
+  newh
+  out=$(offer_pty "$q" "maybe")
+  [ ! -e "$h/$skill_rel" ] && [ ! -e "$h/.config/mdnest/agent-skills-declined" ] && ok "offer: an unclear answer changes nothing" || bad "offer: an unclear answer changes nothing" "$out"
+
+  # --no and MDNEST_AGENT_SKILLS=0 never ask.
+  out=$(offer_pty "$q" "y" --no)
+  case "$out" in *"$q"*) bad "offer --no: never asks" "$out" ;; *) ok "offer --no: never asks" ;; esac
+  out=$(MDNEST_AGENT_SKILLS=0 offer_pty "$q" "y")
+  case "$out" in *"$q"*) bad "offer: MDNEST_AGENT_SKILLS=0 never asks" "$out" ;; *) ok "offer: MDNEST_AGENT_SKILLS=0 never asks" ;; esac
+  [ ! -e "$h/$skill_rel" ] && ok "offer --no: installs nothing" || bad "offer --no: installs nothing" "$out"
+  rm -rf "$h"
+
+  # A terminal but no AI tool: no question, the hint only.
+  h=$(mktemp -d "${TMPDIR:-/tmp}/mdnest-offer.XXXXXX")
+  out=$(offer_pty "$q" "y")
+  case "$out" in *"$q"*) bad "offer: no AI tool means no question" "$out" ;; *) ok "offer: no AI tool means no question" ;; esac
+  rm -rf "$h"
+
+  # Both installers end with the same offer block and read the same flags.
+  local a b
+  a="$(sed -n '/^# Offer the AI agent skill once/,$p' "$REPO_ROOT/install-cli.sh")"
+  b="$(sed -n '/^# Offer the AI agent skill once/,$p' "$REPO_ROOT/frontend/public/cli/install.sh")"
+  if [ -n "$a" ] && [ "$a" = "$b" ]; then ok "installers: the same offer block in both"; else bad "installers: the same offer block in both" "install-cli.sh and frontend/public/cli/install.sh differ"; fi
+  for f in install-cli.sh frontend/public/cli/install.sh; do
+    case "$(cat "$REPO_ROOT/$f")" in *"--agent-skills) AGENT_SKILLS=1"*"--no-agent-skills) AGENT_SKILLS=0"*) ok "$f: reads --agent-skills and --no-agent-skills" ;;
+      *) bad "$f: reads --agent-skills and --no-agent-skills" "flags missing" ;; esac
+  done
+  grep -q '^agent_offer()' "$REPO_ROOT/mdnest" && ok "installers: the CLI has the agent_offer() they look for" || bad "installers: the CLI has the agent_offer() they look for" "renamed?"
 }
 
 # ── CLI download sources ────────────────────────────────────────────────────
@@ -917,6 +1174,9 @@ run_version_suite
 run_keepalive_suite
 run_keepalive_no_policy_suite
 run_approval_suite
+run_agent_suite
+run_color_suite
+run_agent_offer_suite
 run_errexit_lint
 
 echo

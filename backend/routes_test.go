@@ -251,7 +251,11 @@ func buildFixture(t *testing.T) string {
 	return root
 }
 
-func newTestServer(t *testing.T, multi bool) *testServer {
+// testServerOption changes the route set before it is registered (a feature
+// flag a test turns on).
+type testServerOption func(r *contentRoutes, stg storage.Storage, perms *middleware.PermissionChecker)
+
+func newTestServer(t *testing.T, multi bool, opts ...testServerOption) *testServer {
 	t.Helper()
 	root := buildFixture(t)
 	stg, err := storage.NewLocalStorage(root)
@@ -329,6 +333,9 @@ func newTestServer(t *testing.T, multi bool) *testServer {
 		routes.attribution = handlers.NewAttributionHandler(stg, memActivity{})
 		routes.comments = handlers.NewCommentsHandler(stg)
 		routes.ws = handlers.NewWSHandler(hub, testSecret, perms)
+	}
+	for _, o := range opts {
+		o(&routes, stg, perms)
 	}
 	mux := http.NewServeMux()
 	registerContentRoutes(mux, routes)
@@ -520,6 +527,23 @@ func TestRoutes_ChatStatusNeedsWriteOnTheChat(t *testing.T) {
 	_, body = ts.get(owen, "/api/chat?ns=alpha&path=Private/room.md")
 	if !strings.Contains(body, `"text":"on it"`) {
 		t.Errorf("status not returned with the chat: %s", body)
+	}
+}
+
+func TestRoutes_ChatCoordinationNeedsAccessOnTheNote(t *testing.T) {
+	ts := newTestServer(t, true)
+	pat := jwtFor(t, uidPat, "collaborator", nil)
+	for _, route := range []string{"claim", "ack", "room", "stop"} {
+		code, body := ts.do(pat, http.MethodPost, "/api/chat/"+route+"?ns=alpha&path=Private/room.md&as=builder&msg_id=m_test", strings.NewReader("[]"), "")
+		if code != http.StatusForbidden {
+			t.Errorf("%s mutation outside grant: %d %s", route, code, body)
+		}
+	}
+	for _, route := range []string{"room", "stream"} {
+		code, body := ts.get(pat, "/api/chat/"+route+"?ns=alpha&path=Private/room.md")
+		if code != http.StatusForbidden {
+			t.Errorf("%s read outside grant: %d %s", route, code, body)
+		}
 	}
 }
 
@@ -715,7 +739,8 @@ func TestRoutes_TempTokenIsNotASession(t *testing.T) {
 	if code != 200 {
 		t.Errorf("a session token stopped working: %d", code)
 	}
-	code, _ = ts.get("", "/api/files/alpha/Shared/a.md?token="+jwtFor(t, uidOwen, "collaborator", nil))
+	queryToken := jwtFor(t, uidOwen, "collaborator", nil)
+	code, _ = ts.get("", "/api/files/alpha/Shared/a.md?token="+queryToken)
 	if code != 200 {
 		t.Errorf("?token= fallback stopped working: %d", code)
 	}

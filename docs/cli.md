@@ -20,9 +20,10 @@ fork: the CLI you get matches the server, which the GitHub copy may not. If the
 server cannot serve the CLI (an older server, or a proxy in the way), the
 installer falls back to the latest release from GitHub and says so.
 
-It only installs. It then prints `mdnest login https://notes.example.com`,
-which you run to connect the CLI to the server; it asks for a token at the
-terminal (see [Login](#login)). Installing and connecting are separate steps
+It only installs (and may ask the one question about AI tools described in
+[AI agent skills](#ai-agent-skills)). It then prints
+`mdnest login https://notes.example.com`, which you run to connect the CLI to
+the server; it asks for a token at the terminal (see [Login](#login)). Installing and connecting are separate steps
 because most people already have the CLI connected, or are only updating it.
 
 ### From GitHub
@@ -50,6 +51,42 @@ publishes the moment a fix lands on `main`), then jsDelivr, then `mdnest.dev`
 `mdnest update` uses the same chain.
 
 **No dependencies — just bash and curl.** `python3`/`jq` are used when present (for prettier JSON), but the CLI falls back to pure-bash/awk so every command works without them. The installer downloads to a temp file and installs atomically (using `sudo` only if `/usr/local/bin` isn't writable, and falling back to `~/.local/bin` with a PATH hint if it can't) — so it never leaves a half-written binary or aborts mid-download on a fresh machine.
+
+### AI agent skills
+
+At the end of the install, if an AI tool is on your computer (the `claude`,
+`codex` or `gemini` command, or a `~/.claude`, `~/.codex` or `~/.agents`
+folder) and the mdnest skill is not set up yet, the installer asks once:
+
+```text
+Let your AI tools (Claude Code, Codex, ...) use mdnest? [Y/n]
+```
+
+- **Enter or y** runs `mdnest agent install` and says how to undo it
+  (`mdnest agent remove`). See
+  [Use mdnest from your AI agent](#use-mdnest-from-your-ai-agent-optional).
+- **n** installs nothing and writes `~/.config/mdnest/agent-skills-declined`,
+  so no installer, login or update asks or reminds you again.
+- **No terminal** (an AI agent or a script is running the installer): nothing
+  is installed and the installer prints a one-line tip instead.
+
+`mdnest login` asks the same question once after a successful login, for
+people who installed the CLI before the installer asked. `mdnest update` never
+asks; it only prints the tip.
+
+To decide up front, pass a flag to the installer:
+
+```bash
+# set up the skill without asking (useful when an agent runs the install)
+curl -fsSL https://mdnest.dev/install.sh | bash -s -- --agent-skills
+# never ask
+curl -fsSL https://mdnest.dev/install.sh | bash -s -- --no-agent-skills
+# the same, for your own server's installer
+curl -fsSL https://notes.example.com/cli/install.sh | bash -s -- https://notes.example.com --agent-skills
+```
+
+`MDNEST_AGENT_SKILLS=1` (install) or `MDNEST_AGENT_SKILLS=0` (never ask) does
+the same as the flags, and also applies to `mdnest login`.
 
 ### Install from a specific branch
 
@@ -90,6 +127,10 @@ The prompt reads from the terminal itself, not from standard input, so it works
 under `curl ... | bash`. With no terminal at all (a script or CI job), login
 without a token prints the usage and exits 1, as before; pass the token on the
 command line there.
+
+After a successful login, if an AI tool is on your computer and the mdnest
+skill is not set up, login asks the [AI agent skills](#ai-agent-skills)
+question once. It is not asked again after a no, or with no terminal.
 
 ### Pick the alias yourself
 
@@ -314,6 +355,64 @@ mdnest download @work/engineering/notes/meeting.md ./meeting.md
 
 A file downloads as itself and a folder as a zip. Without an output file, the server's name is used in the current folder. A download never overwrites an existing local file, and a failed one leaves nothing behind. Folders over the server's limits are refused with the actual counts.
 
+### Which features a server has on
+
+```bash
+mdnest features @work           # pages, chat, task board, drawings, slides: on or off
+mdnest features @work --json    # the same, for scripts and agents
+```
+
+Reads the server's public settings, so it needs no login. It also says whether
+an HTML page's scripts run on that server. AI agents check it before they offer
+or use an optional feature; over MCP the same answer comes from the
+`server_features` tool.
+
+### HTML pages *(server `ENABLE_PAGES=true`)*
+
+```bash
+mdnest page publish @work/engineering/Reports/q3-report ./report-folder   # folder with index.html
+mdnest page publish @work/engineering/Reports/q3-report ./report.html     # or one .html file
+mdnest page list    @work/engineering                                     # every page you can read
+mdnest page list    @work/engineering revenue                             # pages whose text has "revenue"
+mdnest page list    --json @work/engineering                              # raw API JSON
+mdnest page pull    @work/engineering/Reports/q3-report ./q3-copy         # into a new or empty folder
+mdnest page delete  @work/engineering/Reports/q3-report
+mdnest page export  @work/engineering pages.tgz                           # namespace backup
+mdnest page import  @work/engineering pages.tgz                           # restore handles with new ids
+mdnest read         @work/engineering/Reports/q3-report.page.md           # the handle, then the page text
+```
+
+An HTML page is a view-only report or dashboard written in HTML. It shows in
+the notes tree as a small handle file, here `Reports/q3-report.page.md` (the
+`.page.md` is added when you leave it out). Its HTML and other files are kept
+apart from the notes by default. With `PAGES_IN_GIT=true`, new publishes go in
+the namespace's hidden `.mdnest/pages/` folder so git sync saves them too. A Markdown note stays the default for everything else:
+AI agents publish an HTML page only when someone explicitly asks for one (see
+`mdnest docs agents`). A folder is sent as a gzipped tar made by the system `tar`; publishing
+to the same handle replaces the page. Publishing and deleting need write
+access on the handle's folder, listing and reading need read access, as for
+the notes beside it.
+
+`mdnest read` on a `*.page.md` prints the file as it is on disk, then a line
+`----- page text (extracted from the published HTML) -----` and the page's
+visible text. If the page is not in that namespace it prints the reason
+instead. With pages off it prints the file only.
+
+Move, rename, copy or delete the handle with the normal commands: the page
+goes with it, also to another namespace. A server with pages off answers
+"this server has pages turned off". See "HTML pages" in
+[setup.md](setup.md#html-pages-optional).
+
+`page export` and `page import` need write access to the whole namespace.
+Export never overwrites an existing local file. The `.tar.gz` contains the
+page files, handle paths, titles and descriptions from both stores, but no
+unlinked pages. Missing files are skipped and listed in `manifest.json`; the
+CLI prints the counts. Import validates the whole archive first, then restores
+pages with new ids at their original handle paths. Existing page handles are
+republished, ordinary notes are skipped and kept. Add `--json` after the file
+name for per-entry restore results. Limits are 256 MB of page files, 10,000
+files and 1,000 handles, plus each page's configured size and file limits.
+
 ### Search
 
 ```bash
@@ -356,6 +455,129 @@ minutes (set it again during long work); the next post, or going back to
 to end its turn while its last chat command was a wait is sent back to
 waiting, until it runs `chat leave`. Setup is in [chat.md](chat.md).
 
+### Optional local chat workers
+
+Structured chat reads support `--last N`, `--type`, `--unseen-only` and `--json`.
+JSON returns parsed messages with stable `id`, `author`, `time`, `type`,
+`reply_to`, `meta`, `claimed_by` and `body` fields. `text` and message numbers
+remain available for older callers. Filters run before the limit. A normal
+recent read returns the last matching messages. An unseen read returns the
+oldest pending batch first, so acknowledgment cannot skip earlier work.
+
+```bash
+mdnest chat post notes/Chats/team.md "Please review" --as builder --type review --meta '{"verdict":"pending"}'
+mdnest chat read notes/Chats/team.md --as reviewer --unseen-only --last 6 --json
+mdnest chat read notes/Chats/team.md --as reviewer --unseen-only --type review --ack --json
+mdnest chat claim notes/Chats/team.md --msg-id m_example --as reviewer --worker host1 --ttl 300
+mdnest chat agent notes/Chats/team.md --as reviewer --prompt "Review the tests"
+mdnest chat roster notes/Chats/team.md
+```
+
+New structured reads do not acknowledge unless `--ack` is explicit. Plain
+`read --as` keeps its earlier local-cursor behavior. Claims return a lease ID;
+renew with the same handle, worker and `--lease-id`. A competing active claim
+returns an error with its holder and expiry. Claims coordinate one backend
+writer only, and reject symlink aliases and the multi-writer app role.
+
+`watch --exec` and `crew` require Node 22 or newer only when invoked. They run
+commands on the machine where the CLI runs, never on the HTTP server:
+
+```bash
+mdnest chat watch notes/Chats/team.md --as reviewer --trait "Review tests" --mentions --exec 'my-review-worker' --timeout 15m
+mdnest chat crew "Review the tests" --note notes/Chats/new-team.md --agent 'reviewer:Review tests:my-review-worker' --max-turns 8 --timeout 15m
+```
+
+A worker receives its prompt on stdin and the `MDNEST_NOTE`, `MDNEST_MSG_ID`,
+`MDNEST_MSG_AUTHOR`, `MDNEST_MSG_TYPE`, `MDNEST_MSG_BODY`, `MDNEST_MSG_META`,
+`MDNEST_AGENT_HANDLE` and `MDNEST_AGENT_TRAIT` environment fields. Quotes and
+newlines remain data, never shell substitutions. The explicitly supplied
+`--exec` command is shell code, so use only a command you trust locally.
+Output is prefixed by handle. No model is called while idle.
+
+Children use a temporary home containing only this server's mdnest connection,
+removed on exit. That connection is your full mdnest API token for this
+server, so any agent command you run can do anything your account can. Run
+only agents you trust, and use a separate account limited to the namespaces
+it needs for agents you do not trust. The normal home, ambient credential environment, interpreter
+startup variables and MCP protocol streams are not inherited. Pass a required
+provider credential by name with `--pass-env PROVIDER_API_KEY`, or use a local
+wrapper with its own explicit configuration. `--cwd` selects a trusted local
+working directory. This is environment separation, not an OS sandbox: a local
+command still has the launching account's filesystem and network permissions. Existing interactive
+provider login/profile support is not confirmed by the fake-process tests.
+Do not expect a CLI to find a login in the temporary home automatically.
+
+`mdnest chat reply --with '<command>'` is a ready-made worker command for an AI
+CLI, so you do not have to write a wrapper:
+
+```bash
+mdnest chat crew "Plan a launch" --note notes/Chats/launch.md \
+  --agent "writer:Proposes ideas:mdnest chat reply --with 'claude -p'"
+```
+
+It reads the worker's prompt from stdin, adds a short instruction (write only
+your next chat message, mention `@handle` to hand off), and runs the command
+with `sh -c`, giving it that text on stdin. The command's output is posted to
+`MDNEST_NOTE` as `MDNEST_AGENT_HANDLE`. If the command fails, or prints nothing
+but spaces, nothing is posted and `chat reply` exits non-zero, so the runner
+does not acknowledge the message. It never posts with `--done`: completing a
+crew is left to you or to a command you write yourself.
+
+The one change from the worker's environment is `HOME`: the command runs with
+your real home folder, looked up from the user database because `$HOME` is
+the temporary one. Only that command gets it; the post keeps the temporary
+home and the runner's connection. This lets the AI CLI use your own login and
+settings, which is the purpose, and it is the same trust as running that CLI
+yourself. It also means the CLI keeps every tool and permission your own
+settings allow, while the chat it reads is untrusted text that anyone who can
+post in the room wrote. A message could ask the AI to read a file and repeat
+it, and the answer is posted to the room. In a room where people you do not
+trust can post, turn the CLI's tools off with its own options, or write your
+own worker. `PATH`, `--pass-env` values, `--cwd` and the `MDNEST_*` fields are
+passed through unchanged. Running `chat reply` outside a `watch` or `crew`
+worker is an error.
+
+`crew --config crew.yaml` also accepts local JSON, or this limited YAML shape:
+
+```yaml
+max_turns: 8
+timeout: "15m"
+human_handle: "human"
+agents:
+  - handle: reviewer
+    trait: "Review tests"
+    cmd: "my-review-worker"
+```
+
+Config files are local trusted input. Commands copied into shared notes are
+never used as launch configuration. Startup/post operations are not exactly-once:
+if a response is lost, check the room before retrying. The CLI refuses a second
+create at the same path on the supported single backend writer. This does not
+serialize external filesystem writers, hard links, differently cased aliases or
+two namespaces mounting the same physical file. A crew creates a new note and refuses to
+overwrite an existing one. It registers its roster and cursors, mentions the
+first agent in the goal, and supplies recent context and handoff instructions.
+Post with `--done` for completion. A pause, timeout, local turn cap or signal
+stops children and pauses the crew rather than falsely marking it completed.
+The local deadline and attempt cap cannot be raised by editing the note.
+The human handle defaults to the authenticated account. A saved prompt edit is
+read again for each invocation as untrusted persona data, while the executable,
+working directory, inherited environment and budgets stay fixed locally.
+
+A handle identifies one logical consumer per authenticated account. Duplicate
+watchers using the same handle share its durable acknowledged IDs and compete
+for leases; use different handles for independent consumers. A restart keeps
+that handle's cursor. A new message ID at an old position is still unseen. Edits to the same saved
+prompt are last-write-wins; reopen it before changing a prompt someone else
+may also be editing.
+
+Workers claim before execution and acknowledge only after a successful exit.
+Lease expiry or a crash between work and acknowledgment can replay a task.
+Handlers must be idempotent. These cooperative leases do not fence external
+side effects. The runner renews a lease during work and cancels its child if
+renewal fails. Normal note writers can edit coordination state, so room limits
+are not an authorization boundary.
+
 ### Agent approvals *(experimental; server `ENABLE_AGENT_APPROVALS=true`)*
 
 Lets you answer an agent's permission prompts and questions from mdnest, and
@@ -397,6 +619,62 @@ waits, and only while its own question is open.
 Needs only bash and curl. The policy file and the agent setup are in
 [chat.md](chat.md#agent-approvals-experimental-off-by-default).
 
+## Use mdnest from your AI agent *(optional)*
+
+AI agents such as Claude Code, Codex and Gemini CLI can learn to use mdnest
+from the CLI itself. Nothing is set up for them unless you say yes to the
+installer's question (see [AI agent skills](#ai-agent-skills)) or run the
+command yourself.
+
+```bash
+mdnest docs agents        # the guide for AI agents: paths, which command to use, writing safely, chat
+mdnest agent install      # add a small mdnest skill to each AI tool found on this machine
+mdnest agent status       # what is installed where
+mdnest agent remove       # delete the skill files mdnest wrote
+```
+
+`agent install` writes one file per tool:
+
+| Tool | File |
+|---|---|
+| Claude Code | `~/.claude/skills/mdnest/SKILL.md` |
+| Codex, Gemini CLI and other tools that read the shared skills folder | `~/.agents/skills/mdnest/SKILL.md` |
+
+The skill only tells the agent to run `mdnest docs agents` and follow it. The
+guide is part of the CLI, so `mdnest update` also updates what your agents
+know, with no reinstall.
+
+- A tool counts as found when its folder (`~/.claude`, `~/.agents`, `~/.codex`
+  or `~/.gemini`) or its command (`claude`, `codex`, `gemini`) exists.
+  `--tool claude` or `--tool agents` installs for one tool even if it was not
+  found (`codex` and `gemini` are accepted as names for `agents`).
+- Each file has a mark line with a checksum. If you edit the file, or a file
+  mdnest did not write is already at that path, `install` leaves it alone
+  unless you pass `--force`.
+- `remove` deletes only files mdnest wrote. An edited one needs `--force`. A
+  file mdnest did not write is never deleted.
+- Other tools: point them at `mdnest docs agents` in their own instructions
+  file.
+- To undo it, run `mdnest agent remove`.
+- If you answered no to the installer's question, it is not asked again. To
+  be asked again, delete `~/.config/mdnest/agent-skills-declined`. You can
+  also just run `mdnest agent install`.
+
+**Claude Code plugin.** Instead of `agent install`, Claude Code users can add
+the same skill as a plugin:
+
+```text
+/plugin marketplace add mahsanamin/mdnest
+/plugin install mdnest@mdnest
+```
+
+The plugin holds only the skill. It still needs the `mdnest` CLI installed and
+logged in.
+
+`mdnest docs` prints this CLI reference when the CLI sits in a clone of the
+repository. A CLI installed with the one-line installer is a single file, so
+there it prints the address of this page instead.
+
 ## Server management
 
 ```bash
@@ -429,6 +707,12 @@ SERVER_ALIAS=work
 ```
 
 This makes Copy Path produce `@work/namespace/path` which the CLI can use directly.
+
+The setup commands (`login`, `update`, `version`, `agent`, and the install
+scripts) use colour and a check mark when they print to a terminal. In a pipe,
+or with `NO_COLOR` set, they print plain text. `MDNEST_COLOR=never` or
+`MDNEST_COLOR=always` overrides that. Commands that print notes or data
+(`read`, `list`, `search`, `chat`) never add colour.
 
 ## Version compatibility
 
@@ -476,7 +760,7 @@ version your server is running, so you have something concrete to compare
 
 ```bash
 mdnest update                 # self-update from main
-mdnest update --force         # re-download even if the version matches
+mdnest update --force         # reinstall even if the downloaded file is identical
 MDNEST_BRANCH=develop mdnest update --force   # track an unreleased build
 mdnest update --server @work  # the CLI the @work server was built with (4.8.5+)
 mdnest update --server https://notes.example.com   # same, by address
@@ -486,6 +770,12 @@ A CLI older than 4.8.5 does not know `--server`: it ignores the option, updates
 from GitHub, and may report "up to date" while the server runs a newer
 version. Run the server's install command once (see
 [From your own server](#from-your-own-server-485)) to get past that.
+
+`mdnest update` compares the downloaded file with the installed one, not only
+the version label, so it also replaces an older build that has the same label
+(every build between two releases says, for example, `4.8.17-dev`).
+`mdnest version` prints a short fingerprint of the file next to the version,
+`mdnest CLI v4.8.17-dev (a1b2c3d)`, so you can tell two copies apart.
 
 `--server` downloads only from that server's `/cli/mdnest`; it never falls
 back to GitHub, because the point is to match the server. Like every update it

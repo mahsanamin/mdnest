@@ -16,6 +16,13 @@ spec:
       port: {{ .Values.backend.service.port }}
       targetPort: http
       protocol: TCP
+    {{- if and .Values.pages.enabled .Values.pages.origin }}
+    # Script-mode pages: page files only, no API (see values.yaml pages.origin).
+    - name: pages
+      port: {{ .Values.pages.port }}
+      targetPort: pages
+      protocol: TCP
+    {{- end }}
   selector:
     {{- include "mdnest.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: backend

@@ -57,7 +57,20 @@ type TransferHandler struct {
 	// stricter check that also counts member lists left at old chat paths
 	// (see PermissionChecker.CheckWriteDest).
 	canWriteDest func(r *http.Request, ns, path string) bool
+	// pages carries an HTML page along with its handle (<name>.page.md) when
+	// the handle crosses namespaces. Nil unless ENABLE_PAGES.
+	pages pageCarrier
 }
+
+// pageCarrier is the part of PagesHandler a transfer uses (pages_handles.go).
+type pageCarrier interface {
+	CarryPage(fromNS, id, toNS string) (destID string, carried bool, err error)
+	UndoCarry(toNS, destID string)
+	AfterMove(ctx context.Context, fromNS string, ids []string)
+}
+
+// SetPages makes a transfer between namespaces carry each page handle's page.
+func (h *TransferHandler) SetPages(p pageCarrier) { h.pages = p }
 
 // SetChatMembers makes a transfer carry private chats' member lists along,
 // checking the destination with canWriteDest.
@@ -336,12 +349,17 @@ func (h *TransferHandler) execute(ctx context.Context, t *transfer) *transferErr
 	var sidecars []string      // destination comment files this transfer created
 	var movedSidecars []string // source comment files to remove after a move
 	var threads []movedNote    // moved notes that carry an ID
+	var carriedPages []string  // destination page ids this transfer created
+	var sourcePages []string   // source page ids carried out, removed after a move
 
 	// Rollback removes exactly what this transfer created — never the whole
 	// destination path, which a concurrent upload or note create may have
 	// written into meanwhile. Folders go last, deepest first, and only when
 	// they are empty.
 	rollback := func() {
+		for _, id := range carriedPages {
+			h.pages.UndoCarry(t.toNS, id)
+		}
 		for i := len(sidecars) - 1; i >= 0; i-- {
 			_ = h.store.Remove(wctx, t.toNS, sidecars[i])
 		}
@@ -375,6 +393,29 @@ func (h *TransferHandler) execute(ctx context.Context, t *transfer) *transferErr
 					return fail(err)
 				}
 				data = []byte(InjectNoteID(clean, newID))
+			}
+			// A page handle crossing namespaces takes its page along: the page
+			// is copied first (under a new id when the destination already
+			// has that one, and the handle is rewritten to name it). A page
+			// that cannot be carried fails the whole transfer.
+			if h.pages != nil && t.fromNS != t.toNS && IsPageHandlePath(e.rel) {
+				if pid, ok := ParsePageHandle(string(data)); ok && ValidPageID(pid) {
+					destID, carried, err := h.pages.CarryPage(t.fromNS, pid, t.toNS)
+					if err != nil {
+						log.Printf("transfer %s %s:%s -> %s:%s: carrying the page of %s failed: %v", t.mode, t.fromNS, t.from, t.toNS, t.to, e.rel, err)
+						rollback()
+						return refuse(http.StatusInternalServerError, "could not carry the HTML page of "+e.rel+"; nothing was changed")
+					}
+					if carried {
+						carriedPages = append(carriedPages, destID)
+						sourcePages = append(sourcePages, pid)
+						if destID != pid {
+							if rewritten, ok := rewriteHandleID(string(data), destID); ok {
+								data = []byte(rewritten)
+							}
+						}
+					}
+				}
 			}
 			created = append(created, treeEntry{rel: dst})
 			if err := h.store.WriteFile(wctx, t.toNS, dst, data); err != nil {
@@ -468,6 +509,11 @@ func (h *TransferHandler) execute(ctx context.Context, t *transfer) *transferErr
 	}
 	for _, sc := range movedSidecars {
 		_ = h.store.Remove(wctx, t.fromNS, sc)
+	}
+	// The handles are gone from the source; their pages go too, unless a
+	// handle left there still names one (then, for that page, it was a copy).
+	if h.pages != nil && len(sourcePages) > 0 {
+		h.pages.AfterMove(wctx, t.fromNS, sourcePages)
 	}
 	return nil
 }

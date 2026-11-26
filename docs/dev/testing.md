@@ -13,6 +13,30 @@ time.** The entry point is `bash tests/check.sh --level <level>` (default
 | `develop` | before merging a branch into develop | the pre-push fast tier, `go vet` + `go test -race` on the whole backend with Redis, shellcheck, and the e2e suites the files changed since `origin/develop` call for, each once, sharded. A spec whose flake was just fixed gets `MDNEST_E2E_ARGS="--repeat-each 3"`, not 10 | about 15 to 20 min |
 | `ship` | `md-ship`: a `release/*` or `main` push | the full gate, the only level that runs everything: every suite, compared with `origin/main`, recorded in `.git/mdnest-release-gate` for the hook. `bash tests/release-gate.sh` is the same thing. Upgrade checks when stored data changed stay a manual `md-ship` step | as long as it takes |
 
+Optional local chat coordination has two focused fake-only suites:
+`node tests/chat-runner.mjs` and `npm --prefix mcp-server test` (including
+`test_chat_coordination.mjs`). They never launch a provider or use live notes.
+The runner suite checks trigger data, persona refresh, leases/ack, local limits
+and process-group cleanup. The MCP suite checks trusted local launch opt-in,
+concurrent caps, subscriptions and shutdown. Backend coordination and stream
+contracts run under Go race tests; the Agents popup has unit/browser coverage.
+
+`bash tests/e2e-agentic-multi.sh` adds the real integration boundary: one
+multi-user backend, isolated Postgres, two distinct mounted namespaces,
+synthetic role/grant identities, real browser/CLI/API/MCP requests and fake
+command workers that post through the actual CLI. It checks cross-namespace
+and read-only denials, browser-human versus API-token reset, durable unseen/ack
+across restart, concurrent claims, mention handoff/done and pause/timeout
+cleanup. No paid model is used. Credentials stay in mode-0600 files under a
+fresh private temporary directory and never appear in logs.
+
+Use `KEEP=1` to retain a browser-ready inspection site. The output gives its
+loopback URL and private login-details path, not credentials. Baseline notes
+stay in both namespaces; manifest.json records the source and image identity.
+Ordinary develop runs clean up only the resources this fixture created.
+When the contribution is already on origin/develop, use `MDNEST_GATE_ALL=1`
+so the full develop gate does not mistake an empty origin diff for no coverage.
+
 At `develop` and `ship` the images are built once and the browser suites run
 in one lane beside everything else. The `@budget` timing tests run last,
 alone: always at `ship`, where a failure blocks; at `develop` only when the
@@ -188,6 +212,11 @@ override: `MDNEST_SKIP_E2E=1`.
 - `tests/setup-download-limits.sh` — `DOWNLOAD_MAX_*` reach `.env`, defaults
   are written, a non-number is refused at setup, a shell export cannot leak
   in (it did, before the reset at the top of `setup.sh`).
+- `tests/setup-pages.sh`: HTML pages. with `ENABLE_PAGES` off the generated
+  `.env`, `docker-compose.yml` and `Caddyfile` are byte-identical to what
+  `origin/develop`'s `setup.sh` writes, every `PAGES_*` setting reaches `.env`
+  and the backend reads it, script mode adds only the second port or Caddy
+  site, and mistakes are refused at setup time.
 - **A test that destroys user data must refuse to run against a real account.**
   `tests/browser/stickies.spec.js` wipes the sticky board of whatever account
   it signs in as, and a sticky exists nowhere else — no namespace, no git

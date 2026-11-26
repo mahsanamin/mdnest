@@ -29,7 +29,10 @@ fullnameOverride: ""
 
 # -- Labels added to every resource created by the chart.
 commonLabels: {}
-# -- Annotations added to every resource created by the chart.
+# -- Annotations added to every resource created by the chart, including the
+# volumeClaimTemplates of the StatefulSets (immutable: changing them on an
+# existing release fails the upgrade). For annotations on one workload only
+# (e.g. Stakater Reloader), use `<workload>.annotations`.
 commonAnnotations: {}
 
 # -- Image pull secrets for private registries (list of `{name}`).
@@ -88,6 +91,8 @@ backend:
   namespaces: []
   # -- Image used by the namespace-provisioning init container.
   namespaceInitImage: busybox:1.36
+  # -- Annotations on the backend StatefulSet, or the app Deployment in git-native HA (merged over `commonAnnotations`). Not put on the volumeClaimTemplates.
+  annotations: {}
   # -- Extra pod annotations for the backend.
   podAnnotations: {}
   # -- Extra pod labels for the backend.
@@ -143,6 +148,8 @@ backend:
 frontend:
   # -- Number of frontend (nginx) replicas.
   replicaCount: 1
+  # -- Annotations on the frontend Deployment (merged over `commonAnnotations`).
+  annotations: {}
   # -- Extra pod annotations for the frontend.
   podAnnotations: {}
   # -- Extra pod labels for the frontend.
@@ -315,6 +322,30 @@ excalidraw:
   enabled: false
   # -- Operator-provided default Excalidraw libraries (`EXCALIDRAW_LIBRARIES`): a list of URLs to `.excalidrawlib` files, preloaded into every drawing so an organisation can ship a shared shape set. The URLs must be reachable by the browser (CORS-enabled or same-origin).
   libraries: []
+
+# -----------------------------------------------------------------------------
+# HTML pages (optional). View-only HTML pages (reports, dashboards) published
+# into a namespace with `mdnest page publish` or the MCP publish_page tool.
+# Page files are kept on the notes volume in a hidden folder
+# (/data/notes/.mdnest-pages), never in a namespace, so they never show in the
+# notes tree or search. Not available with the git-native HA topology
+# (storage.backend=git with more than one replica).
+# -----------------------------------------------------------------------------
+pages:
+  # -- Store new publishes in each namespace's .mdnest/pages (`PAGES_IN_GIT`). Git sync saves them with the notes. Existing pages stay where they are; both stores are read.
+  inGit: false
+  # -- Enable HTML pages (`ENABLE_PAGES`). Off by default; when off no route is registered and the frontend never loads the pages chunk.
+  enabled: false
+  # -- Largest total size of one page, in MB (`PAGES_MAX_MB`), checked at publish time.
+  maxMB: 20
+  # -- Most files in one page, and most folders (`PAGES_MAX_FILES`), checked at publish time.
+  maxFiles: 500
+  # -- Script mode (`PAGES_ORIGIN`, needs team setup): a second hostname that serves page files and nothing else, e.g. `https://pages.example.com`. Empty means static mode: pages show with their scripts turned off. Must differ from `backend.frontendOrigin`. With `ingress.enabled`, a rule for this hostname is added that goes to the backend's pages port.
+  origin: ""
+  # -- What a page's scripts may load in script mode (`PAGES_NETWORK`): `strict` (only the page's own files) or `open` (outside scripts and fetches, https). Neither stops a page from sending what it shows to an outside site.
+  network: strict
+  # -- Container and Service port of the pages listener (`PAGES_LISTEN_PORT`), used only in script mode.
+  port: 8081
 
 # -----------------------------------------------------------------------------
 # Folder download (zip) and move/copy between namespaces.
@@ -493,6 +524,8 @@ persistence:
 # persistence.notes (size/storageClass/accessMode); only sizing/scheduling here.
 # -----------------------------------------------------------------------------
 writer:
+  # -- Annotations on the writer StatefulSet (merged over `commonAnnotations`). Not put on its volumeClaimTemplate.
+  annotations: {}
   # -- Writer resource requests/limits.
   resources: {}
   # -- Node selector for the writer pod.
@@ -510,6 +543,8 @@ writer:
 gitSync:
   # -- Enable the git-sync sidecar (mirrors the notes repo to a git remote).
   enabled: false
+  # -- Annotations on the git-sync Deployment (merged over `commonAnnotations`).
+  annotations: {}
   # -- git-sync sidecar image.
   image:
     repository: alpine/git
@@ -622,6 +657,8 @@ mcp:
   extraEnv: []
   # -- MCP resource requests/limits.
   resources: {}
+  # -- Annotations on the MCP server Deployment (merged over `commonAnnotations`).
+  annotations: {}
   # -- Extra pod annotations for the MCP server.
   podAnnotations: {}
   # -- Extra pod labels for the MCP server.

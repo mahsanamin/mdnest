@@ -37,17 +37,19 @@ import (
 const maxChatMessage = 64 << 10 // 64KB — a message, not a document
 
 type ChatHandler struct {
-	store      storage.Storage
-	nsFilter   func(r *http.Request, namespaces []string) []string
-	canRead    func(r *http.Request, ns, path string) bool
-	singleUser string // the label a single-mode post defaults to (MDNEST_USER)
-	multiMode  bool   // a request with no user context is NOT the single-mode owner here
-	hub        *collab.Hub
-	now        func() time.Time
-	index      *chatIndex
-	status     *chatStatusStore      // who is working on what (chat_status.go)
-	members    store.ChatMemberStore // private chats (chat_members.go); nil = off
-	users      chatUserLookup
+	store                storage.Storage
+	nsFilter             func(r *http.Request, namespaces []string) []string
+	canRead              func(r *http.Request, ns, path string) bool
+	singleUser           string // the label a single-mode post defaults to (MDNEST_USER)
+	multiMode            bool   // a request with no user context is NOT the single-mode owner here
+	hub                  *collab.Hub
+	now                  func() time.Time
+	index                *chatIndex
+	status               *chatStatusStore      // who is working on what (chat_status.go)
+	members              store.ChatMemberStore // private chats (chat_members.go); nil = off
+	users                chatUserLookup
+	coordinationDisabled bool
+	events               chatEvents
 }
 
 // NewChatHandler: nsFilter and canRead are REQUIRED. /api/chats spans
@@ -119,12 +121,14 @@ type chatResponse struct {
 	// (chat_context.go), so the page can show it by their name.
 	Contexts map[string]ChatContext `json:"contexts"`
 	// Agents is each agent's saved role, by name (chat_traits.go).
-	Agents map[string]string `json:"agents"`
+	Agents  map[string]string `json:"agents"`
+	Prompts map[string]string `json:"prompts"`
 	// Owner is the account that owns the chat, and CanDelete whether this
 	// caller may delete it (chat_owner.go), so the page offers Delete only
 	// to those who may.
-	Owner     string `json:"owner,omitempty"`
-	CanDelete bool   `json:"canDelete"`
+	Owner     string           `json:"owner,omitempty"`
+	CanDelete bool             `json:"canDelete"`
+	Room      ChatCoordination `json:"room"`
 }
 
 func chatTitle(doc ChatDoc, relPath string) string {
@@ -139,7 +143,9 @@ func (h *ChatHandler) read(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	readUnlock := lockNote(ns, relPath)
 	data, err := h.store.ReadFile(r.Context(), ns, relPath)
+	readUnlock()
 	if errors.Is(err, storage.ErrNotExist) {
 		chatJSONError(w, http.StatusNotFound, "not found")
 		return
@@ -153,6 +159,34 @@ func (h *ChatHandler) read(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	after, _ := strconv.Atoi(r.URL.Query().Get("after"))
+	q := r.URL.Query()
+	coordination := readCoordination(string(data))
+	handle := q.Get("as")
+	if q.Get("unseen_only") == "true" {
+		if !chatTraitNameRe.MatchString(handle) {
+			chatJSONError(w, 400, "unseen_only requires a valid as handle")
+			return
+		}
+		if worker := q.Get("worker"); worker != "" && !chatTraitNameRe.MatchString(worker) {
+			chatJSONError(w, 400, "invalid worker")
+			return
+		}
+	}
+	last := 0
+	if raw := q.Get("last"); raw != "" {
+		var err error
+		last, err = strconv.Atoi(raw)
+		if err != nil || last < 1 || last > 10000 {
+			chatJSONError(w, 400, "last must be 1..10000")
+			return
+		}
+	}
+	// Acknowledgment has a separate write-guarded endpoint, so a plain GET
+	// remains side-effect free even for callers who can only read the note.
+	if q.Get("ack") == "true" {
+		chatJSONError(w, 400, "use POST /api/chat/ack with the delivered message position")
+		return
+	}
 	// exclude drops one poster's own messages, so an agent waiting for a
 	// reply is not woken by what it just posted itself. Matched on the
 	// label (the part before "(via …)"), sanitised the same way a post is.
@@ -163,13 +197,40 @@ func (h *ChatHandler) read(w http.ResponseWriter, r *http.Request) {
 	mention := sanitizeChatLabel(r.URL.Query().Get("mention"))
 	msgs := []ChatMessage{}
 	for _, m := range doc.Messages {
+		if q.Get("unseen_only") == "true" {
+			seen := false
+			for _, c := range coordination.Cursors {
+				if c.Account == coordinationIdentity(r, handle) && strings.EqualFold(c.Handle, handle) && c.Worker == q.Get("worker") && cursorHasSeen(c, m.ID) {
+					seen = true
+					break
+				}
+			}
+			if seen {
+				continue
+			}
+		}
 		if m.N <= after || (exclude != "" && m.Author == exclude) {
 			continue
 		}
 		if mention != "" && !ChatMentions(m.Text, mention) {
 			continue
 		}
+		if q.Get("type") != "" && m.Type != q.Get("type") {
+			continue
+		}
+		if lease, ok := coordination.Claims[m.ID]; ok && !lease.Expires.After(h.now()) {
+			m.ClaimedBy = ""
+		}
 		msgs = append(msgs, m)
+	}
+	if last > 0 && len(msgs) > last {
+		// For unseen work return the oldest batch first, not a tail that would
+		// skip pending messages when the caller acknowledges that batch.
+		if q.Get("unseen_only") == "true" {
+			msgs = msgs[:last]
+		} else {
+			msgs = msgs[len(msgs)-last:]
+		}
 	}
 	// A poll that names its poster (exclude=NAME: every `chat wait --as`) is
 	// presence: NAME is listening, and thinking if this poll handed it new
@@ -178,6 +239,32 @@ func (h *ChatHandler) read(w http.ResponseWriter, r *http.Request) {
 		if label, via, ok := h.authorFor(r, exclude); ok {
 			h.status.polled(ns, relPath, label, via, len(msgs) > 0, h.now())
 		}
+	}
+	if q.Get("include_ids") == "true" {
+		// Keep the whole upstream response header below nginx's small
+		// default buffer. Return a prefix and explicit continuation, never
+		// acknowledge messages that were omitted from this batch.
+		ids := []string{}
+		bytes := 2
+		for _, m := range msgs {
+			encoded, _ := json.Marshal(m.ID)
+			if bytes+len(encoded)+1 > 1024 {
+				break
+			}
+			ids = append(ids, m.ID)
+			bytes += len(encoded) + 1
+		}
+		if len(ids) < len(msgs) {
+			msgs = msgs[:len(ids)]
+			w.Header().Set("X-Chat-More", "true")
+		}
+		encodedIDs, _ := json.Marshal(ids)
+		w.Header().Set("X-Chat-IDs", string(encodedIDs))
+	}
+	if q.Get("format") == "json-array" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(msgs)
+		return
 	}
 	if r.URL.Query().Get("format") == "text" {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -208,7 +295,7 @@ func (h *ChatHandler) read(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(chatResponse{Namespace: ns, Path: relPath, Title: chatTitle(doc, relPath),
 		Description: doc.Description, Count: len(doc.Messages), Messages: msgs, You: you,
 		Working: h.status.list(ns, relPath, h.now()), Contexts: h.status.contexts(ns, relPath, h.now()),
-		Agents: agentsOrEmpty(doc.Agents), Owner: ChatOwner(string(data)), CanDelete: mayRemoveChat(r, ns, string(data))})
+		Agents: agentsOrEmpty(doc.Agents), Prompts: ChatPrompts(string(data)), Owner: ChatOwner(string(data)), CanDelete: mayRemoveChat(r, ns, string(data)), Room: coordination})
 }
 
 // formatChatMessageText is the terminal rendering the CLI prints verbatim, so
@@ -314,21 +401,37 @@ func (h *ChatHandler) post(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	doc, status, errMsg := h.appendMessage(r, ns, relPath, label, via, text)
+	options, err := postOptions(r)
+	if err != nil {
+		chatJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	doc, status, errMsg := h.appendStructuredMessage(r, ns, relPath, label, via, text, options)
 	if status != 0 {
 		chatJSONError(w, status, errMsg)
 		return
 	}
 	msg := doc.Messages[len(doc.Messages)-1]
+	for _, m := range doc.Messages {
+		if m.ID == doc.PostedID {
+			msg = m
+			break
+		}
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]any{"status": "posted", "count": len(doc.Messages), "message": msg})
+	room := doc.Coordination
+	json.NewEncoder(w).Encode(map[string]any{"status": "posted", "count": len(doc.Messages), "message": msg, "msg_id": msg.ID, "consecutive_agent_turns": room.Turns, "max_agent_turns": room.MaxTurns})
 }
 
 // appendMessage adds one message to a chat under the note lock. On failure it
 // returns the HTTP status and the message to answer with; status 0 is success.
 func (h *ChatHandler) appendMessage(r *http.Request, ns, relPath, label, via, text string) (ChatDoc, int, string) {
+	return h.appendStructuredMessage(r, ns, relPath, label, via, text, chatPostOptions{})
+}
+
+func (h *ChatHandler) appendStructuredMessage(r *http.Request, ns, relPath, label, via, text string, options chatPostOptions) (ChatDoc, int, string) {
 	ctx := r.Context()
 	unlock := lockNote(ns, relPath)
 	data, err := h.store.ReadFile(ctx, ns, relPath)
@@ -344,8 +447,69 @@ func (h *ChatHandler) appendMessage(r *http.Request, ns, relPath, label, via, te
 		unlock()
 		return ChatDoc{}, http.StatusBadRequest, "this note is not a chat — convert it first"
 	}
+	c := readCoordination(content)
+	// A crew only ever stops its own agents: a finished crew, or a done post in
+	// a chat that never had a crew, must not stop anyone posting. Once a crew
+	// completes, its room limit is off and the chat is an ordinary chat again.
+	crew := c.MaxTurns > 0 && c.Status != "completed"
+	human := h.humanPost(r, c, label, via)
+	if crew && !human && (c.Status == "paused" || c.Turns >= c.MaxTurns) {
+		unlock()
+		return ChatDoc{}, http.StatusConflict, "crew paused: waiting for human"
+	}
+	if options.ReplyTo != "" {
+		found := false
+		for _, m := range ParseChat(content).Messages {
+			if m.ID == options.ReplyTo {
+				found = true
+				break
+			}
+		}
+		if !found {
+			unlock()
+			return ChatDoc{}, http.StatusBadRequest, "reply_to message not found"
+		}
+	}
 	at := h.now()
-	updated := AppendChatMessage(content, RenderChatMessage(label, via, at, text))
+	block := RenderChatMessage(label, via, at, text)
+	// A plain post in a plain chat is written exactly as before the agent
+	// fields existed: no metadata line, so the note on disk does not change
+	// format for people who never use them. Its ID is then the legacy one,
+	// which claims and acks accept the same way.
+	id := ""
+	if options.Type != "" || options.ReplyTo != "" || len(options.Meta) > 0 || c.MaxTurns > 0 {
+		var err error
+		if id, err = newChatMessageID(); err != nil {
+			unlock()
+			return ChatDoc{}, http.StatusInternalServerError, "failed to generate message ID"
+		}
+		boundary := strings.Index(block[1:], "\n") + 1
+		block = block[:boundary+1] + metadataLine(ChatMessage{ID: id, Type: options.Type, ReplyTo: options.ReplyTo, Meta: options.Meta}) + "\n" + block[boundary+1:]
+	}
+	before := len(ParseChat(content).Messages)
+	updated := AppendChatMessage(content, block)
+	if crew {
+		if human {
+			c.Turns = 0
+			c.Status = "active"
+		} else {
+			c.Turns++
+		}
+		if c.Turns >= c.MaxTurns {
+			c.Status = "paused"
+			pause := fmt.Sprintf("**System Pause:** Reached max_agent_turns (%d). Waiting for @%s before agents continue.", c.MaxTurns, c.Human)
+			updated = AppendChatMessage(updated, RenderChatMessage("System", "", at, pause))
+		}
+	}
+	// Done only means something to a running crew. Elsewhere it is ignored,
+	// so a plain chat is written exactly as it was before crews existed.
+	if options.Done && crew {
+		c.Status = "completed"
+		updated = AppendChatMessage(updated, "\n"+chatDoneMarker+"\n")
+	}
+	if crew {
+		updated = setCoordination(updated, c)
+	}
 	if len(updated) > maxNoteSize {
 		unlock()
 		return ChatDoc{}, http.StatusRequestEntityTooLarge, "chat is full (10MB) — start a new one"
@@ -359,7 +523,12 @@ func (h *ChatHandler) appendMessage(r *http.Request, ns, relPath, label, via, te
 	// The post is the result of whatever the poster said it was working on.
 	h.status.posted(ns, relPath, label)
 	h.notify(r, ns, relPath, updated)
-	return ParseChat(updated), 0, ""
+	doc := ParseChat(updated)
+	if id == "" && before < len(doc.Messages) {
+		id = doc.Messages[before].ID
+	}
+	doc.PostedID = id
+	return doc, 0, ""
 }
 
 // PostNotice appends a message from the server on the caller's behalf, as
@@ -380,6 +549,7 @@ func (h *ChatHandler) PostNotice(r *http.Request, ns, relPath, as, text string) 
 // notify tells an editor with this note open that it changed underneath it
 // (live-collab only). The chat view itself polls, so it works without collab.
 func (h *ChatHandler) notify(r *http.Request, ns, relPath, content string) {
+	h.WakeNamespace(ns)
 	if h.hub == nil {
 		return
 	}

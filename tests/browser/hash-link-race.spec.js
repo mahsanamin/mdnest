@@ -24,12 +24,12 @@ test('a link set in the address bar survives a state change in the same moment',
   await page.fill('input[name=password]', PASS);
   await page.click('button:has-text("Sign in")');
   await expect(page.locator('.tree-row', { hasText: SEED }).first()).toBeVisible({ timeout: 20_000 });
-  const stickies = page.locator('.toolbar-stickies');
+  const stickies = page.locator('[data-testid=toolbar-stickies]');
   test.skip(!(await stickies.count()), 'needs the Stickies button');
 
   await page.evaluate(([ns, file]) => {
     window.location.hash = `#${ns}/${file}`;
-    document.querySelector('.toolbar-stickies').click();
+    document.querySelector('[data-testid=toolbar-stickies]').click();
   }, [NS, SEED]);
 
   await expect(page.locator('.toolbar-path')).toContainText(SEED.replace(/\.md$/, ''), { timeout: 10_000 });

@@ -52,6 +52,8 @@ func TestCommitterTwoWaySync(t *testing.T) {
 	seed := t.TempDir()
 	run(t, "", "git", "clone", "--quiet", bare, seed)
 	tsWrite(t, filepath.Join(seed, "existing.md"), "from remote")
+	os.MkdirAll(filepath.Join(seed, ".mdnest/pages/id"), 0755)
+	tsWrite(t, filepath.Join(seed, ".mdnest/pages/id/index.html"), "base page\n")
 	tsCommitPush(t, seed)
 
 	root := t.TempDir()
@@ -117,6 +119,20 @@ func TestCommitterTwoWaySync(t *testing.T) {
 	}
 	if !changed["team/external.md"] {
 		t.Fatal("reconciler not called for the pulled note")
+	}
+
+	// Private page files must remain complete files after a conflict. They
+	// cannot be repaired in the notes editor, unlike an ordinary note.
+	if err := g.WriteFile(ctx, "team", ".mdnest/pages/id/index.html", []byte("local page\n")); err != nil {
+		t.Fatal(err)
+	}
+	tsWrite(t, filepath.Join(seed, ".mdnest/pages/id/index.html"), "remote page\n")
+	tsCommitPush(t, seed)
+	if err := c.commit(ctx, "team"); err != nil {
+		t.Fatalf("page conflict: %v", err)
+	}
+	if got := tsRead(t, filepath.Join(root, "team/.mdnest/pages/id/index.html")); got != "remote page\n" {
+		t.Fatalf("page contains conflict markers: %q", got)
 	}
 }
 

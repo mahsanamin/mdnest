@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   canDockChat, chatPanelBounds, stickiesPanelBounds, defaultChatPanelWidth, clampWidth,
+  sidePanelBounds, sidePanelWidth,
   EDITOR_MIN_WIDTH, CHAT_PANEL_MIN, CHAT_PANEL_MAX, STICKIES_PANEL_MAX,
 } from '../sidePanel.js';
 import { rememberScroll, recallScroll } from '../chat.js';
@@ -57,5 +58,40 @@ describe('chat scroll memory', () => {
     expect(recallScroll('ns', 'Chats/a.md')).toEqual({ n: '12', offset: 30 });
     expect(recallScroll('ns', 'Chats/b.md')).toEqual({ n: null });
     expect(recallScroll('other', 'Chats/a.md')).toBe(null);
+  });
+});
+
+describe('canDockPages', () => {
+  it('docks when the editor keeps its minimum next to the narrowest list', async () => {
+    const { canDockPages, EDITOR_MIN_WIDTH, STICKIES_PANEL_MIN } = await import('../sidePanel.js');
+    expect(canDockPages(260 + EDITOR_MIN_WIDTH + STICKIES_PANEL_MIN, 260)).toBe(true);
+    expect(canDockPages(260 + EDITOR_MIN_WIDTH + STICKIES_PANEL_MIN - 1, 260)).toBe(false);
+    expect(canDockPages(1280, 260)).toBe(true);
+    expect(canDockPages(800, 260)).toBe(false);
+  });
+});
+
+describe('one side panel width for every view', () => {
+  it('every view shares one maximum; only a chat has a higher minimum', () => {
+    expect(sidePanelBounds(1440, SIDEBAR, 'chat')).toEqual(chatPanelBounds(1440, SIDEBAR));
+    for (const view of ['stickies', 'pages']) {
+      expect(sidePanelBounds(1440, SIDEBAR, view)).toEqual({ min: 260, max: chatPanelBounds(1440, SIDEBAR).max });
+    }
+    expect(sidePanelBounds(1024, SIDEBAR, 'stickies')).toEqual(stickiesPanelBounds(1024, SIDEBAR));
+  });
+  it('a width picked on one view carries to the others', () => {
+    for (const view of ['chat', 'stickies', 'pages']) {
+      expect(sidePanelWidth(null, 1440, SIDEBAR, view)).toBe(defaultChatPanelWidth(1440));
+      expect(sidePanelWidth(700, 1440, SIDEBAR, view)).toBe(700);
+    }
+  });
+  it('a panel narrowed below the chat minimum widens only while a chat shows', () => {
+    expect(sidePanelWidth(300, 1440, SIDEBAR, 'stickies')).toBe(300);
+    expect(sidePanelWidth(300, 1440, SIDEBAR, 'pages')).toBe(300);
+    expect(sidePanelWidth(300, 1440, SIDEBAR, 'chat')).toBe(CHAT_PANEL_MIN);
+  });
+  it('never leaves the editor below its minimum', () => {
+    expect(sidePanelWidth(2000, 1024, SIDEBAR, 'stickies')).toBe(1024 - SIDEBAR - EDITOR_MIN_WIDTH);
+    expect(sidePanelWidth(2000, 4000, SIDEBAR, 'chat')).toBe(CHAT_PANEL_MAX);
   });
 });

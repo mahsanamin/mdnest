@@ -30,6 +30,11 @@ const ExcalidrawEditor = lazy(() => loadWithRetry(() => import('./components/Exc
 // Lazy chats view, off by default (ENABLE_CHAT): notes-only installs never
 // download it.
 const ChatView = lazy(() => loadWithRetry(() => import('./components/ChatView.jsx')));
+// HTML pages (server: ENABLE_PAGES): the sidebar list and the framed viewer,
+// one chunk, never loaded when the server has pages off.
+const PagesView = lazy(() => loadWithRetry(() => import('./components/Pages.jsx')).then((m) => ({ default: m.PagesView })));
+const PagesPanel = lazy(() => loadWithRetry(() => import('./components/Pages.jsx')).then((m) => ({ default: m.PagesPanel })));
+const PageView = lazy(() => loadWithRetry(() => import('./components/Pages.jsx')).then((m) => ({ default: m.PageView })));
 // The two buttons that move a chat between full screen and the side panel.
 // Defined here, not in ChatView, so the chat chunk stays free of App's
 // layout decisions: ChatView just renders whatever action it is handed.
@@ -53,7 +58,7 @@ import HeadingLinks from './components/HeadingLinks.jsx';
 import { findHeading } from './headingLink.js';
 import CommentSidebar from './components/CommentSidebar.jsx';
 import StickiesPanel from './components/StickiesPanel.jsx';
-import { canDockChat, chatPanelBounds, stickiesPanelBounds, defaultChatPanelWidth, clampWidth } from './sidePanel.js';
+import { canDockChat, canDockPages, sidePanelBounds, sidePanelWidth } from './sidePanel.js';
 import StickiesBoard from './components/StickiesBoard.jsx';
 import ShareDialog from './components/ShareDialog.jsx';
 import HistoryModal from './components/HistoryModal.jsx';
@@ -232,6 +237,10 @@ function App() {
   const [ssoError, setSsoError] = useState(() => consumeSSOHashOnLoad());
   const [authenticated, setAuthenticated] = useState(!!getToken());
   const [namespaces, setNamespaces] = useState([]);
+  // False until the namespace list has answered once: before that, an empty
+  // list means "not loaded yet", not "there are none", so the no-namespaces
+  // page must not flash on a reload.
+  const [namespacesLoaded, setNamespacesLoaded] = useState(false);
   // Read by the hashchange handler, which is not re-bound on every list change.
   const namespacesRef = useRef(namespaces);
   namespacesRef.current = namespaces;
@@ -309,7 +318,10 @@ function App() {
   // Bumped by the toolbar "reveal in tree" button; Sidebar watches it to expand
   // ancestors, scroll the active row into view, and flash it.
   const [revealNonce, setRevealNonce] = useState(0);
-  const revealInTree = useCallback(() => {
+  // What a reveal shows: a path from the Pages view, or the open note (null).
+  const [revealPath, setRevealPath] = useState(null);
+  const revealInTree = useCallback((path) => {
+    setRevealPath(typeof path === 'string' ? path : null);
     setSidebarVisible(true); // ensure the tree is on-screen (mobile overlay)
     setRevealNonce((n) => n + 1);
   }, []);
@@ -396,7 +408,8 @@ function App() {
     // chat open. The key keeps its old name so an open drawer stays open
     // across the upgrade.
     if (localStorage.getItem('mdnest_stickies_open') !== '1') return 'closed';
-    return localStorage.getItem('mdnest_side_panel_tab') === 'chat' ? 'chat' : 'stickies';
+    const last = localStorage.getItem('mdnest_side_panel_tab');
+    return last === 'chat' || last === 'pages' ? last : 'stickies';
   });
   // The chat docked in the panel ({ns, path} | null = the chat list), kept
   // apart from openChat (the full-screen one) so expanding and pinning are
@@ -437,6 +450,13 @@ function App() {
   // the conversation shown in it ({ns, path} | null) — chats span namespaces,
   // so it is independent of the note open underneath.
   const [chatsOpen, setChatsOpen] = useState(false);
+  // The Pages view (toolbar "Pages", server: ENABLE_PAGES): every HTML page in
+  // the workspace as cards. A view like chats and the board: opening a note
+  // closes it.
+  const [pagesViewOpen, setPagesViewOpen] = useState(false);
+  // The tab the full Pages view opens on ('pages' | 'unlinked'): the side
+  // panel's "Unlinked (n)" link opens it on its Unlinked tab.
+  const [pagesViewTab, setPagesViewTab] = useState('pages');
   const [openChat, setOpenChat] = useState(null);
   // Chat mode is a place you visit and come back from. chatsReturnTo is the
   // view you came from ('editor' | 'board'), so the one Back button lands you
@@ -456,6 +476,20 @@ function App() {
   // note" from inside a chat does not set it, which is how you still reach
   // the raw markdown on purpose.
   const chatRedirectFor = useRef(null);
+  // Whether the chat mode was "pinned" when that navigation started. A chat
+  // opened from the tree then goes into the side panel instead of full
+  // screen (see chatMode).
+  const chatRedirectDock = useRef(false);
+  // The chat mode the person last picked: 'pinned' (Pin) or 'full' (Expand).
+  // A chat opened from the tree uses it, also after the panel was closed or
+  // a reload. Remembered per browser, like the panel's width and tab.
+  const [chatMode, setChatMode] = useState(() => {
+    try { return localStorage.getItem('mdnest_chat_mode') === 'pinned' ? 'pinned' : 'full'; } catch { return 'full'; }
+  });
+  const pickChatMode = useCallback((mode) => {
+    setChatMode(mode);
+    try { localStorage.setItem('mdnest_chat_mode', mode); } catch { /* storage unavailable: kept until the tab closes */ }
+  }, []);
   // Bumped by the toolbar Refresh so the task board reloads its tasks too
   // (the board isn't part of the note/tree refresh path).
   const [boardRefreshNonce, setBoardRefreshNonce] = useState(0);
@@ -499,6 +533,12 @@ function App() {
   // not registered at all, so the button must not be offered.
   const taskBoardEnabled = !!appConfig?.taskBoard;
   const chatEnabled = !!appConfig?.chat;
+  const pagesEnabled = !!appConfig?.pages?.enabled;
+  // HTML pages live in the tree as handle files (<name>.page.md). With pages
+  // on, opening one shows the page in the sandboxed viewer instead of the
+  // editor; with pages off it is an ordinary small note.
+  const pageHandleActive = pagesEnabled && !!currentPath && currentPath.endsWith('.page.md') && !chatsOpen && !showTaskBoard && !pagesViewOpen;
+  const pagesViewShown = pagesEnabled && pagesViewOpen && !!selectedNs;
 
   // "Basic" on a drawing shows the file's markdown source rather than the
   // canvas. Per-note and not persisted: a drawing should open as a drawing, so
@@ -739,6 +779,12 @@ function App() {
   }, [isMulti, userInfo, selectedNs]);
 
   const canWriteCurrent = canWrite(currentPath);
+  // Namespace backups follow the server's root-write check. Global management
+  // alone gives a superadmin no note-content access.
+  const canManagePages = !isMulti || (!!selectedNs && (
+    (userInfo?.role === 'admin' && (userInfo.admin_namespaces || []).includes(selectedNs))
+    || (userInfo?.grants || []).some((g) => g.namespace === selectedNs && g.path === '/' && g.permission === 'write')
+  ));
 
   // Fetch app config on mount (before auth). If the server is in Firebase
   // mode, the embedded firebaseWebConfig lets us init the Firebase SDK
@@ -1262,6 +1308,7 @@ function App() {
       const { names: data, emptyReason } = await getNamespaceList();
       setNamespaces(data);
       setNamespacesEmptyReason(emptyReason);
+      setNamespacesLoaded(true);
       return data;
     } catch (e) {
       console.error('Failed to load namespaces:', e);
@@ -1625,6 +1672,7 @@ function App() {
       if (path !== currentPath) {
         if (path && ns) {
           chatRedirectFor.current = `${ns}/${path}`;
+          chatRedirectDock.current = false;
           hashNavPending.current = true;
           openNoteDirect(ns, path).finally(() => { hashNavPending.current = false; });
         } else {
@@ -1930,6 +1978,50 @@ function App() {
     setOpenChat(chat || null);
     setChatsOpen(true);
   }, [showTaskBoard, selectedNs, flushPendingSave]);
+  // Desktop files dropped on a tree folder (pages on only): HTML becomes a
+  // page in that folder; anything else is left alone, as before. The drop's
+  // entries are read here, synchronously, because a DataTransfer is emptied
+  // once the event returns; the rest is in pagesDrop.js, loaded on first use.
+  const handleDropFiles = useCallback((folder, dt) => {
+    if (!pagesEnabled || !selectedNs) return;
+    const entries = [];
+    for (const item of Array.from(dt?.items || [])) {
+      if (item.kind !== 'file') continue;
+      const entry = typeof item.webkitGetAsEntry === 'function' ? item.webkitGetAsEntry() : null;
+      if (entry) entries.push(entry);
+    }
+    const dropped = { entries, files: Array.from(dt?.files || []) };
+    const ns = selectedNs;
+    loadWithRetry(() => import('./pagesDrop.js'))
+      .then((mod) => mod.publishDrop({ ns, folder, dropped, tree, notice: setNotice, limits: { maxMB: appConfig?.pages?.maxMB || 20, maxFiles: appConfig?.pages?.maxFiles || 500 } }))
+      .then(async (handle) => {
+        if (!handle) return;
+        await refreshTree(undefined, { broadcast: true });
+        if (ns === selectedNs) openNote(handle);
+      })
+      .catch((e) => setNotice({ kind: 'error', text: e.message || 'Publishing failed' }));
+  }, [pagesEnabled, selectedNs, appConfig, tree, refreshTree, openNote]);
+
+  const setPagesActive = useCallback((on, tab) => {
+    setPagesViewTab(tab === 'unlinked' ? 'unlinked' : 'pages');
+    if (on) {
+      flushPendingSave(); // the editor is swapped out, as for chats and the board
+      setChatsOpen(false);
+      setShowTaskBoard(false);
+    }
+    setPagesViewOpen(on);
+  }, [flushPendingSave]);
+  useEffect(() => {
+    if (chatsOpen || showTaskBoard) setPagesViewOpen(false);
+  }, [chatsOpen, showTaskBoard]);
+  // Opening a note by any route (tree, link, search, history) leaves the view.
+  useEffect(() => { setPagesViewOpen(false); }, [currentPath]);
+  // With pages on, load the pages chunk up front: its stylesheet also holds
+  // the tree's page icon. With pages off it is never requested.
+  useEffect(() => {
+    if (pagesEnabled) loadWithRetry(() => import('./components/Pages.jsx')).catch(() => {});
+  }, [pagesEnabled]);
+
   const leaveChats = useCallback(() => {
     setChatsOpen(false);
     if (chatsReturnTo === 'board') setShowTaskBoard(true);
@@ -1957,11 +2049,63 @@ function App() {
   // is not shown, so the same chat is never mounted, and polled, twice.
   const chatCanDock = chatEnabled && !isMobile && canDockChat(viewportWidth, sidebarWidth);
   const chatDocked = sidePanel === 'chat' && chatCanDock && !chatsOpen;
-  const panelShown = sidePanel === 'stickies' || chatDocked;
-  const chatBounds = chatPanelBounds(viewportWidth, sidebarWidth);
-  const chatWidth = clampWidth(chatPanelWidth ?? defaultChatPanelWidth(viewportWidth), chatBounds);
-  const stickiesBounds = stickiesPanelBounds(viewportWidth, sidebarWidth);
-  const stickiesWidth = clampWidth(commentWidth, stickiesBounds);
+  // The Pages tab (HTML pages on): a compact list beside the note. A Pages
+  // tab remembered from before pages were turned off shows Stickies.
+  const pagesDocked = sidePanel === 'pages' && pagesEnabled && !!selectedNs;
+  const panelShown = sidePanel === 'stickies' || chatDocked || sidePanel === 'pages';
+  const panelTabs = [chatCanDock && !chatsOpen && 'chat', 'stickies', pagesEnabled && selectedNs && 'pages'].filter(Boolean);
+  // Where the narrow Pages list fits beside the note (never on a phone).
+  const pagesCanDock = !isMobile && canDockPages(viewportWidth, sidebarWidth);
+
+  // The toolbar's Chats | Pages | Stickies group. Each opens the side panel on
+  // its tab; where the panel cannot fit (a phone, a narrow window) it opens the
+  // view full screen instead. The button for what is showing is pressed, and
+  // clicking it again closes that. Opening any of them closes the comments,
+  // which own the same edge.
+  const panelButtons = [
+    chatEnabled && {
+      id: 'chats',
+      label: 'Chats',
+      title: chatsOpen ? 'Close chats' : chatCanDock ? 'Chats, in the side panel' : 'All chats',
+      active: chatsOpen || chatDocked,
+      onClick: () => {
+        if (chatsOpen) { setChatsActive(false); return; }
+        if (chatDocked) { setSidePanel('closed'); return; }
+        if (!chatCanDock) { setChatsActive(true); return; }
+        openSidePanel('chat');
+      },
+    },
+    pagesEnabled && selectedNs && {
+      id: 'pages',
+      label: 'Pages',
+      title: pagesViewShown ? 'Close the Pages view' : pagesCanDock ? 'HTML pages, in the side panel' : 'HTML pages in this workspace',
+      active: pagesViewShown || pagesDocked,
+      onClick: () => {
+        if (pagesViewShown) { setPagesActive(false); return; }
+        if (pagesDocked) { setSidePanel('closed'); return; }
+        if (!pagesCanDock) { setPagesActive(true); return; }
+        openSidePanel('pages');
+      },
+    },
+    {
+      id: 'stickies',
+      label: 'Stickies',
+      title: 'Stickies, your private notes on this server',
+      active: sidePanel === 'stickies' || sidePanel === 'board',
+      onClick: () => {
+        if (sidePanel === 'stickies' || sidePanel === 'board') { setSidePanel('closed'); return; }
+        // A phone has no side panel: the stickies open full screen.
+        openSidePanel(isMobile ? 'board' : 'stickies');
+      },
+    },
+  ].filter(Boolean);
+  // One remembered width for the side panel whatever it shows (Chat, Stickies
+  // or Pages), so switching views keeps the size the user picked. Only a chat
+  // has a higher minimum (sidePanel.js). Stored under the key older versions
+  // used for the docked chat.
+  const panelView = chatDocked ? 'chat' : sidePanel === 'pages' ? 'pages' : 'stickies';
+  const panelBounds = sidePanelBounds(viewportWidth, sidebarWidth, panelView);
+  const panelWidth = sidePanelWidth(chatPanelWidth, viewportWidth, sidebarWidth, panelView);
   const openSidePanel = useCallback((tab) => {
     setShowComments(false); // comments own the same edge
     setSidePanel(tab);
@@ -1972,11 +2116,14 @@ function App() {
     leaveChats();
     setDockedChats((m) => withDockedChat(m, chat.ns, chat));
     openSidePanel('chat');
-  }, [leaveChats, openSidePanel]);
+    pickChatMode('pinned');
+  }, [leaveChats, openSidePanel, pickChatMode]);
   // Expand: the docked chat, full screen. The panel stays on its Chat tab,
   // hidden while chats are open, so Back returns to note + docked chat.
-  const expandChat = useCallback((chat) => { enterChats(chat); }, [enterChats]);
-  const selectDockedChat = useCallback((chat) => { setDockedChat(chat); }, [setDockedChat]);
+  const expandChat = useCallback((chat) => { pickChatMode('full'); enterChats(chat); }, [enterChats, pickChatMode]);
+  // Picking a chat in the docked panel is choosing pinned mode too: a chat
+  // docked through the panel's Chat tab never went through Pin.
+  const selectDockedChat = useCallback((chat) => { setDockedChat(chat); if (chat) pickChatMode('pinned'); }, [setDockedChat, pickChatMode]);
   // The "is this note a chat?" decision, made where a note finishes loading
   // rather than in an effect on `content`: that effect stayed armed when the
   // click reloaded identical text (or the load failed), then fired on the
@@ -1991,8 +2138,25 @@ function App() {
     chatRedirectFor.current = null;
     const from = chatRedirectFrom.current;
     chatRedirectFrom.current = null;
+    const dock = chatRedirectDock.current;
+    chatRedirectDock.current = false;
     if (!chatEnabled || !isChatDoc(text)) return;
-    enterChats({ ns, path }, from && !(from.ns === ns && from.path === path) ? from : 'none');
+    const back = from && !(from.ns === ns && from.path === path) ? from : 'none';
+    if (dock && chatCanDock) {
+      // Pinned mode stays pinned: the new chat takes the panel (opened if it
+      // was closed) and the note that was open comes back underneath, as
+      // after Pin. Where a chat cannot dock it opens full screen below.
+      setDockedChats((m) => withDockedChat(m, ns, { ns, path }));
+      openSidePanel('chat');
+      pickChatMode('pinned');
+      if (back === 'none') {
+        setCurrentPath(null); setContent(null); setSavedContent('');
+      } else {
+        openNoteDirect(back.ns, back.path);
+      }
+      return;
+    }
+    enterChats({ ns, path }, back);
   };
   const chatsBackLabel = chatsReturnTo === 'board'
     ? 'Task board'
@@ -2870,7 +3034,7 @@ function App() {
         // Opening a file hands the create-target back to that file's folder,
         // so it tracks where you actually are rather than the last folder
         // you happened to expand.
-        onSelect={(p) => { setPickedFolder(null); setChatsOpen(false); chatRedirectFor.current = `${selectedNs}/${p}`; chatRedirectFrom.current = currentPath ? { ns: selectedNs, path: currentPath } : null; openNote(p); }}
+        onSelect={(p) => { setPickedFolder(null); setChatsOpen(false); setPagesViewOpen(false); chatRedirectFor.current = `${selectedNs}/${p}`; chatRedirectDock.current = chatDocked || chatMode === 'pinned'; chatRedirectFrom.current = currentPath ? { ns: selectedNs, path: currentPath } : null; openNote(p); }}
         currentPath={currentPath}
         namespaces={namespaces}
         selectedNs={selectedNs}
@@ -2904,31 +3068,37 @@ function App() {
         }
         onShowReleaseNotes={() => setShowReleaseNotes(true)}
         revealNonce={revealNonce}
+        revealPath={revealPath}
         width={sidebarWidth}
         onResize={setSidebarWidth}
+        pageHandles={pagesEnabled}
+        onDropFiles={pagesEnabled ? handleDropFiles : null}
       />
       <div
         className="main"
         style={
           isMobile ? undefined
             : commentsEnabled && showComments && currentPath ? { marginRight: commentWidth }
-            : chatDocked ? { marginRight: chatWidth }
-            : panelShown ? { marginRight: stickiesWidth }
+            : panelShown ? { marginRight: panelWidth }
             : undefined
         }
       >
         <Toolbar
-          currentPath={currentPath}
+          // A page has its own bar (title, author, date): the toolbar stops
+          // naming the note underneath it and offers nothing that acts on it.
+          pageActive={pageHandleActive}
+          pagesActive={pagesViewShown}
+          currentPath={pagesViewShown ? null : currentPath}
           onManageUsers={isAdmin && isMulti ? () => setShowAdminPanel(true) : null}
           theme={resolvedTheme}
           onToggleTheme={toggleTheme}
           onToggleSidebar={() => setSidebarVisible((v) => !v)}
           onRevealInTree={revealInTree}
           onChangePassword={() => setShowChangePassword(true)}
-          onRename={canWriteCurrent ? handleToolbarRename : null}
-          onDelete={canWriteCurrent ? handleToolbarDelete : null}
+          onRename={canWriteCurrent && !pagesViewShown ? handleToolbarRename : null}
+          onDelete={canWriteCurrent && !pagesViewShown ? handleToolbarDelete : null}
           viewMode={viewMode}
-          onViewModeChange={(mode) => {
+          onViewModeChange={pageHandleActive || pagesViewShown ? null : (mode) => {
             chooseViewMode(mode);
             // Restore editor mode from user preference when switching to editor-only
             if (mode === 'editor') {
@@ -2958,7 +3128,7 @@ function App() {
           drawingSource={drawingSource}
           onDrawingSourceChange={setDrawingSource}
           boardActive={showTaskBoard}
-          onEditorModeChange={(mode) => {
+          onEditorModeChange={pageHandleActive || pagesViewShown ? null : (mode) => {
             // Marp decks are locked to Basic — ignore attempts to switch to the
             // Live editor, which would reformat and break the slides.
             if ((marpActive || chatNoteActive) && mode === 'live') return;
@@ -2975,21 +3145,7 @@ function App() {
           }}
           onRefresh={handleRefresh}
           commentCount={commentsEnabled ? comments.filter(c => !c.parentId && !c.resolved).length : 0}
-          stickiesOpen={sidePanel === 'stickies' || sidePanel === 'board'}
-          onToggleStickies={() => {
-            // Two drawers, one strip of screen. Opening either closes the
-            // other rather than stacking them — the comment panel already
-            // owns this edge, and two overlapping fixed panels is not a
-            // layout, it is a bug report.
-            setSidePanel((v) => {
-              if (v === 'stickies' || v === 'board') return 'closed';
-              // Closed, or on the Chat tab: show the stickies. The button
-              // closes whichever sticky view is open and reopens at the
-              // drawer — one toggle, not a cycle through the states.
-              setShowComments(false);
-              return 'stickies';
-            });
-          }}
+          panelButtons={panelButtons}
           onToggleComments={!commentsEnabled ? null : () => {
             // A plain toggle: the panel is usable in any view mode (including
             // preview-only, e.g. reviewing Marp slides). Selection-anchored
@@ -3061,10 +3217,32 @@ function App() {
           </div>
         )}
         <div className="split-view" ref={splitViewRef}>
-          {currentPath && !chatsOpen && !showTaskBoard && (
+          {currentPath && !chatsOpen && !showTaskBoard && !pageHandleActive && !pagesViewShown && (
             <HeadingLinks rootRef={splitViewRef} ns={selectedNs} path={currentPath} />
           )}
-          {chatsOpen && chatEnabled ? (
+          {pagesViewShown ? (
+            <ChunkErrorBoundary label="pages" resetKey={selectedNs} onDismiss={() => setPagesViewOpen(false)} dismissLabel="Close pages">
+            <Suspense fallback={<div className="editor-loading">Loading pages...</div>}>
+              <PagesView
+                key={`${selectedNs}:${pagesViewTab}`}
+                ns={selectedNs}
+                inGit={!!appConfig?.pages?.inGit}
+                refreshKey={tree}
+                initialTab={pagesViewTab}
+                onClose={() => setPagesViewOpen(false)}
+                backLabel={currentPath ? currentPath.split('/').pop() : 'the editor'}
+                onOpen={(p) => { setPagesViewOpen(false); setPickedFolder(null); openNote(p); }}
+                onReveal={(p) => revealInTree(p)}
+              />
+            </Suspense>
+            </ChunkErrorBoundary>
+          ) : pageHandleActive ? (
+            <ChunkErrorBoundary label="the page" resetKey={`${selectedNs}/${currentPath}`}>
+            <Suspense fallback={<div className="editor-loading">Loading page...</div>}>
+              <PageView ns={selectedNs} path={currentPath} pageId={(/^page:\s*(\S+)/m.exec(content || '') || [])[1] || ''} />
+            </Suspense>
+            </ChunkErrorBoundary>
+          ) : chatsOpen && chatEnabled ? (
             <ChunkErrorBoundary
               label="chats"
               resetKey="chats"
@@ -3277,7 +3455,7 @@ function App() {
             )
           ) : (
             <div className="empty-state">
-              {namespaces.length === 0 ? (
+              {namespaces.length === 0 ? (namespacesLoaded &&
                 <EmptyNamespaces
                   reason={namespacesEmptyReason}
                   isAdmin={isAdmin}
@@ -3300,6 +3478,10 @@ function App() {
           serverDefaultTheme={appConfig?.defaultTheme}
           serverVersion={appConfig?.version}
           canRestart={isSuperAdmin}
+          pages={appConfig?.pages}
+          namespace={selectedNs}
+          canManagePages={canManagePages}
+          onPagesRestored={refreshTree}
         />
       )}
       {shareTarget && (
@@ -3458,18 +3640,36 @@ function App() {
           saveState={stickySaveState}
           loadState={stickiesLoad}
           onRetry={loadStickies}
-          tab={chatDocked ? 'chat' : 'stickies'}
-          onTab={chatCanDock && !chatsOpen ? setSidePanel : null}
-          {...(isMobile ? {} : chatDocked ? {
-            width: chatWidth,
-            minWidth: chatBounds.min,
-            maxWidth: chatBounds.max,
+          tab={chatDocked ? 'chat' : pagesDocked ? 'pages' : 'stickies'}
+          tabs={panelTabs}
+          onTab={panelTabs.length > 1 ? setSidePanel : null}
+          onExpandTab={(t) => {
+            if (t === 'pages') setPagesActive(true);
+            else if (dockedChat) expandChat(dockedChat);
+            else setChatsActive(true);
+          }}
+          expandChatInPanel={!dockedChat}
+          pages={pagesDocked && (
+            <ChunkErrorBoundary label="pages" resetKey={`panel-${selectedNs}`} onDismiss={() => setSidePanel('stickies')} dismissLabel="Show stickies">
+            <Suspense fallback={<div className="editor-loading">Loading pages...</div>}>
+              <PagesPanel
+                key={selectedNs}
+                ns={selectedNs}
+                inGit={!!appConfig?.pages?.inGit}
+                currentPath={pageHandleActive ? currentPath : null}
+                refreshKey={tree}
+                onOpen={(p) => { setPagesViewOpen(false); setPickedFolder(null); openNote(p); }}
+                onReveal={(p) => revealInTree(p)}
+                onFullView={(t) => setPagesActive(true, t)}
+              />
+            </Suspense>
+            </ChunkErrorBoundary>
+          )}
+          {...(isMobile ? {} : {
+            width: panelWidth,
+            minWidth: panelBounds.min,
+            maxWidth: panelBounds.max,
             onWidthChange: (w) => { setChatPanelWidth(w); localStorage.setItem('mdnest_chat_panel_width', String(w)); },
-          } : {
-            width: stickiesWidth,
-            minWidth: stickiesBounds.min,
-            maxWidth: stickiesBounds.max,
-            onWidthChange: (w) => { setCommentWidth(w); localStorage.setItem('mdnest_comment_width', String(w)); },
           })}
           chat={chatDocked && (
             <ChunkErrorBoundary
@@ -3508,7 +3708,7 @@ function App() {
         <StickiesBoard
           stickies={stickies}
           onChange={updateStickies}
-          onCollapse={() => setSidePanel('stickies')}
+          onCollapse={() => setSidePanel(isMobile ? 'closed' : 'stickies')}
           onClose={() => setSidePanel('closed')}
           saveState={stickySaveState}
           loadState={stickiesLoad}

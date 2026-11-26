@@ -25,7 +25,7 @@ async function signIn(page) {
   await page.fill('input[name=username]', USER);
   await page.fill('input[name=password]', PASS);
   await page.click('button:has-text("Sign in")');
-  await page.locator('.toolbar-view-chats').waitFor({ state: 'visible', timeout: 15_000 });
+  await page.locator('[data-testid=toolbar-chats]').waitFor({ state: 'visible', timeout: 15_000 });
   const cfg = await api(page, 'GET', '/api/config');
   if (!JSON.parse(cfg.text).agentApprovals) test.skip(true, 'agent approvals disabled (ENABLE_AGENT_APPROVALS)');
 }

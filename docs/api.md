@@ -354,7 +354,7 @@ List users. Available to any admin role, and every admin gets the full list *(v4
 
 ```json
 [
-  {"id": 1, "email": "admin@mdnest.local", "username": "admin", "role": "superadmin", "created_at": "2026-03-28T10:00:00Z"},
+  {"id": 1, "email": "admin@example.com", "username": "admin", "role": "superadmin", "created_at": "2026-03-28T10:00:00Z"},
   {"id": 2, "email": "bob@example.com", "username": "bob", "role": "collaborator", "invited_by": 1, "created_at": "2026-03-28T12:00:00Z"}
 ]
 ```
@@ -1442,6 +1442,194 @@ curl -OJ "http://localhost:8286/api/download?ns=personal&path=Project" \
 
 ---
 
+## HTML pages (optional, `ENABLE_PAGES`)
+
+View-only HTML pages. These routes exist only when the server has
+`ENABLE_PAGES=true`; otherwise each answers 404. `GET /api/config` reports
+`"pages": {"enabled": true, "scripts": <bool>, "inGit": false, "maxMB": 20, "maxFiles": 500}`
+when they are on (`scripts` is true in script mode, with `PAGES_ORIGIN` set).
+`inGit` reports `PAGES_IN_GIT`: new publishes go in the namespace's hidden
+`.mdnest/pages/` folder when true, or `PAGES_DIR` when false. Reads always look
+in both stores, hidden first. The flag never moves existing pages.
+
+A page lives in the notes tree as a handle file, `<name>.page.md`, in any
+folder. The handle is an ordinary note holding front matter:
+
+```markdown
+---
+page: 7n3d5yq2kq4w6r3zv6x5bq2m4d7c2f3h
+title: "Q3 report"
+author: "ana"
+published: 2026-11-20T10:00:00Z
+---
+
+HTML page, open it in mdnest.
+```
+
+`page` is a random id (160 bits, lowercase base32) naming the stored page. The
+note routes read, move, copy and delete handles like any note; deleting a
+handle with `DELETE /api/note` (or a folder holding handles) also deletes each
+page no other handle in the namespace names, and `/api/transfer` to another
+namespace carries the page along. Every route below that takes `path` names a
+handle (it must end in `.page.md`) and checks the notes' own permission on
+that path: read to view, write to publish or delete.
+
+### GET /api/pages
+
+The page handles in a namespace the caller can read, newest first.
+
+| Param | Required | Description |
+|-------|----------|-------------|
+| `ns` | yes | Namespace name |
+| `q` | no | Only pages whose title, path or text contains every word (case-insensitive) |
+| `format` | no | `tsv`: one line per page, `path`, `title`, `author`, `publishedAt`, `files`, `bytes`, tab-separated (used by the CLI) |
+
+```json
+{"pages": [{"id": "7n3d...", "path": "Reports/q3-report.page.md", "title": "Q3 report", "author": "ana", "publishedAt": "2026-11-20T10:00:00Z", "bytes": 48213, "files": 4}],
+ "unlinked": [{"id": "k2...", "title": "Old dashboard", "author": "bo", "publishedAt": "2026-10-01T09:00:00Z", "bytes": 1200, "files": 1}]}
+```
+
+A handle whose page is not stored in this namespace is listed with
+`"missing": true`. `unlinked` (stored pages no handle names) is present only
+for callers with write access on the namespace root.
+
+### PUT /api/pages
+
+Publish a page at a handle path. `POST` is accepted too. Needs write access on
+the handle path.
+
+| Param | Required | Description |
+|-------|----------|-------------|
+| `ns` | yes | Namespace name |
+| `path` | yes | The handle, e.g. `Reports/q3-report.page.md` |
+
+The body is either one HTML file (`Content-Type: text/html`, stored as
+`index.html`) or a tar of the page's folder (`application/x-tar`, may be
+gzipped; `application/gzip` also accepted). The folder needs an `index.html` at
+its top level. Hidden files (`.DS_Store`) are skipped. The title comes from
+`<title>`, and the visible text of `index.html` is stored for search.
+
+Every publish stores the page under a new id and writes that one handle. No
+other handle is changed: a handle that named the old id (a copy, for
+example) keeps showing the old version, which is removed once no handle
+names it.
+
+**Response:** the page's details, as in the list.
+
+**Error responses:**
+
+| Status | Cause |
+|--------|-------|
+| 400 | `path` does not end in `.page.md` or has a hidden segment; a path in the upload with `..`, an absolute path or `.git`; a symlink, hard link, device or FIFO; the same file twice; no `index.html`; a broken tar or gzip |
+| 403 | No write access on the handle path |
+| 404 | The namespace does not exist |
+| 409 | `path` is a note that is not a handle (no `page:` in its front matter); it is never overwritten |
+| 413 | Over `PAGES_MAX_MB` (counted on the unpacked bytes) or `PAGES_MAX_FILES` (files, and separately folders); the message names the setting |
+| 415 | A body type other than the ones above |
+
+```bash
+tar -C ./report -czf - . | curl -X PUT "http://localhost:8286/api/pages?ns=engineering&path=Reports%2Fq3-report.page.md" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/gzip" --data-binary @-
+```
+
+### DELETE /api/pages
+
+Delete a handle (`ns`, `path`) and its page, unless another handle in the
+namespace names the same page. Needs write on the handle path.
+
+### DELETE /api/pages/unlinked
+
+Delete a stored page no handle names (`ns`, `id`). Needs write on the namespace
+root. 409 if a handle names it.
+
+### GET /api/pages/text
+
+A page's details plus `text`: the visible text pulled out of `index.html` at
+publish time, without HTML, scripts or styles. Never the raw HTML. `ns`,
+`path`; needs read on the handle. With `format=text`, the text alone as
+`text/plain` (used by `mdnest read`). 404 when the handle's page is not here,
+with `"this page was published in another namespace: publish it again here"`
+or `"this page's files are missing: publish it again here"`.
+
+### GET /api/pages/archive
+
+The page's files as a tar (`ns`, `path`), for `mdnest page pull`. Needs read
+on the handle.
+
+### GET /api/pages/export
+
+Download the pages of one namespace as `<namespace>-pages.tgz`. Takes `ns` and
+needs write access to the whole namespace, the same rule as Unlinked.
+
+The archive contains `manifest.json` and `pages/<key>/` for each exported
+handle. Both page stores are read. Unlinked pages are left out. Handles with
+missing or unreadable files are skipped and listed in the manifest, including
+pages deleted while the backup is being copied. A skipped page never leaves
+half its files in the archive. Response headers `X-Mdnest-Pages-Exported` and
+`X-Mdnest-Pages-Skipped` give the counts.
+
+```json
+{"version":1,"namespace":"engineering","pages":[{"key":"000000","path":"Reports/q3.page.md","title":"Q3 report","description":"Revenue by region"}],"skipped":[{"path":"Reports/old.page.md","status":"skipped","reason":"files missing"}]}
+```
+
+`key` names that page's folder inside the archive. Handle paths are relative
+to the namespace, never absolute paths. The current limits are 1,000 handles,
+10,000 files and 256 MB of page files, counted before compression. The
+manifest is limited to 2 MB, the same as on restore. A busy backup worker
+returns 429; a namespace above these limits returns 413.
+
+### POST /api/pages/import
+
+Restore a downloaded `.tar.gz` backup into the namespace named by `ns`. Send
+the file as the body (`Content-Type: application/gzip`). Needs write access to
+the whole namespace. Every page is published with a new id at its manifest
+handle path, using the store selected by `PAGES_IN_GIT`.
+
+The whole archive is checked before any page is published. Bad or duplicate
+paths, hidden paths, symlinks, hard links, special files, broken gzip/tar data,
+a missing `index.html`, unlisted files or an invalid manifest return 400.
+Each page must fit `PAGES_MAX_MB` and `PAGES_MAX_FILES` (files and folders).
+The namespace limits above also apply, with at most 272 MB for compressed
+uploads or expanded tar data, and 2 MB for the manifest. Over a limit returns
+413. If another proxy is in front of mdnest, allow 272 MB for this route there
+too; the bundled frontend already does.
+
+A path that already holds a page handle is republished. An ordinary note is
+never overwritten: that entry is skipped, and other entries continue. The
+response reports each result, plus the missing-file entries from the export:
+
+```json
+{"restored":1,"skipped":1,"results":[{"path":"Reports/q3.page.md","status":"restored"},{"path":"Reports/old.page.md","status":"skipped","reason":"files missing"}]}
+```
+
+### POST /api/pages/pass
+
+A frame URL for the page a handle names (`ns`, `path`), after a read check on
+the handle. The browser app asks for a new one each time a page is opened.
+
+```json
+{"url": "/api/pages/view/<pass>/", "scripts": false, "expiresAt": "2026-11-20T10:30:00Z",
+ "title": "Q3 report", "author": "ana", "publishedAt": "2026-11-20T10:00:00Z"}
+```
+
+In script mode `url` is on `PAGES_ORIGIN` (`https://pages.example.com/<pass>/`)
+and `scripts` is true. The pass is valid for 30 minutes, for this page only, and
+only for the version of the page that existed when it was made. It is never
+accepted as a login.
+
+### GET /api/pages/view/\<pass\>/\<file\>
+
+Static mode only (not registered in script mode). Serves a page's files to
+whoever presents a valid pass; no other login is needed. `<file>` defaults to
+`index.html`. Responses carry a script-less sandbox CSP, `nosniff`,
+`Referrer-Policy: no-referrer` and `Cache-Control: private, no-store`, and no
+CORS headers. An invalid or expired pass gets 403. In script mode the same
+paths (`/<pass>/<file>`) are served by the pages listener on `PAGES_ORIGIN`,
+with `sandbox allow-scripts` and `Access-Control-Allow-Origin: *`; see
+[security.md](security.md#html-pages).
+
+---
+
 ## Access Groups *(v4.2.0+)*
 
 Superadmin-managed named sets whose members are mdnest users and/or IdP (OIDC)
@@ -1877,6 +2065,76 @@ Returns `201 {"status":"posted","count":N,"message":{...}}`.
 curl -X POST "$URL/api/chat?ns=work&path=Chats/release.md&as=api-agent" \
   -H "Authorization: Bearer $TOKEN" --data-raw "Migrations done"
 ```
+
+### Optional structured chat fields
+
+`GET /api/chat` also accepts `last=1..10000`, `type`, `as`, `worker`, and
+`unseen_only=true`. Filters run before `last`. Normal recent reads return the
+last matches; unseen batches return the oldest pending matches. The JSON
+response adds `room` and full `prompts`. Each message adds `id`, `type`,
+`reply_to`, `meta`, `claimed_by` and `body` while preserving `n`, `time` and
+`text`. `format=json-array` returns only the message array. `include_ids=true` adds `X-Chat-IDs` for an explicit CLI acknowledgment
+batch capped at 1024 encoded header bytes. A shorter prefix sets
+`X-Chat-More: true`; repeat an unseen acknowledgment read to continue.
+Ordinary reads do not add that header. GET never advances a cursor.
+
+`POST /api/chat` accepts query parameters `type` (`task`, `review`, `patch`,
+`question`, `ack`, `error`), `reply_to`, `meta` (a JSON object up to 8 KB) and
+`done=true`. It returns `msg_id`, `consecutive_agent_turns` and `max_agent_turns`
+with its existing fields. The reply ID must exist. In a running crew room, an
+explicit done post marks the crew completed, which stops its runners; a body
+containing a done comment does not. Posts are still accepted after that, and
+the room limit no longer applies. Outside a crew room `done` is ignored.
+
+### POST /api/chat/ack?ns=&path=&as=[&worker=]
+
+Needs write access. Body: a JSON array of up to 1000 delivered message IDs.
+Persists that account/handle/worker's acknowledged message IDs in the note.
+Sparse acknowledgment preserves earlier unseen messages omitted by a type or
+mention filter. A different ID at an earlier position remains unseen. Unknown
+IDs return `400`. Plain GET `ack=true` is refused; use this write endpoint.
+
+### POST /api/chat/claim?ns=&path=&msg_id=&as=[&worker=][&ttl_seconds=300][&lease_id=]
+
+Needs write access. TTL is 1 to 86400 seconds. Returns
+`{claimed:true,held_by,expires,lease_id}`. A live competing lease returns `409`
+with `ALREADY_CLAIMED`, holder and expiry. Renew with the same authenticated
+account, handle, worker and lease ID. Expired leases can be acquired again.
+These cooperative leases require one backend writer and reject symlink aliases
+and the app role, even when ordinary chat is enabled there.
+
+### GET/POST /api/chat/room?ns=&path=
+
+GET needs read access and returns the durable roster, cursors, claims, turn
+count and crew status. POST needs write access and initializes a room exactly
+once, using `{max_agent_turns,human_handle,agents:[{handle,trait}],handles:[],goal}`.
+An optional initial goal is appended under the same initialization lock and
+does not consume an agent turn. It requires an empty room and at least one agent.
+It never accepts commands. Limits are 1 to 10000 turns and 32 agents. The room
+is paused when its threshold post is accepted; later agent posts return `409`.
+A matching human post resets the count. Multi-mode reset requires a matching
+account without an alternate label and without an API token. Single mode uses
+a cooperative label convention. Direct note writers can edit this state.
+
+### POST /api/chat/stop?ns=&path=
+
+Needs write access. Pauses a configured room after local cancellation or a
+local launch limit. It never changes a completed room back to paused.
+
+### GET /api/chat/stream?ns=&path=
+
+Authenticated SSE change hints, with `change`, `heartbeat` and `gone` events.
+The client re-reads durable messages after a hint. Permission is rechecked on
+each wake/heartbeat. Streams end after 55 seconds for reconnect, and are bounded
+to eight per account and 128 total. `X-Accel-Buffering: no` keeps the nginx
+proxy from buffering. Slow writes are bounded. Clients must support polling
+fallback. Streaming requires a single-writer backend.
+
+### POST /api/chat/agents?ns=&path=&name=
+
+Needs write access. The raw body saves a prompt of up to 2000 characters;
+an empty body removes it. Quotes/newlines are preserved in the full prompt,
+while the legacy `agents` map stays a short role reminder.
 
 ### POST /api/chat/status?ns=&path=[&as=label]
 

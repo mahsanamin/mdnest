@@ -1,0 +1,418 @@
+/* HTML pages: the Pages view (cards) and the framed viewer. Loaded with the pages
+   chunk only. Colours come from theme.css tokens. */
+
+.pages-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.pages-settings-actions button { min-height: 44px; }
+[data-testid="settings-pages-result"] { overflow-wrap: anywhere; }
+
+.page-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.page-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.45rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 0.85rem;
+  min-width: 0;
+}
+
+.page-badge {
+  flex: none;
+  padding: 0.05rem 0.45rem;
+  border-radius: var(--radius-sm);
+  background: var(--orange-wash);
+  color: var(--orange);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.page-bar-title {
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.page-bar-meta {
+  flex: 1;
+  color: var(--text-muted);
+  min-width: 0;
+}
+
+
+.page-error {
+  padding: 1rem;
+  color: var(--danger);
+}
+
+/* The page's own background shows inside the frame; white is what a plain
+   HTML document expects, so pages written without a background stay legible
+   in the dark theme. */
+.page-frame {
+  flex: 1;
+  width: 100%;
+  border: none;
+  background: var(--page-frame-bg);
+  min-height: 0;
+}
+
+/* Page handles in the notes tree (TreeNode adds .page when pages are on) and
+   in the Pages list: a document with a globe-like grid, so a page reads as
+   something different from a note. */
+.tree-icon-svg.page {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fab387' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='18' height='18' rx='2'/%3E%3Cline x1='3' y1='8' x2='21' y2='8'/%3E%3Ccircle cx='6' cy='5.5' r='0.6'/%3E%3Ccircle cx='8.5' cy='5.5' r='0.6'/%3E%3Cline x1='7' y1='13' x2='17' y2='13'/%3E%3Cline x1='7' y1='17' x2='13' y2='17'/%3E%3C/svg%3E");
+}
+
+
+
+
+
+
+
+
+/* The Pages view: a grid of cards, no live previews. */
+.pages-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 1rem 1.25rem;
+  gap: 0.75rem;
+}
+
+.pages-view-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.pages-view-tabs {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.pages-view-tabs button {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  font-weight: 600;
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+}
+
+.pages-view-tabs button.active {
+  border-color: var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.pages-view-tools {
+  display: flex;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.pages-view-search,
+.pages-view-sort {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 0.85rem;
+  padding: 0.3rem 0.5rem;
+  min-width: 0;
+}
+
+.pages-view-search {
+  width: 16rem;
+  max-width: 100%;
+}
+
+.pages-view-note {
+  margin: 0.5rem 0 0;
+  padding: 0.5rem 0.75rem;
+  border-left: 3px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.pages-view-empty {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  padding: 1rem 0;
+}
+
+.pages-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: 0.75rem;
+}
+
+.page-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 0.75rem;
+  min-width: 0;
+}
+
+.page-card.missing,
+.page-card.unlinked {
+  border-style: dashed;
+}
+
+.page-card-title {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 600;
+  color: var(--text);
+  min-width: 0;
+}
+
+.page-card-title span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.page-card-folder {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.page-card-desc {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.page-card-meta {
+  color: var(--text-faint);
+  font-size: 0.75rem;
+}
+
+.page-card-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: auto;
+  padding-top: 0.25rem;
+}
+
+.page-card-actions button {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 0.8rem;
+  padding: 0.2rem 0.6rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+}
+
+.page-card-actions button:hover {
+  background: var(--surface-tint);
+}
+
+.page-card-open {
+  border-color: var(--accent) !important;
+  color: var(--accent) !important;
+}
+
+.page-card-delete {
+  color: var(--danger) !important;
+}
+
+.page-card-delete:hover {
+  background: var(--danger-wash) !important;
+}
+
+/* The Pages tab of the right side panel: a compact list. */
+.pages-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+.pages-panel-search {
+  margin: 0.5rem 0.75rem;
+  width: auto;
+}
+
+.pages-panel-list {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 0 0.25rem;
+}
+
+.pages-panel-note {
+  margin: 0.5rem 0.75rem;
+}
+
+.pages-panel-list .pages-view-empty {
+  padding: 0.5rem 0.75rem;
+}
+
+.pages-panel-row {
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+  min-width: 0;
+}
+
+.pages-panel-row:hover {
+  background: var(--surface-tint);
+}
+
+.pages-panel-row.active {
+  background: var(--accent-wash);
+}
+
+.pages-panel-open {
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  background: none;
+  border: none;
+  color: var(--text);
+  text-align: left;
+  padding: 0.35rem 0.5rem;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.pages-panel-row.active .pages-panel-title {
+  color: var(--accent);
+}
+
+.pages-panel-open .tree-icon-svg {
+  flex: none;
+  margin-top: 0.15rem;
+}
+
+.pages-panel-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.pages-panel-title {
+  font-size: 0.85rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pages-panel-folder {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pages-panel-locate {
+  flex: none;
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  padding: 0.3rem 0.45rem;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+}
+
+.pages-panel-locate:hover {
+  color: var(--text);
+  background: var(--surface-tint);
+}
+
+.pages-panel-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  border-top: 1px solid var(--border-subtle);
+  padding: 0.45rem 0.75rem;
+}
+
+.pages-panel-link {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 0.8rem;
+  cursor: pointer;
+  padding: 0;
+}
+
+.pages-panel-link:hover {
+  text-decoration: underline;
+}
+
+/* The full Pages view's way back to the note. */
+.pages-view-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  padding: 0.2rem 0.6rem;
+  cursor: pointer;
+  max-width: 100%;
+  min-width: 0;
+}
+.pages-view-back:hover { color: var(--text); background: var(--surface-tint); }
+.pages-view-back-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 16rem;
+}
+@media (max-width: 768px) {
+  .pages-view { padding: 0.75rem; }
+  .pages-view-back { min-height: 40px; }
+  .pages-view-tools { width: 100%; }
+  .pages-view-search { flex: 1; width: auto; }
+}

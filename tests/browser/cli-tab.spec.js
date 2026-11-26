@@ -42,6 +42,30 @@ test.describe('Settings CLI tab', () => {
     await expect(page.locator('.settings-content')).not.toContainText('mdnest_yourtoken');
   });
 
+  test('says the installer offers to set up AI agent skills', async ({ page }) => {
+    await signIn(page);
+    await openCliTab(page);
+    const note = page.locator('.cli-agent-skills-note');
+    await expect(note).toContainText('offers to set up AI agent skills');
+    await expect(note.locator('code')).toHaveText('mdnest agent install');
+  });
+
+  test('an AI tools section shows how to check, install, remove and use the plugin', async ({ page }) => {
+    await signIn(page);
+    await openCliTab(page);
+    const title = page.locator('.settings-section-title', { hasText: 'AI tools' });
+    await expect(title).toBeVisible();
+    // It comes after "Use it".
+    const order = await page.locator('.settings-section-title').allTextContents();
+    expect(order.indexOf('AI tools')).toBeGreaterThan(order.indexOf('Use it'));
+    await expect(page.locator('.cli-ai-tools .settings-code pre')).toHaveText([
+      'mdnest agent status', 'mdnest agent install', 'mdnest agent remove',
+    ]);
+    await expect(page.locator('.cli-ai-tools-plugin .settings-code pre'))
+      .toHaveText('/plugin marketplace add mahsanamin/mdnest\n/plugin install mdnest@mdnest');
+    await expect(page.locator('.settings-content')).toContainText('Or, in Claude Code, add it as a plugin:');
+  });
+
   test('every Settings tab fits on one row on a desktop screen', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await signIn(page);

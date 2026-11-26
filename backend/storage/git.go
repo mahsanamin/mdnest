@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/mdnest/mdnest/backend/gitproc"
+	"github.com/mdnest/mdnest/backend/relpath"
 )
 
 // GitStorage is the "git" backend: notes live on the local filesystem exactly
@@ -809,8 +810,25 @@ func (c *intervalCommitter) sync(ctx context.Context, dir, ns string) error {
 				return fmt.Errorf("git seed %s: %w", ns, err)
 			}
 		} else if err := c.git(ctx, dir, "merge", "--no-edit", "--allow-unrelated-histories", "FETCH_HEAD"); err != nil {
-			// Merge conflict: keep both sides as conflict markers and commit, so
-			// no data is lost and the user resolves it in the editor.
+			// Notes keep conflict markers for the editor. Private app files
+			// cannot be edited there, and markers would corrupt page assets and
+			// metadata. Keep the complete remote version for those files.
+			cmd := gitproc.Command(ctx, "diff", "--name-only", "--diff-filter=U", "-z")
+			cmd.Dir = dir
+			conflicts, listErr := cmd.Output()
+			if listErr != nil {
+				return listErr
+			}
+			for _, p := range strings.Split(string(conflicts), "\x00") {
+				if p == "" || !relpath.HasReservedSegment(p) {
+					continue
+				}
+				if err := c.git(ctx, dir, "checkout", "--theirs", "--", p); err != nil {
+					if err := c.git(ctx, dir, "rm", "-f", "--", p); err != nil {
+						return err
+					}
+				}
+			}
 			_ = c.git(ctx, dir, "add", "-A")
 			_ = c.git(ctx, dir, "commit", "--no-edit", "-m", "mdnest: merge remote (conflicts kept as markers)")
 		}
