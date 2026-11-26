@@ -4,7 +4,7 @@ All notable changes to mdnest are documented here.
 
 ---
 
-## v4.8.17 (in progress)
+## v4.8.17: HTML pages, local agent crews, and a calmer chat and editor
 
 ### Added
 
