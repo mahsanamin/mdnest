@@ -253,7 +253,7 @@ hook_tier() {
 
 # Shell lint (shellcheck), the same files and severity as CI.
 SC_FILES=(setup.sh mdnest-server mdnest git-sync/sync.sh install-cli.sh .githooks/pre-push
-  tests/release-gate.sh tests/check.sh tests/helm-pages.sh tests/lib/e2e-images.sh)
+  tests/release-gate.sh tests/check.sh tests/helm-pages.sh tests/helm-restricted.sh tests/lib/e2e-images.sh)
 shellcheck_suite() {
   if have shellcheck; then shellcheck -S error "${SC_FILES[@]}"; else
     docker run --rm -v "$REPO_ROOT:/mnt" -w /mnt koalaman/shellcheck:stable -S error "${SC_FILES[@]}"
@@ -283,6 +283,7 @@ other_lane() {
   suite "^backend/(middleware|handlers|store|relpath|storage|collab)/|^backend/main\.go$|^tests/e2e-sec-multi\.sh$|$LIB" e2e-sec-multi.sh "multi-mode access"
   suite "^backend/Dockerfile$|^backend/gitproc/|^tests/backend-image-init\.sh$|$LIB" backend-image-init.sh "tini reaps orphans"
   suite "^deploy/helm/|^backend/handlers/pages|^tests/helm-pages\.sh$|$LIB" helm-pages.sh "HTML pages chart storage"
+  suite "^deploy/helm/|^tests/helm-restricted\.sh$" helm-restricted.sh "chart under Pod Security restricted"
   suite "^backend/storage/|^deploy/helm/|^backend/main\.go$|^tests/e2e-ha-durability\.sh$|$LIB" e2e-ha-durability.sh "HA writer, queue, leader"
   suite "chat_members|^backend/middleware/permission|^backend/store/chat|^tests/e2e-private-chats-multi\.sh$|$LIB" e2e-private-chats-multi.sh "private chats"
   suite "^backend/handlers/(transfer|download|treecopy)|^tests/e2e-transfer-multi\.sh$|$LIB" e2e-transfer-multi.sh "move, copy, download"

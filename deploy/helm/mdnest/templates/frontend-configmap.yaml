@@ -13,7 +13,7 @@ metadata:
 data:
   default.conf: |
     server {
-        listen 80;
+        listen {{ .Values.frontend.containerPort }};
         server_name _;
 
         root /usr/share/nginx/html;

@@ -104,11 +104,17 @@ spec:
               mountPath: /data/notes
             - name: secrets
               mountPath: /data/secrets
+            {{- with .Values.backend.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
       volumes:
         - name: notes
           emptyDir: {}
         - name: secrets
           emptyDir: {}
+        {{- with .Values.backend.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       {{- with .Values.backend.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

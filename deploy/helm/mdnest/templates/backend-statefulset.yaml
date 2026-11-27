@@ -132,6 +132,9 @@ spec:
               mountPath: /etc/mdnest/git
               readOnly: true
             {{- end }}
+            {{- with .Values.backend.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
       volumes:
         # notes/secrets are provided by the volumeClaimTemplates below when
         # managed per-pod. They only appear here when shared (existingClaim) or
@@ -161,6 +164,9 @@ spec:
             items:
               - key: {{ .Values.storage.git.remote.tokenSecretKey }}
                 path: token
+        {{- end }}
+        {{- with .Values.backend.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
         {{- end }}
       {{- with .Values.backend.nodeSelector }}
       nodeSelector:

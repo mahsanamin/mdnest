@@ -102,6 +102,10 @@ backend:
     runAsNonRoot: false
   # -- Container-level security context for the backend.
   securityContext: {}
+  # -- Extra volumes for the backend pod (e.g. an `emptyDir` for `/tmp` with a read-only root filesystem).
+  extraVolumes: []
+  # -- Extra volume mounts for the backend container (not its init containers).
+  extraVolumeMounts: []
   # -- Backend resource requests/limits.
   resources:
     requests:
@@ -158,6 +162,12 @@ frontend:
   podSecurityContext: {}
   # -- Container-level security context for the frontend.
   securityContext: {}
+  # -- Port nginx listens on in the frontend container. Use an unprivileged port (e.g. `8080`) to run as non-root; the Service port does not change.
+  containerPort: 80
+  # -- Extra volumes for the frontend pod (e.g. `emptyDir`s for a read-only root filesystem, or your own `nginx.conf`).
+  extraVolumes: []
+  # -- Extra volume mounts for the frontend container.
+  extraVolumeMounts: []
   # -- Frontend resource requests/limits.
   resources:
     requests:
@@ -528,6 +538,14 @@ writer:
   annotations: {}
   # -- Writer resource requests/limits.
   resources: {}
+  # -- Pod-level security context for the writer. Empty uses `backend.podSecurityContext`. Set it when the writer's volume needs another uid or `fsGroup` than the app replicas.
+  podSecurityContext: {}
+  # -- Container-level security context for the writer and its init container. Empty uses `backend.securityContext`.
+  securityContext: {}
+  # -- Extra volumes for the writer pod.
+  extraVolumes: []
+  # -- Extra volume mounts for the writer container (not its init container).
+  extraVolumeMounts: []
   # -- Node selector for the writer pod.
   nodeSelector: {}
   # -- Tolerations for the writer pod.
@@ -667,6 +685,10 @@ mcp:
   podSecurityContext: {}
   # -- Container-level security context for the MCP server.
   securityContext: {}
+  # -- Extra volumes for the MCP server pod.
+  extraVolumes: []
+  # -- Extra volume mounts for the MCP server container.
+  extraVolumeMounts: []
   # -- Node selector for the MCP server.
   nodeSelector: {}
   # -- Tolerations for the MCP server.
