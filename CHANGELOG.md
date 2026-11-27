@@ -6,6 +6,16 @@ All notable changes to mdnest are documented here.
 
 ## v4.8.18 (in progress)
 
+### Added
+
+- **Helm chart: run under Pod Security "restricted" with a read-only root
+  filesystem.** `backend`, `writer`, `frontend` and `mcp` take `extraVolumes`
+  and `extraVolumeMounts`, the writer takes its own `podSecurityContext` and
+  `securityContext` (it keeps the backend ones when they are empty), and
+  `frontend.containerPort` lets nginx listen on an unprivileged port. Existing
+  installs render the same. See "Pod Security restricted" in
+  [docs/kubernetes.md](docs/kubernetes.md).
+
 ## v4.8.17: HTML pages, local agent crews, and a calmer chat and editor
 
 ### Added

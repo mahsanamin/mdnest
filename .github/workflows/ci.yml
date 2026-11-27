@@ -153,13 +153,17 @@ jobs:
           expect_reject "storage.backend=s3 (unsupported backend)" \
             --set storage.backend=s3
           [ "$fails" -eq 0 ] || exit 1
+      - name: Pod Security restricted values (docs/kubernetes.md)
+        # Empty knobs must leave the default render unchanged; the documented
+        # restricted example must render its volumes, contexts and port.
+        run: MDNEST_HELM_RENDER_OUT=rendered-restricted.yaml bash tests/helm-restricted.sh
       - name: Validate rendered manifests (kubeconform)
         # Pinned by digest, not :latest — an unpinned third-party image in CI
         # means an upstream push silently changes what runs in this repo.
         # Digest is kubeconform v0.8.0.
         uses: docker://ghcr.io/yannh/kubeconform@sha256:faffaf43f95aa6425306e1ab8d6fcad72acb9049158f38e574c085ea1ec0f64e
         with:
-          args: -strict -ignore-missing-schemas -summary rendered-ha.yaml
+          args: -strict -ignore-missing-schemas -summary rendered-ha.yaml rendered-restricted.yaml
 
   images:
     name: Docker images (build only)

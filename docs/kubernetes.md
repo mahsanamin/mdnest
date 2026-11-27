@@ -99,3 +99,126 @@ writer:
   annotations:
     secret.reloader.stakater.com/reload: mdnest-app-secrets
 ```
+
+## Pod Security restricted / read-only root filesystem
+
+By default the backend runs as root and nginx listens on port 80. Every component can run under the Pod Security `restricted` profile with a read-only root filesystem, using values only:
+
+- **backend** (and the **writer**): runs as any uid when `/tmp` is writable and `HOME` points to a writable directory (the backend writes a `.gitconfig` there at start). `/data/notes` and `/data/secrets` are already volumes.
+- **writer**: takes its own `writer.podSecurityContext` / `writer.securityContext`; when they are empty it uses the backend ones. Its notes volume must be writable by that uid. `fsGroup` does it on block (ReadWriteOnce) volumes; kubelet does not apply `fsGroup` on NFS volumes, so `chown -R` the existing data once before switching.
+- **frontend**: nginx needs `/var/cache/nginx`, `/run` and `/tmp` writable and an unprivileged port (`frontend.containerPort`; the Service port does not change). The image's entrypoint tunes `worker_processes` by editing `/etc/nginx/nginx.conf`, which it cannot do on a read-only filesystem, so mount your own `nginx.conf` with a fixed `worker_processes`.
+- **mcp**: already runs as `node` (uid 1000) and needs nothing writable.
+
+```yaml
+backend:
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    fsGroup: 65532
+    fsGroupChangePolicy: OnRootMismatch
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: [ALL]
+  extraEnv:
+    - name: HOME
+      value: /tmp
+  extraVolumes:
+    - name: tmp
+      emptyDir: {}
+  extraVolumeMounts:
+    - name: tmp
+      mountPath: /tmp
+writer:  # git-native HA only; same as the backend, set explicitly
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    fsGroup: 65532
+    fsGroupChangePolicy: OnRootMismatch
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: [ALL]
+  extraVolumes:
+    - name: tmp
+      emptyDir: {}
+  extraVolumeMounts:
+    - name: tmp
+      mountPath: /tmp
+frontend:
+  containerPort: 8080
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 101
+    runAsGroup: 101
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: [ALL]
+  extraVolumes:
+    - name: nginx-cache
+      emptyDir: {}
+    - name: nginx-run
+      emptyDir: {}
+    - name: tmp
+      emptyDir: {}
+    - name: nginx-main
+      configMap:
+        name: mdnest-nginx-main
+  extraVolumeMounts:
+    - name: nginx-cache
+      mountPath: /var/cache/nginx
+    - name: nginx-run
+      mountPath: /run
+    - name: tmp
+      mountPath: /tmp
+    - name: nginx-main
+      mountPath: /etc/nginx/nginx.conf
+      subPath: nginx.conf
+      readOnly: true
+mcp:
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: [ALL]
+```
+
+The `nginx.conf` ConfigMap is yours to create in the release namespace; the chart still mounts its own `conf.d/default.conf`:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mdnest-nginx-main
+data:
+  nginx.conf: |
+    worker_processes 2;
+    pid /tmp/nginx.pid;
+    events {}
+    http {
+      include /etc/nginx/mime.types;
+      default_type application/octet-stream;
+      sendfile on;
+      include /etc/nginx/conf.d/*.conf;
+    }
+```
+
+`tests/helm-restricted.sh` renders this example and checks it.

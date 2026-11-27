@@ -47,7 +47,7 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.backend.podSecurityContext }}
+      {{- with (.Values.writer.podSecurityContext | default .Values.backend.podSecurityContext) }}
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
@@ -68,7 +68,7 @@ spec:
                 echo "ensuring namespace: ${ns}"
                 mkdir -p "/data/notes/${ns}"
               done
-          {{- with $.Values.backend.securityContext }}
+          {{- with ($.Values.writer.securityContext | default $.Values.backend.securityContext) }}
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
@@ -80,7 +80,7 @@ spec:
         - name: writer
           image: {{ include "mdnest.backend.image" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          {{- with .Values.backend.securityContext }}
+          {{- with (.Values.writer.securityContext | default .Values.backend.securityContext) }}
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
@@ -131,6 +131,9 @@ spec:
               mountPath: /etc/mdnest/git
               readOnly: true
             {{- end }}
+            {{- with .Values.writer.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
       volumes:
         - name: secrets
           emptyDir: {}
@@ -141,6 +144,9 @@ spec:
             items:
               - key: {{ .Values.storage.git.remote.tokenSecretKey }}
                 path: token
+        {{- end }}
+        {{- with .Values.writer.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
         {{- end }}
       {{- with .Values.writer.nodeSelector }}
       nodeSelector:
